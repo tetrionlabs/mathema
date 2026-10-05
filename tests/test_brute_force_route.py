@@ -118,7 +118,7 @@ def test_a_false_claim_over_a_finite_domain_is_falsified_with_its_point(
 def test_a_real_domain_never_takes_this_route(divisor_count):
     """The guard that matters most: a real interval has uncountably many
     points, so no sweep of it is ever complete."""
-    p = _verdict(divisor_count, "for n in [2,30], f(n) >= 2")
+    p = _verdict(divisor_count, "for n in [2,30] ⊂ R, f(n) >= 2")
     assert p.route != "derive:brute_force", (p.route, p.sketch)
 
 

@@ -660,10 +660,15 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                                _unmodified_params)
     unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
     kinds = getattr(facts, "param_kinds", None) or {}
-    int_syms = frozenset(sym for name, sym in params.items()
-                         if (kinds.get(name) == "int"
-                             or _integer_bound((domain or {}).get(name)))
-                         and isinstance(sym, sympy.Symbol))
+    # a parameter is an integer where its domain says so; with no bound
+    # for it, its int annotation decides (a bound stating the reals
+    # widens an int parameter)
+    int_syms = frozenset(
+        sym for name, sym in params.items()
+        if (_integer_bound((domain or {}).get(name))
+            if (domain or {}).get(name) is not None
+            else kinds.get(name) == "int")
+        and isinstance(sym, sympy.Symbol))
 
     scope = dict(module_scope(fn))
     guards: list = []

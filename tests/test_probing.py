@@ -204,13 +204,13 @@ def test_budget_stays_the_same_regardless_of_earlier_falsifications():
     r = mathema.check(ema, domain={"alpha": (0, 1)})
     probes = {p.name: p for p in r.probes}
     assert probes["permutation_invariant"].verdict == "falsified"
-    assert probes["is_numerically_stable"].verdict == "holds"
+    holding = "is_dimension_safe[f]"
+    assert probes[holding].verdict == "holds"
     assert (probes["permutation_invariant"].n
-            < probes["is_numerically_stable"].n)
+            < probes[holding].n)
     again = {p.name: p for p in mathema.check(
         ema, domain={"alpha": (0, 1)}).probes}
-    assert again["is_numerically_stable"].n == probes[
-        "is_numerically_stable"].n
+    assert again[holding].n == probes[holding].n
 
 
 def test_a_provably_affine_function_actually_runs_at_the_reduced_budget():

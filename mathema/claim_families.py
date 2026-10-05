@@ -550,35 +550,88 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
               "mathema.witness_executed": True})
 
 
+def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                    trials: int):
+    """Intent:
+        Empirical half of is_numerically_stable: at each corner of the
+        domain and at sampled points, compare the float result of the
+        call with the exact value of the function's mathematics
+        (`f.exact_value`, each float argument read as the exact binary
+        number it is), within the claim tolerance or, by default, 1e-9
+        plus 1e-7 times the exact value's magnitude. The first point
+        past it is the witness, with its exact and float values. A point
+        where the call raises, returns no finite number, or the
+        mathematics has no value is no trial (another family's
+        question); with no exact form at all the verdict is unknown.
+    """
+    import inspect
+    import itertools
+
+    from .f import _is_nonfinite, exact_value
+    from .gates import _fmt_point
+    body = inspect.unwrap(fn)
+    names = list(facts.params)
+    if not names or any(facts.param_kinds.get(p) in SEQUENCE_KINDS
+                        for p in names):
+        return ("unknown", 0, "accuracy against the exact value is read "
+                "for scalar parameters only")
+    if exact_value(body, *[1.0] * len(names)) is None \
+            and exact_value(body, *[0.5] * len(names)) is None:
+        return ("unknown", 0, "the body has no exact form to compare the "
+                "float result with")
+    corners = []
+    ends = [_interval_ends((domain or {}).get(p)) for p in names]
+    if all(e is not None for e in ends):
+        corners = [dict(zip(names, combo))
+                   for combo in itertools.product(*[(lo, hi)
+                                                    for lo, hi in ends])]
+    state = {"i": 0}
+
+    def trial(args):
+        values = dict(zip(names, args))
+        if state["i"] < len(corners):
+            values = corners[state["i"]]
+            state["i"] += 1
+        else:
+            values[names[0]] = _synth(facts.param_kinds.get(names[0],
+                                                          "unknown"),
+                                      rng, (domain or {}).get(names[0]))
+        point = [values[p] for p in names]
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               for v in point):
+            return None
+        try:
+            call_args, call_kwargs = call_arguments(fn, names, values)
+            with _pinned_float_env():
+                out = fn(*call_args, **call_kwargs)
+        except Exception:
+            return None
+        if isinstance(out, bool) or not isinstance(out, (int, float)) \
+                or _is_nonfinite(out):
+            return None
+        exact = exact_value(body, *point)
+        if exact is None:
+            return None
+        allowed = (cj.tolerance if cj.tolerance is not None
+                   else 1e-9 + 1e-7 * abs(float(exact)))
+        if abs(out - exact) <= allowed:
+            return True
+        return (f"{_fmt_point(values, names)}: exact {float(exact)!r}, "
+                f"float {out!r}, apart by {float(abs(out - exact)):.3g}, "
+                f"past the tolerance {float(allowed):.3g}")
+
+    verdict, checked, cx = _probe_trials(fn, facts, names[0], domain, rng,
+                                         max(trials, len(corners)), trial)
+    return verdict, checked, cx
+
+
 def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
-    """Intent:
-        A derive-route half for is_numerically_stable: when a
-        declared-domain parameter's own pole provably lies inside its
-        bound (the reasoning is_pole_safe[param] uses, via the shared
-        _pole_exclusion_proof), disproven if the executed call there
-        raises or returns a non-finite value, else the uncorroborated
-        undecided; None (falling through to the probe check) otherwise.
-
-    Notes:
-        Pole exclusion never proves the claim. `finite_no_error(f, ...)
-        == 1` also fails on an overflow (exp past 709.78) and on a NaN,
-        neither of which is a pole, so with every pole excluded the
-        claim is still open and the probe decides it. lhs_src/rhs_src/
-        relation are unused, kept for protocol uniformity with every
-        other derive-route family.
-    """
-    domain = domain or {}
-    if not domain:
-        return None
-    proof = _pole_exclusion_proof(
-        fn, facts, domain, list(domain),
-        proven_sketch="every declared-domain parameter's own poles are "
-                      "excluded by its bound")
-    if proof is None or proof.status == "proven":
-        return None
-    return proof
+    """Structural half of is_numerically_stable: decline. Whether the
+    float result is accurate is a fact about one computation, settled
+    by executing it (`_accuracy_probe`)."""
+    return None
 
 
 # --- is_number_set_safe[param]: a declared-domain parameter fed into a
@@ -1064,9 +1117,11 @@ def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         write nothing outside the call. A draw from a generator passed
         in is the caller's and is not a write.
     """
-    from ._examine import examine
+    from ._examine import examine, writes_at_defaults
     effects = examine(fn, _generator_parameter(fn, facts))
-    return _examined_verdict(effects.writes,
+    # the default call is judged: a write that needs an argument the
+    # caller passes (`out=` left at None) is not one it makes
+    return _examined_verdict(writes_at_defaults(fn, effects),
                              [*effects.unknowns, *effects.unknown_writes],
                              "writes nothing outside the call",
                              effects, domain)
@@ -2732,7 +2787,7 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     # guards cut it, and only a failure inside it counts (decision A)
     bare = relation == "is_defined"
     structured = _definedness_region_structured(fn, facts, region_gaps,
-                                                working=bare)
+                                                working=bare, domain=domain)
     cuts = guard_cut_texts(fn, facts) if bare else []
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
                 f"cuts the working domain)" if cuts else "")
@@ -4513,7 +4568,8 @@ def _register_builtin_claim_families() -> None:
     # (calling fn with a literal NaN) is empirical, so it reports
     # under a probe route, never relabeled as derive.
     _families.register("is_numerically_stable", SafetyFamily(
-        "is_numerically_stable", derive=_is_numerically_stable_derive))
+        "is_numerically_stable", derive=_is_numerically_stable_derive,
+        probe=_accuracy_probe))
     _families.register("is_number_set_safe", SafetyFamily(
         "is_number_set_safe", derive=_is_number_set_safe_derive,
         probe=_builtin_probe,

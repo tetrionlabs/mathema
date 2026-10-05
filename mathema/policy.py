@@ -865,7 +865,8 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         found_guards = [_guard_for(derived or {}, fn, p, stated.kind, m) for m in members]
         if found_guards and all(g and g[0] == stated.behaviour
                                 and _raised_matches(g[1], stated.exception)
-                                for g in found_guards):
+                                for g in found_guards) \
+                and _guard_raised_it(fn, found_guards[0], calls):
             guard = found_guards[0]
     if guard is not None:
         reason = f"stated; from the guard on line {guard[2]}; {evidence}"
@@ -1003,6 +1004,29 @@ def _members_of(fn, param: str, kind: str) -> list:
     return list(policy.members) or ["nan"]
 
 
+def _guard_raised_it(fn, guard, calls) -> bool:
+    """Intent:
+        Whether a guard that raises raised every exception among the
+        calls: each raising call, made again, raises from a `raise`
+        statement in fn's own body (or fn's own entry guard), not from
+        something fn did before reaching it. False only when a call made
+        again raises the same exception from elsewhere; True for a guard
+        that does not raise.
+    """
+    if guard is None or guard[0] != "raises":
+        return True
+    from .conjecture import _call_by_name, deliberate_raise
+    for c in calls:
+        if not c.raised:
+            continue
+        try:
+            _call_by_name(fn, c.point)
+        except Exception as exc:
+            if type(exc).__name__ == c.raised and not deliberate_raise(exc, fn):
+                return False
+    return True
+
+
 def _guard_for(guards: dict, fn, p: str, kind: str, member: "str | None"):
     """The guard that decides a parameter's kind (and member), or None."""
     if kind == "absent":
@@ -1028,12 +1052,43 @@ def guard_policies(facts) -> dict:
         hole into an absence; one that returns `nan` (`float("nan")`,
         `math.nan`, `np.nan`) passes a hole on and turns an absence into
         a hole; one that returns the parameter itself passes it on; any
-        other return drops.
+        other return drops. A raising check on each entry of a sequence
+        parameter (`for v in xs: if isnan(v): raise`, `if any(isnan(v)
+        for v in xs): raise`) states the policy for the holes in it.
     """
     import ast
     tree = getattr(facts, "tree", None)
     if tree is None:
         return {}
+    params_here = set(facts.params)
+    # `v` in `for v in xs` or `... for v in xs` names an entry of xs
+    entries = {node.target.id: node.iter.id for node in ast.walk(tree)
+               if isinstance(node, (ast.For, ast.comprehension))
+               and isinstance(node.target, ast.Name)
+               and isinstance(node.iter, ast.Name)
+               and node.iter.id in params_here
+               and node.target.id not in params_here}
+
+    def entry_check(test) -> list:
+        # a hole check on one entry name, alone or as `any(... for v in xs)`
+        if isinstance(test, ast.Call) and getattr(test.func, "id", "") == "any" \
+                and len(test.args) == 1 and isinstance(test.args[0], ast.GeneratorExp):
+            test = test.args[0].elt
+        if isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) \
+                and test.left.id in entries and len(test.ops) == 1 \
+                and isinstance(test.ops[0], ast.NotEq) \
+                and isinstance(test.comparators[0], ast.Name) \
+                and test.comparators[0].id == test.left.id:
+            return [(entries[test.left.id], "missing", "nan")]
+        if isinstance(test, ast.Call) and len(test.args) == 1 \
+                and isinstance(test.args[0], ast.Name) and test.args[0].id in entries:
+            name = (test.func.attr if isinstance(test.func, ast.Attribute)
+                    else getattr(test.func, "id", ""))
+            if name == "isnan":
+                return [(entries[test.args[0].id], "missing", "nan")]
+            if name in ("isna", "isnull"):
+                return [(entries[test.args[0].id], "missing", None)]
+        return []
     params = set(facts.params)
     out: dict = {}
 
@@ -1117,9 +1172,11 @@ def guard_policies(facts) -> dict:
         keys = [k for k in covered(node.test) if k not in shadowed]
         if not covered(node.test):
             shadowed.update(checks(node.test, compound=True))
+        raise_stmt = next((s for s in node.body if isinstance(s, ast.Raise)), None)
+        if not keys and raise_stmt is not None:
+            keys = [k for k in entry_check(node.test) if k not in shadowed]
         if not keys:
             continue
-        raise_stmt = next((s for s in node.body if isinstance(s, ast.Raise)), None)
         for p, kind, member in keys:
             back = returned(node.body, p)
             if raise_stmt is not None:
@@ -1432,7 +1489,8 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
     (behaviour, call), = seen.items()
     exception = call.raised if behaviour == "raises" else None
     accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
-    if guard is not None and guard[0] == behaviour:
+    if guard is not None and guard[0] == behaviour \
+            and _guard_raised_it(fn, guard, calls):
         return row("proven", behaviour, exception, "derived",
                    f"from the guard on line {guard[2]}; {evidence}", route="examine")
     if origin == "type":
@@ -2325,6 +2383,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             premised = [r for r in stated if ((r.meta or {}).get("mathema.policy")
                                                or {}).get("premise")]
             guard_here = _guard_for(guards, fn, p, kind, m)
+            if not _guard_raised_it(fn, guard_here, calls):
+                guard_here = None
             library_here = [] if guard_here or origin != "type" else \
                 _library_for(composed, p, kind, m)
             if stated and not premised and all(r.verdict == "unknown" for r in stated):

@@ -494,7 +494,7 @@ _DERIVATIVE_FAMILY_FORMS = {
     "concave": (2, "<="),
 }
 
-_FINITE_NO_ERROR = "mathema.f.finite_no_error"
+_ACCURATE = "mathema.f.accurate"
 
 _COMPARISON_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
 
@@ -540,8 +540,7 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         matches the family of the same name. The derivative-sign
         families match `d(f(<params>), p) >= 0` and its siblings, with
         `p` the bracketed parameter. `is_numerically_stable` matches
-        `g(f, <params>) == 1` with `g` bound to `mathema.f.finite_no_
-        error`. `is_deterministic`, `is_reproducible` and
+        `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
         `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
         restriction form in docs/conditional-claims.md) and so accepts
         any comparison. A family that dispatches on the function's
@@ -571,11 +570,11 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                 and _squash(cj.rhs) == _squash(call))
     if base == "is_numerically_stable":
         bound = (cj.funcs or {}).get("g")
-        from .f import finite_no_error
+        from .f import accurate
         return (cj.relation == "==" and _squash(cj.rhs) == "1"
                 and _squash(cj.lhs) == _squash(
                     f"g(f, {', '.join(facts.params)})")
-                and (bound == _FINITE_NO_ERROR or bound is finite_no_error))
+                and (bound == _ACCURATE or bound is accurate))
     return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
                                    OutputPredicateFamily))
 
@@ -2519,8 +2518,8 @@ def _collect_definedness_guards(fn, facts) -> list:
     return _definedness_guards(fn, facts)[0]
 
 
-def _definedness_guards(fn, facts,
-                        working: bool = False) -> "tuple[list, list]":
+def _definedness_guards(fn, facts, working: bool = False,
+                        domain: "dict | None" = None) -> "tuple[list, list]":
     """Intent:
         `(guards, gaps)`: every raise-region guard of fn itself,
         registered partiality lemmas plus explicit raise branches from
@@ -2540,7 +2539,7 @@ def _definedness_guards(fn, facts,
     gaps: list = []
     opaque: list = []
     try:
-        walked, unread = partiality_walk(fn, facts, opaque_out=opaque)
+        walked, unread = partiality_walk(fn, facts, domain, opaque_out=opaque)
         guards += walked
         if unread:
             gaps.append(unread)
@@ -2572,6 +2571,73 @@ def _definedness_guards(fn, facts,
         else:
             guards.append((region, "RangeError"))
     return guards, gaps
+
+
+def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
+    """Intent:
+        What a family claim's working domain is, for the record: each
+        parameter whose domain the function's own guards narrow, mapped
+        to the narrowed domain as text, and `guards` listing the
+        conditions a conditional raise cuts. Empty for a value claim
+        (its explicit domain is never narrowed) and where no guard
+        narrows anything.
+    """
+    import sympy
+
+    from .domain import bound_to_sympy_set
+    if cj.relation not in routes.examine_predicates() or facts is None:
+        return {}
+    cuts = guard_cut_texts(fn, facts)
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not cuts and not enforced:
+        return {}
+    out: dict = {}
+    for p in facts.params:
+        bound = domain.get(p)
+        if bound is None:
+            continue
+        try:
+            here = bound_to_sympy_set(bound)
+        except Exception:
+            continue
+        narrowed = here
+        sym = sympy.Symbol(p, real=True)
+        if p in enforced:
+            try:
+                narrowed = narrowed & bound_to_sympy_set(enforced[p])
+            except Exception:
+                pass
+        for text in cuts:
+            try:
+                cond = sympy.sympify(text, locals={p: sym})
+            except Exception:
+                continue
+            if getattr(cond, "free_symbols", None) != {sym}:
+                continue
+            try:
+                narrowed = narrowed - cond.as_set()
+            except Exception:
+                continue
+        if narrowed != here:
+            out[p] = _set_text(narrowed)
+    if out and cuts:
+        out["guards"] = list(cuts)
+    return out
+
+
+def _set_text(found) -> str:
+    """A real set as interval text: `[0, 4]`, `(0, 4]`, a union joined
+    with `∪`."""
+    import sympy
+    if isinstance(found, sympy.Interval):
+        lo = "(" if found.left_open else "["
+        hi = ")" if found.right_open else "]"
+        ends = [("-oo" if e == -sympy.oo else "oo" if e == sympy.oo
+                 else str(e)) for e in (found.start, found.end)]
+        return f"{lo}{ends[0]}, {ends[1]}{hi}"
+    if isinstance(found, sympy.Union):
+        return " ∪ ".join(_set_text(part) for part in found.args)
+    return str(found)
 
 
 def guard_cut_texts(fn, facts) -> list:
@@ -2711,7 +2777,8 @@ def _negated_guard_texts(cond, negate, op_text) -> list[str]:
 
 def _definedness_region_structured(fn, facts,
                                    gaps: "list | None" = None,
-                                   working: bool = False) -> list:
+                                   working: bool = False,
+                                   domain: "dict | None" = None) -> list:
     """Intent:
         The region where fn itself returns, as sympy relationals over
         fn's OWN parameter symbols; one per raise guard, negated,
@@ -2728,7 +2795,8 @@ def _definedness_region_structured(fn, facts,
         conjunction of relations (`x` a non-positive integer, a divisor
         that is zero everywhere). With `working`, the region is the part
         of the working domain where fn returns: its own explicit raises
-        are guards and are left out (`_definedness_guards`).
+        are guards and are left out (`_definedness_guards`). `domain`,
+        when given, says which parameters are integers.
     """
     import sympy
 
@@ -2740,7 +2808,7 @@ def _definedness_region_structured(fn, facts,
             negated_rels.append(rel)
 
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    guards, collection_gaps = _definedness_guards(fn, facts, working)
+    guards, collection_gaps = _definedness_guards(fn, facts, working, domain)
     dropped: list = []
 
     def drop(cond) -> None:
@@ -4496,6 +4564,20 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         f"{families.current_family_name(accepted)}")
                 if said not in (probe.note or ""):
                     probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
+        working = _working_domain_record(fn, facts, cj,
+                                         {**domain, **(cj.domain or {})})
+        if working:
+            probe.meta = {**(probe.meta or {}),
+                          "mathema.working_domain": working}
+            said = ("the working domain is "
+                    + ", ".join(f"{p} in {b}" for p, b in working.items()
+                                if p != "guards")
+                    + (f": f's own guard raises where "
+                       f"{' or '.join(working['guards'])}"
+                       if working.get("guards") else
+                       ": f's own guard rejects the rest"))
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
             # always stamped, "user" included: with no provenance
             # prose in the note, meta is the one source channel
@@ -6132,6 +6214,11 @@ def _validate_claim(cj, statement: str, note: str, facts,
                           f"{colliding[0]!r} is also a real parameter; use the "
                           f"explicit d(expr, {colliding[0][1:]}) form instead")
     cj_domain = {**domain, **cj.domain}   # inline quantifier wins
+    for p in cj.domain or {}:
+        # an int annotation completes a binding that states no type to
+        # the integers (`[0, 10]` on `n: int` is `[0, 10] : int`)
+        cj_domain[p] = _int_completed(cj_domain[p],
+                                      facts.param_kinds.get(p))
     inferred_domain = _inferred_literal_domain(cj.lhs, facts.params)
     if cj.rhs:
         for p, bounds in _inferred_literal_domain(cj.rhs, facts.params).items():
@@ -7121,6 +7208,32 @@ def _implied_bindings(cj, fn, kinds: dict) -> tuple:
     return completed, resolution
 
 
+def _as_domain_or_none(bound):
+    """A binding as a Domain, or None for no binding."""
+    from .domain import _as_domain
+    return None if bound is None else _as_domain(bound)
+
+
+def _int_completed(bound, kind: "str | None"):
+    """Intent:
+        A real binding that states no type, completed to the integers
+        when its parameter is annotated `int` (`[0, 10]` on `n: int` is
+        `[0, 10] : int`); any other binding unchanged. A type the claim
+        states wins.
+    """
+    from dataclasses import replace
+
+    from .domain import _as_domain
+    if kind != "int" or bound is None or isinstance(bound, (str, frozenset)):
+        return bound
+    dom = _as_domain(bound)
+    if dom.explicit_type or dom.base_type != "R" or dom.dims \
+            or not dom.pieces \
+            or any(isinstance(piece, frozenset) for piece in dom.pieces):
+        return bound
+    return replace(dom, base_type="Z", explicit_type=True)
+
+
 def _complete_missing(cj, fn) -> tuple:
     """Intent:
         Each of the claim's own bindings completed from its parameter's
@@ -7175,6 +7288,18 @@ def _complete_missing(cj, fn) -> tuple:
                 f"a {defaults.slot_type} slot holds no {', '.join(foreign)}, so "
                 f"{p} cannot hold it; its holes are "
                 f"{', '.join(defaults.members)}"), resolution
+        stated = _as_domain_or_none(bound)
+        if defaults.annotated and stated is not None and stated.explicit_type:
+            # a type the claim states wins over the annotation's, and the
+            # record says which way it moves
+            if defaults.slot_type == "int" and stated.base_type == "R":
+                notes.append(f"the claim widens the type of {p} from int "
+                             f"to the reals")
+            elif defaults.slot_type == "float" and stated.base_type in ("Z", "N"):
+                notes.append(f"the claim narrows the type of {p} from float "
+                             f"to the integers")
+        bound = _int_completed(bound, defaults.slot_type
+                               if defaults.annotated else None)
         done = complete(bound, defaults)
         completed[p] = done
         resolution[p] = defaults

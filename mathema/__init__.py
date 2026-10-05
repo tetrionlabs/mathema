@@ -157,10 +157,11 @@ class Record:
     # namespaced extension data, the same role Probe.meta already plays
     # for one claim; this is the function-level counterpart, for data
     # that isn't a stable, always-computed field (diagnostics.
-    # diagnostic_report(), opted into per function, is the first real
-    # user: "mathema.diagnostic_report" -> its own dict). Never
-    # populated automatically by check()/write_spec(), a caller sets it
-    # explicitly when it wants the extra work done.
+    # diagnostic_report(), opted into per function, is one user:
+    # "mathema.diagnostic_report" -> its own dict). check() fills
+    # "mathema.effects" (what examining the source finds the function
+    # does, stated under it); anything else a caller sets explicitly
+    # when it wants the extra work done.
     meta: dict = field(default_factory=dict, repr=False)
     # the dotted key the function's claims are filed under, which the
     # printed record's commands name; the function's name when unset
@@ -171,8 +172,14 @@ class Record:
         from ._layout import blocks
         from ._missing_words import count_words as _count_words
         lines = [f"mathema.Record({self.facts.name}) · "
-                 f"{tier_word(self.facts.tier, self.probes)} "
+                 f"{tier_word(self.facts.tier, self.probes, (self.meta or {}).get('mathema.effects'))} "
                 f"· form {self.facts.form}"]
+        effects = (self.meta or {}).get("mathema.effects")
+        if effects and effects.get("line") \
+                and effects["line"] != "no side effects":
+            # the header already says a function has no side effects;
+            # anything more is stated under it
+            lines.append(f"  effects: {effects['line']}")
         # a claim with lines under it prints as a block (see _layout)
         grouped = blocks(self.probes, list(self.facts.params),
                          dict(self.facts.param_kinds), self.key or self.facts.name,
@@ -831,6 +838,13 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     except Exception:
         lifted = None
     from .authoring import _fn_key
+    if facts.tree is not None:
+        # what examining the source finds the function does beyond
+        # returning a value, stated under the function
+        from ._examine import effects_line
+        effects = effects_line(fn)
+        if effects is not None:
+            meta = {**meta, "mathema.effects": effects}
     return Record(facts=facts, probes=probes, dependencies=deps,
                   concepts=concept_objs, meta=meta, lifted=lifted, key=_fn_key(fn))
 

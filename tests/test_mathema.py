@@ -203,10 +203,14 @@ def test_total_seq_probes_hold():
     assert verdicts["bounded_upper"] == "falsified"
 
 
-def test_effectful_tier3_probing_skipped():
+def test_effectful_tier3_probing_leaves_no_row_and_states_the_effect():
+    # the algebraic battery is not run on a function with effects, and
+    # a check mathema does not run leaves no row
     r = mathema.check(chatty)
     assert r.facts.tier == 3
-    assert any(p.verdict == "skipped" for p in r.probes)
+    assert not any(p.name == "purity" for p in r.probes)
+    assert r.meta["mathema.effects"]["line"] == (
+        "calls print(), which writes to standard output")
 
 
 def test_parity_probes():
@@ -262,8 +266,12 @@ def test_pole_detected_empirically():
     def reciprocal_gap(x: float) -> float:
         return 1 / (1 - x)
 
-    r = mathema.check(reciprocal_gap)
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    # the finiteness claim stated as written (the suggested
+    # is_numerically_stable reads accuracy, not finiteness)
+    from mathema.conjecture import check_conjectures, claim
+    (st,) = check_conjectures(reciprocal_gap, [claim(
+        "g(f, x) == 1", name="finite", route="best",
+        funcs={"g": "mathema.f.finite_no_error"})])
     assert st.verdict == "falsified"
     assert st.route == "probe:semi_analytical"
     assert "0 vs 1" in st.counterexample
@@ -295,7 +303,7 @@ def test_domain_boundary_edge_pole_provably_unsafe_via_derive():
         return 1 / x
 
     r = mathema.check(edge_pole, domain={"x": (0.0, 2.0)})  # pole at the edge
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    st = next(p for p in r.probes if p.name == "is_pole_safe[x]")
     assert st.verdict == "falsified"
     assert st.route == "examine"
 

@@ -81,16 +81,16 @@ def test_what_examine_cannot_read_is_listed_as_unknowable_with_why(pkg,
     assert "      looked_up calls getattr, which mathema cannot read" in tail
 
 
-def test_a_write_examine_already_sees_stands_alone_with_its_site(pkg,
-                                                                  capsys):
+def test_a_function_that_writes_is_not_offered_state_safety(pkg, capsys):
+    # is_state_safe is suggested only for a function with no side
+    # effects at its defaults; the effects line states the write
     out = _listing(pkg, "secpkg.mod.remember", capsys=capsys)
     head = out.split(" questions with candidate answers", 1)[0]
-    assert ("  - is_state_safe: f(rate) == f(rate)  [route best]\n"
-            "      examine finds a write: remember changes os.environ "
-            "(os.environ['SECTIONS_RATE'] = ...); adopting records it as "
-            "falsified") in head, out
+    assert "  effects: changes os.environ (os.environ['SECTIONS_RATE'] = ...)" \
+        in head, out
+    assert "is_state_safe" not in out
     assert "likely to be unknowable" not in out
-    # nothing hidden is read, so determinism stands alone too
+    # nothing hidden is read, so determinism stands alone
     assert "  - is_deterministic:" in head
     assert "SECTIONS_RATE" not in os.environ
 
@@ -101,10 +101,7 @@ def test_the_json_rows_carry_the_section_and_the_reason(pkg, capsys):
     payload = json.loads(out)
     assert payload["cols"][-2:] == ["section", "reason"]
     rows = {row[0]: row for row in payload["rows"]}
-    assert rows["is_state_safe"][5:] == [
-        "individual", "examine finds a write: remember changes os.environ "
-                      "(os.environ['SECTIONS_RATE'] = ...); adopting "
-                      "records it as falsified"]
+    assert "is_state_safe" not in rows
     assert rows["convex[rate]"][5:] == ["question", ""]
     assert rows["is_deterministic"][5:] == ["individual", ""]
 

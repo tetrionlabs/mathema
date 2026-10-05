@@ -1832,3 +1832,84 @@ class _Examiner:
         self.effects.add(Site("unknown", f"{self.name} calls "
                               f"{self._shown(node.func)} on {changed}, a "
                               f"method mathema has no entry for"))
+
+
+def _defaults(fn) -> dict:
+    """`{parameter: default value}` for every parameter with one."""
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    return {name: p.default for name, p in sig.parameters.items()
+            if p.default is not inspect.Parameter.empty}
+
+
+def reachable_at_defaults(fn, effects: Effects, site: Site) -> bool:
+    """Intent:
+        Whether a site can happen in a call that leaves every defaulted
+        parameter at its default: False only when one of the branch
+        conditions around it, read with those defaults, is decided the
+        other way (`if out is not None:` with `out=None`). A condition
+        reading anything else is undecided, and the site counts.
+    """
+    defaults = _defaults(fn)
+    if not defaults:
+        return True
+    for condition, wanted in effects.guards.get(site, ()):
+        try:
+            tree = ast.parse(condition, mode="eval")
+        except SyntaxError:
+            continue
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        if not names or not names <= set(defaults):
+            continue
+        try:
+            value = bool(eval(compile(tree, "<guard>", "eval"),
+                              {"__builtins__": {}}, dict(defaults)))
+        except Exception:
+            continue
+        if value != wanted:
+            return False
+    return True
+
+
+def effects_line(fn) -> "dict | None":
+    """Intent:
+        The record's statement of a function's effects: `line`, one
+        sentence (`opens a file for writing, reads os.environ`, `no side
+        effects`, or `no side effects with default values` when every
+        effect needs an argument the caller passes), `sites`, each
+        effect a default call can have, and `writes`, those of them that
+        change something outside the call. None when the source cannot
+        be examined.
+    """
+    try:
+        found = examine(fn)
+    except Exception:
+        return None
+    sites = [*found.writes, *found.unknown_writes, *found.hidden_reads]
+    name = getattr(fn, "__name__", "f")
+    at_defaults = [site for site in sites
+                   if reachable_at_defaults(fn, found, site)]
+
+    def said(site: Site) -> str:
+        text = site.text
+        return text[len(name) + 1:] if text.startswith(name + " ") else text
+    texts = list(dict.fromkeys(said(site) for site in at_defaults))
+    if texts:
+        line = ", ".join(texts)
+    elif sites:
+        line = "no side effects with default values"
+    else:
+        line = "no side effects"
+    writes = [said(site) for site in at_defaults
+              if site.kind != "hidden_read"]
+    return {"line": line, "sites": texts,
+            "writes": list(dict.fromkeys(writes))}
+
+
+def writes_at_defaults(fn, effects: Effects) -> list:
+    """The writes a call with every defaulted parameter at its default
+    can make."""
+    return [site for site in effects.writes
+            if reachable_at_defaults(fn, effects, site)]
