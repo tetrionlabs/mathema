@@ -11,7 +11,7 @@ Two kinds live here:
   convexity/concavity), the route a `route="best"` claim falls back to.
 - derive-route families, symbolic/structural checks with no sampling
   at all (`is_numerically_stable`'s pole-containment disproof,
-  `is_builtin_safe[param]`'s restricted-real-domain check,
+  `is_number_set_safe[param]`'s restricted-real-domain check,
   `is_pole_safe[param]`'s pole-containment check), each returning a
   `symbolic.ProofResult` or `None` to decline. The safety predicates
   also carry targeted empirical halves (`_pole_probe`/
@@ -548,7 +548,7 @@ def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
     return proof
 
 
-# --- is_builtin_safe[param]: a declared-domain parameter fed into a
+# --- is_number_set_safe[param]: a declared-domain parameter fed into a
 # real math function whose own domain is narrower than sympy's symbolic
 # generalization (factorial/gamma/lgamma need an integer or positive
 # argument; sqrt/log/asin/acos need a non-negative/positive/[-1,1]
@@ -718,11 +718,11 @@ def _check_restricted_domain(name: str, dom) -> str:
     return _combine_piece_verdicts([_range_piece_verdict(name, p) for p in _domain_pieces(dom)])
 
 
-def _is_builtin_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_number_set_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                             relation: str, domain: dict | None = None,
                             tolerance: float | None = None):
     """Intent:
-        A derive-route check for is_builtin_safe[param]: proven when
+        A derive-route check for is_number_set_safe[param]: proven when
         param's own declared domain is safe for every restricted-domain
         math function it's actually passed to in fn's body, disproven
         when provably unsafe for at least one, undecided otherwise
@@ -735,8 +735,8 @@ def _is_builtin_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         domain calls against the declared domain), kept for protocol
         uniformity with every other derive-route family. `lhs_src` is
         param itself: grammar.parse_domain_safety() parses
-        "is_builtin_safe(param)" straight into
-        `Conjecture(lhs=param, relation="is_builtin_safe", rhs="")`, no
+        "is_number_set_safe(param)" straight into
+        `Conjecture(lhs=param, relation="is_number_set_safe", rhs="")`, no
         f(...) wrapper and no name-parsing needed here.
     """
     from .symbolic import ProofResult
@@ -776,7 +776,7 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     Notes:
         rhs_src/relation/tolerance are unused, kept for protocol
         uniformity with every other derive-route family (see
-        _is_builtin_safe_derive's own note on why). `lhs_src` is param
+        _is_number_set_safe_derive's own note on why). `lhs_src` is param
         itself. The containment reasoning is the shared
         _pole_exclusion_proof, restricted to this one parameter.
     """
@@ -882,99 +882,6 @@ def _pole_probe(fn, facts, cj, domain: dict, rng: random.Random,
         lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but sits at or beside a "
                              f"pole: the call {what}"))
-
-
-def _is_extremity_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
-                            relation: str, domain: dict | None = None,
-                            tolerance: float | None = None):
-    """Intent:
-        The range-analysis half of is_extremity_safe[param]: proven when
-        the rigorous interval hull of the lifted form over the declared
-        domain box provably stays inside float range (the true range is
-        contained in the hull, so containment IS representability
-        everywhere); undecided (None) otherwise, falling through to
-        the extreme-trial probe half.
-
-    Notes:
-        Analysis never falsifies here: interval arithmetic
-        over-approximates, so a hull escaping float range does not
-        witness any attained overflow, and even an attained
-        mathematical overflow says nothing certain about code that
-        clamps before it. Violation is the probe half's to witness
-        with a real call. Requires every declared bound along the way
-        to be finite (an unbounded box has an unbounded hull); the
-        probe half owns the unbounded case through its
-        pseudo-infinity scoping.
-    """
-    import sys
-
-    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    from .symbolic import ProofResult, lift
-    param = lhs_src
-    if param not in facts.params:
-        return None
-    domain = domain or {}
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        return None
-    if lifted is None or isinstance(lifted.expr, tuple):
-        return None
-    expr = lifted.expr
-    params = {s.name: s for s in expr.free_symbols}
-    if param not in params:
-        return None
-    try:
-        from .symbolic._proof_support import _interval_bounds
-        hull = _with_timeout(
-            lambda: _interval_bounds(expr, domain, params),
-            FAST_TIMEOUT_SECONDS)
-    except Exception:
-        return None
-    if hull is None:
-        return None
-    lo = getattr(hull, "min", hull)
-    hi = getattr(hull, "max", hull)
-    float_max = sys.float_info.max
-    try:
-        within = bool((lo > -float_max) == True         # noqa: E712
-                      and (hi < float_max) == True)     # noqa: E712
-    except Exception:
-        return None
-    if not within:
-        return None
-    return ProofResult(
-        "proven",
-        sketch=f"the value hull over the declared domain stays inside "
-               f"float range, so no admitted input can push the "
-               f"result past what a float represents ({param} "
-               f"included at its declared extremes)")
-
-
-def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                   trials: int):
-    """Empirical half of is_extremity_safe[param]: trials at the
-    representation-extreme inputs the declared domain admits, the
-    finite declared endpoints, and (for an unbounded side) the
-    pseudo-infinity cap when the claim states one, else the true
-    representation ladder (float max, the x*x-overflow scale, the
-    exp-overflow threshold, the denormal band). Reaching true float
-    extremes on an unbounded, uncapped domain is this member's
-    explicit job; every trial point is still admitted by the domain.
-    A raise or non-finite return falsifies with that witness."""
-    from .hazards import _extreme_candidates
-    from .records import operational_range
-    target = cj.lhs
-    if target not in facts.params:
-        return None
-    pinf = operational_range(cj)
-    candidates = _extreme_candidates(domain.get(target),
-                                     pseudo_infinity=pinf)
-    return _hazard_value_probe(
-        fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
-                             f"declared domain but the computation "
-                             f"leaves float range there: the call {what}"))
 
 
 def _examined_verdict(found: list, unread: list, clean: str,
@@ -1710,11 +1617,11 @@ _ACCIDENTAL_CRASHES = (TypeError, IndexError, UnicodeError, RecursionError,
                        AttributeError, KeyError, OverflowError)
 
 
-def _is_arbitrary_input_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                                     relation: str, domain: dict | None = None,
                                     tolerance: float | None = None):
     """Intent:
-        Structural half of is_arbitrary_input_safe: decline. "No
+        Structural half of is_language_defined: decline. "No
         accidental crash on ANY string" is not something the derive
         route can establish symbolically over arbitrary code, so the
         member is empirical, this returns None and the fuzz + shrink
@@ -1725,7 +1632,7 @@ def _is_arbitrary_input_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
 
 def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                            trials: int):
-    """Empirical half of is_arbitrary_input_safe[s]: feed the target
+    """Empirical half of is_language_defined[s]: feed the target
     string parameter every edge case in the corpus (empty, whitespace,
     control chars, combining/zero-width marks, non-ascii, a very long
     string, injection-/format-/path-shaped strings) plus a few random
@@ -1970,7 +1877,7 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
 def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
                    trials: int):
-    """Empirical half of is_builtin_safe[param]: trials at the domain
+    """Empirical half of is_number_set_safe[param]: trials at the domain
     edges of every restricted builtin the parameter is actually passed
     to (log's zero, asin/acos's unit endpoints, sqrt's negatives,
     factorial's negative and non-integer neighbours), clipped to the
@@ -2015,7 +1922,7 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
 # this family is the mechanism that lets a claim actually earn the
 # narrower domain. Tests literal NaN-in behavior only: a domain-invalid
 # *non-NaN* input that produces NaN downstream is is_pole_safe/
-# is_builtin_safe territory, a separable code path (verified empirically
+# is_number_set_safe territory, a separable code path (verified empirically
 # against numpy: NaN-in never raises even under seterr(all='raise'),
 # while domain-invalid inputs go through a different, global-state-
 # dependent path). ---------------------------------------------------
@@ -2039,7 +1946,7 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     Notes:
         rhs_src/relation/tolerance are unused, kept for protocol
         uniformity with the other derive-route families. `lhs_src` is
-        param itself, same as is_pole_safe/is_builtin_safe. This reads
+        param itself, same as is_pole_safe/is_number_set_safe. This reads
         only what is actually written in the source: no guard is never
         evidence of acceptance, and a guard is never assumed to cover
         spellings it doesn't test; either gap stays undecided rather
@@ -2098,7 +2005,7 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
     two missing spellings only, never a domain-invalid ordinary
     number: missing-in and domain-invalid-producing-NaN are separable
     code paths, and the latter belongs to is_pole_safe/
-    is_builtin_safe. Returns (verdict, n_checked, counterexample) or
+    is_number_set_safe. Returns (verdict, n_checked, counterexample) or
     None to decline."""
     from .domain import missing_included
     from .types import missing_policy_from_signature
@@ -2356,7 +2263,7 @@ def _guarded_safety_probe(probe):
 #: other parameter, never the target itself
 _OUTSIDE_DOMAIN_FAMILIES = frozenset({
     "is_missing_safe", "is_empty_safe", "excluded_outside_domain",
-    "is_arbitrary_input_safe"})
+    "is_language_defined"})
 
 
 class SafetyFamily(_NamedClaimFamily):
@@ -4057,9 +3964,9 @@ def _reserved_probe(name: str):
 #: is_repeatable's question.
 _COMPUTATION_CHILDREN = (
     "is_overflow_safe", "is_numerically_stable", "is_representation_safe",
-    "is_extremity_safe", "is_pole_safe", "is_builtin_safe",
+    "is_extremity_safe", "is_pole_safe", "is_number_set_safe",
     "is_missing_safe", "is_empty_safe", "is_recursion_safe",
-    "is_arbitrary_input_safe", "is_compendium_safe")
+    "is_language_defined", "is_compendium_safe")
 _ALWAYS_RELEVANT_CHILDREN = frozenset({"is_numerically_stable"})
 
 
@@ -4232,8 +4139,8 @@ def _register_builtin_claim_families() -> None:
     # under a probe route, never relabeled as derive.
     _families.register("is_numerically_stable", SafetyFamily(
         "is_numerically_stable", derive=_is_numerically_stable_derive))
-    _families.register("is_builtin_safe", SafetyFamily(
-        "is_builtin_safe", derive=_is_builtin_safe_derive,
+    _families.register("is_number_set_safe", SafetyFamily(
+        "is_number_set_safe", derive=_is_number_set_safe_derive,
         probe=_builtin_probe,
         suggest_targets=_restricted_domain_targets))
     _families.register("is_pole_safe", SafetyFamily(
@@ -4244,11 +4151,7 @@ def _register_builtin_claim_families() -> None:
         "is_missing_safe", derive=_is_missing_safe_derive,
         probe=_missing_probe,
         suggest_targets=lambda fn, facts: _missing_guard_params(facts)))
-    from .hazards import _overflow_prone_params, _type_discipline_params
-    _families.register("is_extremity_safe", SafetyFamily(
-        "is_extremity_safe", derive=_is_extremity_safe_derive,
-        probe=_extreme_probe,
-        suggest_targets=_overflow_prone_params))
+    from .hazards import _type_discipline_params
     # is_overflow_safe: no infinity and no OverflowError from finite
     # inputs (P13); its restriction form states the region where the
     # computation stays in float range, the row a
@@ -4268,12 +4171,12 @@ def _register_builtin_claim_families() -> None:
         "is_empty_safe", derive=_is_empty_safe_derive,
         probe=_empty_probe,
         suggest_targets=lambda fn, facts: _emptiness_guard_params(facts)))
-    # is_arbitrary_input_safe fuzzes a string parameter and shrinks any
+    # is_language_defined fuzzes a string parameter and shrinks any
     # crash to a minimal witness, so its empirical verdict is stamped
     # probe:minimal_example. Suggested for every bare-string parameter.
     from .hazards import _string_input_params
-    _families.register("is_arbitrary_input_safe", SafetyFamily(
-        "is_arbitrary_input_safe", derive=_is_arbitrary_input_safe_derive,
+    _families.register("is_language_defined", SafetyFamily(
+        "is_language_defined", derive=_is_language_defined_derive,
         probe=_arbitrary_input_probe,
         suggest_targets=lambda fn, facts: _string_input_params(facts),
         probe_route="probe:minimal_example"))

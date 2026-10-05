@@ -529,7 +529,7 @@ def libraries_called(fn, facts, root: str = ".") -> set:
     suggested and adjudicated for: a function that never touches a
     covered library function has nothing to check."""
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
-    # stdlib (math) is is_builtin_safe's domain; is_compendium_safe
+    # stdlib (math) is is_number_set_safe's domain; is_compendium_safe
     # covers THIRD-PARTY libraries (numpy, ...) only
     return {key.split(".")[0] for key in library_keys_called(fn, facts, root)
             if key.split(".")[0] not in stdlib}

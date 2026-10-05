@@ -28,18 +28,17 @@ DERIVE_ONLY_FORMS = frozenset({"d", "lim", "integrate", "Sum", "Prod",
 
 # Domain-safety predicates: every one is on both routes, a
 # structural/symbolic derive half AND a targeted empirical half
-# (is_pole_safe trials the admitted pole locations, is_builtin_safe
+# (is_pole_safe trials the admitted pole locations, is_number_set_safe
 # the restricted builtins' domain edges, is_missing_safe a literal
 # NaN). raises likewise: "every call in the domain raises" is a
 # universal fact however it was reached. This set is the ONE
 # statement of which relations are safety predicates, grammar,
 # records, spec, acceptance, and the adjudication loop all read it
 # from here.
-SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
+SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_number_set_safe",
                                "is_missing_safe", "is_absent_safe",
-                               "is_extremity_safe",
                                "is_representation_safe", "is_empty_safe",
-                               "is_arbitrary_input_safe",
+                               "is_language_defined",
                                "is_compendium_safe",
                                "excluded_outside_domain",
                                # function-wide computation checks.

@@ -1252,7 +1252,7 @@ def claim(law: str, name: str | None = None, source: str = "user",
     Spellings are normalized by grammar.py (^ is power, = reads as ==,
     Unicode ≤ ≥ − · × π accepted), so equivalent spellings are the same
     statement. Accepted relations: ==, <=, >=, plus the raises(...)
-    predicate and the family-derive-only `is_pole_safe(param)`/`is_builtin_safe(param)`
+    predicate and the family-derive-only `is_pole_safe(param)`/`is_number_set_safe(param)`
     predicates (no `f(...)` wrapper; these are facts about param's own
     declared domain, not fn's return value). `route` defaults to "best",
     which cascades: the fast proof attempt, then the extensive strategy
@@ -1604,6 +1604,14 @@ def _claim(law: str, name: str | None, source: str, route: str,
                 "pseudo_infinity stated twice: the let binding and the "
                 "keyword argument disagree")
         pseudo_infinity = let_pseudo_inf
+    accepted_spelling = None
+    if rel in families.RETIRED_FAMILY_NAMES:
+        accepted_spelling, rel = rel, families.current_family_name(rel)
+    if name is not None and families.current_claim_name(name) != name:
+        accepted_spelling = accepted_spelling or families.claim_base_name(name)
+        name = families.current_claim_name(name)
+    if accepted_spelling is not None:
+        meta = {**(meta or {}), "mathema.accepted_spelling": accepted_spelling}
     if rel in routes.examine_predicates():
         # the examine normalization promised above: computation
         # facts always run the full cascade; a declared derive/probe/
@@ -4109,6 +4117,12 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # concepts) passes through under the probe's meta, the
             # probe's own keys winning
             probe.meta = {**cj.meta, **(probe.meta or {})}
+            accepted = cj.meta.get("mathema.accepted_spelling")
+            if accepted:
+                said = (f"{accepted} is an accepted spelling of "
+                        f"{families.current_family_name(accepted)}")
+                if said not in (probe.note or ""):
+                    probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
             # always stamped, "user" included: with no provenance
             # prose in the note, meta is the one source channel
@@ -8395,7 +8409,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # reports (`mathema.cause`)
                 family_cause = {
                     "is_representation_safe": "implementation:representation",
-                    "is_arbitrary_input_safe":
+                    "is_language_defined":
                         "implementation:accidental-crash",
                     "is_overflow_safe": "implementation:overflow",
                     "is_recursion_safe": "implementation:recursion-depth",
