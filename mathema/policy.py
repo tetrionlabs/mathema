@@ -1668,9 +1668,50 @@ def library_policies() -> dict:
     return _LIBRARY
 
 
+#: method calls that read a sequence without changing it, allowed in the
+#: test of a raising guard
+_READING_METHODS = frozenset({"count", "isna", "isnull", "notna", "notnull",
+                              "any", "all", "sum", "is_empty", "null_count"})
+#: functions that read their argument without changing it
+_READING_FUNCTIONS = frozenset({"len", "any", "all", "isnan", "isinstance"})
+
+
+def _reads_only(test, param: str) -> bool:
+    """Whether a guard's test only reads (names, constants, comparisons,
+    `len(xs)`, `xs.count()`, `xs.empty`), never changing or binding
+    anything."""
+    import ast
+    for n in ast.walk(test):
+        if isinstance(n, ast.NamedExpr):
+            return False
+        if isinstance(n, ast.Call):
+            func = n.func
+            if isinstance(func, ast.Attribute) and func.attr in _READING_METHODS:
+                continue
+            if isinstance(func, ast.Name) and func.id in _READING_FUNCTIONS:
+                continue
+            if isinstance(func, ast.Attribute) and func.attr in _READING_FUNCTIONS:
+                continue
+            return False
+    return True
+
+
+def _raising_guard(stmt, param: str) -> bool:
+    """Whether `stmt` is a guard that only refuses a call (`if
+    xs.count() == 0: raise ...`): an `if` with no `else`, a test that
+    only reads, and a body that only raises. The parameter reaches the
+    rest of the body unchanged on every call it lets through."""
+    import ast
+    return (isinstance(stmt, ast.If) and not stmt.orelse
+            and all(isinstance(b, ast.Raise) for b in stmt.body)
+            and _reads_only(stmt.test, param))
+
+
 def _touched_before_return(tree, ret, param: str) -> bool:
     """Whether a statement of the function other than the return `ret`
-    reads or writes `param` (a guard, an in-place change, an alias)."""
+    reads or writes `param` (an in-place change, an alias, a branch
+    that returns), a raising guard aside: a guard decides only the calls
+    it refuses, and passes the others on unchanged."""
     import ast
     fdef = next((n for n in ast.walk(tree)
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
@@ -1678,7 +1719,8 @@ def _touched_before_return(tree, ret, param: str) -> bool:
     body = fdef.body if fdef is not None else []
     for stmt in body:
         if stmt is ret or (isinstance(stmt, ast.Expr)
-                           and isinstance(stmt.value, ast.Constant)):
+                           and isinstance(stmt.value, ast.Constant)) \
+                or _raising_guard(stmt, param):
             continue
         if any(isinstance(n, ast.Name) and n.id == param
                for n in ast.walk(stmt)):
