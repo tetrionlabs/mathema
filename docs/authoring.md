@@ -398,13 +398,14 @@ behind sampling hints, `is_pole_safe[...]`, and the case-split fallback
 to also consider a fold/dot/sum-lifted function, not just a directly
 liftable one. This can make a partially-liftable function's own
 sampling genuinely hybrid, part real symbolic resolution, part
-empirical, not just the same analysis run slower. Off by default
-everywhere; results are cached by the function's form, so the cost,
-when paid, is paid at most once per distinct function shape per
-process.
+empirical, not just the same analysis run slower. Off by default;
+results are cached by the function's form, so the cost, when paid, is
+paid at most once per distinct function shape per process.
 
-On the derive route, extensive is a strategy ladder, not just a wider
-budget: exact real-root isolation (Sturm), adaptive interval
+On the derive side the extra effort is a strategy ladder, not just a
+wider budget. A claim on the default route (`best`) already climbs it
+when the first attempt leaves the claim undecided; `extensive=True`
+gives it to a claim pinned to `route="derive"` as well: exact real-root isolation (Sturm), adaptive interval
 refinement over the domain box, change-of-variable substitutions
 (t = sqrt(x)/erf(x)/tanh(x), atan compactification for unbounded
 claims), residue contour evaluation for trigonometric integrals, and

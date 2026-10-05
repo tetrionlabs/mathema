@@ -330,19 +330,20 @@ between machines, whether a proof finishes inside its time cap, is written
 into the record whenever the cap was hit, so a `holds` that would have been
 a `proven` on a quieter machine says so.
 
-When a proof matters more than the time it takes, `extensive=True` asks for
-more. It is off by default and costs real time. The ordinary proof attempt
-gets up to 15 seconds instead of 3, and a claim it still leaves undecided goes
-on to a ladder of genuinely different strategies, each given 3 seconds of its
-own: exact root isolation for polynomial differences, interval refinement over
+A claim the ordinary proof attempt leaves undecided does not stop there.
+On the default route, `best`, it goes on to a ladder of genuinely different
+strategies, each given a time cap of its own: exact root isolation for polynomial differences, interval refinement over
 the domain, a gallery of equivalent rewrites, a library of changes of
 variable, and z3's nonlinear real arithmetic when the `smt` extra is
 installed, followed by one more try of the ordinary attempt at 15 seconds.
 Behind all of that sits a failsafe: whatever happens, the ladder stops at 45
-seconds, so a single claim can never hold up a run indefinitely. Probing
-searches harder at the same time, spending the wider cap on finding the
-critical points worth sampling, and a proof found this way records its route
-as `derive:extensive`, so the extra effort is visible in the record.
+seconds, so a single claim can never hold up a run indefinitely. A proof
+found this way records its route as `derive:extensive`, so the extra effort
+is visible in the record. When a proof matters more than the time it takes,
+`extensive=True` asks for more, at real cost: it gives the same ladder to a
+claim pinned to the derive route, widens the time caps, and makes probing
+search harder for the critical points worth sampling. It changes where the
+probe looks, never how many points it runs.
 
 That is the division of labour the rest of this page assumes. Let a model
 propose the code and the claims, which is what models are good at, and let
@@ -404,9 +405,10 @@ ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicate
 
 `proven`, over every point of a five-dimensional region of prices, rates,
 maturities and volatilities: mathema read the body as mathematics, both
-Gaussian terms cancelled, and `sigma` disappeared. The `holds` is the proof's
-float companion, the same identity run through the real code in floating
-point. No number of test cases
+Gaussian terms cancelled, and `sigma` disappeared. Of the six `holds`, one
+is the proof's computation line, the same identity run through the real code
+in floating point, and five are policy lines, one for a `nan` in each
+argument. No number of test cases
 could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
 go on to the Greeks, stated as the partial derivatives they are.
 
