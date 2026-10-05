@@ -2589,11 +2589,15 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
         return {}
     if cj.relation not in routes.examine_predicates():
         # a value claim: only a parameter it binds no domain for
+        if not _reads_working_domain(fn, facts, cj, domain):
+            return {}
         unbound = {p: found[1] for p in facts.params
                    if domain.get(p) is None
                    and (found := _unbound_working_bound(fn, facts, p))}
-        if unbound and guard_cut_texts(fn, facts):
-            unbound["guards"] = guard_cut_texts(fn, facts)
+        cuts = guard_cut_texts(fn, facts) or [
+            str(c) for c in _own_guard_conditions(fn, facts)]
+        if cuts:
+            unbound["guards"] = cuts
         return unbound
     cuts = guard_cut_texts(fn, facts)
     enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
@@ -2725,6 +2729,66 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     return True
 
 
+def _point_of(text: "str | None") -> dict:
+    """The `name = number` pairs a witness text states, before any
+    colon that explains it."""
+    out: dict = {}
+    for name, value in re.findall(
+            r"\b([A-Za-z_]\w*) = (-?[0-9.]+(?:e[-+]?\d+)?)\b",
+            (text or "").split(":")[0]):
+        out[name] = value
+    return out
+
+
+def _refused_by_own_guard(fn, witness) -> bool:
+    """Whether f, called at a witness point (`{name: value}`), raises
+    from one of its own guards."""
+    if not witness:
+        return False
+    try:
+        point = {str(k): float(v) for k, v in dict(witness).items()}
+    except (TypeError, ValueError):
+        return False
+    try:
+        _call_by_name(fn, point)
+    except Exception as exc:
+        return deliberate_raise(exc, fn)
+    return False
+
+
+def _own_guard_conditions(fn, facts) -> list:
+    """Intent:
+        The conditions of f's own explicit raise branches, as sympy
+        relations; empty when they do not lift.
+    """
+    from .symbolic._conditioned import lift_piecewise
+    if facts is None or facts.tree is None or not facts.branch_count \
+            or facts.loops or facts.recursion:
+        return []
+    try:
+        pw = lift_piecewise(fn, facts)
+    except Exception:
+        return []
+    return [cond for cond, _exc in (getattr(pw, "raise_guards", None) or [])]
+
+
+def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
+    """Intent:
+        Whether a value claim is read over the working domain f's own
+        raise branches leave: it binds no domain (in the claim or the
+        call) for any parameter those branches read.
+    """
+    if cj.relation in routes.examine_predicates() or cj.relation == "raises":
+        return False
+    conds = _own_guard_conditions(fn, facts)
+    if not conds:
+        return False
+    read = {str(sym) for cond in conds
+            for sym in getattr(cond, "free_symbols", ())}
+    bound = set(cj.domain or {}) | set(domain or {})
+    return bool(read) and not (read & bound)
+
+
 def _unbound_working_bound(fn, facts, p: str):
     """Intent:
         The working domain of a real parameter no binding names, as
@@ -2757,7 +2821,14 @@ def _unbound_working_bound(fn, facts, p: str):
             here = here - cond.as_set()
         except Exception:
             return None
-    if here == sympy.S.Reals or not isinstance(here, sympy.Interval):
+    if here == sympy.S.Reals:
+        return None
+    if isinstance(here, sympy.Union) and all(
+            isinstance(part, sympy.Interval) for part in here.args):
+        # the working domain is a union: stated, while the claim keeps
+        # the real line and the routes skip what the guards refuse
+        return (None, _set_text(here))
+    if not isinstance(here, sympy.Interval):
         return None
     lo = float(here.start) if here.start.is_finite else float("-inf")
     hi = float(here.end) if here.end.is_finite else float("inf")
@@ -4718,13 +4789,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if working:
             probe.meta = {**(probe.meta or {}),
                           "mathema.working_domain": working}
-            said = ("the working domain is "
-                    + ", ".join(f"{p} in {b}" for p, b in working.items()
-                                if p != "guards")
-                    + (f": f's own guard raises where "
-                       f"{' or '.join(working['guards'])}"
-                       if working.get("guards") else
-                       ": f's own guard rejects the rest"))
+            per_param = [f"{p} in {b}" for p, b in working.items()
+                         if p != "guards"]
+            if per_param:
+                said = ("the working domain is " + ", ".join(per_param)
+                        + (f": f's own guard raises where "
+                           f"{' or '.join(working['guards'])}"
+                           if working.get("guards") else
+                           ": f's own guard rejects the rest"))
+            else:
+                said = (f"the working domain is the domain left by f's "
+                        f"guards ({' or '.join(working.get('guards') or [])})")
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
@@ -5028,6 +5103,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 ctx.assumption_display = ", ".join(
                     f"{r.lhs} {r.relation} {r.rhs}" for r in lent)
         ctx.assume_defined = defined_mode
+        ctx.exclude_own_guards = (not defined_mode and
+                                  _reads_working_domain(fn, facts, cj, domain))
         ctx.premise_structures = premise_structures
         ctx.companion_mode = (
             "math_only" if math_only else
@@ -5159,6 +5236,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # probe claim.
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            if ctx.guard_refused:
+                refused = (f"{ctx.guard_refused} draw"
+                           f"{'s' if ctx.guard_refused != 1 else ''} refused "
+                           f"by f's own guard, outside the working domain")
+                probed.note = f"{probed.note or ''}; {refused}".lstrip("; ")
+                probed.meta = {**(probed.meta or {}),
+                               "mathema.guard_refused": ctx.guard_refused}
             probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
                                                     float_companions,
                                                     conjectures)
@@ -6072,6 +6156,12 @@ class _ClaimContext:
     # strengthening ask()'s context, probe by rejection sampling.
     assumption_display: str = ""
     assume_defined: bool = False
+    # a value claim binding no domain for the parameters f's own raise
+    # branches read: those branches refuse their inputs, outside the
+    # working domain, so derive excludes them and the probe skips (and
+    # counts) the draws they refuse
+    exclude_own_guards: bool = False
+    guard_refused: int = 0
     # matrix-structure premises: {param: (prop, ...)} the sampler
     # synthesises to, and the derive backend turns into sympy
     # assumptions (Q.symmetric, Q.positive_definite, ...)
@@ -6501,7 +6591,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
         for p in facts.params:
             if p in read and p not in cj_domain:
                 found = _unbound_working_bound(fn, facts, p)
-                if found is not None:
+                if found is not None and found[0] is not None:
                     cj_domain[p] = found[0]
     # canonical narrowing, at resolve time: the resolved domain IS the
     # canonical set (prover, records, and comparisons all use it); the
@@ -8476,7 +8566,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               tolerance=cj.tolerance,
                               extensive=extensive, funcs=bound_funcs or None,
                               assumption=assumption,
-                              assume_defined=ctx.assume_defined)
+                              assume_defined=ctx.assume_defined,
+                              exclude_own_guards=ctx.exclude_own_guards)
     elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts
@@ -8510,7 +8601,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               domain=cj_domain, tolerance=cj.tolerance,
                               extensive=extensive, funcs=bound_funcs or None,
                               assumption=assumption,
-                              assume_defined=ctx.assume_defined)
+                              assume_defined=ctx.assume_defined,
+                              exclude_own_guards=ctx.exclude_own_guards)
         if definitions_hint is not None \
                 and proof.status in ("undecided", "unliftable"):
             from .symbolic._proof_support import ProofResult
@@ -8650,6 +8742,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         gated = _corroboration_gate(falsified, proof, cj, fn, facts,
                                     cj_domain, bound_funcs,
                                     assum=assumption or [])
+        if gated.verdict == "falsified" and ctx.exclude_own_guards \
+                and _refused_by_own_guard(fn, proof.witness
+                                          or _point_of(gated.counterexample)):
+            # the witness is a point f's own guard refuses, outside the
+            # working domain of a claim that binds none: no counterexample
+            gated = Probe(cj.name, statement, "unknown", route=None,
+                          sketch=proof.sketch,
+                          note=f"{note + '; ' if note else ''}the derive "
+                               f"witness is refused by f's own guard, "
+                               f"outside the working domain",
+                          meta=_provenance_meta(proof))
         if gated.verdict != "unknown":
             return gated
         # uncorroborated, so the symbolic disproof is not to be trusted
@@ -10134,6 +10237,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     cx = (f"{_point_text(args)}: the claim is false here, "
                           f"its own side read exactly")
                     break
+                continue
+            if ctx.exclude_own_guards and call_raised[0] == "f" \
+                    and deliberate_raise(e, fn):
+                # a draw f's own guard refuses is outside the working
+                # domain of a claim that binds none: never a trial
+                ctx.guard_refused += 1
                 continue
             if ctx.assume_defined and call_raised[0] == "f":
                 # `assuming is_defined(f)`: a sample where F raises is
