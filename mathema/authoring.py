@@ -532,7 +532,8 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
                     f"conflicts with the declared claim domain "
                     f"{declared_domain[p]} on {fn.__name__!r}; these must "
                     "not diverge")
-        merged_domain = {**domain_from_signature(fn, guards=False),
+        merged_domain = {**_domain_from_entry_asserts(fn),
+                         **domain_from_signature(fn, guards=False),
                          **declared_domain, **explicit}
         sig = callable_signature(fn)
 
@@ -841,6 +842,68 @@ def enforce_range(key: "str | None" = None, root: str = "."):
             "intervals": intervals, "checks": checks}
         return wrapper
     return decorator
+
+
+def _domain_from_entry_asserts(fn) -> dict:
+    """Intent:
+        `{param: Interval}` from the asserts at the top of fn's body
+        that compare a parameter with numbers (`assert 0 <= x <= 1`,
+        `assert x > 0`), read before any other statement, so
+        `enforce_domain` turns each into the guard it states.
+    """
+    import ast
+    import inspect
+    import math
+    import textwrap
+
+    from .domain import Interval
+    try:
+        lines, _start = inspect.getsourcelines(fn)
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError):
+        return {}
+    func = next((n for n in tree.body
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None)
+    if func is None:
+        return {}
+    params = {a.arg for a in func.args.args + func.args.kwonlyargs}
+    ops = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
+    ends: dict = {}
+    body = func.body
+    if body and isinstance(body[0], ast.Expr) \
+            and isinstance(getattr(body[0], "value", None), ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    for stmt in body:
+        if not isinstance(stmt, ast.Assert):
+            break
+        test = stmt.test
+        if not isinstance(test, ast.Compare):
+            continue
+        operands = [test.left, *test.comparators]
+        for left, op, right in zip(operands, test.ops, operands[1:]):
+            rel = ops.get(type(op))
+            if rel is None:
+                continue
+            if isinstance(left, ast.Name) and left.id in params:
+                name, bound = left.id, _constant(ast.unparse(right))
+            elif isinstance(right, ast.Name) and right.id in params:
+                name, bound = right.id, _constant(ast.unparse(left))
+                rel = _FLIPPED[rel]
+            else:
+                continue
+            if bound is None:
+                continue
+            lo, hi, closed_lo, closed_hi = ends.get(
+                name, (-math.inf, math.inf, False, False))
+            if rel in (">", ">=") and bound >= lo:
+                lo, closed_lo = bound, rel == ">="
+            elif rel in ("<", "<=") and bound <= hi:
+                hi, closed_hi = bound, rel == "<="
+            ends[name] = (lo, hi, closed_lo, closed_hi)
+    return {name: Interval(lo, hi, closed_lo, closed_hi)
+            for name, (lo, hi, closed_lo, closed_hi) in ends.items()}
 
 
 def _declare_exclusions(wrapper, fn, params, ref_surface: str) -> None:

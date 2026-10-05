@@ -2689,6 +2689,10 @@ def _definedness_region_structured(fn, facts,
             # where SOME trip meets it, which no conjunct states
             drop(cond)
             continue
+        if isinstance(cond, sympy.Not):
+            # a failed assert's region, `not (0 <= x <= 4)`, read as the
+            # disjunction it is
+            cond = cond.to_nnf()
         # note: simple (and Or-shaped) guards yield conjuncts directly;
         # And-shaped path guards wait for the second pass below (an
         # unsatisfiable one, Eq(x, 0) & (x > 0), simplifies away
