@@ -50,15 +50,9 @@ def _definition_rows(relative: str) -> list:
 def _expected_battery_skips(relative: str) -> list:
     """The `callable`-battery rows `verify` is expected to report skipped
     for a bundled file on the installed library, as `<key>: 1 skipped
-    claim(s)`. Before numpy 2.4, `numpy.sum` is a Python wrapper whose
-    source writes to its `out` argument, which the purity analysis reads
-    as an effect, so its `purity` row is skipped there; the definition
-    row itself holds on every numpy the file covers."""
-    if relative != "numpy/definitions.claims.yaml":
-        return []
-    import numpy
-    if tuple(int(part) for part in numpy.__version__.split(".")[:2]) < (2, 4):
-        return ["numpy.sum: 1 skipped claim(s)"]
+    claim(s)`: none. `numpy.sum` before numpy 2.4 is a Python wrapper
+    whose source writes to its `out` argument; its battery is judged at
+    the default call (`out=None`), where nothing is written."""
     return []
 
 

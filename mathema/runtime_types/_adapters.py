@@ -410,8 +410,9 @@ class PolarsSeriesAdapter:
         if not isinstance(abstract, AbstractVec):
             raise TypeError("polars.Series carries a vector")
         values = _polars_values(abstract, options)
-        # a vector of numbers with no value left is still a float column
-        dtype = pl.Float64 if values and all(
+        # a vector of numbers with no value left, or none at all, is
+        # still a float column
+        dtype = pl.Float64 if not values or all(
             v is None or (isinstance(v, float) and v != v) for v in values) else None
         return pl.Series(options.get("name", ""), values, dtype=dtype, strict=False)
 

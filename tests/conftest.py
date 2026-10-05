@@ -72,6 +72,25 @@ def _no_project_pseudo_infinity(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_throwaway_modules_left_behind(tmp_path_factory):
+    """A test that imports a package it wrote under its temporary
+    directory (`spkg.mod`, say) leaves no module behind: every module
+    imported during the test from a file under pytest's temporary base
+    directory is removed afterwards, so a later test in the same process
+    that writes a package of the same name imports its own."""
+    import os
+    import sys
+    base = os.path.realpath(str(tmp_path_factory.getbasetemp())) + os.sep
+    before = set(sys.modules)
+    yield
+    for name in set(sys.modules) - before:
+        module = sys.modules.get(name)
+        path = getattr(module, "__file__", None)
+        if path and os.path.realpath(path).startswith(base):
+            sys.modules.pop(name, None)
+
+
+@pytest.fixture(autouse=True)
 def _library_claims_isolated():
     """Installing library claims (`compendium.install`, which `verify`,
     `write_spec` and `mathema check` do) registers process-wide
