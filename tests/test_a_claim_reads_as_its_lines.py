@@ -72,7 +72,8 @@ def test_the_mathematics_line_keeps_its_own_verdict_under_an_empty_input_witness
     assert row.meta["mathema.mathematics"]["verdict"] == "unknown", row.meta
     lines = _lines(rec)
     start = next(i for i, line in enumerate(lines) if line.startswith("  lead  "))
-    assert lines[start + 1].split()[:2] == ["unknown", "mathematics"], lines[start + 1]
+    # the probe ran the code to reach it, so it is the computation's line
+    assert lines[start + 1].split()[:2] == ["unknown", "computation"], lines[start + 1]
 
 
 def line_of(x: float) -> float:
@@ -86,3 +87,21 @@ def test_the_headline_is_the_weakest_line_when_none_is_falsified():
     lines = _lines(rec)
     head = next(line for line in lines if line.startswith("  line  "))
     assert head.endswith("   holds"), head
+
+
+def square_in_int32(x: float) -> float:
+    import numpy as np
+    return float(np.int32(x) * np.int32(x))
+
+
+def test_a_verdict_from_running_the_code_is_on_the_computation_line():
+    # the square is never negative; int32 overflows past 46340
+    rec = mathema.check(square_in_int32, claims=[mathema.claim(
+        "for x in [0, 100000], f(x) >= 0", name="sq")])
+    lines = _lines(rec)
+    start = next(i for i, line in enumerate(lines) if line.startswith("  sq  "))
+    block = [ln for ln in lines[start + 1:] if ln.startswith("    ")]
+    assert not any(ln.split()[1:2] == ["mathematics"] and ln.split()[0] == "falsified"
+                   for ln in block), block
+    assert block[0].split()[:2] == ["falsified", "computation"], block[0]
+    assert "counterexample x = " in block[0], block[0]

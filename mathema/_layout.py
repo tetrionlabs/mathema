@@ -7,7 +7,9 @@ claim's name, its statement and its overall verdict: falsified, with the
 witness, when any line is falsified, otherwise the verdict of its
 mathematics. One line follows per aspect of what is known about it:
 
-- `mathematics`: the claim over the numbers of its domain;
+- `mathematics`: the claim over the numbers of its domain, as derive
+  decided it; a verdict reached by running the code is a computation
+  line instead;
 - `computation`: the claim run in the number representation (`[float]`);
 - `policy`: what f does at each value that is not a number, as the call
   `f(nan)`, `f(None)` or `f([])`.
@@ -45,6 +47,18 @@ def over_the_reals(statement: str) -> str:
     for typed, spelled in _REALS.items():
         text = re.sub(re.escape(typed) + r"\b", spelled, text)
     return text
+
+
+def _ran(route) -> bool:
+    """Whether a verdict was reached by running the code (a probe route)
+    rather than decided by derive."""
+    return str(route or "").startswith("probe")
+
+
+def _shown(statement: str, aspect: str) -> str:
+    """The claim as the line of `aspect` restates it."""
+    return over_the_reals(statement) if aspect == "mathematics" \
+        else over_numbers(statement)
 
 
 def _verdict(p) -> str:
@@ -143,11 +157,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 detail = count_words(found["n"], meta.get("mathema.drawn"))
             elif verdict in ("unknown", "skipped") and found.get("note"):
                 detail = found["note"]
-            lines.append(_row(verdict, "mathematics", over_the_reals(main.statement),
-                              detail))
+            # a verdict reached by running the code is the computation's
+            aspect = "computation" if _ran(found.get("route")) else "mathematics"
+            lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
         else:
-            lines.append(_row(_verdict(main), "mathematics",
-                              over_the_reals(main.statement), _detail(main, count_words)))
+            aspect = "computation" if _ran(main.route) else "mathematics"
+            lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
+                              _detail(main, count_words)))
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
         lines += _extras(main)
