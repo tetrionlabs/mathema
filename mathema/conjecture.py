@@ -3765,6 +3765,30 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
                   None)
     if broken is None or probe.verdict == "falsified":
         return probe, lines
+    return _falsified_by_empty_line(probe, broken), lines
+
+
+def _without_empty_line(probe: "Probe") -> "Probe":
+    """A claim falsified by its empty-input line
+    (`_falsified_by_empty_line`) as its own finding over non-empty
+    inputs; any other claim as it is."""
+    from dataclasses import replace as _replace
+    meta = dict(probe.meta or {})
+    if not meta.pop("mathema.empty_input", None):
+        return probe
+    found = meta.pop("mathema.mathematics", None) or {}
+    meta.pop("mathema.witness_executed", None)
+    return _replace(probe, verdict=found.get("verdict", "unknown"),
+                    route=found.get("route"), note=found.get("note"),
+                    n=found.get("n"), counterexample=None, meta=meta)
+
+
+def _falsified_by_empty_line(probe: "Probe", broken: "Probe") -> "Probe":
+    """Intent:
+        The claim falsified by its falsified empty-input line `broken`:
+        the line's witness, its finding over non-empty inputs kept in
+        `meta["mathema.mathematics"]`.
+    """
     from dataclasses import replace as _replace
     note = (f"{probe.note + '; ' if probe.note else ''}{broken.name} is "
             f"falsified: {broken.note}")
@@ -3779,7 +3803,7 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
             "mathema.witness_executed": True}
     return _replace(probe, verdict="falsified", route="probe",
                     counterexample=broken.counterexample, note=note,
-                    meta=meta), lines
+                    meta=meta)
 
 
 def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
@@ -5162,7 +5186,9 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                                extensive=extensive,
                                float_companions=float_companions)
     link_names = {c.name for c in link_cjs}
-    links = [p for p in probes if p.name in link_names]
+    # each link is the chain's mathematics over non-empty inputs; the
+    # empty list reaches the chain through its empty-input line alone
+    links = [_without_empty_line(p) for p in probes if p.name in link_names]
     # a link that does not read as a claim (an undeclared name, say)
     # makes the whole chain unreadable, whatever the other links decide
     refused = next((p for p in links
@@ -5185,10 +5211,17 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     combined.meta = {**(combined.meta or {}),
                      "mathema.chain_lines": list(empty.values())} if empty \
         else combined.meta
+    broken = next((p for p in empty.values() if p.verdict == "falsified"),
+                  None)
+
+    def headline(chain: "Probe") -> "Probe":
+        if broken is not None and chain.verdict != "falsified":
+            return _falsified_by_empty_line(chain, broken)
+        return chain
     companions = [p for p in probes if p.name not in link_names
                   and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
     if combined.verdict != "proven" or len(companions) != len(links):
-        return combined, None
+        return headline(combined), None
     from .gates import companion_representation
     descriptor, _representation, representation_word = \
         companion_representation(cj.domain, facts)
@@ -5205,7 +5238,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         companion.stratum = broken.stratum
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
-    return combined, companion
+    return headline(combined), companion
 
 
 def _stamp_examine_route(probe, cj, fn, facts) -> None:
