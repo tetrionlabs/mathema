@@ -112,7 +112,7 @@ def _exact_value(value, rounded_roots: bool = False):
     if np is not None and isinstance(value, np.generic):
         value = value.item()
     if isinstance(value, _Root):
-        return Fraction(value) if rounded_roots else None
+        return Fraction(value) if rounded_roots else None  # type: ignore[call-overload]
     if _is_exact(value):
         return value
     if isinstance(value, (list, tuple)):

@@ -119,7 +119,11 @@ def test_real_parameter_named_like_a_reserved_word_is_not_misspecified():
     result = check_conjectures(arithmetic_term, [cj], extensive=False)[0]
     assert result.verdict == "proven"
 
-    cj_probe = claim("f(a1, d, n) == a1 + (n-1)*d", route="probe")
+    # bounded: over R the product overflows near the float limit, which
+    # falsifies the computation (ruling of 2026-10-01: an infinity from
+    # finite inputs is no value)
+    cj_probe = claim("for a1 in [-1e6, 1e6], d in [-1e6, 1e6], n in [-1e6, 1e6], "
+                     "f(a1, d, n) == a1 + (n-1)*d", route="probe")
     result_probe = check_conjectures(arithmetic_term, [cj_probe], extensive=False)[0]
     assert result_probe.verdict == "holds"
 

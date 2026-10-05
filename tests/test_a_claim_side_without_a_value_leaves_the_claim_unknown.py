@@ -90,7 +90,6 @@ def test_a_claim_side_beyond_float_range_stays_exact():
     # at returns = [1e300, -1e300, ...] norm(returns)**2 is past the
     # float limit; read exactly it is the sum of squares, and the code's
     # own values agree with it there
-    from mathema.conjecture import check_conjectures, claim
     from mathema._exact_side import exact_sides
     from mathema.conjecture import _validate
     code_l, _ = _validate("dot(f(returns, c), returns)", {"returns", "c"}, set())

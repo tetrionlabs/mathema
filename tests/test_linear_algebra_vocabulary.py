@@ -93,7 +93,6 @@ _WORDS = [
 
 #: true identities the probe route meets at a magnitude corner
 _AT_A_CORNER = {
-    ("dot(x, x) == norm(x)**2", "probe"): "unknown",
     ("x.T @ (A + A.T) @ x ~= 2 * (x.T @ A @ x)", "probe"): "falsified",
 }
 
@@ -109,12 +108,6 @@ def test_each_word_has_a_true_identity_and_a_false_sibling(fn, true, false,
         # magnitude corner (rulings of 2026-10-01 and 2026-10-05)
         assert p.verdict == "falsified", (true, p.verdict, p.note)
         assert "e+300" in p.counterexample or "e+16" in p.counterexample, p.counterexample
-    elif expected == "unknown":
-        # the claim's own float side overflows at a corner draw, which
-        # leaves the probe line unknown (ruling of 2026-10-01: an
-        # undecided point never counts toward holds)
-        assert p.verdict == "unknown", (true, p.verdict, p.note)
-        assert "OverflowError" in p.note, p.note
     else:
         assert _holds(p), (true, p.verdict, p.note, p.counterexample)
     p = _one(fn, false, route)

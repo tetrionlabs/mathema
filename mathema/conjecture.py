@@ -10419,7 +10419,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 and cj.relation in ("==", "~=", "<=", ">=")
                 and not some_side_is_finite(code_l, code_r, env,
                                             {"f": fn_call, **bound_funcs}))))
-        if float_gave_out and corner_row and _magnitude_corner(args):
+        if corner_row and _magnitude_corner(args) and (
+                float_gave_out or call_inf[0] is not None
+                or call_nan[0] == "f" or holds_nan(lv) or holds_nan(rv)):
             # a definition row's library gave no value at a magnitude
             # corner: a finding about its computation, not a wrong model
             checked += 1
