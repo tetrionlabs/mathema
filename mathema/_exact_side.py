@@ -65,12 +65,15 @@ def to_float(value):
     return value
 
 
-def wrap(callee):
-    """`callee` called with the executed floats, its result read back
-    exactly."""
+def wrap(callee, exact_calls: bool = False):
+    """`callee` called with the executed floats (with the exact values
+    themselves when `exact_calls`), its result read back exactly."""
     def call(*args, **kwargs):
-        result = callee(*[to_float(a) for a in args],
-                        **{k: to_float(v) for k, v in kwargs.items()})
+        if exact_calls:
+            result = callee(*args, **kwargs)
+        else:
+            result = callee(*[to_float(a) for a in args],
+                            **{k: to_float(v) for k, v in kwargs.items()})
         return to_exact(result)
     return call
 
@@ -115,15 +118,22 @@ def exact_literals(code):
         return code
 
 
-def exact_sides(code_l, code_r, env: dict, callees: dict) -> "tuple | None":
+def exact_sides(code_l, code_r, env: dict, callees: dict,
+                exact_calls: bool = False) -> "tuple | None":
     """Intent:
         `(left, right)` evaluated exactly at the point `env` holds, the
         names in `callees` (the function under test and any function the
         claim binds) called with the executed floats and read back
-        exactly, or None when either side is not exact.
+        exactly, or None when either side is not exact. With
+        `exact_calls` each callee runs on the exact values themselves
+        (Fractions in place of floats), the mathematics of the point
+        rather than its float computation.
     """
-    exact_env = {k: (wrap(v) if k in callees else to_exact(v))
+    exact_env = {k: (wrap(callees[k], exact_calls) if k in callees
+                     else to_exact(v))
                  for k, v in env.items() if k != "__builtins__"}
+    for k, v in callees.items():
+        exact_env.setdefault(k, wrap(v, exact_calls))
     try:
         left = eval(exact_literals(code_l), {"__builtins__": {}}, exact_env)
         right = eval(exact_literals(code_r), {"__builtins__": {}}, exact_env) \

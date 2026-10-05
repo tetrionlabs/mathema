@@ -4541,6 +4541,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
                                                     float_companions)
             out.append(stamp(probed, _cap=verdict_cap))
+            if ctx.companion is not None:
+                _emit_companion(out, _stamped(ctx.companion, cj_record,
+                                              written=cj.domain or {}),
+                                probed.name)
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)
         except LanguageDrawFailed as e:
@@ -5050,6 +5054,33 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
                     if kw.arg and isinstance(kw.value, ast.Constant):
                         shown.add(kw.arg)
     return tuple(kinds), shown
+
+
+def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
+    """Intent:
+        Whether the claim holds at the point `env` in exact arithmetic:
+        f and the claim's bound functions run on the point's exact values
+        (`_exact_side.exact_sides` with `exact_calls`), under the fast
+        wall-clock cap. False when that evaluation cannot be carried out
+        exactly.
+    """
+    from ._exact_side import exact_sides
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        exact = _with_timeout(
+            lambda: exact_sides(code_l, code_r, env,
+                                {"f": fn, **(bound_funcs or {})},
+                                exact_calls=True),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False
+    if exact is None:
+        return False
+    return relation_holds_elementwise(
+        exact[0], exact[1], cj.relation,
+        cj.tolerance if cj.tolerance is not None else 0.0,
+        exact_inequality=cj.tolerance is None,
+        rel_tol=_declared_rel_tol(cj)) is True
 
 
 def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok):
@@ -8714,6 +8745,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the LABEL and sign of the first callee to return an infinity for
     # finite arguments
     call_inf: list = [None, 0]
+    # the first point where the float computation gave no value while
+    # the claim holds there in exact arithmetic
+    computation_cx = None
 
     def _tagged(callee, label, inject=None):
         # a raise from the function under test (or a bound function) is
@@ -9374,6 +9408,32 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # the missing and absence companions judge what f does there
             executed_record.classified += 1
             continue
+        float_gave_out = not missing_in and (
+            call_hole[0] is not None or holds_nan(lv) or holds_nan(rv)
+            or (call_nan[0] == "f" and not f_nan_unread(env, lv, rv))
+            or (call_inf[0] is not None and not (
+                same_infinity(lv, rv)
+                and cj.relation in ("==", "~=", "<=", ">="))))
+        if float_gave_out and ctx.companion_mode == "spawn" \
+                and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
+                                      bound_funcs):
+            # the float computation gave no value (an overflow to inf or
+            # nan) where the claim holds in exact arithmetic: a failure
+            # of the computation, carried by the `[float]` line
+            checked += 1
+            if computation_cx is None:
+                computation_cx = (
+                    f"{_point_text(args)}: "
+                    + (f"{call_hole[0][0]} returned {call_hole[0][1]}"
+                       if call_hole[0] is not None
+                       else f"{call_nan[0]} returned nan" if call_nan[0] is not None
+                       else f"{call_inf[0]} returned "
+                            f"{'-inf' if call_inf[1] < 0 else 'inf'}"
+                       if call_inf[0] is not None else
+                       f"{_linalg_eval.shown(lv)!r} vs "
+                       f"{_linalg_eval.shown(rv)!r}"))
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            continue
         if not missing_in and call_hole[0] is not None:
             # a hole of any member computed from inputs that are not
             # missing is no value, as a NaN is
@@ -9536,6 +9596,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
             break
     rng = main_rng
+    if computation_cx is not None:
+        from .gates import companion_name, companion_representation
+        descriptor, _rep, rep_word = companion_representation(cj_domain, facts)
+        ctx.companion = Probe(
+            companion_name(cj.name, descriptor), statement, "falsified",
+            route="probe", counterexample=computation_cx,
+            note=f"the {rep_word} computation of {cj.name} gave no value "
+                 f"where the claim holds in exact arithmetic")
     if checked > tallied:
         tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))
