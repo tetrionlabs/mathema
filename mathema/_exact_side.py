@@ -98,22 +98,101 @@ def _is_exact(value) -> bool:
     return isinstance(value, (*EXACT_TYPES, Algebraic))
 
 
-def _exact_value(value):
+def _exact_value(value, rounded_roots: bool = False):
     """`value` as a plain exact value (an int, Fraction or bool, or a
-    nested list of them), or None when any part is inexact."""
+    nested list of them), or None when any part is inexact. With
+    `rounded_roots`, a square root of an exact rational
+    (`_linalg_eval._Root`, rounded once to a float or, beyond float
+    range, to 60 significant digits) is read as that rounded value, a
+    reading close enough for a computation line's tolerance."""
+    from ._linalg_eval import _Root
     np = _np()
     if np is not None and isinstance(value, np.ndarray):
         value = value.tolist()
     if np is not None and isinstance(value, np.generic):
         value = value.item()
+    if isinstance(value, _Root):
+        return Fraction(value) if rounded_roots else None
     if _is_exact(value):
         return value
     if isinstance(value, (list, tuple)):
-        parts = [_exact_value(v) for v in value]
+        parts = [_exact_value(v, rounded_roots) for v in value]
         if any(p is None for p in parts):
             return None
         return parts
     return None
+
+
+def _exact_elements(value) -> "list | None":
+    """The elements of a vector of exact numbers, or None."""
+    np = _np()
+    if np is not None and isinstance(value, np.ndarray):
+        if value.ndim != 1:
+            return None
+        value = value.tolist()
+    if not isinstance(value, (list, tuple)):
+        return None
+    if all(isinstance(v, (int, Fraction)) and not isinstance(v, bool)
+           for v in value):
+        return list(value)
+    return None
+
+
+def exact_words(words: dict) -> dict:
+    """Intent:
+        The claim words that keep an exact vector exact: `sum`, `mean`
+        and `prod` as Fractions, `norm` (Euclidean, of a vector) and
+        `sqrt` as the square root of the exact rational
+        (`_linalg_eval._exact_sqrt`), whose whole powers are exact. Any
+        other argument goes to the word as it was.
+    """
+    from ._linalg_eval import _exact_sqrt
+    out: dict = {}
+
+    def keep(name, exact):
+        original = words.get(name)
+        if original is None:
+            return
+
+        def word(*args, **kwargs):
+            if len(args) == 1 and not kwargs:
+                result = exact(args[0])
+                if result is not None:
+                    return result
+            return original(*args, **kwargs)
+        out[name] = word
+
+    def total(v):
+        xs = _exact_elements(v)
+        return None if xs is None else sum(xs, Fraction(0))
+
+    def mean(v):
+        xs = _exact_elements(v)
+        return None if not xs else sum(xs, Fraction(0)) / len(xs)
+
+    def prod(v):
+        xs = _exact_elements(v)
+        if xs is None:
+            return None
+        out_ = Fraction(1)
+        for x in xs:
+            out_ *= x
+        return out_
+
+    def norm(v):
+        xs = _exact_elements(v)
+        return None if xs is None else _exact_sqrt(
+            sum((Fraction(x) * x for x in xs), Fraction(0)))
+
+    def sqrt(v):
+        if isinstance(v, (int, Fraction)) and not isinstance(v, bool) \
+                and v >= 0:
+            return _exact_sqrt(Fraction(v))
+        return None
+    for name, fn in (("sum", total), ("mean", mean), ("prod", prod),
+                     ("norm", norm), ("sqrt", sqrt)):
+        keep(name, fn)
+    return out
 
 
 class ExactInt(int):
@@ -271,6 +350,8 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
                  for k, v in env.items() if k != "__builtins__"}
     for k, v in callees.items():
         exact_env.setdefault(k, wrap(v, exact_calls))
+    exact_env.update(exact_words({k: v for k, v in env.items()
+                                  if k not in callees}))
     exact_env["__exact__"] = _literal
     try:
         left = eval(exact_literals(code_l, exact_calls),
@@ -280,8 +361,39 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
             if code_r is not None else None
     except Exception:
         return None
-    left = _exact_value(left)
-    right = _exact_value(right) if code_r is not None else None
+    # a rounded root is close enough for a computation line, never for
+    # the mathematics
+    left = _exact_value(left, not exact_calls)
+    right = _exact_value(right, not exact_calls) if code_r is not None else None
     if left is None or (code_r is not None and right is None):
         return None
     return left, right
+
+
+def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
+    """Intent:
+        Whether either side of the claim, evaluated exactly at the point
+        `env` holds as a computation line reads it (the function's
+        results as the values it returned, literals as the floats they
+        parse to, a square root rounded once), is a finite value. Two
+        float sides at the same infinity then do not agree: the value
+        they stand for is finite.
+    """
+    exact_env = {k: (wrap(callees[k]) if k in callees else to_exact(v))
+                 for k, v in env.items() if k != "__builtins__"}
+    for k, v in callees.items():
+        exact_env.setdefault(k, wrap(v))
+    exact_env.update(exact_words({k: v for k, v in env.items()
+                                  if k not in callees}))
+    exact_env["__exact__"] = _literal
+    for code in (code_l, code_r):
+        if code is None:
+            continue
+        try:
+            value = eval(exact_literals(code, False), {"__builtins__": {}},
+                         exact_env)
+        except Exception:
+            continue
+        if _exact_value(value, True) is not None:
+            return True
+    return False

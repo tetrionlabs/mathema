@@ -430,9 +430,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
             # sides overflowing toward the same infinity are one
-            # extended-real point and agree, as equal sides; a NaN is
-            # the absence of a value and agrees with nothing
-            if _same_no_value(lv, rv):
+            # extended-real point and agree, as equal sides, unless a
+            # side read exactly is finite; a NaN is the absence of a
+            # value and agrees with nothing
+            if _same_no_value(lv, rv) and not _finite_exactly(point):
                 return cj.relation in ("==", "~=", "<=", ">=")
             return False
         if not inputs_missing(point.values()) \
@@ -490,6 +491,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the routes that build a record from this kit
     evaluate.executed = executed  # type: ignore[attr-defined]
     evaluate.drawn = tally  # type: ignore[attr-defined]
+
+    def _finite_exactly(point) -> bool:
+        # two float sides at the same infinity stand for a finite value
+        # when a side read exactly is finite: the code overflowed
+        from ._exact_side import some_side_is_finite
+        saved = (calls_raised[0], calls_nonfinite[0])
+        held = some_side_is_finite(code_l, code_r,
+                                   {**base_env, **_typed(point)},
+                                   {"f": fn_call, **(bound_funcs or {})})
+        calls_raised[0], calls_nonfinite[0] = saved
+        return held
 
     def _exact_decision(point, tol) -> "bool | None":
         # the claim's sides read exactly, the function's results as the
@@ -589,7 +601,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # point and agree, as equal sides; a NaN, or an infinity
             # against a value, is a failure
             if _same_no_value(lv, rv) and cj.relation in ("==", "~=",
-                                                          "<=", ">="):
+                                                          "<=", ">=") \
+                    and not _finite_exactly(point):
                 return None
             if calls_nonfinite[0].endswith("nan"):
                 return (f"the computation returns NaN here "

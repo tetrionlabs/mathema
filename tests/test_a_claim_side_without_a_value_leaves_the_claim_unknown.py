@@ -57,3 +57,52 @@ def test_the_code_overflowing_falsifies_even_where_the_claim_side_raises():
     assert rows["c"].verdict == "proven"
     assert rows["c[float]"].verdict == "falsified", rows["c[float]"].note
     assert "inf" in rows["c[float]"].counterexample + (rows["c[float]"].sketch or "")
+
+
+import numpy as np  # noqa: E402
+
+
+def norm_by_numpy(x: np.ndarray) -> float:
+    return float(np.linalg.norm(x))
+
+
+def test_an_overflow_on_both_float_sides_is_not_agreement():
+    # at x near 1e300 the code's norm overflows to inf and so does the
+    # claim's float side, while the claim read exactly is finite: the
+    # code gave no value there, and two infinities do not agree
+    import mathema
+    from mathema.conjecture import check_conjectures, claim
+    nrm = norm_by_numpy
+    law = "for x in [1e300, 2e300]^3, f(x) == sqrt(sum(x**2))"
+    rows = {p.name: p for p in mathema.check(nrm, claims=[
+        mathema.claim(law, name="c")]).probes}
+    (float_row,) = [p for n, p in rows.items() if n.startswith("c[float")]
+    assert float_row.verdict == "falsified", float_row.note
+    (p,) = check_conjectures(nrm, [claim(law, route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+
+
+def scaled_returns(returns: np.ndarray, c: float) -> np.ndarray:
+    return returns * c
+
+
+def test_a_claim_side_beyond_float_range_stays_exact():
+    # at returns = [1e300, -1e300, ...] norm(returns)**2 is past the
+    # float limit; read exactly it is the sum of squares, and the code's
+    # own values agree with it there
+    from mathema.conjecture import check_conjectures, claim
+    from mathema._exact_side import exact_sides
+    from mathema.conjecture import _validate
+    code_l, _ = _validate("dot(f(returns, c), returns)", {"returns", "c"}, set())
+    code_r, _ = _validate("c * norm(returns)**2", {"returns", "c"}, set())
+    from mathema._linalg_eval import FUNCTIONS
+    env = {**FUNCTIONS, "returns": np.array([1e300, -1e300, 3.0]), "c": 2.0}
+    sides = exact_sides(code_l, code_r, env, {"f": scaled_returns})
+    assert sides is not None
+    from fractions import Fraction
+    # f's float products are exact here (scaling by 2), so both sides are
+    # the exact 2 * (2e600 + 9), far past the float limit
+    left, right = sides
+    expected = 2 * (2 * Fraction(1e300) ** 2 + 9)
+    assert left == expected
+    assert abs(Fraction(right) - expected) <= expected / 10**50
