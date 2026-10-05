@@ -5393,7 +5393,8 @@ def _bound_for_arrays(callee):
         library function (numpy, scipy, pandas, polars) receives the
         claim's arrays as they are; any other Python function receives
         plain lists, realised through the runtime types its own
-        signature names. The result is read back as an array.
+        signature names, or else its claims-file entry's
+        `runtime_types:` declares. The result is read back as an array.
     """
     from . import _linalg_eval
     module = (getattr(callee, "__module__", "") or "").split(".", 1)[0]
@@ -5402,9 +5403,14 @@ def _bound_for_arrays(callee):
         return _linalg_eval.law_callable(callee, plain_args=False)
     from types import SimpleNamespace
 
+    from .compendium import declared_runtime_types
     from .runtime_types import calling, detect_parameters
+    key = f"{getattr(callee, '__module__', '')}." \
+          f"{getattr(callee, '__qualname__', '')}"
+    declared = {str(k): str(v)
+                for k, v in declared_runtime_types(key).items()}
     try:
-        detected = detect_parameters(callee)
+        detected = detect_parameters(callee, declared or None)
     except Exception:
         detected = {}
     return _linalg_eval.law_callable(
