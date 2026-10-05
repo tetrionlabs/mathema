@@ -1502,6 +1502,10 @@ def _library_fields_problem(data: dict) -> "tuple[str, str] | None":
                 or not valid_version_range(versions):
             return ("versions", f"{versions!r} is not a version range "
                                 f"(use \"*\", \">=X\" or \">=X,<Y\")")
+        from .compendium import empty_version_range
+        if empty_version_range(versions):
+            return ("versions", f"{versions!r} admits no version: its upper "
+                                f"bound is at or below its lower bound")
     if "aliases" in data:
         aliases = data.get("aliases")
         if "compendium" not in data:

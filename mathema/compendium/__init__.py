@@ -89,6 +89,27 @@ def valid_version_range(spec: str) -> bool:
     return all(re.fullmatch(rf"(?:>=|<)\s*{version}", p) for p in parts)
 
 
+def empty_version_range(spec: str) -> bool:
+    """Intent:
+        Whether a range `valid_version_range` reads admits no version:
+        an upper bound at or below its lower bound (`">=6,<5"`), or an
+        upper bound of 0 (`"<0"`).
+    """
+    lower: tuple = (0,)
+    upper = None
+    for part in (p.strip() for p in spec.split(",")):
+        if part.startswith(">="):
+            lower = _version_tuple(part[2:].strip())
+        elif part.startswith("<"):
+            upper = _version_tuple(part[1:].strip())
+    if upper is None:
+        return False
+
+    def padded(v: tuple) -> tuple:
+        return tuple(list(v) + [0] * (3 - len(v)))
+    return padded(upper) <= padded(lower)
+
+
 def _installed_version(package: str,
                        aliases: "tuple | list" = ()) -> "str | None":
     """Intent:
