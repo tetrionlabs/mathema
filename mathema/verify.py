@@ -588,7 +588,8 @@ def _drop_retired_declared(key: str, current_claims: list,
 
 
 def _born_falsified_hint(key: str, probes: list,
-                         verified_entry: dict) -> list:
+                         verified_entry: dict,
+                         library_source: "str | None" = None) -> list:
     """Intent:
         The one-time teaching line for a claim that falsified on its
         FIRST adjudication: a failed authoring experiment, which the
@@ -596,7 +597,10 @@ def _born_falsified_hint(key: str, probes: list,
         silently shrinks. Names the exits and the cheap path that
         writes nothing. A claim the record already knew is
         re-falsifying, which is a regression, not an experiment, and
-        gets no line.
+        gets no line. A library key's row (`library_source` names the
+        claims file stating it) is wrong about the installed library:
+        its line names the row, recording it as a discovery, and
+        correcting it in that file.
     """
     from .records import classify_verdict
     known = {c.get("name") for c in (verified_entry.get("claims") or [])
@@ -630,6 +634,14 @@ def _born_falsified_hint(key: str, probes: list,
     if not fresh:
         return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
+    if library_source is not None:
+        accepts = "; ".join(f"mathema accept {key} {p.name} --as discovery"
+                            for p in sorted(fresh, key=lambda p: str(p.name)))
+        return lines + [
+            f"note {key}: {names} falsified on first adjudication: the "
+            f"installed library does not do what the row states. Record "
+            f"the falsification as a discovery ({accepts}), or correct "
+            f"the row in {library_source}."]
     return lines + [f"note {key}: {names} falsified on first adjudication. A "
             f"declared claim is kept until a human decides it (fix the "
             f"code, `mathema accept {key} <claim> --as discovery`, or "
@@ -1623,7 +1635,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             key, rec.probes, verified_entry or {}, retired_noted)
         out.lines.extend(late_notes)
         out.lines.extend(_born_falsified_hint(key, rec.probes,
-                                              verified_entry or {}))
+                                              verified_entry or {},
+                                              library.get(key)))
         _apply_declared_extras(rec, merged_entry)
         moved = _grammar_changes(rec.probes, verified_entry or {})
         if moved:
