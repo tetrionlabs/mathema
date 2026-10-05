@@ -121,7 +121,8 @@ note fees.discounted: never_raises_price falsified on first adjudication. A
   (i) fix the code
   (ii) to record it as a discovery, run: mathema accept fees.discounted <claim>
       --as discovery
-  (iii) supersede it
+  (iii) to replace it with a corrected claim, edit it, then run: mathema accept
+      fees.discounted <claim> --as superseded
   (iv) to try a spelling first (it writes nothing), run: mathema check
       fees.discounted --claim "..."
 FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
