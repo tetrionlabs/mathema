@@ -343,7 +343,8 @@ def declared_optional_return(fn) -> "str | None":
         return None
     args = typing.get_args(ann)
     if type(None) in args:
-        return repr(ann).replace("typing.", "").replace("NoneType", "None")
+        from ._annotation_text import annotation_text
+        return annotation_text(ann)
     return None
 
 

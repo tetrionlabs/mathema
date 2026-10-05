@@ -361,6 +361,10 @@ def _qualified(obj) -> "str | None":
     name = getattr(obj, "__qualname__", None) or getattr(obj, "__name__", "")
     if module in ("posix", "nt"):
         module = "os"
+    if module in ("_py_warnings", "_warnings"):
+        # the warnings module's implementation (`_py_warnings` from
+        # Python 3.14), read under its public name
+        module = "warnings"
     if module == "builtins":
         return name
     if module.startswith("numpy.random"):

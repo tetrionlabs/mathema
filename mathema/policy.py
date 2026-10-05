@@ -760,7 +760,8 @@ def none_default_misspecified(fn, params: "list | None" = None) -> "str | None":
         else:
             if ann in (typing.Any, object) or _admits_none(ann):
                 continue
-            text = getattr(ann, "__name__", None) or repr(ann).replace("typing.", "")
+            from ._annotation_text import annotation_text
+            text = annotation_text(ann)
         return (f"{p} is annotated {text} but defaults to None; annotate it "
                 f"Optional[{text}] or change the default")
     return None
@@ -2703,8 +2704,9 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     ann = inspect.signature(fn).return_annotation
                 except (TypeError, ValueError):
                     ann = inspect.Signature.empty
-                shown = ("no annotation" if ann is inspect.Signature.empty else
-                         ann if isinstance(ann, str) else getattr(ann, "__name__", repr(ann)))
+                from ._annotation_text import annotation_text
+                shown = ("no annotation" if ann is inspect.Signature.empty
+                         else annotation_text(ann))
                 sentence = (f"f returned None at {where} from present inputs, and its "
                             f"return type {shown} does not declare it")
                 parts.append(sentence)

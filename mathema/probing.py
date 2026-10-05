@@ -1932,11 +1932,8 @@ def _annotation_text(param) -> str:
     ann = getattr(param, "annotation", inspect.Parameter.empty)
     if ann is inspect.Parameter.empty:
         return ""
-    if isinstance(ann, str):
-        return ann
-    if isinstance(ann, type):
-        return ann.__name__
-    return repr(ann).replace("typing.", "")
+    from ._annotation_text import annotation_text
+    return annotation_text(ann)
 
 
 def _hides_characters(s: str) -> bool:
