@@ -244,9 +244,45 @@ def compendium_status(root: str = ".",
                     counts[state] += 1
             entry["functions"][key] = counts
         libraries.append(entry)
+    uncovered = _uncovered_calls(root, claims)
+    for entry in libraries:
+        entry["uncovered"] = [u for u in uncovered
+                              if u["key"].split(".")[0] == entry["library"]]
     libraries.sort(key=lambda e: (-e["calls"], e["library"]))
     return {"root": root, "standard_library": "left out",
             "libraries": libraries}
+
+
+def _uncovered_calls(root: str, claims: dict) -> list:
+    """Intent:
+        Each library call a project function makes with non-default
+        literal arguments that no row of the function covers (no row
+        pinned to them, and no row ranging over them at the values
+        passed), as `{"key", "pins", "caller", "line"}`.
+    """
+    import warnings
+
+    from . import row_pins
+    from ..analysis import StateDependenceWarning
+    from ..policy import parse_policy
+    from .update import _open_pins, _pins_text, call_sites
+    out: list = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", StateDependenceWarning)
+        sites = call_sites(root, claims)
+    for site in sites:
+        if not site.pins:
+            continue
+        rows = [r for r in (claims.get(site.key) or {}).get("entry", {})
+                .get("claims") or [] if isinstance(r, dict)
+                and not parse_policy(str(r.get("statement") or ""))]
+        covered = any(row_pins(r) == site.pins for r in rows) or any(
+            _open_pins(r, site.pins) == ({}, None) for r in rows
+            if not row_pins(r))
+        if not covered:
+            out.append({"key": site.key, "pins": _pins_text(site.pins),
+                        "caller": site.caller, "line": site.line})
+    return out
 
 
 def _plural(n: int, word: str) -> str:
@@ -288,6 +324,12 @@ def render_status(data: dict) -> str:
                          for name, why in c["unregistered"].items())
         if lib["no_claims"]:
             lines.append("  no claims: " + ", ".join(lib["no_claims"]))
+        if lib.get("uncovered"):
+            lines.append(
+                "  calls with arguments no row covers: "
+                + "; ".join(f"{u['key']} {u['pins']} ({u['caller']}, line "
+                            f"{u['line']})" for u in lib["uncovered"])
+                + "; to add rows for them, run: mathema compendium update")
         blocks.append("\n".join(lines))
     if not blocks:
         blocks.append("no third-party library is called by a function in "
