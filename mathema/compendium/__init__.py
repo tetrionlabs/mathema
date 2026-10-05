@@ -726,13 +726,18 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
 
 def _compendium_hint(tag: str, name: str, key: str,
                      verdict: "str | None" = None) -> str:
-    standing = (f"mathema verify recorded it {verdict} against the "
-                f"installed library" if verdict and verdict != "declared"
-                else "a compendium verdict is never trusted silently")
-    return (f"{tag} declares {name!r} for {key}; {standing}: accept it "
-            f"(mathema accept {key} {name} --as trusted) or let "
-            f"mathema verify adjudicate it against the installed "
-            f"library")
+    recorded = bool(verdict) and verdict != "declared"
+    if recorded:
+        # verify already tried: the way forward is a row it can decide
+        return (f"{tag} declares {name!r} for {key}; mathema verify "
+                f"recorded it {verdict} against the installed library. To "
+                f"take it on its word, run: mathema accept {key} {name} "
+                f"--as trusted; to decide it, restate the row, then run: "
+                f"mathema check {key} --claim \"...\"")
+    return (f"{tag} declares {name!r} for {key}; a compendium verdict is "
+            f"never trusted silently: accept it (mathema accept {key} "
+            f"{name} --as trusted) or let mathema verify adjudicate it "
+            f"against the installed library")
 
 
 def _region_texts(entry: dict, families) -> list:
