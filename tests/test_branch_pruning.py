@@ -103,13 +103,22 @@ def test_no_domain_gets_empirical_adjudication_after_derive_declines():
     assert "declare its values" in results[0].note
 
 
-def test_unbounded_claim_over_a_raising_guard_is_pedantically_falsified():
-    # with no domain, the claim quantifies over the whole line, which
-    # includes the region where clamp_floor raises. A raise is not a
-    # value, so the claim is false there: falsified, with the witness
-    # found by solving the guard region, and the remedy named.
+def test_an_unbound_claim_reads_the_working_domain_the_guard_leaves():
+    # with no domain, the claim is read over the working domain: the
+    # line minus where clamp_floor's own guard raises (x <= -1)
     results = check_conjectures(
         clamp_floor, [claim("f(x) >= -5", route="derive")])
+    assert results[0].verdict == "proven", (results[0].verdict,
+                                            results[0].sketch)
+    assert "the working domain is x in (-1, oo)" in results[0].note
+
+
+def test_a_stated_domain_over_a_raising_guard_is_pedantically_falsified():
+    # a domain the claim states is never narrowed: a raise inside it is
+    # not a value, so the claim is false there, with the witness found
+    # by solving the guard region and the remedy named
+    results = check_conjectures(
+        clamp_floor, [claim("for x in [-3, 3], f(x) >= -5", route="derive")])
     assert results[0].verdict == "falsified"
     assert "raises" in results[0].sketch
     assert "narrow the claim's domain" in results[0].sketch
