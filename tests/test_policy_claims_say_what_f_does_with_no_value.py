@@ -118,8 +118,9 @@ def test_a_contradicted_policy_carries_the_executed_witness_and_the_claim_to_wri
     row = _rows(clamp01, "missing(f, x) propagates")["missing(f, x) propagates"]
     assert row.verdict == "falsified"
     assert row.counterexample == "x = nan: f returned 1.0"
-    assert row.note == ("stated; f drops instead: nan in, 1.0 out; if not, change f; "
-                        "if that is intended, state: missing(f, x) drops")
+    assert row.note == ("stated; f drops instead: nan in, 1.0 out\n"
+                        "(i) if that is intended, state: missing(f, x) drops\n"
+                        "(ii) if not, change f")
 
 
 def test_a_named_exception_must_be_the_one_raised():
@@ -214,10 +215,12 @@ def test_a_silent_drop_contradicts_the_default():
         "mathema's default word for a float, not a claim of yours; f drops instead: nan "
         "in, 1.0 out")
     assert row.meta["mathema.policy"]["next"] == (
-        "if not, make f raise or give nan back; if 1.0 is the answer f should give for "
-        "a missing x, state: missing(f, x) drops; or to accept it as a discovery, run: "
-        "mathema accept test_policy_claims_say_what_f_does_with_no_value.clamp01 "
-        "missing[x] --as discovery --corrected \"missing(f, x) drops\"")
+        "(i) if 1.0 is the answer f should give for a missing x, state: missing(f, x) "
+        "drops\n"
+        "(ii) if not, make f raise or give nan back\n"
+        "(iii) to accept it as a discovery, run: mathema accept "
+        "test_policy_claims_say_what_f_does_with_no_value.clamp01 missing[x] --as "
+        "discovery --corrected \"missing(f, x) drops\"")
 
 
 def test_an_unannotated_parameter_raises_on_none_by_default():
@@ -239,9 +242,10 @@ def test_an_author_admitted_absence_that_raises_is_unaccounted_for():
     assert row.meta["mathema.policy"]["reason"] == (
         "f raised TypeError at x = None, and no claim says it may")
     assert row.meta["mathema.policy"]["next"] == (
-        "x is Optional[float], so f promised to take None. Otherwise handle None in f, "
-        "or annotate x as float; if the raise is intended, state: absent(f, x) "
-        "raises(TypeError); or to accept the raise as a discovery, run: mathema accept "
+        "x is Optional[float], so f promised to take None.\n"
+        "(i) if the raise is intended, state: absent(f, x) raises(TypeError)\n"
+        "(ii) if not, handle None in f, or annotate x as float\n"
+        "(iii) to accept the raise as a discovery, run: mathema accept "
         "test_policy_claims_say_what_f_does_with_no_value.opt_root absent[x] --as "
         "discovery --corrected \"absent(f, x) raises(TypeError)\"")
 
@@ -274,7 +278,7 @@ def test_a_contradicted_default_row_gates_verify():
     assert report.falsified == 1
     assert report.problems == [
         "1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) where "
-        "mathema's default says propagates; change f, or write: missing(f, x) drops"]
+        "mathema's default says propagates\n(i) change f\n(ii) write: missing(f, x) drops"]
 
 
 def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
@@ -282,11 +286,12 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
                                                        name="c0")])
     text = repr(rec)
     assert ("    falsified  policy       f(nan)   no missing policy stated; returns 1.0\n"
-            "                            possible fixes: (i) if dropping nan is intended, "
-            "run: mathema accept "
-            "test_policy_claims_say_what_f_does_with_no_value.clamp01 missing[x] --as "
-            "discovery --corrected \"missing(f, x) drops\"  (ii) exclude nan  "
-            "(iii) handle nan at entry") in text, text
+            "                            possible fixes:\n"
+            "                              (i) if dropping nan is intended, run: mathema "
+            "accept test_policy_claims_say_what_f_does_with_no_value.clamp01 missing[x] "
+            "--as discovery --corrected \"missing(f, x) drops\"\n"
+            "                              (ii) exclude nan\n"
+            "                              (iii) handle nan at entry") in text, text
 
 
 def test_the_absent_word_parses_without_f():
@@ -348,18 +353,19 @@ def test_write_writes_every_row_with_a_true_note(tmp_path, monkeypatch, capsys):
     today = datetime.date.today().isoformat()
     main(["claims", "pmod.clamp", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
-        "pmod.clamp: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
-        "The code contradicts missing[x] (f drops, nan in, 1.0 out): change the word "
-        "in the file or change f; or to accept it as a discovery, run: mathema accept "
-        "pmod.clamp missing[x] --as discovery --corrected \"missing(f, x) drops\"")
+        "pmod.clamp: wrote 1 policy row to claims/policies.claims.yaml: missing[x].\n"
+        "The code contradicts missing[x] (f drops, nan in, 1.0 out):\n"
+        "(i) change the word in the file or change f\n"
+        "(ii) to accept it as a discovery, run: mathema accept pmod.clamp missing[x] "
+        "--as discovery --corrected \"missing(f, x) drops\"")
     main(["claims", "pmod.lin", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
         "pmod.lin: wrote 1 policy row to claims/policies.claims.yaml: missing[x]")
     main(["claims", "pmod.root_opt", "--root", str(tmp_path), "--write"])
     assert capsys.readouterr().out.strip() == (
-        "pmod.root_opt: wrote 1 policy row to claims/policies.claims.yaml: missing[x]. "
+        "pmod.root_opt: wrote 1 policy row to claims/policies.claims.yaml: missing[x].\n"
         "Not written: absent[x], f raises TypeError at x = None and no claim says it "
-        "may; handle None in f, or state yourself: absent(f, x) raises(TypeError)")
+        "may:\n(i) handle None in f\n(ii) state yourself: absent(f, x) raises(TypeError)")
     written = yaml.safe_load((tmp_path / "claims" / "policies.claims.yaml").read_text())
     assert written["pmod.clamp"] == {"claims": [{
         "name": "missing[x]", "statement": "missing(f, x) propagates",

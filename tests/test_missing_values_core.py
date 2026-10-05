@@ -271,15 +271,16 @@ def test_l1_a_gate_is_not_a_premise():
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
         "assuming is_missing_safe(f) is not a premise: a value claim is never judged "
-        "where f returns a missing value, so the premise would change nothing. To keep "
-        "f from being called with a missing x, write in the domain: \\ {missing}; or "
-        "state what f does with one as its own claim, with the word propagates, drops "
-        "or raises, for example: missing(f, x) propagates")
+        "where f returns a missing value, so the premise would change nothing.\n"
+        "(i) to keep f from being called with a missing x, write in the domain: "
+        "\\ {missing}\n"
+        "(ii) to state what f does with one as its own claim (propagates, drops or "
+        "raises), write, for example: missing(f, x) propagates")
     probe, _ = run(sqrt_guarded, "assuming is_absent_safe(f), for x in [0, 1], f(x) >= 0")
     assert probe.verdict == "skipped:misspecified", (probe.verdict, probe.note)
     assert probe.note == (
         "assuming is_absent_safe(f) is not a premise: a value claim is never judged "
-        "where f returns None, so the premise would change nothing. To keep f from "
-        "being called with None, write in the domain: \\ {absent}; or state what f "
-        "does when x is None as its own claim, for example: absent(f, x) "
-        "raises(TypeError)")
+        "where f returns None, so the premise would change nothing.\n"
+        "(i) to keep f from being called with None, write in the domain: \\ {absent}\n"
+        "(ii) to state what f does when x is None as its own claim, write, for "
+        "example: absent(f, x) raises(TypeError)")

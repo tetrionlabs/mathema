@@ -123,6 +123,12 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "numeric_check", "form_hash"]
 
 
+def _pad(text: str) -> str:
+    """`text` with each line after its first indented to sit under a
+    record line's detail column."""
+    return text.replace("\n", "\n           ")
+
+
 @dataclass
 class Record:
     """The result of checking a function's claims: the facts read off it,
@@ -189,14 +195,14 @@ class Record:
                 elif p.verdict.startswith(("unknown", "skipped")):
                     line = f"  {mark} {p.name}: {p.statement}"
                     if pol.get("reason") or p.note:
-                        line += f"\n           {pol.get('reason') or p.note}"
+                        line += "\n           " + _pad(str(pol.get('reason') or p.note))
                 else:
                     line = f"  {mark} {p.name}: {p.statement}"
                     if pol.get("reason"):
                         line += f"   [{pol['reason']}]"
                 for extra in (pol.get("said"), pol.get("next")):
                     if extra and p.verdict not in ("holds", "proven"):
-                        line += f"\n           {extra}"
+                        line += "\n           " + _pad(str(extra))
                 lines.append(line)
                 continue
             gate = (p.meta or {}).get("mathema.gate")
@@ -204,11 +210,11 @@ class Record:
                 # a gate names what each parameter's members do and whose
                 # word it is; a falsified one its witness and next step
                 line = f"  {mark} {p.name}: {p.statement}"
-                line += f"\n           {p.sketch}"
+                line += "\n           " + _pad(str(p.sketch))
                 if p.counterexample:
                     line += f"\n           counterexample {p.counterexample}"
                 if gate.get("next") and p.verdict not in ("holds", "proven"):
-                    line += f"\n           {gate['next']}"
+                    line += "\n           " + _pad(str(gate['next']))
                 lines.append(line)
                 continue
             if p.verdict == "proven":
@@ -236,10 +242,10 @@ class Record:
                     or missing.get("said") or missing.get("returned")):
                 # what happened at a missing input, or why the row is
                 # open, said once under the row
-                line += f"\n           {p.note}"
+                line += "\n           " + _pad(str(p.note))
             elif p.verdict == "proven" and (missing.get("said") or missing.get("returned")) \
                     and p.note:
-                line += f"\n           {p.note}"
+                line += "\n           " + _pad(str(p.note))
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
             for said in (p.meta or {}).get("mathema.let_warning") or ():

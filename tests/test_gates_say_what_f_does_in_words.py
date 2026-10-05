@@ -118,9 +118,10 @@ def test_a_falsified_gate_prints_its_reason_and_next_step():
         "           xs (list): null raises TypeError, and no claim says it may; nan "
         "propagates, confirmed on the 43 draws of c0[float]; no claim states it yet")
     assert under[2] == "           counterexample xs = [null]: f raised TypeError"
-    assert under[3].startswith(
-        "           if not, make f skip or fill the null slot; if the raise is "
-        "intended, state: missing(f, xs, null) raises(TypeError)")
+    assert under[3:5] == [
+        "           (i) if the raise is intended, state: missing(f, xs, null) "
+        "raises(TypeError)",
+        "           (ii) if not, make f skip or fill the null slot"], under[3:5]
 
 
 def test_a_gate_alone_still_says_what_to_do():
@@ -128,7 +129,8 @@ def test_a_gate_alone_still_says_what_to_do():
     under = _lines_under(rec, "c0")
     assert under[1] == ("           x (float): None raises TypeError, and no claim says "
                         "it may")
-    assert "state: absent(f, x) raises(TypeError)" in under[3]
+    assert under[4] == ("           (i) if the raise is intended, state: absent(f, x) "
+                        "raises(TypeError)"), under
 
 
 def test_a_library_named_once_and_the_odd_member_said_once():
@@ -290,11 +292,12 @@ def test_the_check_line_names_the_row_to_settle(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     from mathema.cli import main
     assert main(["check", "cmod.py:clamp01"]) == 1
-    line = capsys.readouterr().out.strip().splitlines()[0]
-    assert line.endswith(
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0].endswith(
         "  <- 1 policy row to settle: missing[x], f drops a missing x (nan in, 1.0 out) "
-        "where mathema's default says propagates; change f, or write: missing(f, x) "
-        "drops; to list them, run: mathema claims cmod.clamp01")
+        "where mathema's default says propagates"), lines[0]
+    assert lines[1:4] == ["       (i) change f", "       (ii) write: missing(f, x) drops",
+                          "       to list them, run: mathema claims cmod.clamp01"], lines
 
 
 def test_a_compact_row_carries_the_reason_and_the_next_step():
@@ -303,8 +306,7 @@ def test_a_compact_row_carries_the_reason_and_the_next_step():
     row = claim_row(_row(rec, "missing[x]"))
     assert row["reason"].startswith("mathema's default word for a float, not a claim of "
                                     "yours")
-    assert row["next"].startswith("if not, make f raise or give nan back; if 1.0 is "
-                                  "the answer f should give")
+    assert row["next"].startswith("(i) if 1.0 is the answer f should give")
     assert row["source"] == "default"
 
 

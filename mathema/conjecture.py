@@ -4028,17 +4028,23 @@ def _gate_premise_refusal(cj) -> "str | None":
             continue
         param = next((p for p in (cj.domain or {}) if p.isidentifier()), "x")
         if gate.group(1) == "is_missing_safe":
+            from ._missing_words import options
             return (f"assuming {part.strip()} is not a premise: a value claim is never "
                     f"judged where f returns a missing value, so the premise would "
-                    f"change nothing. To keep f from being called with a missing "
-                    f"{param}, write in the domain: \\ {{missing}}; or state what f does "
-                    f"with one as its own claim, with the word propagates, drops or "
-                    f"raises, for example: missing(f, {param}) propagates")
+                    f"change nothing.\n" + options([
+                        f"to keep f from being called with a missing {param}, write "
+                        f"in the domain: \\ {{missing}}",
+                        f"to state what f does with one as its own claim (propagates, "
+                        f"drops or raises), write, for example: missing(f, {param}) "
+                        f"propagates"]))
+        from ._missing_words import options
         return (f"assuming {part.strip()} is not a premise: a value claim is never "
-                f"judged where f returns None, so the premise would change nothing. "
-                f"To keep f from being called with None, write in the domain: "
-                f"\\ {{absent}}; or state what f does when {param} is None as its own "
-                f"claim, for example: absent(f, {param}) raises(TypeError)")
+                f"judged where f returns None, so the premise would change nothing."
+                "\n" + options([
+                    "to keep f from being called with None, write in the domain: "
+                    "\\ {absent}",
+                    f"to state what f does when {param} is None as its own claim, "
+                    f"write, for example: absent(f, {param}) raises(TypeError)"]))
     return None
 
 

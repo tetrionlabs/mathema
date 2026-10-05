@@ -73,7 +73,7 @@ def test_the_remedy_names_the_discovery_route(project):
     rec = mathema.check(pv.clamp01)
     (row,) = [p for p in rec.probes if p.name == "missing[x]"]
     assert row.meta["mathema.policy"]["next"].endswith(
-        'or to accept it as a discovery, run: mathema accept pv.clamp01 missing[x] --as '
+        '(iii) to accept it as a discovery, run: mathema accept pv.clamp01 missing[x] --as '
         'discovery --corrected "missing(f, x) drops"')
 
 
