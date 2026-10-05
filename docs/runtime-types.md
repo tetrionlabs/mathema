@@ -331,8 +331,8 @@ admits a missing day (`[-0.1, 0.1]^n` lets a float entry be `nan` or
 `NA`), nothing in it says what `sharpe` should do with one, so mathema
 assumed the missing value would reach the result, and it does not.
 pandas' `mean` and `std` skip it, so `sharpe` drops the missing day and
-returns a number. Writing that behaviour down (`missing[returns]`, the
-first fix offered) or excluding missing values from the claim
+returns a number. Stating that behaviour (`missing(f, returns) drops`)
+or excluding missing values from the claim
 (`[-0.1, 0.1]^n \ {missing}`) settles it. A call no row covers is named
 in the derive note (`pandas.Series.ewm has no definition row`), and such
 a claim is adjudicated by sampling.
