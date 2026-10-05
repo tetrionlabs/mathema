@@ -37,6 +37,10 @@ def to_exact(value):
     if isinstance(value, bool):
         return value
     if isinstance(value, float):
+        # a signed zero has no exact counterpart and stays the float
+        # it is, so the function still receives -0.0
+        if value == 0.0 and str(value).startswith("-"):
+            return value
         return Fraction(value) if value == value and abs(value) != float("inf") else value
     if np is not None and isinstance(value, np.ndarray) and value.dtype.kind == "f":
         out = np.empty(value.shape, dtype=object)

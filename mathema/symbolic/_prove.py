@@ -1644,18 +1644,14 @@ def _certified_guard(cond, witness: dict, ext_params: dict,
         return None
 
 
-def _witness_corroborated(callable_target, arg_exprs: list,
-                          witness: dict, exc: "str | None" = None) -> bool:
+def _call_at_witness(callable_target, arg_exprs: list,
+                     witness: dict) -> "tuple | None":
     """Intent:
-        True only when the real call, executed at the candidate
-        witness point, actually raises, the executed-witness bar a
-        guard disproof must clear; for a `NO_VALUE` guard, a call that
-        returns a nan or an infinity corroborates too. Evaluates each
-        substituted argument expression at the witness numerically;
-        any evaluation failure, or a call that returns a (finite)
-        value, refuses corroboration.
+        The real call executed at the candidate witness point:
+        `("raised", exception)` or `("returned", value)`, or None when
+        an argument has no real numeric value there. Each substituted
+        argument expression is evaluated numerically.
     """
-    from ._partiality import NO_VALUE
     try:
         annotations = [prm.annotation for prm in
                        callable_signature(callable_target).parameters.values()]
@@ -1673,9 +1669,9 @@ def _witness_corroborated(callable_target, arg_exprs: list,
         except TimeoutError:
             raise
         except Exception:
-            return False
+            return None
         if abs(v.imag) > 1e-12:
-            return False
+            return None
         # a float-annotated parameter always gets a float; otherwise an
         # integral value is passed as int, since a float where the code
         # expects an int (a range() bound) would raise a TypeError that
@@ -1689,12 +1685,54 @@ def _witness_corroborated(callable_target, arg_exprs: list,
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            out = callable_target(*vals)
+            return ("returned", callable_target(*vals))
     except TimeoutError:
         raise
-    except Exception:
+    except Exception as e:
+        return ("raised", e)
+
+
+def _witness_corroborated(callable_target, arg_exprs: list,
+                          witness: dict, exc: "str | None" = None) -> bool:
+    """Intent:
+        True only when the real call, executed at the candidate
+        witness point, actually raises, the executed-witness bar a
+        guard disproof must clear; for a `NO_VALUE` guard, a call that
+        returns a nan, an infinity or a complex value corroborates too.
+        Any evaluation failure, or a call that returns a (finite) value,
+        refuses corroboration.
+    """
+    from ._partiality import NO_VALUE
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return False
+    if outcome[0] == "raised":
         return True
-    return exc == NO_VALUE and _returns_no_value(out)
+    return exc == NO_VALUE and _returns_no_value(outcome[1])
+
+
+def _returned_words(callable_target, arg_exprs: list, witness: dict) -> str:
+    """What the real call did at the witness, for a counterexample: the
+    complex value, nan or infinity it returned, or the exception it
+    raised; empty when it returned an ordinary value."""
+    outcome = _call_at_witness(callable_target, arg_exprs, witness)
+    if outcome is None:
+        return ""
+    kind, value = outcome
+    if kind == "raised":
+        return f"raised {type(value).__name__}"
+    if isinstance(value, complex) or getattr(value, "dtype", None) is not None \
+            and getattr(value.dtype, "kind", "") == "c":
+        return f"returned the complex value {value!r}"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if f != f:
+        return "returned nan"
+    if f in (float("inf"), float("-inf")):
+        return f"returned {f!r}"
+    return ""
 
 
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
@@ -1819,6 +1857,8 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             from ._partiality import NO_VALUE
             fails = ("has no value" if exc == NO_VALUE
                      else f"raises {exc or 'an exception'}")
+            shown = (_returned_words(target, arg_exprs, witness)
+                     if exc == NO_VALUE and target is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "
@@ -1828,7 +1868,8 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                        "claim's domain to where every call returns, or "
                        "state the raising region as its own raises(...) "
                        "claim",
-                counterexample=where,
+                counterexample=(f"{where}: {call_text} {shown}" if shown
+                                else where),
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
@@ -1877,6 +1918,79 @@ _CLAIM_FUNCTION_REGIONS: dict = {
     "loggamma": (_nonpositive_integer_region, False),
     "factorial": (lambda u: _nonpositive_integer_region(u + 1), False),
 }
+
+
+#: the lifted functions with no real value somewhere, by sympy class
+#: name: the region of their argument where they have none
+_REAL_ONLY_REGIONS: dict = {
+    "log": lambda u: sympy.Le(u, 0),
+    "asin": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acos": lambda u: sympy.Gt(sympy.Abs(u), 1),
+    "acosh": lambda u: sympy.Lt(u, 1),
+    "atanh": lambda u: sympy.Ge(sympy.Abs(u), 1),
+}
+
+
+def _real_only_guards(expr, domain: dict) -> list:
+    """Intent:
+        The no-value guards `[(region, NO_VALUE)]` of a lifted body over
+        the reals, read from the lifted expression itself: a power with
+        a non-integer exponent has none where its base is negative, and
+        a logarithm, arcsine, arccosine, inverse hyperbolic cosine or
+        tangent none outside their real domains. The lift reads every
+        such call as the function over the reals whether or not a
+        compendium row states its definedness, so the mathematics never
+        takes a complex value for one. Empty when a parameter ranges
+        over C.
+    """
+    from ..probing import _bound_is_complex
+    from ._partiality import NO_VALUE
+    if any(_bound_is_complex(b) for b in domain.values()):
+        return []
+    exprs = expr if isinstance(expr, tuple) else (expr,)
+    out: list = []
+
+    def add(region) -> None:
+        if region not in (sympy.true, sympy.false) \
+                and region not in [r for r, _ in out]:
+            out.append((region, NO_VALUE))
+
+    def walk(node, context) -> None:
+        # `context` is the branch condition under which `node` is
+        # evaluated: a Piecewise evaluates a piece only where its own
+        # condition holds and no earlier one does
+        if isinstance(node, sympy.Piecewise):
+            earlier = sympy.false
+            for piece, cond in node.args:
+                here = sympy.And(context, cond, sympy.Not(earlier))
+                if here is not sympy.false:
+                    walk(piece, here)
+                    if not isinstance(cond, sympy.logic.boolalg.BooleanAtom):
+                        walk(cond, sympy.And(context, sympy.Not(earlier)))
+                earlier = sympy.Or(earlier, cond)
+            return
+        region = None
+        if isinstance(node, sympy.Pow):
+            k = node.exp
+            if k.is_number and k.is_real and k.is_integer is False \
+                    and node.base.free_symbols:
+                region = sympy.Lt(node.base, 0)
+        elif isinstance(node, sympy.Function):
+            build = _REAL_ONLY_REGIONS.get(type(node).__name__.lower())
+            if build is not None and len(node.args) == 1 \
+                    and node.args[0].free_symbols:
+                region = build(node.args[0])
+        if region is not None:
+            add(region if context is sympy.true
+                else sympy.And(context, region))
+        for arg in node.args:
+            if isinstance(arg, sympy.Basic):
+                walk(arg, context)
+
+    for e in exprs:
+        if isinstance(e, sympy.Basic):
+            walk(e, sympy.true)
+    return out
 
 
 def _integer_valued_over(expr, integer_names: set) -> bool:
@@ -3750,6 +3864,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         _walk_notes.setdefault("unread", f"{fn.__name__} {unread}")
     if implicit:
         piecewise_guards = list(piecewise_guards) + implicit
+    if lifted is not None:
+        real_only = _real_only_guards(lifted.expr, domain or {})
+        if real_only:
+            piecewise_guards = list(piecewise_guards) + real_only
 
     # Domain assumptions (e.g. sigma declared nonnegative) must be baked
     # into the symbols *before* the law is parsed, not substituted into
