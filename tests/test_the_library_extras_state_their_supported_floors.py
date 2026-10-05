@@ -13,8 +13,9 @@ except ModuleNotFoundError:      # Python 3.10 predates tomllib
 
 import yaml
 
+from mathema.compendium import SUPPORTED_FLOORS as _FLOORS
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_FLOORS = {"numpy": "2.0", "pandas": "2.2", "polars": "1.0"}
 
 
 def _extras() -> dict:
@@ -32,6 +33,7 @@ def _lower(spec: str) -> tuple:
 
 
 def test_each_library_extra_states_its_floor():
+    assert set(_FLOORS) == {"numpy", "pandas", "polars"}
     extras = _extras()
     for library, floor in _FLOORS.items():
         assert extras[library] == [f"{library}>={floor}"], extras[library]

@@ -2,7 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """`mathema compendium update` pins a call's arguments into the rows
 that leave them at their defaults. A row whose domain already ranges
-over an argument (`numpy.clip`'s definition binds `a_min` and `a_max`)
+over an argument (each `numpy.clip` row binds `a_min` and `a_max`)
 speaks for the call when the passed value lies in that range, so it is
 not copied; a missing-value policy row takes no pinned arguments, and
 the update says so in one line rather than reporting it as a claim that
@@ -65,10 +65,13 @@ def test_a_row_ranging_over_the_argument_is_not_pinned(project):
     assert "declared with both" not in r.stdout, r.stdout
     data = yaml.safe_load((project / "claims" / "numpy.claims.yaml")
                           .read_text())
-    names = [c["name"] for c in data["numpy.clip"]["claims"]]
-    assert "definition" in names
-    assert not any(n.startswith("definition@") for n in names), names
-    assert "clip_lower@a_max=1.0,a_min=0.0" in names
+    # every numpy.clip row ranges over a_min and a_max (over R), so the
+    # call np.clip(x, 0.0, 1.0) is covered and gains no pinned copy
+    assert "numpy.clip" not in data, data.get("numpy.clip")
+    assert "numpy.clip" not in r.stdout, r.stdout
+    # a row that leaves the argument open is pinned for the call
+    names = [c["name"] for c in data["numpy.mean"]["claims"]]
+    assert "is_defined@axis=0" in names, names
 
 
 def test_a_policy_row_is_named_as_not_taking_pins(project):
