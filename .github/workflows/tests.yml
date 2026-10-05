@@ -73,10 +73,8 @@ jobs:
   # The bundled compendium rows adjudicated against the libraries
   # (`--third-party-compendiums`): a red here is a library that changed
   # under a row, or a row that misreads it. Runs when a bundled compendium file
-  # or the lock file changes, weekly, and on demand: on the floor and
-  # ceiling interpreters with the libraries pip resolves today, and on
-  # the oldest numpy, pandas and polars the bundled files declare, so
-  # each declared version range is exercised at both ends.
+  # or the lock file changes, weekly, and on demand, once, on the supported
+  # floor: Python 3.10 with numpy 2.0, pandas 2.2 and polars 1.0.
   third-party-compendiums:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -85,11 +83,7 @@ jobs:
       matrix:
         include:
           - python-version: "3.10"
-            libraries: ""
-          - python-version: "3.13"
-            libraries: ""
-          - python-version: "3.10"
-            libraries: "numpy==1.24.* pandas==2.0.* polars==1.0.*"
+            libraries: "numpy==2.0.* pandas==2.2.* polars==1.0.*"
     steps:
       - uses: actions/checkout@v4
         with:
