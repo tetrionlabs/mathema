@@ -32,8 +32,8 @@ def test_the_companion_condition_begins_with_the_let(monkeypatch):
     assert comp.meta["mathema.pseudo_infinity"]["source"] == "environment"
     (row,) = [c for c in rec.to_spec()["claims"] if c["name"] == "law[float]"]
     assert row["condition"].startswith("let |inf| be 1e+06, "), row
-    assert "law[float]: let |inf| be 1e+06, for x in R" in repr(rec), \
-        repr(rec)
+    assert "    holds      computation  let |inf| be 1e+06, for x in R, f(x) >= 0   " \
+        in repr(rec), repr(rec)
 
 
 @pytest.mark.needs_full_proof_budget
@@ -81,7 +81,7 @@ def test_the_function_level_value_shows_the_same_way():
 def test_a_claim_level_binding_is_not_repeated():
     rec, rows = _rows("let |inf| be 1e6, for x in R, f(x) >= 0")
     comp = rows["law[float]"]
-    shown = [ln for ln in repr(rec).splitlines() if "law[float]" in ln]
+    shown = [ln for ln in repr(rec).splitlines() if "computation" in ln]
     assert shown and shown[0].count("|inf|") == 1, shown
     assert (comp.condition or "").count("|inf|") <= 1
     assert "(claim)" not in (comp.note or "")
