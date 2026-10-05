@@ -256,6 +256,26 @@ def _pinned_row(row: dict, pins: dict, site: CallSite) -> dict:
                      f"{site.line}), which passes {tag}")}
 
 
+def _definition_template(row: dict, pins: dict, site: CallSite) -> str:
+    """Intent:
+        A definition row for the call's arguments to fill in: the row
+        pinned as `_pinned_row` writes it, with what f computes left as
+        `...`, as one line of YAML (`{name: definition@ddof=2,
+        statement: "for a in R^n, f(a, ddof=2) ~= ..."}`).
+    """
+    from ..conjecture import claim
+    pinned = _pinned_row(row, pins, site)
+    statement = pinned["statement"]
+    try:
+        cj = claim(str(row.get("statement") or ""), name=row.get("name"))
+        rhs = str(cj.rhs or "")
+    except Exception:
+        rhs = ""
+    if rhs and statement.endswith(rhs):
+        statement = statement[:-len(rhs)] + "..."
+    return f'{{name: {pinned["name"]}, statement: "{statement}"}}'
+
+
 def _adjudicated(key: str, current: list, added: list, root: str,
                  library_claims: dict) -> dict:
     """Intent:
@@ -474,6 +494,18 @@ def _plan_update(root: str) -> dict:
                              f"in {site.caller} (line {site.line}) passing "
                              f"{_pins_text(site.pins)} gains no pinned "
                              f"copy of it")
+                continue
+            if open_pins and claim_base_name(str(r.get("name"))) == \
+                    "definition":
+                # a definition row states the value at the defaults; a
+                # copy with other arguments would state the wrong one
+                path_rel = os.path.relpath(target(site.key.split(".")[0])[0],
+                                           root)
+                lines.append(
+                    f"{site.key}: no definition row covers "
+                    f"{_pins_text(open_pins)} (the call in {site.caller}, "
+                    f"line {site.line}); to state one in {path_rel}, "
+                    f"write: {_definition_template(r, open_pins, site)}")
                 continue
             if open_pins:
                 added.append(_pinned_row(r, open_pins, site))
