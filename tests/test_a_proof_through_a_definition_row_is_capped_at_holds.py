@@ -115,7 +115,9 @@ def test_the_same_row_accepted_as_trusted_is_an_axiom(project):
     (verified / "pandas.Series.multiply.yaml").write_text(yaml.safe_dump({
         "pandas.Series.multiply": {"claims": [
             {"name": "definition", "statement": statement,
-             "verdict": "holds", "accepted": {"as": "trusted"}}]}}))
+             "verdict": "holds", "accepted": {
+                 "as": "trusted", "statement": statement,
+                 "versions": ">=2"}}]}}))
     p = _check(project, doubled_mean)
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
     row = _used(p)["pandas.Series.multiply"]

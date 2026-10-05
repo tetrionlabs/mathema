@@ -162,7 +162,9 @@ def test_a_trusted_acceptance_lets_a_project_row_feed_derive(project):
     (verified / "pandas.Series.sem.yaml").write_text(yaml.safe_dump({
         "pandas.Series.sem": {"claims": [
             {"name": "definition", "statement": statement,
-             "verdict": "holds", "accepted": {"as": "trusted"}}]}}))
+             "verdict": "holds", "accepted": {
+                 "as": "trusted", "statement": statement,
+                 "versions": ">=2"}}]}}))
     p = _check(project, sem_ratio)
     assert p.verdict == "proven", (p.verdict, p.note)
     used = {u["key"]: u for u in p.meta["mathema.definitions"]}

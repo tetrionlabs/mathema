@@ -221,10 +221,12 @@ def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
                  if isinstance(c, dict) and c.get("name") == name), None)
 
 
-def _local_status(local: "dict | None", statement: str) -> "str | None":
+def _local_status(local: "dict | None", statement: str,
+                  versions: "str | None" = None) -> "str | None":
     """The local verdict of a recorded row stating `statement`
-    (`trusted` for an accepted testimony), or None when nothing was
-    recorded for this statement."""
+    (`trusted` for an accepted testimony still tied to the row as
+    written, `statement` and its `versions` range), or None when
+    nothing was recorded for this statement."""
     if local is None:
         return None
     if _canonical(str(local.get("statement") or "")) != _canonical(statement):
@@ -233,7 +235,9 @@ def _local_status(local: "dict | None", statement: str) -> "str | None":
     accepted = local.get("accepted") or {}
     if accepted.get("as") == "trusted" and not accepted.get("stale") \
             and verdict in ("holds", "proven"):
-        return "trusted"
+        from .acceptance import trust_mismatch
+        if trust_mismatch(accepted, statement, versions) is None:
+            return "trusted"
     return verdict or None
 
 
@@ -243,7 +247,8 @@ def _installed_root() -> "str | None":
 
 
 def row_standing(root: "str | None", key: str, row: dict,
-                 bundled: bool) -> "tuple[str | None, str]":
+                 bundled: bool,
+                 versions: "str | None" = None) -> "tuple[str | None, str]":
     """Intent:
         `(status, reason)` for one definition row: `status` is the
         local status a usable row carries (`bundled`, `holds`,
@@ -261,7 +266,8 @@ def row_standing(root: "str | None", key: str, row: dict,
                       f"the installed library")
     statement = str(row.get("statement") or "")
     local = _local_status(_local_row(root, key, str(row.get("name"))),
-                          statement)
+                          statement,
+                          str(row.get("versions") or versions or "*"))
     if local == "falsified":
         return None, "mathema verify recorded it falsified"
     if bundled:
@@ -462,7 +468,8 @@ class RowBook:
                     or not is_definition_name(row.get("name")):
                 continue
             status, reason = row_standing(self.root, key, row,
-                                          info["bundled"])
+                                          info["bundled"],
+                                          info.get("versions"))
             if status is None:
                 why = why or f"{row.get('name')}: {reason}"
                 continue
