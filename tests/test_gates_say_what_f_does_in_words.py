@@ -325,3 +325,13 @@ def test_a_chained_claim_says_a_gate_is_no_premise_once():
         "assuming is_missing_safe(f), for xs in [0, 1]^n, 0 <= f(xs) <= 1")])
     assert row.verdict == "skipped:misspecified"
     assert "link 1" not in row.note and row.note.count("is not a premise") == 1
+
+
+def test_a_problem_after_a_command_starts_its_own_line():
+    from mathema.verify import problems_text
+    text = problems_text(["1 policy row to settle: missing[x]\n(i) change f\n"
+                          "to list them, run: mathema claims k", "c unknown: no proof"])
+    lines = text.splitlines()
+    # a command is the last thing on its line, so the next problem starts a line
+    assert lines[2] == "       to list them, run: mathema claims k", lines
+    assert lines[3] == "       c unknown: no proof", lines

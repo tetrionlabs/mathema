@@ -293,7 +293,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                 f'claims {r["coverage"]} '
                 f'adjudicated ({summary_counts(r)})')
         if r["problems"]:
-            line += "  <- " + "; ".join(r["problems"]).replace("\n", "\n       ")
+            from .verify import problems_text
+            line += "  <- " + problems_text(r["problems"])
         lines.append(line)
         lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
         lines.extend(f"     warning: {w}" for w in r.get("warnings", ()))

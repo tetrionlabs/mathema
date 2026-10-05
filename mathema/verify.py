@@ -1248,6 +1248,20 @@ def _library_population(root: str, verified: dict, declared: dict,
     return {k: library_claims[k]["source"] for k in sorted(wanted)}
 
 
+def problems_text(problems: list) -> str:
+    """Intent:
+        A record's problems as the sweep line prints them after `<-`:
+        joined by `; `, unless one runs over several lines (its options,
+        a command), when each problem and each of its lines starts its
+        own line, indented, so a command is always the last thing on its
+        line.
+    """
+    if not any("\n" in p for p in problems):
+        return "; ".join(problems)
+    first, *rest = "\n".join(problems).splitlines()
+    return "\n".join([first, *(f"       {line}" for line in rest)])
+
+
 def _verify_sweep(root: str = ".", *, all: bool = False,
                   strict: bool = True,
                   trials_scale: float = 1.0,
@@ -1956,8 +1970,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += "; " + "; ".join(standing)
             if report.problems:
                 # a problem's options sit on their own lines, under it
-                line += "  <- " + "; ".join(report.problems + hints).replace(
-                    "\n", "\n       ")
+                line += "  <- " + problems_text(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
         # a definition row's corner finding: the library's computation
