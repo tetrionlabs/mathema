@@ -3470,6 +3470,25 @@ def _pins_in_calls(cj) -> dict:
             if len(values) == calls and all(v == values[0] for v in values)}
 
 
+def _with_pins(fn, pins: dict):
+    """`fn` called with each pinned parameter a call leaves out passed at
+    its pin (`let alpha be 2`); `fn` itself when nothing is pinned."""
+    if not pins:
+        return fn
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return fn
+
+    def call(*a, **k):
+        try:
+            given = sig.bind_partial(*a, **k).arguments
+        except TypeError:
+            given = {}
+        return fn(*a, **{**{p: v for p, v in pins.items() if p not in given}, **k})
+    return call
+
+
 def pins_into_calls(cj, fn):
     """Intent:
         `cj` written with its pins in the call: each `let p be v` that
@@ -10081,7 +10100,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # results as the values it returned): a float claim side that
         # rounds the way the code does would agree with it and hide the
         # code's error
-        callees = {"f": fn_call, **bound_funcs}
+        # f is read exactly as the claim calls it, its pins passed
+        callees = {"f": _with_pins(fn_call, call_pins), **bound_funcs}
         exact_ok = _exactly_decided(cj, code_l, code_r, env, callees,
                                     slack, None)
         call_raised[0] = call_nan[0] = call_inf[0] = None
