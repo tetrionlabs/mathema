@@ -61,3 +61,32 @@ def test_numpys_own_clip_holds_its_definition_where_inputs_may_be_missing():
         "- abs((a + a_min + abs(a - a_min)) / 2 - a_max)) / 2",
         name="definition")]).probes if p.name == "definition"]
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def floor_tenths_by_product(x: float) -> float:
+    import math
+    return math.floor(10 * x) / 10
+
+
+def test_a_float_claim_side_that_rounds_like_the_code_does_not_hide_it():
+    # at the float nearest 0.3 (just below 3/10) the code computes
+    # floor(3.0) / 10 = 0.3, while the claim read exactly gives 2/10:
+    # the float claim side makes the same rounding and would agree
+    import mathema
+    rows = {p.name: p for p in mathema.check(
+        floor_tenths_by_product,
+        claims=["for x in [0, 1], f(x) == floor(10*x)/10"]).probes}
+    (float_row,) = [p for n, p in rows.items() if n.endswith("[float]")]
+    assert float_row.verdict == "falsified", float_row.note
+    from fractions import Fraction
+    import math
+    x = float(float_row.counterexample.split(":")[0].split("=")[1])
+    assert Fraction(floor_tenths_by_product(x)) != \
+        Fraction(math.floor(10 * Fraction(x)), 10)
+
+
+def test_the_probe_line_reads_the_claim_exactly_too():
+    (p,) = check_conjectures(floor_tenths_by_product, [claim(
+        "for x in {0.3, 0.5}, f(x) == floor(10*x)/10", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "read exactly" in p.counterexample

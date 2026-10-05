@@ -5085,6 +5085,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     """
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if not _inside_as_written(cj, env):
+        return None
     try:
         exact = _with_timeout(
             lambda: exact_sides(code_l, code_r, env,
@@ -5099,6 +5101,43 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         exact[0], exact[1], cj.relation,
         cj.tolerance if cj.tolerance is not None else 0.0,
         exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+
+def _inside_as_written(cj, env) -> bool:
+    """Intent:
+        Whether every coordinate of the executed point lies in the
+        claim's domain read as written (a float draw at the end of
+        `[-1e308, 1e308]` is the float nearest 1e308, which can lie past
+        the number written). A bound that is not a union of intervals or
+        a finite set of numbers is not checked.
+    """
+    from fractions import Fraction
+
+    from ._exact_witness import Undecided, in_bound
+    for name, bound in (cj.domain or {}).items():
+        value = env.get(name)
+        values = (list(value) if isinstance(value, (list, tuple))
+                  else value.ravel().tolist() if hasattr(value, "ravel")
+                  else [value])
+        for v in values:
+            if not isinstance(v, float) or v != v or v in (float("inf"),
+                                                           float("-inf")):
+                continue
+            q = Fraction(v)
+            pieces = getattr(bound, "pieces", None)
+            try:
+                if not in_bound(q, bound):
+                    return False
+            except Undecided:
+                sets = [p for p in (pieces or ()) if isinstance(p, frozenset)]
+                members = [m for p in sets for m in p
+                           if isinstance(m, (int, float))
+                           and not isinstance(m, bool)]
+                if members and len(sets) == len(pieces or ()) and q not in {
+                        Fraction(repr(m)) if isinstance(m, float)
+                        else Fraction(m) for m in members}:
+                    return False
+    return True
 
 
 def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
@@ -9600,19 +9639,37 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # a scalar broadcasting across the matrix.
         if as_arrays:
             lv, rv = _linalg_eval.comparable(lv, rv)
-        ok = relation_holds_elementwise(
-            lv, rv, cj.relation, slack,
-            exact_inequality=cj.tolerance is None,
-            rel_tol=_declared_rel_tol(cj))
-        if ok is False:
-            ok = _exactly_decided(cj, code_l, code_r, env,
-                                  {"f": fn_call, **bound_funcs}, slack, ok)
+        # the claim read exactly decides where it can be (the code's
+        # results as the values it returned): a float claim side that
+        # rounds the way the code does would agree with it and hide the
+        # code's error
+        callees = {"f": fn_call, **bound_funcs}
+        exact_ok = _exactly_decided(cj, code_l, code_r, env, callees,
+                                    slack, None)
+        call_raised[0] = call_nan[0] = call_inf[0] = None
+        hidden_by_float = False
+        if exact_ok is not None:
+            ok = exact_ok
+            hidden_by_float = ok is False and relation_holds_elementwise(
+                lv, rv, cj.relation, slack,
+                exact_inequality=cj.tolerance is None,
+                rel_tol=_declared_rel_tol(cj)) is True
+            within = (ok is True and cj.tolerance is None
+                      and cj.relation in ("==", "~=")
+                      and _exactly_decided(cj, code_l, code_r, env, callees,
+                                           slack, None, rel_tol=0.0)
+                      is not True)
             call_raised[0] = call_nan[0] = call_inf[0] = None
-        within = (ok is True and cj.tolerance is None
-                  and cj.relation in ("==", "~=")
-                  and relation_holds_elementwise(
-                      lv, rv, cj.relation, slack, exact_inequality=True,
-                      rel_tol=0.0) is not True)
+        else:
+            ok = relation_holds_elementwise(
+                lv, rv, cj.relation, slack,
+                exact_inequality=cj.tolerance is None,
+                rel_tol=_declared_rel_tol(cj))
+            within = (ok is True and cj.tolerance is None
+                      and cj.relation in ("==", "~=")
+                      and relation_holds_elementwise(
+                          lv, rv, cj.relation, slack, exact_inequality=True,
+                          rel_tol=0.0) is not True)
         roundoff_gap = None
         if ok is False and as_arrays \
                 and cj.relation in ("==", "~=", "<=", ">="):
@@ -9687,6 +9744,9 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if exactly_false:
                 cx += (", within the float tolerance but false here in "
                        "exact arithmetic")
+            elif hidden_by_float:
+                cx += (", equal in float but not with the claim's own side "
+                       "read exactly")
             break
     rng = main_rng
     if computation_cx is not None:
@@ -9733,7 +9793,8 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                            f"evaluated at {undecided} draw"
                            f"{'s' if undecided != 1 else ''}, first at "
                            f"{undecided_at}").lstrip("; "),
-                     meta=dict(missing_meta))
+                     meta={**missing_meta,
+                           "mathema.claim_side_unknown": undecided_at})
     inconclusive_words = (
         f"{inconclusive} draw{'s' if inconclusive != 1 else ''} passed only "
         f"within the tolerance and could not be evaluated in exact "
