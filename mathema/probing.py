@@ -417,15 +417,28 @@ def _is_number(v) -> bool:
         and not isinstance(v, bool)
 
 
+def _beyond_float(v) -> bool:
+    """Whether `v` is an integer too large for a float."""
+    if not isinstance(v, int) or isinstance(v, bool):
+        return False
+    try:
+        float(v)
+    except OverflowError:
+        return True
+    return False
+
+
 def _exact_pair(*values):
-    """`values` with each finite float read as the exact rational it is
-    when one of them is an exact rational (a claim word's value beyond
-    float range), so they compare and subtract without overflowing;
-    unchanged otherwise. An infinity or nan stays the float it is."""
-    if not any(isinstance(v, Fraction) for v in values):
+    """`values` with each finite float and integer read as the exact
+    rational it is when one of them is an exact rational (a claim word's
+    value beyond float range) or an integer beyond float range, so they
+    compare and subtract without overflowing; unchanged otherwise. An
+    infinity or nan stays the float it is."""
+    if not any(isinstance(v, Fraction) or _beyond_float(v) for v in values):
         return values
-    return tuple(Fraction(v) if isinstance(v, (int, float))
-                 and not isinstance(v, bool) and math.isfinite(v) else v
+    return tuple(Fraction(v) if (isinstance(v, int)
+                                 and not isinstance(v, bool))
+                 or (isinstance(v, float) and math.isfinite(v)) else v
                  for v in values)
 
 
@@ -437,7 +450,8 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
         return False
     if holds_inf(u) or holds_inf(v):
         return u == v
-    if isinstance(u, Fraction) or isinstance(v, Fraction):
+    if isinstance(u, Fraction) or isinstance(v, Fraction) \
+            or _beyond_float(u) or _beyond_float(v):
         if isinstance(u, complex) or isinstance(v, complex):
             return False
         u, v = _exact_pair(u, v)
