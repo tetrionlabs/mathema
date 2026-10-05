@@ -23,6 +23,9 @@ numpy.mean:
     - name: missing_propagates
       statement: "missing(f, a) propagates"
       note: "A hole anywhere makes the mean nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan, with a RuntimeWarning."
 
 numpy.std:
   claims:
@@ -35,6 +38,9 @@ numpy.std:
     - name: definition@ddof=1
       statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
       note: "The sample standard deviation; one element with ddof=1 gives nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.var:
   claims:
@@ -47,6 +53,9 @@ numpy.var:
     - name: definition@ddof=1
       statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
       note: "The sample variance; one element with ddof=1 gives nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.average:
   claims:
@@ -59,3 +68,6 @@ numpy.average:
     - name: weighted
       statement: "for a in R^n, weights in R^n, assuming min(weights) > 0, f(a, None, weights) ~= sum(a * weights) / sum(weights)"
       note: "Stated for positive weights of the same length, passed third (axis None)."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."

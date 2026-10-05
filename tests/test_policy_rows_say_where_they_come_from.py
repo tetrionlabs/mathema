@@ -262,14 +262,16 @@ def test_a_premised_library_row_remedy_keeps_its_premise():
 
     def mean_pd(xs: pd.Series) -> float:
         return float(xs.mean())
+    # mean of an empty Series is nan, stated as its empty policy
+    empty = mathema.claim("f([]) in {missing}", name="empty")
     rec = mathema.check(mean_pd, claims=[mathema.claim(
-        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")])
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c"), empty])
     row = _policy(rec)["missing[xs, count == 0]"]
     nxt = row.meta["mathema.policy"]["next"]
     remedies = re.findall(r"`([^`]+)`", nxt)
     assert remedies and all(r.startswith("assuming count(xs) == 0, ") for r in remedies)
     again = mathema.check(mean_pd, claims=[mathema.claim(
-        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c")] + [
+        "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="c"), empty] + [
         mathema.claim(r) for r in remedies])
     stated = [p for p in again.probes if p.statement in remedies]
     assert stated and all(p.verdict == "holds" for p in stated), \

@@ -12,6 +12,9 @@ pandas.Series.median:
     - name: definition
       statement: "for a in R^n, f(a) ~= median(a)"
       note: "The mean of the two middle elements for an even length."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.quantile:
   claims:
@@ -22,9 +25,15 @@ pandas.Series.quantile:
       statement: "for a in R^n, f(a, q=0.25) ~= quantile(a, 0.25)"
     - name: definition@q=0.75
       statement: "for a in R^n, f(a, q=0.75) ~= quantile(a, 0.75)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 pandas.Series.sem:
   claims:
     - name: definition
       statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1) / sqrt(dim(a))"
       note: "The standard error of the mean: ddof defaults to 1; one element gives nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."

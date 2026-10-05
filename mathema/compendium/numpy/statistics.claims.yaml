@@ -39,6 +39,9 @@ numpy.median:
     - name: definition@axis=0
       statement: "for a in R^(m,n), f(a, axis=0) ~= median(a, axis=0)"
       note: "The median of each column of a matrix."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.percentile:
   claims:
@@ -99,6 +102,9 @@ numpy.nanmean:
     - name: all_missing_is_nan
       statement: "assuming count(a) == 0, missing(f, a) propagates"
       note: "An array with no value has mean nan."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanstd:
   claims:
@@ -106,6 +112,9 @@ numpy.nanstd:
       statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
     - name: definition@ddof=1
       statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= std(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanvar:
   claims:
@@ -113,6 +122,9 @@ numpy.nanvar:
       statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
       statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
 
 numpy.nanmax:
   claims:
@@ -155,3 +167,6 @@ numpy.ndarray.var:
       statement: "for a in R^n, f(a) ~= var(a, ddof=0)"
     - name: definition@ddof=1
       statement: "for a in R^n, assuming dim(a) >= 2, f(a, ddof=1) ~= var(a, ddof=1)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."

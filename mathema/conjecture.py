@@ -3591,7 +3591,7 @@ def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
 
 
 def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
-                            companions: bool):
+                            companions: bool, siblings: list = ()):
     """Intent:
         `(probe, lines)`: the claim's empty-input lines
         (`_empty_input.empty_input_lines`), and the claim itself,
@@ -3600,7 +3600,9 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
         lines.
         Without `companions` (a caller asking for the claim alone, as
         for the float companion) the claim is its mathematics over
-        non-empty inputs and no line is made.
+        non-empty inputs and no line is made. `siblings` are the claims
+        checked beside it, whose literal calls at the empty input
+        (`f([]) in {missing}`) state the empty policy.
     """
     if not companions or probe.verdict.startswith("skipped"):
         return probe, []
@@ -3608,8 +3610,9 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
     try:
         from ._empty_input import empty_input_lines
+        from ._empty_input import STATED
         lines = empty_input_lines(ctx.cj, fn, facts, ctx.cj_domain,
-                                  assumption)
+                                  assumption, [*siblings, *STATED.get()])
     except TimeoutError:
         raise
     except Exception:
@@ -3924,7 +3927,6 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     """
     from .probing import resolve_trials_downscale
     trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
-    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     from .types import matrix_param_names
     try:
         fn_mats = matrix_param_names(fn)
@@ -3939,7 +3941,6 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # the signature's matrices read the bars as determinants; those and
     # the matrix runtime types also render as matrices, their products
     # in written order
-    from . import policy as _policy
     # a policy claim is decided on the calls the other claims make, so
     # it is adjudicated after them
     built = [claim(c) if isinstance(c, str) else c for c in conjectures]
@@ -3955,6 +3956,29 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
     values = [c for c in built if getattr(c, "relation", None) != "policy"
               and c not in gates and c not in scalar_empty]
+    from ._empty_input import STATED
+    # the claims checked here state the empty policy their value claims
+    # read; a nested check (a chain's links) keeps the outer ones too
+    stated_token = STATED.set((*STATED.get(), *built))
+    try:
+        return _check_built(fn, built, values, stated, gates, scalar_empty,
+                            fn_mats, runtime_mats, domain, trials,
+                            trials_scale, facts, extensive, known_premises,
+                            float_companions, pseudo_infinity)
+    finally:
+        STATED.reset(stated_token)
+
+
+def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
+                 runtime_mats, domain, trials, trials_scale, facts,
+                 extensive, known_premises, float_companions,
+                 pseudo_infinity):
+    """Intent:
+        `check_conjectures`' adjudication of the built claims: the
+        value claims, then the stated policy rows, then the gates.
+    """
+    from . import policy as _policy
+    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn):
@@ -4686,7 +4710,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     extensive or cj.route in ("best", "examine"))
                 if derived is not None:
                     derived, lines = _with_empty_input_lines(
-                        derived, ctx, fn, facts, float_companions)
+                        derived, ctx, fn, facts, float_companions,
+                        conjectures)
                     out.append(stamp(derived, _cap=verdict_cap))
                     if ctx.companion is not None:
                         _emit_companion(out, _stamped(ctx.companion, cj_record,
@@ -4701,7 +4726,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
             probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
-                                                    float_companions)
+                                                    float_companions,
+                                                    conjectures)
             out.append(stamp(probed, _cap=verdict_cap))
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)

@@ -168,8 +168,10 @@ def test_the_gate_payload_says_unstated_not_none():
 # --- a class row a stated member row settles -----------------------------
 
 def test_a_stated_member_row_narrows_the_library_row():
+    # mean of an empty Series is nan, stated as its empty policy
     rec = _record(mean_pd, "for xs in [0, 1]^n, 0 <= f(xs) <= 1",
-                  "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)")
+                  "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+                  "f([]) in {missing}")
     row = _row(rec, "missing[xs, count == 0]")
     assert row.verdict == "proven", (row.verdict, row.meta["mathema.policy"])
     assert row.meta["mathema.policy"]["reason"].endswith("; NA is stated separately")
