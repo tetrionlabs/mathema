@@ -876,22 +876,45 @@ def claims_file_entries(path: str, root: str,
             f"note {where}: `compendium: {library}` names this project's "
             f"own package; nothing in it was adjudicated"]
     tag = applicable_tag(library, versions, aliases)
+    lines: list = []
     if tag is None:
         installed = _installed_version(library, aliases)
-        why = (f"{library} is not importable here" if installed is None
-               else f"{library} {installed} is outside the file's range "
-                    f"{versions}")
-        return {}, True, [f"note {where}: {why}; nothing in it was "
-                          f"adjudicated"]
+        if installed is None:
+            return {}, True, [f"note {where}: {library} is not importable "
+                              f"here; nothing in it was adjudicated"]
+        # installed outside the file's range: every row is adjudicated
+        # against the installed version and marked outside its range,
+        # so it is recorded and never used as a fact
+        tag = f"compendium:{library}-{'.'.join(installed.split('.')[:2])}"
+        for entry in data.values():
+            for row in (entry.get("claims") or []
+                        if isinstance(entry, dict) else []):
+                if isinstance(row, dict):
+                    row.setdefault("versions", versions)
+        lines.append(
+            f"note {where}: {library} {installed} is outside the file's "
+            f"range {versions}; its rows are adjudicated against "
+            f"{library} {installed} and never used as facts here (`mathema "
+            f"compendium export {library}` writes the rows that hold into "
+            f"a project compendium for this version)")
     stamp_library_rows(data, tag)
     mark_row_versions(data, library, aliases)
     for key, entry in data.items():
         if not isinstance(entry, dict) or _defines_only(entry):
             continue
         info = library_claims.get(key)
+        if info and lines:
+            # the key's applicable rows stay; this file's rows join them
+            names = {r.get("name") for r in info["entry"].get("claims") or []}
+            merged = dict(info["entry"])
+            merged["claims"] = list(info["entry"].get("claims") or []) + [
+                r for r in entry.get("claims") or []
+                if r.get("name") not in names]
+            entries[key] = {"entry": merged, "source": info["source"]}
+            continue
         entries[key] = ({"entry": info["entry"], "source": info["source"]}
                         if info else {"entry": entry, "source": where})
-    return entries, True, []
+    return entries, True, lines
 
 
 def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
@@ -982,6 +1005,30 @@ def _unsettled_library_hints(key: str, claims: list) -> list:
             meta.get("mathema.compendium") or "a compendium", name, key,
             verdict))
     return out
+
+
+def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
+    """Intent:
+        The line for a recorded library key no applicable claims file
+        states rows for: the library and installed version, each claims
+        file about the library with its range, and that the record is
+        kept as it is.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    library = key.split(".")[0]
+    files = _library_files(root).get(library, [])
+    aliases: list = []
+    for f in files:
+        aliases += list(f.get("aliases") or ())
+    installed = _installed_version(library, aliases)
+    have = (f"{library} {installed}" if installed
+            else f"{library}, which is not installed here")
+    ranges = "; ".join(f"{f['source']} states {f['versions']}"
+                       for f in files)
+    return (f"note {key}: no claims file about {key} applies to {have}"
+            + (f" ({ranges})" if ranges else "")
+            + "; its record is kept as it is and not re-adjudicated")
 
 
 def _library_population(root: str, verified: dict, declared: dict,
@@ -1087,6 +1134,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # adjudicated against the installed library; project-declared keys
     # keep their own entry
     library = _library_population(root, verified, declared, library_claims)
+    # a project's own compendium file is adjudicated in full: each of
+    # its keys is a library key
+    for lkey in declared:
+        info = library_claims.get(lkey)
+        if info is not None and not info.get("bundled"):
+            library.setdefault(lkey, info["source"])
     for lkey in library:
         if lkey not in declared:
             info = library_claims[lkey]
@@ -1110,6 +1163,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         only = list(only or []) + sorted(eager)
         if not only:
             return out
+    # a library key recorded here whose rows no claims file states for
+    # the installed library any more (its file left its range, or is
+    # gone): the record is kept as it is, never re-adjudicated as if the
+    # library function were the project's own
+    from .compendium import is_library_record
+    kept_records = False
+    for key in sorted(set(verified) - set(declared) - set(broken)):
+        entry = (verified[key] or {}).get("entry") or {}
+        if key in library_claims or not is_library_record(entry):
+            continue
+        verified = {k: v for k, v in verified.items() if k != key}
+        out.lines.append(_no_applicable_file_note(key, entry, root))
+        kept_records = True
     # library keys first, so a premise resting on one sees the verdict
     # this run records for it
     keys = sorted(set(verified) | set(declared) | set(broken),
@@ -1122,7 +1188,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         keys = [k for k in keys if k in want]
         lock_only = [k for k in lock_only if k in want]
     if not keys and not lock_only:
-        out.nothing_declared = True
+        out.nothing_declared = not kept_records
         return out
 
     # phase 1: freshness + adjudication + record writes. Gating waits
