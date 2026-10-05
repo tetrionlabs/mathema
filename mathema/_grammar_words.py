@@ -29,14 +29,13 @@ __all__ = ["HOLES", "MATRIX", "SEQUENCE", "SYNONYMS", "WORDS", "Word",
 #: what a word does with a hole, by rule name
 HOLES = {
     "slots": "reads the value slots; a hole when every slot is one",
-    "slots, identity": "reads the value slots",
-    "count": "counts the value slots",
+    "count": "counts the value slots; 0 when every slot is a hole",
     "every slot": "counts every slot, holes included",
     "running": "a hole stays at its position; entry `i` reads the "
                "value slots among `0..i`",
     "elementwise": "a hole stays a hole",
-    "dot": "reads the positions where both vectors hold a value",
-    "norm": "without `ord`, reads the value slots",
+    "dot": "reads the positions where both vectors hold a value; a "
+           "hole when there is none",
     "entries": "not read over holes: a hole entry is nan",
 }
 
@@ -93,9 +92,9 @@ WORDS: tuple = (
        keywords=_AXIS, holes="count", lowering=_SEQ),
     # reductions
     _w("sum", "sum(x, axis=None)", "`x[0] + x[1] + ... + x[n-1]`",
-       keywords=_AXIS, holes="slots, identity", lowering=_SEQ),
+       keywords=_AXIS, holes="slots", lowering=_SEQ),
     _w("prod", "prod(x, axis=None)", "`x[0] * x[1] * ... * x[n-1]`",
-       keywords=_AXIS, holes="slots, identity", lowering=_SEQ),
+       keywords=_AXIS, holes="slots", lowering=_SEQ),
     _w("mean", "mean(x, axis=None)", "`sum(x) / n`", keywords=_AXIS,
        holes="slots", lowering=_SEQ),
     _w("var", "var(x, ddof=0, axis=None)",
@@ -143,7 +142,7 @@ WORDS: tuple = (
        "`sum(abs(x[i]))` (a matrix's largest column sum), `ord=inf` "
        "`max(abs(x[i]))` (a matrix's largest row sum), `ord=2` on a "
        "matrix the largest singular value", keywords=(("ord", None),),
-       holes="norm", lowering=(SEQUENCE, MATRIX),
+       holes="slots", lowering=(SEQUENCE, MATRIX),
        lowered_keywords=("ord",)),
     _w("outer", "outer(x, y)", "the matrix with entry `(i, j)` equal to "
        "`x[i] * y[j]`", lowering=_MAT),
