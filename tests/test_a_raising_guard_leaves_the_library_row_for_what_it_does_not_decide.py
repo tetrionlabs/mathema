@@ -45,3 +45,47 @@ def test_is_missing_safe_is_not_falsified_by_the_library_drop():
     gate = rows["is_missing_safe[f]"]
     assert gate.verdict in ("proven", "holds"), (gate.verdict, gate.counterexample)
     assert rows["bounded"].verdict in ("proven", "holds"), rows["bounded"].verdict
+
+
+def refuse_any_hole(xs: pd.Series) -> float:
+    if xs.isna().any():
+        raise ValueError("a return is missing")
+    return float(xs.mean())
+
+
+def refuse_all_holes(xs: pd.Series) -> float:
+    if xs.isna().all():
+        raise ValueError("no returns to average")
+    return float(xs.mean())
+
+
+def _rows(fn, *extra):
+    return {p.name: p for p in mathema.check(fn, claims=[
+        mathema.claim("for xs in [-1, 1]^n, -1 <= f(xs) <= 1", name="bounded"),
+        *[mathema.claim(t, name=f"s{i}") for i, t in enumerate(extra)],
+        mathema.claim("is_missing_safe(f)")]).probes}
+
+
+def test_a_guard_refusing_any_hole_is_the_raise_policy():
+    # f's own guard decides every partly missing call: the raise is f's
+    # stated behaviour, never "pandas drops but f raised"
+    rows = _rows(refuse_any_hole)
+    gate = rows["is_missing_safe[f]"]
+    assert gate.verdict in ("proven", "holds"), (gate.verdict,
+                                                 gate.counterexample)
+    for p in rows.values():
+        reason = ((p.meta or {}).get("mathema.policy") or {}).get("reason") or ""
+        assert "pandas.Series.mean's own policy row" not in reason, (p.name,
+                                                                    reason)
+
+
+def test_a_guard_refusing_only_all_holes_leaves_the_library_drop():
+    rows = _rows(refuse_all_holes,
+                 "assuming count(xs) == 0, missing(f, xs) raises(ValueError)")
+    gate = rows["is_missing_safe[f]"]
+    assert gate.verdict in ("proven", "holds"), (gate.verdict,
+                                                 gate.counterexample)
+    drops = [p for p in rows.values()
+             if ((p.meta or {}).get("mathema.policy") or {}).get("behaviour") == "drops"]
+    assert drops and all("pandas.Series.mean's own policy row" in
+                         p.meta["mathema.policy"]["reason"] for p in drops)

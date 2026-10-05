@@ -1040,6 +1040,29 @@ def _guard_for(guards: dict, fn, p: str, kind: str, member: "str | None"):
 
 # --- what the body says ----------------------------------------------------
 
+#: the methods that mark each hole of a container, read with `.any()`
+_HOLE_MASKS = frozenset({"isna", "isnull", "is_null", "is_nan"})
+
+
+def _any_hole_check(node, params) -> "str | None":
+    """The parameter a test asks "holds a hole anywhere" of
+    (`xs.isna().any()`, `xs.is_null().any()`, `xs.hasnans`), or None."""
+    import ast
+    if isinstance(node, ast.Attribute) and node.attr == "hasnans" \
+            and isinstance(node.value, ast.Name) and node.value.id in params:
+        return node.value.id
+    if isinstance(node, ast.Call) and not node.args \
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "any":
+        mask = node.func.value
+        if isinstance(mask, ast.Call) and not mask.args \
+                and isinstance(mask.func, ast.Attribute) \
+                and mask.func.attr in _HOLE_MASKS \
+                and isinstance(mask.func.value, ast.Name) \
+                and mask.func.value.id in params:
+            return mask.func.value.id
+    return None
+
+
 def guard_policies(facts) -> dict:
     """Intent:
         The policy each guard in the body states, `{(param, kind, member):
@@ -1047,7 +1070,8 @@ def guard_policies(facts) -> dict:
         `if x is None: raise TypeError` states `absent(f, x)
         raises(TypeError)`, `if x != x: return 0.0` states `missing(f,
         x, nan) drops`. `x is None` covers absence only, `x != x` and
-        `isnan(x)` the member `nan`, `isna(x)` every member and absence.
+        `isnan(x)` the member `nan`, `isna(x)` every member and absence,
+        `xs.isna().any()` (or `xs.hasnans`) every member in a container.
         A guard that returns `None` passes an absence on and turns a
         hole into an absence; one that returns `nan` (`float("nan")`,
         `math.nan`, `np.nan`) passes a hole on and turns an absence into
@@ -1119,6 +1143,10 @@ def guard_policies(facts) -> dict:
                 if isinstance(op, ast.NotEq) and isinstance(right, ast.Name) \
                         and right.id == node.left.id:
                     keys.append((node.left.id, "missing", "nan"))
+            hole_of = _any_hole_check(node, params)
+            if hole_of is not None:
+                # `xs.isna().any()`: a hole anywhere in the container
+                keys.append((hole_of, "missing", None))
             if isinstance(node, ast.Call) and node.args \
                     and isinstance(node.args[0], ast.Name) and node.args[0].id in params:
                 name = (node.func.attr if isinstance(node.func, ast.Attribute)
