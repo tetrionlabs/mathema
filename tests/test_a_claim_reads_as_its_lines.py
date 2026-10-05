@@ -11,6 +11,7 @@ import math
 from typing import Optional
 
 import mathema
+import pandas as pd
 
 
 def root_opt(x: Optional[float]) -> float:
@@ -137,3 +138,18 @@ def test_the_first_possible_fix_is_a_command_that_settles_the_line(tmp_path, mon
         assert argv[:2] == ["mathema", "accept"], command
         assert main(argv[1:] + ["--yes", "--root", str(tmp_path)]) == 0, command
     assert main(["verify", "--root", str(tmp_path)]) == 0
+
+
+def average_return(returns: pd.Series) -> float:
+    return float(returns.mean())
+
+
+def test_a_chained_claim_on_a_series_keeps_its_computation_line():
+    rec = mathema.check(average_return, claims=[
+        "for returns in [-0.1, 0.1]^n \\ {missing}, "
+        "min(returns) <= f(returns) <= max(returns)"])
+    names = [p.name for p in rec.probes]
+    assert "min_returns_le_f_returns_le_max_returns[float, pandas.Series]" in names, names
+    lines = _lines(rec)
+    assert any(line.split()[:2] == ["holds", "computation"] for line in lines), lines
+    assert any("f([])" in line for line in lines), lines
