@@ -87,7 +87,7 @@
 [x] docs/missing-values.md:defines               file run output
 [x] docs/missing-values.md:enforce               run output
 [-] docs/missing-values.md:17
-[-] docs/missing-values.md:542
+[-] docs/missing-values.md:559
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl
@@ -105,7 +105,7 @@
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [x] docs/modes/verify.md:eager                   session
-[-] docs/modes/verify.md:409
+[-] docs/modes/verify.md:423
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/pandas-function.md:pandas               file run output run output run output run output run output run output  (requires)
 [x] docs/quickstart.md:falsify                   file run output run output run output
@@ -117,17 +117,17 @@
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
 [-] docs/runtime-types.md:105
 [x] docs/security.md:let-warning                 file session session
-[h] docs/start.md:40
-[h] docs/start.md:71
-[h] docs/start.md:99
-[h] docs/start.md:124
+[h] docs/start.md:59
+[h] docs/start.md:90
+[h] docs/start.md:118
+[h] docs/start.md:143
 [x] docs/symbology.md:alphabets                  run output
 [x] docs/symbology.md:latex                      run output
 [ ] docs/symbology.md:135
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] docs/verdicts.md:reading                     file run output
-[-] docs/verdicts.md:69
+[-] docs/verdicts.md:72
 [x] README.md:parity                             file run output
 [x] README.md:sigmoid                            file run output
 [x] README.md:pole                               run output

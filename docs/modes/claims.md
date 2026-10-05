@@ -84,14 +84,16 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 <!-- example: adopt session -->
 ```
 $ mathema claims functions.softmax
-functions.softmax: no declared claims (mathema claims --suggest lists candidates)
+functions.softmax: no declared claims (to list candidates, run: mathema claims functions.softmax --suggest)
 $ mathema claims functions.softmax --suggest
-functions.softmax: 10 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+functions.softmax: 11 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+  effects: no side effects
  individual claims:
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
   - is_numerically_stable: g(f, scores) == 1  [route best]
   - is_empty_safe[scores]: is_empty_safe(scores)  [route examine]
+  - is_dimension_safe[f]: is_dimension_safe(f)  [route examine]
   - preserves_length: dim(f(scores), 0) == dim(scores, 0)  [route probe]
   - is_permutation_of_input: sorted(f(scores)) == sorted(scores)  [route probe]
   - preserves_type: type(f(scores)) == type(scores)  [route probe]
@@ -147,10 +149,10 @@ functions.softmax:
   function it has no entry for), the suggestion is listed here with that
   reason on the line below it. It is never adopted unless named.
 
-When the reading already sees a write or a hidden input, the answer is
-known, so the suggestion is listed with the individual claims, the site
-on the line below it. Adopting it records the falsification, which is
-knowledge about the program rather than a failing test. For a function
+The effects the reading finds are always shown, on a line under the
+count. `is_state_safe` is suggested only for a function with no side
+effects at its default values: when the reading already sees a write,
+the effects line states it and there is nothing to adopt. For a function
 that stores a rate in the environment:
 
 <!-- example: env-write file=rates.py -->
@@ -171,9 +173,9 @@ mathema claims rates.remember --suggest --root .
 
 <!-- example: env-write output match=subset -->
 ```text
+rates.remember: 12 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+  effects: changes os.environ (os.environ['R'] = ...)
  individual claims:
-  - is_state_safe: f(rate) == f(rate)  [route best]
-      examine finds a write: remember changes os.environ (os.environ['R'] = ...); adopting records it as falsified
 ```
 
 A stronger relation, a genuine contradiction where adopting a second

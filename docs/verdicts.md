@@ -62,7 +62,10 @@ mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
     proven     mathematics  for rate in R, 0 <= f(rate) <= 1
     holds      computation  for rate in R, 0 <= f(rate) <= 1   43 draws
     falsified  policy       f(nan)   no missing policy stated; returns 1.0
-                            possible fixes: (i) mathema claims pricing.clamp_discount --adopt 'missing[rate]'  (ii) exclude nan  (iii) handle nan at entry
+                            possible fixes:
+                              (i) if dropping nan is intended, run: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
+                              (ii) exclude nan
+                              (iii) handle nan at entry
 ```
 
 <!-- illustration -->
