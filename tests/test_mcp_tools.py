@@ -530,6 +530,7 @@ def test_the_wire_payload_is_compact_and_not_duplicated():
     assert result.structured_content is None
 
 
+@pytest.mark.needs_full_proof_budget
 def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
     import json
     import os

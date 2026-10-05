@@ -262,32 +262,64 @@ def _literal(text: str):
         return Fraction(text)
 
 
+def _carrier_literal(text: str):
+    """A numeric literal as the computation reads it: an integer exact,
+    a float literal as the exact value of the float it parses to, and a
+    negative zero as the signed float it is."""
+    text = text.replace("_", "")
+    try:
+        return ExactInt(int(text))
+    except ValueError:
+        value = float(text)
+    if value == 0.0 and str(value).startswith("-"):
+        return value
+    return Fraction(value)
+
+
 def register_source(code, src: str, tree) -> None:
     """Intent:
-        Record the exact twin of `code`, compiled from `tree` (parsed
-        from `src`) with each int or float literal replaced by a call
-        reading its source text exactly.
+        Record the exact twins of `code`, compiled from `tree` (parsed
+        from `src`): each int or float literal replaced by a call reading
+        its source text, as written (`__exact__`) or as the computation
+        reads it (`__carrier__`). A sign written before a literal is
+        read with it, so `-0.0` keeps its sign.
     """
     import ast
     import copy
 
-    class _Exact(ast.NodeTransformer):
-        def visit_Constant(self, node):
-            if isinstance(node.value, (int, float)) \
-                    and not isinstance(node.value, bool):
-                text = ast.get_source_segment(src, node)
-                if text is None:
-                    return node
+    def twin_of(name: str):
+        class _Exact(ast.NodeTransformer):
+            def _call(self, text, node):
                 return ast.copy_location(ast.Call(
-                    func=ast.Name("__exact__", ast.Load()),
+                    func=ast.Name(name, ast.Load()),
                     args=[ast.Constant(text)], keywords=[]), node)
-            return node
-    try:
+
+            def visit_UnaryOp(self, node):
+                operand = node.operand
+                if isinstance(node.op, ast.USub) \
+                        and isinstance(operand, ast.Constant) \
+                        and isinstance(operand.value, (int, float)) \
+                        and not isinstance(operand.value, bool):
+                    text = ast.get_source_segment(src, operand)
+                    if text is not None:
+                        return self._call("-" + text, node)
+                return self.generic_visit(node)
+
+            def visit_Constant(self, node):
+                if isinstance(node.value, (int, float)) \
+                        and not isinstance(node.value, bool):
+                    text = ast.get_source_segment(src, node)
+                    if text is None:
+                        return node
+                    return self._call(text, node)
+                return node
         twin = _Exact().visit(copy.deepcopy(tree))
         ast.fix_missing_locations(twin)
+        return compile(twin, "<conjecture>", "eval")
+    try:
         if len(_EXACT_TWINS) > 4096:
             _EXACT_TWINS.clear()
-        _EXACT_TWINS[code] = compile(twin, "<conjecture>", "eval")
+        _EXACT_TWINS[code] = (twin_of("__exact__"), twin_of("__carrier__"))
     except (SyntaxError, ValueError, TypeError):
         return
 
@@ -304,10 +336,9 @@ def exact_literals(code, written: bool = True):
     import types
     if code is None:
         return None
-    if written:
-        twin = _EXACT_TWINS.get(code)
-        if twin is not None:
-            return twin
+    twins = _EXACT_TWINS.get(code)
+    if twins is not None:
+        return twins[0] if written else twins[1]
     consts = []
     for c in code.co_consts:
         if isinstance(c, float) and c == 0.0 and math.copysign(1.0, c) < 0 \
@@ -353,6 +384,7 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
+    exact_env["__carrier__"] = _carrier_literal
     try:
         left = eval(exact_literals(code_l, exact_calls),
                     {"__builtins__": {}}, exact_env)
@@ -386,6 +418,7 @@ def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
+    exact_env["__carrier__"] = _carrier_literal
     for code in (code_l, code_r):
         if code is None:
             continue

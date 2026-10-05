@@ -6,6 +6,8 @@ coverage` pass merges the three, per function and repo-wide."""
 import os
 import textwrap
 
+import pytest
+
 from mathema.impl_coverage import (FunctionCoverage, function_coverage,
                                    project_coverage)
 
@@ -28,6 +30,7 @@ def test_percent_is_line_weighted():
     assert FunctionCoverage(key="g", statements=set()).percent == 100
 
 
+@pytest.mark.needs_full_proof_budget
 def test_derivable_function_is_derive_covered(tmp_path):
     mod = _load(tmp_path, '''
         def clamp01(x: float) -> float:

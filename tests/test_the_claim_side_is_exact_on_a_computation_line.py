@@ -103,3 +103,17 @@ def test_a_negative_zero_literal_stays_negative_zero():
     (p,) = check_conjectures(sign_of, [claim(
         "for x in [1, 2], f(-0.0) == -1", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_the_computation_reading_keeps_integer_literals_exact():
+    # small integer literals may not sit among a code object's constants
+    # (Python 3.14 loads them by an instruction of their own); the
+    # computation's reading still divides them exactly
+    from fractions import Fraction
+
+    from mathema._exact_side import exact_sides
+    from mathema.conjecture import _validate
+    code_l, _ = _validate("x", {"x"}, set())
+    code_r, _ = _validate("7 / 10", {"x"}, set())
+    sides = exact_sides(code_l, code_r, {"x": 0.5}, {})
+    assert sides is not None and sides[1] == Fraction(7, 10), sides
