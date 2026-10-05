@@ -182,6 +182,9 @@ class Record:
             # the header already says a function has no side effects;
             # anything more is stated under it
             lines.append(f"  effects: {effects['line']}")
+        not_read = (self.meta or {}).get("mathema.compendium_not_read")
+        if not_read:
+            lines.append(f"  note: {not_read}")
         # a claim with lines under it prints as a block (see _layout)
         grouped = blocks(self.probes, list(self.facts.params),
                          dict(self.facts.param_kinds), self.key or self.facts.name,
@@ -591,7 +594,11 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     project's files. What mathema itself ships about libraries (the
     bundled compendium: numpy's sqrt has no value below zero, ...)
     applies to every call, as the engine's own knowledge; a project's
-    own compendium files apply once `compendium.install(root)` ran. The file-declared layer, the highest-precedence
+    own compendium files apply once `compendium.install(root)` ran:
+    in a project with compendium files of its own, call
+    `mathema.compendium.install(root)` first so check() reads the rows
+    `mathema verify` reads; otherwise the record's
+    `meta["mathema.compendium_not_read"]` says the files were not read. The file-declared layer, the highest-precedence
     authoring surface, therefore reaches it only through `declared=`,
     a retrieved entry from `mathema.retrieve(fn, root)`. Call-site
     `claims=` still wins per claim name over everything retrieved.
@@ -855,6 +862,13 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         effects = effects_line(fn)
         if effects is not None:
             meta = {**meta, "mathema.effects": effects}
+    from .compendium import uninstalled_project_note
+    try:
+        not_read = uninstalled_project_note(fn)
+    except Exception:
+        not_read = None
+    if not_read:
+        meta = {**meta, "mathema.compendium_not_read": not_read}
     return Record(facts=facts, probes=probes, dependencies=deps,
                   concepts=concept_objs, meta=meta, lifted=lifted, key=_fn_key(fn))
 

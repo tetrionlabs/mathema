@@ -1282,6 +1282,73 @@ def install(root: str = ".") -> None:
     register_library_claims(root)
 
 
+#: the files that mark a project's root directory
+_ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".mathema", ".git")
+
+
+def uninstalled_project_note(fn) -> "str | None":
+    """Intent:
+        The record note for `check()` on a function whose source file
+        sits in a project (the nearest directory above it with a
+        `pyproject.toml`, `setup.py`, `setup.cfg`, `.mathema` or `.git`)
+        that states compendium files of its own (looked up once per
+        process for each project) which are not installed:
+        "project compendium files under <root> were not read; to use
+        them, call: mathema.compendium.install('<root>')". None when the
+        function has no source file, no project is found, the project
+        states no compendium file, or its files are installed.
+    """
+    import inspect
+    try:
+        path = inspect.getsourcefile(_engine_unwrapped(fn))
+    except (TypeError, OSError):
+        return None
+    if not path:
+        return None
+    parts = os.path.realpath(path).split(os.sep)
+    if "site-packages" in parts or "dist-packages" in parts:
+        return None
+    here = os.path.dirname(os.path.realpath(path))
+    root = None
+    while True:
+        if any(os.path.exists(os.path.join(here, m)) for m in _ROOT_MARKERS):
+            root = here
+            break
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+    if _INSTALLED.get("root") == os.path.abspath(root):
+        return None
+    if root not in _PROJECT_FILES:
+        _PROJECT_FILES[root] = _states_compendium_files(root)
+    if not _PROJECT_FILES[root]:
+        return None
+    return (f"project compendium files under {root} were not read; to use "
+            f"them, call: mathema.compendium.install({root!r})")
+
+
+#: per project root, whether it states compendium files of its own,
+#: looked up once per process
+_PROJECT_FILES: dict = {}
+
+
+def _states_compendium_files(root: str) -> bool:
+    """Whether any claims file under `root` declares `compendium:` for a
+    library other than the project's own package."""
+    from ..spec import claims_file_paths, read_claims_file
+    for claims_path in claims_file_paths(root, exclude=(_bundled_dir(),)):
+        try:
+            data = read_claims_file(claims_path,
+                                    os.path.relpath(claims_path, root)) or {}
+        except Exception:
+            continue
+        library = data.get("compendium")
+        if isinstance(library, str) and not names_own_package(library, root):
+            return True
+    return False
+
+
 def library_key_of(fn) -> "str | None":
     """Intent:
         The library claim key `fn` is (`numpy.mean` for `np.mean`),
