@@ -345,11 +345,23 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         rule the rest of the engine follows, and the point evaluator
         already reports such a point as a genuine counterexample.
     """
-    if facts.is_pure is not True or not _examined_clean(fn):
+    if facts.is_pure is not True:
+        return None
+    # a counterexample the sweep executes falsifies though a callee is
+    # unreadable; only a clean sweep's proof needs the strict
+    # examination to find nothing. A detected write or hidden read
+    # declines the sweep: there a point's result depends on the calls
+    # before it
+    unexamined = _examination_obstacle(fn)
+    if unexamined is _STATEFUL:
         return None
     # read at call time, not bound as a default, so the budget stays one
     # knob rather than a value frozen when this module was imported
     budget = BRUTE_FORCE_POINT_BUDGET if budget is None else budget
+    if unexamined is not None and (
+            cj.relation == "raises" or (cj.relation in ("in", "not in") and
+                                        getattr(cj, "rhs_bound", None) is not None)):
+        return None
     if cj.relation == "raises":
         return None if assumption else _raises_proof(
             cj, fn, facts, cj_domain, bound_funcs, budget, resolution)
@@ -398,7 +410,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                      # a value a listed sentinel stands for is only
                      # reproduced by calling with that same value
                      **({"mathema.witness_executed": True}
-                        if _lists_a_sentinel(cj_domain, names) else {})},
+                        if _lists_a_sentinel(cj_domain, names)
+                        or unexamined is not None else {})},
                     executed_missing(deps)))
         checked += 1
         judged.append(point)
@@ -407,6 +420,15 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         # clean pass over no points proves nothing while looking like a
         # proof
         return None
+    if unexamined is not None:
+        return ProofResult(
+            "undecided",
+            sketch=(f"{_holds_at(total, judged)}; every point executed; "
+                    f"proven needs the function to be shown pure: "
+                    f"{unexamined}"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.sweep_holds": True, **_tried(grid)},
+                               executed_missing(deps)))
     return ProofResult(
         "proven",
         sketch=_holds_at(total, judged),
@@ -414,6 +436,30 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                    f"({_points(total)})",
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed_missing(deps)))
+
+
+_STATEFUL = object()
+
+
+def _examination_obstacle(fn):
+    """Intent:
+        What stands between a clean sweep of `fn` and a proof: None when
+        the strict examination finds nothing (`_examined_clean`), the
+        text of the first site it cannot read when that is all it finds,
+        and `_STATEFUL` when it finds a write, a hidden read or an
+        order-sensitive reduction, where a call's result can depend on
+        the calls before it and no point of the sweep stands alone.
+    """
+    from ._examine import examine
+    effects = examine(fn)
+    if (effects.writes or effects.hidden_reads or effects.order_sensitive
+            or effects.unknown_writes):
+        return _STATEFUL
+    fixed = {text for _module, _name, text in effects.module_reads}
+    for site in effects.unknowns:
+        if site.text not in fixed:
+            return str(site.text)
+    return None
 
 
 def _examined_clean(fn) -> bool:

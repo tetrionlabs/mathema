@@ -7640,6 +7640,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return witnessed
     elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
+        if swept is not None and swept.meta.get("mathema.sweep_holds"):
+            # every point executed and agreed, over a function the strict
+            # examination could not show pure: holds, never proven
+            return Probe(cj.name, statement, "holds", route="derive:brute_force",
+                         sketch=swept.sketch,
+                         note=f"{note + '; ' if note else ''}{swept.sketch}",
+                         meta=_provenance_meta(swept))
         if swept is not None:
             proof = swept
     from collections import Counter
@@ -7757,6 +7764,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 return Probe(cj.name, statement, "falsified",
                              route="derive:brute_force", sketch=swept.sketch,
                              counterexample=swept.counterexample, note=note,
+                             meta=_provenance_meta(swept))
+            if swept.meta.get("mathema.sweep_holds"):
+                return Probe(cj.name, statement, "holds",
+                             route="derive:brute_force", sketch=swept.sketch,
+                             note=f"{note + '; ' if note else ''}{swept.sketch}",
                              meta=_provenance_meta(swept))
         # an unknown is superseded by real empirical evidence like any
         # other, stash the flagged report and fall through to the
