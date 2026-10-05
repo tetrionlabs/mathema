@@ -45,14 +45,16 @@ def test_set_str_annotation_stays_a_sequence():
 
 def test_bare_str_declines_honestly_not_a_spurious_gap():
     rec = check(_bare_str)
-    gap = [p for p in rec.probes
-           if (p.meta or {}).get("mathema.probe_gap")]
-    assert gap, [p.name for p in rec.probes]
-    p = gap[0]
-    assert p.verdict == "skipped"
-    # a gap asserts no law: its statement names the call it tried
-    assert p.statement == "f(r, scale) can be called"
-    assert "'scale' is a string with no declared domain" in (p.note or "")
+    # the battery call is not run: no row, the reason in the record meta
+    assert not [p for p in rec.probes if p.name == "callable"]
+    (gap,) = rec.meta["mathema.not_run"]
+    assert gap["gap"] == "string-domain-missing"
+    assert gap["statement"] == "f(r, scale) can be called"
+    assert "'scale' is a string with no declared domain" in gap["reason"]
+    from mathema.probing import probe
+    from mathema.analysis import analyze_source
+    (p,) = [q for q in probe(_bare_str, analyze_source(_bare_str))
+            if q.name == "callable"]
     assert claim_reason_code(p) == ClaimReasonCode.NO_EVALUABLE_INPUTS
     # the old artefact, a float thrown at the str param and the raise
     # recorded as a synthesis failure, must not appear

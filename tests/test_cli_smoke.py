@@ -142,27 +142,35 @@ def test_check_fails_on_a_declared_but_unenforced_exclusion(tmp_path):
 
 
 def test_check_strict_fails_on_unverifiable_claims(tmp_path):
-    # a function that raises unconditionally, regardless of input, is a
-    # robust way to force a real "no evaluable inputs" verdict on every
-    # probe-route claim (checked==0 on every trial, for any probe
-    # technique), a guarded-but-otherwise-trivial function isn't a
-    # reliable fixture for this any more, now that route="best" claims
-    # have a real probe:algorithmic/derive fallback for cases that used
-    # to have no evaluable path at all.
-    guarded = tmp_path / "guarded.py"
-    guarded.write_text(
-        "def always_raises(x: float) -> float:\n"
-        "    if x != x:\n"
-        "        raise ValueError('x is missing')\n"
-        "    raise ValueError('always fails')\n"
+    # a stated claim over a language mathema cannot resolve has no
+    # input to evaluate at: it is skipped, which --strict refuses
+    mod = tmp_path / "lab.py"
+    mod.write_text(
+        "def label(name: str) -> str:\n"
+        "    return name.upper()\n"
     )
-    lenient = _run("check", "guarded.py:always_raises", cwd=tmp_path)
+    law = "for name in L[nosuch.grammar], len(f(name)) == len(name)"
+    lenient = _run("check", "lab.py:label", "--claim", law, cwd=tmp_path)
     assert lenient.returncode == 0, lenient.stdout
     assert "1 skipped" in lenient.stdout
 
-    strict = _run("check", "guarded.py:always_raises", "--strict", cwd=tmp_path)
+    strict = _run("check", "lab.py:label", "--claim", law, "--strict",
+                  cwd=tmp_path)
     assert strict.returncode == 1, strict.stdout
     assert "1 skipped claim(s)" in strict.stdout
+
+
+def test_a_battery_call_mathema_could_not_build_does_not_gate(tmp_path):
+    # mathema's own call to a function that raises for every input it
+    # builds is a check not run: no row, so nothing for --strict to refuse
+    guarded = tmp_path / "guarded.py"
+    guarded.write_text(
+        "def always_raises(x: float) -> float:\n"
+        "    raise ValueError('always fails')\n"
+    )
+    strict = _run("check", "guarded.py:always_raises", "--strict", cwd=tmp_path)
+    assert strict.returncode == 0, strict.stdout
+    assert "skipped" not in strict.stdout
 
 
 # ---------------------------------------------------------------------------

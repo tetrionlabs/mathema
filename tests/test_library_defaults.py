@@ -92,9 +92,9 @@ def test_a_project_function_still_samples_its_defaulted_parameters(
     assert not _keeps_default(f, alpha)
     rec = mathema.check(f, claims=["for x in [0, 1], f(x) >= 0"])
     # the battery samples alpha, and the raise it hits says so
-    (callable_probe,) = [p for p in rec.probes if p.name == "callable"]
-    assert callable_probe.verdict == "skipped", callable_probe.note
-    assert "ValueError" in callable_probe.note
+    (not_run,) = rec.meta["mathema.not_run"]
+    assert not_run["check"] == "callable", not_run
+    assert "ValueError" in not_run["reason"]
     (claim_probe,) = [p for p in rec.probes if p.name == "f_x_ge_0"]
     assert "mathema.defaults" not in (claim_probe.meta or {})
 
