@@ -10,16 +10,16 @@ polars.Series.min:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) == min(a)"
-    - name: empty_is_null
-      statement: "f([]) in {null}"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
       note: "The empty input has no value: null, returned as None."
 
 polars.Series.max:
   claims:
     - name: definition
       statement: "for a in R^n, f(a) == max(a)"
-    - name: empty_is_null
-      statement: "f([]) in {null}"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
       note: "The empty input has no value: null, returned as None."
 
 polars.Series.abs:
