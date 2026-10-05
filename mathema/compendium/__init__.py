@@ -829,18 +829,21 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
 
 def _compendium_hint(tag: str, name: str, key: str,
                      verdict: "str | None" = None) -> str:
+    from .._missing_words import options
     recorded = bool(verdict) and verdict != "declared"
     if recorded:
         # verify already tried: the way forward is a row it can decide
         return (f"{tag} declares {name!r} for {key}; mathema verify "
-                f"recorded it {verdict} against the installed library. To "
-                f"take it on its word, run: mathema accept {key} {name} "
-                f"--as trusted; to decide it, restate the row, then run: "
-                f"mathema check {key} --claim \"...\"")
+                f"recorded it {verdict} against the installed library:\n"
+                + options([f"to take it on its word, run: mathema accept {key} "
+                           f"{name} --as trusted",
+                           f"to decide it, restate the row, then run: mathema "
+                           f"check {key} --claim \"...\""]))
     return (f"{tag} declares {name!r} for {key}; a compendium verdict is "
-            f"never trusted silently: accept it (mathema accept {key} "
-            f"{name} --as trusted) or let mathema verify adjudicate it "
-            f"against the installed library")
+            f"never trusted silently:\n"
+            + options([f"to accept it, run: mathema accept {key} {name} --as trusted",
+                       "let mathema verify adjudicate it against the installed "
+                       "library"]))
 
 
 def _region_texts(entry: dict, families) -> list:

@@ -352,3 +352,15 @@ def test_a_first_falsification_note_puts_each_command_last_on_its_line():
         "  (i) to record the falsification as a discovery, run: mathema accept "
         "numpy.ptp at_most_the_largest --as discovery",
         "  (ii) correct the row in claims/numpy.claims.yaml"], lines
+
+
+def test_a_compendium_hint_puts_each_command_last_on_its_line():
+    from mathema.compendium import _compendium_hint
+    for verdict in ("unknown", None):
+        text = _compendium_hint("compendium:math", "log_monotone", "math.log", verdict)
+        commands = [line for line in text.splitlines() if "mathema accept" in line
+                    or "mathema check" in line]
+        assert commands, text
+        for line in commands:
+            # the command runs to the end of its line, after a colon
+            assert "run: mathema " in line and ";" not in line.split("run: ", 1)[1], line
