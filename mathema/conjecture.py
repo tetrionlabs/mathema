@@ -2574,6 +2574,73 @@ def _definedness_guards(fn, facts, working: bool = False,
     return guards, gaps
 
 
+def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
+    """Intent:
+        What a family claim's working domain is, for the record: each
+        parameter whose domain the function's own guards narrow, mapped
+        to the narrowed domain as text, and `guards` listing the
+        conditions a conditional raise cuts. Empty for a value claim
+        (its explicit domain is never narrowed) and where no guard
+        narrows anything.
+    """
+    import sympy
+
+    from .domain import bound_to_sympy_set
+    if cj.relation not in routes.examine_predicates() or facts is None:
+        return {}
+    cuts = guard_cut_texts(fn, facts)
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not cuts and not enforced:
+        return {}
+    out: dict = {}
+    for p in facts.params:
+        bound = domain.get(p)
+        if bound is None:
+            continue
+        try:
+            here = bound_to_sympy_set(bound)
+        except Exception:
+            continue
+        narrowed = here
+        sym = sympy.Symbol(p, real=True)
+        if p in enforced:
+            try:
+                narrowed = narrowed & bound_to_sympy_set(enforced[p])
+            except Exception:
+                pass
+        for text in cuts:
+            try:
+                cond = sympy.sympify(text, locals={p: sym})
+            except Exception:
+                continue
+            if getattr(cond, "free_symbols", None) != {sym}:
+                continue
+            try:
+                narrowed = narrowed - cond.as_set()
+            except Exception:
+                continue
+        if narrowed != here:
+            out[p] = _set_text(narrowed)
+    if out and cuts:
+        out["guards"] = list(cuts)
+    return out
+
+
+def _set_text(found) -> str:
+    """A real set as interval text: `[0, 4]`, `(0, 4]`, a union joined
+    with `∪`."""
+    import sympy
+    if isinstance(found, sympy.Interval):
+        lo = "(" if found.left_open else "["
+        hi = ")" if found.right_open else "]"
+        ends = [("-oo" if e == -sympy.oo else "oo" if e == sympy.oo
+                 else str(e)) for e in (found.start, found.end)]
+        return f"{lo}{ends[0]}, {ends[1]}{hi}"
+    if isinstance(found, sympy.Union):
+        return " ∪ ".join(_set_text(part) for part in found.args)
+    return str(found)
+
+
 def guard_cut_texts(fn, facts) -> list:
     """Intent:
         Each condition under which fn raises deliberately, as claim
@@ -4479,6 +4546,20 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         f"{families.current_family_name(accepted)}")
                 if said not in (probe.note or ""):
                     probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
+        working = _working_domain_record(fn, facts, cj,
+                                         {**domain, **(cj.domain or {})})
+        if working:
+            probe.meta = {**(probe.meta or {}),
+                          "mathema.working_domain": working}
+            said = ("the working domain is "
+                    + ", ".join(f"{p} in {b}" for p, b in working.items()
+                                if p != "guards")
+                    + (f": f's own guard raises where "
+                       f"{' or '.join(working['guards'])}"
+                       if working.get("guards") else
+                       ": f's own guard rejects the rest"))
+            if said not in (probe.note or ""):
+                probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
             # always stamped, "user" included: with no provenance
             # prose in the note, meta is the one source channel

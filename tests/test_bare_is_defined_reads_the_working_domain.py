@@ -80,3 +80,16 @@ def test_an_enforced_domain_cuts_the_working_domain():
     p = _bare(enforced_root)
     assert p.verdict in ("proven", "holds"), (p.verdict, p.note,
                                               p.counterexample)
+
+
+def test_the_record_states_the_working_domain_beside_the_claim():
+    p = _bare(guarded_root)
+    # the statement keeps the domain as written
+    assert "[-4.0, 4.0]" in p.statement, p.statement
+    working = p.meta["mathema.working_domain"]
+    assert working["x"] == "[0, 4]", working
+    assert working["guards"] == ["x < 0"], working
+    assert "the working domain is x in [0, 4]" in (p.note or ""), p.note
+    # a value claim's explicit domain is never narrowed
+    (v,) = check_conjectures(guarded_root, [claim("for x in [-4, 4], f(x) >= 0")])
+    assert "mathema.working_domain" not in (v.meta or {})
