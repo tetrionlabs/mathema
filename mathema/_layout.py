@@ -245,7 +245,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                                   c.note if _verdict(c) != "holds" else ""))
                 if _verdict(c) == "falsified" and \
                         (c.meta or {}).get("mathema.empty_fixes"):
-                    lines.append(" " * 28 + c.meta["mathema.empty_fixes"])
+                    lines += [" " * 28 + part
+                              for part in c.meta["mathema.empty_fixes"].splitlines()]
             else:
                 shown = over_numbers(c.statement)
                 if (c.condition or "").startswith("let |inf| be ") and "|inf|" not in shown:
