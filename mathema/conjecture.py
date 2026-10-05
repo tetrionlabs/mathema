@@ -2655,7 +2655,10 @@ def _always_raises(stmts) -> bool:
 def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     """Intent:
         Whether a family claim's working domain is empty: f's own guards
-        refuse every input its annotations and binding admit. Read from
+        refuse every input its annotations and binding admit. The
+        stateless families (is_state_safe, is_deterministic,
+        is_reproducible) are examined from the source alone and are
+        never read over a domain. Read from
         the body (no `return` anywhere and every path ends in a `raise`,
         or a guard cut or `enforce_domain` that leaves no point of a
         parameter's domain) and corroborated by calls at points of the
@@ -2668,6 +2671,10 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     from .domain import bound_to_sympy_set, without_sentinels
     if cj.relation not in routes.examine_predicates() or facts is None \
             or facts.tree is None or not facts.params:
+        return False
+    if cj.relation in families.GROUPS["stateless"]:
+        # state and repeatability are read from the source, never by
+        # calling f, and say nothing about which inputs f accepts
         return False
     # the numbers each parameter admits, its holes and absence aside
     domain = {p: without_sentinels(b) if b is not None else None
