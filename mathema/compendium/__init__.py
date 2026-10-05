@@ -102,6 +102,20 @@ def _installed_version(package: str,
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if package in ("math",) or package in stdlib:   # stdlib: always present
         return "*"
+    asked = (package, tuple(aliases))
+    if asked not in _VERSIONS:
+        _VERSIONS[asked] = _distribution_version(package, aliases)
+    return _VERSIONS[asked]
+
+
+#: installed versions already looked up in this process, by the
+#: `(package, aliases)` asked about
+_VERSIONS: dict = {}
+
+
+def _distribution_version(package: str, aliases) -> "str | None":
+    """The installed version `_installed_version` reports for a library
+    outside the standard library, looked up afresh."""
     from importlib import metadata
     names = [package, *[a for a in aliases if a != package]]
     for name in names:
@@ -109,9 +123,8 @@ def _installed_version(package: str,
             return metadata.version(name)
         except Exception:
             continue
-    try:
-        provided = metadata.packages_distributions()
-    except Exception:
+    provided = _packages_distributions()
+    if provided is None:
         return None
     for name in names:
         for dist in provided.get(name) or []:
@@ -120,6 +133,23 @@ def _installed_version(package: str,
             except Exception:
                 continue
     return None
+
+
+#: `importlib.metadata.packages_distributions()`, read once per process
+#: (it walks every installed distribution's file list)
+_PROVIDED: dict = {}
+
+
+def _packages_distributions() -> "dict | None":
+    """The import-name to distributions map of the installed packages,
+    read once per process; None when it cannot be read."""
+    if "map" not in _PROVIDED:
+        from importlib import metadata
+        try:
+            _PROVIDED["map"] = metadata.packages_distributions()
+        except Exception:
+            _PROVIDED["map"] = None
+    return _PROVIDED["map"]
 
 
 def applicable_tag(library: str, versions: str = "*",
