@@ -829,7 +829,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                 if k in ("declared", "mechanism") and v}
     concept_objs = [Concept(name, src)
                     for src, names in asserted.items() for name in names]
-    meta = {}
+    meta: dict = {}
     if asserted or sources.get("keyword"):
         # the spec's own interop shape (a flat list under
         # meta.concepts) plus the un-flattened provenance beside it
