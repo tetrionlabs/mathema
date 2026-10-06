@@ -91,6 +91,52 @@ def vector_floor(holes: list, admits_zero: bool, length_free: bool,
     return items
 
 
+#: the ordinary draws a vector takes before its magnitude corners, so
+#: a claim false at ordinary points falls there first
+_DRAWS_BEFORE_CORNERS = 4
+
+
+def corner_floor(corners: list, length_free: bool) -> list:
+    """Intent:
+        Floor items for a vector's magnitude corners
+        (`probing.sequence_corners`), one per corner, after
+        `_DRAWS_BEFORE_CORNERS` items that pass the trial's random draw
+        through unchanged: the pair itself when the length is free, else
+        the pair repeated to the trial's length (None below 2).
+    """
+    if not corners:
+        return []
+    items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
+    for pair in corners:
+        if length_free:
+            items.append(lambda base, pair=pair: list(pair))
+        else:
+            items.append(lambda base, pair=pair: [pair[i % 2] for i in range(len(base))]
+                         if len(base) > 1 else None)
+    return items
+
+
+def table_corner_floor(corners: list) -> list:
+    """Intent:
+        Floor items for a table's magnitude corners, one per corner,
+        after `_DRAWS_BEFORE_CORNERS` items that pass the draw through:
+        every column set to the pair repeated to the column's length
+        (the pair itself for a column shorter than 2).
+    """
+    if not corners:
+        return []
+    items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
+
+    def column(pair, col):
+        n = len(col) if isinstance(col, (list, tuple)) and len(col) > 1 else 2
+        return [pair[i % 2] for i in range(n)]
+    for pair in corners:
+        items.append(lambda base, pair=pair: {c: column(pair, col)
+                                              for c, col in base.items()}
+                     if isinstance(base, dict) and base else None)
+    return items
+
+
 def _pairs(holes: list) -> list:
     """Every two of the admitted hole values, in order, that one
     container can hold apart: `pd.NA` is a nullable column's hole, which

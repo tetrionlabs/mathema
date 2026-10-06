@@ -7379,7 +7379,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
-        hole member in it) and the holes its random draws carry; None
+        hole member in it, and a vector's magnitude corners) and the
+        holes its random draws carry; None
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
     """
@@ -7404,12 +7405,23 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
     except Exception:
         admits_zero = False
     if form == "vec":
+        from .probing import sequence_corners
         floor = _floor.vector_floor(holes, admits_zero, length_free=not shared,
                                     absent=absent)
+        # the magnitude corners of the completed element range, after
+        # the degenerate containers
+        floor += _floor.corner_floor(
+            sequence_corners(record if record is not None else bound),
+            length_free=not shared)
     elif form == "mat":
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
     else:
+        from .probing import sequence_corners
         floor = _floor.table_floor(holes, absent=absent)
+        # each column meets the magnitude corners of the completed
+        # element range, after the degenerate tables
+        floor += _floor.table_corner_floor(
+            sequence_corners(record if record is not None else bound))
     return _floor.ContainerDraws(form, floor, holes)
 
 

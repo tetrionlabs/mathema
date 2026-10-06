@@ -729,7 +729,7 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   proven    is_empty_safe[scores]: is_empty_safe(scores)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds
-    holds      computation  len(f(scores)) = len(scores)   877 entries across 185 draws, sizes (1, 1) to (8, 1)
+    holds      computation  len(f(scores)) = len(scores)   882 entries across 185 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
@@ -737,17 +737,17 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   preserves_type  type(f(scores)) = type(scores)   holds
-    holds      computation  type(f(scores)) = type(scores)   822 entries across 186 draws, sizes (1, 1) to (8, 1)
+    holds      computation  type(f(scores)) = type(scores)   764 entries across 176 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
-    falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
+  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-2.8381494956158138, -0.4254556073372662, 8.436996229785226, 6.088382694778112]
+    falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-2.8381494956158138, -0.4254556073372662, 8.436996229785226, 6.088382694778112]: output [1.1576900427756998e-05, 0.00012924446113696248, 0.9126954157158059, 0.08716376292262935] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
     falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   875 entries across 186 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   869 entries across 185 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```

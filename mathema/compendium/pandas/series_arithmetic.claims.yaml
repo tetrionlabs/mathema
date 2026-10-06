@@ -29,7 +29,7 @@ pandas.Series.mul:
       statement: "for a in R^n, other in [-1e6, 1e6], f(a, other) == a * other"
       note: "Stated for a factor whose product with every element stays finite in float64."
     - name: elementwise
-      statement: "for a in R^n, other in R^n, f(a, other) ~= a * other"
+      statement: "for a in [-1e150, 1e150]^n, other in [-1e150, 1e150]^n, f(a, other) ~= a * other"
 
 pandas.Series.div:
   claims:

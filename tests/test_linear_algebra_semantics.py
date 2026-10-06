@@ -132,7 +132,8 @@ def test_plus_on_vectors_is_never_concatenation(law, true):
 
 def test_a_bound_library_function_sees_the_elementwise_value():
     # `h(2*x)` passes the doubled vector, not the list repeated twice
-    p = _one(vecs, "let h = numpy.linalg.norm, h(2*x) == 2*h(x)")
+    p = _one(vecs, "for x in [-1e6, 1e6]^n, let h = numpy.linalg.norm, "
+                   "h(2*x) == 2*h(x)")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
     p = _one(vecs, "let h = numpy.linalg.norm, "
                    "h(x + y)**2 == h(x)**2 + h(y)**2")
@@ -140,11 +141,11 @@ def test_a_bound_library_function_sees_the_elementwise_value():
 
 
 def test_a_returned_list_is_read_back_as_a_vector():
-    p = _one(doubled, "f(x) == 2*x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) == 2*x")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
-    p = _one(doubled, "f(x) + f(x) == 4*x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) + f(x) == 4*x")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
-    p = _one(doubled, "f(x) == x + x + x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) == x + x + x")
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 

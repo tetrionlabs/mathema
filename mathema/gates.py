@@ -1066,6 +1066,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     else:
         corners = [{n: _corner_value(n, edges[n][min(i, len(edges[n]) - 1)])
                     for n in names} for i in (0, 1)]
+    # a sequence's magnitude corners (the cancelling pairs, the float
+    # limit pair), each at the first box corner of the other coordinates
+    from .probing import sequence_corners
+
+    def _corner_sequence(name, pair):
+        if name in planned:
+            import itertools
+            cycle = itertools.cycle(pair)
+            return resolver.synth(name, corner_sizes, lambda: next(cycle),
+                                  _random.Random(0))
+        return [pair[i % 2] for i in range(3)]
+    for seq in [n for n in names if n in seq_names
+                and n not in mat_names and n not in table_names]:
+        for pair in sequence_corners(cj_domain.get(seq)):
+            corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner

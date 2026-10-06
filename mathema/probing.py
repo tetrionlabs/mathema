@@ -442,10 +442,11 @@ def _exact_pair(*values):
                  for v in values)
 
 
-def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
+def _numbers_agree(u, v, abs_tol, rel_tol: float) -> bool:
     # a NaN agrees with nothing; the same infinity is one point; a
     # finite value is close within the tolerances, complex values by
-    # abs(u - v)
+    # abs(u - v); `abs_tol` is a float, or an exact rational where it
+    # was scaled to a magnitude beyond float range
     if holds_nan(u) or holds_nan(v):
         return False
     if holds_inf(u) or holds_inf(v):
@@ -455,11 +456,18 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
         if isinstance(u, complex) or isinstance(v, complex):
             return False
         u, v = _exact_pair(u, v)
-        if not math.isfinite(abs_tol):
+        if isinstance(abs_tol, float) and not math.isfinite(abs_tol):
             return True
         allowed = max(Fraction(rel_tol) * max(abs(u), abs(v)),
                       Fraction(abs_tol))
         return abs(u - v) <= allowed
+    if isinstance(abs_tol, Fraction):
+        # a tolerance scaled to a magnitude beyond float range holds two
+        # finite floats within it
+        try:
+            abs_tol = float(abs_tol)
+        except OverflowError:
+            return True
     if isinstance(u, complex) or isinstance(v, complex):
         return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
     return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
@@ -1808,6 +1816,43 @@ def _ordinary_element(rng: random.Random, lo: float, hi: float) -> float:
     if a <= b:
         return rng.uniform(a, b) if a < b else a
     return _between(lo, hi, rng.random()) if lo < hi else lo
+
+
+def _cancel_magnitudes(top: float) -> list:
+    """The magnitudes of the cancelling pairs `[M, -M]` a sequence meets
+    inside a range reaching `top` on both sides: 1e16, 1e300 and `top`
+    itself (the float limit when the range is unbounded), those within
+    it."""
+    out: list = []
+    for m in (1e16, 1e300, top):
+        if 0 < m <= top and m not in out:
+            out.append(m)
+    return out or [top]
+
+
+def sequence_corners(bounds, n: "int | None" = None) -> list:
+    """Intent:
+        The magnitude corners of a sequence whose elements range over
+        `bounds` (None the whole line, an unbounded end at the number
+        representation's reach), each a list: the pairs that cancel at
+        a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
+        range's own limit, and the range's opposite ends `[lo, hi]`;
+        every entry inside the range. With `n`, each pair is repeated
+        to length `n`, and none is given below 2. Empty when the
+        elements are not one real interval.
+    """
+    span = _element_range(bounds)
+    if span is None or (n is not None and n < 2):
+        return []
+    lo, hi = span
+    pairs: list = []
+    if lo < 0 < hi:
+        pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
+    if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
+        pairs.append([lo, hi])
+    if n is None:
+        return pairs
+    return [[pair[i % 2] for i in range(n)] for pair in pairs]
 
 
 def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":

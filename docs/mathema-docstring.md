@@ -49,7 +49,7 @@ print(mathema.check(ema, claims=[]))
 ```text
 mathema.Record(ema) · source, no side effects · form b96b0b96677f
   bounded  for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   holds
-    holds      computation  for x in ([0.0, 1.0])^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   731 entries across 161 draws, sizes (1, 1) to (8, 1)
+    holds      computation  for x in ([0.0, 1.0])^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   735 entries across 161 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[])
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
 ```

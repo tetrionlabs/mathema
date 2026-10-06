@@ -115,9 +115,9 @@
   "ascii": "for A in (R | {missing})^(n,3)|absent, f(A) in R**(n,3)"
  },
  "space_output_named": {
-  "input": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ¹⁵ ∪ {absent}, x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(A, x) ∈ R**15",
-  "ascii": "for A in (R | {missing})^(n,15)|absent, x in (R | {missing})^n|absent, f(A, x) in R**15"
+  "input": "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15",
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ¹⁵ ∪ {absent}, x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(A, x) ∈ R**15",
+  "ascii": "for A in (R | {missing})^(n,15)|absent, x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(A, x) in R**15"
  },
  "space_excluded_fixed": {
   "input": "for A in R^(30,15), excluded_outside_domain(A)",
@@ -615,14 +615,14 @@
   "ascii": "let q = numpy.linalg.qr, for A in (R | {missing})^(n,n)|absent, q(A)[0] @ q(A)[1] ~= A"
  },
  "table_column_attribute": {
-  "input": "for c in [-2, 2], f(df, c) == c * df.returns",
-  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df.returns",
-  "ascii": "for c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df.returns"
+  "input": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+  "unicode": "∀ df ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df.returns",
+  "ascii": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df.returns"
  },
  "table_column_item": {
-  "input": "for c in [-2, 2], f(df, c) == c * df[\"returns\"]",
-  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df[\"returns\"]",
-  "ascii": "for c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df[\"returns\"]"
+  "input": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df[\"returns\"]",
+  "unicode": "∀ df ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df[\"returns\"]",
+  "ascii": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df[\"returns\"]"
  },
  "vector_running_maximum": {
   "input": "for a in R^n, f(a) == cummax(a)",

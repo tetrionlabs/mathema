@@ -49,11 +49,16 @@ def strict_dot(tmp_path_factory):
     return m.strict_dot
 
 
+#: the element range of the strict_dot tests: the length mechanics are
+#: what they test, and a product of two entries stays finite
+_RANGE = "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^m"
+
+
 def test_an_equal_length_premise_holds_by_construction(strict_dot):
     # without the premise the free 2..8 draws mismatch and hit the
     # raise, a genuine out-of-contract falsification
-    (bare,) = check_conjectures(strict_dot,
-                                [claim("f(x, y) == f(y, x)", route="probe")])
+    (bare,) = check_conjectures(strict_dot, [claim(
+        f"{_RANGE}, f(x, y) == f(y, x)", route="probe")])
     assert bare.verdict == "falsified"
 
     # with it, lengths are drawn equal, so the raise region is never
@@ -61,7 +66,8 @@ def test_an_equal_length_premise_holds_by_construction(strict_dot):
     for spelling in ("assuming len(x) == len(y), f(x, y) == f(y, x)",
                      "assuming dim(x, 0) == dim(y, 0), f(x, y) == f(y, x)",
                      "assuming rows(x) == rows(y), f(x, y) == f(y, x)"):
-        (p,) = check_conjectures(strict_dot, [claim(spelling, route="probe")])
+        (p,) = check_conjectures(strict_dot, [claim(f"{_RANGE}, {spelling}",
+                                                    route="probe")])
         assert p.verdict == "holds", (spelling, p.note)
 
 
@@ -69,7 +75,7 @@ def test_a_bounded_length_premise_constrains_the_draw(strict_dot):
     # equal-and-at-least-4: still holds, and the plan never draws
     # below the floor (a raise on a too-short input would falsify)
     (p,) = check_conjectures(strict_dot, [claim(
-        "assuming dim(x, 0) == dim(y, 0) and dim(x, 0) >= 4, "
+        f"{_RANGE}, assuming dim(x, 0) == dim(y, 0) and dim(x, 0) >= 4, "
         "f(x, y) == f(y, x)", route="probe")])
     assert p.verdict == "holds", p.note
 
@@ -248,12 +254,14 @@ def test_a_shared_space_dimension_draws_equal_lengths(strict_dot):
     # equal every trial, premise or not, the space form IS the
     # constraint
     (shared,) = check_conjectures(strict_dot, [claim(
-        "for x in R^n, y in R^n, f(x, y) == f(y, x)", route="probe")])
+        "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) == f(y, x)",
+        route="probe")])
     assert shared.verdict == "holds", (shared.verdict, shared.note)
     # distinct dimension names are free to differ, so the strict
     # function's own length guard falsifies
     (distinct,) = check_conjectures(strict_dot, [claim(
-        "for x in R^n, y in R^m, f(x, y) == f(y, x)", route="probe")])
+        "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^m, f(x, y) == f(y, x)",
+        route="probe")])
     assert distinct.verdict == "falsified"
 
 

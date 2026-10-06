@@ -57,7 +57,7 @@ mathema.Record(average_return) · source, no side effects · form cb973acd88fd
     proven     mathematics  for returns in [-0.1, 0.1]^n ⊂ ℝ, min(returns) <=
         f(returns) <= max(returns)
     holds      computation  for returns in [-0.1, 0.1]^n : float, min(returns)
-        <= f(returns) <= max(returns)   205 entries across 43 draws, sizes (1,
+        <= f(returns) <= max(returns)   208 entries across 44 draws, sizes (1,
         1) to (8, 1)
     falsified  policy       f([])   f(returns) returns nan at returns = []: no
         value for no data, and no empty policy is stated

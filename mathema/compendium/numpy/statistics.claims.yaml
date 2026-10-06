@@ -46,7 +46,7 @@ numpy.median:
 numpy.percentile:
   claims:
     - name: within_range
-      statement: "for a in R^n, q in [0, 100], min(a) <= f(a, q) <= max(a)"
+      statement: "for a in [-1e150, 1e150]^n, q in [0, 100], min(a) <= f(a, q) <= max(a)"
     - name: definition
       statement: "for a in R^n, q in [0, 100], f(a, q) == quantile(a, q / 100)"
       note: "The q-th percentile is the (q / 100)-quantile, interpolated linearly."
@@ -54,7 +54,7 @@ numpy.percentile:
 numpy.quantile:
   claims:
     - name: within_range
-      statement: "for a in R^n, q in [0, 1], min(a) <= f(a, q) <= max(a)"
+      statement: "for a in [-1e150, 1e150]^n, q in [0, 1], min(a) <= f(a, q) <= max(a)"
     - name: definition
       statement: "for a in R^n, q in [0, 1], f(a, q) == quantile(a, q)"
       note: "Stated for one q; q outside [0, 1] raises ValueError."

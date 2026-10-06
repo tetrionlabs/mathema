@@ -78,23 +78,23 @@ _VECTOR_FUNCTIONS = [scale_numpy, scale_pandas, scale_polars, scale_list]
 _TABLE_FUNCTIONS = [column_pandas, column_polars, attribute_pandas]
 
 _VECTOR_CLAIMS = [
-    ("for returns in R^n, c in [-2, 2], f(returns, c) == c * returns",
-     "for returns in R^n, c in [-2, 2], f(returns, c) == returns + c"),
-    ("for returns in R^n, c in [-2, 2], "
+    ("for returns in [-1e6, 1e6]^n, c in [-2, 2], f(returns, c) == c * returns",
+     "for returns in [-1e6, 1e6]^n, c in [-2, 2], f(returns, c) == returns + c"),
+    ("for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "norm(f(returns, c)) ~= abs(c) * norm(returns)",
-     "for returns in R^n, c in [-2, 2], "
+     "for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "norm(f(returns, c)) ~= c * norm(returns)"),
-    ("for returns in R^n, c in [-2, 2], "
+    ("for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "mean(f(returns, c)) ~= c * mean(returns)",
-     "for returns in R^n, c in [-2, 2], "
+     "for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "mean(f(returns, c)) ~= mean(returns) + c"),
-    ("for returns in R^n, c in [-2, 2], "
+    ("for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "dot(f(returns, c), returns) ~= c * norm(returns)**2",
-     "for returns in R^n, c in [-2, 2], "
+     "for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "dot(f(returns, c), returns) ~= norm(returns)**2"),
-    ("for returns in R^n, c in [-2, 2], "
+    ("for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "f(returns + c, c) ~= c * returns + c * c",
-     "for returns in R^n, c in [-2, 2], "
+     "for returns in [-1e6, 1e6]^n, c in [-2, 2], "
      "f(returns + c, c) ~= c * returns + c"),
 ]
 
@@ -111,8 +111,8 @@ def _holds(p):
 @pytest.mark.parametrize("fn", _VECTOR_FUNCTIONS)
 @pytest.mark.parametrize("true, false", _VECTOR_CLAIMS)
 def test_one_claim_text_on_every_vector_runtime_type(fn, true, false):
-    # the claim's own side stays exact past the float limit (norm(...)**2
-    # is the exact sum of squares, 61bfd67), so a corner draw decides
+    # the range keeps the float limit out: the scaling is what is tested
+    # here, and the limit has its own test
     p = _one(fn, true)
     assert _holds(p), (fn.__name__, true, p.verdict, p.note,
                        p.counterexample)
@@ -121,14 +121,14 @@ def test_one_claim_text_on_every_vector_runtime_type(fn, true, false):
 
 
 _TABLE_CLAIMS = [
-    ("for c in [-2, 2], f(df, c) == c * df.returns",
-     "for c in [-2, 2], f(df, c) == df.returns + c"),
-    ('for c in [-2, 2], f(df, c) == c * df["returns"]',
-     'for c in [-2, 2], f(df, c) == df["returns"] + c'),
-    ("for c in [-2, 2], norm(f(df, c)) ~= abs(c) * norm(df.returns)",
-     "for c in [-2, 2], norm(f(df, c)) ~= norm(df.returns)"),
-    ("for c in [-2, 2], mean(f(df, c)) ~= c * mean(df.returns)",
-     "for c in [-2, 2], mean(f(df, c)) ~= mean(df.returns)"),
+    ("for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+     "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == df.returns + c"),
+    ('for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df["returns"]',
+     'for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == df["returns"] + c'),
+    ("for df in [-1e6, 1e6]^n, c in [-2, 2], norm(f(df, c)) ~= abs(c) * norm(df.returns)",
+     "for df in [-1e6, 1e6]^n, c in [-2, 2], norm(f(df, c)) ~= norm(df.returns)"),
+    ("for df in [-1e6, 1e6]^n, c in [-2, 2], mean(f(df, c)) ~= c * mean(df.returns)",
+     "for df in [-1e6, 1e6]^n, c in [-2, 2], mean(f(df, c)) ~= mean(df.returns)"),
 ]
 
 
@@ -151,9 +151,9 @@ def test_a_returned_dataframe_compares_element_by_element(same, shifted,
     assert _holds(_one(same, "f(df) == df"))
     p = _one(shifted, "f(df) == df")
     assert p.verdict == "falsified", (p.verdict, p.note)
-    p = _one(doubled, 'f(df)["a"] == 2 * df["a"]')
+    p = _one(doubled, 'for df in [-1e6, 1e6]^n, f(df)["a"] == 2 * df["a"]')
     assert _holds(p), (p.verdict, p.note, p.counterexample)
-    p = _one(doubled, 'f(df)["a"] == df["a"]')
+    p = _one(doubled, 'for df in [-1e6, 1e6]^n, f(df)["a"] == df["a"]')
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
@@ -167,6 +167,6 @@ def test_the_scalar_derive_route_never_reads_a_column(law):
 
 
 def test_the_sampling_note_says_a_table_was_drawn():
-    p = _one(column_pandas, "for c in [-2, 2], f(df, c) == c * df.returns",
+    p = _one(column_pandas, "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
              "probe")
     assert "df~Table(" in p.meta["mathema.sampling"], p.meta

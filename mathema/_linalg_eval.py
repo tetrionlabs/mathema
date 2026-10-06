@@ -350,6 +350,11 @@ def roundoff_allowance(evaluate, env: dict, names, sides,
             signs = np.array([rng.choice((-1.0, 1.0))
                               for _ in range(value.size)]).reshape(value.shape)
             moved = value * (1.0 + signs * _NUDGE)
+            # an entry at the float limit moves inward, never past it,
+            # by two steps so it still differs from an entry moved one
+            over = ~np.isfinite(moved) & np.isfinite(value)
+            if over.any():
+                moved = np.where(over, value * (1.0 - 2 * _NUDGE), moved)
             if bound is None:
                 return moved
             flat_moved, flat = moved.ravel(), value.ravel()
@@ -357,8 +362,10 @@ def roundoff_allowance(evaluate, env: dict, names, sides,
                              for m, o in zip(flat_moved, flat)])
             return kept.reshape(value.shape).astype(value.dtype)
         if isinstance(value, float):
-            return inside(value * (1.0 + rng.choice((-1.0, 1.0)) * _NUDGE),
-                          value, bound)
+            moved = value * (1.0 + rng.choice((-1.0, 1.0)) * _NUDGE)
+            if not math.isfinite(moved) and math.isfinite(value):
+                moved = value * (1.0 - 2 * _NUDGE)
+            return inside(moved, value, bound)
         return value
     moved = [0.0, 0.0]
     for _ in range(3):

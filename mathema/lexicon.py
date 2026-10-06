@@ -122,7 +122,7 @@ LEXICON: dict[str, str] = {
     # shape is outside the space it was said to be in
     "space_output_wrong_shape": "for A in R^(n,3), f(A) in R^(n,3)",
     # a shared name draws x to A's rows; the output is A's other axis
-    "space_output_named": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
+    "space_output_named": "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15",
     # a fixed shape has an outside (a wrong size on a fixed axis, a
     # wrong rank); an unguarded function accepts it and the exclusion
     # claim says so with the shape it accepted
@@ -340,8 +340,8 @@ LEXICON: dict[str, str] = {
     "matrix_qr_factors":
         "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
     # a DataFrame's column, as an attribute or an item, is a vector
-    "table_column_attribute": "for c in [-2, 2], f(df, c) == c * df.returns",
-    "table_column_item": 'for c in [-2, 2], f(df, c) == c * df["returns"]',
+    "table_column_attribute": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+    "table_column_item": 'for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df["returns"]',
     # a running maximum, the least and greatest elements, and a table's
     # columns read as vectors on the derive route
     "vector_running_maximum": "for a in R^n, f(a) == cummax(a)",

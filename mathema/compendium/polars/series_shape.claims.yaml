@@ -24,13 +24,13 @@ polars.Series.shift:
 polars.Series.diff:
   claims:
     - name: differences
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
+      statement: "for a in [-1e150, 1e150]^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
       note: "n defaults to 1; position 0 is null."
 
 polars.Series.pct_change:
   claims:
     - name: changes
-      statement: "for a in R^n, assuming dim(a) >= 2 and min(abs(a)) > 0, f(a)[1:] ~= a[1:] / a[:-1] - 1"
+      statement: "for a in [-1e150, 1e150]^n, assuming dim(a) >= 2 and min(abs(a)) > 0, f(a)[1:] ~= a[1:] / a[:-1] - 1"
       note: "The relative change from the previous element; position 0 is null."
 
 polars.Series.rolling_mean:
@@ -54,5 +54,5 @@ polars.Series.rolling_sum:
 polars.Series.ewm_mean:
   claims:
     - name: recursion@adjust=False,alpha=0.5
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a, alpha=0.5, adjust=False)[1:] ~= 0.5 * f(a, alpha=0.5, adjust=False)[:-1] + 0.5 * a[1:]"
+      statement: "for a in [-1e150, 1e150]^n, assuming dim(a) >= 2, f(a, alpha=0.5, adjust=False)[1:] ~= 0.5 * f(a, alpha=0.5, adjust=False)[:-1] + 0.5 * a[1:]"
       note: "Unadjusted, each element is the previous mean moved halfway to the new element; element 0 is a[0]."

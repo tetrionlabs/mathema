@@ -437,8 +437,8 @@ for A in R^(n,n), f(A) == A   # falsified
 
 <!-- example: numpy-functions verdicts fn=solve_for -->
 ```
-for A in R^(n,n), b in R^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
-for A in R^(n,n), b in R^n, assuming det(A) != 0, f(A, b) == b   # falsified
+for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
+for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, f(A, b) == b   # falsified
 ```
 
 ## Runtime enforcement

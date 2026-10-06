@@ -22,7 +22,7 @@ pandas.Series.shift:
 pandas.Series.diff:
   claims:
     - name: differences
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
+      statement: "for a in [-1e150, 1e150]^n, assuming dim(a) >= 2, f(a)[1:] ~= a[1:] - a[:-1]"
       note: "periods defaults to 1; position 0 is missing."
     - name: differences@periods=2
       statement: "for a in R^n, assuming dim(a) >= 3, f(a, periods=2)[2:] ~= a[2:] - a[:-2]"
