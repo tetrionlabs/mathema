@@ -819,22 +819,40 @@ def leaf_words(path: str, leaf) -> "str | None":
     return f"{path} = null (hole)" if word == "null" else f"{path} = {word}"
 
 
-def path_bindings_hold(value, root: str, bindings: dict) -> bool:
+def path_bindings_verdict(value, root: str, bindings: dict) -> "str | None":
     """Intent:
-        Whether every path binding rooted at `root` (`{"o.lines[*].qty":
-        bound}`) holds of `value`: every value the path reaches is in
-        its bound.
+        How the path bindings rooted at `root` (`{"o.lines[*].qty":
+        bound}`) judge `value`: None when every value each path reaches
+        is in its bound; `"no value"` when a path reaches an absence or
+        a hole (a key left out, an index past the end, a field holding
+        None, a nan) the bound does not admit; `"outside"` when it
+        reaches a value outside the bound. Each bound is read as a path
+        bound (`PATH_DEFAULTS`): it admits neither kind of absence
+        unless it says so.
     """
     for key, bound in bindings.items():
         if not (key.startswith(root + ".") or key.startswith(root + "[")):
             continue
+        dom = complete(bound, PATH_DEFAULTS)
         for leaf in path_values(value, path_steps(key[len(root):])):
             try:
-                if not domain_contains(leaf, bound):
-                    return False
+                inside = domain_contains(leaf, dom)
             except Exception:
-                return False
-    return True
+                inside = False
+            if inside:
+                continue
+            if isinstance(leaf, _Sentinel) or is_missing(leaf):
+                return "no value"
+            return "outside"
+    return None
+
+
+def path_bindings_hold(value, root: str, bindings: dict) -> bool:
+    """Intent:
+        Whether every path binding rooted at `root` holds of `value`
+        (`path_bindings_verdict` finds nothing outside).
+    """
+    return path_bindings_verdict(value, root, bindings) is None
 
 
 def language_ref(text: str) -> "LanguageRef | None":

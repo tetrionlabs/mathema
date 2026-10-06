@@ -831,6 +831,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return True
         return isinstance(e, (int, float)) and domain_contains(e, bound)
 
+    from .domain import path_bindings_hold as _paths_hold
+    # the parameters the claim binds paths into (`o.lines[*].qty`): a
+    # path binding is a filter on the member
+    path_bound_names = {n for n in names
+                        if any(k.startswith(n + ".") or k.startswith(n + "[")
+                               for k in cj_domain)}
+
     def admits(point):
         for n in seq_names | table_names:
             # a sequence coordinate is a container of the shape its
@@ -882,6 +889,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             except (TypeError, ValueError, OverflowError):
                 continue
             if not domain_contains(fv, bound):
+                return False
+        for n in path_bound_names:
+            # a member where a path reaches a value outside its bound, or
+            # no value the bound does not admit, is outside the claim's
+            # domain
+            if n in point and not _paths_hold(point[n], n, cj_domain):
                 return False
         for a_l, a_rel, a_r in assum:
             try:
