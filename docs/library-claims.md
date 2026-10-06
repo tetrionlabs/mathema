@@ -96,11 +96,11 @@ mathema verify --root .
 <!-- example: library output -->
 ```text
 ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
-     note definition: numpy.percentile gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], q = 30.72597523513774, axis = None, out = None, overwrite_input = False, method = 'linear', keepdims = False, weights = None, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+     note definition: numpy.percentile gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], q = 30.72597523513774, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 4 holds, 0 falsified
-     note definition: numpy.std gives no value at a = [1e+300, -1e+300], axis = None, dtype = None, out = None, ddof = 0, keepdims = <no value>, where = <no value>, mean = <no value>, correction = <no value>, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
-     note definition@ddof=1: numpy.std gives no value at a = [1e+300, -1e+300], axis = None, dtype = None, out = None, ddof = 1, keepdims = <no value>, where = <no value>, mean = <no value>, correction = <no value>, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+     note definition: numpy.std gives no value at a = [1e+300, -1e+300], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+     note definition@ddof=1: numpy.std gives no value at a = [1e+300, -1e+300], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
 ok   risk.moves: no baseline record; 1 proven, 2 holds, 0 falsified
 ok   risk.value_at_risk: no baseline record; 1 proven, 3 holds, 0 falsified
 ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified

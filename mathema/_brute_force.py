@@ -446,8 +446,12 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                           f"{plan.coverage.words(checked + 1)}"),
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
+                # the witness is a call of the real function at a point
+                # the domain admits: an executed witness, which the
+                # corroboration gate keeps as it is
                 meta=with_executed(
-                    {"mathema.derive_route": "brute_force", **_tried(grid),
+                    {"mathema.derive_route": "brute_force",
+                     "mathema.witness_executed": True, **_tried(grid),
                      **counted,
                      # a value a listed sentinel stands for is only
                      # reproduced by calling with that same value

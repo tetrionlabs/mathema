@@ -10212,6 +10212,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         words = path_words(point_args)
         return ", ".join([said, *words]) if words else said
 
+    def _drawn_text(point_args) -> str:
+        # the drawn arguments alone, the parameters held at their
+        # defaults left out: a finding about the computation at a draw
+        # names the draw, not the call's whole signature
+        drawn = [(p, v) for p, v in zip(kinds, point_args)
+                 if p in sampled_kinds]
+        if not drawn or len(drawn) == len(kinds):
+            return _point_text(point_args)
+        return _fmt(tuple(v for _p, v in drawn), tuple(p for p, _v in drawn),
+                    shown_names)
+
     def narrowed(p, draw):
         # a parameter with path bindings is drawn until every binding
         # holds, a bounded rejection; a point none satisfies is outside
@@ -10797,7 +10808,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # corner: a finding about its computation, not a wrong model
             checked += 1
             if corner_finding is None:
-                corner_finding = _point_text(args)
+                corner_finding = _drawn_text(args)
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if float_gave_out and ctx.companion_mode == "spawn" \
@@ -11061,7 +11072,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     checked += 1
                     if conditioning_finding is None:
                         conditioning_finding = _conditioning.finding_words(
-                            library_key_of(fn), _point_text(args), found)
+                            library_key_of(fn), _drawn_text(args), found)
                     call_raised[0] = call_nan[0] = call_inf[0] = None
                     call_hole[0] = None
                     continue
