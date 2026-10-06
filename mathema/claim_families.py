@@ -578,6 +578,11 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
                         for p in names):
         return ("unknown", 0, "accuracy against the exact value is read "
                 "for scalar parameters only")
+    if not any(facts.param_kinds.get(p) in ("scalar", "int", "complex")
+               for p in names):
+        return ("unknown", 0, "accuracy against the exact value is read "
+                "for a number computed from numbers, and no parameter "
+                "holds a number")
     if exact_value(body, *[1.0] * len(names)) is None \
             and exact_value(body, *[0.5] * len(names)) is None:
         return ("unknown", 0, "the body has no exact form to compare the "
@@ -1015,6 +1020,10 @@ def _pole_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
+    from .hazards import not_a_number
+    reason = not_a_number(facts, target, "is_pole_safe")
+    if reason is not None:
+        return ("unknown", 0, reason)
     bounds = domain.get(target)
 
     candidates: list = []
@@ -1829,11 +1838,21 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None       # a deliberate/other exception is not a crash
         return None
 
+    from .conjecture import _text_set_members
+    members = _text_set_members(bound)
+    sampled = None
     if language_bound:
         # the declared language's own hazards and members, then its
         # near non-members: a crash is reported for the side it happened
         # on, and the witness shrinks without crossing the boundary
         names, corpus = _language_corpus(bound, rng)
+    elif members is not None:
+        # a finite set of strings: every member works, and nothing
+        # outside the set is the parameter's
+        names = ""
+        corpus = [(v, None) for v in members]
+        sampled = (f"every member of {target} tried "
+                   f"({len(members)} member{'s' if len(members) != 1 else ''})")
     else:
         names = ""
         corpus = [(v, None) for v in
@@ -1848,6 +1867,9 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
         exc = crash_on(args, value)
         if exc is None:
             return True
+        if side is None and members is not None:
+            return (f"{target} = {value!r}, a member of its set, raised {exc}, "
+                    f"an unguarded crash, not a declared rejection")
         if side is None:
             minimal = shrink(value, lambda s: crash_on(args, s) is not None)
             return (f"{target} = {minimal!r} raised {exc} on arbitrary input, "
@@ -1863,8 +1885,11 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials, len(corpus)), trial)
+    verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
+                                         max(trials, len(corpus)), trial)
+    if sampled is not None:
+        return verdict, checked, cx, {"mathema.sampled": sampled}
+    return verdict, checked, cx
 
 
 def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1897,6 +1922,9 @@ def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .symbolic import ProofResult
     param = lhs_src
     if param not in facts.params:
+        return None
+    from .hazards import numeric_or_enum
+    if not numeric_or_enum(fn, facts, param):
         return None
     domain = domain or {}
     bounds = domain.get(param)
@@ -1942,6 +1970,67 @@ def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _enum_spelling_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                         trials: int, target: str, enum_cls):
+    """Intent:
+        is_representation_safe on an Enum parameter: at each member,
+        the call with the member against the call with the member's
+        value, the one real cross-type spelling. The value spelling is
+        outside the annotation, so f may refuse it (a raise); a value
+        it returns must agree with the member's and keep the return
+        type f declares. The first member that breaks this is the
+        witness.
+    """
+    import inspect
+    import typing
+    raw = inspect.unwrap(fn)
+    try:
+        declared = typing.get_type_hints(raw).get("return")
+    except Exception:
+        declared = None
+    members = list(enum_cls)
+    if not members:
+        return None
+    state = {"i": 0}
+
+    def agrees(a, b) -> bool:
+        if a == b:
+            return True
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            tol = cj.tolerance if cj.tolerance is not None else 1e-9
+            return abs(float(a) - float(b)) <= tol
+        return False
+
+    def trial(args):
+        member = members[state["i"] % len(members)]
+        state["i"] += 1
+        outcomes = []
+        for label, spelled in (("member", member), ("value", member.value)):
+            try:
+                with _pinned_float_env():
+                    out = _call_with_target(raw, facts, target, args, spelled)
+                outcomes.append((label, "returned", out))
+            except Exception as exc:
+                outcomes.append((label, "raised", type(exc).__name__))
+        (_m, what_m, out_m), (_v, what_v, out_v) = outcomes
+        if what_m == "raised":
+            return (f"{target} = {member} is a member of {enum_cls.__name__} "
+                    f"but the call raised {out_m}")
+        if what_v == "raised":
+            return True
+        if not agrees(out_m, out_v):
+            return (f"{target} = {member} returned {out_m!r} but the value "
+                    f"spelling {member.value!r} returned {out_v!r}")
+        if isinstance(declared, type) and not isinstance(out_v, declared):
+            return (f"{target} = {member.value!r} returned {out_v!r} "
+                    f"({type(out_v).__name__}) where f declares -> "
+                    f"{declared.__name__}")
+        return True
+
+    return _probe_trials(fn, facts, target, domain, rng,
+                         max(trials, len(members)), trial)
+
+
 def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                           trials: int):
     """Empirical half of is_representation_safe[param]: at each
@@ -1957,12 +2046,19 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     falsifies). What runs here is what
     mypy cannot ask: whether f(2), f(2.0), and f(True) AGREE."""
     from .grammar import domain_contains
-    from .hazards import _spelling_values
+    from .hazards import _spelling_values, not_a_number
+    from .runtime_types import enum_parameters
     target = cj.lhs
     if target not in facts.params:
         return None
     if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
+    enum_cls = enum_parameters(fn).get(target)
+    if enum_cls is not None:
+        return _enum_spelling_probe(fn, facts, cj, domain, rng, trials, target, enum_cls)
+    reason = not_a_number(facts, target, "is_representation_safe")
+    if reason is not None:
+        return ("unknown", 0, reason)
     bounds = domain.get(target)
     values = _spelling_values(bounds)
     if not values:
@@ -2060,6 +2156,11 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .hazards import (_SAFE_RANGE, _admitted_spelling,
                           _restricted_domain_targets)
     target = cj.lhs
+    if target in facts.params:
+        from .hazards import not_a_number
+        reason = not_a_number(facts, target, "is_number_set_safe")
+        if reason is not None:
+            return ("unknown", 0, reason)
     names = _restricted_domain_targets(fn, facts).get(target)
     if not names:
         return None
@@ -4204,6 +4305,11 @@ def _overflow_probe(fn, facts, cj, domain: dict, rng: random.Random,
     "does not overflow" (no infinity returned, no OverflowError) as
     the inside condition. The bare claim also tries the representation
     extremes the domain admits, where overflow lives."""
+    if cj.lhs in facts.params:
+        from .hazards import not_a_number
+        reason = not_a_number(facts, cj.lhs, "is_overflow_safe")
+        if reason is not None:
+            return ("unknown", 0, reason)
     return _region_probe(fn, facts, cj, domain, rng, trials,
                          "is_overflow_safe")
 

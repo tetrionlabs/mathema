@@ -726,8 +726,6 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   is_state_safe  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, scores) = 1
-           derive could not decide it; the probe could not decide it either (accuracy against the exact value is read for scalar parameters only)
   proven    is_empty_safe[scores]: is_empty_safe(scores)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds
@@ -756,8 +754,9 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
 `sums_to_one` came from the docstring `Claims:` block, and the rest are
-mathema's built-in battery: every function gets the determinism, state
-and stability probes, and a list-in, list-out function also gets the
+mathema's built-in battery: every function gets the determinism and
+state probes, a function computing a number from numbers gets the
+stability probe too, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
 permutes nor sorts its input. A third, `raises[scores]`, is a
 suggestion read off the guard: it asks whether `softmax` always raises

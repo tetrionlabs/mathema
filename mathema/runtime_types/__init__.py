@@ -437,9 +437,10 @@ class _Realising:
     `__wrapped__` is the function, so signature and source readers see
     the function itself."""
 
-    def __init__(self, fn, bindings: dict, sig):
+    def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
+        self._enums = enums or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -454,6 +455,9 @@ class _Realising:
             if name in bound.arguments:
                 bound.arguments[name] = realise(bound.arguments[name],
                                                 detection)
+        for name, cls in self._enums.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_enum_member(bound.arguments[name], cls)
         return observed_plain(fn(*bound.args, **bound.kwargs))
 
     def __repr__(self) -> str:
@@ -475,12 +479,48 @@ def calling(fn, facts):
     if isinstance(fn, _Realising):
         return fn
     bindings = realised_parameters(facts)
-    if not bindings:
+    enums = enum_parameters(fn)
+    if not bindings and not enums:
         return fn
     sig = _signature(fn)
     if sig is None:
         return fn
-    return _Realising(fn, bindings, sig)
+    return _Realising(fn, bindings, sig, enums)
+
+
+def enum_parameters(fn) -> dict:
+    """Intent:
+        `{param: EnumClass}` for every parameter annotated with an
+        `Enum` subclass (`Optional[Side]` included): the drawn value of
+        such a parameter is one of the Enum's values, and the call
+        passes the member it names.
+    """
+    import enum
+    try:
+        hints = typing.get_type_hints(inspect.unwrap(fn))
+    except Exception:
+        return {}
+    out: dict = {}
+    for name, hint in hints.items():
+        if name == "return":
+            continue
+        args = [a for a in typing.get_args(hint) if a is not type(None)] or [hint]
+        if len(args) == 1 and isinstance(args[0], type) \
+                and issubclass(args[0], enum.Enum):
+            out[name] = args[0]
+    return out
+
+
+def as_enum_member(value, cls):
+    """The member of `cls` whose value is `value`, when there is one; a
+    member, `None` or any other value is passed on unchanged."""
+    import enum
+    if value is None or isinstance(value, enum.Enum):
+        return value
+    try:
+        return cls(value)
+    except (ValueError, TypeError):
+        return value
 
 
 # --- the hint for an undeclared vector parameter ------------------------

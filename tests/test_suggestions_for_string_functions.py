@@ -50,6 +50,8 @@ def test_numeric_stability_is_not_offered_where_nothing_is_numeric(mod):
     assert "is_numerically_stable" not in _names(mod.label)
 
 
-def test_numeric_stability_stays_where_the_function_returns_a_number(mod):
-    assert "is_numerically_stable" in _names(mod.width)
+def test_numeric_stability_asks_for_a_number_computed_from_numbers(mod):
+    # a count of a string's characters is exact: accuracy has nothing to
+    # compare, so the family is not offered; a number from a number is
+    assert "is_numerically_stable" not in _names(mod.width)
     assert "is_numerically_stable" in _names(mod.scale)
