@@ -133,10 +133,13 @@ def test_what_the_function_returns_does_not_matter():
 
 
 def test_a_claim_named_is_deterministic_that_states_something_else():
-    # an ordinary claim: the derive route's disproof stands
+    # an ordinary claim: the derive route's disproof stands, reproduced
+    # by executing f at its witness
     (p,) = check_conjectures(minus_five, [mathema.claim(
         "f(x) >= 0", name="is_deterministic")])
-    assert (p.verdict, p.route) == ("falsified", "derive"), (p.verdict, p.note)
+    assert (p.verdict, p.route) == ("falsified", "probe:semi_analytical"), \
+        (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") == "reproduced"
 
 
 def zero_price(x: float) -> float:

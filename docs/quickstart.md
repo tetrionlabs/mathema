@@ -62,7 +62,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: falsify output -->
 ```text
-falsified price = -8767334983.247742, rate = 0.3637206090059846
+falsified price = -1, rate = 1
 ```
 
 The claim is wrong, not the code. A negative price multiplied by

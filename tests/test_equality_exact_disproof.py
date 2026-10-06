@@ -55,8 +55,10 @@ def test_rounding_that_makes_the_code_exactly_equal_does_not_falsify():
 
 
 def test_approximate_equality_keeps_its_allowance():
+    # `~=` is abs(f(x) - x) <= ε, decided exactly: 1e-10 is within the
+    # 1e-9 default, for every x
     p = _v(just_above, "for x in [0, 1], f(x) ~= x", "best")
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "proven", (p.verdict, p.note)
     assert "mathema bug" not in (p.note or "")
 
 

@@ -737,10 +737,10 @@ def test_claim_helper_strings():
     by = {p.name: p.verdict for p in results}
     assert by["f_x_eq_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1
-    # x**3 >= 0 is false over the reals: a derive disproof with an
-    # executed witness, not an overflow
+    # x**3 >= 0 is false over the reals: a derive disproof whose
+    # witness is executed, not an overflow
     (neg,) = [p for p in results if p.name == "f_x_ge_0"]
-    assert (neg.verdict, neg.route) == ("falsified", "derive")
+    assert (neg.verdict, neg.route) == ("falsified", "probe:semi_analytical")
     assert neg.meta.get("mathema.corroboration") == "reproduced"
     assert float(neg.counterexample.split("=", 1)[1]) < 0, neg.counterexample
 

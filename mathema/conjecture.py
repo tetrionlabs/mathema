@@ -4781,7 +4781,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         and not (probe.meta or {}).get("mathema.missing_unknown"):
                     probe.note = f"{probe.note or ''}; {told}".lstrip("; ")
         reading = _approx_reading(cj)
-        if reading and not probe.name.startswith(f"{cj.name}[") \
+        if reading and probe.name == cj.name \
                 and reading not in (probe.note or ""):
             probe.note = f"{probe.note or ''}; {reading}".lstrip("; ")
         if canonical:

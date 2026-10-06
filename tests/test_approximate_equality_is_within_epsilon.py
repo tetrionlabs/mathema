@@ -38,8 +38,11 @@ def test_the_same_offset_falsifies_exact_equality():
 
 
 def test_the_record_states_how_it_read_approximate_equality():
-    main, _ = _main(exact_offset, LEXICON["exact_offset_vs_approx"])
+    main, rows = _main(exact_offset, LEXICON["exact_offset_vs_approx"])
     assert "read as abs(f(x) - x) <= ε, ε = 1e-9 (the default)" in main.note
+    # only the claim's own line says it, never a line under it
+    assert not [p.name for p in rows if p is not main
+                and "read as abs(" in (p.note or "")]
 
 
 def test_a_declared_tolerance_is_the_epsilon_the_record_names():

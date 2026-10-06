@@ -134,8 +134,12 @@ def to_plain(value):
     if isinstance(value, Table):
         return {k: to_plain(v) for k, v in value.items()}
     if is_array(value):
-        out = _floats(value.tolist()) if value.dtype.kind == "O" \
-            else value.tolist()
+        # a claim's own exact result goes to the function as floats; an
+        # array read exactly (the claim's side read in exact arithmetic)
+        # keeps its rationals
+        out = _floats(value.tolist()) \
+            if getattr(value, "exact", None) is not None \
+            and value.dtype.kind == "O" else value.tolist()
         for position, hole in (getattr(value, "hole_values", None) or {}).items():
             # the hole value the array was drawn with, back in its slot
             if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
@@ -808,6 +812,13 @@ class _Root:
     def __mul__(self, other):
         if isinstance(other, _Root):
             return _exact_sqrt(self.radicand * other.radicand)
+        if _finite_real(other) and not isinstance(other, _Root):
+            # c * sqrt(r) is sqrt(c**2 * r) with the sign of c
+            c = _exact(other)
+            if c == 0:
+                return 0.0
+            root = _exact_sqrt(self.radicand * c * c)
+            return root if c > 0 else -root
         return super().__mul__(other)  # type: ignore[misc]
 
     __rmul__ = __mul__
@@ -1405,6 +1416,18 @@ def exact_values(a):
     return _exact(v) if _finite_real(v) else None
 
 
+def _read_exactly(value) -> bool:
+    """Whether a claim value is already exact, as where the claim's side
+    is read exactly: an exact rational, or an object array of them that
+    carries no rounded view."""
+    from fractions import Fraction
+    if isinstance(value, Fraction):
+        return True
+    return (is_array(value) and value.dtype.kind == "O"
+            and getattr(value, "exact", None) is None
+            and any(isinstance(v, Fraction) for v in value.ravel()))
+
+
 def _from_exact(values):
     """An array of exact values as a claim value: each entry rounded
     once, an entry beyond float range kept exact, the exact values
@@ -1461,24 +1484,33 @@ def arith(op: str, a, b):
         values = np.frompyfunc(fn, 2, 1)(ea, eb)
     except ValueError:
         return fn(a, b)
+    if _read_exactly(a) or _read_exactly(b):
+        return values
     return _from_exact(values)
 
 
 def _scalar_arith(op: str, fn, a, b):
-    """`a <op> b` between two numbers: the float operation, except
-    exactly (rounded once, beyond float range kept exact) when an operand
-    is already an exact rational or the float operation overflows from
-    finite operands."""
+    """`a <op> b` between two numbers: the float operation (an overflow
+    is left to the reading of the claim's side in exact arithmetic),
+    except exactly, and unrounded, when an operand is already an exact
+    rational, as where the claim's side is read exactly. A square root a
+    word returned keeps its own exact products (see `_Root`), and an
+    operation on one that overflows is computed from its value read
+    exactly."""
     from fractions import Fraction
-    exact = isinstance(a, Fraction) or isinstance(b, Fraction)
-    if not exact:
+    if not (_finite_real(_element(a)) and _finite_real(_element(b))):
+        return fn(a, b)
+    if isinstance(a, _Root) or isinstance(b, _Root):
+        # a word's square root: its own arithmetic, and past float range
+        # its value read exactly
         try:
             out = fn(a, b)
         except OverflowError:
             out = None
         if out is not None and not (isinstance(out, float) and math.isinf(out)):
             return out
-    if not (_finite_real(_element(a)) and _finite_real(_element(b))):
+        return fn(_exact(_element(a)), _exact(_element(b)))
+    if not (isinstance(a, Fraction) or isinstance(b, Fraction)):
         return fn(a, b)
     ea, eb = _exact(_element(a)), _exact(_element(b))
     if op == "/" and eb == 0:
@@ -1488,7 +1520,7 @@ def _scalar_arith(op: str, fn, a, b):
                 or (eb < 0 and ea == 0):
             return fn(a, b)
         eb = int(eb)
-    return _rounded(fn(ea, eb))
+    return fn(ea, eb)
 
 
 def matmul(a, b):
