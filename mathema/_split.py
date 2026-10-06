@@ -15,6 +15,11 @@ two rows that hold:
 `k` is the least length, from one past the witness's, at which the
 claim with that premise is not falsified and the region row is not
 falsified either, so every witness of the claim lies below it.
+
+The empty input is not such a length: `R^n` runs from n = 1, and what
+f does at `[]` is the empty-input line's fact (is_empty_safe, with its
+own fixes), so a headline whose witness is the empty input offers no
+split.
 """
 from __future__ import annotations
 
@@ -58,6 +63,9 @@ def split_offer(fn, facts, cj, probe, text: str) -> "dict | None":
     if len(lengths) != 1:
         return None
     (param, length), = lengths.items()
+    if length == 0:
+        # the witness is the empty input, the empty-input line's fact
+        return None
     if not text:
         return None
     for at in range(max(length + 1, 2), _MAX_AT + 1):
