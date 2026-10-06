@@ -1122,7 +1122,7 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         raise NotSymbolic(
             f"a comprehension outside the recognized sum(...) shapes: "
             f"{ast.unparse(node)!r}, sum(<generator>) derives; a "
-            f"comprehension VALUE (a built list/dict) is vector-valued "
+            f"comprehension whose value is a built list or dict is vector-valued "
             f"and out of scope",
             category="unsupported-comprehension")
     if isinstance(node, ast.Lambda):

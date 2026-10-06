@@ -40,7 +40,7 @@ def test_unknown_gates_unless_risk_accepted():
 def test_strict_refuses_owned_risk_and_skips():
     claims = [_probe("a", "unknown"), _probe("b", "skipped")]
     r = gate(claims, strict=True, accepted_risk=frozenset({"a"}))
-    assert r.problems == ["1 skipped claim(s)", "1 accepted-risk claim(s)"]
+    assert r.problems == ["b unknown", "1 accepted-risk claim(s)"]
     r = gate(claims, strict=False, accepted_risk=frozenset({"a"}))
     assert r.problems == []
 

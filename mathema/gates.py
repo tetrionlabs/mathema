@@ -1302,11 +1302,10 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                           "mathema.corroboration_unexecutable": True}
         falsified.counterexample = None
         falsified.note = (
-            f"{falsified.note}; uncorroborated disproof: the derive route "
-            f"reported this false, but the claim form has no point "
-            f"evaluation against the function, so the symbolic disproof "
-            f"has no executed witness, and a falsification needs one; the "
-            f"verdict stays unknown").lstrip("; ")
+            f"{falsified.note}; derive found this claim false, but there "
+            f"is no single input to run it at, so no run of the code "
+            f"confirms it; a falsification needs one, so the verdict "
+            f"stays unknown").lstrip("; ")
         return falsified
     seq_names = [n for n in deps["names"]
                  if facts.param_kinds.get(n) in SEQUENCE_KINDS]
@@ -1389,17 +1388,16 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         falsified.meta["mathema.corroboration_reason"] = \
             C.EXACT_ARITHMETIC_ONLY
         falsified.note = (
-            f"{falsified.note}; uncorroborated disproof: "
-            f"{C.EXACT_ARITHMETIC_ONLY_NOTE} (compared exactly at derive's "
-            f"witness, the executed values are equal), so the verdict "
-            f"stays unknown").lstrip("; ")
+            f"{falsified.note}; derive found this claim false, but "
+            f"{C.EXACT_ARITHMETIC_ONLY_NOTE} (run at derive's "
+            f"counterexample, the two sides come out equal), so the "
+            f"verdict stays unknown").lstrip("; ")
         return falsified
     falsified.note = (
-        f"{falsified.note}; uncorroborated disproof: the derive route "
-        f"reported this false but no in-domain counterexample reproduced "
-        f"against the function ({result.checked} points checked), a "
-        f"symbolic disproof nothing reproduces indicates an engine bug "
-        f"worth reporting, so the verdict stays unknown")
+        f"{falsified.note}; derive found this claim false, but no run of "
+        f"the code inside the domain reproduced it ({result.checked} points "
+        f"checked); a disproof nothing reproduces is probably a mathema "
+        f"bug worth reporting, so the verdict stays unknown")
     return falsified
 
 

@@ -345,8 +345,8 @@ def test_a_first_falsification_note_puts_each_command_last_on_its_line():
                         meta={}, verdict="falsified")
     (note,) = _initially_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
     lines = note.splitlines()
-    assert lines[0] == ("note numpy.ptp: at_most_the_largest falsified on first "
-                        "adjudication: the installed library does not do what the "
+    assert lines[0] == ("note numpy.ptp: at_most_the_largest initially "
+                        "falsified: the installed library does not do what the "
                         "row states:"), lines
     assert lines[1:] == [
         "  (i) to record the falsification as a discovery, run: mathema accept "

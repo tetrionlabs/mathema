@@ -192,8 +192,8 @@ def _elementwise(op, left, right):
                 ast.Pow: lambda: left ** right}[type(op)]()
     if isinstance(op, (ast.Add, ast.Sub)):
         if not (lm and rm):
-            raise ValueError("a number added to a matrix is outside the "
-                             "lift")
+            raise ValueError("derive cannot read a number added to a "
+                             "matrix")
         return left + right if isinstance(op, ast.Add) else left - right
     if isinstance(op, ast.Mult):
         if lm and rm:
@@ -201,11 +201,11 @@ def _elementwise(op, left, right):
         return _scalar(left) * right if rm else left * _scalar(right)
     if isinstance(op, ast.Div):
         if rm:
-            raise ValueError("division by a matrix is outside the lift")
+            raise ValueError("derive cannot read division by a matrix")
         return left / _scalar(right)
     if isinstance(op, ast.Pow):
         if rm:
-            raise ValueError("a matrix exponent is outside the lift")
+            raise ValueError("derive cannot read a matrix exponent")
         return HadamardPower(left, _scalar(right))
     raise ValueError(f"unsupported matrix operator {ast.dump(op)}")
 

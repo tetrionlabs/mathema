@@ -458,8 +458,8 @@ def _uncorroborated_family_disproof(sketch: str, why: str,
         meta["mathema.corroboration_reason"] = reason
     return ProofResult(
         "undecided",
-        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
-               f"falsification needs an executed witness",
+        sketch=f"{sketch}; derive found a disproof but {why}, and a "
+               f"falsification needs a run of the code that shows it",
         meta=meta)
 
 
@@ -529,8 +529,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
         value = None
     if value is None:
         return _uncorroborated_family_disproof(
-            sketch, f"the pole {pole_text} has no machine spelling the "
-                    f"domain admits, so no call could be made there")
+            sketch, f"the pole {pole_text} is not a value a float can "
+                    f"hold inside the domain, so the code could not be "
+                    f"run there")
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
@@ -940,7 +941,7 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return _pole_exclusion_proof(
         fn, facts, domain, [param],
         proven_sketch=f"the declared domain for {param} excludes every "
-                      f"DISCOVERED pole of {facts.name} (pole discovery "
+                      f"pole of {facts.name} that mathema found (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
 
@@ -2802,8 +2803,8 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
                f"checked in the domain)")
     return ProofResult(
         "undecided",
-        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
-               f"falsification needs an executed witness",
+        sketch=f"{sketch}; derive found a disproof but {why}, and a "
+               f"falsification needs a run of the code that shows it",
         meta=meta)
 
 
@@ -4290,7 +4291,7 @@ RESERVED_FAMILIES = {
 def _reserved_note(name: str) -> str:
     """Why a reserved family reports skipped."""
     return (f"{name} ({RESERVED_FAMILIES[name]}) is reserved for a later "
-            f"release and not adjudicated in this one")
+            f"release and not checked in this one")
 
 
 def _reserved_derive(fn, facts, lhs_src: str, rhs_src: str,

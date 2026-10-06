@@ -64,14 +64,14 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-note funcs.settle: nonneg, symmetric_in_sign falsified on first adjudication. A declared claim is kept until a human decides it:
+note funcs.settle: nonneg, symmetric_in_sign initially falsified. A declared claim is kept until a human decides it:
   (i) fix the code
   (ii) to record it as a discovery, run: mathema accept funcs.settle <claim> --as discovery
   (iii) to replace it with a corrected claim, edit it, then run: mathema accept funcs.settle <claim> --as superseded
   (iv) to try a spelling first (it writes nothing), run: mathema check funcs.settle --claim "..."
 ok   funcs.midpoint: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
 FAIL funcs.settle: no baseline record; 1 proven, 2 holds, 2 falsified  <- 2 falsified claim(s)
-0 fresh (form unchanged, skipped), 2 adjudicated, 1 problem(s)
+0 unchanged since the last run (not run again), 2 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -139,7 +139,7 @@ mathema verify --root .
 ```text
 ok   funcs.midpoint: fresh
 FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -245,9 +245,9 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 ```text
 accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
   - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials
+  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', checked now: holds over 127 trials
   - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', adjudicated now: holds over 127 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
+write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', checked now: holds over 127 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
 declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
   - name: negative_exposure_negative_corrected
     statement: "for x in [-5.0, -1.0] : float|missing, f(x) > 0"
@@ -279,7 +279,7 @@ mathema verify --root .
 ```text
 ok   funcs.midpoint: fresh
 ok   funcs.settle: claims changed; 1 proven, 4 holds, 0 falsified
-1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 

@@ -1028,7 +1028,7 @@ _BLOCKER_HELP = {
                 "beyond field reads and sibling calls)",
     "loop": "the loop doesn't match a recognized fold/sum/dot shape",
     "branch": "a branch couldn't be resolved from the declared domain",
-    "recursion": "recursive calls can't be lifted",
+    "recursion": "derive cannot read recursive calls, so claims on it are decided by running the code",
     "no-parameters": "the function takes no parameters, so there's nothing to quantify over",
     "non-scalar-parameters": "a parameter isn't a scalar (or recognized sequence) of reals",
     "internal-error": "the lifter itself hit an internal error",

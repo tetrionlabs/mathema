@@ -72,6 +72,7 @@ class GateReport:
     builtin_proven: int = 0
     # the unknown claims by name, each with its one-line reason
     unknown_reasons: list = field(default_factory=list)
+    skipped_reasons: list = field(default_factory=list)
     # the clauses of the policy rows mathema wrote that do not hold
     unaccounted: list = field(default_factory=list)
     # the clauses of the declared policy rows that are falsified
@@ -182,11 +183,13 @@ def summary_counts(counts) -> str:
         proven += (f" ({mine} claim{'s' if mine != 1 else ''}, {builtin} "
                    f"built-in)")
     parts = [proven, f"{get('holds')} holds", f"{get('falsified')} falsified"]
+    # a claim mathema could not run reads as unknown, with its reason
+    # in the problems; the count keeps the two together
     for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
-                      ("skipped", "skipped"),
                       ("accepted_risk", "accepted risk")):
-        if get(key):
-            parts.append(f"{get(key)} {word}")
+        n = get(key) + (get("skipped") if key == "unknown" else 0)
+        if n:
+            parts.append(f"{n} {word}")
     return ", ".join(parts)
 
 
@@ -328,6 +331,7 @@ def gate(claims, *, strict: bool,
                 r.unknown_reasons.append((name, _first_sentence(note)))
         elif kind == "skipped":
             r.skipped += 1
+            r.skipped_reasons.append((name, _first_sentence(note)))
     # a falsified or invalidated claim is a failing check, in every
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
@@ -360,7 +364,11 @@ def gate(claims, *, strict: bool,
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
         if r.skipped:
-            r.problems.append(f"{r.skipped} skipped claim(s)")
+            # a claim mathema could not run is unknown, with its reason
+            named = [f"{n} unknown: {why}" if why else f"{n} unknown"
+                     for n, why in r.skipped_reasons]
+            r.problems.append("; ".join(named) if named else
+                              f"{r.skipped} unknown claim(s)")
         if r.owned:
             r.problems.append(f"{r.owned} accepted-risk claim(s)")
     if unresolved:
@@ -609,7 +617,7 @@ def _drop_retired_declared(key: str, current_claims: list,
             notes.append(
                 f"note {key}: claim {name!r} is still declared {where} "
                 "but retired as a discovery; remove it or restate it "
-                "(not adjudicated)")
+                "(not checked)")
         else:
             kept.append(c)
     return kept, notes
@@ -652,8 +660,8 @@ def _initially_falsified_hint(key: str, probes: list,
     for p in list(fresh):
         gate_meta = (getattr(p, "meta", None) or {}).get("mathema.gate") or {}
         if gate_meta.get("reason"):
-            lines.append(f"note {key}: gate ({p.statement}) falsified on first "
-                         f"adjudication: {gate_meta['reason']}. The claim is kept "
+            lines.append(f"note {key}: gate ({p.statement}) initially "
+                         f"falsified: {gate_meta['reason']}. The claim is kept "
                          f"until one of these is done:\n"
                          + _indented(options([f"to see the rows to state, run: "
                                               f"mathema claims {key}", "change f"])))
@@ -662,7 +670,7 @@ def _initially_falsified_hint(key: str, probes: list,
         pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
         clause = _policy_clause(p.name, p.statement, pol) if pol else None
         if clause:
-            lines.append(f"note {key}: {p.name} falsified on first adjudication; "
+            lines.append(f"note {key}: {p.name} initially falsified; "
                          + clause[len(str(p.name)):].lstrip(":,").strip().replace(
                              "; change the word or the code",
                              ". Change the word in the claims file, or change f."))
@@ -675,13 +683,13 @@ def _initially_falsified_hint(key: str, probes: list,
                    f"accept {key} {p.name} --as discovery"
                    for p in sorted(fresh, key=lambda p: str(p.name))]
         return lines + [
-            f"note {key}: {names} falsified on first adjudication: the "
+            f"note {key}: {names} initially falsified: the "
             f"installed library does not do what the row states:\n"
             + _indented(options(accepts + [
                 f"correct the row in {library_source}, then run: mathema "
                 f"accept {key} {p.name} --as superseded"
                 for p in sorted(fresh, key=lambda p: str(p.name))]))]
-    return lines + [f"note {key}: {names} falsified on first adjudication. A "
+    return lines + [f"note {key}: {names} initially falsified. A "
             f"declared claim is kept until a human decides it:\n"
             + _indented(options([
                 "fix the code",
@@ -731,7 +739,7 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
                 notes.append(
                     f"note {key}: claim {name!r} is still declared on its "
                     "authoring surface but retired as a discovery; remove "
-                    "it or restate it (not adjudicated)")
+                    "it or restate it (not checked)")
                 already_noted.add(name)
         else:
             kept.append(p)
@@ -930,14 +938,14 @@ def claims_file_entries(path: str, root: str,
             os.path.join("mathema", "compendium")):
         return {}, True, [
             f"note {where}: `compendium: {library}` names this project's "
-            f"own package; nothing in it was adjudicated"]
+            f"own package; nothing in it was checked"]
     tag = applicable_tag(library, versions, aliases)
     lines: list = []
     if tag is None:
         installed = _installed_version(library, aliases)
         if installed is None:
             return {}, True, [f"note {where}: {library} is not importable "
-                              f"here; nothing in it was adjudicated"]
+                              f"here; nothing in it was checked"]
         # installed outside the file's range: every row is adjudicated
         # against the installed version and marked outside its range,
         # so it is recorded and never used as a fact
@@ -949,7 +957,7 @@ def claims_file_entries(path: str, root: str,
                     row.setdefault("versions", versions)
         lines.append(
             f"note {where}: {library} {installed} is outside the file's "
-            f"range {versions}; its rows are adjudicated against "
+            f"range {versions}; its rows are checked against "
             f"{library} {installed} and never used as facts here (`mathema "
             f"compendium export {library}` writes the rows that hold into "
             f"a project compendium for this version)")
@@ -1166,7 +1174,7 @@ def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
                        for f in files if states_key(f))
     return (f"note {key}: no claims file about {key} applies to {have}"
             + (f" ({ranges})" if ranges else "")
-            + "; its record is kept as it is and not re-adjudicated")
+            + "; its record is kept as it is and not checked again")
 
 
 def _out_of_range_notes(root: str, heads: set) -> list:
@@ -1204,7 +1212,7 @@ def _out_of_range_notes(root: str, heads: set) -> list:
                    f"every claims file about it, so none of their rows is "
                    f"used here: {ranges}. `mathema compendium status "
                    f"{library}` shows the calls; verifying a file by path "
-                   f"adjudicates its rows against {library} {installed}")
+                   f"checks its rows against {library} {installed}")
     return out
 
 
@@ -1465,7 +1473,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # with a fresh record. The key fails and names the repair.
             src, reason = broken[key]["source"], broken[key]["reason"]
             _fail(key, f"{key}: the verified record {src} {reason}; "
-                       f"nothing was adjudicated or written for this key. "
+                       f"nothing was checked or written for this key. "
                        f"Repair it (after a merge, keep every discoveries, "
                        f"historical and superseded row from both sides), "
                        f"or restore it with `git restore {src}`, and "
@@ -1490,15 +1498,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _fail(key, f"{key}: the {section} row {name!r} carries no "
                        f"acceptance, and only `mathema accept` retires a "
                        f"claim, so it retires nothing; remove the row, or "
-                       f"accept the claim with `mathema accept {key} "
-                       f"{name} --as ...`")
+                       f"accept the claim: mathema accept {key} "
+                       f"{name} --as ...")
         recorded_form = (verified_entry.get("identity") or {}).get("form")
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
         fn = _resolve_func_ref(key, root=root)
         if fn is None and key in eager and key in library:
             out.lines.append(f"note {key}: not importable from the "
-                             f"installed library; nothing adjudicated")
+                             f"installed library; nothing checked")
             continue
         if fn is None:
             from .compendium import is_library_record
@@ -1510,8 +1518,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 out.lines.append(
                     f"note {key}: library claims only, the library is "
                     f"not importable here; accept rows --as trusted, or "
-                    f"install the library for the sweep to adjudicate "
-                    f"them")
+                    f"install the library for verify to check them")
                 continue
             msg = f"{key}: cannot resolve to a live function"
             out.problems.append(msg)
@@ -1544,7 +1551,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             remedies = [rename_command(key, o) for o in moved_here[key]]
             _fail(key, f"{key}: no record yet, and its form hash matches "
                        f"the orphan record {', '.join(moved_here[key])}; "
-                       f"nothing was adjudicated or written for this key. "
+                       f"nothing was checked or written for this key. "
                        f"If it moved, a human keeps its history with: "
                        + " (or) ".join(remedies)
                        + "; if it is a different function, remove the "
@@ -1592,14 +1599,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         conflict["authored"]
                     msg = (f"{key}: claim {conflict['claim']!r} was "
                            f"re-authored but is already verified, the "
-                           f"verified version keeps adjudicating; adopt the "
-                           f"change with `mathema accept {key} "
-                           f"{conflict['claim']} --as superseded`")
+                           f"verified version is the one checked; to adopt the "
+                           f"change, run: mathema accept {key} "
+                           f"{conflict['claim']} --as superseded")
                 else:
                     msg = (f"{key}: claim {conflict['claim']!r} differs "
-                           f"between the docstring and the declared file, "
-                           f"run `mathema docsync` to resolve (neither "
-                           f"version is adjudicated until then)")
+                           f"between the docstring and the declared file, and "
+                           f"neither version is checked until it is "
+                           f"resolved; to resolve it, run: mathema docsync")
                 _fail(key, msg)
             # a claim whose two surfaces disagree has no single meaning
             # to record, so neither version is adjudicated or written
@@ -1997,7 +2004,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.extend(
             f"     warning: claim {name} of {key} was verified under "
             f"mathema; its grammar is now {grammar!r}, so mathema no "
-            f"longer adjudicates it"
+            f"longer checks it"
             for name, grammar in grammar_changes.get(key, {}).items())
         out.keys.append({
             "key": key,

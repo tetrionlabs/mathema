@@ -15,7 +15,7 @@ mathematics. One line follows per aspect of what is known about it:
   `f(nan)`, `f(None)` or `f([])`.
 
 Each line starts with its verdict word (proven, holds, falsified,
-unknown, skipped). A falsified absence or missing line is followed by
+unknown); a claim mathema could not run reads unknown, with the reason. A falsified absence or missing line is followed by
 its possible fixes.
 """
 from __future__ import annotations
@@ -181,6 +181,7 @@ def _split_lines(p, key: str) -> list:
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
+    verdict = "unknown" if verdict == "skipped" else verdict
     line = f"    {verdict:<9}  {aspect:<11}  {what}"
     return f"{line}   {detail}" if detail else line
 
@@ -282,6 +283,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             head = min((ln.split()[0] for ln in lines if ln.split()
                         and ln.split()[0] in _STRENGTH),
                        key=_STRENGTH.__getitem__, default=_verdict(main))
+            head = "unknown" if head == "skipped" else head
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out

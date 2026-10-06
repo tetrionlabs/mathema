@@ -34,7 +34,7 @@ def note_length(text: str) -> int:
 <!-- example: let-warning session -->
 ```console
 $ mathema check notes.py:note_length --claim 'let g = html.escape, for text in {"a < b", "fish & chips"}, f(g(text)) >= f(text)'
-ok   notes.note_length: source, no side effects; claims 1/1 adjudicated (1 proven, 0 holds, 0 falsified)
+ok   notes.note_length: source, no side effects; claims 1/1 checked (1 proven, 0 holds, 0 falsified)
      warning: let g = html.escape calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would
 ```
 

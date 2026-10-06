@@ -62,7 +62,7 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 7/7 adjudicated (1 proven, 6 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 checked (1 proven, 6 holds, 0 falsified)
 ```
 
 Everything before the last comma is the domain and everything after it is the
@@ -136,7 +136,7 @@ mathema check sigmoid.py \
 
 <!-- example: sigmoid output -->
 ```text
-ok   sigmoid.logistic: source, no side effects; claims 6/6 adjudicated (4 proven, 2 holds, 0 falsified)
+ok   sigmoid.logistic: source, no side effects; claims 6/6 checked (4 proven, 2 holds, 0 falsified)
 ```
 
 ## When the code is wrong

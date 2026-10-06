@@ -1193,7 +1193,7 @@ def _decide_relation(lhs, rhs, relation: str, domain: dict, bound_context,
                 sketch="a disproof resting on symbolic integration needs "
                        "independent confirmation, and numeric quadrature "
                        "of the original integral could not evaluate here "
-                       f"-- left undecided; symbolic value gave "
+                       f"; left undecided; symbolic value gave "
                        f"{_humanize(diff)}")
     return result
 

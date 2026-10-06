@@ -196,7 +196,7 @@ class Record:
             if id(p) in grouped["used"]:
                 continue
             mark = {"holds": "holds    ", "falsified": "falsified", "proven": "proven   ",
-                    "skipped": "skipped  ", "unknown": "unknown  ",
+                    "skipped": "unknown  ", "unknown": "unknown  ",
                     "invalidated": "invalidated"}.get(p.verdict.split(":", 1)[0], p.verdict)
             missing = (p.meta or {}).get("mathema.missing") or {}
             pol = (p.meta or {}).get("mathema.policy")
@@ -1003,7 +1003,7 @@ def status(root: str = ".") -> str:
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
         state = ("fresh" if stored and stored == current
-                 else "STALE (code changed since spec)" if stored else "no hash")
+                 else "stale (code changed since spec)" if stored else "no hash")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")
     return "mathema status\n" + ("\n".join(lines) if lines else

@@ -34,7 +34,7 @@ def test_an_exact_equality_disproof_inside_the_allowance_is_falsified():
         assert p.verdict == "falsified", (route, p.verdict, p.note)
         assert p.counterexample
         assert p.meta.get("mathema.corroboration") == "reproduced"
-        assert "engine bug" not in (p.note or "")
+        assert "mathema bug" not in (p.note or "")
         assert "exactly" in (p.note or "")
 
 
@@ -57,13 +57,13 @@ def test_rounding_that_makes_the_code_exactly_equal_does_not_falsify():
 def test_approximate_equality_keeps_its_allowance():
     p = _v(just_above, "for x in [0, 1], f(x) ~= x", "best")
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "engine bug" not in (p.note or "")
+    assert "mathema bug" not in (p.note or "")
 
 
 def test_a_declared_tolerance_on_equality_stays_part_of_the_claim():
     p = _v(just_above, "for x in [0, 1], f(x) == x", "best", tolerance=1e-9)
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "engine bug" not in (p.note or "")
+    assert "mathema bug" not in (p.note or "")
     assert p.meta.get("mathema.corroboration") is None
 
 
@@ -73,5 +73,5 @@ def test_rounding_to_exact_equality_is_labelled_exact_arithmetic_only():
         assert p.meta.get("mathema.corroboration") == "uncorroborated"
         assert p.meta.get("mathema.corroboration_reason") == \
             "exact arithmetic only", (route, p.meta)
-        assert "engine bug" not in (p.note or ""), (route, p.note)
+        assert "mathema bug" not in (p.note or ""), (route, p.note)
         assert "floating point does not reproduce" in (p.note or "")

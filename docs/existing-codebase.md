@@ -69,8 +69,8 @@ billing.fees
  .late_fee   | 1:3p   || {7 | 0 | -}  || yes     | 1  | -      | -    || yes   | -             || -    | -       | -     || no-report || 4/5     || 26%
  .settle     | 11:13p || {9 | 0 | -}  || yes     | 1  | -      | -    || yes   | -             || -    | -       | -     || no-report || 3/4     || 26%
 
-0/3 claimed, 3/3 derivable, 3/3 lift unconditionally, 3/3 fully typed, 11/14 docstring quality criteria met, no coverage.json/.coverage report found, mean docsync 26%.
-`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
+0/3 claimed, 3/3 derivable, 3/3 derive reads with nothing supplied, 3/3 fully typed, 11/14 docstring quality criteria met, no coverage.json/.coverage report found, mean docsync 26%.
+`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe what derive reads with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and checked for every function here.
 ```
 
 `0/3 claimed`, and all three could be proven. The `claims` cell reads
@@ -181,7 +181,7 @@ mathema check billing.fees.discounted --root .
 
 <!-- example: codebase output -->
 ```text
-FAIL billing.fees.discounted: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL billing.fees.discounted: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified. The witness says why:
@@ -264,7 +264,7 @@ mathema audit billing --root . --filter unclaimed --cols key,claims
 ok   billing.fees.discounted: no baseline record; 2 proven (1 claim, 1 built-in), 0 holds, 0 falsified
 ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
 ok   billing.fees.settle: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
-0 fresh (form unchanged, skipped), 3 adjudicated, 0 problem(s)
+0 unchanged since the last run (not run again), 3 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 {"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}
 ```

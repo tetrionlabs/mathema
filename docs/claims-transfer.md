@@ -329,9 +329,9 @@ Which values a runtime holds as missing is stated once, under the
 runtime's own key, as a **definition**: a row of `defines:`, never of
 `claims:`, written `<word> := {<members>}` with the word `missing` (the
 hole class) or `absent` (absence, also spelled `None`). A definition is taken at face value,
-never adjudicated: its record reads `verdict: trusted`, `route: axiom`,
-and `mathema verify` lists a project's own definitions under
-`definitions (trusted)`, outside the verdict counts. A set with plain
+never checked, so it has no verdict: its record reads `standing: axiom`,
+`route: axiom`, and `mathema verify` lists a project's own definitions
+under `definitions (axioms, taken as stated)`, outside the verdict counts. A set with plain
 members, e.g. `missing := {null, nan}`, replaces what the key had; a set
 that includes the word itself, e.g. `missing := {missing, NaT}`, adds
 to it. A spelling the runtime type cannot realise fails when the file

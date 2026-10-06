@@ -131,7 +131,7 @@ def test_the_derive_route_declines_with_the_reason(tmp_path, letters):
     ''')
     p = _one(mod.shout, "for s in L[letters], f(s) in L[letters]", route="derive")
     assert p.verdict != "proven", (p.verdict, p.note)
-    assert "decided by execution" in (p.note or "") + str(p.sketch or "")
+    assert "decided by running the code" in (p.note or "") + str(p.sketch or "")
 
 
 def test_an_unknown_language_on_the_right_is_a_gap_not_a_crash(tmp_path, letters):

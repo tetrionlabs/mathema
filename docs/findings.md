@@ -152,7 +152,7 @@ mathema check options.py --claim "f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 
 <!-- example: parity output -->
 ```text
-FAIL options.put_call_parity_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL options.put_call_parity_gap: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The counterexample is `s = 1, k = 1, r = 1, t = -1, sigma = 1`, a negative

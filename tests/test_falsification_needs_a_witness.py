@@ -56,7 +56,7 @@ def test_a_calculus_disproof_with_no_executable_witness_is_unknown():
     assert p.verdict == "unknown"
     assert p.counterexample is None
     assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
-    assert "no executed witness" in p.note
+    assert "no run of the code confirms it" in p.note
 
 
 @pytest.mark.needs_full_proof_budget

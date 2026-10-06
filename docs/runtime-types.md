@@ -103,7 +103,7 @@ annotate:
 
 <!-- illustration -->
 ```text
-returns is used as a vector; this module imports pandas: annotate `returns: pd.Series` to sample it as one
+returns is used as a vector; this module imports pandas: to sample it as one, annotate: returns: pd.Series
 ```
 
 The hint rides the note of every claim on the function when a list
@@ -321,7 +321,7 @@ mathema.Record(sharpe) · source, no side effects · form ef276c12c167
                               (i) if dropping missing is intended, run: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
                               (ii) exclude missing
                               (iii) handle missing at entry
-taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2 to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with mathema, pandas 2.2 to 3.x); through the pandas.Series.mean definition and pandas.Series.std definition rows, lowered to sums over returns at a symbolic length: the relation holds for every length
+taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2 to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with mathema, pandas 2.2 to 3.x); through the pandas.Series.mean definition and pandas.Series.std definition rows, read as sums over returns at a symbolic length: the relation holds for every length
 pandas.Series.mean definition bundled mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std definition bundled mathema/compendium/pandas/series.claims.yaml
 ```
@@ -398,7 +398,7 @@ falsified probe
 taking pandas.Series.cummax as cummax(a) (axiom, bundled with mathema, pandas
 2.2 to 3.x); taking pandas.Series.min as min(a) (axiom, bundled with mathema,
 pandas 2.2 to 3.x); through the pandas.Series.cummax definition and
-pandas.Series.min definition rows, lowered to sums over prices at a symbolic
+pandas.Series.min definition rows, read as sums over prices at a symbolic
 length: the relation holds for every length of at least one (every element of
 prices / cummax(prices) - 1.0 is <= 0 (0 < prices[i] / cummax(prices)[i] <=
 1), so min(prices / cummax(prices) - 1.0) is too)

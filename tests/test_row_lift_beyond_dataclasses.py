@@ -190,10 +190,10 @@ def test_a_text_field_read_through_len_is_a_bounded_whole_number(rows, fn, shape
 def test_no_uncorroborated_disproof_over_dict_rows(rows):
     p = _one(rows.dict_total, "for line in L[lift_more_rows.LineDict], f(line) >= 0")
     assert p.verdict == "proven", (p.verdict, p.note)
-    assert "UNCORROBORATED" not in (p.note or "")
+    assert "derive found a disproof" not in (p.note or "")
     q = _one(rows.dict_width, "for line in L[lift_more_rows.LineDict], f(line) <= 9")
     assert q.verdict == "falsified", (q.verdict, q.note)
-    assert "UNCORROBORATED" not in (q.note or "")
+    assert "derive found a disproof" not in (q.note or "")
 
 
 def test_a_text_field_read_as_text_declines_naming_the_field(rows):

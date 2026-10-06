@@ -550,7 +550,7 @@ def test_status_reports_fresh_and_stale(tmp_path):
     # simulate the code changing after the spec was recorded
     p = tmp_path / ".mathema" / "verified" / f"{key}.yaml"
     p.write_text(p.read_text().replace(mathema.analyze(tracked).form, "deadbeef0000"))
-    assert "STALE" in mathema.status(root)
+    assert "stale (code changed since spec)" in mathema.status(root)
 
 
 def test_note_writes_spec_and_returns_record(tmp_path):

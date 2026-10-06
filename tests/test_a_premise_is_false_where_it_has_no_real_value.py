@@ -34,7 +34,7 @@ def test_a_claim_under_a_root_premise_is_proven():
         ident, [claim("assuming sqrt(x) > 0.5, for x in [-1, 1], f(x) > 0")],
         extensive=True)
     assert p.verdict == "proven"
-    assert "UNCORROBORATED" not in (p.note or "")
+    assert "derive found a disproof" not in (p.note or "")
 
 
 def gap(x: float) -> float:
