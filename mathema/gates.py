@@ -356,6 +356,34 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             lv, rv = scalar(lv), scalar(rv)
         return plain_value(lv), plain_value(rv)
 
+    def _nan_unread(point, lv, rv) -> bool:
+        # whether the claim's sides never read a nan f returned: they
+        # come out the same with every nan in f's output filled by v,
+        # 2v and 0.9v (v = 1)
+        if holds_nan(lv) or holds_nan(rv):
+            return False
+        from ._missing_policy import _same_output
+        from .conjecture import _nan_filled
+        saved = (calls_raised[0], calls_nonfinite[0])
+        try:
+            for fill in (1.0, 2.0, 0.9):
+                env = {"__builtins__": {}, **base_env, **_typed(point),
+                       "f": lambda *a, _fill=fill, **k:
+                       _nan_filled(fn_call(*a, **k), _fill)}
+                try:
+                    lf = eval(code_l, env)
+                    rf = eval(code_r, env) if code_r is not None else 0
+                except Exception:
+                    return False
+                if as_arrays:
+                    lf, rf = scalar(lf), scalar(rf)
+                if not (_same_output(plain_value(lf), lv)
+                        and _same_output(plain_value(rf), rv)):
+                    return False
+            return True
+        finally:
+            calls_raised[0], calls_nonfinite[0] = saved
+
     def _real(v):
         # a plain real number the relation can compare, not a bool,
         # string, None, complex, list, tuple, or NaN (inf is allowed:
@@ -397,6 +425,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 else None
         if _classify(point, False, (lv, rv)):
             return None
+        if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
+                and _nan_unread(point, lv, rv):
+            # a nan in a slot of f's result the claim never reads (a
+            # first difference the claim slices away) is no failure
+            calls_nonfinite[0] = None
         if calls_nonfinite[0] is not None:
             # a nan or an infinity the code returned for finite inputs
             # is no value: against a value every relation fails. Two
@@ -560,6 +593,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return (f"the relation fails at a missing input "
                         f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
+        if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
+                and _nan_unread(point, lv, rv):
+            # a nan in a slot of f's result the claim never reads (a
+            # first difference the claim slices away) is no failure
+            calls_nonfinite[0] = None
         if calls_nonfinite[0] is not None:
             # no value at a finite input: an overflow, a pole, a nan.
             # Two sides at the same infinity are one extended-real
