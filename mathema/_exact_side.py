@@ -22,12 +22,23 @@ from fractions import Fraction
 EXACT_TYPES = (int, Fraction, bool)
 
 
+#: numpy not looked for yet; `_NUMPY` holds the module or None after
+#: the one lookup, since the interpreter does not cache a failed import
+_UNLOOKED = object()
+_NUMPY: object = _UNLOOKED
+
+
 def _np():
-    try:
-        import numpy
-    except ImportError:
-        return None
-    return numpy
+    """The numpy module, or None on an install without it, looked up
+    once per process."""
+    global _NUMPY
+    if _NUMPY is _UNLOOKED:
+        try:
+            import numpy
+        except ImportError:
+            numpy = None
+        _NUMPY = numpy
+    return _NUMPY
 
 
 def to_exact(value):
