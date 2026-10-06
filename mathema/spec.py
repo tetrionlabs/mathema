@@ -840,11 +840,20 @@ def authored_route(row: dict) -> str:
         The route a verified row's claim was authored with: its
         `authored.route` when the row records one, otherwise the base
         of its evidence route, which is how a row written before the
-        authored route was kept reads.
+        authored route was kept reads. A probe row whose meta records a
+        derive attempt (`mathema.derive_status`) reads as `best`: the
+        probe stood in for derive on a claim authored with the default
+        route, since a derive-route claim never falls to the probe.
     """
     stated = (row.get("authored") or {}).get("route") \
         if isinstance(row.get("authored"), dict) else None
-    return base_route(stated or row.get("route"))
+    if stated:
+        return base_route(stated)
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    if base_route(row.get("route")) == "probe" \
+            and "mathema.derive_status" in (meta or {}):
+        return "best"
+    return base_route(row.get("route"))
 
 
 def record(ex, key: str | None = None, root: str = ".",

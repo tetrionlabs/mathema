@@ -13,7 +13,8 @@ import pytest
 import yaml
 
 from mathema.conjecture import check_conjectures, claim
-from mathema.spec import canonical_claim_text, declare, entry_claims
+from mathema.spec import (authored_route, canonical_claim_text, declare,
+                          entry_claims)
 from tests.test_cli_verify import _run
 
 _SOURCE = '''\
@@ -94,15 +95,33 @@ def test_a_verified_row_rebuilds_a_claim_with_the_same_verdict(
         functions, fname, text, name):
     fn = getattr(functions, fname)
     (p,) = check_conjectures(fn, [claim(text, name=name)])
-    row = {"name": p.name, "statement": p.statement,
-           "route": (p.route or "best").split(":", 1)[0]}
-    if row["route"] not in ("derive", "probe"):
-        row["route"] = "best"
+    # the row as the store writes it: the evidence route and the meta
+    # beside the statement; the claim is rebuilt with the route it was
+    # authored with, as verify and sync rebuild it
+    row = {"name": p.name, "statement": p.statement, "route": p.route or "best"}
+    if p.meta:
+        row["meta"] = p.meta
     if p.domain is not None:
         row["domain"] = p.domain
-    (rebuilt,) = entry_claims({"claims": [row]})
+    (rebuilt,) = entry_claims({"claims": [{**row, "route": authored_route(row)}]})
     (p2,) = check_conjectures(fn, [rebuilt])
     assert p2.verdict == p.verdict, (p.statement, p.verdict, p2.verdict)
+
+
+def test_a_probe_row_that_derive_attempted_first_was_authored_best():
+    # the probe stood in for derive (the clock, or an identity sympy could
+    # not settle): the row's evidence route is probe, its meta records the
+    # derive attempt, and the claim is rebuilt with the default route
+    stood_in = {"route": "probe",
+                "meta": {"mathema.derive_status": "undecided"}}
+    assert authored_route(stood_in) == "best"
+    assert authored_route({"route": "probe"}) == "probe"
+    assert authored_route({"route": "probe:algorithmic",
+                           "meta": {"mathema.family": "x"}}) == "probe"
+    # a stated authored route is the author's word, whatever the meta says
+    assert authored_route({**stood_in, "authored": {"route": "probe"}}) == "probe"
+    assert authored_route({"route": "derive:extensive",
+                           "meta": {"mathema.derive_status": "proven"}}) == "derive"
 
 
 def test_a_project_store_settles_after_one_sweep(tmp_path):
