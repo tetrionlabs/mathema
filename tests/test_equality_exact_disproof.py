@@ -29,13 +29,18 @@ def _v(fn, law, route, **kw):
 
 
 def test_an_exact_equality_disproof_inside_the_allowance_is_falsified():
+    # the witness, run again, differs from x (ruling of 2026-10-06: the
+    # allowance is relative to the result, so near 0 the 1e-10 is a
+    # plain miss and needs no exact re-check)
+    import re
     for route in ("derive", "best"):
         p = _v(just_above, "for x in [0, 1], f(x) == x", route)
         assert p.verdict == "falsified", (route, p.verdict, p.note)
         assert p.counterexample
         assert p.meta.get("mathema.corroboration") == "reproduced"
         assert "mathema bug" not in (p.note or "")
-        assert "exactly" in (p.note or "")
+        x = float(re.search(r"x = ([-+0-9.e]+)", p.counterexample).group(1))
+        assert just_above(x) != x, p.counterexample
 
 
 def test_the_unbounded_equality_falsifies():

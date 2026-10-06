@@ -558,8 +558,9 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
         domain and at sampled points, compare the float result of the
         call with the exact value of the function's mathematics
         (`f.exact_value`, each float argument read as the exact binary
-        number it is), within the claim tolerance or, by default, 1e-9
-        plus 1e-7 times the exact value's magnitude. The first point
+        number it is), within the computation allowance
+        (`_allowance.allowance`: the claim tolerance, else the default
+        rule against the exact value). The first point
         past it is the witness, with its exact and float values. A point
         where the call raises, returns no finite number, or the
         mathematics has no value is no trial (another family's
@@ -624,13 +625,13 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if exact is None:
             missed["no exact value"] += 1
             return None
-        allowed = (cj.tolerance if cj.tolerance is not None
-                   else 1e-9 + 1e-7 * abs(float(exact)))
+        from ._allowance import allowance
+        allowed = allowance(float(exact), cj.tolerance)
         if abs(out - exact) <= allowed:
             return True
         return (f"{_fmt_point(values, names)}: exact {float(exact)!r}, "
                 f"float {out!r}, apart by {float(abs(out - exact)):.3g}, "
-                f"past the tolerance {float(allowed):.3g}")
+                f"past the allowance {float(allowed):.3g}")
 
     verdict, checked, cx = _probe_trials(fn, facts, names[0], domain, rng,
                                          max(trials, len(corners)), trial)
