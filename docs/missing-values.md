@@ -432,7 +432,7 @@ print(mathema.check(average_return, claims=[mathema.claim(
 mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
   nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at positions = [null]
     proven     mathematics  for positions in ([0.0, 1.0])^n ⊂ ℝ, total_exposure(positions) >= 0
-    holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   205 entries across 43 draws, sizes (1, 1) to (8, 1)
+    holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   208 entries across 44 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f([..., null, ...])   no missing policy stated; raises TypeError
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
@@ -441,7 +441,7 @@ mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
   unit  for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1   holds
-    holds      computation  for returns in ([0.0, 1.0])^n : float, 0 <= average_return(returns) <= 1   417 entries across 100 draws, sizes (1, 1) to (8, 1)
+    holds      computation  for returns in ([0.0, 1.0])^n : float, 0 <= average_return(returns) <= 1   428 entries across 104 draws, sizes (1, 1) to (8, 1)
     proven     policy       f([..., nan, ...])   propagates, from numpy.mean's own policy row, which f calls
 ```
 

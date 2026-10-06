@@ -43,7 +43,7 @@ numpy.linalg.solve:
       statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, f(a, b) == solve(a, b)"
       note: "A singular matrix raises LinAlgError."
     - name: solves
-      statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, a @ f(a, b) ~= b"
+      statement: "for a in R^(n,n), b in [-1e150, 1e150]^n, assuming det(a) != 0, a @ f(a, b) ~= b"
 
 numpy.linalg.pinv:
   claims:

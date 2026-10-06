@@ -50,6 +50,17 @@ def test_a_power_of_two_far_beyond_float_range_is_judged_exactly():
 
 
 @pytest.mark.needs_full_proof_budget
+def test_an_equality_with_a_power_of_two_is_judged_exactly():
+    rows = _rows(pow2, ["for n in [0, 2000] subset Z, f(n) == 2**n"])
+    (main,) = [p for name, p in rows.items() if "[" not in name
+               and name.startswith("f_n")]
+    assert main.verdict == "proven", (main.verdict, main.note)
+    companion = rows[f"{main.name}[float]"]
+    assert companion.verdict in ("proven", "holds"), \
+        (companion.verdict, companion.note)
+
+
+@pytest.mark.needs_full_proof_budget
 def test_a_wrong_bound_on_a_power_of_two_is_falsified_exactly():
     rows = _rows(pow2, ["for n in [0, 2000] subset Z, f(n) <= 2 ** 1999"])
     (main,) = [p for name, p in rows.items() if "[" not in name

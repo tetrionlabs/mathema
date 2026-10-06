@@ -69,7 +69,7 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -141,14 +141,14 @@ the picture, not just the wording (an excerpt, from the bounds on):
 ```text
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  min(x) <= f(x, alpha)
-    holds      computation  min(x) <= f(x, alpha)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  min(x) <= f(x, alpha)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
                               (ii) guard the empty input at entry
   bounded_upper  f(x, alpha) <= max(x)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  f(x, alpha) <= max(x)
-    holds      computation  f(x, alpha) <= max(x)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  f(x, alpha) <= max(x)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -161,7 +161,7 @@ the picture, not just the wording (an excerpt, from the bounds on):
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -223,11 +223,11 @@ print(mathema.check(ema, claims=collapses))
 ```text
 mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
   collapses_probed  assuming len(x) >= 1, f(x, 1.0) = x[-1]   holds
-    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   640 entries across 133 draws, sizes (1, 1) to (8, 1)
+    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   658 entries across 137 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
   collapses_derived  assuming len(x) >= 1, f(x, 1.0) = x[-1]   holds
     proven     mathematics  assuming len(x) >= 1, f(x, 1.0) = x[-1]
-    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   226 entries across 42 draws, sizes (1, 1) to (8, 1)
+    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   235 entries across 45 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
@@ -298,19 +298,19 @@ ema:
     - name: "collapses_derived[float]"
       statement: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 42
-      note: "the float64 computation of collapses_derived ran at 42 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      n: 45
+      note: "the float64 computation of collapses_derived ran at 45 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 133
+      n: 137
       note: "inferred alpha=1 from the claim's own literal argument; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back"
       route: "probe"
     - name: "missing[x]"
       statement: "missing(f, x) propagates"
       verdict: "holds"
-      n: 36
+      n: 32
       note: "default for a list[float] slot that may be nan; confirmed on the draws of collapses_probed and collapses_derived[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims ema --write"
       route: "probe:counterfactual"
   concepts:
@@ -326,16 +326,16 @@ ema:
       basis: "read off the AST"
     - step: "evidence"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
-      basis: "probed, n=133"
+      basis: "probed, n=137"
     - step: "derivation"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
-      basis: "probed, n=42"
+      basis: "probed, n=45"
     - step: "evidence"
       claim: "missing(f, x) propagates"
-      basis: "probed, n=36"
+      basis: "probed, n=32"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

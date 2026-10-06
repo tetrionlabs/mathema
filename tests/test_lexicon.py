@@ -131,7 +131,9 @@ PINNED: dict = {
     "sqrt_symbol": "proven",
     "stress_gauge_invariance": "proven",
     "table_column_attribute": "holds",
-    "table_column_item": "holds",
+    # a bound table lifts, and the item form proves; the attribute form
+    # is read by the probe (the same asymmetry docs/runtime-types.md shows)
+    "table_column_item": "proven",
     "table_columns_dot": "proven",
     "tolerance_eps_ascii": "proven",
     "tolerance_epsilon": "proven",

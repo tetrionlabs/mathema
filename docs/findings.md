@@ -187,8 +187,8 @@ Among the results, all found with no claims written:
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
                               (ii) guard the empty input at entry
-  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [1e+16, -1e+16], alpha = -0.5847481298766866
-    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [1e+16, -1e+16], alpha = -0.5847481298766866: 2.1694962597533732e+16 vs -2.1694962597533732e+16
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [1.7976931348623157e+308, 1.7976931348623157e+308, 1.7976931348623157e+308], alpha = 8.53772588170353
+    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [1.7976931348623157e+308, 1.7976931348623157e+308, 1.7976931348623157e+308], alpha = 8.53772588170353: f returned nan
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
