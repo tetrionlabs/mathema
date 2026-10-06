@@ -657,6 +657,14 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
         mean before the ladder existed.
     """
     attempted: list = []
+    if opaque is not None and any(opaque.is_opaque_symbol(s)
+                                  for s in lhs.free_symbols | rhs.free_symbols):
+        # a condition on a non-numeric value (a string compared with a
+        # literal) is decided by the domain or not at all: no rung below
+        # reads it, and a rewrite of it would read it as a number
+        return ProofResult("undecided",
+                           sketch="a non-numeric value in the body is not "
+                                  "decided by the declared domain"), attempted
     diff = lhs - rhs
     from ._proof_support import _has_equality_constraint, _has_premise_region
     assumed_surface = _has_equality_constraint(bound_context)
