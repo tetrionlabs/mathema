@@ -173,7 +173,7 @@ def test_a_false_sibling_is_falsified(fn, law):
 
 @pytest.mark.needs_full_proof_budget
 def test_solve_holds_and_its_row_is_stated_over_a_matrix_and_a_vector():
-    law = ("for A in R^(n,n), b in R^n, assuming det(A) != 0, "
+    law = ("for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, "
            "A @ f(A, b) == b")
     p = _one(fn=solve_for, law=law)
     # numpy.linalg.solve definition carries this on derive once the

@@ -189,11 +189,13 @@ def test_an_empty_container_is_outside_a_vector_space(mod):
 
 
 def test_a_named_output_axis_takes_the_size_the_trial_bound(mod):
+    # the output axis is what is tested; the range keeps the float limit,
+    # where A.T @ x overflows, out of the draws
     (wrong,) = check_conjectures(mod.atx, [claim(
-        "for A in R^(n,15), x in R^n, f(A, x) in R^n", route="probe")])
+        "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^n", route="probe")])
     assert wrong.verdict == "falsified", (wrong.verdict, wrong.note)
     (right,) = check_conjectures(mod.atx, [claim(
-        "for A in R^(n,15), x in R^n, f(A, x) in R^15", route="probe")])
+        "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15", route="probe")])
     assert right.verdict == "holds", (right.verdict, right.note)
 
 

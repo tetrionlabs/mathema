@@ -23,7 +23,9 @@ def guarded_head(x: list, alpha: float = 1.0) -> float:
     return x[0] * alpha
 
 
-_PINNED = "let alpha be 2, f(x) == 2 * x[0]"
+#: the pin is what is tested; the range keeps the float limit, where
+#: 2 * x[0] overflows, out of the draws
+_PINNED = "let alpha be 2, for x in [-1e6, 1e6]^n, f(x) == 2 * x[0]"
 
 
 def test_a_pinned_parameter_the_call_omits_is_passed():
