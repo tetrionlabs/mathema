@@ -9555,7 +9555,8 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
               else frozenset())
     return _premises.PremiseGuard(
         compiled=compiled, params=tuple(facts.params), domain=cj_domain,
-        draws=_premises.premise_draws(ctx.assumption, kinds, cj_domain),
+        draws=_premises.premise_draws(ctx.assumption, kinds, cj_domain,
+                                      tolerance=cj.tolerance),
         solved=_premises.solve_equality(ctx.assumption, kinds),
         base_env=base, array_params=array_params, bind_env=bind_env,
         ignore=ignore)
@@ -9865,7 +9866,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         ctx.assumption, resolver)
     plan_dims = bool(resolver.distinct_keys())
     premise_draws = _premises.premise_draws(ctx.assumption, kinds,
-                                            cj_domain)
+                                            cj_domain, tolerance=cj.tolerance)
     from .types import structures_from_signature
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
