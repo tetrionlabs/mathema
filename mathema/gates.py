@@ -244,6 +244,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
                    for p, v in point.items())
 
+    def _record_returned_none(point, lv, rv):
+        # a None f returned from present inputs: filed for the absence
+        # policy line, as declared by the return type or as introduced
+        # against it
+        if lv is None or rv is None:
+            if declared_return:
+                executed.returned_absent(dict(point), declared_return)
+            else:
+                from .policy import record_introduced
+                record_introduced(dict(point))
+
     def _classify(point, raised, sides=()):
         # at a missing input, a raise or a missing output is classified
         # into the executed missing inputs and not judged; so is every
@@ -438,13 +449,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
-            # a None from present inputs is no value, like a NaN, unless
-            # the return type declares it
-            if not declared_return and (lv is None or rv is None):
-                from .policy import record_introduced
-                record_introduced(dict(point))
+            # a None from present inputs is the absence policy line's
+            # fact; absence compares as absence (None agrees with None
+            # under == and ~=, and fails against a value, under != and
+            # under an ordering)
+            from ._missing_words import absence_agrees
+            _record_returned_none(point, lv, rv)
+            if absence_agrees(lv, rv, cj.relation):
+                return True
             if declared_return and (lv is None or rv is None):
-                executed.returned_absent(dict(point), declared_return)
                 return None
             return False
         if _complex_pair(lv, rv) and not (holds_nan(lv) or holds_nan(rv)):
@@ -581,10 +594,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
-            if declared_return:
+            from ._missing_words import absence_agrees, absence_words
+            _record_returned_none(point, lv, rv)
+            if absence_agrees(lv, rv, cj.relation) or declared_return:
                 return None
             return (f"the computation returns None here "
-                    f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
+                    f"({_fmt_value(lv)} vs {_fmt_value(rv)}), "
+                    f"{absence_words(lv, rv, cj.relation)}")
         if inputs_missing(point.values()) and (holds_nan(lv) or holds_nan(rv)
                                                or None in (lv, rv)):
             # the code returned a value at a missing input and the law's
@@ -1330,6 +1346,10 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             falsified.counterexample = (
                 f"{pt}: {reason}; narrow the claim's domain to where every "
                 f"side of it is real")
+        elif pt and isinstance(detail, str) and \
+                detail.startswith("the computation returns None"):
+            # the witness says what the code gave back: an absence
+            falsified.counterexample = f"{pt}: {detail}"
         if falsified.stratum is None:
             # a symbolic disproof plus a reproduced executed witness is
             # the evidence bar for indicting the mathematics itself

@@ -504,3 +504,22 @@ def _all_member(shown: str, member: str) -> bool:
     inner = shown.strip("[]")
     cells = [c.strip() for c in inner.split(",") if c.strip()]
     return bool(cells) and all(c == member for c in cells)
+
+
+def absence_agrees(lv, rv, relation: str) -> bool:
+    """Whether two sides agree because both are absent: a None on each
+    side is one absence under `==` and `~=`. Under `!=` and every
+    ordering an absence agrees with nothing, and an absence against a
+    value fails every relation."""
+    return lv is None and rv is None and relation in ("==", "~=")
+
+
+def absence_words(lv, rv, relation: str) -> str:
+    """Why a comparison with an absent side fails, as the witness says
+    it: both sides absent under a relation that does not admit it, or an
+    absence against a value."""
+    if lv is None and rv is None:
+        if relation == "!=":
+            return "both sides are absent, one absence, which != does not admit"
+        return "both sides are absent, and an absence has no order"
+    return "an absence against a value, and an absence is no value"
