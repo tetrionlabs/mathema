@@ -62,6 +62,29 @@ def test_a_sample_statistic_of_one_element_offers_the_split_at_two(tmp_path):
             '"for r in [-1e6, 1e6]^n, f(r) >= 0" --at "len(r) >= 2"') in shown, shown
 
 
+def test_a_witness_at_the_empty_input_searches_no_split(tmp_path, monkeypatch):
+    # the empty container is the empty-input line's fact (is_empty_safe,
+    # which offers its own fixes); it says nothing about the lengths the
+    # claim's own numbers run over, so no narrowed claim is checked
+    from mathema import claims as claims_mod
+    from mathema._split import split_offer
+    from mathema.analysis import analyze_source
+    from mathema.conjecture import claim
+    from mathema.records import Probe
+    mod = _module(tmp_path)
+    calls = []
+    real = claims_mod.check_conjectures
+    monkeypatch.setattr(claims_mod, "check_conjectures",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    text = "for xs in [-1e6, 1e6]^n, f(xs) == xs[1] - xs[0]"
+    cj = claim(text)
+    probe = Probe(cj.name, text, "falsified", route="probe",
+                  counterexample="xs = []: f raised IndexError")
+    assert split_offer(mod.first_move, analyze_source(mod.first_move),
+                       cj, probe, text) is None
+    assert calls == []
+
+
 def test_an_index_past_the_end_offers_the_split_at_two(tmp_path):
     # a bounded interval: over R^n the computation is also drawn at the
     # float-limit corners, where xs[1] - xs[0] overflows to -inf (no value
