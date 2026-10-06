@@ -387,12 +387,12 @@ def narrowing(point: dict, cj_domain: dict, kappa: float, how: str,
     bound = 10.0 ** math.floor(exponent) if exponent < 308 else None
     if bound is None or bound >= scale:
         return None
-    carriers = [p for p, v in point.items()
-                if any(abs(x) >= scale / 10 for x in _numbers(v))]
-    if not carriers:
+    wide = [p for p, v in point.items()
+            if any(abs(x) >= scale / 10 for x in _numbers(v))]
+    if not wide:
         return None
     parts = []
-    for p in carriers:
+    for p in wide:
         dims = _dims_text((cj_domain or {}).get(p), point.get(p))
         parts.append(f"{p} in [-{short(bound)}, {short(bound)}]{dims}")
     return "for " + ", ".join(parts)

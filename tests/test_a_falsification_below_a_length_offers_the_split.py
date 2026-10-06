@@ -59,9 +59,12 @@ def test_a_sample_statistic_of_one_element_offers_the_split_at_two(tmp_path):
 
 
 def test_an_index_past_the_end_offers_the_split_at_two(tmp_path):
+    # a bounded interval: over R^n the computation is also drawn at the
+    # float-limit corners, where xs[1] - xs[0] overflows to -inf (no value
+    # from finite inputs), a second failure the split would not mend
     mod = _module(tmp_path)
     rec = mathema.check(mod.first_move,
-                        claims=["for xs in R^n, f(xs) == xs[1] - xs[0]"])
+                        claims=["for xs in [-1e6, 1e6]^n, f(xs) == xs[1] - xs[0]"])
     p = _claim_probe(rec, "xs[1]")
     assert p.meta["mathema.split"] == {"param": "xs", "at": 2}
 

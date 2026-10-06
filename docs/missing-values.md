@@ -380,10 +380,9 @@ print(mathema.check(fee_rate, claims=[mathema.claim(
 <!-- example: core output -->
 ```text
 mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
-  proven    below_one: for tier in [0, 3] : int, fee_rate(tier) < 1
-           ∀ tier in the declared finite domain (4 points)
-           f returns None at tier = 0, which its return type Optional[float] allows; that point has no value to compare, so it is recorded, not judged
-  proven    absent[f]: absent(f) introduces   [from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one]
+  below_one  for tier in [0, 3] : int, fee_rate(tier) < 1   proven
+    proven     mathematics  for tier in [0, 3] ⊂ ℤ, fee_rate(tier) < 1
+    proven     policy       absent(f) introduces   from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one
 ```
 
 `-> Optional[float]` declares that the result may be absent, so the
@@ -441,7 +440,7 @@ mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
   unit  for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1   holds
-    holds      computation  for returns in ([0.0, 1.0])^n : float, 0 <= average_return(returns) <= 1   428 entries across 104 draws, sizes (1, 1) to (8, 1)
+    holds      computation  for returns in ([0.0, 1.0])^n : float, 0 <= average_return(returns) <= 1   418 entries across 102 draws, sizes (1, 1) to (8, 1)
     proven     policy       f([..., nan, ...])   propagates, from numpy.mean's own policy row, which f calls
 ```
 
@@ -525,7 +524,7 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 <!-- example: slip output -->
 ```text
 mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
-  holds     has_text: for order.note in {"leave at the door", "ring twice", None} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
+  holds     has_text: for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
            derive could not decide it (function body is not derivable, likely reason: unsupported-construct: unsupported-call (line 3), an expression form the derive vocabulary doesn't cover yet), so the probe decided it by running the code; at order.note, a key left out, f raised KeyError
   falsified absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
            (i) if the raise is intended, state: absent(f, order.note) raises(KeyError)

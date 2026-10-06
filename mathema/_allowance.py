@@ -27,6 +27,7 @@ difference that replaces both parts.
 from __future__ import annotations
 
 import ast
+import decimal
 from fractions import Fraction
 
 #: the absolute part of the default allowance
@@ -41,8 +42,11 @@ STABILITY_FACTOR = 2 ** 10
 
 
 def _magnitude(value):
-    """|value| as a Fraction for an exact value or an integer beyond float
-    range, else a float; None for a value that is not a real number."""
+    """|value| as a Fraction for an exact value (a Fraction, a finite
+    Decimal, an integer beyond float range), else a float; None for a
+    value that is not a real number."""
+    if isinstance(value, decimal.Decimal):
+        return abs(Fraction(value)) if value.is_finite() else None
     if isinstance(value, bool) or not isinstance(value, (int, float, Fraction,
                                                           complex)):
         return None
@@ -180,11 +184,19 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
     if _magnitude(u) is None or _magnitude(v) is None:
         # a value that is not a number (a string, None, a record) is
         # equal only by its own equality, and does not order
-        if relation in ("==", "~="):
-            return bool(u == v)
-        if relation == "!=":
-            return not (u == v)
+        try:
+            if relation in ("==", "~="):
+                return bool(u == v)
+            if relation == "!=":
+                return not (u == v)
+        except (TypeError, ValueError):
+            return None
         return None
+    # a finite Decimal compares as the exact rational it is
+    if isinstance(u, decimal.Decimal):
+        u = Fraction(u)
+    if isinstance(v, decimal.Decimal):
+        v = Fraction(v)
     reference = _reference_of(u, v, side) if scale is None else scale
     tol = allowance(reference, declared, input_scaled)
     if isinstance(u, complex) or isinstance(v, complex):
@@ -251,7 +263,7 @@ def relation_within(lv, rv, relation: str, declared=None,
         try:
             return _scalar(x, y, relation, declared, input_scaled, side,
                            exact_inequality, scale)
-        except TypeError:
+        except (TypeError, ValueError):
             return None
 
     if not arrays:

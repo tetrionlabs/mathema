@@ -75,9 +75,8 @@ note numpy.ptp: at_most_the_largest initially falsified: the installed library
 FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
     record; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
      note definition: numpy.ptp gives no value at a = [1.7976931348623157e+308,
-         -1.7976931348623157e+308], axis = None, out = None, keepdims = <no
-         value>, a magnitude corner where the exact value is finite: a finding
-         about its computation; the row stands
+         -1.7976931348623157e+308], a magnitude corner where the exact value is
+         finite: a finding about its computation; the row stands
 0 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -181,7 +180,7 @@ mathema verify claims/numpy.claims.yaml --root .
 <!-- example: ptp output -->
 ```text
 ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 4 holds, 0 falsified
-     note definition: numpy.ptp gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], axis = None, out = None, keepdims = <no value>, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+     note definition: numpy.ptp gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
 0 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
