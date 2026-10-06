@@ -339,7 +339,7 @@ loads. mathema ships the polars and pandas ones:
 
 ```yaml
 compendium: polars
-versions: ">=1,<2"
+versions: ">=1,<3"
 
 polars.Series:
   defines:

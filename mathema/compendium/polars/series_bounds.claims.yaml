@@ -4,7 +4,7 @@
 # of `returns.min()` is `a`. mathema's own test suite verifies each row
 # against the installed polars.
 compendium: polars
-versions: ">=1,<2"
+versions: ">=1,<3"
 
 polars.Series.min:
   claims:
