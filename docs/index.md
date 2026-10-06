@@ -474,7 +474,7 @@ whatever cannot yet be settled says so.
 ## Stop measuring how much code you have. Measure how much you know about it.
 
 ```bash
-pip install mathema
+pip install "mathema[all]"
 ```
 
 <p class="mx-actions">

@@ -6,18 +6,20 @@ virtual environment rather than a system Python:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install mathema
+pip install "mathema[all]"
 ```
 
 or, in a project managed with uv:
 
 ```bash
-uv add mathema
+uv add "mathema[all]"
 ```
 
-That is the whole of what most people need: `mathema check`, `verify`,
-`audit`, `lock`, the derive route and the record store all come with the core
-install.
+`[all]` adds numpy for array-shaped claims, z3 for the nonlinear proof
+rung, the MCP server and the native coverage reader; `pip install mathema`
+is the minimal core, which already has `mathema check`, `verify`, `audit`,
+`lock`, the derive route and the record store. pandas and polars are
+separate extras, installed when your code uses them.
 
 ## Optional extras
 
@@ -32,10 +34,11 @@ Each extra adds one capability without making it everyone's dependency.
 | `mcp` | `mathema mcp serve`, which exposes mathema's checking tools to a coding agent |
 | `coverage` | reading a native `.coverage` report, so the tests you already run count toward the implementation score (a `coverage.json` export works without it) |
 | `symbology` | conventional notation for parameter and function names when claims are rendered |
-| `all` | `numpy`, `smt`, `mcp` and `coverage` together |
+| `all` | `numpy`, `smt`, `mcp` and `coverage` together, the recommended install |
 
 ```bash
-pip install "mathema[all]"
+pip install mathema            # the minimal core
+pip install "mathema[pandas]"  # one extra at a time
 ```
 
 ## Offline by design

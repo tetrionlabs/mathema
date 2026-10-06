@@ -376,8 +376,8 @@ environment (`python3 -m venv .venv && source .venv/bin/activate`, or your
 usual equivalent) rather than against a system Python:
 
 ```bash
-pip install mathema           # core: the derive route and the spec store
-pip install "mathema[all]"    # numpy, z3, MCP server, coverage
+pip install "mathema[all]"    # recommended: numpy, z3, MCP server, coverage
+pip install mathema           # the minimal core: the derive route and the spec store
 ```
 
 The extras can also be taken one at a time: `mcp` exposes mathema's tools to
