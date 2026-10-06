@@ -10,17 +10,17 @@ versions: ">=1.24,<3"
 numpy.linalg.norm:
   claims:
     - name: definition
-      statement: "for x in R^n, f(x) ~= sqrt(sum(x ** 2))"
+      statement: "for x in R^n, f(x) == sqrt(sum(x ** 2))"
       note: "The Euclidean norm of a vector, the default `ord=None`."
     - name: euclidean
-      statement: "for x in [-1e150, 1e150]^n, f(x) ~= norm(x)"
+      statement: "for x in [-1e150, 1e150]^n, f(x) == norm(x)"
     - name: frobenius
       statement: "for x in R^(m,n), f(x) ~= norm(x)"
       note: "A matrix with the default `ord=None` has its Frobenius norm."
     - name: definition@ord=1
-      statement: "for x in R^n, f(x, ord=1) ~= sum(abs(x))"
+      statement: "for x in R^n, f(x, ord=1) == sum(abs(x))"
     - name: definition@ord=2
-      statement: "for x in R^n, f(x, ord=2) ~= sqrt(sum(x ** 2))"
+      statement: "for x in R^n, f(x, ord=2) == sqrt(sum(x ** 2))"
     - name: definition@ord=inf
       statement: "for x in R^n, f(x, ord=inf) == max(abs(x))"
       note: "The largest magnitude among the elements."
@@ -40,7 +40,7 @@ numpy.linalg.svd:
 numpy.linalg.solve:
   claims:
     - name: definition
-      statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, f(a, b) ~= solve(a, b)"
+      statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, f(a, b) == solve(a, b)"
       note: "A singular matrix raises LinAlgError."
     - name: solves
       statement: "for a in R^(n,n), b in R^n, assuming det(a) != 0, a @ f(a, b) ~= b"
@@ -48,7 +48,7 @@ numpy.linalg.solve:
 numpy.linalg.pinv:
   claims:
     - name: definition
-      statement: "for a in R^(m,n), assuming cond(a) < 1e15, f(a) ~= pinv(a)"
+      statement: "for a in R^(m,n), assuming cond(a) < 1e15, f(a) == pinv(a)"
       note: "The Moore-Penrose pseudo-inverse, through the singular value decomposition. A singular value at most 1e-15 times the largest (the default rcond) is read as zero, so the pseudo-inverse is stated where every singular value is above that cutoff."
     - name: inverse_when_nonsingular
       statement: "for a in R^(n,n), assuming cond(a) < 1e15, f(a) ~= inv(a)"
@@ -73,7 +73,7 @@ numpy.linalg.matrix_rank:
 numpy.linalg.cond:
   claims:
     - name: definition
-      statement: "for x in R^(n,n), assuming det(x) != 0, f(x) ~= cond(x)"
+      statement: "for x in R^(n,n), assuming det(x) != 0, f(x) == cond(x)"
       note: "The 2-norm condition number; a singular matrix gives a very large value or inf."
     - name: at_least_one
       statement: "for x in R^(n,n), assuming det(x) != 0, f(x) >= 1"
@@ -81,12 +81,12 @@ numpy.linalg.cond:
 numpy.outer:
   claims:
     - name: definition
-      statement: "for a in R^m, b in R^n, f(a, b) ~= outer(a, b)"
+      statement: "for a in R^m, b in R^n, f(a, b) == outer(a, b)"
 
 numpy.kron:
   claims:
     - name: definition
-      statement: "for a in R^(m,n), b in R^(p,q), f(a, b) ~= kron(a, b)"
+      statement: "for a in R^(m,n), b in R^(p,q), f(a, b) == kron(a, b)"
 
 numpy.diag:
   claims:

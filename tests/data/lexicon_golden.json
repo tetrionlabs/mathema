@@ -864,6 +864,26 @@
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ ε",
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon"
  },
+ "exact_offset_vs_approx": {
+  "input": "for x in [0, 1], f(x) ~= x",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≈ x",
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) ~= x"
+ },
+ "exact_offset_vs_approx_trap": {
+  "input": "for x in [0, 1], f(x) == x",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = x",
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) = x"
+ },
+ "approx_taylor_sin_exact_fails": {
+  "input": "for x in [0, 0.01], f(x) == sin(x)",
+  "unicode": "∀ x ∈ [0.0, 0.01] ⊂ ℝ ∪ {absent, ∅}, f(x) = sin(x)",
+  "ascii": "for x in [0.0, 0.01] : float|absent|missing, f(x) = sin(x)"
+ },
+ "approx_too_wide": {
+  "input": "for x in [0, 0.5], f(x) ~= sin(x)",
+  "unicode": "∀ x ∈ [0.0, 0.5] ⊂ ℝ ∪ {absent, ∅}, f(x) ≈ sin(x)",
+  "ascii": "for x in [0.0, 0.5] : float|absent|missing, f(x) ~= sin(x)"
+ },
  "derivative_call": {
   "input": "d(f(x), x) >= 0",
   "unicode": "f'(x) ≥ 0",

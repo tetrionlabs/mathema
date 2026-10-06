@@ -35,7 +35,7 @@ versions: ">=2"
 pandas.Series.sem:
   claims:
     - name: definition
-      statement: "for a in R^n \\\\ {∅}, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1) / sqrt(len(a))"
+      statement: "for a in R^n \\\\ {∅}, assuming dim(a) >= 2, f(a) == std(a, ddof=1) / sqrt(len(a))"
 """
 
 _LEVERAGE = ("for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
@@ -58,7 +58,7 @@ versions: ">=2"
 pandas.Series.multiply:
   claims:
     - name: definition
-      statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) ~= a * other"
+      statement: "for a in R^n \\\\ {∅}, other in [-1e6, 1e6], f(a, other) == a * other"
 """
 
 
@@ -169,6 +169,30 @@ def test_a_trusted_acceptance_lets_a_project_row_feed_derive(project):
     assert p.verdict == "proven", (p.verdict, p.note)
     used = {u["key"]: u for u in p.meta["mathema.definitions"]}
     assert used["pandas.Series.sem"]["status"] == "trusted"
+
+
+def test_a_trusted_row_written_with_approximate_equality_is_not_a_rewrite(
+        project):
+    """A definition row is an equation derive rewrites through; one
+    written with `~=` (within ε) is not an equation, so even trusted it
+    feeds no proof, and the note says why."""
+    approx = _SEM_ROW.replace("f(a) == std", "f(a) ~= std")
+    rows = project / "claims" / "pandas.claims.yaml"
+    rows.write_text(approx)
+    statement = yaml.safe_load(approx)["pandas.Series.sem"]["claims"][0][
+        "statement"]
+    verified = project / ".mathema" / "verified"
+    verified.mkdir(parents=True)
+    (verified / "pandas.Series.sem.yaml").write_text(yaml.safe_dump({
+        "pandas.Series.sem": {"claims": [
+            {"name": "definition", "statement": statement,
+             "verdict": "holds", "accepted": {
+                 "as": "trusted", "statement": statement,
+                 "versions": ">=2"}}]}}))
+    p = _check(project, sem_ratio)
+    assert p.verdict != "proven", (p.verdict, p.note)
+    assert ("definition rows are equations, and pandas.Series.sem's row is "
+            "written with ~=, so it is not used as one") in p.note, p.note
 
 
 def test_a_record_is_stale_when_its_definition_rows_change(project,

@@ -2950,6 +2950,32 @@ def _claim_side_value_gate(sources, build, aux, domain, bound_context,
     return unsettled
 
 
+def _try_prove_within_epsilon(fn, facts, lhs_src: str, rhs_src: str,
+                              **kwargs) -> ProofResult:
+    """Intent:
+        `lhs ~= rhs`, which is `abs(lhs - rhs) <= ε` with ε the declared
+        tolerance or else the 1e-9 default: proven when the two sides
+        are equal (their difference is 0), or when the difference is
+        shown to be at most ε; disproven only when the difference is
+        shown to exceed ε somewhere. A proof that the sides differ
+        decides nothing here.
+    """
+    equal = try_prove(fn, facts, lhs_src, rhs_src, "==", **kwargs)
+    if equal.status == "proven":
+        return ProofResult("proven",
+                           sketch=f"{equal.sketch}; the two sides are equal, "
+                                  f"so within ε",
+                           meta=dict(equal.meta))
+    within = try_prove(fn, facts, f"abs(({lhs_src}) - ({rhs_src}))", "ε",
+                       "<=", **kwargs)
+    if within.status in ("proven", "disproven"):
+        return within
+    return ProofResult("undecided",
+                       sketch=f"read as abs({lhs_src} - {rhs_src}) <= ε: "
+                              f"{within.sketch}",
+                       meta=dict(within.meta))
+
+
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
              max_callee_depth: int = 3, extensive: bool = False,
@@ -2960,7 +2986,15 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     """See `_try_prove`. A proof is kept only when every raise region
     of the functions it reads was read too: a statement the raise-region
     pass stops at could hide a raise in the domain, and a value claim is
-    false wherever the code raises."""
+    false wherever the code raises. `~=` is decided as `abs(lhs - rhs)
+    <= ε` (see `_try_prove_within_epsilon`)."""
+    if relation == "~=":
+        return _try_prove_within_epsilon(
+            fn, facts, lhs_src, rhs_src, domain=domain, tolerance=tolerance,
+            max_callee_depth=max_callee_depth, extensive=extensive,
+            _split_depth=_split_depth, funcs=funcs, assumption=assumption,
+            assume_defined=assume_defined,
+            exclude_own_guards=exclude_own_guards)
     notes: dict = {}
     result = _try_prove(fn, facts, lhs_src, rhs_src, relation, domain,
                         tolerance, max_callee_depth, extensive, _split_depth,

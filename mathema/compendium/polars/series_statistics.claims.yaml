@@ -11,7 +11,7 @@ versions: ">=1,<2"
 polars.Series.median:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= median(a)"
+      statement: "for a in R^n, f(a) == median(a)"
       note: "The mean of the two middle elements for an even length."
     - name: empty_is_missing
       statement: "f([]) in {missing}"

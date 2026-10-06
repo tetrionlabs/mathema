@@ -1165,8 +1165,8 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         or names no in-domain witness.
 
     Notes:
-        `~=` is approximate equality by its own spelling, so it keeps
-        the allowance and is never rechecked exactly. A coordinate
+        `~=` is `abs(lhs - rhs) <= ε`, compared exactly as that ordering
+        (ε the 1e-9 default). A coordinate
         derive's witness leaves free (the difference does not depend on
         it) is drawn from its declared bound with a fixed seed, a few
         draws at most, and the first admissible completion is the point
@@ -1174,6 +1174,10 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
     """
     import random
     from . import corroboration as C
+    if cj.relation == "~=" and cj.tolerance is None and cj.rhs:
+        from dataclasses import replace
+        cj = replace(cj, lhs=f"abs(({cj.lhs}) - ({cj.rhs}))", relation="<=",
+                     rhs="ε")
     if cj.relation not in ("<=", ">=", "==") or cj.tolerance is not None:
         return None, False
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,

@@ -145,20 +145,21 @@ claims in them.
 
 ### How close counts as equal
 
-On the derive route every relation is decided exactly: `==` and `~=` both
-ask whether the two sides are the same over the whole domain, in exact real
-arithmetic, and a proof of either is exact algebra. They part ways only
-when derive disproves the claim by a difference smaller than the probe's
-allowance (below): for `==` the real code is then run at derive's witness
-and compared exactly, while `~=`, which asks for approximate equality,
-gets no such recheck, and the allowance decides.
+`a ~= b` means `abs(a - b) <= ε`, with `ε` the claim's declared
+tolerance or else 1e-9 (see below), and the record says so: "read as
+abs(f(x) - x) <= ε, ε = 1e-9 (the default)". On the derive route every
+relation is decided exactly: `==` asks whether the two sides are the same
+over the whole domain, in exact real arithmetic, and `~=` whether their
+difference stays within `ε`, so `x + 1e-12` is not `x` under `==` and is
+under `~=`. A definition row in a compendium is an exact equation, written
+with `==`.
 
-On the probe route, which runs the real function in floating point, `==`
-and `~=` are the same comparison: the two sides count as equal when they
-agree within a relative tolerance of 1e-6 or an absolute tolerance of 1e-9,
-whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
-constant offset of `1e-7` is caught near zero, where the relative allowance
-shrinks below it. A claim sets its own absolute tolerance with the
+On the probe route, which runs the real function in floating point, `~=`
+is the same `abs(a - b) <= ε` in float64, and `==` counts the two sides as
+equal when they agree within a relative tolerance of 1e-6 or an absolute
+tolerance of 1e-9, whichever is larger. So under `==` the computation
+`x * (1 + 1e-8)` equals `x` everywhere, while a constant offset of `1e-7`
+is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
 it, with no relative tolerance on top.
@@ -206,9 +207,8 @@ to spend: when it disproves a `<=`, `>=` or `==` claim, the real code is
 run at derive's witness and compared exactly, and a violation there,
 however small, falsifies the claim with that point as the witness. So
 `f(x) == x` is falsified for `x + 1e-10`, but not for `x + 1e-20` on
-`[1, 2]`, where rounding makes the executed values exactly equal. A `~=`
-disproof never gets this exact recheck, though a `~=` proof is still exact
-algebra. For a function that returns `-1e-10`:
+`[1, 2]`, where rounding makes the executed values exactly equal. For a
+function that returns `-1e-10`:
 
 <!-- example: just-below run -->
 ```python

@@ -89,6 +89,27 @@ def _names(src: str) -> frozenset:
     return frozenset(n.id for n in ast.walk(tree) if isinstance(n, ast.Name))
 
 
+#: the names a claim reads as its tolerance
+_EPSILON_NAMES = frozenset({"eps", "epsilon", "ε"})
+
+
+def _epsilon_as_value(src: str, tolerance: float, kinds) -> str:
+    """`src` with each `ε` (`eps`, `epsilon`) that is not a parameter
+    replaced by the tolerance it names, so `assuming x ~= 1`, read as
+    `abs((x) - (1)) <= ε`, filters with a number."""
+    names = _EPSILON_NAMES - set(kinds)
+    if not (_names(src) & names):
+        return src
+
+    class _Value(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id in names:
+                return ast.copy_location(ast.Constant(value=tolerance), node)
+            return node
+    tree = _Value().visit(ast.parse(src, mode="eval"))
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
 def compile_premises(cj, assumption, kinds, extra) -> CompiledPremises:
     """Intent:
         The conjuncts of `assumption` (the parsed `assuming` clause of
@@ -109,8 +130,10 @@ def compile_premises(cj, assumption, kinds, extra) -> CompiledPremises:
     conjuncts: list = []
     aux: set = set()
     for acj in assumption:
-        code_l, aux_l = _validate(acj.lhs, set(kinds), extra)
-        code_r, aux_r = _validate(acj.rhs, set(kinds), extra)
+        lhs = _epsilon_as_value(acj.lhs, tol, kinds)
+        rhs = _epsilon_as_value(acj.rhs, tol, kinds)
+        code_l, aux_l = _validate(lhs, set(kinds), extra)
+        code_r, aux_r = _validate(rhs, set(kinds), extra)
         scalar = {"<=": operator.le, ">=": operator.ge,
                   "<": operator.lt, ">": operator.gt,
                   "==": lambda a, b, t=tol, r=rel:

@@ -2005,8 +2005,12 @@ def _parse_assuming_relation(part: str):
                     lhs, rhs = part[:i].strip(), part[i + len(op):].strip()
                     if not lhs or not rhs:
                         return None
-                    rel = "==" if op == "~=" else op
-                    return SimpleNamespace(lhs=lhs, relation=rel, rhs=rhs)
+                    if op == "~=":
+                        # `a ~= b` is `abs(a - b) <= ε`
+                        return SimpleNamespace(
+                            lhs=f"abs(({lhs}) - ({rhs}))", relation="<=",
+                            rhs="ε")
+                    return SimpleNamespace(lhs=lhs, relation=op, rhs=rhs)
         i += 1
     return None
 
@@ -4637,6 +4641,29 @@ def _policy_gate(cj, fn, facts) -> bool:
     return cj.lhs not in params
 
 
+def _approx_reading(cj) -> "str | None":
+    """How the record reads a `~=` claim, or None for any other: "read
+    as abs(f(x) - x) <= ε, ε = 1e-9 (the default)", ε the declared
+    tolerance when there is one."""
+    if cj.relation != "~=" or cj.links or not cj.lhs or not cj.rhs:
+        return None
+    eps, why = ((cj.tolerance, "declared") if cj.tolerance is not None
+                else (1e-9, "the default"))
+    mantissa, _, exponent = f"{eps:g}".partition("e")
+    text = f"{mantissa}e{int(exponent)}" if exponent else mantissa
+    rhs = cj.rhs.strip()
+    try:
+        node = ast.parse(rhs, mode="eval").body
+        bare = isinstance(node, (ast.Name, ast.Call, ast.Constant,
+                                 ast.Subscript, ast.Attribute))
+    except SyntaxError:
+        bare = False
+    if not bare:
+        rhs = f"({rhs})"
+    return (f"read as abs({cj.lhs.strip()} - {rhs}) <= ε, ε = {text} "
+            f"({why})")
+
+
 def _check_conjectures(fn, conjectures: list[Conjecture],
                        domain: dict | None = None, trials: int | None = None,
                        trials_scale: float = 1.0, facts=None,
@@ -4734,6 +4761,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 if told and not computation and told not in (probe.note or "") \
                         and not (probe.meta or {}).get("mathema.missing_unknown"):
                     probe.note = f"{probe.note or ''}; {told}".lstrip("; ")
+        reading = _approx_reading(cj)
+        if reading and not probe.name.startswith(f"{cj.name}[") \
+                and reading not in (probe.note or ""):
+            probe.note = f"{probe.note or ''}; {reading}".lstrip("; ")
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
