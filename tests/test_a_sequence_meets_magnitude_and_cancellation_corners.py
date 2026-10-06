@@ -10,11 +10,16 @@ the note (rulings of 2026-10-01, 2026-10-05 and 2026-10-06 on G94: the
 corners are turned on with the strata work, the mathematics is exact,
 the absolute part of the allowance never exceeds the relative part of
 the result)."""
-import math
 
-import numpy as np
+import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def running_total(xs: list, y0: float) -> float:

@@ -8,9 +8,11 @@ index raises. The grammar's `dot(a, other)` pairs by position, so no
 bundled row states `pandas.Series.dot` as `dot(a, other)`.
 """
 from __future__ import annotations
-
-import pandas as pd
 import pytest
+
+pytest.importorskip("pandas")
+
+import pandas as pd  # noqa: E402
 
 
 def test_a_reordered_series_is_paired_by_label():

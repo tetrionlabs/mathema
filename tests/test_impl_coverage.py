@@ -210,6 +210,7 @@ def test_stale_test_is_excluded_but_reclaimable(tmp_path):
 
 
 def test_run_tests_refreshes_and_reclaims_the_test_source(tmp_path):
+    pytest.importorskip("coverage")
     # `--run-tests` re-runs the suite under coverage to produce a FRESH
     # report; here a custom command stands in for the suite. After it,
     # the test source is current and counts toward the score.
@@ -258,6 +259,7 @@ def test_regenerate_reports_failure_without_coverage(monkeypatch):
 
 
 def test_regenerate_keeps_the_report_when_a_test_fails(tmp_path):
+    pytest.importorskip("coverage")
     # a failing test still leaves executed-line data behind; the report is
     # exported from it and counts as regenerated, whatever the exit status.
     import sys
@@ -279,6 +281,7 @@ def test_regenerate_keeps_the_report_when_a_test_fails(tmp_path):
 
 
 def test_regenerate_combines_parallel_data_files(tmp_path):
+    pytest.importorskip("coverage")
     # a parallel-mode run (one data file per process, as subprocess
     # measurement writes) leaves only `.coverage.<suffix>` files; they are
     # combined before the export, or every line they hold is lost.
@@ -386,6 +389,7 @@ def test_without_a_stamp_freshness_is_judged_by_file_time(tmp_path):
 
 
 def test_regenerate_stamps_the_measured_sources(tmp_path):
+    pytest.importorskip("coverage")
     import sys
 
     import mathema.impl_coverage as ic

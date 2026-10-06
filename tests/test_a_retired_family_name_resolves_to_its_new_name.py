@@ -7,12 +7,15 @@ is `is_language_defined` and `is_compendium_safe` is `is_library_safe`
 (the view of definedness over a library's calls only). A claim written with the old spelling is the
 claim under the new name, and its record says the spelling was
 accepted and what it resolved to."""
-import math
-
-import numpy as np
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def root(x: float) -> float:

@@ -42,6 +42,7 @@ def install_throwaway_library(tmp_path, monkeypatch) -> str:
 
 
 def test_bundled_files_load_for_installed_libraries():
+    pytest.importorskip("numpy")
     lib = load_library_claims(".")
     assert lib["math.sqrt"]["compendium"] == "math"          # stdlib: always
     assert lib["numpy.clip"]["compendium"] == "numpy"         # in the test venv
@@ -91,6 +92,7 @@ def test_a_malformed_library_field_is_refused_naming_the_field(data, field):
 
 
 def test_a_project_row_replaces_its_bundled_namesake(tmp_path):
+    pytest.importorskip("numpy")
     _write(tmp_path / "claims" / "numpy.claims.yaml", """
         compendium: numpy
         versions: "*"
@@ -143,6 +145,7 @@ def test_a_library_that_is_not_importable_contributes_nothing(tmp_path):
 
 def test_rows_of_a_project_compendium_file_carry_the_compendium_surface(
         tmp_path):
+    pytest.importorskip("numpy")
     _write(tmp_path / "claims" / "numpy.claims.yaml", """
         compendium: numpy
         numpy.tanh:
@@ -174,6 +177,7 @@ def test_the_bundled_directory_is_not_a_project_claims_file():
 
 
 def test_a_compendium_premise_is_named_but_never_trusted():
+    pytest.importorskip("numpy")
     import mathema
 
     def widened(x: float) -> float:
@@ -192,6 +196,7 @@ def test_a_compendium_premise_is_named_but_never_trusted():
 
 
 def test_is_defined_regions_become_hazard_boundaries_for_callers():
+    pytest.importorskip("numpy")
     import numpy
 
     def root_gap(x: float, y: float) -> float:
@@ -220,6 +225,7 @@ def test_region_boundaries_are_solved_over_the_reals():
 @pytest.mark.parametrize("spelling", ["np.arcsin(x)", "numpy.arcsin(x)",
                                       "arcsin(x)"])
 def test_every_import_spelling_of_a_call_gets_the_hazard(tmp_path, spelling):
+    pytest.importorskip("numpy")
     import importlib.util
     (tmp_path / "hz.py").write_text(textwrap.dedent(f'''
         import numpy
@@ -243,6 +249,7 @@ def test_every_import_spelling_of_a_call_gets_the_hazard(tmp_path, spelling):
 
 
 def test_an_empty_reduction_is_a_hazard_on_sequence_parameters():
+    pytest.importorskip("numpy")
     import numpy as np
 
     def average_of(xs: list) -> float:
@@ -360,6 +367,7 @@ def test_a_compendium_file_naming_the_projects_own_package_is_ignored(
 
 
 def test_a_bundled_entry_states_its_prose_as_row_notes_not_intent():
+    pytest.importorskip("numpy")
     # intent is a function's own statement of purpose; what a claims
     # file says about a library's behaviour rides the row it explains
     import glob

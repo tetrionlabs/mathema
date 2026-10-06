@@ -6,13 +6,17 @@ does not know (a method on a series, an uncatalogued helper), or a
 region with no expressible complement (gamma's poles), leaves that
 region unknown: the claim is then decided by execution, never proven
 from the part of the region that is known."""
-import math
-
-import numpy as np
-import pandas as pd
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def log_and_gamma(x: float) -> float:

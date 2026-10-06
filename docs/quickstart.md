@@ -10,8 +10,12 @@ Work inside a virtual environment rather than against a system Python:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install mathema
+pip install "mathema[all]"
 ```
+
+`[all]` adds numpy, the z3 proof rung, the MCP server and the coverage
+reader; `pip install mathema` is the minimal core, enough for everything on
+this page.
 
 mathema is fully offline. The one command that reaches the network is
 `mathema init --agents`, which you run by name to fetch the optional agent
@@ -48,7 +52,7 @@ FAIL pricing.discounted: source, no side effects; claims 1/1 checked (0 proven, 
 Falsified, on the first try. That is not a bad start, it is the point.
 Asking for the counterexample says why:
 
-<!-- example: falsify run -->
+<!-- example: falsify run requires=z3 -->
 ```python
 import mathema
 from pricing import discounted

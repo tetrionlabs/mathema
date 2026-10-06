@@ -7,11 +7,16 @@ and the policy at each value that is not a number: f(nan), f(None),
 f([])), each with its verdict first. The claim is falsified when any of
 its lines is, and a falsified absence or missing line says the possible
 fixes."""
-import math
-from typing import Optional
 
-import mathema
-import pandas as pd
+import pytest
+
+pytest.importorskip("pandas")
+
+import math  # noqa: E402
+from typing import Optional  # noqa: E402
+
+import mathema  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def root_opt(x: Optional[float]) -> float:

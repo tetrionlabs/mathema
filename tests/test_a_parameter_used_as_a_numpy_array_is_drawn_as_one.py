@@ -4,12 +4,17 @@
 beside `np.mean(a)`, in a module importing numpy) is drawn as a numpy
 array, so the claim exercises the code as it is called, not a list
 that has no `.size`."""
-import os
-import sys
 
-from mathema.analysis import analyze_source
-from mathema.conjecture import check_conjectures, claim
-from mathema.runtime_types import realised_parameters
+import pytest
+
+pytest.importorskip("numpy")
+
+import os  # noqa: E402
+import sys  # noqa: E402
+
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
+from mathema.runtime_types import realised_parameters  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "data"))
 import numpy_body  # noqa: E402

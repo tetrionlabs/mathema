@@ -66,6 +66,7 @@ def test_a_matrix_product_keeps_its_written_order(law, unicode):
 
 
 def test_elementwise_and_matrix_commutativity_render_differently():
+    pytest.importorskip("numpy")
     (hadamard,) = check_conjectures(two, [claim("A * B == B * A")])
     (product,) = check_conjectures(two, [claim("A @ B == B @ A")])
     assert hadamard.statement == "A*B = B*A", hadamard.statement

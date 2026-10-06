@@ -80,6 +80,7 @@ def test_a_bounded_square_is_overflow_safe(tmp_path):
 
 
 def test_overflow_safe_restriction_on_a_project_function_holds(tmp_path):
+    pytest.importorskip("numpy")
     ex = _load(tmp_path, '''
         import numpy as np
 

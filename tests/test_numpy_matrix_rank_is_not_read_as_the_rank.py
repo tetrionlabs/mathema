@@ -12,13 +12,17 @@ above that cutoff.
 """
 from __future__ import annotations
 
-import os
+import pytest
 
-import numpy as np
-import yaml
+pytest.importorskip("numpy")
 
-from mathema.claims import check_conjectures, claim
-from mathema.compendium import _bundled_dir
+import os  # noqa: E402
+
+import numpy as np  # noqa: E402
+import yaml  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.compendium import _bundled_dir  # noqa: E402
 
 
 def gram_rank(A: np.ndarray) -> int:

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat, Vec
+pytest.importorskip("numpy")
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat, Vec  # noqa: E402
 
 
 def two(A: Mat("n", "n"), B: Mat("n", "n")):

@@ -12,12 +12,14 @@ combines with a relation premise, and the identity and skew-symmetric
 premises carry to the derive route.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat  # noqa: E402
 
 
 def one(A: Mat("n", "n")):

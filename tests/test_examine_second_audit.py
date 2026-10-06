@@ -8,13 +8,16 @@ with None and from the order of a set of strings however it was
 built; a counter read after the call changes it; a slice of a list is
 a copy. A write is never proven state-safe, a hidden input is never
 proven deterministic, and a pure function is never falsified."""
-import inspect
-import os
-import sys
 
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import inspect  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "data"))
 import examine_attacks2 as A  # noqa: E402

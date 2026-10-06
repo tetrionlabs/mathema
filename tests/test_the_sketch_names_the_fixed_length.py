@@ -7,12 +7,15 @@ keeps saying so, since it covers the fixed one. The sampling note prints
 one fixed size, never a range, and a literal dimension that contradicts
 a length premise is the vacuous premise the engine already reports,
 naming both; a premise the size satisfies is not vacuous."""
-import importlib.util
-import textwrap
 
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import importlib.util  # noqa: E402
+import textwrap  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 _MODULE = '''
 import numpy as np

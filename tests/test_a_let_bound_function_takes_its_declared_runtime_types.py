@@ -15,7 +15,11 @@ from __future__ import annotations
 import sys
 import textwrap
 
+import pytest
+
 import yaml
+
+pytest.importorskip("pandas")
 
 
 def _write(path, text):

@@ -12,13 +12,15 @@ added or an infinity times zero have none, and complex numbers have no
 running extremum. A broken numpy cannot make a running row hold.
 """
 from __future__ import annotations
-
-import math
-
-import numpy as np
 import pytest
 
-from mathema._linalg_eval import FUNCTIONS
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
 
 INF = math.inf
 

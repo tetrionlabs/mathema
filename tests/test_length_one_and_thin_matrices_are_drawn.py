@@ -9,9 +9,13 @@ single element.
 """
 from __future__ import annotations
 
-import numpy as np
+import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def sample_std(x: np.ndarray) -> float:

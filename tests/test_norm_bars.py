@@ -14,17 +14,19 @@ Euclidean for a vector, Frobenius for a matrix. Any other order is
 refused with the accepted orders named.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema._linalg_eval import _norm
-from mathema.claims import check_conjectures, claim
-from mathema.compendium import _installed_version, _version_in_range
-from mathema.conjecture import InvalidConjecture
-from mathema.grammar import normalize
-from mathema.spec import canonical_claim_text, render_claim_text
-from tests.test_claim_text_soundness import assert_round_trips
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema._linalg_eval import _norm  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.compendium import _installed_version, _version_in_range  # noqa: E402
+from mathema.conjecture import InvalidConjecture  # noqa: E402
+from mathema.grammar import normalize  # noqa: E402
+from mathema.spec import canonical_claim_text, render_claim_text  # noqa: E402
+from tests.test_claim_text_soundness import assert_round_trips  # noqa: E402
 
 
 # `numpy.dot`'s definition row applies from numpy 2.4, so below it a

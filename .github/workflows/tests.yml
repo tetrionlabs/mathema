@@ -70,6 +70,26 @@ jobs:
         run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('mathema_language') is not None)"
       - run: python -m pytest -q
 
+  # The core install alone: no optional extra, so the degraded paths
+  # (no numpy, no z3, no pandas or polars) are exercised as a user who
+  # ran `pip install mathema` sees them. A test whose subject is an
+  # extra skips itself (`needs_smt`, `importorskip`); everything else
+  # must pass here, which is the check that the degraded path is honest.
+  core-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e . pytest pytest-xdist
+      - name: no optional extra is installed
+        run: python -c "import importlib.util, sys; sys.exit(any(importlib.util.find_spec(m) for m in ('numpy', 'pandas', 'polars', 'z3', 'coverage', 'mcp')))"
+      - run: python -m pytest -q -n 4
+
   # The bundled compendium rows adjudicated against the libraries
   # (`--third-party-compendiums`): a red here is a library that changed
   # under a row, or a row that misreads it. Runs when a bundled compendium file

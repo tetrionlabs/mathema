@@ -9,9 +9,13 @@ library's stated behaviour, not an unaccounted one.
 """
 from __future__ import annotations
 
-import pandas as pd
+import pytest
 
-import mathema
+pytest.importorskip("pandas")
+
+import pandas as pd  # noqa: E402
+
+import mathema  # noqa: E402
 
 
 def mean_return(xs: pd.Series) -> float:

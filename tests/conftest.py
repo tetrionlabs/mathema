@@ -149,6 +149,10 @@ def pytest_configure(config):
         "third_party_compendiums: adjudicates bundled compendium rows "
         "against the installed library; skipped unless "
         "--third-party-compendiums is given")
+    config.addinivalue_line(
+        "markers",
+        "needs_smt: the subject is the nlsat rung (the optional "
+        "mathema[smt] extra); skipped when z3 is not installed")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -164,6 +168,13 @@ def pytest_collection_modifyitems(config, items):
         skip = pytest.mark.skip(reason=reason)
         for item in items:
             if marker in item.keywords:
+                item.add_marker(skip)
+    import importlib.util
+    if importlib.util.find_spec("z3") is None:
+        skip = pytest.mark.skip(reason="the nlsat rung needs the optional "
+                                       "mathema[smt] extra (z3)")
+        for item in items:
+            if "needs_smt" in item.keywords:
                 item.add_marker(skip)
 
 # --- the proof budget, and why a test may need it raised ---------------

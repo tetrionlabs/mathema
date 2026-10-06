@@ -8,12 +8,18 @@ while a function on plain numbers that returns None is not.
 """
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-import polars as pl
+import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.conjecture import _resolve_func_ref
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+pytest.importorskip("polars")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import polars as pl  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.conjecture import _resolve_func_ref  # noqa: E402
 
 
 def _verdict(fn, law):

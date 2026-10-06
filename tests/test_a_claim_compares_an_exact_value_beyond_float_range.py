@@ -12,14 +12,16 @@ overflow. A function that overflows to inf is falsified with the gap
 in view, also along an axis and under a square root.
 """
 from __future__ import annotations
-
-import math
-import sys
-
-import numpy as np
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+import sys  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 _BIG = sys.float_info.max
 _OVER = "for a in [1e307, 1.7e308]^n \\ {∅}, assuming dim(a) >= 2, "

@@ -10,14 +10,17 @@ array result compares element by element, as any array does, and a
 Decimal compares exactly.
 """
 from __future__ import annotations
-
-from decimal import Decimal
-
-import numpy as np
-import pandas as pd
 import pytest
 
-import mathema
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+from decimal import Decimal  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import mathema  # noqa: E402
 
 
 def pow2(n: int) -> int:

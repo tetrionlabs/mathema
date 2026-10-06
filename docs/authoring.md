@@ -689,7 +689,7 @@ cares which surface a claim came from. `mathema.write_spec()`'s worked example b
 shows claims from three different sources adjudicated together with
 zero manual wiring, for this softmax:
 
-<!-- example: write-spec run -->
+<!-- example: write-spec run requires=numpy -->
 ```python
 import math
 from typing import Annotated

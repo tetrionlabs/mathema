@@ -9,13 +9,16 @@ inplace=True)`), or through another name bound to it, hands the call a
 different value, so the call's rows say nothing about `xs`.
 """
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
 import pytest
 
-from mathema import analyze
-from mathema.policy import composed_policies
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from mathema import analyze  # noqa: E402
+from mathema.policy import composed_policies  # noqa: E402
 
 
 def mean_after_zeroing(xs: np.ndarray) -> float:

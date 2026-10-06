@@ -8,15 +8,19 @@ premise evaluated in float would admit the point, and the computation
 companion would then execute the code on an input the claim never
 covered and blame the code for what happens there.
 """
-import math
-
-import numpy as np
-import pandas as pd
 import pytest
 
-import mathema
-from mathema._exact_premises import premise_functions
-from mathema._linalg_eval import FUNCTIONS
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema._exact_premises import premise_functions  # noqa: E402
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
 
 pytestmark = pytest.mark.needs_full_proof_budget
 

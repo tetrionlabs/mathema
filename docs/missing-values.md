@@ -415,7 +415,7 @@ def average_return(returns: np.ndarray) -> float:
     return float(np.mean(returns))
 ```
 
-<!-- example: containers run -->
+<!-- example: containers run requires=numpy -->
 ```python
 import mathema
 from portfolio import average_return, total_exposure
@@ -668,7 +668,7 @@ def total_volume(volumes: pl.Series) -> float:
     return float(volumes.sum())
 ```
 
-<!-- example: defines run -->
+<!-- example: defines run requires=polars -->
 ```python
 import mathema
 from pl_prices import total_volume

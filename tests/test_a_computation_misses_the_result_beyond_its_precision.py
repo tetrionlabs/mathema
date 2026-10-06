@@ -10,11 +10,14 @@ condition number at the witness and says whether the miss is inherent
 (no float64 computation can deliver the result there) or the code's,
 and offers narrowing the domain or accepting the discovery (ruling of
 2026-10-06 on G94, option a)."""
-import numpy as np
 import pytest
 
-import mathema
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def running_total(xs: list, y0: float) -> float:

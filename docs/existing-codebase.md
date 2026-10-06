@@ -55,7 +55,7 @@ lives, whether it has claims, whether the derive route could prove
 things about it, what state outside its parameters it touches, whether a
 test report covers it, and how well its docstring states its intent.
 
-<!-- example: codebase run -->
+<!-- example: codebase run requires=coverage -->
 ```bash
 mathema audit billing --root .
 ```
