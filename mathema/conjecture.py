@@ -994,6 +994,7 @@ _SAFE_FUNCS = {
     "str": str,
     # the call a claim's `@` is compiled to (`_exact_products`)
     "_exact_matmul": lambda a, b: _linalg_eval_words().matmul(a, b),
+    "_exact_arith": lambda op, a, b: _linalg_eval_words().arith(op, a, b),
     # sympy's own capitalization, mirroring _math_vocab._SYMPY_FUNCS's
     # Abs/Min/Max synonyms so a claim written that way adjudicates on
     # either route
@@ -3513,11 +3514,15 @@ def _validate(src: str, param_names: set[str],
 
 def _exact_products(tree):
     """A copy of a claim's tree with each `a @ b` written as the call
-    `_linalg_eval.matmul(a, b)`, the exact product of finite real
-    arrays."""
+    `_linalg_eval.matmul(a, b)` and each `a + b` (`-`, `*`, `/`, `**`)
+    as `_linalg_eval.arith("+", a, b)`: exact entry by entry when an
+    operand is an array of finite real numbers, the operands' own
+    operator otherwise."""
     import copy
 
-    from ._linalg_eval import MATMUL
+    from ._linalg_eval import ARITH, MATMUL
+    arithmetic = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/",
+                  ast.Pow: "**"}
 
     class _Products(ast.NodeTransformer):
         def visit_BinOp(self, node):
@@ -3526,6 +3531,12 @@ def _exact_products(tree):
                 return ast.copy_location(ast.Call(
                     func=ast.Name(id=MATMUL, ctx=ast.Load()),
                     args=[node.left, node.right], keywords=[]), node)
+            op = arithmetic.get(type(node.op))
+            if op is not None:
+                return ast.copy_location(ast.Call(
+                    func=ast.Name(id=ARITH, ctx=ast.Load()),
+                    args=[ast.Constant(value=op), node.left, node.right],
+                    keywords=[]), node)
             return node
     return ast.fix_missing_locations(_Products().visit(copy.deepcopy(tree)))
 

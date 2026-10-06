@@ -104,7 +104,9 @@ def test_vector_operators_read_as_numpy(law, true):
 @pytest.mark.parametrize("law, true", [
     ("norm(c*x) == abs(c)*norm(x)", True),
     ("norm(c*x) == c*norm(x)", False),
-    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", "corner"),
+    # no f is read: both sides are claim words, exact at every draw,
+    # so the triangle inequality holds at the float limit too
+    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", True),
 ])
 def test_a_number_scales_and_shifts_every_element(law, true):
     p = _one(scaled, law)
