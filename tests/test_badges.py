@@ -243,7 +243,7 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     # no verified store here, so clarity sits at the structural floor
     # (nothing verified, only what the code visibly shows), a low number
     assert scores.clarity < 25
-    assert scores.algo == "entropy-dimensions@1.2"
+    assert scores.algo == "entropy-dimensions@1.3"
 
 
 def test_repo_badges_gives_no_implementation_credit_from_a_stale_report(tmp_path):
