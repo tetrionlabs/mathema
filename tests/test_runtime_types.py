@@ -12,19 +12,23 @@ vector, matrix or table with its missing positions in the library's
 own spelling, and observes what a function returns back into one.
 """
 from __future__ import annotations
-
-import math
-
-import numpy as np
-import numpy.typing as npt
-import pandas as pd
-import polars as pl
 import pytest
 
-from mathema import runtime_types as rt
-from mathema.runtime_types import (AbstractMat, AbstractTable, AbstractVec,
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+pytest.importorskip("polars")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import numpy.typing as npt  # noqa: E402
+import pandas as pd  # noqa: E402
+import polars as pl  # noqa: E402
+
+from mathema import runtime_types as rt  # noqa: E402
+from mathema.runtime_types import (AbstractMat, AbstractTable, AbstractVec,  # noqa: E402
                                    NotMine)
-from mathema.types import Mat, Vec
+from mathema.types import Mat, Vec  # noqa: E402
 
 
 def _first(fn, declared=None):

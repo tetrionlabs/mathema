@@ -8,12 +8,17 @@ is_dimension_safe; is_input_safe rolls up the missing, absent and empty
 families; is_computation_safe the overflow, representation and
 recursion families; is_finite_over_floats is the view of poles and
 overflow."""
-import math
 
-import numpy as np
+import pytest
 
-from mathema.conjecture import check_conjectures, claim
-from mathema.types import Mat
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat  # noqa: E402
 
 
 def reciprocal(x: float) -> float:

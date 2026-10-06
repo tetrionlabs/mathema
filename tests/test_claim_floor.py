@@ -5,6 +5,7 @@
 A floor, not a ceiling. Nothing divides by it, and carrying more claims
 than it asks for is not an overrun.
 """
+import importlib.util
 import math
 import re
 
@@ -61,9 +62,13 @@ ALL = (add, scale, bs_d1, mean, parse_tag, stateful_io)
 # scale_equivariant suggestion (proven by construction) joins their
 # floor; mean takes a sequence, so whether its operands and result have
 # the right shapes (is_dimension_safe, a child of is_numerically_defined)
-# is one of its aspects
+# is one of its aspects, and the sum_like comparison with numpy.sum
+# joins its floor where numpy imports
 @pytest.mark.parametrize("fn,expected", [
-    (add, 12), (scale, 9), (bs_d1, 26), (mean, 12),
+    (add, 12), (scale, 9), (bs_d1, 26),
+    pytest.param(mean, 12, marks=pytest.mark.skipif(
+        importlib.util.find_spec("numpy") is None,
+        reason="the sum_like aspect names numpy.sum")),
 ])
 def test_floor_for_liftable_shapes(fn, expected):
     assert claim_floor(fn)["floor"] == expected

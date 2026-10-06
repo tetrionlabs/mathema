@@ -6,10 +6,15 @@ logger or one obtained by name), so a function whose only effect is
 logging is proven state safe by structure. Changing logging's
 configuration (basicConfig, setLevel, addHandler, disable) stays a
 state change and is falsified with the state named."""
-import logging
-import os
 
-from mathema.conjecture import check_conjectures, claim
+import pytest
+
+pytest.importorskip("numpy")
+
+import logging  # noqa: E402
+import os  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 log = logging.getLogger(__name__)
 

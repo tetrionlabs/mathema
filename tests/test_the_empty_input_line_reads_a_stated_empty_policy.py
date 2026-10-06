@@ -18,14 +18,16 @@ A falsified line offers its fixes with the condition first and the
 claim last, after a colon.
 """
 from __future__ import annotations
-
-import statistics
-
-import pandas as pd
 import pytest
 
-from mathema import enforce_domain
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("pandas")
+
+import statistics  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+from mathema import enforce_domain  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def mean_ret(r: pd.Series) -> float:

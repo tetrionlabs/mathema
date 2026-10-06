@@ -478,6 +478,7 @@ def test_derivability_report_unsupported_call_names_the_category():
 
 
 def test_derivability_report_unsupported_call_message_names_the_specific_culprit():
+    pytest.importorskip("numpy")
     import numpy as np
 
     def calls_unresolvable_wrapper(x: float) -> float:

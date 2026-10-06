@@ -15,12 +15,15 @@ least it. Each positive case here stands beside a negative control
 that the derive route does not prove and sampling falsifies.
 """
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def running_peak(a: pd.Series):

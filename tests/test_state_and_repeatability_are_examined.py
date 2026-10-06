@@ -9,13 +9,16 @@ falsifies is_state_safe with the site as the witness; a hidden input
 is_deterministic; anything the examination cannot read leaves the row
 unknown with the reason; a threaded reduction leaves determinism
 unknown; and a body with none of these is proven."""
-import os
-import sys
 
 import pytest
 
-from mathema import check
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import os  # noqa: E402
+import sys  # noqa: E402
+
+from mathema import check  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "data"))
 import examined_functions as ex  # noqa: E402

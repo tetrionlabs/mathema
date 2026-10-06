@@ -12,11 +12,13 @@ end: the call raises, the claim is not proven, and its computation row
 never counts that raise as a pass.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def ellipse_path(cx, cy, a, b, n):

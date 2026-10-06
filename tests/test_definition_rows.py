@@ -98,6 +98,8 @@ def test_the_numbers_of_bundled_definition_rows():
 
 
 def test_a_method_key_is_a_function_of_its_receiver_a():
+    for library in ("numpy", "pandas", "polars"):
+        pytest.importorskip(library)
     import numpy as np
     import pandas as pd
     import polars as pl
@@ -128,6 +130,7 @@ def test_a_method_key_is_a_function_of_its_receiver_a():
 ])
 def test_a_wrong_definition_row_is_falsified(tmp_path, library, key,
                                              statement):
+    pytest.importorskip(library)
     from mathema import compendium
     from mathema.verify import verify_project
     claims = tmp_path / "claims"

@@ -18,15 +18,19 @@ witness. A premise that excludes the region
 (`assuming std(returns, ddof=1) > 0`) makes it provable.
 """
 from __future__ import annotations
-
-import math
-
-import numpy as np
-import pandas as pd
-import polars as pl
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+pytest.importorskip("polars")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import polars as pl  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def sharpe(returns: pd.Series):

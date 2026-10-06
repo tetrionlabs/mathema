@@ -72,14 +72,17 @@ distinct from a locally built array, which phase 4 above now handles);
 and a **reduction over a locally built array** (`np.sum`/`np.dot` on
 one, as opposed to returning it elementwise, named here, not yet
 backed by its own test case in this file)."""
-import math
-
-import numpy as np
 import pytest
 
-from mathema.conjecture import claim, check_conjectures
-from mathema.analysis import analyze_source
-from mathema.symbolic import lift_fold
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import claim, check_conjectures  # noqa: E402
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.symbolic import lift_fold  # noqa: E402
 
 
 # --- Physics -----------------------------------------------------------

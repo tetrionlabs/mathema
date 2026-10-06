@@ -10,15 +10,19 @@ sequences, which random draws never produce, so the premise has a
 solved draw: a constant sequence. A premise no sampled point satisfies
 is `skipped`, never `holds`, and `n` counts admitted points only.
 """
-import math
-
-import numpy as np
-import pandas as pd
 import pytest
 
-from mathema._exact_premises import premise_functions
-from mathema._linalg_eval import FUNCTIONS
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from mathema._exact_premises import premise_functions  # noqa: E402
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 SEEN: list = []
 

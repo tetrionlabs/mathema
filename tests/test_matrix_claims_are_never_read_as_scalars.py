@@ -68,6 +68,7 @@ def test_a_matrix_or_vector_claim_is_not_proven_as_scalars(fn, law, route):
 
 @pytest.mark.parametrize("route", ["derive", "best"])
 def test_the_false_product_of_norms_is_not_proven(route):
+    pytest.importorskip("numpy")
     # |x||y| == |x*y| is a scalar identity; with x*y the elementwise
     # product of two vectors it is false
     p = _one(vec_pair, "norm(x)*norm(y) == norm(x*y)", route)
@@ -77,6 +78,7 @@ def test_the_false_product_of_norms_is_not_proven(route):
 
 
 def test_the_matrix_binomial_square_falsifies_with_a_witness():
+    pytest.importorskip("numpy")
     p = _one(two_plain, "for A in R^(n,n), B in R^(n,n), "
                         "(A + B) @ (A + B) == A @ A + 2 * A @ B + B @ B",
              "best")

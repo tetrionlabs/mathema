@@ -10,12 +10,16 @@ region the function has a value on.
 """
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import textwrap
+import pytest
 
-import mathema
+pytest.importorskip("numpy")
+
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import textwrap  # noqa: E402
+
+import mathema  # noqa: E402
 
 _MODULE = textwrap.dedent('''
     import numpy as np

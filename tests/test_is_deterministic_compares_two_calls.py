@@ -134,11 +134,13 @@ def test_what_the_function_returns_does_not_matter():
 
 def test_a_claim_named_is_deterministic_that_states_something_else():
     # an ordinary claim: the derive route's disproof stands, reproduced
-    # by executing f at its witness
+    # by executing f at its witness; the route names whether the point
+    # executed was derive's own witness or a search it seeded (the
+    # nlsat rung, when z3 is installed, seeds one)
     (p,) = check_conjectures(minus_five, [mathema.claim(
         "f(x) >= 0", name="is_deterministic")])
-    assert (p.verdict, p.route) == ("falsified", "probe:semi_analytical"), \
-        (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.route in ("derive", "probe:semi_analytical"), (p.route, p.note)
     assert p.meta.get("mathema.corroboration") == "reproduced"
 
 

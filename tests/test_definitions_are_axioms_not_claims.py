@@ -45,6 +45,7 @@ def test_a_definition_row_reads_its_word_and_members():
 
 
 def test_the_bundled_definitions_apply():
+    pytest.importorskip("pandas")
     compendium.ensure_bundled()
     assert rt.resolve_missing("pandas.Series") == ("nan", "null", "NA", "NaT")
     assert rt.resolve_missing("polars.Series") == ("null", "nan")
@@ -52,6 +53,7 @@ def test_the_bundled_definitions_apply():
 
 
 def test_a_project_row_loads_as_an_axiom_and_composes(tmp_path):
+    pytest.importorskip("pandas")
     write(tmp_path, "project.claims.yaml", """
         polars.Series:
           defines:

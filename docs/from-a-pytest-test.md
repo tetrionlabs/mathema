@@ -59,7 +59,7 @@ numpy.ptp:
 Naming the file adjudicates every row in it against the numpy that is
 installed:
 
-<!-- example: ptp run -->
+<!-- example: ptp run requires=numpy -->
 ```bash
 mathema verify claims/numpy.claims.yaml --root .
 ```

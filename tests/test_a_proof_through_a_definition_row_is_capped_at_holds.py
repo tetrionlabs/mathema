@@ -14,16 +14,19 @@ trusted: mathema accept KEY ROW --as trusted"). So is a bundled row
 whose version range excludes the installed library.
 """
 from __future__ import annotations
-
-import textwrap
-
-import numpy as np
-import pandas as pd
 import pytest
-import yaml
 
-from mathema import compendium
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import textwrap  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import yaml  # noqa: E402
+
+from mathema import compendium  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 _SCALE = ("let s = mathema.f.scale_seq, let c be [0.1, 10], "
           "for x in [-1, 1]^n, f(s(x, c)) ~= c * f(x)")

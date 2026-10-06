@@ -5,17 +5,20 @@ primitive that turns ordinary equality/inequality claims into calculus,
 PDE, and Ito-lemma coefficient-matching claims), domain-aware bounds,
 np.clip, ternary expressions, and branch conditions over affine local
 variables."""
-import math
-import random
-
-import numpy as np
 import pytest
-import sympy
 
-from mathema.analysis import analyze_source
-from mathema.conjecture import claim, check_conjectures
-from mathema.grammar import to_latex
-from mathema.symbolic import diagnose_fold, lift, lift_dot, lift_fold, lift_sum
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+import random  # noqa: E402
+
+import numpy as np  # noqa: E402
+import sympy  # noqa: E402
+
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.conjecture import claim, check_conjectures  # noqa: E402
+from mathema.grammar import to_latex  # noqa: E402
+from mathema.symbolic import diagnose_fold, lift, lift_dot, lift_fold, lift_sum  # noqa: E402
 
 
 def cube(x: float) -> float:

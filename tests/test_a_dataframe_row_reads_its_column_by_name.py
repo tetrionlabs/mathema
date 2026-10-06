@@ -9,15 +9,17 @@ whatever order. A table whose first column is `y` keeps its `x` entry
 under `"x"`, never at position 0, so no row reads a result by position.
 """
 from __future__ import annotations
-
-import os
-import re
-
-import pandas as pd
 import pytest
-import yaml
 
-from mathema.compendium import _bundled_dir
+pytest.importorskip("pandas")
+
+import os  # noqa: E402
+import re  # noqa: E402
+
+import pandas as pd  # noqa: E402
+import yaml  # noqa: E402
+
+from mathema.compendium import _bundled_dir  # noqa: E402
 
 
 def _rows() -> dict:

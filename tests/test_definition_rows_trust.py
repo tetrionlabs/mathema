@@ -16,17 +16,19 @@ proof could read through different rows now (a row verified,
 falsified or added since) is stale, and verify re-adjudicates it.
 """
 from __future__ import annotations
-
-import sys
-import textwrap
-
-import pandas as pd
 import pytest
-import yaml
 
-from mathema import compendium
-from mathema.claims import check_conjectures, claim
-from mathema.definitions import RowBook, row_standing
+pytest.importorskip("pandas")
+
+import sys  # noqa: E402
+import textwrap  # noqa: E402
+
+import pandas as pd  # noqa: E402
+import yaml  # noqa: E402
+
+from mathema import compendium  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.definitions import RowBook, row_standing  # noqa: E402
 
 _SEM_ROW = """\
 compendium: pandas

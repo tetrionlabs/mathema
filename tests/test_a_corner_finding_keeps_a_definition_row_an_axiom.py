@@ -5,18 +5,22 @@ ordinary draw. A failure only at a magnitude corner (an overflow where
 the exact value is finite) is a finding about the library's computation:
 the row stays an axiom, and no proof through it is weakened. A wrong row
 still falls at an ordinary draw."""
-import os
-import tempfile
-import textwrap
-
-import numpy as np
-import pandas as pd
 import pytest
-import yaml
 
-import mathema
-from mathema import compendium
-from mathema.compendium import _bundled_dir
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import os  # noqa: E402
+import tempfile  # noqa: E402
+import textwrap  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import yaml  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema import compendium  # noqa: E402
+from mathema.compendium import _bundled_dir  # noqa: E402
 
 LAW = ("for returns in {dom}, let s = mathema.f.shift_seq, let c be [0.1, 10], "
        "assuming dim(returns) >= 2, f(s(returns, c)) ~= f(returns)")

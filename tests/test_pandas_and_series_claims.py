@@ -13,13 +13,17 @@ compared element by element. A column is addressed as `df.returns` or
 construct: `norm`, `dot`, `mean`, `returns * c`, `returns + c`.
 """
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
-import polars as pl
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+pytest.importorskip("polars")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import polars as pl  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def scale_numpy(returns: np.ndarray, c: float):

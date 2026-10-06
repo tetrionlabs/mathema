@@ -27,6 +27,7 @@ def _v(fn, law):
 
 
 def test_the_numpy_compendium_covers_the_expected_surface():
+    pytest.importorskip("numpy")
     from mathema.compendium import compendium_functions
     numpy = {k: v for k, v in compendium_functions().items()
              if k.startswith("numpy.")}

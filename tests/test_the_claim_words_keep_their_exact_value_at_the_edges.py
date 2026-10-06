@@ -15,14 +15,16 @@ numbers, the interpolation between -inf and a number) it gives that
 infinity. Integers are read exactly and a quantile level as written.
 """
 from __future__ import annotations
-
-import math
-from fractions import Fraction
-
-import numpy as np
 import pytest
 
-from mathema._linalg_eval import FUNCTIONS
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+from fractions import Fraction  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
 
 INF = math.inf
 

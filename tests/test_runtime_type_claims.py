@@ -13,16 +13,20 @@ runtime type to annotate; a list the function cannot use is then
 runtime type falsifies as always.
 """
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
-import polars as pl
 import pytest
 
-import mathema
-from mathema.claims import check_conjectures, claim
-from mathema.gates import companion_descriptor
-from mathema.types import Vec
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+pytest.importorskip("polars")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import polars as pl  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.gates import companion_descriptor  # noqa: E402
+from mathema.types import Vec  # noqa: E402
 
 _BETWEEN = "for xs in R^n, min(xs) <= f(xs) <= max(xs)"
 

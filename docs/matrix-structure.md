@@ -139,7 +139,7 @@ vector or matrix as a number: a claim that uses one as a value goes
 to the matrix algebra below or, when that cannot close it, to
 sampling.
 
-<!-- example: semantics run -->
+<!-- example: semantics run requires=numpy -->
 ```python
 from mathema.types import Mat, Vec
 
@@ -189,7 +189,7 @@ vector of the claim's own is declared with `let b be R^n`, and takes
 the size the parameters give `n`. `x != 0` over a vector says it is not
 the zero vector.
 
-<!-- example: vocabulary run -->
+<!-- example: vocabulary run requires=numpy -->
 ```python
 from mathema.types import Mat, Vec
 
@@ -325,7 +325,7 @@ A proof that used one names it in its sketch and in the record's
 `mathema.matrix_lemmas` meta. Each lemma is exact, so a relation it
 does not close is not thereby false: the claim is sampled as before.
 
-<!-- example: lemmas run -->
+<!-- example: lemmas run requires=numpy -->
 ```python
 from mathema.types import Mat, Vec
 

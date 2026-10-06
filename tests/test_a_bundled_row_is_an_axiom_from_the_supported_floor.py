@@ -11,12 +11,14 @@ floor. From the floor up the row is an axiom, and its sketch names the
 range from the floor ("numpy 2.0 to 2.x").
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema import compendium, definitions
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema import compendium, definitions  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 _SCALE = ("let s = mathema.f.scale_seq, let c be [0.1, 10], "
           "for x in [-1, 1]^n, f(s(x, c)) ~= c * f(x)")

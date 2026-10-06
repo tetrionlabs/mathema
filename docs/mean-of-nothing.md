@@ -29,7 +29,7 @@ The series it will meet, slot by slot:
 
 A mean of returns in `[-1, 1]` lies in `[-1, 1]`:
 
-<!-- example: mean run -->
+<!-- example: mean run requires=pandas -->
 ```python
 import mathema
 from returns import mean_return

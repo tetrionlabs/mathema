@@ -48,7 +48,7 @@ FAIL pricing.discounted: source, no side effects; claims 1/1 checked (0 proven, 
 Falsified, on the first try. That is not a bad start, it is the point.
 Asking for the counterexample says why:
 
-<!-- example: falsify run -->
+<!-- example: falsify run requires=z3 -->
 ```python
 import mathema
 from pricing import discounted

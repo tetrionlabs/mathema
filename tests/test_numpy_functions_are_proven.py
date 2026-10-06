@@ -16,11 +16,13 @@ it). Each is marked with the row that
 carries it or the row it lacks.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 #: numpy's ufuncs, `matmul` and `sum` state signatures a row binds to
 #: from numpy 2.4 on, and the rows for them apply from there

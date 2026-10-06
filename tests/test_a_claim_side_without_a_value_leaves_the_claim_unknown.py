@@ -5,7 +5,12 @@ own arithmetic, not in f) is never silently dropped: the side is read
 exactly when it can be, and otherwise the claim is unknown, naming the
 draw and the reason (ruling of 2026-10-01: a point that cannot be
 decided is never counted toward holds)."""
-from mathema.conjecture import check_conjectures, claim
+
+import pytest
+
+pytest.importorskip("numpy")
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def ident(x: float) -> float:
