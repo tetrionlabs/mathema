@@ -142,22 +142,40 @@ def test_check_fails_on_a_declared_but_unenforced_exclusion(tmp_path):
 
 
 def test_check_strict_fails_on_unverifiable_claims(tmp_path):
-    # a stated claim over a language mathema cannot resolve has no
-    # input to evaluate at: it is skipped, which --strict refuses
+    # a probe-route claim over a string parameter with no finite set or
+    # language to draw from has no input to evaluate at: it is skipped,
+    # which --strict refuses and the default mode lets through
+    mod = tmp_path / "lab.py"
+    mod.write_text(
+        "def label(name: str) -> str:\n"
+        '    """Upper case.\n'
+        "\n"
+        "    Claims:\n"
+        "        same_len [probe]: len(f(name)) == len(name)\n"
+        '    """\n'
+        "    return name.upper()\n"
+    )
+    lenient = _run("check", "lab.py:label", cwd=tmp_path)
+    assert lenient.returncode == 0, lenient.stdout
+    assert "0/1 checked" in lenient.stdout
+
+    strict = _run("check", "lab.py:label", "--strict", cwd=tmp_path)
+    assert strict.returncode == 1, strict.stdout
+    assert "same_len" in strict.stdout
+
+
+def test_a_claim_naming_a_language_no_package_serves_is_unknown(tmp_path):
+    # the claim is read, parses, and is unknown until mathema-language is
+    # installed; unknown is never let through
     mod = tmp_path / "lab.py"
     mod.write_text(
         "def label(name: str) -> str:\n"
         "    return name.upper()\n"
     )
     law = "for name in L[nosuch.grammar], len(f(name)) == len(name)"
-    lenient = _run("check", "lab.py:label", "--claim", law, cwd=tmp_path)
-    assert lenient.returncode == 0, lenient.stdout
-    assert "1 unknown" in lenient.stdout
-
-    strict = _run("check", "lab.py:label", "--claim", law, "--strict",
-                  cwd=tmp_path)
-    assert strict.returncode == 1, strict.stdout
-    assert " unknown: " in strict.stdout, strict.stdout
+    r = _run("check", "lab.py:label", "--claim", law, cwd=tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "1 unknown" in r.stdout and "mathema-language" in r.stdout, r.stdout
 
 
 def test_a_battery_call_mathema_could_not_build_does_not_gate(tmp_path):

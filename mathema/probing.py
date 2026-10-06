@@ -1539,6 +1539,10 @@ def _sample_domain(rng: random.Random, dom: Domain,
             weights.append(max(hi / 2 - lo / 2, 1e-9))
         else:
             weights.append(1.0)
+    if dom.base_type == "S" and not enumerated:
+        # the type of strings alone: a string from the hazard corpus
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     for _ in range(20):
         piece = rng.choices(pieces, weights=weights, k=1)[0]
         if isinstance(piece, frozenset):
@@ -1937,6 +1941,11 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         return _sample_bare_named_set(rng, bound_shape)
     if kind == "bool":
         return rng.random() < 0.5
+    if kind == "string":
+        # a string parameter with no finite set or language to draw
+        # from: one string from the hazard corpus, never a number
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     if kind == "int":
         if bounds is not None:
             return _synth_int_in(rng, bounds, "Z")
@@ -2617,14 +2626,21 @@ def probe(fn, facts, domain: dict | None = None,
     # domain always wins over the inference)
     for p, vals in getattr(facts, "finite_domains", {}).items():
         domain.setdefault(p, frozenset(vals))
+    # a guard refusing every value outside a set of strings leaves that
+    # set as the working domain (decision A)
+    from .hazards import finite_guard_sets
+    for p, vals in finite_guard_sets(facts).items():
+        domain.setdefault(p, vals)
     # a string parameter with no finite domain has no honest sampling
     # story: synthesizing a float and watching the function raise would
     # manufacture a gap that is an artefact of the battery, not a fact
     # about the code, decline, naming the parameter and the spelling
     # that fixes it
+    from .domain import bare_text_type
     for p, k in zip(facts.params, kinds):
-        if k == "string" and _classify_bound(domain.get(p)) not in (
-                "frozenset", "domain", "language"):
+        if k == "string" and (_classify_bound(domain.get(p)) not in (
+                "frozenset", "domain", "language")
+                or bare_text_type(domain.get(p))):
             return [Probe(
                 "callable", callable_statement, "skipped",
                 note=string_domain_hint(p) + " in a claim, or annotate it "

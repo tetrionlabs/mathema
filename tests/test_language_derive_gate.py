@@ -157,7 +157,7 @@ def test_an_unknown_language_skips_with_the_vocabulary_on_every_route(tmp_path, 
             return s
     ''')
     p = _one(mod.same, "for s in L[nope], f(s) == s", route=route)
-    assert p.verdict == "skipped" and p.route is None
+    assert p.verdict == "unknown" and p.route is None
     assert "unknown language L[nope]" in p.note and "letters" in p.note
     assert "mathema[language]" in p.note
     assert p.meta["mathema.probe_gap"] == "language-unresolved"
@@ -170,7 +170,7 @@ def test_without_the_package_a_common_name_skips_and_names_it(tmp_path):
             return s
     ''')
     p = _one(mod.same, "for s in L[unicode], f(s) == s")
-    assert p.verdict == "skipped"
+    assert p.verdict == "unknown"
     assert "unknown language L[unicode]" in p.note
     assert "mathema[language]" in p.note
 
