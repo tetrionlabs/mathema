@@ -6074,9 +6074,16 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
     if missing_in and inputs_missing([lv]):
         # a missing output at a missing input is classified, not judged
         return None
-    if not missing_in and (holds_nan(lv) or holds_nan(rv)
-                           or "absent" in (missing_class(lv), missing_class(rv))):
+    if not missing_in and (holds_nan(lv) or holds_nan(rv)):
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, and a nan is no value"
+    if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
+        # absence compares as absence: None agrees with None under == and
+        # ~=, and fails against a value, under != and under an ordering
+        from ._missing_words import absence_agrees, absence_words
+        if absence_agrees(lv, rv, cj.relation):
+            return None
+        return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, "
+                f"{absence_words(lv, rv, cj.relation)}")
     ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
                                     exact_inequality=cj.tolerance is None,
                                     rel_tol=_declared_rel_tol(cj))
@@ -10644,23 +10651,32 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"{'-inf' if call_inf[1] < 0 else 'inf'}, and an "
                   f"infinity for a finite input is no value")
             break
-        if not missing_in and "absent" in (missing_class(lv), missing_class(rv)) \
-                and not declared_return and any(o is None for o in f_call.outputs()):
-            # an undeclared None from present inputs: a failure of the
-            # value claim, and a fact the absence gate reads
-            from .policy import record_introduced
-            record_introduced(dict(zip(kinds, args)))
-        if not missing_in and "absent" in (missing_class(lv), missing_class(rv)) \
-                and declared_return and any(o is None for o in f_call.outputs()):
-            # a None the return type declares: recorded, not judged
-            executed_record.returned_absent(dict(zip(kinds, args)), declared_return)
-            continue
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
-            # a None from present inputs is no value, like a NaN
+            # a None f returned from present inputs is the absence policy
+            # line's fact: declared by the return type, or flagged there
+            from ._missing_words import absence_agrees, absence_words
+            if any(o is None for o in f_call.outputs()):
+                if declared_return:
+                    executed_record.returned_absent(dict(zip(kinds, args)),
+                                                    declared_return)
+                else:
+                    from .policy import record_introduced
+                    record_introduced(dict(zip(kinds, args)))
+            if absence_agrees(lv, rv, cj.relation):
+                # absence compares as absence: None agrees with None
+                checked += 1
+                continue
+            if declared_return and any(o is None for o in f_call.outputs()):
+                # a None the return type declares, against a value or
+                # under a relation absence does not admit: recorded above,
+                # not judged
+                continue
+            # an absence against a value, under != or under an ordering
+            # fails every relation
             checked += 1
             cx = (f"{_point_text(args)}: "
                   f"{_linalg_eval.shown(lv)!r} vs {_linalg_eval.shown(rv)!r}, "
-                  f"and None is no value")
+                  f"{absence_words(lv, rv, cj.relation)}")
             break
         if missing_in:
             # the code returned a value at a missing input: judged as

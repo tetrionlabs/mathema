@@ -164,6 +164,22 @@ def _fixes(p, key: str, word: str) -> str:
                                              options(fixes).splitlines())
 
 
+def _is_return_row(p) -> bool:
+    """Whether a policy row is about what f gives back (`absent(f)
+    introduces`), rather than about a parameter."""
+    pol = (p.meta or {}).get("mathema.policy") or {}
+    return pol.get("kind") == "absent" and pol.get("parameter") is None
+
+
+def _return_fixes(pol: dict) -> str:
+    """The possible fixes under a falsified return row: its own next
+    step, each option on its own line."""
+    nxt = pol.get("next") or ""
+    if not nxt:
+        return ""
+    return "possible fixes:\n" + "\n".join(f"  {line}" for line in nxt.splitlines())
+
+
 def _split_lines(p, key: str) -> list:
     """The split a claim falsified only below some length is offered as:
     what the witnesses share, and the command that writes the claim
@@ -212,7 +228,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             continue
         under = companions.get(main.name, [])
         rows = [r for r in policy
-                if _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
+                if _is_return_row(r)
+                or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
                            r.meta["mathema.policy"].get("kind") or "")]
         if not under and not rows:
             continue
@@ -263,6 +280,17 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             used.add(id(c))
         for r in rows:
             pol = r.meta["mathema.policy"]
+            if _is_return_row(r):
+                # what f gives back: the row's own statement, its reason
+                # beside it, and its next step as the possible fixes
+                lines.append(_row(_verdict(r), "policy", r.statement,
+                                  pol.get("sentence") or pol.get("reason") or ""))
+                if _verdict(r) == "falsified":
+                    falsified.append(r.counterexample)
+                    lines += [" " * 28 + part
+                              for part in _return_fixes(pol).splitlines()]
+                used.add(id(r))
+                continue
             param, kind = pol.get("parameter") or "", pol.get("kind") or ""
             word = "None" if kind == "absent" else (
                 pol.get("member") or _hole_word(main, param))

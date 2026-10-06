@@ -438,14 +438,20 @@ def none_above_half(x: float) -> float:
     return None if x > 0.5 else x
 
 
-def test_an_undeclared_none_falsifies_the_value_claim_and_has_no_row_of_its_own():
+def test_an_undeclared_none_fails_against_a_value_and_is_flagged_on_its_own_row():
+    # an absence against a number fails the value claim; whether f may
+    # return None from present inputs is the absence policy line's
+    # question, and a return type that does not declare it is flagged
+    # there
     import mathema
     rec = mathema.check(none_above_half, claims=[mathema.claim(
         "for x in [0, 1], f(x) <= 1", name="c")])
     rows = {p.name: p for p in rec.probes}
-    assert "absent[f]" not in rows
     value = rows["c"]
     assert value.verdict == "falsified" or rows.get("c[float]").verdict == "falsified"
+    flagged = rows["absent[f]"]
+    assert flagged.verdict == "falsified", (flagged.verdict, flagged.note)
+    assert "does not declare it" in flagged.note, flagged.note
 
 
 def test_an_undeclared_none_falsifies_is_defined():
