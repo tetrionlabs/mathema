@@ -3034,6 +3034,11 @@ def _try_prove_within_epsilon(fn, facts, lhs_src: str, rhs_src: str,
                        meta=dict(within.meta))
 
 
+#: the sketch's last words where the nlsat rung would have run next and
+#: z3 is not installed
+SMT_HINT = "install mathema[smt] to attempt a proof"
+
+
 def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
              domain: dict | None = None, tolerance: float | None = None,
              max_callee_depth: int = 3, extensive: bool = False,
@@ -3595,6 +3600,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     context and lets a raise guard be excluded when the assumed region
     provably avoids it, the claim then quantifies only where every
     conjunct holds."""
+    smt_hint = False
     aliases = _names_of_function_under_test(funcs, fn)
     if aliases:
         # the function under test called by its own name is `f`: one
@@ -4376,6 +4382,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # substitution library, then one widened-cap retry of the
             # base procedure (see _extensive).
             from ._extensive import extensive_ladder
+            from ._smt import available as _smt_available
             ladder_result, attempted = extensive_ladder(
                 lhs, rhs, relation, domain, bound_context, lifted.params,
                 opaque=lifted.opaque)
@@ -4385,6 +4392,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                 result = replace(result, sketch=f"{result.sketch}; extensive "
                                  "attempts did not settle it either: "
                                  + ", ".join(attempted))
+                # the ladder reached the point where the nlsat rung runs
+                # with the optional extra installed
+                smt_hint = ("interval refinement" in attempted
+                            and not _smt_available())
         if result.status == "undecided":
             result = _try_case_split(lhs, rhs, relation, domain, bound_context, lifted.params,
                                      opaque=lifted.opaque, extensive=extensive) or result
@@ -4417,6 +4428,8 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             note = aux.pop(_LIM_NOTE_KEY)
             result = replace(result, sketch=f"{result.sketch}; {note}"
                              if result.sketch else note)
+        if result.status == "undecided" and smt_hint:
+            result = replace(result, sketch=f"{result.sketch}; {SMT_HINT}")
         return _quantified(result)
     except TimeoutError:
         result = ProofResult("undecided",
