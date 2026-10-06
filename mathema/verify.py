@@ -675,6 +675,21 @@ def _initially_falsified_hint(key: str, probes: list,
                              "; change the word or the code",
                              ". Change the word in the claims file, or change f."))
             fresh.remove(p)
+            continue
+        found = (getattr(p, "meta", None) or {}).get("mathema.conditioning")
+        if found:
+            # a computation line that missed the mathematics: what the
+            # conditioning at the witness says, and the ways out
+            claim_name = str(p.name).split("[", 1)[0]
+            fixes = []
+            if found.get("narrow"):
+                fixes.append("if inputs this large are out of scope, narrow "
+                             f"the domain: {found['narrow']}")
+            fixes.append(f"if the loss is accepted, run: mathema accept {key} "
+                         f"{claim_name} --as discovery")
+            lines.append(f"note {key}: {p.name} initially falsified: "
+                         f"{found['words']}:\n" + _indented(options(fixes)))
+            fresh.remove(p)
     if not fresh:
         return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
@@ -1998,9 +2013,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # a definition row's corner finding: the library's computation
         # gave no value at a magnitude corner, and the row stands
         out.lines.extend(
-            f"     note {name}: {meta['mathema.computation_finding']}"
+            f"     note {name}: {meta[found]}"
             for name, _verdict, meta, _n in map(_claim_fields, claims_for_gate)
-            if meta.get("mathema.computation_finding"))
+            for found in ("mathema.computation_finding",
+                          "mathema.conditioning_finding")
+            if meta.get(found))
         out.lines.extend(
             f"     warning: claim {name} of {key} was verified under "
             f"mathema; its grammar is now {grammar!r}, so mathema no "

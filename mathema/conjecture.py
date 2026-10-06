@@ -57,6 +57,10 @@ from ._scan import _split_commas, blank_strings
 from ._float_text import exact_literal_text, overlong_literals
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
+from . import _conditioning
+from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
+                         relation_within)
+from ._exact_side import exact_sides
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -113,7 +117,21 @@ def _inferred_literal_domain(text: str, sig_params: list) -> dict:
     return inferred
 
 
-def _literal_call_args(text: str, sig_params: list) -> dict:
+def _names_in_text(text: str) -> set:
+    """The bare names a claim expression reads (its variables, not the
+    functions it calls)."""
+    try:
+        tree = ast.parse(text, mode="eval")
+    except SyntaxError:
+        return set()
+    called = {id(node.func) for node in ast.walk(tree)
+              if isinstance(node, ast.Call)}
+    return {node.id for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and id(node) not in called}
+
+
+def _literal_call_args(text: str, sig_params: list,
+                       varied: "set | None" = None) -> dict:
     """`{param: value}` for every `f(...)` call argument that is a plain
     literal at a real parameter's position: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
@@ -121,12 +139,16 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
     keeps every literal kind (a string `"nope"`, a `True`, a number, a
     list such as the empty `[]`) and its actual value, so both the sample and the counterexample witness
     show what the call really passed rather than a synthesized
-    placeholder in a literal's slot."""
+    placeholder in a literal's slot. A parameter some other call passes
+    as anything but a literal (`f(xs, y0) == f(xs, 0) + y0`) is still
+    drawn: its name is added to `varied` when given, and left out of
+    the result."""
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError:
         return {}
     fixed: dict = {}
+    moving: set = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "f"):
@@ -140,8 +162,12 @@ def _literal_call_args(text: str, sig_params: list) -> dict:
                 try:
                     fixed[p] = ast.literal_eval(arg)
                 except (ValueError, SyntaxError):
-                    continue
-    return fixed
+                    moving.add(p)
+            else:
+                moving.add(p)
+    if varied is not None:
+        varied.update(moving)
+    return {p: v for p, v in fixed.items() if p not in moving}
 
 
 def _yaml_safe_args(args) -> list:
@@ -6005,28 +6031,68 @@ def _magnitude_corner(args) -> bool:
                for v in values)
 
 
+def _exact_point_sides(code_l, code_r, env, fn, bound_funcs):
+    """A function of a point (`{param: exact value}`) evaluating the
+    claim's sides with f run on those exact numbers, under the fast cap;
+    None where it cannot."""
+    from ._exact_side import exact_sides
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+
+    def at(point):
+        try:
+            return _with_timeout(
+                lambda: exact_sides(code_l, code_r, {**env, **point},
+                                    {"f": fn, **(bound_funcs or {})},
+                                    exact_calls=True),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return None
+    return at
+
+
+def _called_point(f_call, facts, env: dict, kinds: dict) -> dict:
+    """Intent:
+        The point f was last called at, `{param: value}`: the arguments
+        of its last returning call (a literal the claim passes, a pin, a
+        default included), else the sampled values of the parameters.
+    """
+    calls = [c for c in getattr(f_call, "calls", []) or [] if c[0] == "returned"]
+    if calls:
+        _kind, _out, args, kwargs = calls[-1]
+        point = dict(zip(list(facts.params), args))
+        point.update(kwargs or {})
+        if point:
+            return point
+    return {p: env.get(p) for p in kinds}
+
+
 def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
     """Whether `_exact_verdict` finds the claim true at the point."""
     return _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) is True
 
 
-def _exactly_decided(cj, code_l, code_r, env, callees, slack, ok,
-                     rel_tol=None):
+def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
+                     within: "float | None" = None, input_scaled: float = 0.0,
+                     side: "int | None" = None):
     """Intent:
         The relation at the point `env` holds, re-decided with the claim's
         sides evaluated exactly (`_exact_side.exact_sides`): the function's
         results read as the exact values it returned, the claim's own
-        literals and arithmetic exact. `ok` (the float verdict) comes back
-        unchanged when the sides cannot be computed exactly.
+        literals and arithmetic exact, compared within the computation
+        allowance (`_allowance.relation_within`; with `within` given,
+        within that absolute allowance alone, 0.0 for an exact
+        comparison). `ok` (the float verdict) comes back unchanged when
+        the sides cannot be computed exactly.
     """
+    from ._allowance import relation_within
     from ._exact_side import exact_sides
     exact = exact_sides(code_l, code_r, env, callees)
     if exact is None:
         return ok
-    held = relation_holds_elementwise(
-        exact[0], exact[1], cj.relation, slack,
-        exact_inequality=cj.tolerance is None,
-        rel_tol=_declared_rel_tol(cj) if rel_tol is None else rel_tol)
+    declared = cj.tolerance if cj.tolerance is not None else within
+    held = relation_within(exact[0], exact[1], cj.relation, declared,
+                           input_scaled, side,
+                           exact_inequality=cj.tolerance is None)
     return ok if held is None else held
 
 
@@ -6062,7 +6128,6 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
             return (f"{_fmt(tuple(args), *labels)}: {lv!r} is "
                     f"{'not ' if cj.relation == 'in' else ''}in {cj.rhs}")
         return None
-    slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
     missing_in = inputs_missing(args)
     if missing_in and inputs_missing([lv]):
         # a missing output at a missing input is classified, not judged
@@ -6070,14 +6135,15 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
     if not missing_in and (holds_nan(lv) or holds_nan(rv)
                            or "absent" in (missing_class(lv), missing_class(rv))):
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, and a nan is no value"
-    ok = relation_holds_elementwise(lv, rv, cj.relation, slack,
-                                    exact_inequality=cj.tolerance is None,
-                                    rel_tol=_declared_rel_tol(cj))
+    from ._allowance import reference_side, relation_within
+    side = reference_side(cj)
+    ok = relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
+                         exact_inequality=cj.tolerance is None)
     if ok is False:
         callees = {k: v for k, v in trial_env.items()
                    if callable(v) and (k == "f" or k in (cj.funcs or {}))}
-        if _exactly_decided(cj, code_l, code_r, trial_env, callees,
-                            slack, ok) is True:
+        if _exactly_decided(cj, code_l, code_r, trial_env, callees, ok,
+                            side=side) is True:
             return None
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
@@ -6625,7 +6691,11 @@ def _validate_claim(cj, statement: str, note: str, facts,
     if cj.rhs:
         for p, bounds in _inferred_literal_domain(cj.rhs, facts.params).items():
             inferred_domain.setdefault(p, bounds)
-    inferred_domain = {p: b for p, b in inferred_domain.items() if p not in cj_domain}
+    # a parameter the claim also names (`f(xs, y0) == f(xs, 0) + y0`) is
+    # quantified, so a literal passed for it elsewhere pins nothing
+    named = _names_in_text(cj.lhs) | _names_in_text(cj.rhs or "")
+    inferred_domain = {p: b for p, b in inferred_domain.items()
+                       if p not in cj_domain and p not in named}
     cj_domain = {**inferred_domain, **cj_domain}
     if inferred_domain:
         note = (f"{note}; inferred "
@@ -9787,9 +9857,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # 0.35)`) fixes that parameter to the literal; the call passes it
     # verbatim, so sampling must not overwrite it with a synthesized
     # value (which would misreport the witness, e.g. `"nope"` as 0).
-    literal_args = _literal_call_args(cj.lhs, facts.params)
+    varied: set = set()
+    literal_args = _literal_call_args(cj.lhs, facts.params, varied)
     if cj.rhs:
-        literal_args.update(_literal_call_args(cj.rhs, facts.params))
+        literal_args.update(_literal_call_args(cj.rhs, facts.params, varied))
+    literal_args = {p: v for p, v in literal_args.items() if p not in varied}
     # a library call's defaulted parameters the claim leaves alone stay
     # at their defaults, and a pinned one at its pin: fixed values, not
     # samples, and a pin is passed on every call of f
@@ -9826,6 +9898,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     corner_row = (cj.name or "").split("@", 1)[0] == "definition" \
         and library_key_of(fn) is not None
     corner_finding = None
+    # a loss a definition row's conditioning explains at a draw, and
+    # what the conditioning says about the miss a falsification stands on
+    conditioning_finding = None
+    miss_conditioning = None
+    # the side the claim's words make exact, when they settle it; the
+    # draw decides where two claim words face each other
+    claim_side = reference_side(cj)
+    side = claim_side
 
     def _tagged(callee, label, inject=None):
         # a raise from the function under test (or a bound function) is
@@ -10334,12 +10414,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 decided = _exactly_decided(
                     cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
-                    cj.tolerance if cj.tolerance is not None
-                    else DEFAULT_TOLERANCE, None)
+                    None, side=side)
                 if decided is True and _exactly_decided(
                         cj, code_l, code_r, env,
-                        {"f": fn_call, **bound_funcs}, 0.0, None,
-                        rel_tol=0.0) is not True:
+                        {"f": fn_call, **bound_funcs}, None,
+                        within=0.0, side=side) is not True:
                     # it passes only within the tolerance: the
                     # mathematics at the point decides
                     decided = _exact_verdict(cj, code_l, code_r, env,
@@ -10641,16 +10720,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if missing_in:
             # the code returned a value at a missing input: judged as
             # usual, a side the law left without a value failing
-            ok = relation_holds_elementwise(
-                lv, rv, cj.relation,
-                cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE,
-                exact_inequality=cj.tolerance is None,
-                rel_tol=_declared_rel_tol(cj))
+            ok = relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
+                                 exact_inequality=cj.tolerance is None)
             if ok is False:
                 ok = _exactly_decided(
                     cj, code_l, code_r, env, {"f": fn_call, **bound_funcs},
-                    cj.tolerance if cj.tolerance is not None
-                    else DEFAULT_TOLERANCE, ok)
+                    ok, side=side)
                 call_raised[0] = call_nan[0] = call_inf[0] = None
             if ok is None:
                 continue
@@ -10684,41 +10759,28 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # the claim read exactly decides where it can be (the code's
         # results as the values it returned): a float claim side that
         # rounds the way the code does would agree with it and hide the
-        # code's error
+        # code's error. Every comparison is within the one computation
+        # allowance (`_allowance`): the absolute part never exceeds the
+        # relative part of the result
         # f is read exactly as the claim calls it, its pins passed
         callees = {"f": _with_pins(fn_call, call_pins), **bound_funcs}
-        exact_ok = _exactly_decided(cj, code_l, code_r, env, callees,
-                                    slack, None)
+        exact_now = exact_sides(code_l, code_r, env, callees)
+        side = exact_side_at(cj, code_l, code_r, env, claim_side, callees)
         call_raised[0] = call_nan[0] = call_inf[0] = None
-        hidden_by_float = False
-        if exact_ok is not None:
-            ok = exact_ok
-            hidden_by_float = ok is False and relation_holds_elementwise(
-                lv, rv, cj.relation, slack,
-                exact_inequality=cj.tolerance is None,
-                rel_tol=_declared_rel_tol(cj)) is True
-            within = (ok is True and cj.tolerance is None
-                      and cj.relation in ("==", "~=")
-                      and _exactly_decided(cj, code_l, code_r, env, callees,
-                                           slack, None, rel_tol=0.0)
-                      is not True)
-            call_raised[0] = call_nan[0] = call_inf[0] = None
-        else:
-            ok = relation_holds_elementwise(
-                lv, rv, cj.relation, slack,
-                exact_inequality=cj.tolerance is None,
-                rel_tol=_declared_rel_tol(cj))
-            within = (ok is True and cj.tolerance is None
-                      and cj.relation in ("==", "~=")
-                      and relation_holds_elementwise(
-                          lv, rv, cj.relation, slack, exact_inequality=True,
-                          rel_tol=0.0) is not True)
+        compare_l, compare_r = (exact_now if exact_now is not None
+                                else (lv, rv))
+        ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
+                             0.0, side, exact_inequality=cj.tolerance is None)
+        hidden_by_float = exact_now is not None and ok is False and \
+            relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
+                            exact_inequality=cj.tolerance is None) is True
         roundoff_gap = None
         if ok is False and as_arrays \
                 and cj.relation in ("==", "~=", "<=", ">="):
             # the draw disagrees by no more than the round-off its own
             # magnitudes produce (inputs moved by a few units in the
-            # last place move the sides by as much)
+            # last place move the sides by as much), which enters the
+            # absolute part of the allowance and is capped with it
             allowance = _linalg_eval.roundoff_allowance(
                 lambda jenv: (eval(code_l, {"__builtins__": {}}, jenv),
                               eval(code_r, {"__builtins__": {}}, jenv)),
@@ -10726,12 +10788,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                       if isinstance(env.get(p), float))],
                 (lv, rv), domain=cj_domain)
             call_raised[0] = call_nan[0] = call_inf[0] = None
-            if allowance > 0 and relation_holds_elementwise(
-                    lv, rv, cj.relation, slack + allowance,
-                    exact_inequality=cj.tolerance is None,
-                    rel_tol=_declared_rel_tol(cj)):
-                ok = within = True
+            if allowance > 0 and relation_within(
+                    compare_l, compare_r, cj.relation, cj.tolerance,
+                    allowance, side, exact_inequality=cj.tolerance is None):
+                ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        within = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "~=")
+                  and relation_within(compare_l, compare_r, cj.relation,
+                                      ABSOLUTE, 0.0, side) is not True)
         exactly_false = False
         if within:
             # a draw that passes only within a tolerance is decided in
@@ -10777,7 +10842,54 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
                 absorbed, absorbed_at = gap, _point_text(args)
+        mathematics = None
+        if not ok and not exactly_false and family is None:
+            # the mathematics at the point: f run on the exact numbers
+            # satisfying the claim makes this a miss of the computation;
+            # violating it makes the claim false there. The calls these
+            # readings make are not the draw's own
+            made = list(f_call.calls)
+            mathematics = _exact_verdict(cj, code_l, code_r, env, fn_call,
+                                         bound_funcs)
+            f_call.calls = made
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
         if not ok:
+            if not exactly_false and mathematics is not False \
+                    and family is None:
+                # what the conditioning says about the miss: inherent in
+                # the inputs' magnitudes, or the code's own loss; with
+                # neither the mathematics at the point nor κ readable
+                # (opaque code) the falsification stands on its own
+                gap, reference = largest_miss(compare_l, compare_r, side)
+                made = list(f_call.calls)
+                # a library row is an axiom: its mathematics holds
+                # the reduction reading of κ needs a computation known to
+                # reduce its inputs: its mathematics settled (a trusted
+                # row, f run exactly), or a reduction word on the claim
+                # side it stands against
+                found = _conditioning.at_miss(
+                    fn, facts, _called_point(f_call, facts, env, kinds), gap,
+                    reference, cj_domain,
+                    mathematics=True if corner_row else mathematics,
+                    reduces=bool(corner_row or _conditioning.claim_reduces(cj)),
+                    exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
+                                                 bound_funcs)
+                              if mathematics is True else None))
+                f_call.calls = made
+                if found["kappa"] is None and mathematics is None:
+                    found = None
+                if corner_row and found and found["inherent"] is True:
+                    # a library definition row that loses only what its
+                    # conditioning explains at this draw is not a wrong
+                    # model: a finding about its computation
+                    checked += 1
+                    if conditioning_finding is None:
+                        conditioning_finding = _conditioning.finding_words(
+                            library_key_of(fn), _point_text(args), found)
+                    call_raised[0] = call_nan[0] = call_inf[0] = None
+                    call_hole[0] = None
+                    continue
+                miss_conditioning = found
             aux_part = ("; " + ", ".join(
                 f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
                 else f"{a} = {env[a]!r}" for a in aux) if aux else "")
@@ -10799,6 +10911,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         note = f"{note}; {finding}".lstrip("; ")
         missing_meta = {**(missing_meta or {}),
                         "mathema.computation_finding": finding}  # type: ignore[dict-item]
+    if conditioning_finding is not None:
+        note = f"{note}; {conditioning_finding}".lstrip("; ")
+        missing_meta = {**(missing_meta or {}),
+                        "mathema.conditioning_finding": conditioning_finding}  # type: ignore[dict-item]
+    if cx is not None and miss_conditioning is not None:
+        note = f"{note}; {miss_conditioning['words']}".lstrip("; ")
+        missing_meta = {**(missing_meta or {}),
+                        "mathema.conditioning": miss_conditioning}  # type: ignore[dict-item]
     if computation_cx is not None:
         from .gates import companion_name, companion_representation
         descriptor, _rep, rep_word = companion_representation(cj_domain, facts)

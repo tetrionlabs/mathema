@@ -3,11 +3,13 @@
 """Sequence draws include the corners where float arithmetic breaks:
 entries that cancel at a large magnitude ([1e16, -1e16]), entries near
 the largest double, and a nearly constant series one ulp from
-constant, the cases a uniform draw almost never makes. A draw that
-passes only within the tolerance there is decided in exact arithmetic
-(rulings of 2026-10-01 and 2026-10-05: the corners are turned on with
-the strata work, the mathematics is exact, tolerance belongs to the
-computation)."""
+constant, the cases a uniform draw almost never makes. A float result
+that misses the mathematics there beyond the result's own precision
+falsifies the computation line, with the conditioning at the witness in
+the note (rulings of 2026-10-01, 2026-10-05 and 2026-10-06 on G94: the
+corners are turned on with the strata work, the mathematics is exact,
+the absolute part of the allowance never exceeds the relative part of
+the result)."""
 import math
 
 import numpy as np
@@ -32,15 +34,18 @@ def signal_to_noise(xs: list) -> float:
     return m / math.sqrt(var)
 
 
-def test_a_cancelling_pair_is_drawn_and_decided_exactly():
+def test_a_cancelling_pair_falsifies_the_computation_with_its_conditioning():
     # the shift is exact mathematics; at [1e16, -1e16, ...] the float
-    # sum is off by 1, which passes within that draw's round-off only
-    # because the code run on exact numbers satisfies the claim there
+    # sum misses it by about 1, far past the result's precision, a loss
+    # the conditioning at the draw explains
     (p,) = check_conjectures(running_total, [claim(
         "for xs in R^n, y0 in [-10, 10], f(xs, y0 + 1) == f(xs, y0) + 1",
         route="probe")])
-    assert p.verdict == "holds", (p.verdict, p.note)
-    assert "at xs = [1e+16, -1e+16" in p.note, p.note
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "xs = [1e+16, -1e+16" in p.counterexample or \
+        "xs = [1e+300, -1e+300" in p.counterexample, p.counterexample
+    assert "ill-conditioned here (κ ≈" in p.note, p.note
+    assert p.meta["mathema.conditioning"]["inherent"] is True
 
 
 def test_entries_near_the_float_limit_break_a_range_claim():
@@ -51,14 +56,18 @@ def test_entries_near_the_float_limit_break_a_range_claim():
 
 
 def test_a_nearly_constant_series_meets_a_std_premise():
-    # a series one ulp from constant passes `std > 0` and has an
-    # enormous mean-to-deviation ratio; the square root keeps it from
-    # being evaluated exactly, so those draws are inconclusive
+    # a series one ulp from constant passes `std > 0` and has a
+    # mean-to-deviation ratio near 1e16, so the bound of 1e9 is false
+    # there in exact arithmetic as in float: falsified at that series
     (p,) = check_conjectures(signal_to_noise, [claim(
         "for xs in [0.5, 1]^n, assuming n >= 2 and std(xs, ddof=1) > 0, "
         "abs(f(xs)) <= 1e9", route="probe")])
-    assert p.verdict != "falsified", (p.verdict, p.counterexample)
-    assert "could not be evaluated in exact arithmetic" in p.note, p.note
+    assert p.verdict == "falsified", (p.verdict, p.counterexample)
+    import re
+    m = re.search(r"xs = \[([^\]]*)\]", p.counterexample)
+    values = [float(v) for v in m.group(1).split(",")]
+    assert len(set(values)) == 2 and \
+        math.nextafter(min(values), 2.0) == max(values), values
 
 
 def test_every_corner_entry_lies_in_the_element_range():

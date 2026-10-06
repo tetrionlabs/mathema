@@ -102,14 +102,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import math
     from .domain import (_as_int_if_whole, bound_to_sympy_set,
                          domain_contains, operational_domain)
-    from .probing import (DEFAULT_RELATIVE_TOLERANCE, ComplexResult,
+    from .probing import (ComplexResult,
                           _bound_is_complex, _fmt_value, _is_matrix_value,
                           _synth, complex_is_a_raise,
                           ExecutedMissing, LastCall, classified,
                           holds_inf, holds_nan, inputs_missing,
                           is_complex_value, missing_class,
-                          plain_value, relation_holds_elementwise,
-                          same_infinity, values_agree, values_differ)
+                          plain_value,
+                          values_agree, values_differ)
     InvalidConjecture, _SAFE_FUNCS, _validate = _conjecture_bits()
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in facts.params}
     # the gates verify VALUE claims by calling fn at a point; a
@@ -153,8 +153,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             bound_indices = bound_l | bound_r
     except (InvalidConjecture, ValueError):
         return None
-    slack = (cj.tolerance if cj.tolerance is not None
-             else 0.0 if exact else 1e-9)
+    # the computation allowance (`_allowance`): a declared tolerance, an
+    # exact comparison, or the default rule against the exact side
+    from ._allowance import (exact_side_at, largest_miss, reference_side,
+                             relation_within)
+    declared = (cj.tolerance if cj.tolerance is not None
+                else 0.0 if exact else None)
+    claim_side = reference_side(cj)
+    # the gap and the result's magnitude at the last miss
+    miss: list = [None]
+
+    def _within(lv, rv, input_scaled: float = 0.0, point=None):
+        side = claim_side
+        if side is None and point is not None:
+            side = exact_side_at(cj, code_l, code_r,
+                                 {**base_env, **_typed(point)}, None,
+                                 {"f": fn_call, **(bound_funcs or {})})
+            _reset()
+        held = relation_within(lv, rv, cj.relation, declared, input_scaled,
+                               side, exact_inequality=cj.tolerance is None)
+        if held is False:
+            miss[0] = largest_miss(lv, rv, side)
+        return held
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
     eps_names = (aux_l | aux_r) & {"eps", "epsilon", "ε"}
@@ -325,64 +345,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             lv, rv = scalar(lv), scalar(rv)
         return plain_value(lv), plain_value(rv)
 
-    def _relation_holds(lv, rv, tol):
-        # inf-aware: an infinity here is one the law's own arithmetic
-        # produced (a callee's own nan or inf is no value, read before
-        # this: two sides at the same infinity, inf and inf or -inf and
-        # -inf, are one extended-real point and agree; a NaN is the
-        # absence of a value and agrees with nothing, another NaN
-        # included; no value against a value fails). Native comparison handles inf/-inf, never
-        # abs(inf - inf) = NaN; abs-difference is only for the finite
-        # case.
-        rel = cj.relation
-        if same_infinity(lv, rv):
-            # one extended-real point: equal, so no strict order
-            return rel in ("==", "~=", "<=", ">=")
-        if isinstance(lv, complex) or isinstance(rv, complex):
-            # over C equality and closeness compare by abs(lv - rv);
-            # ordering has no complex reading
-            finite = not any(holds_inf(v) for v in (lv, rv))
-            close = lv == rv or (finite and abs(lv - rv) <= tol)
-            if rel in ("==", "~="):
-                return close
-            if rel == "!=":
-                return not (lv == rv) if cj.tolerance is None else not close
-            return None
-        both_finite = all(abs(v) != float("inf") for v in (lv, rv))
-        if rel in ("==", "~="):
-            try:
-                return lv == rv or (both_finite and abs(lv - rv) <= tol)
-            except OverflowError:
-                from fractions import Fraction
-                return lv == rv or (both_finite and abs(
-                    Fraction(lv) - Fraction(rv)) <= Fraction(tol))
-        if rel == "!=":
-            # with no declared tolerance an inequality fails only at an
-            # actual equality
-            if cj.tolerance is None:
-                return not (lv == rv)
-            return not (lv == rv or (both_finite and abs(lv - rv) <= tol))
-        if both_finite:
-            # strict relations compare natively: equality within
-            # tolerance must not count as strictly greater/less (the
-            # probe loop applies the same rule)
-            try:
-                return (lv <= rv + tol if rel == "<=" else
-                        lv >= rv - tol if rel == ">=" else
-                        lv < rv if rel == "<" else
-                        lv > rv if rel == ">" else None)
-            except OverflowError:
-                # an integer beyond float range: compare exactly
-                from fractions import Fraction
-                lv, rv, tol = Fraction(lv), Fraction(rv), Fraction(tol)
-                return (lv <= rv + tol if rel == "<=" else
-                        lv >= rv - tol if rel == ">=" else
-                        lv < rv if rel == "<" else
-                        lv > rv if rel == ">" else None)
-        # an infinity on one side: native comparison is exact
-        return (lv <= rv if rel == "<=" else lv >= rv if rel == ">=" else
-                lv < rv if rel == "<" else lv > rv if rel == ">" else None)
-
     def _real(v):
         # a plain real number the relation can compare, not a bool,
         # string, None, complex, list, tuple, or NaN (inf is allowed:
@@ -396,15 +358,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 and all(isinstance(v, (int, float, complex))
                         and not isinstance(v, bool) for v in (lv, rv)))
 
-    def _array_relation(lv, rv, tol, point):
+    def _array_relation(lv, rv, point):
         # an array result compared element by element: a NaN the code
         # computed from inputs that are not missing is no value and
         # fails (a missing input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
             return False
-        return relation_holds_elementwise(
-            lv, rv, cj.relation, tol,
-            exact_inequality=cj.tolerance is None, rel_tol=0.0)
+        return _within(lv, rv, point=point)
 
     def evaluate(point):
         _reset()
@@ -451,9 +411,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if (holds_inf(lv) or holds_inf(rv)) and not calls_nonfinite[0]:
                 # an infinity only the law's own arithmetic produced
                 return None
-            return _relation_holds(lv, rv, slack)
+            return _within(lv, rv, point=point)
         if _is_matrix_value(lv) or _is_matrix_value(rv):
-            return _array_relation(lv, rv, slack, point)
+            return _array_relation(lv, rv, point)
         if _real(lv) and _real(rv):
             if (abs(lv) == float("inf") or abs(rv) == float("inf")) \
                     and not calls_nonfinite[0]:
@@ -464,7 +424,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # an overflow the function itself returned is an executed
             # value like any other: if the relation fails on it, that
             # is a counterexample (the overflow rule)
-            return _relation_holds(lv, rv, slack)
+            return _within(lv, rv, point=point)
         # non-numeric result: an EQUALITY relation still compares
         # exactly (None vs a real number is a genuine mismatch, so an
         # opaque disproof reproduces), and ordering over non-orderable
@@ -503,11 +463,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         calls_raised[0], calls_nonfinite[0] = saved
         return held
 
-    def _exact_decision(point, tol) -> "bool | None":
+    def _exact_decision(point) -> "bool | None":
         # the claim's sides read exactly, the function's results as the
         # exact values it returned (`_exact_side`): whether the relation
-        # holds within `tol` there, None when the sides cannot be
-        # computed exactly
+        # holds within the computation allowance there, None when the
+        # sides cannot be computed exactly
         from ._exact_side import exact_sides
         env = {**base_env, **_typed(point)}
         exact = exact_sides(code_l, code_r, env,
@@ -515,12 +475,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         _reset()
         if exact is None:
             return None
-        return relation_holds_elementwise(
-            exact[0], exact[1], cj.relation, tol,
-            exact_inequality=cj.tolerance is None, rel_tol=0.0)
-
-    def _exact_holds(point, tol) -> bool:
-        return _exact_decision(point, tol) is True
+        return _within(exact[0], exact[1], point=point)
 
     def probe_finite(point):
         tally.add(point)
@@ -565,11 +520,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                 {**base_env, **_typed(point)},
                                 {"f": fn_call, **(bound_funcs or {})})
             _reset()
-            held = None if exact is None else relation_holds_elementwise(
-                exact[0], exact[1], cj.relation, slack,
-                exact_inequality=cj.tolerance is None,
-                rel_tol=DEFAULT_RELATIVE_TOLERANCE
-                if cj.tolerance is None else 0.0)
+            held = None if exact is None else _within(exact[0], exact[1])
             if held is None:
                 return Undecided(f"the claim's own side raised "
                                  f"{type(e).__name__} ({e})")
@@ -589,9 +540,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                                or None in (lv, rv)):
             # the code returned a value at a missing input and the law's
             # side holds no value there
-            if relation_holds_elementwise(
-                    lv, rv, cj.relation, slack,
-                    exact_inequality=cj.tolerance is None, rel_tol=0.0) is False:
+            if _within(lv, rv, point=point) is False:
                 return (f"the relation fails at a missing input "
                         f"({_fmt_value(lv)} {cj.relation} {_fmt_value(rv)})")
             return None
@@ -616,41 +565,31 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv) or cj.relation not in ("==", "~=", "!="):
                 return None
-            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * max(abs(lv), abs(rv))
-            if _relation_holds(lv, rv, scaled):
+            if _within(lv, rv):
                 return None
             return (f"the relation fails on the executed values "
                     f"({_fmt_value(complex(lv))} {cj.relation} "
-                    f"{_fmt_value(complex(rv))}), past the magnitude-scaled "
-                    f"tolerance")
+                    f"{_fmt_value(complex(rv))}), past the allowance")
         if _is_matrix_value(lv) or _is_matrix_value(rv):
             if holds_nan(lv) or holds_nan(rv) or holds_inf(lv) \
                     or holds_inf(rv):
                 # only the law's own arithmetic: the code's own no-value
                 # results were read above
                 return None
-            try:
-                import numpy
-                size = float(numpy.max(numpy.abs(numpy.asarray(
-                    [lv, rv], dtype=complex))))
-            except Exception:
-                return None
-            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * size
             # the claim read exactly decides where it can be: a float
             # claim side that rounds the way the code does would agree
             # with it and hide the code's error
-            exact = _exact_decision(point, scaled)
+            exact = _exact_decision(point)
             if exact is True:
                 return None
             if exact is False:
                 return ("the relation fails on the executed values, the "
                         "claim's own side read exactly")
-            held = _array_relation(lv, rv, scaled, point)
+            held = _array_relation(lv, rv, point)
             if held is None or held:
                 return None
             return (f"the relation fails on the executed values ({lv!r} "
-                    f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                    f"tolerance")
+                    f"{cj.relation} {rv!r}), past the allowance")
         if any(isinstance(v, float) and v != v for v in (lv, rv)):
             return ("the computation returns NaN here"
                     if calls_nonfinite[0] else None)
@@ -659,31 +598,21 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         overflowed = any(abs(v) == float("inf") for v in (lv, rv))
         if overflowed and not calls_nonfinite[0]:
             return None
-        magnitude = max(abs(lv) if not overflowed else 0.0,
-                        abs(rv) if not overflowed else 0.0)
-        try:
-            scaled = slack + DEFAULT_RELATIVE_TOLERANCE * magnitude
-        except OverflowError:
-            # an integer beyond float range: the tolerance is exact too
-            from fractions import Fraction
-            scaled = Fraction(slack) \
-                + Fraction(DEFAULT_RELATIVE_TOLERANCE) * magnitude
-        exact = None if overflowed else _exact_decision(point, scaled)
+        exact = None if overflowed else _exact_decision(point)
         if exact is True:
             return None
         if exact is False:
             return (f"the relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r} in float), the claim's own side "
                     f"read exactly")
-        if _relation_holds(lv, rv, scaled):
+        if _within(lv, rv):
             return None
         if overflowed:
             return (f"the computation overflows to inf here, and the "
                     f"relation fails on the executed values ({lv!r} "
                     f"{cj.relation} {rv!r})")
         return (f"the relation fails on the executed values ({lv!r} "
-                f"{cj.relation} {rv!r}), past the magnitude-scaled "
-                f"tolerance")
+                f"{cj.relation} {rv!r}), past the allowance")
 
     def _ends(bound):
         # the bound's (lo, hi) as floats, +-inf for an unbounded end
@@ -1054,6 +983,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             _reset()
 
     evaluate.exact_at = exact_at  # type: ignore[attr-defined]
+    evaluate.last_miss = lambda: miss[0]  # type: ignore[attr-defined]
+
+    def last_args():
+        # the arguments of f's last returning call at the point
+        for kind, _out, args, kwargs in reversed(f_calls.calls):
+            if kind == "returned":
+                point = dict(zip(list(facts.params), args))
+                point.update(kwargs or {})
+                return point
+        return None
+    evaluate.last_args = last_args  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
 
@@ -1199,6 +1139,15 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
                 return point, True
             return None, holds is True
     return None, False
+
+
+def _capped_exact(exact_at, point):
+    """`exact_at(point)` under the fast wall-clock cap, None on the cap."""
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(lambda: exact_at(point), FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
 
 
 def _certified_point_witness(cj, deps, proof, cj_domain) -> "str | None":
@@ -1873,27 +1822,41 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                        f"the computation ({sweep.detail})",
                 meta={"mathema.proof_contradicted": pt})
         relation_failed = sweep.detail.startswith("the relation fails")
+        found = None
+        if relation_failed:
+            # what the conditioning at the witness says about the miss
+            from . import _conditioning
+            last = deps["evaluate"].last_miss()
+            gap, reference = last if last is not None else (0.0, 0.0)
+            called = deps["evaluate"].last_args() or dict(sweep.fragile_point)
+            exact_at = getattr(deps["evaluate"], "exact_at", None)
+            found = _conditioning.at_miss(
+                fn, facts, called, gap, reference, cj_domain,
+                reduces=_conditioning.claim_reduces(cj),
+                exact_at=(lambda point: _capped_exact(exact_at, point))
+                if exact_at is not None else None)
+        conditioned = f"; {found['words']}" if found else ""
+        found_meta = {"mathema.conditioning": found} if found else {}
         if exact is None and relation_failed:
-            # finite values that contradict the proof: either float lost
-            # the value or the proof is wrong, and nothing here says which
+            # finite values that contradict the proof: whether the
+            # mathematics holds at that point was not decided here
             return Probe(
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=pt, note=what,
                 sketch=f"{parent.name} is proven, but its computation "
-                       f"fails at {pt}: {sweep.detail}; whether the "
-                       f"mathematics holds at that point was not decided, "
-                       f"so this is the computation failing or the proof "
-                       f"failing; "
+                       f"fails at {pt}: {sweep.detail}{conditioned}; "
                        + (f"{covered}; " if covered else "")
-                       + f"{remedy}")
+                       + f"{remedy}",
+                meta={**(tried_meta or {}), **found_meta} or None)
         return Probe(
             name, parent.statement, "falsified", route=float_route,
             n=numbers, counterexample=pt, note=what,
             sketch=f"{parent.name} is mathematically proven, but its "
                    f"computation fails at {pt}: {sweep.detail}"
                    + (": precision loss" if relation_failed else "")
-                   + ("; the claim holds there in exact arithmetic; "
-                      if exact else "; ")
+                   + ("; the claim holds there in exact arithmetic"
+                      if exact else "")
+                   + f"{conditioned}; "
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
             # the proof that coexists with the executed break is the
@@ -1901,7 +1864,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             stratum={"mathematics": "sound", "blame": "implementation",
                      "cause": "implementation:numerical-instability",
                      "representation": representation.tag, "witness": pt},
-            meta=tried_meta or None)
+            meta={**(tried_meta or {}), **found_meta} or None)
     if sweep.undecided:
         at = _fmt_point(sweep.undecided_point, deps["names"])
         return Probe(name, parent.statement, "unknown", route=float_route,

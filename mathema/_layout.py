@@ -164,6 +164,26 @@ def _fixes(p, key: str, word: str) -> str:
                                              options(fixes).splitlines())
 
 
+def _conditioning_lines(p, key: str) -> list:
+    """What the conditioning says under a falsified computation line, and
+    the fixes it offers: a narrower domain where float64 can honour the
+    claim, or accepting the discovery."""
+    found = (p.meta or {}).get("mathema.conditioning")
+    if not found:
+        return []
+    from ._missing_words import options
+    fixes = []
+    if found.get("narrow"):
+        fixes.append("if inputs this large are out of scope, narrow the "
+                     f"domain: {found['narrow']}")
+    name = str(p.name).split("[", 1)[0]
+    fixes.append(f"if the loss is accepted, run: mathema accept {key} "
+                 f"{name} --as discovery")
+    return [" " * 28 + found["words"],
+            " " * 28 + "possible fixes:",
+            *(" " * 30 + line for line in options(fixes).splitlines())]
+
+
 def _split_lines(p, key: str) -> list:
     """The split a claim falsified only below some length is offered as:
     what the witnesses share, and the command that writes the claim
@@ -238,6 +258,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
                 lines += _split_lines(main, key)
+                lines += _conditioning_lines(main, key)
         lines += _extras(main)
         for c in under:
             fam = (c.meta or {}).get("mathema.family")
@@ -258,6 +279,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 lines.append(_row(_verdict(c), "computation", shown,
                                   _detail(c, count_words)))
                 lines += _extras(c)
+                if _verdict(c) == "falsified":
+                    lines += _conditioning_lines(c, key)
             if _verdict(c) == "falsified":
                 falsified.append(c.counterexample)
             used.add(id(c))

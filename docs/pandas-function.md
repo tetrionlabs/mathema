@@ -184,6 +184,12 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
         : float, f(s(returns, c)) ~= f(returns)   counterexample returns =
         [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
         -0.02405627255486045, -0.024056272554860453], c = 10
+                            conditioning unknown here: derive cannot read f, so
+                                whether this loss is inherent is not decided
+                            possible fixes:
+                              if the loss is accepted, run: mathema accept
+                                  returns.sharpe leverage_invariant --as
+                                  discovery
 ```
 
 The `mathematics` line is proven. The `computation` line runs the same
@@ -191,7 +197,12 @@ claim through the real code in floating point and is falsified at a
 series of five returns that differ only in their last digit: their
 standard deviation is about `2.5e-18`, the ratio about `-1.6e17`, and
 scaling the series by 10 moves the float result to about `-1.9e17`.
-That is a fact about the computation, not the mathematics. The premise
+That is a fact about the computation, not the mathematics. A loss like
+this is either inherent in the inputs (no float64 computation could do
+better there) or the code's own; the line says which when mathema can
+read the condition number at the witness, and says it cannot here, since
+the function's body is pandas rather than arithmetic derive can read.
+The premise
 took the one-day series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on both lines alike: mathema computes the premise's `std` exactly rather than
 through the function's floating point, so a constant series whose float
