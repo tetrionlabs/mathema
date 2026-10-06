@@ -787,11 +787,10 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # helper mathema.f.accurate (by dotted path, so the claim survives
     # the declared store's round trip); the is_numerically_stable family
     # executes it point by point.
-    # numeric stability reads a finite number out of the call, which a
-    # function over strings that returns no number does not have
-    all_text = bool(facts.params) and all(
-        facts.param_kinds.get(p) == "string" for p in facts.params)
-    if not (all_text and facts.returns_kind != "scalar"):
+    # accuracy is read for a function computing a number from numbers:
+    # one parameter at least holds a number or a container of them, and
+    # the return annotation, when there is one, names a number
+    if _computes_a_number(fn, facts):
         out.append(_made(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
                          source="mathema", route="best", funcs={"g": "mathema.f.accurate"}))
 
@@ -1404,6 +1403,35 @@ def gate_suggestions(fn) -> list:
             out.append(claim(f"{gate}(f)", name=f"{gate}[f]", source="mathema",
                              route="examine"))
     return out
+
+
+def _computes_a_number(fn, facts) -> bool:
+    """Whether f computes a number from numbers, which is what accuracy
+    (is_numerically_stable) asks about: a parameter of a numeric or
+    container kind, and no return annotation naming anything but a
+    number."""
+    from .runtime_types import SEQUENCE_KINDS
+    kinds = facts.param_kinds or {}
+    if not any(kinds.get(p) in ("scalar", "int", "complex", *SEQUENCE_KINDS, "table")
+               for p in facts.params):
+        return False
+    try:
+        import inspect
+        import typing
+        declared = typing.get_type_hints(inspect.unwrap(fn)).get("return")
+    except Exception:
+        declared = None
+    if declared is None:
+        return True
+    args = [a for a in typing.get_args(declared) if a is not type(None)] or [declared]
+    numeric = (int, float, complex)
+    try:
+        import numpy as np
+        numeric = (*numeric, np.number, np.ndarray)
+    except ImportError:
+        pass
+    return all(isinstance(a, type) and issubclass(a, numeric) and not issubclass(a, bool)
+               for a in args)
 
 
 def _default_side_effects(fn) -> bool:

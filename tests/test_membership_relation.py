@@ -141,7 +141,7 @@ def test_an_unknown_language_on_the_right_is_a_gap_not_a_crash(tmp_path, letters
             return s.upper()
     ''')
     p = _one(mod.shout, "for s in L[letters], f(s) in L[no_such_language]")
-    assert p.verdict == "skipped"
+    assert p.verdict == "unknown"
     assert p.meta.get("mathema.probe_gap") == "language-unresolved"
 
 

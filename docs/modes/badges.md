@@ -140,6 +140,19 @@ A few consequences worth knowing:
   nothing. It never looks further: what the callee itself calls is the
   callee's own clarity, not the caller's. Built-in and standard-library
   calls with no claims file stay out of the count.
+- **What it accepts is charged by what is known about the inputs.** Each
+  parameter costs the uncertainty its completed domain leaves, read from
+  the same reading every check uses: a parameter with no annotation 1.5
+  bits; a type alone (`float`, `str`, or a language admitting every
+  string) 1.0; a narrower language by its level, an alphabet 0.8, a
+  predicate 0.6, a refined language (`L[ascii, len <= 80]`) 0.4; a
+  bounded range 0.4; a finite set of k values (a `Literal`, a str
+  `Enum`, a guard to a set) `log2(k) / 10`, at most 0.3, and a proof by
+  visiting every member clears it entirely. A verified claim binding a
+  narrower domain for a parameter lowers that parameter's share. An
+  `Optional` parameter adds half a bit for its absence, cleared by its
+  `absent` row or a stated absence policy. A guarded parameter is
+  charged for its boundary as before.
 - **No claims is a low floor, not always zero.** A function nobody has
   verified is scored only on what its code visibly shows: a plainly pure,
   total, hazard-free helper reads low but not zero (it is nearly
@@ -147,10 +160,21 @@ A few consequences worth knowing:
   much closer to zero. Declaring and verifying claims is what
   raises the score.
 
-The scoring algorithm is versioned (`entropy-dimensions@1.2`) and recorded
+The scoring algorithm is versioned (`entropy-dimensions@1.3`) and recorded
 beside the scores, so a number is only ever compared against one computed
 the same way; a change to the algorithm reads as an algorithm change, not
 a regression.
+
+`@1.3` changed how *what it accepts* is charged. Under `@1.2` every
+unguarded parameter cost the same 0.3 bits, so a bare `str` read as
+certain as a `Literal["buy", "sell"]`. Under `@1.3` each parameter costs
+what its completed domain leaves unknown, on the scale above, and an
+`Optional` parameter carries an absence source of its own. Scores move
+down for a function with unannotated or type-only parameters nobody has
+bound, and up for one whose parameters are finite sets, bounded ranges or
+narrower languages, or whose absence rows are verified. After this
+one-time move, a function's clarity changes only when its own record or
+a callee's record changes.
 
 `@1.2` changed how a call is charged. Under `@1.1` a call into a library
 some compendium file covered cost half a bit, cleared by a verified

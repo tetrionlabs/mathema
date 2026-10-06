@@ -1296,7 +1296,8 @@ def _function_key(fn) -> str:
     return _fn_key(fn)
 
 
-def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
+def default_rows(fn, facts, domain: dict, covered: set, name_of,
+                 optional_only: bool = False) -> list:
     """Intent:
         The policy rows a record carries for every parameter that admits
         a kind, beside the cases stated policy rows cover (`covered`, a
@@ -1310,7 +1311,9 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
         row states the behaviour; `absent(f) introduces` where the return
         type declares the None f gave back from present inputs. One row
         per member when the members behave differently or a stated row
-        covers some of them.
+        covers some of them. With `optional_only` (a record with no
+        written claim), only the absence of a parameter an `Optional`
+        annotation admits is judged, by calling f there.
     """
     from .domain import NO_ANNOTATION
     from .records import Probe
@@ -1327,6 +1330,8 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
             admitted = (sig.absent if kind == "absent" else bool(sig.members)) \
                 or origin is not None
             if not admitted:
+                continue
+            if optional_only and not (kind == "absent" and sig.annotated and sig.absent):
                 continue
             mine = {(m, pr) for (k, q, m, pr) in covered if k == kind and q in (p, None)}
             if (None, "") in mine:
@@ -1359,13 +1364,24 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                              & (done_members | stated_members))
                      and not any((m is None or m in _members_at(c, p, kind))
                                  and _in_region(pr, c) for m, pr in premised)]
+            if not calls and kind == "absent" and sig.annotated and sig.absent \
+                    and not mine:
+                # what f does at None is judged for every Optional
+                # parameter: where no claim's draw reached it (a text
+                # parameter no claim samples), the row calls f there
+                # itself
+                calls = _run_floor(fn, facts,
+                                   _floor_points(fn, facts, p, kind, ["None"], domain),
+                                   domain)
             # a record's own rows read the calls its claims made, and run
-            # nothing of their own
+            # nothing of their own beyond that
             if not calls:
                 continue
             rows += _member_rows(fn, p, kind, calls, origin, sig, guards, current,
                                  name_of, Probe,
                                  apart=bool(stated_members or premised) and kind == "missing")
+    if optional_only:
+        return rows
     rows += _path_rows(fn, covered, current, guards, name_of)
     rows += _return_rows(fn, covered, current, name_of)
     return rows

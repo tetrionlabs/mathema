@@ -2455,12 +2455,70 @@ def _guard_condition_params(facts) -> set:
     unmodified = _unmodified_params(facts.tree, set(facts.params))
     named: set = set()
     for node in ast.walk(facts.tree):
-        if not isinstance(node, ast.If):
+        # an `if` statement or a ternary: both branch on their test
+        if not isinstance(node, (ast.If, ast.IfExp)):
             continue
         for sub in ast.walk(node.test):
             if isinstance(sub, ast.Name) and sub.id in unmodified:
                 named.add(sub.id)
     return named
+
+def _opaque_pins(lifted, domain: dict) -> dict:
+    """The symbol of each parameter whose domain is one non-numeric
+    value (`side in {"buy"}`, the piece a finite-set split hands a
+    sub-proof) mapped to the opaque symbol the lift registered for that
+    value, so a branch on `side == "buy"` is decided by substitution."""
+    from ..domain import Domain, _is_enumerated, is_sentinel
+    opaque = getattr(lifted, "opaque", None)
+    if opaque is None:
+        return {}
+    pins: dict = {}
+    for p, sym in lifted.params.items():
+        bound = domain.get(p)
+        if isinstance(bound, Domain) and _is_enumerated(bound) and not bound.dims:
+            values = [v for piece in bound.pieces for v in piece if not is_sentinel(v)]
+        elif isinstance(bound, frozenset):
+            values = [v for v in bound if not is_sentinel(v)]
+        else:
+            continue
+        if len(values) == 1 and is_opaque_eligible(values[0]) \
+                and not isinstance(values[0], bool):
+            pins[sym] = opaque.register(values[0])
+    return pins
+
+
+def _decide_opaque_relations(expr, opaque):
+    """`expr` with every equality or inequality between two opaque
+    symbols decided: the registry is a bijection on values, so two
+    distinct symbols stand for two distinct values and are unequal, and
+    a symbol equals itself. A `Piecewise` whose condition is decided
+    collapses to the piece it selects."""
+    if opaque is None:
+        return expr
+    if isinstance(expr, tuple):
+        return tuple(_decide_opaque_relations(e, opaque) for e in expr)
+    if isinstance(expr, _SymbolicArray):
+        return _SymbolicArray(_decide_opaque_relations(expr.expr, opaque), expr.index,
+                              expr.length)
+    if not hasattr(expr, "replace"):
+        return expr
+
+    def is_opaque(e) -> bool:
+        return isinstance(e, sympy.Symbol) and opaque.is_opaque_symbol(e)
+
+    def decide(rel):
+        a, b = rel.args
+        if is_opaque(a) and is_opaque(b):
+            same = a == b
+            return sympy.true if (same if isinstance(rel, sympy.Eq) else not same) \
+                else sympy.false
+        return rel
+
+    try:
+        return expr.replace(lambda e: isinstance(e, (sympy.Eq, sympy.Ne)), decide)
+    except Exception:
+        return expr
+
 
 def _piece_point(piece):
     """One point of a split piece: its single value when it has one,
@@ -4135,6 +4193,20 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                       e.length.subs(pins, simultaneous=True))
             return e.subs(pins, simultaneous=True)
         lhs, rhs = _pin(lhs), _pin(rhs)
+    text_pins = _opaque_pins(lifted, domain)
+    if text_pins:
+        # a parameter fixed to one string (a finite-set split's piece)
+        # is substituted by the symbol the lift gave that string, and
+        # the branch conditions that compare it are decided
+        def _pin_text(e):
+            if isinstance(e, tuple):
+                return tuple(_pin_text(v) for v in e)
+            if isinstance(e, _SymbolicArray):
+                return _SymbolicArray(e.expr.subs(text_pins, simultaneous=True), e.index,
+                                      e.length.subs(text_pins, simultaneous=True))
+            return e.subs(text_pins, simultaneous=True)
+        lhs = _decide_opaque_relations(_pin_text(lhs), lifted.opaque)
+        rhs = _decide_opaque_relations(_pin_text(rhs), lifted.opaque)
 
     if relation in ("==", "~=", "!=", "<", "<=", ">", ">="):
         from ..domain import bound_assumptions as _assumptions_of
@@ -4316,6 +4388,16 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         if result.status == "undecided":
             result = _try_case_split(lhs, rhs, relation, domain, bound_context, lifted.params,
                                      opaque=lifted.opaque, extensive=extensive) or result
+        if (result.status == "undecided" and lifted.opaque is not None
+                and any(lifted.opaque.is_opaque_symbol(s)
+                        for s in lhs.free_symbols | rhs.free_symbols)):
+            # a branch on a non-numeric value the domain leaves open: one
+            # case per member of the parameter's finite set
+            split = _try_domain_split(fn, facts, lhs_src, rhs_src, relation,
+                                      domain or {}, tolerance, max_callee_depth,
+                                      extensive, _split_depth)
+            if split is not None:
+                result = split
         if result.status == "undecided" and piecewise_hint:
             # the branch-pruning diagnosis stays actionable even though
             # the piecewise lift got further than pruning did

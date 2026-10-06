@@ -232,7 +232,7 @@ PINNED: dict = {
     "dim_call_premise": "holds",
 }
 if importlib.util.find_spec("mathema_language") is None:
-    PINNED.update({key: "skipped" for key in _LANGUAGE_ROWS})
+    PINNED.update({key: "unknown" for key in _LANGUAGE_ROWS})
 
 
 @pytest.mark.parametrize("key", list(LEXICON))

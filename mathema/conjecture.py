@@ -830,30 +830,122 @@ def _adaptor_inferred_domains(fn, facts, cj_domain: dict) -> dict:
     """
     if fn is None:
         return {}
+    from ._annotation_text import annotation_text
     from .domain import Domain, LanguageRef, language_ref
     from .languages import adapt_annotation, resolve, resolves
-    from .types import _hints
+    from .types import _hints, _optional_parts
     hints = _hints(fn)
     out: dict = {}
     for p in facts.params:
         hint = hints.get(p)
         if p in cj_domain or hint is None:
             continue
-        found = adapt_annotation(hint)
+        # the adaptor reads the type without its None; the absence an
+        # Optional annotation admits is added to the language domain
+        optional, inner = _optional_parts(hint)
+        found = adapt_annotation(inner)
         if found is None:
             continue
         language, adaptor = found
         named = language_ref(language.name)
         if named is not None and _ref_resolves(named, resolve):
             ref = named
-        elif isinstance(hint, type) and resolves(
-                f"{hint.__module__}.{hint.__qualname__}"):
-            ref = LanguageRef(f"{hint.__module__}.{hint.__qualname__}")
+        elif isinstance(inner, type) and resolves(
+                f"{inner.__module__}.{inner.__qualname__}"):
+            ref = LanguageRef(f"{inner.__module__}.{inner.__qualname__}")
         else:
             continue
-        hint_text = getattr(hint, "__name__", None) or str(hint)
-        out[p] = (Domain(base_type="L", pieces=(ref,), explicit_type=True),
-                  adaptor, hint_text)
+        out[p] = (Domain(base_type="L", pieces=(ref,), explicit_type=True,
+                         absent=optional),
+                  adaptor, annotation_text(hint))
+    return out
+
+
+def parameter_domain_facts(fn, facts) -> dict:
+    """Intent:
+        The domain each parameter's own annotation, default or guard
+        states, `{param: (bound, category, detail)}`, the one reading
+        every route and the clarity score start from. An `int`
+        annotation gives the integers (`int`); a `Literal`, an `Enum`
+        or a `bool` its stated values (`stated_values`); an unannotated
+        parameter defaulting to a bool the two flags (`flag`, the
+        default as detail); a guard refusing every value outside a set
+        of strings that set, the working domain it leaves (`guard`); a
+        registered language adaptor its language (`adaptor`, detail
+        `(adaptor name, annotation text)`); a `str` annotation the type
+        of strings (`text`, the annotation text as detail). An
+        `Optional` annotation adds the absence of the object to a
+        language or text domain. A parameter nothing states is left
+        out.
+    """
+    from ._annotation_text import annotation_text
+    from .domain import Domain
+    from .hazards import finite_guard_sets
+    from .types import _hints, missing_policy_from_signature
+    if facts is None:
+        return {}
+    out: dict = {}
+    kinds = facts.param_kinds or {}
+    for p in facts.params:
+        if kinds.get(p) == "int":
+            out[p] = ("Z", "int", None)
+    for p, vals in (getattr(facts, "finite_domains", {}) or {}).items():
+        out.setdefault(p, (frozenset(vals), "stated_values", None))
+    try:
+        signature = inspect.signature(fn).parameters if fn is not None else {}
+    except (TypeError, ValueError):
+        signature = {}
+    for p in facts.params:
+        param = signature.get(p)
+        if (param is not None and p not in out
+                and param.annotation is inspect.Parameter.empty
+                and isinstance(param.default, bool)):
+            out[p] = (frozenset({False, True}), "flag", param.default)
+    for p, values in finite_guard_sets(facts).items():
+        if p not in out:
+            out[p] = (values, "guard", None)
+    try:
+        adapted = _adaptor_inferred_domains(fn, facts, out)
+    except Exception:
+        adapted = {}
+    for p, (bound, adaptor, hint_text) in adapted.items():
+        out[p] = (bound, "adaptor", (adaptor, hint_text))
+    hints = _hints(fn) if fn is not None else {}
+    policy = missing_policy_from_signature(fn) if fn is not None else {}
+    for p in facts.params:
+        if p in out or kinds.get(p) != "string" or p not in hints:
+            continue
+        defaults = policy.get(p)
+        optional = bool(defaults is not None and defaults.annotated and defaults.absent)
+        out[p] = (Domain(base_type="S", explicit_type=True, absent=optional,
+                         clause=True),
+                  "text", annotation_text(hints[p]))
+    return out
+
+
+def parameter_domains(fn, facts=None) -> dict:
+    """Intent:
+        `{param: bound}` for every parameter whose annotation, default
+        or guard states its domain (`parameter_domain_facts`), each
+        completed from the annotation's missing-value defaults
+        (`domain.complete`) exactly as a claim's resolved domain is:
+        the completed domain the checks use and the clarity score
+        reads.
+    """
+    from .domain import NO_ANNOTATION, complete
+    from .types import missing_policy_from_signature
+    if facts is None:
+        try:
+            facts = analyze_source(fn)
+        except Exception:
+            return {}
+    policy = missing_policy_from_signature(fn)
+    out: dict = {}
+    for p, (bound, _category, _detail) in parameter_domain_facts(fn, facts).items():
+        try:
+            out[p] = complete(bound, policy.get(p, NO_ANNOTATION))
+        except Exception:
+            out[p] = bound
     return out
 
 
@@ -2606,14 +2698,21 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
                    and (found := _unbound_working_bound(fn, facts, p))}
         cuts = guard_cut_texts(fn, facts) or [
             str(c) for c in _own_guard_conditions(fn, facts)]
+        cuts += _finite_guard_texts(facts, domain)
         if cuts:
             unbound["guards"] = cuts
         return unbound
     cuts = guard_cut_texts(fn, facts)
     enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
-    if not cuts and not enforced:
+    listed_texts = _finite_guard_texts(facts, domain)
+    if not cuts and not enforced and not listed_texts:
         return {}
     out: dict = {}
+    from .domain import render_domain_bound as _render_bound
+    from .hazards import finite_guard_sets
+    for p, values in finite_guard_sets(facts).items():
+        if domain.get(p) is None:
+            out[p] = _render_bound(values)
     for p in facts.params:
         bound = domain.get(p)
         if bound is None:
@@ -2642,9 +2741,20 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
                 continue
         if narrowed != here:
             out[p] = _set_text(narrowed)
-    if out and cuts:
-        out["guards"] = list(cuts)
+    if out and (cuts or listed_texts):
+        out["guards"] = list(cuts) + listed_texts
     return out
+
+
+def _finite_guard_texts(facts, domain: dict) -> list:
+    """The condition of each guard refusing a parameter outside a set of
+    strings, as claim text (`side not in {"buy", "sell"}`), for the
+    parameters the claim binds no domain for."""
+    from .domain import render_domain_bound
+    from .hazards import finite_guard_sets
+    return [f"{p} not in {render_domain_bound(values)}"
+            for p, values in finite_guard_sets(facts).items()
+            if (domain or {}).get(p) is None]
 
 
 def _always_raises(stmts) -> bool:
@@ -2795,13 +2905,13 @@ def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
         raise branches leave: it binds no domain (in the claim or the
         call) for any parameter those branches read.
     """
+    from .hazards import finite_guard_sets
     if cj.relation in routes.examine_predicates() or cj.relation == "raises":
         return False
     conds = _own_guard_conditions(fn, facts)
-    if not conds:
-        return False
     read = {str(sym) for cond in conds
             for sym in getattr(cond, "free_symbols", ())}
+    read |= set(finite_guard_sets(facts))
     bound = set(cj.domain or {}) | set(domain or {})
     return bool(read) and not (read & bound)
 
@@ -2816,7 +2926,12 @@ def _unbound_working_bound(fn, facts, p: str):
     """
     import sympy
 
-    from .domain import Interval, bound_to_sympy_set
+    from .domain import Interval, bound_to_sympy_set, render_domain_bound
+    from .hazards import finite_guard_sets
+    listed = finite_guard_sets(facts).get(p)
+    if listed is not None:
+        # a guard to a set of strings leaves exactly that set
+        return (listed, render_domain_bound(listed))
     if facts.param_kinds.get(p) != "scalar":
         return None
     here = sympy.S.Reals
@@ -6483,6 +6598,15 @@ def _claim_sides(cj) -> list:
     return [s for s in sides if s]
 
 
+def _needs_language(cj, statement: str, note: str, error) -> "Probe":
+    """The row for a claim naming a language nothing in this process
+    serves: unknown, never falsified, with the package that adds the
+    named languages (mathema-language) in the note and the gap in meta."""
+    return Probe(cj.name, statement, "unknown", route=None,
+                 note=f"{note}; needs mathema-language: {error}".lstrip("; "),
+                 meta={"mathema.probe_gap": "language-unresolved"})
+
+
 def _validate_claim(cj, statement: str, note: str, facts,
                     domain: dict, fn=None) -> "Probe | _ClaimContext":
     """Intent:
@@ -6649,25 +6773,19 @@ def _validate_claim(cj, statement: str, note: str, facts,
         note = (f"{note}; inferred "
                + ", ".join(f"{p}={v[0]:g}" for p, v in sorted(inferred_domain.items()))
                + " from the claim's own literal argument")
-    # annotation-inferred domain TYPE, the same gap-filling shape as
-    # the literal inference above: an int annotation is domain
-    # information the author already wrote, so a parameter with no
-    # stated bound at all resolves to the integer type, rendered here
-    # explicitly; a stated domain always wins, and a plain
-    # float/unknown annotation infers nothing (everywhere-real is
-    # already the default reading). A bool parameter's two-point set
-    # arrives through facts.finite_domains below instead, the same
-    # channel a Literal[...]/Enum annotation uses, so the stated
-    # values are the real False/True objects
-    _ANNOTATION_DOMAIN = {"int": "Z"}
-    # only a parameter the claim reads is a coordinate; one it fills
-    # with a literal, or leaves at its default, has nothing to infer
+    # the domains the parameters' own annotations, defaults and guards
+    # state (`parameter_domain_facts`, the one reading every route
+    # uses): an int annotation the integers, a Literal/Enum/bool its
+    # stated values, a flag default the two bools, a guard to a set that
+    # set, a registered adaptor its language, a str annotation the type
+    # of strings; each fills a gap only (a stated domain always wins) and
+    # is rendered here explicitly, never silently. Only a parameter the
+    # claim reads is a coordinate; one it fills with a literal, or
+    # leaves at its default, has nothing to infer
     read = _names_in_claim(cj)
-    annotation_inferred = {
-        p: _ANNOTATION_DOMAIN[facts.param_kinds.get(p)]
-        for p in facts.params
-        if p not in cj_domain and p in read
-        and facts.param_kinds.get(p) in _ANNOTATION_DOMAIN}
+    stated = {p: fact for p, fact in parameter_domain_facts(fn, facts).items()
+              if p not in cj_domain and p in read}
+    annotation_inferred = {p: b for p, (b, cat, _d) in stated.items() if cat == "int"}
     if annotation_inferred:
         cj_domain = {**annotation_inferred, **cj_domain}
         note = (f"{note}; inferred "
@@ -6678,13 +6796,8 @@ def _validate_claim(cj, statement: str, note: str, facts,
                + "/".join(sorted({facts.param_kinds[p]
                                   for p in annotation_inferred}))
                + " annotation")
-    # a Literal[...]/Enum annotation states the parameter's entire
-    # value set, the finite-set counterpart of the type inference
-    # above, rendered the same way
-    literal_inferred = {
-        p: frozenset(vals)
-        for p, vals in getattr(facts, "finite_domains", {}).items()
-        if p not in cj_domain and p in read}
+    literal_inferred = {p: b for p, (b, cat, _d) in stated.items()
+                        if cat == "stated_values"}
     if literal_inferred:
         cj_domain = {**literal_inferred, **cj_domain}
         note = (f"{note}; inferred "
@@ -6693,47 +6806,47 @@ def _validate_claim(cj, statement: str, note: str, facts,
                    + ", ".join(repr(v) for v in sorted(vals, key=repr)) + "}"
                    for p, vals in sorted(literal_inferred.items()))
                + " from its own annotation's stated values")
-    # an unannotated parameter whose default is a bool is a flag: its
-    # value set is {False, True}, rendered the same way
-    flag_inferred: dict = {}
-    try:
-        flag_params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        flag_params = {}
-    for p in facts.params:
-        param = flag_params.get(p)
-        if (param is not None and p not in cj_domain and p in read
-                and param.annotation is inspect.Parameter.empty
-                and isinstance(param.default, bool)):
-            flag_inferred[p] = frozenset({False, True})
+    flag_inferred = {p: (b, d) for p, (b, cat, d) in stated.items() if cat == "flag"}
     if flag_inferred:
-        cj_domain = {**flag_inferred, **cj_domain}
+        cj_domain = {**{p: b for p, (b, _d) in flag_inferred.items()}, **cj_domain}
         note = (f"{note}; inferred "
                + ", ".join(f"{p} in {{False, True}} from its default "
-                           f"{flag_params[p].default!r}"
-                           for p in sorted(flag_inferred)))
-    # a language inferred from the annotation by a registered adaptor
-    # (`str` to the package's unicode language, a schema class to the
-    # language of its rows), the same gap-filling rule as the int
-    # inference above: only a parameter no binding names, rendered
-    # explicitly with the adaptor that answered; with no adaptor
-    # installed nothing is inferred
-    adaptor_inferred = {p: v for p, v in
-                        _adaptor_inferred_domains(fn, facts, cj_domain).items()
-                        if p in read}
+                           f"{default!r}"
+                           for p, (_b, default) in sorted(flag_inferred.items())))
+    # a guard to a set is the working domain the guard leaves (decision
+    # A); the record states it as such. A raises claim asks about the
+    # inputs the guard refuses, outside that set, so it keeps its own
+    # domain
+    if cj.relation not in ("raises", "excluded_outside_domain"):
+        cj_domain = {**{p: b for p, (b, cat, _d) in stated.items() if cat == "guard"},
+                     **cj_domain}
+    adaptor_inferred = {p: (b, d) for p, (b, cat, d) in stated.items()
+                        if cat == "adaptor"}
     if adaptor_inferred:
         from .domain import render_domain
-        cj_domain = {**{p: b for p, (b, _, _) in adaptor_inferred.items()},
+        cj_domain = {**{p: b for p, (b, _d) in adaptor_inferred.items()},
                      **cj_domain}
         note = (f"{note}; inferred "
                + ", ".join(
                    f"{p} in {render_domain(b, ascii_mode=True)} from its own "
                    f"{hint_text} annotation (adaptor {adaptor})"
-                   for p, (b, adaptor, hint_text)
+                   for p, (b, (adaptor, hint_text))
                    in sorted(adaptor_inferred.items())))
+    text_inferred = {p: (b, d) for p, (b, cat, d) in stated.items() if cat == "text"}
+    if text_inferred:
+        from .domain import render_domain
+        cj_domain = {**{p: b for p, (b, _d) in text_inferred.items()}, **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(
+                   f"{p} in {render_domain(b, ascii_mode=True)} from its own "
+                   f"{hint_text} annotation"
+                   for p, (b, hint_text) in sorted(text_inferred.items())))
     # a real parameter no binding names is read over the working
-    # domain f's own guards leave (decision A); the record states it
-    if cj.relation not in routes.examine_predicates():
+    # domain f's own guards leave (decision A); the record states it. A
+    # raises claim asks about the inputs the guards refuse, so it keeps
+    # the whole domain
+    if cj.relation not in (*routes.examine_predicates(), "raises",
+                           "excluded_outside_domain"):
         for p in facts.params:
             if p in read and p not in cj_domain:
                 found = _unbound_working_bound(fn, facts, p)
@@ -6884,10 +6997,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                 try:
                     language, source = resolve(piece)
                 except UnknownLanguage as e:
-                    return Probe(cj.name, statement, "skipped", route=None,
-                                 note=f"{note}; {e}",
-                                 meta={"mathema.probe_gap":
-                                       "language-unresolved"})
+                    return _needs_language(cj, statement, note, e)
                 resolved_sources.append(f"{p} in L[{piece.text}] ({source})")
                 real_kind = facts.param_kinds.get(p)
                 if not _kind_compatible(language.kind, real_kind):
@@ -6905,10 +7015,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                 try:
                     resolve(piece)
                 except UnknownLanguage as e:
-                    return Probe(cj.name, statement, "skipped", route=None,
-                                 note=f"{note}; {e}",
-                                 meta={"mathema.probe_gap":
-                                       "language-unresolved"})
+                    return _needs_language(cj, statement, note, e)
     strange_types = sorted(
         f"{p} ({bound.base_type})" for p, bound in cj_domain.items()
         if getattr(bound, "base_type", None) not in (None, *KNOWN_BASE_TYPES))
@@ -7235,7 +7342,7 @@ def _fill_value(bound):
     from dataclasses import replace as _replace
 
     from .domain import bound_to_sympy_set, domain_contains
-    if bound is not None and getattr(bound, "base_type", None) == "L":
+    if bound is not None and getattr(bound, "base_type", None) in ("L", "S"):
         return None
     if bound is not None and getattr(bound, "dims", ()):
         bound = _replace(bound, dims=())
@@ -8373,6 +8480,21 @@ def _bound_callables(cj) -> dict:
         except AttributeError:
             out[name] = None
     return out
+
+
+def _text_set_members(bound) -> "list | None":
+    """The members of a finite set of strings (a `frozenset`, or a
+    domain listing them), or None for any other bound."""
+    from .domain import Domain, _is_enumerated, is_sentinel
+    if isinstance(bound, frozenset):
+        values = [v for v in bound if not is_sentinel(v)]
+    elif isinstance(bound, Domain) and _is_enumerated(bound) and not bound.dims:
+        values = [v for piece in bound.pieces for v in piece if not is_sentinel(v)]
+    else:
+        return None
+    if not values or not all(isinstance(v, str) for v in values):
+        return None
+    return sorted(set(values))
 
 
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
@@ -9576,9 +9698,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a string parameter with no stated domain has no honest sampling
     # story, as in the automatic probes: numbers drawn for it would
     # falsify the claim on inputs the function was never meant to take
+    from .domain import bare_text_type
     named = _names_in_claim(cj)
     for p, k in kinds.items():
-        if k == "string" and p in named and ctx.cj_domain.get(p) is None:
+        if k == "string" and p in named and (
+                ctx.cj_domain.get(p) is None or bare_text_type(ctx.cj_domain.get(p))):
             return Probe(
                 cj.name, statement, "skipped", route=None,
                 note=(f"{note}; {string_domain_hint(p)}, or annotate it "

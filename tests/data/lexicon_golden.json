@@ -1381,8 +1381,8 @@
  },
  "absent_key_left_out": {
   "input": "for order.side in {\"buy\", \"sell\"} | {None} \\ {null}, len(f(order)) >= 1",
-  "unicode": "∀ order.side ∈ {\"buy\", \"sell\", None} \\ {null}, len(f(order)) ≥ 1",
-  "ascii": "for order.side in {\"buy\", \"sell\", None} \\ {null}, len(f(order)) >= 1"
+  "unicode": "∀ order.side ∈ {\"buy\", \"sell\", absent} \\ {null}, len(f(order)) ≥ 1",
+  "ascii": "for order.side in {\"buy\", \"sell\", absent} \\ {null}, len(f(order)) >= 1"
  },
  "let_scale_seq_sharpe_premise": {
   "input": "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)",

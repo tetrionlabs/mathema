@@ -65,9 +65,10 @@ def test_a_raises_claim_over_the_class_is_called_with_nan():
     assert probe.verdict == "holds", (probe.verdict, probe.note)
     assert "at x = nan f raised ValueError" in probe.note, probe.note
     # the claim's own point reaches f as the float nan; the smoke call
-    # that checks f can be called at all uses a value from its signature
+    # that checks f can be called at all uses a value from its signature,
+    # and the absence row of an Optional parameter calls f at None
     assert any(isinstance(v, float) and math.isnan(v) for v in SEEN)
-    assert all(isinstance(v, float) for v in SEEN)
+    assert all(isinstance(v, float) or v is None for v in SEEN)
 
 
 def test_a_raises_claim_over_the_class_is_proven_by_its_one_point():

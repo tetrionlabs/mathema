@@ -86,12 +86,11 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 $ mathema claims functions.softmax
 functions.softmax: no declared claims (to list candidates, run: mathema claims functions.softmax --suggest)
 $ mathema claims functions.softmax --suggest
-functions.softmax: 11 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
+functions.softmax: 10 suggested claim(s) (adopt with: mathema claims KEY --adopt NAME)
   effects: no side effects
  individual claims:
   - is_deterministic: f(scores) == f(scores)  [route best]
   - is_state_safe: f(scores) == f(scores)  [route best]
-  - is_numerically_stable: g(f, scores) == 1  [route best]
   - is_empty_safe[scores]: is_empty_safe(scores)  [route examine]
   - is_dimension_safe[f]: is_dimension_safe(f)  [route examine]
   - preserves_length: dim(f(scores), 0) == dim(scores, 0)  [route probe]

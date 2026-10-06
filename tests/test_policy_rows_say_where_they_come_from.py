@@ -338,10 +338,11 @@ def _policy_rows(rec) -> list:
             if p.name.startswith(("missing[", "absent["))]
 
 
-def test_a_bare_check_carries_no_policy_rows():
-    # with no claim written, nothing asks what f does with a missing value
+def test_a_bare_check_carries_only_the_absence_an_optional_annotation_admits():
+    # with no claim written, nothing asks what f does with a missing
+    # value; what it does at None is asked for an Optional parameter
     assert _policy_rows(mathema.check(clamp01)) == []
-    assert _policy_rows(mathema.check(root_opt)) == []
+    assert _policy_rows(mathema.check(root_opt)) == ["absent[x]"]
 
 
 def test_a_written_claim_carries_the_policy_rows_of_what_it_admits():

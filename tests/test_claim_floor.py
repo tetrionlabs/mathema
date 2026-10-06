@@ -77,7 +77,7 @@ def test_a_sequence_parameter_brings_the_dimension_aspect():
 
 
 @pytest.mark.parametrize("fn,expected", [
-    (parse_tag, 6), (stateful_io, 8),
+    (parse_tag, 5), (stateful_io, 7),
 ])
 def test_an_unliftable_function_still_has_a_floor(fn, expected):
     """Most families offer a probe route, so nothing about the floor

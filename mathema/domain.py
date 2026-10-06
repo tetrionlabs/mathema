@@ -206,10 +206,10 @@ _SUBSET_OPS = r"(?:\\subset|\\sub|subset|⊂)"
 # `subset`/`⊂` keyword, see render_domain's own ascii-mode preference
 # for this spelling over `subset R`/`subset Z`.
 _SUBSET_ANYWHERE = re.compile(
-    rf"\s*(?:{_SUBSET_OPS}\s+|:\s*)(?P<type>R|Z|N|C|ℝ|ℤ|ℕ|ℂ|real|float|integer|int|complex)\s*")
+    rf"\s*(?:{_SUBSET_OPS}\s+|:\s*)(?P<type>R|Z|N|C|ℝ|ℤ|ℕ|ℂ|real|float|integer|int|complex|str)\s*")
 _SUBSET_ASCII = {"ℝ": "R", "ℤ": "Z", "ℕ": "N", "ℂ": "C",
                 "real": "R", "float": "R", "integer": "Z", "int": "Z",
-                "complex": "C"}
+                "complex": "C", "str": "S"}
 # "D \ {v1, v2, ...}" / "D, exclude={v1, v2, ...}", a trailing
 # exclusion, subtracted from whatever D's own pieces already cover.
 # `_EXCLUDE_SUFFIX` is the inline spelling, anchored to the end of one
@@ -923,7 +923,10 @@ class Domain:
 # to happen, not a default. `"L"` is a language domain (`L[ascii]`):
 # its pieces are `LanguageRef`s and finite sets, it has no real-set
 # reading, and its members are strings or structured values.
-KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C", "L"})
+#: `S` is the type of strings, the fact a `str` annotation states: it
+#: has no pieces of its own beyond a finite set of members, and no
+#: real-set reading
+KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C", "L", "S"})
 
 
 def _require_known_base_type(base_type: str) -> None:
@@ -1029,6 +1032,16 @@ def _is_enumerated(dom: Domain) -> bool:
         return False
     return not dom.explicit_type or any(
         not isinstance(v, _Sentinel) for p in dom.pieces for v in p)
+
+
+def bare_text_type(bound) -> bool:
+    """Whether a bound is the type of strings alone (`: str`, with or
+    without its absence): a type fact with no members listed, which
+    admits every string and so has no finite set or language to draw
+    from."""
+    return (isinstance(bound, Domain) and bound.base_type == "S"
+            and not any(isinstance(p, frozenset) and not _sentinel_piece(p)
+                        for p in bound.pieces))
 
 
 def _sentinel_piece(piece) -> bool:
@@ -1562,6 +1575,14 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
         # a language domain: the resolved language decides, a finite
         # piece by membership, and a number is a member of neither
         return any(_language_piece_contains(value, p) for p in dom.pieces)
+    if dom.base_type == "S":
+        # the type of strings: a string is a member, any other value is
+        # not; a finite piece lists the members
+        if not isinstance(value, str):
+            return False
+        members = [p for p in dom.pieces if isinstance(p, frozenset)
+                   and not _sentinel_piece(p)]
+        return not members or any(value in p for p in members)
     if dom.base_type == "C":
         # the complex plane: any number belongs (the reals embed);
         # discrete pieces and exclusions still apply below.
@@ -1794,12 +1815,12 @@ def _states_by_type(dom, value_pieces, num_excl, always_show_type: bool) -> bool
 def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> str:
     """A sentinel as the grammar spells it: `absent` for absence, the
     class as `missing` (`∅` in unicode), a member as its own word. With
-    `words`, as a language domain and a path binding spell them,
-    absence is `None` and the class the word `missing` in both modes."""
+    `words`, as a language domain and a path binding spell them, the
+    class is the word `missing` in both modes."""
     if s.kind == "absent":
         if s.member is not None:
             return s.member
-        return "None" if words else "absent"
+        return "absent"
     if s.member is None:
         return "missing" if (ascii_mode or words) else "∅"
     return s.member
@@ -1944,8 +1965,16 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         text += excluded_text()
         if dom.explicit_type and not language:
             text += _type_annotation_suffix(dom.base_type, ascii_mode)
+        if dom.base_type == "S" and show_missing and admitted(dom, defaults)[0]:
+            text += "|absent"
         return text
     absent, holes = admitted(dom, defaults)
+    if dom.base_type == "S":
+        # the type of strings: `: str`, its absence fused after it in
+        # both modes, as a language domain spells its own
+        if not show_missing:
+            absent = False
+        return ": str" + ("|absent" if absent else "")
     if not show_missing:
         absent, holes = False, ()
     ordered = _ordered_sentinels(absent, holes)
@@ -2024,6 +2053,10 @@ _ASCII_TYPE_ANNOTATION = {"R": " : float", "Z": " : int", "C": " : complex"}
 
 
 def _type_annotation_suffix(base_type: str, ascii_mode: bool) -> str:
+    if base_type == "S":
+        # the type of strings has no blackboard letter: the annotation
+        # spelling in both modes
+        return " : str"
     if ascii_mode:
         return _ASCII_TYPE_ANNOTATION.get(base_type, f" subset {base_type}")
     return f" ⊂ {_TYPE_GLYPH.get(base_type, base_type)}"
@@ -2405,13 +2438,14 @@ def _parse_binding(part: str):
         text, more = _peel_trailing_sentinels(text)
         tail_words = more + tail_words
 
-    m = _MEMBERSHIP_PREFIX.match(text)
+    # a type clause alone leaves nothing after the operator (`s in : str`)
+    m = _MEMBERSHIP_PREFIX.match(text) or _MEMBERSHIP_PREFIX.match(text + " ")
     if m is None:
         return (f"{part!r}: no recognized membership operator "
                 f"(in / ∈ / \\in / \\elem), expected 'name in domain'")
     name = m.group("name")
     rest = text[m.end():].strip()
-    if not rest:
+    if not rest and type_explicit is None:
         return f"{part!r}: {name!r} has no domain after the membership operator"
     # where the binding sits decides what `None` and `null` are: at an
     # element (`o.lines[*]`, a space's slots) a hole, at a parameter or a
@@ -2434,7 +2468,8 @@ def _parse_binding(part: str):
             if inner is not None:
                 rest, in_element = inner, True
     pieces = []
-    for pt in _UNION_SPLIT.split(rest):
+    for pt in (_UNION_SPLIT.split(rest) if rest else []):
+        # a type clause alone (`s in : str`) is the whole type
         piece = (_parse_piece(pt, in_element=in_element or element_path,
                               on_field=on_field) if pt else None)
         if piece is None:
@@ -2557,7 +2592,7 @@ def _parse_binding(part: str):
 
     # an enumerated domain is exactly its members: the values it lists
     # and the sentinels it lists, one set
-    enumerated = type_explicit != "L" and not space_dims and not named_only and (
+    enumerated = type_explicit not in ("L", "S") and not space_dims and not named_only and (
         all(isinstance(p, frozenset) for p in value_pieces)
         and (bool(value_pieces) or bool(unique)))
     if enumerated:
@@ -3198,6 +3233,9 @@ def bound_to_sympy_set(bound):
     if bound == "L" or isinstance(bound, LanguageRef) or (
             isinstance(bound, Domain) and bound.base_type == "L"):
         raise InvalidDomain("a language domain (L[...]) has no real-set "
+                            "reading")
+    if bound == "S" or (isinstance(bound, Domain) and bound.base_type == "S"):
+        raise InvalidDomain("the type of strings (: str) has no real-set "
                             "reading")
 
     def piece_set(piece):

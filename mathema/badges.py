@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 # calibration change (the constants below) bumps the minor (@1.1); a
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
-CLARITY_ALGO = "entropy-dimensions@1.2"
+CLARITY_ALGO = "entropy-dimensions@1.3"
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -41,9 +41,18 @@ _BITS: dict[str, float] = {
     "graph": 1.0, "region": 0.4,
     # form: the relational shape (the output envelope is _EXTENT_BITS)
     "shape_branched": 1.0, "shape_flat": 0.4,
-    # domain: what each parameter accepts; a guarded parameter has a real,
-    # implementation-specific boundary, an unguarded one barely any
-    "domain_guarded": 1.0, "domain_soft": 0.3,
+    # domain: what each parameter accepts. A guarded parameter has a
+    # real, implementation-specific boundary; an unguarded one costs
+    # what is left unknown about the inputs it takes, read from the
+    # domain the checks complete for it (conjecture.parameter_domains):
+    # nothing stated, a type alone (a language naming the whole type
+    # adds nothing), a narrower language by its level, a bounded range
+    # or a refined language, a finite set of k values (log2(k)/10, capped,
+    # and cleared outright by an exhaustive proof), and the absence an
+    # Optional annotation admits as a source of its own
+    "domain_guarded": 1.0, "domain_unannotated": 1.5, "domain_type": 1.0,
+    "domain_alphabet": 0.8, "domain_predicate": 0.6, "domain_refined": 0.4,
+    "domain_bounded": 0.4, "domain_finite_cap": 0.3, "domain_absence": 0.5,
     # safety families, scaled to whether the hazard can actually occur
     "safety_pure": 0.15, "safety_impure": 0.8,
     "safety_numeric": 0.2, "safety_numeric_loop": 0.4,
@@ -180,12 +189,108 @@ def _statement_relation(statement: str) -> str | None:
 
 
 @dataclass(frozen=True)
+class _ParamDomain:
+    """What is known about one parameter's inputs: its name, the bits
+    its completed domain leaves (`domain_bits`), whether a guard in the
+    body bounds it, whether an Optional annotation admits its absence,
+    and whether its domain is a finite set."""
+    name: str
+    bits: float
+    guarded: bool = False
+    optional: bool = False
+    finite: bool = False
+
+
+def _whole_type_language(language) -> bool:
+    """Whether a string language admits every string the hazard corpus
+    holds, which is a language naming the whole type rather than a
+    narrower one."""
+    from .languages import STRING_HAZARDS
+    try:
+        return getattr(language, "kind", "") == "string" and all(
+            language.contains(h.value) for h in STRING_HAZARDS)
+    except Exception:
+        return False
+
+
+def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
+    """Intent:
+        `(bits, finite)`: the a-priori entropy of one parameter's inputs
+        read from its completed domain, on the scale in `_BITS`:
+        nothing known (no annotation and no bound) 1.5; a type alone
+        (`float`, `: str`, a bare `Z`, a language admitting every
+        string) 1.0; a narrower language by its level, an alphabet 0.8,
+        a predicate, regular or schema language 0.6, a refined one 0.4;
+        a bounded number range 0.4; a finite set of k values
+        min(0.3, log2(k) / 10). `finite` says the domain is a finite
+        set, which an exhaustive proof clears entirely.
+    """
+    import math
+
+    from .domain import Domain, LanguageRef, _is_enumerated, is_sentinel
+    C = _BITS
+
+    def finite_bits(k: int):
+        return (min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1 else 0.0), True
+
+    if bound is None:
+        return (C["domain_type"] if annotated else C["domain_unannotated"]), False
+    if isinstance(bound, frozenset):
+        return finite_bits(len([v for v in bound if not is_sentinel(v)]))
+    if isinstance(bound, str):
+        return C["domain_type"], False
+    if isinstance(bound, Domain):
+        if bound.base_type == "L":
+            refs = [p for p in bound.pieces if isinstance(p, LanguageRef)]
+            if any(ref.refinements for ref in refs):
+                return C["domain_refined"], False
+            from .languages import resolve
+            levels = set()
+            for ref in refs:
+                try:
+                    language, _source = resolve(ref)
+                except Exception:
+                    return C["domain_type"], False
+                if getattr(language, "level", "") == "finite":
+                    members = language.members(1024)
+                    if members is not None:
+                        return finite_bits(len(members))
+                if _whole_type_language(language):
+                    return C["domain_type"], False
+                levels.add(getattr(language, "level", "predicate"))
+            if not levels:
+                return C["domain_type"], False
+            if levels == {"alphabet"}:
+                return C["domain_alphabet"], False
+            return C["domain_predicate"], False
+        if _is_enumerated(bound) and not bound.dims:
+            return finite_bits(len({v for p in bound.pieces for v in p
+                                    if not is_sentinel(v)}))
+        pieces = [p for p in bound.pieces
+                  if not (isinstance(p, frozenset) and all(is_sentinel(v) for v in p))]
+        if pieces and all(isinstance(p, tuple) and not isinstance(p, frozenset)
+                          and all(math.isfinite(float(v)) for v in p[:2])
+                          for p in pieces):
+            return C["domain_bounded"], False
+        return C["domain_type"], False
+    if isinstance(bound, tuple):
+        try:
+            if all(math.isfinite(float(v)) for v in bound[:2]):
+                return C["domain_bounded"], False
+        except (TypeError, ValueError):
+            pass
+        return C["domain_type"], False
+    return C["domain_type"], False
+
+
+@dataclass(frozen=True)
 class _Profile:
     """The structural + hazard surface behind a function's clarity: the
     shape from `analyze_source` (no lift), and each callee with the
     evidence its own record holds."""
     params: tuple = ()            # kinds: scalar / sequence / matrix / string
     guarded: int = 0             # parameters with a real accept/reject boundary
+    domains: tuple = ()          # one _ParamDomain per parameter, in order
     cx: int = 0                  # decision points (the branch surface)
     output: str = "scalar"
     numeric: bool = False
@@ -317,6 +422,7 @@ def _clarity_profile(fn, facts=None, root: str = ".",
                         else kinds.get(p, "scalar")
                         for p in params)
     guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
+    domains = _param_domains(fn, facts, params, guards)
     if store is None:
         from .spec import load_verified
         store = load_verified(root)
@@ -325,7 +431,7 @@ def _clarity_profile(fn, facts=None, root: str = ".",
     except Exception:
         callees = ()
     return _Profile(
-        params=param_kinds, guarded=guarded, cx=cx,
+        params=param_kinds, guarded=guarded, domains=domains, cx=cx,
         output=getattr(facts, "returns_kind", "scalar") or "none",
         numeric=numeric, loops=len(getattr(facts, "loops", []) or []),
         pure=bool(getattr(facts, "is_pure", True)),
@@ -333,20 +439,58 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         callees=callees)
 
 
+def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
+    """One `_ParamDomain` per parameter: the bits of the domain the
+    checks complete for it (`conjecture.parameter_domains`, the one
+    reading), whether a guard bounds it, whether its annotation admits
+    absence, whether it is a finite set."""
+    import warnings
+
+    from .conjecture import parameter_domains
+    from .hazards import _annotated_params
+    from .types import missing_policy_from_signature
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            completed = parameter_domains(fn, facts)
+    except Exception:
+        completed = {}
+    try:
+        annotated = _annotated_params(facts)
+    except Exception:
+        annotated = set()
+    try:
+        policy = missing_policy_from_signature(fn)
+    except Exception:
+        policy = {}
+    out = []
+    for p in params:
+        bound = completed.get(p)
+        bits, finite = domain_bits(bound, p in annotated or bound is not None)
+        sig = policy.get(p)
+        optional = bool(sig is not None and sig.annotated and sig.absent)
+        out.append(_ParamDomain(p, bits, guards.get(p) not in (None, "none"),
+                                optional, finite))
+    return tuple(out)
+
+
 def _clarity_sources(p: _Profile) -> list:
     """The entropy sources of one function, `(dimension, bits, reducer)`.
     `reducer` names which claim group (or structural baseline) clears
     it; a call's reducer is `callee:<key>`, cleared only by that
-    callee's own recorded evidence. See `_BITS`."""
+    callee's own recorded evidence; an unguarded parameter's reducer is
+    `domain_soft:<name>`, its absence `absence:<name>`. See `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
     s.append(("form", C["shape_branched"] if p.cx else C["shape_flat"], "shape"))
-    for i, _kind in enumerate(p.params):
-        if i < p.guarded:
+    for d in p.domains:
+        if d.guarded:
             s.append(("domain", C["domain_guarded"], "domain"))
-        else:
-            s.append(("domain", C["domain_soft"], "domain_soft"))
+        elif d.bits > 0:
+            s.append(("domain", d.bits, f"domain_soft:{d.name}"))
+        if d.optional:
+            s.append(("domain", C["domain_absence"], f"absence:{d.name}"))
     pur = C["safety_pure"] if p.pure else C["safety_impure"]
     s.append(("safety", pur, "safety:is_state_safe"))
     s.append(("safety", pur, "safety:is_deterministic"))
@@ -365,7 +509,71 @@ def _clarity_sources(p: _Profile) -> list:
     return s
 
 
-def _reductions(verified_claims, pure: bool) -> dict:
+def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
+    """What the verified claims say about each unguarded parameter's
+    inputs beyond its completed domain: a claim binding a narrower domain
+    for it lowers its bits to that domain's (the reduction is the share
+    removed), and a proof by visiting every point of a finite set clears
+    it entirely."""
+    from .conjecture import claim as _claim
+    by_name = {d.name: d for d in profile.domains}
+    for row in verified_claims:
+        statement = row.get("statement") or row.get("law") or ""
+        name = row.get("name") or ""
+        if not statement or statement == name:
+            continue
+        verdict = row.get("verdict") or ""
+        route = row.get("route") or ""
+        strength = _strength(verdict, route)
+        if strength <= 0:
+            continue
+        if route == "derive:brute_force" and verdict == "proven":
+            for d in profile.domains:
+                if d.finite:
+                    bump(f"domain_soft:{d.name}", 1.0)
+        try:
+            bound_domains = _claim(statement).domain or {}
+        except Exception:
+            continue
+        for p, bound in bound_domains.items():
+            d = by_name.get(p)
+            if d is None or d.bits <= 0:
+                continue
+            narrower, _finite = domain_bits(bound, True)
+            if narrower < d.bits:
+                bump(f"domain_soft:{p}", strength * (1.0 - narrower / d.bits))
+
+
+def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
+    """A verified absence row (`absent[x]`, a stated `absent(f, x) ...`
+    policy, `is_absent_safe`) clears the absence source of the
+    parameter it names, or of every Optional parameter for a row over
+    the whole function."""
+    optional = [d.name for d in profile.domains if d.optional]
+    if not optional:
+        return
+    from .families import claim_base_name
+    for row in verified_claims:
+        name = row.get("name") or ""
+        meta = row.get("meta") or {}
+        policy = meta.get("mathema.policy") or {}
+        strength = _strength(row.get("verdict") or "", row.get("route") or "")
+        if strength <= 0:
+            continue
+        base = claim_base_name(name) if name else ""
+        if policy.get("kind") == "absent":
+            targets = [policy["parameter"]] if policy.get("parameter") else optional
+        elif base in ("is_absent_safe", "is_input_safe", "absent"):
+            inside = name[len(base) + 1:-1] if name.endswith("]") else ""
+            targets = [inside] if inside in optional else optional
+        else:
+            continue
+        for p in targets:
+            if p in optional:
+                bump(f"absence:{p}", strength)
+
+
+def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) -> dict:
     """The fraction each reducer group has been established to, from the
     verified claims plus the structural (examine-route) baselines."""
     C = _BITS
@@ -436,6 +644,12 @@ def _reductions(verified_claims, pure: bool) -> dict:
     r["extent"] = max(r["extent"], r["identity"])
     r["shape"] = max(r["shape"], r["identity"])
     r["domain_soft"] = max(r["domain_soft"], r["domain"], r["identity"])
+    if profile is not None:
+        _binding_reductions(verified_claims, profile, bump)
+        _absence_reductions(verified_claims, profile, bump)
+        for d in profile.domains:
+            key = f"domain_soft:{d.name}"
+            r[key] = max(r.get(key, 0.0), r["domain_soft"])
     return r
 
 
@@ -460,7 +674,7 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
     profile = _clarity_profile(fn, facts, root, store, library_keys)
     if profile is None:
         return None
-    reductions = _reductions(verified_claims, profile.pure)
+    reductions = _reductions(verified_claims, profile.pure, profile)
     reductions.update({f"callee:{key}": evidence
                        for key, evidence in profile.callees})
     h0 = h_rem = 0.0
