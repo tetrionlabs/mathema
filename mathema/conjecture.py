@@ -5323,6 +5323,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 probed.note = f"{probed.note or ''}; {refused}".lstrip("; ")
                 probed.meta = {**(probed.meta or {}),
                                "mathema.guard_refused": ctx.guard_refused}
+            if ctx.path_no_value:
+                outside = (f"{ctx.path_no_value} draw"
+                           f"{'s' if ctx.path_no_value != 1 else ''} outside "
+                           f"the binding: the path has no value")
+                probed.note = f"{probed.note or ''}; {outside}".lstrip("; ")
+                probed.meta = {**(probed.meta or {}),
+                               "mathema.path_no_value": ctx.path_no_value}
             probed, lines = _with_empty_input_lines(probed, ctx, fn, facts,
                                                     float_companions,
                                                     conjectures)
@@ -6297,6 +6304,10 @@ class _ClaimContext:
     # counts) the draws they refuse
     exclude_own_guards: bool = False
     guard_refused: int = 0
+    # draws a path binding rejected because the path reached no value
+    # (an index past the end, a field holding None) the bound does not
+    # admit: outside the binding, counted in the record
+    path_no_value: int = 0
     # matrix-structure premises: {param: (prop, ...)} the sampler
     # synthesises to, and the derive backend turns into sympy
     # assumptions (Q.symmetric, Q.positive_definite, ...)
@@ -7390,8 +7401,14 @@ def _in_field_type(path: str, bound, cj_domain: dict):
         in [1, 3]` over an int field reads `[1, 3] : int`); the bound
         unchanged otherwise, or when the bound states its own type.
     """
+    import dataclasses
+
     from .domain import Domain, _as_domain
-    if getattr(bound, "explicit_type", False) or not isinstance(bound, tuple):
+    if getattr(bound, "explicit_type", False):
+        return bound
+    plain_domain = (isinstance(bound, Domain) and bound.base_type == "R"
+                    and not bound.dims)
+    if not (isinstance(bound, tuple) or plain_domain):
         return bound
     root, _, rest = path.partition(".")
     if "[" in root:
@@ -7407,6 +7424,8 @@ def _in_field_type(path: str, bound, cj_domain: dict):
     base = getattr(_as_domain(field_bound), "base_type", None) \
         if field_bound is not None else None
     if base in ("Z", "N"):
+        if isinstance(bound, Domain):
+            return dataclasses.replace(bound, base_type="Z", explicit_type=True)
         return Domain(base_type="Z", pieces=(bound,), explicit_type=True)
     return bound
 
@@ -7777,7 +7796,7 @@ def _provenance_meta(proof) -> dict:
     """
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
-                "mathema.missing",
+                "mathema.missing", "mathema.path_no_value",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions"):
@@ -9913,7 +9932,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         p: fill for p in kinds
         if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
                                 )) is not None}
-    from .domain import path_bindings_hold
+    from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")
                          for key in cj_domain)}
@@ -9980,16 +9999,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     def narrowed(p, draw):
         # a parameter with path bindings is drawn until every binding
         # holds, a bounded rejection; a point none satisfies is outside
-        # the claim's domain
+        # the claim's domain. A draw a path reaches no value in (an
+        # index past the end, a field holding None) is counted
         v = draw()
         if p not in path_bound:
             return v
-        for _ in range(20):
-            if path_bindings_hold(v, p, cj_domain):
+        for _ in range(21):
+            said = path_bindings_verdict(v, p, cj_domain)
+            if said is None:
+                return v
+            if said == "no value":
+                ctx.path_no_value += 1
+            if _ == 20:
+                outside_draw[0] = True
                 return v
             v = draw()
-        if not path_bindings_hold(v, p, cj_domain):
-            outside_draw[0] = True
         return v
 
     fn_tagged = f_call.wrap(_tagged(fn_call, "f", inject=call_pins))

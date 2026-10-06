@@ -17,6 +17,12 @@ an `importlib.metadata` entry point under the group named by
 never overriding a built-in name outright (a same-name external entry
 is dropped with a warning, not silently preferred); a plugin adds new
 claim families, it doesn't get to silently replace mathema's own.
+
+The predicate a family owns is its registered name, so the grammar
+reads the names of the entry points without loading them; a family is
+loaded when a claim is adjudicated. An entry point whose load fails is
+warned about once and tried again on the next call, never remembered
+as absent.
 """
 from __future__ import annotations
 
@@ -104,16 +110,54 @@ def register(name: str, family: ClaimFamily) -> None:
 
 
 @functools.lru_cache(maxsize=1)
+def _entry_points() -> tuple:
+    """The entry points registered under `FAMILY_GROUP`, read once per
+    process (installed metadata), none of them loaded."""
+    return tuple(entry_points(group=FAMILY_GROUP))
+
+
+#: the external families loaded so far, by entry-point name
+_LOADED: dict[str, ClaimFamily] = {}
+#: the entry points whose failed load has been warned about
+_WARNED: set = set()
+
+
 def _discovered_external() -> dict[str, ClaimFamily]:
-    discovered: dict[str, ClaimFamily] = {}
-    for ep in entry_points(group=FAMILY_GROUP):
+    """Intent:
+        Every external family that loads, by entry-point name. An entry
+        point is loaded on the first call that needs it and kept once it
+        loads; one whose load fails is skipped for this call with a
+        warning (once per entry point) and tried again on the next, so a
+        family that could not import yet, because the module importing
+        it was still being imported, is read as soon as it can be.
+    """
+    for ep in _entry_points():
+        if ep.name in _LOADED:
+            continue
         try:
-            discovered[ep.name] = ep.load()
+            _LOADED[ep.name] = ep.load()
         except Exception as e:
-            warnings.warn(f"mathema: claim family {ep.value!r} registered "
-                          f"under {ep.name!r} failed to load ({e!r}), "
-                          "skipping it", stacklevel=2)
-    return discovered
+            if (ep.name, ep.value) not in _WARNED:
+                _WARNED.add((ep.name, ep.value))
+                warnings.warn(f"mathema: claim family {ep.value!r} registered "
+                              f"under {ep.name!r} failed to load ({e!r}), "
+                              "skipping it until it loads", stacklevel=2)
+    return dict(_LOADED)
+
+
+def _registered_names() -> frozenset:
+    """Every family name, built-in or registered: the entry points'
+    names read without loading them."""
+    return frozenset(_REGISTRY) | frozenset(ep.name for ep in _entry_points())
+
+
+def _reset_discovery() -> None:
+    """Forget the entry points read, the families loaded and the loads
+    warned about, so the next call discovers afresh (for a test that
+    substitutes `entry_points`)."""
+    _entry_points.cache_clear()
+    _LOADED.clear()
+    _WARNED.clear()
 
 
 def families() -> dict[str, ClaimFamily]:
@@ -210,7 +254,7 @@ def registered_output_predicates() -> frozenset:
     families: every family name shaped like `output_<slug>` or
     `is_<slug>_output`. The registered NAME is the predicate, as for
     the safety predicates; `routes` unions this with its static table."""
-    return frozenset(name for name in families()
+    return frozenset(name for name in _registered_names()
                      if _OUTPUT_SHAPE.fullmatch(name))
 
 
@@ -237,10 +281,11 @@ def registered_predicates() -> frozenset:
     every family name shaped like `is_<slug>_safe`. The registered NAME
     is the predicate it owns (the same name-is-the-contract rule target
     resolvers use), so a family owning several predicates registers
-    once per predicate. `routes` unions this with its static tables;
-    with nothing registered beyond mathema's own members, the union
-    adds nothing."""
-    return frozenset(name for name in families()
+    once per predicate, and the names are read from the entry points
+    without loading a family. `routes` unions this with its static
+    tables; with nothing registered beyond mathema's own members, the
+    union adds nothing."""
+    return frozenset(name for name in _registered_names()
                      if _PREDICATE_SHAPE.fullmatch(name))
 
 

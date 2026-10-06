@@ -75,11 +75,6 @@ from ..languages import UnknownRefinement as UnknownRefinement
 from ..languages import refinement_keys as refinement_keys
 from ..languages import register_refinement as register_refinement
 from ..languages import unregister_refinement as unregister_refinement
-from ..lexicon import LEXICON_GROUP as LEXICON_GROUP
-from ..lexicon import LexiconSource as LexiconSource
-from ..lexicon import lexicon_source as lexicon_source
-from ..lexicon_checks import lexicon_problems as lexicon_problems
-from ..lexicon_checks import write_lexicon_golden as write_lexicon_golden
 from ..languages import describe_language as describe_language
 from ..languages import language_problems as language_problems
 from ..languages import language_adaptors as language_adaptors
@@ -232,3 +227,26 @@ __all__ = [
     "capability_problems",
     *(name for names in SURFACE.values() for name in names),
 ]
+
+#: the surface names the lexicon modules provide, imported on first
+#: read (a lexicon defines example functions, so importing it is work
+#: this module does not do on a package's behalf)
+_LEXICON_NAMES = {
+    "LEXICON_GROUP": "lexicon", "LexiconSource": "lexicon",
+    "lexicon_source": "lexicon", "lexicon_problems": "lexicon_checks",
+    "write_lexicon_golden": "lexicon_checks",
+}
+
+
+def __getattr__(name: str):
+    module = _LEXICON_NAMES.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+    value = getattr(importlib.import_module(f"mathema.{module}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list:
+    return sorted(set(globals()) | set(_LEXICON_NAMES))

@@ -47,7 +47,7 @@ import math
 import os
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
 
@@ -1123,7 +1123,7 @@ lexicon_source = source_of
 
 
 def _core() -> LexiconSource:
-    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, EXAMPLE_FUNCTIONS)
+    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, _examples())
 
 
 def _entry_points() -> tuple:
@@ -1362,8 +1362,6 @@ def frob(A: "numpy.ndarray") -> float:
     return float((A * A).sum())
 
 
-@enforce_dimensions()
-@claims_decorator("for A in R^(30,15), f(A) >= 0")
 def frob_guarded(A: "numpy.ndarray") -> float:
     """The sum of squares of every entry, guarded to 30 by 15 by
     `enforce_dimensions()`, which declares the exclusion it makes true
@@ -1537,8 +1535,6 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     return (m1 * x1 + m2 * x2) / (m1 + m2)
 
 
-@enforce_domain()
-@claims_decorator("for alpha in [0, 1], f(x, alpha) <= max(x, 1)")
 def blend(x: float, alpha: float) -> float:
     """A blend of x with 1, weighted by alpha, which its guard keeps in
     [0, 1], what "enforce_domain_guard" demonstrates."""
@@ -1967,7 +1963,20 @@ def sample_std(returns: "pandas.Series") -> float:
     return returns.std(ddof=1)
 
 
-EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+#: the example functions that carry a runtime guard and a declared
+#: claim: the guard and the claims decorator are applied on the first
+#: read of `EXAMPLE_FUNCTIONS` (see `_examples`), so importing this
+#: module parses no claim
+_GUARDED: dict[str, tuple] = {
+    "frob_guarded": (lambda: enforce_dimensions(),
+                     "for A in R^(30,15), f(A) >= 0"),
+    "blend": (lambda: enforce_domain(),
+              "for alpha in [0, 1], f(x, alpha) <= max(x, 1)"),
+}
+
+#: the entries of `EXAMPLE_FUNCTIONS` as written, the guarded functions
+#: still plain
+_EXAMPLE_ENTRIES: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
         "language_missing_excluded", "language_closure", "language_length_bound",
@@ -2126,8 +2135,39 @@ try:
     from . import _lexicon_numpy as _numpy_examples
 except ImportError:
     _numpy_examples = None
-if _numpy_examples is not None:
-    EXAMPLE_FUNCTIONS.update(_numpy_examples.EXAMPLE_FUNCTIONS)
+
+
+def _examples() -> dict:
+    """Intent:
+        `EXAMPLE_FUNCTIONS`, built on first read: the entries as written,
+        each guarded function decorated with its guard and its declared
+        claim (and rebound under its name in this module), and the numpy
+        examples added when numpy is installed. Later reads return the
+        same dict.
+    """
+    built = globals().get("EXAMPLE_FUNCTIONS")
+    if built is not None:
+        return built
+    out = dict(_EXAMPLE_ENTRIES)
+    for name, (guard, statement) in _GUARDED.items():
+        fn, keys = out[name]
+        decorated = guard()(claims_decorator(statement)(fn))
+        globals()[name] = decorated
+        out[name] = (decorated, keys)
+    if _numpy_examples is not None:
+        out.update(_numpy_examples.EXAMPLE_FUNCTIONS)
+    globals()["EXAMPLE_FUNCTIONS"] = out
+    return out
+
+
+def __getattr__(name: str) -> Any:
+    if name == "EXAMPLE_FUNCTIONS":
+        return _examples()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list:
+    return sorted(set(globals()) | {"EXAMPLE_FUNCTIONS"})
 
 
 def get(key: str | int) -> str:
