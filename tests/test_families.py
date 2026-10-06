@@ -24,13 +24,13 @@ def setup_function(_fn):
     # every test starts from a known-empty registry, regardless of
     # what else has run in this process before it.
     families._REGISTRY.clear()
-    families._discovered_external.cache_clear()
+    families._reset_discovery()
 
 
 def teardown_function(_fn):
     families._REGISTRY.clear()
     families._REGISTRY.update(_BASELINE)
-    families._discovered_external.cache_clear()
+    families._reset_discovery()
 
 
 class _AlwaysDeclines:

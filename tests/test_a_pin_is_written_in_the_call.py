@@ -34,12 +34,14 @@ def test_a_keyword_in_a_call_round_trips(unicode):
 
 def test_the_let_pin_is_written_into_the_call():
     rec = mathema.check(scaled_head, claims=[claim(
-        "let alpha be 2, for x in R^3, f(x) == 2 * x[0]", name="pinned")])
+        "let alpha be 2, for x in [-1e6, 1e6]^3, f(x) == 2 * x[0]",
+        name="pinned")])
     (row,) = [p for p in rec.probes if p.name == "pinned"]
     assert "f(x, alpha=2)" in row.statement, row.statement
     assert "let alpha" not in row.statement, row.statement
     (same,) = [p for p in mathema.check(scaled_head, claims=[claim(
-        "for x in R^3, f(x, alpha=2) == 2 * x[0]", name="pinned")]).probes
+        "for x in [-1e6, 1e6]^3, f(x, alpha=2) == 2 * x[0]",
+        name="pinned")]).probes
         if p.name == "pinned"]
     assert same.statement == row.statement
     assert same.verdict == row.verdict, (row.verdict, same.verdict, same.note)
