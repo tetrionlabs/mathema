@@ -978,6 +978,14 @@ def claims_file_entries(path: str, root: str,
             f"a project compendium for this version)")
     stamp_library_rows(data, tag)
     mark_row_versions(data, library, aliases)
+    if lines:
+        # the file's functions are library functions here too, so each
+        # row reads as it does in range (defaults held, the corner rule
+        # on definition rows, no empty-input line); only no row of the
+        # file is registered as a fact
+        from .compendium import know_keys
+        know_keys(key for key, entry in data.items()
+                  if isinstance(entry, dict) and not _defines_only(entry))
     for key, entry in data.items():
         if not isinstance(entry, dict) or _defines_only(entry):
             continue

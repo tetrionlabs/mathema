@@ -1398,6 +1398,22 @@ def library_key_of(fn) -> "str | None":
     return None
 
 
+def know_keys(keys) -> None:
+    """Intent:
+        Add `keys` to the library claim keys `library_key_of` recognises
+        without registering any row of theirs as a fact: the keys of a
+        compendium file verified by path outside its `versions:` range,
+        whose functions are then read as library functions (defaults
+        held, definition rows under the magnitude-corner rule, no
+        empty-input line) exactly as an in-range file's are.
+    """
+    added = frozenset(keys) - (_INSTALLED.get("keys") or frozenset())
+    if not added:
+        return
+    _INSTALLED["keys"] = (_INSTALLED.get("keys") or frozenset()) | added
+    _INSTALLED["objects"] = None
+
+
 def _engine_unwrapped(fn):
     """`fn` without the wrappers mathema calls a function through: a
     runtime type realiser (`runtime_types._Realising`) and a premise
