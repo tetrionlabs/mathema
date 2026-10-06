@@ -74,8 +74,10 @@ def test_shift_proves_exactly_when_the_weights_sum_to_one(folds):
     assert (q.meta or {}).get("mathema.corroboration") == "reproduced"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_battery_equivariances_now_prove_on_linear_folds(folds):
     # the mathematics: each equivariance is proven over non-empty lists
+    # (proven, not holds: the proof has to finish, so the caps are lifted)
     from mathema.conjecture import check_conjectures
     import mathema
     for name in ("scale_equivariant", "translation_equivariant"):
