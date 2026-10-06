@@ -132,3 +132,17 @@ def test_a_derive_disproof_under_a_premise_is_corroborated(law):
     (p,) = mathema.claims.check(double, [claim(law)])
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "UNCORROBORATED" not in p.note, p.note
+
+
+def test_the_probe_draws_inside_a_premise_band_and_falsifies_there():
+    """`assuming x ~= 1` admits `[1 - ε, 1 + ε]`, a region random draws
+    over [0, 2] never land on: the sampler draws inside it, its ends
+    first, so the probe alone falsifies `f(x) ~= 2` for `2 * x` there
+    (2x is 2e-9 from 2 at x = 1 + 1e-9), whatever derive could do."""
+    from mathema.lexicon import double
+    (p,) = mathema.claims.check(double, [claim(
+        "for x in [0, 2], assuming x ~= 1, f(x) ~= 2", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    import re
+    witness = float(re.search(r"x = ([-0-9.e+]+)", p.counterexample).group(1))
+    assert abs(witness - 1) <= 1e-9, p.counterexample
