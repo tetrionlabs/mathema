@@ -5457,6 +5457,19 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # probe claim.
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            if ctx.companion is None and probed.verdict == "holds" \
+                    and _stands_in_for_derive(ctx):
+                # the probe stood in for derive on the mathematics: the
+                # computation line runs the corners a proof's companion
+                # would, and is kept where it falsifies (the stand-in's
+                # own draws already say where the computation held)
+                _spawn_float_companion(
+                    ctx, probed, fn, facts, _bound_funcs_of(cj),
+                    [(a.lhs, a.relation, a.rhs) for a in ctx.assumption or ()])
+                if ctx.companion is None \
+                        or ctx.companion.verdict != "falsified":
+                    ctx.companion = None
+                    probed.meta.pop("mathema.float_companion", None)
             if ctx.guard_refused:
                 refused = (f"{ctx.guard_refused} draw"
                            f"{'s' if ctx.guard_refused != 1 else ''} refused "
@@ -6191,6 +6204,37 @@ def _called_point(f_call, facts, env: dict, kinds: dict) -> dict:
 def _exactly_holds_at(cj, code_l, code_r, env, fn, bound_funcs) -> bool:
     """Whether `_exact_verdict` finds the claim true at the point."""
     return _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) is True
+
+
+def _stands_in_for_derive(ctx: "_ClaimContext") -> bool:
+    """Intent:
+        Whether this probe stands in for a derive attempt that could not
+        settle the mathematics (the wall clock, or sympy unable to close
+        the identity). Its draws then judge the mathematics, so a failure
+        of the float computation at a point where the claim holds exactly
+        belongs to the computation line. Where derive does not apply at
+        all (an unliftable or unsupported claim) the probe is the
+        computation line itself, and such a point falsifies it.
+    """
+    fallen = ctx.derive_undecided
+    return fallen is not None and \
+        (fallen.meta or {}).get("mathema.derive_status") == "undecided"
+
+
+def _representation_word(cj_domain, facts) -> str:
+    """The computation's representation in words ("float64")."""
+    from .gates import companion_representation
+    return companion_representation(cj_domain, facts)[2]
+
+
+def _bound_funcs_of(cj) -> dict:
+    """The claim's bound functions, a dotted reference resolved to the
+    callable it names, as the derive stage resolves them."""
+    try:
+        return {name: (v if callable(v) else _resolve_bound_ref(v))
+                for name, v in cj.funcs.items()}
+    except AttributeError:
+        return {}
 
 
 def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
@@ -8428,22 +8472,28 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     witness = (companion.meta or {}).get("mathema.proof_contradicted")
     if witness:
         # an executed point where the claim is false in exact arithmetic
-        # too: the proof failed, and the claim is falsified there
+        # too: the claim is falsified there, and a proof that said
+        # otherwise failed (a probe that stood in for derive merely held)
+        stood_in = proven.verdict == "holds"
         proven.verdict = "falsified"
         proven.route = "probe"
         # the witness with the reason the companion executed there
         proven.counterexample = companion.counterexample or witness
         proven.condition = None
-        proven.sketch = (f"the proof failed: derive reported the claim "
-                         f"proven ({proven.sketch}), but at {witness} it is "
-                         f"false in exact arithmetic and in the executed "
-                         f"computation")
+        proven.sketch = (
+            f"the probe's draws held, but at {witness} the claim is false "
+            f"in exact arithmetic and in the executed computation"
+            if stood_in else
+            f"the proof failed: derive reported the claim proven "
+            f"({proven.sketch}), but at {witness} it is false in exact "
+            f"arithmetic and in the executed computation")
         proven.stratum = {"mathematics": "unsound", "blame": "claim",
                           "witness": witness}
         proven.meta = {**proven.meta,
                        "mathema.corroboration": "reproduced",
                        "mathema.witness_executed": True,
-                       "mathema.proof_contradicted": witness}
+                       **({} if stood_in else
+                          {"mathema.proof_contradicted": witness})}
 
 
 def _same_univariate_region(fn, facts, links) -> "bool | None":
@@ -10052,9 +10102,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the LABEL and sign of the first callee to return an infinity for
     # finite arguments
     call_inf: list = [None, 0]
-    # the first point where the float computation gave no value while
-    # the claim holds there in exact arithmetic
+    # the first point where the float computation gave no value, or
+    # missed the result beyond its precision, while the claim holds
+    # there in exact arithmetic: the `[float]` line's witness, with the
+    # conditioning words and record of a miss; or, when the probe stands
+    # in for derive and no computation line was asked for, a finding
     computation_cx = None
+    computation_note = None
+    computation_meta: dict = {}
+    computation_finding = None
+    stands_in = _stands_in_for_derive(ctx)
     # a library definition row: a failure only at a magnitude corner is a
     # finding about the library's computation, and the row stands
     from .compendium import library_key_of
@@ -10812,24 +10869,32 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 corner_finding = _drawn_text(args)
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
-        if float_gave_out and ctx.companion_mode == "spawn" \
+        if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
                 and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
                                       bound_funcs):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
-            # of the computation, carried by the `[float]` line
+            # of the computation, carried by the `[float]` line; where the
+            # probe stands in for derive and no computation line was asked
+            # for, a finding
             checked += 1
-            if computation_cx is None:
-                computation_cx = (
-                    f"{_point_text(args)}: "
-                    + (f"{call_hole[0][0]} returned {call_hole[0][1]}"
-                       if call_hole[0] is not None
-                       else f"{call_nan[0]} returned nan" if call_nan[0] is not None
-                       else f"{call_inf[0]} returned "
-                            f"{'-inf' if call_inf[1] < 0 else 'inf'}"
-                       if call_inf[0] is not None else
-                       f"{_linalg_eval.shown(lv)!r} vs "
-                       f"{_linalg_eval.shown(rv)!r}"))
+            gave = (f"{call_hole[0][0]} returned {call_hole[0][1]}"
+                    if call_hole[0] is not None
+                    else f"{call_nan[0]} returned nan" if call_nan[0] is not None
+                    else f"{call_inf[0]} returned "
+                         f"{'-inf' if call_inf[1] < 0 else 'inf'}"
+                    if call_inf[0] is not None else
+                    f"{_linalg_eval.shown(lv)!r} vs "
+                    f"{_linalg_eval.shown(rv)!r}")
+            if ctx.companion_mode == "spawn":
+                if computation_cx is None:
+                    computation_cx = f"{_point_text(args)}: {gave}"
+            elif computation_finding is None:
+                computation_finding = (
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), where the "
+                    f"claim holds in exact arithmetic: a finding about the "
+                    f"computation")
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if not missing_in and call_hole[0] is not None:
@@ -11041,6 +11106,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                          bound_funcs)
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        aux_part = ("; " + ", ".join(
+            f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
+            else f"{a} = {env[a]!r}" for a in aux) if aux else "")
         if not ok:
             if not exactly_false and mathematics is not False \
                     and family is None:
@@ -11077,10 +11145,34 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     call_raised[0] = call_nan[0] = call_inf[0] = None
                     call_hole[0] = None
                     continue
+                if mathematics is True and found is not None and stands_in:
+                    # the probe stands in for derive, and the claim holds
+                    # here in exact arithmetic: the miss is the
+                    # computation's, carried by the `[float]` line with its
+                    # condition number, or noted when no computation line
+                    # was asked for (where the probe is the computation
+                    # line itself, the miss falsifies it below)
+                    words = (found.get("words")
+                             or "the float computation misses the result "
+                                "beyond its precision")
+                    if ctx.companion_mode == "spawn":
+                        if computation_cx is None:
+                            shown_l, shown_r = ((_linalg_eval.shown(lv),
+                                                 _linalg_eval.shown(rv))
+                                                if as_arrays else (lv, rv))
+                            computation_cx = (f"{_point_text(args)}{aux_part}: "
+                                              f"{_sides(shown_l, shown_r)}")
+                            computation_note = words
+                            computation_meta = {"mathema.conditioning": found}
+                    elif computation_finding is None:
+                        computation_finding = (
+                            f"{words} at {_point_text(args)}{aux_part}, where "
+                            f"the claim holds in exact arithmetic: a finding "
+                            f"about the computation")
+                    call_raised[0] = call_nan[0] = call_inf[0] = None
+                    call_hole[0] = None
+                    continue
                 miss_conditioning = found
-            aux_part = ("; " + ", ".join(
-                f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
-                else f"{a} = {env[a]!r}" for a in aux) if aux else "")
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
@@ -11107,14 +11199,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         note = f"{note}; {miss_conditioning['words']}".lstrip("; ")
         missing_meta = {**(missing_meta or {}),
                         "mathema.conditioning": miss_conditioning}  # type: ignore[dict-item]
+    if computation_finding is not None:
+        note = f"{note}; {computation_finding}".lstrip("; ")
+        missing_meta = {**(missing_meta or {}),
+                        "mathema.computation_finding": computation_finding}  # type: ignore[dict-item]
     if computation_cx is not None:
         from .gates import companion_name, companion_representation
         descriptor, _rep, rep_word = companion_representation(cj_domain, facts)
         ctx.companion = Probe(
             companion_name(cj.name, descriptor), statement, "falsified",
             route="probe", counterexample=computation_cx,
-            note=f"the {rep_word} computation of {cj.name} gave no value "
-                 f"where the claim holds in exact arithmetic")
+            note=(f"the {rep_word} computation of {cj.name} misses the result "
+                  f"beyond its precision where the claim holds in exact "
+                  f"arithmetic; {computation_note}" if computation_note else
+                  f"the {rep_word} computation of {cj.name} gave no value "
+                  f"where the claim holds in exact arithmetic"),
+            meta=computation_meta)
     if checked > tallied:
         tally.add(dict(zip(kinds, args)))
     f_call.record(executed_record, dict(zip(kinds, args)))

@@ -10,6 +10,8 @@ import math
 
 import sympy
 
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 from mathema.symbolic._extensive import (
     _refine_decide, _sturm_decide, _substituted_attempts,
@@ -142,11 +144,13 @@ def test_undecided_extensive_run_names_what_it_tried():
     assert "extensive attempts did not settle it" in p.note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_atan_compactification_falsifies_over_the_whole_line():
     # f(x) >= -2 is false far from the origin (x*sin(x) reaches every
     # depth); the t = atan(x) substitution compactifies the line and
     # refinement finds a violation cell, with the witness mapped back
-    # through tan to a genuine original-variable counterexample.
+    # through tan to a genuine original-variable counterexample. The
+    # sketch names the rung, so the ladder has to finish: caps lifted.
     p = _one(xsin, "f(x) >= -2", extensive=True)
     assert p.verdict == "falsified"
     assert "atan" in p.sketch
