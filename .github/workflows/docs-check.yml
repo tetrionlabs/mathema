@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      LANGUAGE_DOCS_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+      LANGUAGE_DOCS_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN || github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,14 +38,13 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[docs]'
       # the mathema-language reference, imported under /language/reference/
-      # by docs_hooks/language_reference.py. The repository is private
-      # until release, so the checkout needs a token that can read it; a
-      # build without one (a fork's pull request) checks the site alone.
-      # the ref is the variable when set, else the package's latest
-      # release tag, else main before its first release
+      # by docs_hooks/language_reference.py, is always part of the check.
+      # The repository is public, so the workflow's own token reads it;
+      # the MATHEMA_LANGUAGE_DOCS_TOKEN secret is optional and used when
+      # set. The ref is the variable when set, else the package's latest
+      # release tag; with neither the check fails.
       - name: resolve the language reference's release
         id: langref
-        if: ${{ env.LANGUAGE_DOCS_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ env.LANGUAGE_DOCS_TOKEN }}
           PINNED: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF }}
@@ -55,9 +54,12 @@ jobs:
             ref=$(gh api repos/tetrionlabs/mathema-language/tags --paginate --jq '.[].name' \
                   | grep -E '^v[0-9]' | sort -V | tail -n 1)
           fi
-          echo "ref=${ref:-main}" >> "$GITHUB_OUTPUT"
+          if [ -z "$ref" ]; then
+            echo "no release tag of mathema-language to check the reference from"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - name: fetch the language reference
-        if: ${{ env.LANGUAGE_DOCS_TOKEN != '' }}
         uses: actions/checkout@v4
         with:
           repository: tetrionlabs/mathema-language
@@ -65,6 +67,8 @@ jobs:
           path: _external/mathema-language
           token: ${{ env.LANGUAGE_DOCS_TOKEN }}
           sparse-checkout: docs
+      - name: the language reference is present
+        run: test -f _external/mathema-language/docs/reference.yml
       # --strict promotes warnings to errors, so an orphaned page or a
       # dangling anchor fails here rather than at deploy time
       - run: mkdocs build --strict

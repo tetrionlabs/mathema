@@ -48,13 +48,12 @@ jobs:
       # at the package's latest release tag (the highest v* tag), or at
       # the MATHEMA_LANGUAGE_DOCS_REF repository variable when that is
       # set; with no release tag and no variable the deploy stops. The
-      # MATHEMA_LANGUAGE_DOCS_TOKEN secret (a fine-grained token with
-      # read access to tetrionlabs/mathema-language contents) is needed
-      # while that repository is private.
+      # repository is public, so the workflow's own token reads it; the
+      # MATHEMA_LANGUAGE_DOCS_TOKEN secret is optional and used when set.
       - name: Resolve the language reference's release
         id: langref
         env:
-          GH_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN || github.token }}
           PINNED: ${{ vars.MATHEMA_LANGUAGE_DOCS_REF }}
         run: |
           ref="$PINNED"
@@ -74,7 +73,7 @@ jobs:
           repository: tetrionlabs/mathema-language
           ref: ${{ steps.langref.outputs.ref }}
           path: _external/mathema-language
-          token: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN }}
+          token: ${{ secrets.MATHEMA_LANGUAGE_DOCS_TOKEN || github.token }}
           sparse-checkout: docs
 
       - name: The language reference is present
