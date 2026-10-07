@@ -130,7 +130,5 @@
 [-] docs/verdicts.md:72
 [x] README.md:pole                               run output
 [x] README.md:parity                             file run output run output
-[x] README.md:lang                               file session  (requires)
-[x] README.md:core-only                          session  (after)
 
-# 105 examples checked, 4 output fences not yet marked, 10 commands checked by hand
+# 103 examples checked, 4 output fences not yet marked, 10 commands checked by hand
