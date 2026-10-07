@@ -135,21 +135,63 @@ def test_g10_a_function_handling_every_missing_value_is_missing_safe():
     assert_row(label_any_missing, "is_missing_safe(f)", PROVEN)
 
 
+def _block(rec, name: str) -> tuple:
+    """`(headline, lines under it)` of claim `name` in the printed record."""
+    lines = str(rec).splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith(f"  {name}  ") or line.startswith(f"  holds     {name}:"))
+    end = next((i for i in range(start + 1, len(lines))
+                if not lines[i].startswith("   ")), len(lines))
+    return lines[start], "\n".join(lines[start + 1:end])
+
+
 @needs_language
 @needs_pydantic
 def test_o1_a_raise_at_an_absent_optional_field_is_its_row_not_the_claims():
-    """The field's absence is a missing input (FM26 on a path): the value
-    claim holds on the orders with a note, and the field's own row says
-    no claim accounts for the raise."""
+    """The field's absence is a missing input (FM26 on a path): the raise
+    at `o.note = null` falsifies the field's own absence row, never the
+    claim's mathematics, and the claim's block in the record shows that
+    policy line, whichever route settled the mathematics."""
     rec = mathema.check(note_len, claims=[mathema.claim(f"for o in {ORDER}, f(o) >= 0",
                                                         name="c")])
     rows = {p.name: p for p in rec.probes}
-    assert rows["c"].verdict in PROVEN_OR_HOLDS, (rows["c"].verdict, rows["c"].note)
-    assert rows["c[float]"].verdict == "holds", rows["c[float]"].note
-    assert "at o.note = null (absent) f raised TypeError" in rows["c[float]"].note
     row = rows["absent[o.note]"]
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert row.counterexample == "o.note = null (absent): f raised TypeError"
+    assert rows["c"].verdict in PROVEN_OR_HOLDS, (rows["c"].verdict, rows["c"].note)
+    head, block = _block(rec, "c")
+    assert "falsified at o.note = null (absent)" in head, str(rec)
+    assert "falsified  policy       f(o) at o.note = null (absent)" in block, str(rec)
+    assert "exclude null at o.note" in block, str(rec)
+    assert "\n  falsified absent[o.note]" not in str(rec), str(rec)
+
+
+@needs_language
+@needs_pydantic
+def test_a_path_bound_admitting_absence_carries_the_absence_row():
+    """A claim that binds the path itself and admits its absence
+    (`o.note in L[unicode] | {absent}`) is the claim the row belongs to."""
+    rec = mathema.check(note_len, claims=[mathema.claim(
+        f"for o in {ORDER}, o.note in L[unicode] | {{absent}}, f(o) >= 0", name="c")])
+    head, block = _block(rec, "c")
+    assert "falsified at o.note = null (absent)" in head, str(rec)
+    assert "falsified  policy       f(o) at o.note = null (absent)" in block, str(rec)
+
+
+@needs_language
+@needs_pydantic
+def test_a_path_bound_excluding_absence_does_not_carry_the_absence_row():
+    """A path bound admits no absence unless it says so: the claim that
+    binds `o.note in L[unicode]` draws no absent note, so the absence row
+    found under the other claim never attaches to it and its headline
+    stays."""
+    rec = mathema.check(note_len, claims=[
+        mathema.claim(f"for o in {ORDER}, o.note in L[unicode], f(o) >= 0", name="bound"),
+        mathema.claim(f"for o in {ORDER}, f(o) >= 0", name="open")])
+    head, block = _block(rec, "bound")
+    assert "falsified" not in head and "policy" not in block, str(rec)
+    head, block = _block(rec, "open")
+    assert "falsified at o.note = null (absent)" in head, str(rec)
 
 
 @needs_language

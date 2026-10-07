@@ -68,9 +68,26 @@ def _verdict(p) -> str:
 
 
 def _admits(main, param: str, kind: str) -> bool:
-    admitted = (((main.meta or {}).get("mathema.missing") or {})
-                .get("admitted") or {}).get(param) or {}
-    return bool(admitted.get(kind))
+    """Intent:
+        Whether the claim `main` admits `kind` (`absent` or `missing`)
+        at `param`. A parameter reads the admission its record states.
+        A path (`o.note`, `o.lines[0]`) reads the claim's own binding of
+        that path as a path bound (`PATH_DEFAULTS`, which admits neither
+        kind unless the bound says so); a path the claim leaves unbound
+        under a root it binds is drawn as the root's language draws it,
+        so it admits what the draws reached.
+    """
+    if "." not in param and "[" not in param:
+        admitted = (((main.meta or {}).get("mathema.missing") or {})
+                    .get("admitted") or {}).get(param) or {}
+        return bool(admitted.get(kind))
+    domain = getattr(main, "domain", None) or {}
+    if param in domain:
+        from .domain import PATH_DEFAULTS, admitted as admits, complete, domain_bound_from_json
+        absent, holes = admits(complete(domain_bound_from_json(domain[param]), PATH_DEFAULTS))
+        return bool(absent if kind == "absent" else holes)
+    root = re.match(r"[A-Za-z_]\w*", param)
+    return root is not None and root.group(0) in domain
 
 
 def _hole_word(main, param: str) -> str:
@@ -138,11 +155,11 @@ def _intended(stated: str, word: str) -> str:
     return "that"
 
 
-def _fixes(p, key: str, word: str) -> str:
+def _fixes(p, key: str, word: str, path: str = "") -> str:
     """The possible fixes under a falsified absence or missing line: the
     command that records what f does as a stated policy, when the row
-    names one policy to state, then excluding the value, then handling
-    it at entry."""
+    names one policy to state, then excluding the value (at `path`, for
+    a row about a path into a parameter), then handling it at entry."""
     pol = (p.meta or {}).get("mathema.policy") or {}
     # a row with no single policy needs one claim per case, not one command
     mixed = (pol.get("sentence") or "").startswith("f has no single policy")
@@ -157,7 +174,8 @@ def _fixes(p, key: str, word: str) -> str:
         # the condition first, the command last, after a colon
         fixes.append(f"if {_intended(found, word)} is intended, run: mathema accept "
                      f"{key} {p.name} --as discovery --corrected \"{found}\"")
-    fixes += [f"exclude {word}", f"handle {word} at entry"]
+    fixes += [f"exclude {word}" + (f" at {path}" if path else ""),
+              f"handle {word} at entry"]
     # each fix on its own line, the command last on its line
     from ._missing_words import options
     return "possible fixes:\n" + "\n".join(f"  {line}" for line in
@@ -317,14 +335,25 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             param, kind = pol.get("parameter") or "", pol.get("kind") or ""
             word = "None" if kind == "absent" else (
                 pol.get("member") or _hole_word(main, param))
-            what = _call(params, kinds, param, word)
+            path = param if ("." in param or "[" in param) else ""
+            if path:
+                # a path is reached through the parameter it starts at,
+                # and its witness names the member reached (`o.note =
+                # null (absent)`, `order.note unset`)
+                root = re.match(r"[A-Za-z_]\w*", path)
+                reached = (r.counterexample or "").split(": ", 1)[0] or f"{path} = {word}"
+                word = "unset" if reached.endswith(" unset") else (
+                    "null" if kind == "absent" else word)
+                what = f"f({root.group(0) if root else path}) at {reached}"
+            else:
+                what = _call(params, kinds, param, word)
             if pol.get("premise"):
                 # a row about one case of the parameter names its case
                 what += f" assuming {pol['premise']}"
             lines.append(_row(_verdict(r), "policy", what, _policy_detail(r)))
             if _verdict(r) == "falsified":
                 falsified.append(r.counterexample)
-                lines += [" " * 28 + part for part in _fixes(r, key, word).splitlines()]
+                lines += [" " * 28 + part for part in _fixes(r, key, word, path).splitlines()]
             used.add(id(r))
         if falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
