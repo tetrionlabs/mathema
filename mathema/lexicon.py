@@ -2184,7 +2184,10 @@ def get(key: str | int) -> str:
 def render_both(key: str | int, *, include_internal: bool = False):
     """`(input_text, output_unicode, output_ascii)` for one `LEXICON`
     entry, `input_text` as authored, the other two from `claim()` +
-    `spec.render_claim_text()`. Use this instead of `get()` to see the
+    `spec.render_claim_text()`. A row with an example function renders
+    as that function completes it (`for n in N` against `n: int` stays
+    `N`), the form its record states; a row without one renders the
+    unannotated default. Use this instead of `get()` to see the
     rendered shape next to the input, e.g. while reviewing whether a
     rendering choice reads right.
 
@@ -2196,10 +2199,13 @@ def render_both(key: str | int, *, include_internal: bool = False):
     a free variable's assumed type made explicit, ...) rather than only
     its two surface spellings."""
     from .conjecture import claim
+    from .lexicon_checks import _as_checked, _example_for
     from .spec import render_claim_text
 
     text = get(key)
-    cj = claim(text)
+    name = key if isinstance(key, str) else list(_rows())[key]
+    src = next((s for s in sources() if name in s.rows), None)
+    cj = _as_checked(claim(text), _example_for(src, name) if src else None)
     result = (text, render_claim_text(cj, unicode=True),
              render_claim_text(cj, unicode=False))
     if not include_internal:
