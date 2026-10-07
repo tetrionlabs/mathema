@@ -55,6 +55,7 @@ def test_the_numeric_families_run_on_the_number_only():
     assert "is_numerically_stable" in suggested
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_the_type_fact_is_strings_only_and_renders_as_str():
     bound = parameter_domains(label2)["s"]
     assert render_domain(bound, ascii_mode=True) == ": str"
@@ -77,6 +78,7 @@ def test_the_rendering_reads_back_as_the_same_domain():
     assert not domain_contains(None, parse_binding("s in : str")[1])
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_an_optional_str_admits_absence_and_check_judges_it():
     bound = parameter_domains(label)["s"]
     assert render_domain(bound, ascii_mode=True) == ": str|absent"

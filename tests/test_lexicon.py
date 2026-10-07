@@ -512,9 +512,10 @@ def test_search_tolerates_a_typo():
 
 
 def test_search_returns_laws_that_are_really_in_the_lexicon():
-    from mathema.lexicon import LEXICON, search
+    from mathema.lexicon import entries, search
+    rows = entries()
     for key, law in search("domain", limit=20):
-        assert LEXICON[key] == law, key
+        assert rows[key] == law, key
 
 
 def test_search_is_empty_for_a_query_that_matches_nothing():

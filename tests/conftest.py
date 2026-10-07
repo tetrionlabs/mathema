@@ -50,6 +50,41 @@ def _no_installed_runtime_type_adapters(monkeypatch):
     runtime_types._discovered.cache_clear()
 
 
+def _forget_language_discovery() -> None:
+    """Clear every cache that holds what the installed languages,
+    adaptors, refinements, families and lexicons resolved to."""
+    from mathema import families, languages, lexicon
+    families._reset_discovery()
+    for cached in (languages._discovered_refinements, languages._discovered_languages,
+                   languages._discovered_adaptors, languages._load_language,
+                   languages._loaded_adaptors, lexicon._extensions):
+        cached.cache_clear()
+    languages._changed()
+
+
+@pytest.fixture
+def without_language_package(monkeypatch):
+    """The process as it is when mathema-language is not installed:
+    every entry point the package registers (its languages, adaptors,
+    refinements, claim families and lexicon) is hidden from discovery
+    for the test, and discovery starts afresh before and after it."""
+    import importlib.metadata
+    from mathema import families, languages
+
+    real = importlib.metadata.entry_points
+
+    def entry_points(**kwargs):
+        return [ep for ep in real(**kwargs)
+                if not ep.value.startswith("mathema_language")]
+
+    for module in (importlib.metadata, families, languages):
+        monkeypatch.setattr(module, "entry_points", entry_points)
+    _forget_language_discovery()
+    yield
+    monkeypatch.undo()
+    _forget_language_discovery()
+
+
 @pytest.fixture(autouse=True)
 def _len_refinement():
     """mathema registers no refinement key; the suite registers `len`
