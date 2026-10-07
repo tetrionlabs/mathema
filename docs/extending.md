@@ -161,7 +161,10 @@ that reaches the same verdict, survives the declared store and the
 verified record, states its missing-value policy, has sections that
 partition it and tags that find it, has an example function for every
 row, and lands on every pinned verdict and witness), and
-`write_lexicon_golden` writes the snapshot for review.
+`write_lexicon_golden` writes the snapshot for review. A row with an
+example function is rendered and round-tripped as that function
+completes it, so `for n in N` against `n: int` stays `N`, the form its
+record states; a row without one renders the unannotated default.
 
 ## Injected facts
 
