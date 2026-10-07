@@ -11,6 +11,7 @@ still under review; a deliberate rendering change regenerates it (see
 as part of that change. The verdict table is the same kind of net for
 adjudication: a row whose verdict moves is a change to review."""
 import importlib.util
+import os
 
 import pytest
 
@@ -271,6 +272,46 @@ def test_show_does_not_raise(capsys):
     assert "input:" in capsys.readouterr().out
 
 
+#: the extras an example function's annotations can name, by the
+#: spellings the lexicon uses
+_EXTRA_SPELLINGS = {"numpy": ("numpy.", "np."), "pandas": ("pandas.", "pd."),
+                    "polars": ("polars.", "pl.")}
+
+
+def _numpy_example_rows() -> set:
+    """The rows `mathema._lexicon_numpy` demonstrates, read from its
+    source, so they are known without numpy installed."""
+    import ast
+    import mathema
+    path = os.path.join(os.path.dirname(mathema.__file__), "_lexicon_numpy.py")
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        target = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+        if isinstance(target, ast.Name) and target.id == "EXAMPLE_FUNCTIONS":
+            return {k.value for entry in node.value.values
+                    for k in entry.elts[1].elts}
+    return set()
+
+
+def _extra_the_row_needs(key: str) -> "str | None":
+    """The uninstalled extra a row's example function takes a type
+    from (an annotation naming it, or the numpy examples module), else
+    None. Such a row renders as its function completes it only with
+    the extra installed."""
+    installed = {m: importlib.util.find_spec(m) is not None for m in _EXTRA_SPELLINGS}
+    if not installed["numpy"] and key in _numpy_example_rows():
+        return "numpy"
+    for fn, keys in EXAMPLE_FUNCTIONS.values():
+        if key not in keys:
+            continue
+        words = " ".join(str(a) for a in getattr(fn, "__annotations__", {}).values())
+        for extra, spellings in _EXTRA_SPELLINGS.items():
+            if not installed[extra] and any(sp in words for sp in spellings):
+                return extra
+    return None
+
+
 @pytest.mark.parametrize("key", list(LEXICON))
 def test_rendered_output_matches_golden_snapshot(key):
     """Characterization net for refactoring, not a sign-off of the
@@ -289,6 +330,10 @@ def test_rendered_output_matches_golden_snapshot(key):
     import json
     import os
 
+    needs = _extra_the_row_needs(key)
+    if needs is not None:
+        pytest.skip(f"{key}'s example function takes a {needs} type, and "
+                    f"{needs} is not installed")
     path = os.path.join(os.path.dirname(__file__), "data", "lexicon_golden.json")
     with open(path) as fh:
         golden = json.load(fh)
