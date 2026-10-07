@@ -140,7 +140,7 @@ _REQUIRED_CALLABLES = ("contains", "explain", "sample", "members", "hazards",
                        "outside", "shrink", "fields", "render", "to_json")
 
 
-def language_problems(obj) -> list[str]:
+def language_problems(obj: object) -> list[str]:
     """Intent:
         Every way `obj` fails the `Language` protocol, as readable
         strings; an empty list means it conforms. The registry checks
@@ -392,7 +392,8 @@ def generation() -> int:
     return _GENERATION[0]
 
 
-def register_refinement(key: str, refine) -> None:
+def register_refinement(key: str,
+                        refine: Callable[[Language, object], Language]) -> None:
     """Intent:
         Serve the refinement `key` inside `L[...]` in this process:
         `refine(language, interval)` returns the language refined to
@@ -598,7 +599,7 @@ class RefinedLanguage:
         return out
 
 
-def register_language(name: str, language) -> None:
+def register_language(name: str, language: Language) -> None:
     """Intent:
         Make `language` resolvable as `L[<name>]` in this process,
         the in-process half of the seam (the entry-point groups are
@@ -795,13 +796,13 @@ def resolves(name: str) -> bool:
     return True
 
 
-def resolve_language(ref):
+def resolve_language(ref: LanguageRef | str) -> Language:
     """The `Language` behind a `LanguageRef` or a bare name; see
     `resolve` for the precedence and the refusal."""
     return resolve(ref)[0]
 
 
-def describe_language(ref) -> dict:
+def describe_language(ref: LanguageRef | str) -> dict:
     """The record's statement of a resolved language: its name, where
     it came from, its level and kind, and its persisted form."""
     language, source = resolve(ref)

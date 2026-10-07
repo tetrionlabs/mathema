@@ -19,6 +19,11 @@ new code should import from here.
 """
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sympy
+
 import fractions
 import math
 import re
@@ -2153,7 +2158,7 @@ def _endpoint_to_json(v):
     return v
 
 
-def domain_bound_from_json(v):
+def domain_bound_from_json(v: Any) -> Any:
     """The inverse of `domain_bound_to_json`, tolerates the new dict
     shapes (including `Domain`'s own), the legacy plain `[lo, hi]` list
     (every domain bound ever written by mathema before this function
@@ -3211,7 +3216,7 @@ def unbounded_directions(names, cj_domain: dict, *,
     return out
 
 
-def bound_to_sympy_set(bound):
+def bound_to_sympy_set(bound: Any) -> sympy.Set:
     """The declared bound as a sympy `Set` over the reals, intervals
     with exact open/closed endpoints, discrete sets as `FiniteSet`,
     `"Z"`/`"N"` (and a `Domain`'s integer `base_type`) via intersection

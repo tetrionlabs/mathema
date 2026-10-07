@@ -110,7 +110,7 @@ POINT_RUNTIME_PROTOCOL: dict[str, tuple[str, ...]] = {
 }
 
 
-def runtime_problems(kit) -> list[str]:
+def runtime_problems(kit: object) -> list[str]:
     """Intent:
         Every way `kit` fails the point-runtime contract, as
         human-readable strings; empty means it conforms. Accepts the

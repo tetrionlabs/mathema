@@ -16,7 +16,10 @@ in `claim_families.py`.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import cmath
+import contextlib
 import collections
 import dataclasses
 import math
@@ -1044,7 +1047,7 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
-def _pinned_float_env():
+def _pinned_float_env() -> contextlib.ExitStack:
     """The floating-point error regime every probe evaluation runs
     under: numpy's own defaults, pinned explicitly so a verdict never
     depends on whatever ambient `numpy.seterr` state the calling
@@ -2034,7 +2037,7 @@ def spell_text(s: str, *, force: bool = False) -> str:
     return shown
 
 
-def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
+def sample_bound(bound: Any, rng: random.Random, kind: str = "scalar") -> Any:
     """Intent:
         One value drawn from a declared bound, the draw the probe route
         makes for a parameter of `kind` with that bound: a language

@@ -24,6 +24,11 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .analysis import Facts
+
 import math
 import numbers
 import random
@@ -68,7 +73,8 @@ def _claim_target_param(name: str) -> str | None:
     return None
 
 
-def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random):
+def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
+                        rng: random.Random) -> list:
     """One synthesized positional-argument list for every parameter of
     fn except target, in facts.params order; target itself is left
     as None, filled in by the caller once per sample point."""
@@ -83,7 +89,8 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
     return args
 
 
-def _call_with_target(fn, facts, target: str, args: list, value):
+def _call_with_target(fn: Callable[..., Any], facts: Facts, target: str, args: list,
+                      value: Any) -> Any:
     values = dict(zip(facts.params, args))
     values[target] = value
     call_args, call_kwargs = call_arguments(fn, facts.params, values)
@@ -118,8 +125,9 @@ def _admitted(values: dict) -> bool:
     return guard is None or guard.admits_point(values)
 
 
-def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
-                  trials: int, trial):
+def _probe_trials(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
+                  rng: random.Random, trials: int,
+                  trial: Callable[[list], Any]) -> tuple[str, int, Any]:
     """Intent:
         The one trial loop every probe:algorithmic technique runs:
         synthesize the non-target arguments (a parameter an equality

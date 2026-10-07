@@ -187,7 +187,7 @@ SURFACE: dict[str, tuple[str, ...]] = {
 CAPABILITY_PROTOCOLS: dict[str, dict[str, tuple[str, ...]]] = {}
 
 
-def capability_problems(provider, capability: str) -> list[str]:
+def capability_problems(provider: object, capability: str) -> list[str]:
     """Intent:
         Every way `provider` fails to satisfy `capability`'s protocol,
         as human-readable strings. An empty list means it conforms.
