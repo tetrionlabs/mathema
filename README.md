@@ -128,9 +128,14 @@ mathema supports Python 3.10 to 3.14, runs offline, and is best installed
 into a virtual environment:
 
 ```bash
-pip install "mathema[all]"    # recommended, with numpy, z3, MCP, coverage and mathema-language
+pip install "mathema[all]"    # recommended, with numpy, z3, MCP and coverage
 pip install mathema           # the core alone
 ```
+
+Claims over strings and structured values take their domains from the
+[mathema-language](https://mathema.tetrionlabs.com/language/) package,
+which `[all]` includes; without it such a claim is `unknown` and names the
+package it needs.
 
 ## Record, verify, gate
 
@@ -144,41 +149,12 @@ exits 2, so a pipeline can tell a finding from a broken job.
 [gate a pipeline](https://mathema.tetrionlabs.com/gate-a-pipeline/) shows
 each case from a real run.
 
-## Text, and coding agents
+## Coding agents
 
-A string is drawn from a named language (`L[unicode]`, `L[ascii]`,
-`L[json]`) that the `mathema-language` package supplies. With it installed:
-
-<!-- example: lang file=names.py requires=mathema_language -->
-```python
-def display_name(username: str) -> str:
-    """The name shown beside a comment, trimmed and capped at 32 characters."""
-    return username.strip()[:32]
-```
-
-<!-- example: lang session requires=mathema_language -->
-```console
-$ mathema check names.py --claim "for username in L[unicode], len(f(username)) <= 32"
-ok   names.display_name: source, no side effects; claims 1/1 checked (0 proven, 1 holds, 0 falsified)
-```
-
-Without it the claim is `unknown` and names the package it needs, and a
-plain claim over a `str` parameter is `unknown` as well:
-
-<!-- example: core-only session after=lang wrap=85 -->
-```console
-$ mathema check names.py --claim "for username in L[unicode], len(f(username)) <= 32"
-FAIL names.display_name: source, no side effects; claims 0/1 checked (0 proven, 0
-    holds, 0 falsified, 1 unknown)  <- dim_f_username_0_le_32 unknown: needs
-    mathema-language: unknown language L[unicode]: known languages are none in this
-    process
-```
-
-[Language domains](https://mathema.tetrionlabs.com/language/) has the
-rest. The mathema-agents skills teach a coding agent to propose claims and
-read verdicts, and arrive through an explicit, opt-in
-`mathema init --agents`, the one command that fetches anything. Accepting a
-verdict and unlocking a locked function stay with a person
+The mathema-agents skills teach a coding agent to propose claims and read
+verdicts, and arrive through an explicit, opt-in `mathema init --agents`,
+the one command that fetches anything. Accepting a verdict and unlocking a
+locked function stay with a person
 ([working with coding agents](https://mathema.tetrionlabs.com/agents/)).
 
 ## Where next
