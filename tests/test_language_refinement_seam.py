@@ -104,6 +104,7 @@ def test_a_registered_key_refines_the_language(words):
     assert problem.predicate == "vowels <= 2"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_an_unknown_key_is_refused_at_resolution_naming_the_known_keys(words):
     with pytest.raises(UnknownRefinement, match=r"'depth'.*vowels"):
         resolve_language(_ref("L[words, depth <= 3]"))

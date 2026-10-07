@@ -34,9 +34,19 @@ def _write_no_functions(path):
     path.write_text("x = 1\ny = 2\n")
 
 
-def _run(*argv, cwd):
-    script = ("import sys; from mathema.cli import main; "
-             f"sys.exit(main({list(argv)!r}))")
+#: run first in a child process to make it the process it is without
+#: mathema-language: the package's entry points are hidden before mathema
+#: imports and discovers them
+_HIDE_LANGUAGE_PACKAGE = (
+    "import importlib.metadata as md; _ep = md.entry_points; "
+    "md.entry_points = lambda **k: [e for e in _ep(**k) "
+    "if not e.value.startswith('mathema_language')]; ")
+
+
+def _run(*argv, cwd, without_language_package=False):
+    script = ((_HIDE_LANGUAGE_PACKAGE if without_language_package else "")
+              + "import sys; from mathema.cli import main; "
+              f"sys.exit(main({list(argv)!r}))")
     return subprocess.run([sys.executable, "-c", script], cwd=str(cwd),
                           capture_output=True, text=True)
 
@@ -155,11 +165,13 @@ def test_check_strict_fails_on_unverifiable_claims(tmp_path):
         '    """\n'
         "    return name.upper()\n"
     )
-    lenient = _run("check", "lab.py:label", cwd=tmp_path)
+    lenient = _run("check", "lab.py:label", cwd=tmp_path,
+                   without_language_package=True)
     assert lenient.returncode == 0, lenient.stdout
     assert "0/1 checked" in lenient.stdout
 
-    strict = _run("check", "lab.py:label", "--strict", cwd=tmp_path)
+    strict = _run("check", "lab.py:label", "--strict", cwd=tmp_path,
+                  without_language_package=True)
     assert strict.returncode == 1, strict.stdout
     assert "same_len" in strict.stdout
 

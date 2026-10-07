@@ -62,10 +62,12 @@ class _AlwaysHandles:
         return "sentinel-result"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_families_empty_by_default():
     assert families.families() == {}
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_register_makes_a_family_discoverable():
     fam = _AlwaysHandles()
     families.register("always", fam)

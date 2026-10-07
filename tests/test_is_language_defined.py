@@ -7,6 +7,8 @@ probe:minimal_example route. A deliberate rejection (a guarded raise, a
 ValueError) or a clean return holds."""
 import textwrap
 
+import pytest
+
 
 def _load(tmp_path, body, name="m"):
     import importlib.util
@@ -100,6 +102,7 @@ def test_shrinking_never_crosses_the_language_boundary(tmp_path):
         unregister_language("letters")
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_without_a_language_bound_nothing_changes(tmp_path):
     mod = _load(tmp_path, '''
         def first_char(s: str) -> str:

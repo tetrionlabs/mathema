@@ -480,7 +480,7 @@ print(mathema.check(greeting, claims=[mathema.claim(
 <!-- example: strings output match=subset -->
 ```text
 mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
-  long_enough  for nickname in L[unicode]|None, len(greeting(nickname)) >= 3   falsified at nickname = None
+  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at nickname = None
     holds      computation  for nickname in L[unicode], len(greeting(nickname)) >= 3   223 draws
     falsified  policy       f(None)   no absent policy stated; raises AttributeError
                             possible fixes:
@@ -524,19 +524,19 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 <!-- example: slip output -->
 ```text
 mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
-  holds     has_text: for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1 (87 draws)
-           derive could not decide it (function body is not derivable, likely reason: unsupported-construct: unsupported-call (line 3), an expression form the derive vocabulary doesn't cover yet), so the probe decided it by running the code; at order.note, a key left out, f raised KeyError
-  falsified absent[order.note]: f raised KeyError at order.note, a key left out, and no claim says it may
-           (i) if the raise is intended, state: absent(f, order.note) raises(KeyError)
-           (ii) if not, handle it in f
-           (iii) to exclude it where order.note is bound, write: \ {unset}
-           (iv) to accept the raise as a discovery, run: mathema accept slips.delivery_note absent[order.note] --as discovery --corrected "absent(f, order.note) raises(KeyError)"
+  has_text  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   falsified at order.note unset
+    holds      computation  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   87 draws
+    falsified  policy       f(order) at order.note unset   no absent policy stated; raises KeyError
+                            possible fixes:
+                              (i) if the raise is intended, run: mathema accept slips.delivery_note absent[order.note] --as discovery --corrected "absent(f, order.note) raises(KeyError)"
+                              (ii) exclude unset at order.note
+                              (iii) handle unset at entry
 ```
 
 A field's no-value is a missing input as a parameter's is: the value
-claim is judged on the notes that are there, the raise at the key left
-out is said on the claim's row, and the path has a policy row of its
-own. `absent(f, order.note, unset) raises(KeyError)` states it; the
+claim is judged on the notes that are there, and the raise at the key
+left out is the path's policy line under the claim, which is why the
+headline is falsified. `absent(f, order.note, unset) raises(KeyError)` states it; the
 second argument of a policy row is a parameter or a path, with the same
 member forms (`absent(f, order.note, null) drops`,
 `missing(f, order.lines[*].qty) propagates`).

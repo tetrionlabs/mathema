@@ -279,7 +279,7 @@ them and shows how to register your own. An alphabet language is a
 Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
 the way to exclude it. Union with a finite set of members, and what the domain admits,
 read exactly as they do for a numeric domain:
-`L[alnum] ∪ {"n/a"}`, `L[ascii] \ {missing}`. A length bound goes inside
+`L[alnum] ∪ {"n/a"}`. A length bound goes inside
 the brackets, `L[ascii, len <= 80]`, `L[unicode, len > 20]` or
 `L[unicode, len in [1, 80]]`, lengths counted in code points as Python's
 `len` counts them; without one, a very long input is a hazard the probe
@@ -329,7 +329,7 @@ member. `is_language_defined(text)` keeps fuzzing a string
 parameter for accidental crashes as before.
 
 Without the package installed, a claim over `L[unicode]` is not wrong,
-only unresolved: it reports `skipped` with a note naming the package,
+only unresolved: it is `unknown`, with a note saying it needs mathema-language,
 and the finite-set spelling (`scale in {"info", "linear"}`) keeps
 working as it always has.
 

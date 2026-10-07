@@ -93,6 +93,7 @@ def test_a_bound_nothing_satisfies_is_refused_at_parse(letters):
         parse_binding("s in L[letters, len < 0]")
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_a_key_nothing_serves_is_refused_at_resolution(letters):
     from mathema.languages import UnknownRefinement
     with pytest.raises(UnknownRefinement, match=r"'n'.*known keys are len"):

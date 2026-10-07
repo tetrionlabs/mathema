@@ -12,11 +12,15 @@ or else at `_external/mathema-language/docs` beside this repository's
 to this site's nav after "Language domains". When they are absent the
 site builds exactly as it would without this hook. The pages are read
 from where they are, never copied into `docs/`, so this repository's
-own docs runner never sees them."""
+own docs runner never sees them. A block the package marks as
+GitHub-only (between `<!-- github-only -->` and `<!-- /github-only -->`,
+a pointer to the published site for readers on GitHub) is removed from
+each imported page."""
 from __future__ import annotations
 
 import os
 import pathlib
+import re
 
 import yaml
 from mkdocs.structure.files import File
@@ -24,6 +28,7 @@ from mkdocs.structure.files import File
 PREFIX = "language/reference"
 ENV = "MATHEMA_LANGUAGE_DOCS"
 DEFAULT = pathlib.Path(__file__).resolve().parents[1] / "_external" / "mathema-language" / "docs"
+GITHUB_ONLY = re.compile(r"<!-- github-only -->.*?<!-- /github-only -->\n*", re.S)
 SECTION, AFTER, TITLE = "Writing claims", "Language domains", "Language reference"
 
 
@@ -69,3 +74,9 @@ def on_files(files, config):
     for page in sorted(found.glob("*.md")):
         files.append(File.generated(config, f"{PREFIX}/{page.name}", abs_src_path=str(page)))
     return files
+
+
+def on_page_markdown(markdown, page, config, files):
+    if page.file.src_uri.startswith(f"{PREFIX}/"):
+        return GITHUB_ONLY.sub("", markdown)
+    return markdown

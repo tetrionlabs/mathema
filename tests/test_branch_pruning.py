@@ -77,6 +77,7 @@ def test_wrong_formula_for_pinned_branch_is_falsified_not_silently_passed():
     assert results[0].verdict == "falsified"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_no_domain_gets_empirical_adjudication_after_derive_declines():
     # a domain that does not pin one path makes the derive route
     # decline, and the claim then quantifies over the stated scales,

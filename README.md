@@ -128,7 +128,7 @@ mathema supports Python 3.10 to 3.14, runs offline, and is best installed
 into a virtual environment:
 
 ```bash
-pip install "mathema[all]"    # recommended, with numpy, z3, MCP and coverage
+pip install "mathema[all]"    # recommended, with numpy, z3, MCP, coverage and mathema-language
 pip install mathema           # the core alone
 ```
 

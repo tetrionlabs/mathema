@@ -214,7 +214,7 @@ prove things about it, what state outside its parameters it reads or writes,
 whether any test report covers it, and how well its docstring states its
 intent. Here is one module of mathema's own source:
 
-<!-- example: audit run -->
+<!-- example: audit run requires=mathema_language -->
 ```bash
 mathema audit mathema.intent --root .
 ```
@@ -224,10 +224,10 @@ mathema audit mathema.intent --root .
                          ||             || derive route                                                        || typing                || globals                                                                  ||           || docs    ||
 key           | span     || claims      || derives | cx | reason                         | code                || typed | finite_domain || vars                      | mutates | funcs                              || tested    || quality || docsync
 mathema.intent
- ._references | 92:145p  || {3 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 50%
- ._sections   | 67:73p   || {3 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 50%
- ._summary    | 76:80p   || {3 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 44%
- .parse_doc   | 148:162p || {3 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 40%
+ ._references | 92:145p  || {5 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 50%
+ ._sections   | 67:73p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 50%
+ ._summary    | 76:80p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 44%
+ .parse_doc   | 148:162p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 40%
 
 0/4 claimed, 0/4 derivable, 0/4 derive reads with nothing supplied, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
 `derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe what derive reads with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and checked for every function here.

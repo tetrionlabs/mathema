@@ -8,7 +8,7 @@ a name stands for, or of structured values a schema stands for, written
 ```
 for s in L[unicode], f(f(s)) == f(s)
 for s in L[unicode] \ {""}, len(f(s)) >= 1
-for s in L[unicode] \ {missing}, len(f(s)) <= len(s)
+for s in L[unicode], len(f(s)) <= len(s)
 ```
 
 ## Three words
@@ -109,9 +109,10 @@ for o in L[myapp.Order], o.lines[*].qty in [1, 10], total(o) >= 0
 ```
 
 `[*]` means every element. A path binding narrows the members the probe
-draws: every value the path reaches is in the bound, and a path through a
-missing field or past the end of a list reaches the missing value, so
-`\ {missing}` on the bound says the path must be there. The derive route
+draws: every value the path reaches is in the bound. A path through a
+missing field or past the end of a list is absent, and a bare bound
+already means the value is there; `| {absent}` on the bound keeps such a
+record in. A `None` list element and a `nan` are holes, not absences. The derive route
 reads a numeric leaf at any depth the body reads (`o.lines[0].qty`,
 `o["address"]["zip"]`) with the bound the language states for it, and a
 claim's own path binding, the `[*]` form included, overrides that bound.
@@ -155,12 +156,12 @@ standard-library test behind each (`identifier`, `json`, `uuid`,
 `iso_date`, `iso_datetime`, `ipv4`, `ipv6`, `base64`, `hex`, `slug`,
 `shell_safe`), the hazard sub-alphabets a probe mixes in (control and
 format characters, combining marks, surrogates, the characters whose
-NFKC form differs, the astral planes), the hazard families
+NFKC form differs, the astral planes), the built-in claims
 `is_length_safe` and `is_encoding_safe`, and the schema adaptors that
 turn a dataclass, a `TypedDict`, a pydantic model or a JSON Schema into
 the language of its rows (a SQLAlchemy table and a Django model too).
-Without it, a claim over `L[unicode]` reports `skipped` with the message
-naming the package.
+Without it, a claim over `L[unicode]` is `unknown`, and its note says it
+needs mathema-language.
 
 The package keeps its own reference, published on this site as
 [the language reference](/language/reference/): every language and its

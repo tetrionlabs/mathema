@@ -163,6 +163,7 @@ def test_an_unknown_language_skips_with_the_vocabulary_on_every_route(tmp_path, 
     assert p.meta["mathema.probe_gap"] == "language-unresolved"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_without_the_package_a_common_name_skips_and_names_it(tmp_path):
     mod = _load(tmp_path, '''
         def same(s: str) -> str:

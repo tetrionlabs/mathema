@@ -38,6 +38,7 @@ def mod(tmp_path):
     return m
 
 
+@pytest.mark.usefixtures("without_language_package")
 @pytest.mark.parametrize("name", ["label", "maybe_label"])
 def test_a_string_claim_with_no_domain_is_skipped_with_the_gap(mod, name):
     (p,) = check_conjectures(getattr(mod, name), [claim("f(f(s)) == f(s)", route="probe")])

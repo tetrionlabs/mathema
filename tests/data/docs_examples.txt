@@ -60,7 +60,7 @@
 [x] docs/grammar.md:gauss                        run output
 [x] docs/grammar.md:levels                       file run output
 [x] docs/index.md:midpoint                       file file run output run output file run output
-[x] docs/index.md:audit                          run output
+[x] docs/index.md:audit                          run output  (requires)
 [x] docs/index.md:lock                           file run output file session
 [x] docs/index.md:parity                         file run output
 [x] docs/lemmas.md:chain                         run output
