@@ -779,20 +779,50 @@ def _path_bound(p: str, path: str, fields: dict, cj_domain: dict):
         The bound of the field `path` reads off parameter `p`: the
         claim's own binding of that path, or of the same path with every
         index read as `[*]`, else the language's, found by walking its
-        `fields()` (a nested mapping for a record, `"[*]"` for the
-        elements of a list). None when neither states one.
+        `fields()`: a nested mapping for a record, and the elements of
+        a list field under `"[*]"`, as a one-item list, as the element
+        record stated under the field's own name, or under the field's
+        starred name (`lines[*]`). None when neither states one.
     """
     import re as _re
     from .domain import path_steps
     for key in (f"{p}.{path}", _re.sub(r"\[\d+\]", "[*]", f"{p}.{path}")):
         if key in cj_domain:
             return cj_domain[key]
+    steps = path_steps(f".{path}")
     node = fields
-    for step in path_steps(f".{path}"):
+    i = 0
+    while i < len(steps):
+        step = steps[i]
+        indexed = isinstance(step, int) or step == "*"
+        if isinstance(node, list):
+            # a list field stated as a one-item list of its element (a
+            # tuple is a bound, an interval's two ends)
+            if len(node) != 1:
+                return None
+            node = node[0]
+            if indexed:
+                i += 1
+            continue
         if not isinstance(node, dict):
             return None
-        node = node.get("[*]") if isinstance(step, int) or step == "*" else node.get(step)
-    return None if isinstance(node, dict) else node
+        if indexed:
+            # the elements of a list field: under `"[*]"`, or the
+            # mapping is the element record itself
+            node = node.get("[*]", node)
+            i += 1
+            continue
+        if step in node:
+            node = node[step]
+        elif f"{step}[*]" in node and i + 1 < len(steps) and (
+                isinstance(steps[i + 1], int) or steps[i + 1] == "*"):
+            # the elements stated under the field's starred name
+            node = node[f"{step}[*]"]
+            i += 1
+        else:
+            return None
+        i += 1
+    return None if isinstance(node, (dict, list)) else node
 
 
 def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":

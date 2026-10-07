@@ -18,6 +18,11 @@ rather than guessing.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..analysis import Facts
+
 import ast
 import copy
 from dataclasses import dataclass, field, replace
@@ -185,7 +190,7 @@ def lift_fold(fn, facts) -> "FoldLift | None":
     return result if isinstance(result, FoldLift) else None
 
 
-def diagnose_fold(fn, facts) -> dict | None:
+def diagnose_fold(fn: Callable[..., Any], facts: Facts) -> dict | None:
     """Why `lift_fold()` declined a loop-shaped function: the exact
     diagnosis the shared implementation produced at the first check
     that failed, `{"reason", "hint", "derive_unlock"}` (`derive_unlock` is

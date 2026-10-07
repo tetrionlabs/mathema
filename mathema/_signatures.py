@@ -9,6 +9,8 @@ fixed by the ufunc's `nin` and `nout`, and is built from them here.
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import inspect
 
 _P = inspect.Parameter
@@ -55,7 +57,7 @@ def ufunc_signature(fn) -> inspect.Signature:
     return inspect.Signature(params)
 
 
-def callable_signature(fn) -> inspect.Signature:
+def callable_signature(fn: Callable[..., Any]) -> inspect.Signature:
     """Intent:
         `inspect.signature(fn)`, with a numpy ufunc that has none read
         as `ufunc_signature(fn)`, so a ufunc has the same parameters on

@@ -7,6 +7,8 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from ._signatures import module_scope
 import ast
 import inspect
@@ -1047,7 +1049,7 @@ def looks_like_wrapper(facts) -> bool:
                 and facts.call_groups.get("external"))
 
 
-def analyze_source(fn) -> Facts:
+def analyze_source(fn: Callable[..., Any]) -> Facts:
     """Read a function's real source and build its `Facts` record,
     the single entry point everything downstream (the derive-route
     lifter, the probe route, `mathema audit`'s population analyses)

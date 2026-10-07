@@ -1099,7 +1099,7 @@ class LexiconSource:
     example_functions: dict
 
 
-def source_of(name: str, obj) -> LexiconSource:
+def source_of(name: str, obj: object) -> LexiconSource:
     """Intent:
         The `LexiconSource` an object (a module, a class, an instance)
         provides: its `LEXICON`, and its `SECTIONS`, `TAGS` and
