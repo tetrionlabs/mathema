@@ -98,9 +98,12 @@ coverage = ["coverage>=7"]
 # optional: this project's own convention names for common
 # parameters, installed separately.
 symbology = ["mathema-symbology>=0.3"]
+# String and structured-value domains, the `L[...]` languages a claim
+# names (see docs/language.md), installed separately.
+language = ["mathema-language>=0.1.0,<0.2"]
 # Every runtime CAPABILITY at once (not the docs/test dev tooling):
 # `pip install "mathema[all]"`. smt pulls z3-solver (~100 MB native).
-all = ["mathema[numpy,smt,mcp,coverage]"]
+all = ["mathema[numpy,smt,mcp,coverage,language]"]
 
 [project.scripts]
 mathema = "mathema.cli:main"

@@ -1203,6 +1203,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "coverage" },
+    { name = "mathema-language" },
     { name = "mcp" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -1224,6 +1225,9 @@ docs = [
     { name = "mkdocs-llmstxt" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+]
+language = [
+    { name = "mathema-language" },
 ]
 mcp = [
     { name = "mcp" },
@@ -1265,8 +1269,9 @@ test = [
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1" },
     { name = "coverage", marker = "extra == 'coverage'", specifier = ">=7" },
-    { name = "mathema", extras = ["coverage", "mcp", "numpy", "smt"], marker = "extra == 'all'" },
+    { name = "mathema", extras = ["coverage", "language", "mcp", "numpy", "smt"], marker = "extra == 'all'" },
     { name = "mathema", extras = ["coverage", "numpy", "pandas", "polars", "smt"], marker = "extra == 'test'" },
+    { name = "mathema-language", marker = "extra == 'language'", specifier = ">=0.1.0,<0.2" },
     { name = "mathema-symbology", marker = "extra == 'symbology'", specifier = ">=0.3" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2,<3" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
@@ -1288,7 +1293,19 @@ requires-dist = [
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "z3-solver", marker = "extra == 'smt'", specifier = ">=4.12" },
 ]
-provides-extras = ["docs", "numpy", "pandas", "polars", "test", "dev", "mcp", "smt", "coverage", "symbology", "all"]
+provides-extras = ["docs", "numpy", "pandas", "polars", "test", "dev", "mcp", "smt", "coverage", "symbology", "language", "all"]
+
+[[package]]
+name = "mathema-language"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mathema" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5e/40/c058490e07fa028e848c18069b2af1e28785c280087c32001730b2b7dd15/mathema_language-0.1.0.tar.gz", hash = "sha256:e4bca18ee36aefb2e5529c49c7f5c5e267d51fbf0bc04e19fd80d3f5063cf303", size = 177017, upload-time = "2026-10-07T13:15:32.302Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/1d/ee84d7d541e5583a10abdbcfd45a217566366d28b8d6a1c6b2b3156819ac/mathema_language-0.1.0-py3-none-any.whl", hash = "sha256:f451dbbb2f73fae30418bca148ee698969e46d495a614b16dfff63972d2b17ca", size = 106817, upload-time = "2026-10-07T13:15:30.741Z" },
+]
 
 [[package]]
 name = "mathema-symbology"
