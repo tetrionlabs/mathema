@@ -1,36 +1,53 @@
 # mathema
 
-*Know what your code actually guarantees.*
+mathema checks Python functions against claims, short mathematical
+statements of what a function is meant to do, and keeps each result as a
+record bound to the exact code it was checked against. Where the body can
+be read as mathematics, mathema proves the claim for every input in the
+range the claim names, and where it cannot, it runs the real function on
+inputs chosen to break the claim and reports what it found, evidence or a
+counterexample, without upgrading one into the other.
 
-AI has changed the cost of producing code without changing the cost of knowing
-whether that code is correct, and so more of it now arrives than anyone can
-review line by line. **mathema** adds a verification layer between AI-assisted
-code and trusted systems: you state what a function is supposed to do as an
-explicit claim, and mathema checks it against the real function, proving it
-outright where the mathematics permits and gathering reported evidence where
-it does not. What comes back is a durable record of what has been established,
-how, and whether it still applies to the code in front of you.
+AI-assisted development has made code cheaper to produce without making it
+any cheaper to know whether that code is correct, and a claim gives the
+reviewer something smaller and more precise to read than the diff. Every
+verdict comes from mathematics or from running the real code rather than
+from a model's judgement, so there is no account or API key and your code
+stays on your machine. The name is Greek, μάθημα, a thing learned.
 
-Nothing is asserted and nothing is quietly upgraded. Evidence remains
-evidence, proof remains proof, and a claim that nothing could settle remains
-unresolved and says so.
+## A function with a pole in it
 
-mathema is a System 0 engine: a verification engine with zero models between
-the code and its verdict. Every result comes from mathematics and from running
-the real code, never from a model's judgement, so there are no LLM tokens to
-pay for, no account or API key, and your code never leaves your machine.
+A discount factor written in a hurry, checked with no claim at all, so
+only mathema's built-in claims apply:
 
-The name is Greek: μάθημα, a thing learned.
+<!-- example: pole run -->
+```python
+import mathema
 
-Why it matters: [The bottleneck moved](https://tetrionlabs.com/why/), on how
-AI moves the bottleneck from writing code to reviewing it, and what mathema
-does about it.
+def discount_factor(x: float) -> float:
+    """A discount factor that divides by one minus the rate."""
+    return 1 / (1 - x)
 
-## See it in action
+print(mathema.check(discount_factor))
+```
 
-Here is a European call minus a European put on the same strike, both legs
-priced by Black-Scholes, with a square root, a logarithm, an exponential and
-the Gaussian CDF expressed through `math.erf`:
+<!-- example: pole output match=subset -->
+```text
+mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
+  proven    is_defined: 1 - x != 0
+  falsified is_pole_safe[x]: is_pole_safe(x)
+           counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
+```
+
+Those are two of the record's fourteen built-in claims. Uniform random
+sampling lands on `x = 1` with probability zero, so a property-based run
+can pass a thousand trials here and report nothing, whereas mathema solves
+the lifted expression for where its denominator vanishes and makes sure
+that point is tried. `is_defined` states the region on which `f` returns,
+and every falsification rests on an executed witness, never on a symbolic
+argument alone.
+
+## A claim proven over its domain
 
 <!-- example: parity file=options.py -->
 ```python
@@ -48,10 +65,10 @@ def put_call_parity_gap(s: float, k: float, r: float, t: float,
     return call - put
 ```
 
-Put-call parity says that difference collapses to `S - K*exp(-r*T)`, whatever
-the volatility, which is a surprising thing to say about a function where
-`sigma` appears five times. State it as a claim over the region it should hold
-on:
+Put-call parity says this call minus put, both priced by Black-Scholes,
+is `S - K*exp(-r*T)` whatever the volatility. In a claim everything before
+the last comma is the domain and everything after it is the law, with `f`
+standing for the function:
 
 <!-- example: parity run -->
 ```bash
@@ -65,375 +82,118 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 ok   options.put_call_parity_gap: source, no side effects; claims 7/7 checked (1 proven, 6 holds, 0 falsified)
 ```
 
-Everything before the last comma is the domain and everything after it is the
-law, with `f` standing for the function under test. `[0.1,2]` is a
-mathematical interval rather than a two-element Python list, so the claim
-covers every real value in it, and mathema lifted the body to a symbolic
-expression in which both Gaussian terms cancel and `sigma` disappears,
-establishing the identity for the whole region at once. The second row is
-that proof's `[float]` companion, a separate claim that runs the same identity
-through the real code in floating point at the region's corners and across its
-interior, because a proof is about the mathematics and whether its
-computation keeps up with it in float64 is a different question, answered here
-by `holds`. The other five rows are policy claims, one per parameter,
-saying what the function does with a missing value (`missing(f, s)
-propagates`: a `nan` in gives a `nan` back), each checked on the calls
-already made; [missing values](https://mathema.tetrionlabs.com/missing-values/)
-explains them. The [claim grammar](https://mathema.tetrionlabs.com/grammar/)
-has the full notation.
+`[0.1,2]` is an interval of reals, and mathema lifted the body to an
+expression in which both Gaussian terms cancel and `sigma` drops out, so
+the mathematics is proven for the whole region. Of the six that hold, one
+is the same identity run through the real code in float64 and five record
+what the function does with a `nan` in each parameter. Without its domain
+the claim covers every real input, a negative maturity where `math.sqrt(t)`
+raises included:
 
-The domain is doing real work: drop it and the same claim comes back
-`falsified`, with a counterexample at a negative maturity where `math.sqrt(t)`
-raises, because a claim with no domain covers every real input, including ones
-the function was never meant to take. A claim without its domain is a
-different claim, and mathema says so rather than assuming the range you had in
-mind.
+<!-- example: parity run -->
+```python
+import mathema
+from options import put_call_parity_gap
 
-## Proof is not the same as testing
+print(mathema.check(put_call_parity_gap, claims=[mathema.claim(
+    "f(s,k,r,t,sigma) == s - k*exp(-r*t)", name="parity")]))
+```
 
-A test demonstrates behaviour at the inputs you chose, and a property-based
-test at many inputs you did not, but neither can say anything about the
-uncountably many points of `[0.1,2]` it never visited. mathema keeps its
-verdicts apart so you always know which kind of answer you have:
+<!-- example: parity output -->
+```text
+mathema.Record(put_call_parity_gap) · source, no side effects · form a0c3d838b4f8
+  falsified parity: f(s, k, r, t, sigma) = -k*exp(-r*t) + s
+           counterexample s = 1, k = 1, r = 1, t = -1, sigma = 1
+```
+
+## Four verdicts
 
 | Verdict | Means |
 |---|---|
 | `proven` | established mathematically over the claim's stated domain |
-| `holds (n=...)` | survived exactly `n` behavioural trials, which is evidence, not proof |
-| `falsified` | a counterexample was found by running the function, and is kept |
-| `invalidated` | was `proven` or `holds` in the previous record, and the current code no longer supports it |
-| `unknown` | nothing was decided, and the record keeps the reason |
-| `skipped` | the claim could not be adjudicated as stated, and the record says why |
+| `holds` | survived every trial mathema ran, which is evidence and not proof |
+| `falsified` | an input inside the domain broke the claim, and that input is kept |
+| `unknown` | nothing was settled, and the record keeps the reason |
 
-[Guarantees and limits](https://mathema.tetrionlabs.com/guarantees/) states what each
-verdict establishes and what it does not, in one place.
-
-The same distinction reaches claims no amount of test-running could establish.
-Four defining properties of the logistic function include a limit at infinity and an
-improper integral over the whole real line, and all four come back proven, with a
-fifth row for the symmetry identity's `[float]` companion (the calculus claims
-spawn none, having no point to execute). The two identities carry a range for
-the sake of that companion rather than the proof: stated over the whole line
-both are still proven, and the companion is falsified instead where this code
-overflows, below about `x = -709.78`:
-
-<!-- example: sigmoid file=sigmoid.py -->
-```python
-import math
-
-def logistic(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
-```
-
-<!-- example: sigmoid run -->
-```bash
-mathema check sigmoid.py \
-    --claim "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))" \
-    --claim "for x in [-700, 700], f(-x) == 1 - f(x)" \
-    --claim "lim(f(x), x -> oo) == 1" \
-    --claim "∫(d(f(x), x), x, -oo, oo) == 1"
-```
-
-<!-- example: sigmoid output -->
-```text
-ok   sigmoid.logistic: source, no side effects; claims 6/6 checked (4 proven, 2 holds, 0 falsified)
-```
-
-## When the code is wrong
-
-Proving a good function correct is the easy half, and the question that
-matters more is whether a bad one gets caught. Here is a discount factor with a
-pole hiding in it, checked with no claims at all, only mathema's built-in laws:
-
-<!-- example: pole run -->
-```python
-import mathema
-
-def discount_factor(x: float) -> float:
-    """A discount factor that divides by one minus the rate."""
-    return 1 / (1 - x)
-
-print(mathema.check(discount_factor))
-```
-
-<!-- example: pole output match=subset -->
-```text
-mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
-  falsified monotonic_increasing[x]: d(f(x), x) >= 0
-           counterexample x = 1
-  falsified even: f(-x) = f(x)
-           counterexample x = -1
-  proven    is_deterministic: f(x) = f(x)
-           missing for x (float) means nan
-  proven    is_defined: 1 - x != 0
-  falsified is_pole_safe[x]: is_pole_safe(x)
-           counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
-  falsified is_representation_safe[x]: is_representation_safe(x)
-           counterexample x = 1 (the int spelling) is admitted by the declared domain but the call raised ZeroDivisionError
-           [implementation:representation]
-```
-
-(trimmed from fourteen claims). The pole was not found by luck: uniform random
-sampling lands exactly on `x == 1` with probability zero, so a property-based
-run can pass a thousand trials here and report nothing, whereas mathema solves
-the lifted expression for where the denominator vanishes and makes sure that
-point is tried. Every falsification rests on an executed witness, never on a
-symbolic argument alone, and the bracketed tag marks a computation that
-fell over (the integer `1` raising where the domain admits it). `is_defined`
-reads the other way round: it states the region on which `f` returns, and
-`1 - x != 0` is exactly that region.
-
-## Built for AI-assisted development
-
-An agent can write the code and propose the claims, but mathema reserves the
-decisions that turn a verdict into an accepted fact for a person, so the agent
-never gets to mark its own homework:
-
-<!-- illustration -->
-```text
-agent proposes a claim
-        ↓
-mathema adjudicates it against the real function
-        ↓
-a person accepts the verdict            (mathema accept)
-        ↓
-the function is locked                  (mathema lock)
-```
-
-No tool exposed over MCP accepts a verdict from its caller, and claim
-expressions are validated against a strict AST whitelist before they run. A
-claim can call the function under test, mathema's helpers and the functions it
-binds with `let`; a binding that reaches the system (`os`, `subprocess` and
-the like) is refused, and a binding into third-party code runs as it would if
-you imported it yourself, with a warning in the output (the function itself
-runs as it would in its own tests; see
-[Security and execution](https://mathema.tetrionlabs.com/security/)). `mathema accept` prints the
-exact write before making it, and lets a person accept evidence as sufficient,
-own a residual risk explicitly, or correct a claim the falsification showed
-was wrong (the correction is itself adjudicated first). An agent may lock a
-function it has finished; only a person can unlock one, behind a prompt and
-optionally a PIN, with deliberately no `--yes` flag.
-
-## Verification that survives code changes
-
-Every verdict binds to the exact code that earned it, through two identity
-hashes: `form`, over the AST structure with names and formatting normalised
-away, and `sig`, over the parameter shape. `mathema.write_spec` writes the
-record as standalone YAML under `.mathema/verified/`, and `mathema verify`
-later re-checks every record whose function, or a function it depends on, has
-changed since, so a verification result cannot quietly outlive the
-implementation it describes the way a test result does the moment nobody
-re-runs it. A locked
-function fails verification the moment its body changes, though docstring
-edits stay allowed.
-
-mathema is fully offline: nothing in checking, verifying or recording makes a
-network call, so none of this sends your source or your claims anywhere. The
-one command that fetches anything is the explicit, opt-in `mathema init
---agents`, which clones the skills repository.
-
-## Audit a codebase you didn't write
-
-`mathema audit` reads a whole package without running anything and gives every
-function a row: its location as a ready-made `sed -n` line range, its
-branching, whether it carries claims, whether the derive route could prove
-things about it, the state outside its parameters it reads or writes, whether
-a test report covers it, and how well its docstring states its intent.
-
-`mathema audit --index` writes the same map to `.mathema/index.yaml`, with each
-module's stated intent and every function's file, line and span, which is the
-fastest way to hand an agent a codebase without letting it grep its way around.
-
-## Beyond tests
-
-| | Unit tests | Property-based testing | Symbolic execution (CrossHair) | Proof assistants and SMT solvers | mathema |
-|---|:-:|:-:|:-:|:-:|:-:|
-| Checks the examples you chose | ✓ | ✓ | | | ✓ |
-| Checks many generated inputs | | ✓ | ✓ | | ✓ |
-| Proves a claim over its whole domain | | | when every path is explored | ✓ | ✓ where the function lifts |
-| Works on ordinary Python, no separate specification language | ✓ | ✓ | ✓ | | ✓ |
-| Keeps a record bound to the exact code it verified | | | | ✓ | ✓ |
-| Routes each claim to whatever method can settle it | | | | | ✓ |
-
-None of these replaces the others, and mathema complements your test suite
-rather than replacing it: the lines your tests already reach count toward the
-implementation score. mathema's probe route is the same idea as
-Hypothesis, CrossHair's symbolic execution is the nearest thing in Python to
-its derive route, and contract libraries such as icontract and deal check
-pre- and postconditions as the code runs, which complements a claim rather
-than competing with it. What mathema adds is the place where a property check,
-a real proof attempt and a durable record meet on the same claim, with the
-claim routed automatically to whichever method the function's shape can
-support, and `skipped` reported plainly the moment none can.
-
-## Measuring a codebase
-
-A codebase can have every line exercised by tests while having very little of
-its intent stated or verified, so mathema measures those separately rather
-than folding them into one coverage number. `mathema badges` reports three
-scores, each measured on its own so a strength in one can't hide a gap in
-another:
-
-- **implementation**, coverage that counts proofs: the share of statements
-  reached by a test, a probe or a derive proof, taken together, so code proven
-  symbolically counts even where no test calls it;
-- **intent**, what the code is meant to do, stated: how much of what each
-  function is meant to do is explicitly specified and up to date, so intent
-  that lives only in someone's head, or in a prompt that was thrown away,
-  shows up as a gap;
-- **clarity**, how much of the behaviour is pinned down: of everything
-  knowable about a function, how much its verified claims have settled, where
-  a proof counts for more than a sample and a failure found is still
-  knowledge.
-
-They are drawn as a triangle whose area is the overall score, so it falls
-toward zero when any one of them is empty instead of averaging politely over
-the gap. An illustrative example:
-
-<!-- illustration -->
-```text
-        CLARITY 50
-              ◆
-             · ·
-            ·   ·
-           ·     ·
-          ·       ·
-         ·         ·
-        ·           ·
-       ·      ●      ·
-      ·     ···       ·
-     ·    ······       ·
-    ·   ········        ·
-   ·  ···········        ·
-  · ·············         ·
- ·················         ·
-●·············+···●·········◆
-  IMPL 100           INTENT 26
-        overall 32
-```
-
-Every line is exercised and intent is a quarter specified, which the area
-shows as 32 where the mean of the three would have said 59. The [badges reference](https://mathema.tetrionlabs.com/modes/badges/)
-covers how each score is computed and what to expect of them.
-
-## API
-
-```python
-import mathema
-
-def ema(x: list, alpha: float) -> float:
-    """Exponentially weighted moving average."""
-    y = x[0]
-    for v in x[1:]:
-        y = alpha * v + (1 - alpha) * y
-    return y
-
-bounds = {"x": (-1e6, 1e6), "alpha": (-10, 10)}
-mathema.check(ema, domain=bounds)                   # built-in laws, inside a stated domain
-mathema.check(ema, claims=["f(x, 1.0) == x[-1]"])   # your own claim
-mathema.check(ema, domain={"alpha": (0, 1)})        # narrow the domain
-mathema.write_spec(ema, claims=[...])               # check, then write the record
-mathema.status()                                    # fresh or stale, per tracked function
-```
-
-Without anyone reading the code, the first call proves that the result is
-deterministic and that scaling or shifting every element of `x` scales or
-shifts the result the same way, with the `[float]` companions of those proofs
-holding across the stated domain, and it finds that reordering `x` does *not*
-leave the result unchanged, with the counterexample kept. Leave the domain out
-and every claim ranges over all of the reals, where the companions report the
-overflow at float64's maximum instead. The
-[API reference](https://mathema.tetrionlabs.com/api/) has the rest.
-
-## CI
-
-A gate, not a dashboard:
-
-```bash
-mathema verify                  # the gate: re-checks what changed, fails on what broke
-mathema review origin/main      # what a pull request changed, as claims and verdicts
-mathema check model.py --format junit --output claims.xml   # reports for the CI UI
-```
-
-A failing claim exits 1 and a broken invocation exits 2, so a pipeline can
-tell a real finding from a broken run. `mathema init --ci` scaffolds the
-GitHub Actions or GitLab step, `--format github`, `junit` and `json` feed each
-platform's own reports, and fuller pipelines are in
-[examples/ci/](https://github.com/tetrionlabs/mathema/tree/main/examples/ci).
-
-## Intent
-
-mathema exists to make the behaviour of a function something that can be
-checked rather than assumed, namely a claim about what the function does,
-stated precisely enough that the code can be held to it, with the result
-recorded as proof, as evidence, or as an open question, whichever is true,
-and kept honest as the code changes underneath it.
+A proof is about real numbers and whether float64 keeps up is a separate
+question, so a record shows each claim's headline above a `mathematics`
+line and a `computation` line, each with its own verdict, as
+[reading a record](https://mathema.tetrionlabs.com/verdicts/#reading-a-record)
+shows; [guarantees](https://mathema.tetrionlabs.com/guarantees/) says what
+each verdict establishes and what it leaves open.
 
 ## Install
 
-mathema needs Python 3.10 or newer. Install it inside an active virtual
-environment (`python3 -m venv .venv && source .venv/bin/activate`, or your
-usual equivalent) rather than against a system Python:
+mathema supports Python 3.10 to 3.14, runs offline, and is best installed
+into a virtual environment:
 
 ```bash
-pip install "mathema[all]"    # recommended: numpy, z3, MCP server, coverage
-pip install mathema           # the minimal core: the derive route and the spec store
+pip install "mathema[all]"    # recommended, with numpy, z3, MCP, coverage and mathema-language
+pip install mathema           # the core alone
 ```
 
-The extras can also be taken one at a time: `mcp` exposes mathema's tools to
-an agent, `smt` adds z3 as a fallback decision procedure, `numpy` enables
-array-shaped claims, `pandas` and `polars` sample a parameter annotated with
-their Series or DataFrame types, `coverage` reads a native `.coverage` report,
-`symbology` adds conventional notation and `language` brings the named
-languages a claim quantifies text and structured values over.
+## Record, verify, gate
 
-## Documentation
+`mathema.write_spec` writes a function's record as YAML under
+`.mathema/verified/`, with a `form` hash over the code's structure and a
+`sig` hash over its parameters, and `mathema verify` re-checks every record
+whose function, or a function it depends on, has since changed. A falsified
+claim or an unaccepted `unknown` exits 1 and a run that could not start
+exits 2, so a pipeline can tell a finding from a broken job.
+`mathema init --ci` scaffolds the GitHub Actions or GitLab step, and
+[gate a pipeline](https://mathema.tetrionlabs.com/gate-a-pipeline/) shows
+each case from a real run.
 
-- [The bottleneck moved](https://tetrionlabs.com/why/): why verification, not
-  generation, is now the hard part of shipping AI-assisted code.
-- **[Quick start](https://mathema.tetrionlabs.com/quickstart/)**: five minutes,
-  one function, and a claim that goes from falsified to proven.
-- [Claim-driven development](https://mathema.tetrionlabs.com/cdd/): the
-  vocabulary every mode assumes, including what separates `proven` from `holds`.
-- [The claim grammar](https://mathema.tetrionlabs.com/grammar/): everything you
-  can say in a claim, with a runnable example of each.
-- [The derive route](https://mathema.tetrionlabs.com/derive-route/): which
-  function shapes can reach `proven`, and what happens to the ones that cannot.
-- [Case studies](https://mathema.tetrionlabs.com/case-studies/): put-call
-  parity, the Greeks, and the sigmoid worked end to end.
+## Text, and coding agents
 
-The full documentation, including the command reference, is at
-**[mathema.tetrionlabs.com](https://mathema.tetrionlabs.com)**.
+A string is drawn from a named language (`L[unicode]`, `L[ascii]`,
+`L[json]`) that the `mathema-language` package supplies. With it installed:
 
-mathema is at 0.6.1 and pre-1.0, feature-complete for its current scope and
-covered by over 3,500 tests; the claim grammar and record format are settled by
-the spec, but the Python API is likely to change before 1.0.
+<!-- example: lang file=names.py requires=mathema_language -->
+```python
+def display_name(username: str) -> str:
+    """The name shown beside a comment, trimmed and capped at 32 characters."""
+    return username.strip()[:32]
+```
 
-## Related projects
+<!-- example: lang session requires=mathema_language -->
+```console
+$ mathema check names.py --claim "for username in L[unicode], len(f(username)) <= 32"
+ok   names.display_name: source, no side effects; claims 1/1 checked (0 proven, 1 holds, 0 falsified)
+```
 
-[claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development)
-is the specification mathema implements (v0.2: the claim tuple, the claim
-families and the YAML record schema), maintained independently under
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so anything
-that reads or writes that shape interoperates with mathema's records without
-importing it. `mathema.SPEC_VERSION` states the targeted version and every
-record stamps it. [mathema-symbology](https://github.com/aaronbyrnephd/mathema-symbology)
-renders claims in a field's conventional notation,
-[mathema-language](https://github.com/tetrionlabs/mathema-language) provides
-the languages behind `L[...]` (alphabets, predicate languages, schemas), and
-[mathema-agents](https://github.com/tetrionlabs/mathema-agents) teaches coding
-agents to drive the claim loop properly, vendored by an explicit, opt-in
-`mathema init --agents`.
+Without it the claim is `unknown` and names the package it needs, and a
+plain claim over a `str` parameter is `unknown` as well:
 
-See also [CHANGELOG.md](https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md), [CONTRIBUTING.md](https://github.com/tetrionlabs/mathema/blob/main/CONTRIBUTING.md),
+<!-- example: core-only session after=lang wrap=85 -->
+```console
+$ mathema check names.py --claim "for username in L[unicode], len(f(username)) <= 32"
+FAIL names.display_name: source, no side effects; claims 0/1 checked (0 proven, 0
+    holds, 0 falsified, 1 unknown)  <- dim_f_username_0_le_32 unknown: needs
+    mathema-language: unknown language L[unicode]: known languages are none in this
+    process
+```
+
+[Language domains](https://mathema.tetrionlabs.com/language/) has the
+rest. The mathema-agents skills teach a coding agent to propose claims and
+read verdicts, and arrive through an explicit, opt-in
+`mathema init --agents`, the one command that fetches anything. Accepting a
+verdict and unlocking a locked function stay with a person
+([working with coding agents](https://mathema.tetrionlabs.com/agents/)).
+
+## Where next
+
+[Start here](https://mathema.tetrionlabs.com/start/) offers a reading
+order for each job, from a numerical function to a CI pipeline, and the
+[quick start](https://mathema.tetrionlabs.com/quickstart/) takes one
+function from falsified to proven. mathema is pre-1.0, with its claim
+grammar and record format fixed by the
+[claim-driven development](https://github.com/aaronbyrnephd/claim-driven-development)
+specification and its Python API likely to change, as
+[stability](https://mathema.tetrionlabs.com/stability/) sets out. See also
+[CHANGELOG.md](https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md), [CONTRIBUTING.md](https://github.com/tetrionlabs/mathema/blob/main/CONTRIBUTING.md),
 [SECURITY.md](https://github.com/tetrionlabs/mathema/blob/main/SECURITY.md) and [SUPPORT.md](https://github.com/tetrionlabs/mathema/blob/main/SUPPORT.md).
 
-## Licensing
-
-mathema is source-available under the [Business Source License
-1.1](https://github.com/tetrionlabs/mathema/blob/main/LICENSE.md). Production use is free when any one of these applies:
-your organisation's revenue is under USD 10 million, mathema is used in no
-more than three of its repositories, the use is research, teaching, personal
-or otherwise non-commercial, or it is within a 90-day evaluation. Every
-released version converts to AGPL-3.0-or-later four years after its release.
-See [LICENSING.md](https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md) for the plain-language version.
+mathema is source-available under the [Business Source License 1.1](https://github.com/tetrionlabs/mathema/blob/main/LICENSE.md),
+and each release converts to AGPL-3.0-or-later four years after it is published.
+[LICENSING.md](https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md) sets out the grant in plain language.
