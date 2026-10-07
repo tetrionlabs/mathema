@@ -480,7 +480,7 @@ print(mathema.check(greeting, claims=[mathema.claim(
 <!-- example: strings output match=subset -->
 ```text
 mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
-  long_enough  for nickname in L[unicode]|None, len(greeting(nickname)) >= 3   falsified at nickname = None
+  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at nickname = None
     holds      computation  for nickname in L[unicode], len(greeting(nickname)) >= 3   223 draws
     falsified  policy       f(None)   no absent policy stated; raises AttributeError
                             possible fixes:
