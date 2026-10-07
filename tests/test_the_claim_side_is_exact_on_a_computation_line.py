@@ -6,9 +6,14 @@ claim written in a form that cancels in float (`(x + 1e16) - 1e16`,
 numpy.clip's midpoint-and-half-gap definition on wide bounds) never
 falsifies correct code (rulings of 2026-10-01: the mathematics is exact,
 tolerance belongs to the computation)."""
-import numpy as np
 
-from mathema.conjecture import check_conjectures, claim
+import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def ident(x: float) -> float:

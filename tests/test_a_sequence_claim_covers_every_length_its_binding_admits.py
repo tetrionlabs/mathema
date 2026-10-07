@@ -15,13 +15,15 @@ claim's empty-input line (see
 `test_a_value_claim_is_its_mathematics_and_its_empty_input_line.py`).
 """
 from __future__ import annotations
-
-import math
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def rms(signal: list) -> float:

@@ -41,8 +41,8 @@
  },
  "abs_bars_compound": {
   "input": "for x in [0, 1], y in [0, 1], |x + y - f(x, y)| <= ε",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x + y - f(x, y)) ≤ ε",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, y in [0.0, 1.0] : float|absent|missing, abs(x + y - f(x, y)) <= \\epsilon"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x + y - f(x, y)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0] : float|missing, y in [0.0, 1.0] : float|missing, abs(x + y - f(x, y)) <= \\epsilon"
  },
  "factorial_postfix": {
   "input": "for n in [1, 5] subset Z, f(n) <= n!",
@@ -66,8 +66,8 @@
  },
  "space_vector_real": {
   "input": "for v in R^n, f(v) >= 0",
-  "unicode": "∀ v ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(v) ≥ 0",
-  "ascii": "for v in (R | {missing})^n|absent, f(v) >= 0"
+  "unicode": "∀ v ∈ (ℝ ∪ {∅})ⁿ, f(v) ≥ 0",
+  "ascii": "for v in (R | {missing})^n, f(v) >= 0"
  },
  "space_vector_bounded": {
   "input": "for xs in [0, 1]^n, f(xs) <= 1",
@@ -76,8 +76,8 @@
  },
  "space_matrix": {
   "input": "for A in R^(m,n), f(A) == f(A)",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(A) = f(A)",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, f(A) = f(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(A) = f(A)",
+  "ascii": "for A in (R | {missing})^(m,n), f(A) = f(A)"
  },
  "space_shared_dim": {
   "input": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
@@ -86,18 +86,18 @@
  },
  "space_vector_fixed": {
   "input": "for c in [0, 1]^3, f(c) in [0, 1]",
-  "unicode": "∀ c ∈ ([0.0, 1.0] ∪ {∅})³ ⊂ ℝ ∪ {absent}, 0 ≤ f(c) ≤ 1",
-  "ascii": "for c in ([0.0, 1.0] | {missing})^3 : float|absent, 0 <= f(c) <= 1"
+  "unicode": "∀ c ∈ ([0.0, 1.0] ∪ {∅})³ ⊂ ℝ, 0 ≤ f(c) ≤ 1",
+  "ascii": "for c in ([0.0, 1.0] | {missing})^3 : float, 0 <= f(c) <= 1"
  },
  "space_vector_fixed_trap": {
   "input": "for r in [-0.1, 0.1]^12, f(r) <= 0.1",
-  "unicode": "∀ r ∈ ([-0.1, 0.1] ∪ {∅})¹² ⊂ ℝ ∪ {absent}, f(r) ≤ 0.100000000000000",
-  "ascii": "for r in ([-0.1, 0.1] | {missing})^12 : float|absent, f(r) <= 0.100000000000000"
+  "unicode": "∀ r ∈ ([-0.1, 0.1] ∪ {∅})¹² ⊂ ℝ, f(r) ≤ 0.100000000000000",
+  "ascii": "for r in ([-0.1, 0.1] | {missing})^12 : float, f(r) <= 0.100000000000000"
  },
  "space_vector_fixed_sketch": {
   "input": "for r in [-0.1, 0.1]^12, f(r) >= -1.2",
-  "unicode": "∀ r ∈ ([-0.1, 0.1] ∪ {∅})¹² ⊂ ℝ ∪ {absent}, f(r) ≥ -1.20000000000000",
-  "ascii": "for r in ([-0.1, 0.1] | {missing})^12 : float|absent, f(r) >= -1.20000000000000"
+  "unicode": "∀ r ∈ ([-0.1, 0.1] ∪ {∅})¹² ⊂ ℝ, f(r) ≥ -1.20000000000000",
+  "ascii": "for r in ([-0.1, 0.1] | {missing})^12 : float, f(r) >= -1.20000000000000"
  },
  "space_matrix_fixed": {
   "input": "for A in [-1, 1]^(3,3), f(A) >= 0",
@@ -106,53 +106,53 @@
  },
  "space_matrix_mixed": {
   "input": "for A in R^(n,3), f(A) in R^(3,3)",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ³ ∪ {absent}, f(A) ∈ R**(3,3)",
-  "ascii": "for A in (R | {missing})^(n,3)|absent, f(A) in R**(3,3)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ³, f(A) ∈ R**(3,3)",
+  "ascii": "for A in (R | {missing})^(n,3), f(A) in R**(3,3)"
  },
  "space_output_wrong_shape": {
   "input": "for A in R^(n,3), f(A) in R^(n,3)",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ³ ∪ {absent}, f(A) ∈ R**(n,3)",
-  "ascii": "for A in (R | {missing})^(n,3)|absent, f(A) in R**(n,3)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ³, f(A) ∈ R**(n,3)",
+  "ascii": "for A in (R | {missing})^(n,3), f(A) in R**(n,3)"
  },
  "space_output_named": {
-  "input": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ¹⁵ ∪ {absent}, x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(A, x) ∈ R**15",
-  "ascii": "for A in (R | {missing})^(n,15)|absent, x in (R | {missing})^n|absent, f(A, x) in R**15"
+  "input": "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15",
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣ¹⁵, x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, f(A, x) ∈ R**15",
+  "ascii": "for A in (R | {missing})^(n,15), x in ([-1000000.0, 1000000.0] | {missing})^n : float, f(A, x) in R**15"
  },
  "space_excluded_fixed": {
   "input": "for A in R^(30,15), excluded_outside_domain(A)",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})³⁰ˣ¹⁵ ∪ {absent}, A excluded outside domain",
-  "ascii": "for A in (R | {missing})^(30,15)|absent, excluded_outside_domain(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})³⁰ˣ¹⁵, A excluded outside domain",
+  "ascii": "for A in (R | {missing})^(30,15), excluded_outside_domain(A)"
  },
  "space_excluded_by_construction": {
   "input": "for A in R^(30,15), A excluded outside domain",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})³⁰ˣ¹⁵ ∪ {absent}, A excluded outside domain",
-  "ascii": "for A in (R | {missing})^(30,15)|absent, excluded_outside_domain(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})³⁰ˣ¹⁵, A excluded outside domain",
+  "ascii": "for A in (R | {missing})^(30,15), excluded_outside_domain(A)"
  },
  "dim_premise_against_fixed": {
   "input": "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
-  "unicode": "assuming len(r) == 5, ∀ r ∈ ([0.0, 1.0] ∪ {∅})¹² ⊂ ℝ ∪ {absent}, f(r) ≥ 0",
-  "ascii": "assuming len(r) == 5, for r in ([0.0, 1.0] | {missing})^12 : float|absent, f(r) >= 0"
+  "unicode": "assuming len(r) == 5, ∀ r ∈ ([0.0, 1.0] ∪ {∅})¹² ⊂ ℝ, f(r) ≥ 0",
+  "ascii": "assuming len(r) == 5, for r in ([0.0, 1.0] | {missing})^12 : float, f(r) >= 0"
  },
  "domain_closed_interval": {
   "input": "for x in [0, 1], f(x) >= 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) >= 0"
  },
  "enforce_domain_guard": {
   "input": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
-  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x ∈ [1.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, α) ≤ x",
-  "ascii": "for alpha in [0.0, 1.0] : float|absent|missing, x in [1.0, 10.0] : float|absent|missing, f(x, alpha) <= x"
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, x ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ x",
+  "ascii": "for alpha in [0.0, 1.0] : float|missing, x in [1.0, 10.0] : float|missing, f(x, alpha) <= x"
  },
  "enforce_domain_guard_unbound": {
   "input": "for x in [1, 10], f(x, alpha) <= x",
-  "unicode": "let α = alpha, ∀ x ∈ [1.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, α) ≤ x",
-  "ascii": "for x in [1.0, 10.0] : float|absent|missing, f(x, alpha) <= x"
+  "unicode": "let α = alpha, ∀ x ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ x",
+  "ascii": "for x in [1.0, 10.0] : float|missing, f(x, alpha) <= x"
  },
  "domain_open_interval": {
   "input": "for x in (0, 1), f(x) >= 0",
-  "unicode": "∀ x ∈ (0.0, 1.0) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in (0.0, 1.0) : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ (0.0, 1.0) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in (0.0, 1.0) : float|missing, f(x) >= 0"
  },
  "domain_subset_integer": {
   "input": "for n in [0, 100] subset Z, f(n) >= 0",
@@ -181,8 +181,8 @@
  },
  "raises_typed_region": {
   "input": "for x in [-10, -1], raises(f(x), ValueError)",
-  "unicode": "∀ x ∈ [-10.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x), ValueError)",
-  "ascii": "for x in [-10.0, -1.0] : float|absent|missing, raises(f(x), ValueError)"
+  "unicode": "∀ x ∈ [-10.0, -1.0] ⊂ ℝ ∪ {∅}, raises(f(x), ValueError)",
+  "ascii": "for x in [-10.0, -1.0] : float|missing, raises(f(x), ValueError)"
  },
  "is_pole_safe": {
   "input": "is_pole_safe(x)",
@@ -226,8 +226,8 @@
  },
  "is_library_safe_scoped": {
   "input": "for x in [0, 1e6], is_library_safe(numpy)",
-  "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, numpy is library safe",
-  "ascii": "for x in [0.0, 1000000.0] : float|absent|missing, is_library_safe(numpy)"
+  "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {∅}, numpy is library safe",
+  "ascii": "for x in [0.0, 1000000.0] : float|missing, is_library_safe(numpy)"
  },
  "is_language_defined_postfix": {
   "input": "s is language defined",
@@ -391,148 +391,148 @@
  },
  "norm_bars_euclidean": {
   "input": "for x in R^n, f(x) ~= ||x||",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x) ≈ ‖x‖",
-  "ascii": "for x in (R | {missing})^n|absent, f(x) ~= ||x||"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, f(x) ≈ ‖x‖",
+  "ascii": "for x in (R | {missing})^n, f(x) ~= ||x||"
  },
  "norm_bars_two": {
   "input": "for x in R^n, f(x) ~= ||x||_2",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x) ≈ ‖x‖₂",
-  "ascii": "for x in (R | {missing})^n|absent, f(x) ~= ||x||_2"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, f(x) ≈ ‖x‖₂",
+  "ascii": "for x in (R | {missing})^n, f(x) ~= ||x||_2"
  },
  "norm_bars_one": {
   "input": "for x in R^n, f(x) ~= ||x||_1",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x) ≈ ‖x‖₁",
-  "ascii": "for x in (R | {missing})^n|absent, f(x) ~= ||x||_1"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, f(x) ≈ ‖x‖₁",
+  "ascii": "for x in (R | {missing})^n, f(x) ~= ||x||_1"
  },
  "norm_bars_inf": {
   "input": "for x in R^n, f(x) ~= ||x||_inf",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x) ≈ ‖x‖∞",
-  "ascii": "for x in (R | {missing})^n|absent, f(x) ~= ||x||_inf"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, f(x) ≈ ‖x‖∞",
+  "ascii": "for x in (R | {missing})^n, f(x) ~= ||x||_inf"
  },
  "norm_bars_integer_order": {
   "input": "for x in [-1e6, 1e6]^n, f(x, 3) ~= ||x||_3",
-  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x, 3) ≈ ‖x‖₃",
-  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, 3) ~= ||x||_3"
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, f(x, 3) ≈ ‖x‖₃",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float, f(x, 3) ~= ||x||_3"
  },
  "norm_bars_chain": {
   "input": "for x in [-1e6, 1e6]^n, ||x||_inf <= f(x) <= ||x||_1",
-  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, ‖x‖∞ ≤ f(x) ≤ ‖x‖₁",
-  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, ||x||_inf <= f(x) <= ||x||_1"
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, ‖x‖∞ ≤ f(x) ≤ ‖x‖₁",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float, ||x||_inf <= f(x) <= ||x||_1"
  },
  "norm_bars_homogeneous": {
   "input": "for x in R^n, let c be [-2, 2], f(c * x) ~= |c| * ||x||",
-  "unicode": "let c be [-2.0, 2.0], ∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(c*x) ≈ ‖x‖*|c|",
-  "ascii": "let c be [-2.0, 2.0], for x in (R | {missing})^n|absent, f(c*x) ~= ||x||*|c|"
+  "unicode": "let c be [-2.0, 2.0], ∀ x ∈ (ℝ ∪ {∅})ⁿ, f(c*x) ≈ ‖x‖*|c|",
+  "ascii": "let c be [-2.0, 2.0], for x in (R | {missing})^n, f(c*x) ~= ||x||*|c|"
  },
  "norm_bars_homogeneous_sign_trap": {
   "input": "for x in R^n, let c be [-2, 2], f(c * x) ~= c * ||x||",
-  "unicode": "let c be [-2.0, 2.0], ∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(c*x) ≈ c*‖x‖",
-  "ascii": "let c be [-2.0, 2.0], for x in (R | {missing})^n|absent, f(c*x) ~= c*||x||"
+  "unicode": "let c be [-2.0, 2.0], ∀ x ∈ (ℝ ∪ {∅})ⁿ, f(c*x) ≈ c*‖x‖",
+  "ascii": "let c be [-2.0, 2.0], for x in (R | {missing})^n, f(c*x) ~= c*||x||"
  },
  "norm_bars_unit_vector": {
   "input": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
-  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, ‖f(x)‖ ≈ 1",
-  "ascii": "assuming ||x|| > 0, for x in (R | {missing})^n|absent, ||f(x)|| ~= 1"
+  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ (ℝ ∪ {∅})ⁿ, ‖f(x)‖ ≈ 1",
+  "ascii": "assuming ||x|| > 0, for x in (R | {missing})^n, ||f(x)|| ~= 1"
  },
  "norm_bars_direction": {
   "input": "assuming ||x|| > 0, for x in R^n, f(x) ~= x / ||x||",
-  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x) ≈ x/‖x‖",
-  "ascii": "assuming ||x|| > 0, for x in (R | {missing})^n|absent, f(x) ~= x/||x||"
+  "unicode": "assuming ‖x‖ > 0, ∀ x ∈ (ℝ ∪ {∅})ⁿ, f(x) ≈ x/‖x‖",
+  "ascii": "assuming ||x|| > 0, for x in (R | {missing})^n, f(x) ~= x/||x||"
  },
  "norm_bars_distance": {
   "input": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(x, y) ≈ ‖x - y‖",
-  "ascii": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(x, y) ~= ||x - y||"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, y ∈ (ℝ ∪ {∅})ⁿ, f(x, y) ≈ ‖x - y‖",
+  "ascii": "for x in (R | {missing})^n, y in (R | {missing})^n, f(x, y) ~= ||x - y||"
  },
  "norm_bars_distance_symmetric": {
   "input": "for x in R^n, y in R^n, f(y, x) == ||x - y||",
-  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, y ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(y, x) = ‖x - y‖",
-  "ascii": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(y, x) = ||x - y||"
+  "unicode": "∀ x ∈ (ℝ ∪ {∅})ⁿ, y ∈ (ℝ ∪ {∅})ⁿ, f(y, x) = ‖x - y‖",
+  "ascii": "for x in (R | {missing})^n, y in (R | {missing})^n, f(y, x) = ||x - y||"
  },
  "norm_bars_triangle": {
   "input": "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) <= ||x|| + ||y||",
-  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, y ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x, y) ≤ ‖x‖ + ‖y‖",
-  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, y in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, y) <= ||x|| + ||y||"
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, y ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, f(x, y) ≤ ‖x‖ + ‖y‖",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float, y in ([-1000000.0, 1000000.0] | {missing})^n : float, f(x, y) <= ||x|| + ||y||"
  },
  "norm_bars_stopping_criterion": {
   "input": "for x_new in R^n, x_old in R^n, tol in [0.01, 1], f(x_new, x_old, tol) == (||x_new - x_old|| <= tol)",
-  "unicode": "∀ x_new ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, x_old ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, tol ∈ [0.01, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x_new, x_old, tol) = (‖x_new - x_old‖ <= tol)",
-  "ascii": "for x_new in (R | {missing})^n|absent, x_old in (R | {missing})^n|absent, tol in [0.01, 1.0] : float|absent|missing, f(x_new, x_old, tol) = (||x_new - x_old|| <= tol)"
+  "unicode": "∀ x_new ∈ (ℝ ∪ {∅})ⁿ, x_old ∈ (ℝ ∪ {∅})ⁿ, tol ∈ [0.01, 1.0] ⊂ ℝ ∪ {∅}, f(x_new, x_old, tol) = (‖x_new - x_old‖ <= tol)",
+  "ascii": "for x_new in (R | {missing})^n, x_old in (R | {missing})^n, tol in [0.01, 1.0] : float|missing, f(x_new, x_old, tol) = (||x_new - x_old|| <= tol)"
  },
  "norm_bars_nearest_distance": {
   "input": "for points in [-1e6, 1e6]^(m,n), q in [-1e6, 1e6]^n, f(points, q) <= ||points[0, :] - q||",
-  "unicode": "∀ points ∈ ([-1000000.0, 1000000.0] ∪ {∅})ᵐˣⁿ ⊂ ℝ ∪ {absent}, q ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(points, q) ≤ ‖points[0, :] - q‖",
-  "ascii": "for points in ([-1000000.0, 1000000.0] | {missing})^(m,n) : float|absent, q in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(points, q) <= ||points[0, :] - q||"
+  "unicode": "∀ points ∈ ([-1000000.0, 1000000.0] ∪ {∅})ᵐˣⁿ ⊂ ℝ, q ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, f(points, q) ≤ ‖points[0, :] - q‖",
+  "ascii": "for points in ([-1000000.0, 1000000.0] | {missing})^(m,n) : float, q in ([-1000000.0, 1000000.0] | {missing})^n : float, f(points, q) <= ||points[0, :] - q||"
  },
  "norm_bars_nearest_distance_trap": {
   "input": "for points in R^(m,n), q in R^n, f(points, q) >= ||points[0, :] - q||",
-  "unicode": "∀ points ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, q ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(points, q) ≥ ‖points[0, :] - q‖",
-  "ascii": "for points in (R | {missing})^(m,n)|absent, q in (R | {missing})^n|absent, f(points, q) >= ||points[0, :] - q||"
+  "unicode": "∀ points ∈ (ℝ ∪ {∅})ᵐˣⁿ, q ∈ (ℝ ∪ {∅})ⁿ, f(points, q) ≥ ‖points[0, :] - q‖",
+  "ascii": "for points in (R | {missing})^(m,n), q in (R | {missing})^n, f(points, q) >= ||points[0, :] - q||"
  },
  "norm_bars_series_tracking_error": {
   "input": "for port in R^n, bench in R^n, f(port, bench) ~= ||port - bench||",
-  "unicode": "∀ port ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, bench ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(port, bench) ≈ ‖-bench + port‖",
-  "ascii": "for port in (R | {missing})^n|absent, bench in (R | {missing})^n|absent, f(port, bench) ~= ||-bench + port||"
+  "unicode": "∀ port ∈ (ℝ ∪ {∅})ⁿ, bench ∈ (ℝ ∪ {∅})ⁿ, f(port, bench) ≈ ‖-bench + port‖",
+  "ascii": "for port in (R | {missing})^n, bench in (R | {missing})^n, f(port, bench) ~= ||-bench + port||"
  },
  "norm_bars_rmse": {
   "input": "for pred in R^n, actual in R^n, f(pred, actual) ~= ||pred - actual|| / sqrt(len(pred))",
-  "unicode": "∀ pred ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, actual ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(pred, actual) ≈ ‖-actual + pred‖/sqrt(len(pred))",
-  "ascii": "for pred in (R | {missing})^n|absent, actual in (R | {missing})^n|absent, f(pred, actual) ~= ||-actual + pred||/sqrt(len(pred))"
+  "unicode": "∀ pred ∈ (ℝ ∪ {∅})ⁿ, actual ∈ (ℝ ∪ {∅})ⁿ, f(pred, actual) ≈ ‖-actual + pred‖/sqrt(len(pred))",
+  "ascii": "for pred in (R | {missing})^n, actual in (R | {missing})^n, f(pred, actual) ~= ||-actual + pred||/sqrt(len(pred))"
  },
  "norm_bars_portfolio_weights": {
   "input": "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
-  "unicode": "∀ scores ∈ ([0.1, 10.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, ‖f(scores)‖₁ ≈ 1",
-  "ascii": "for scores in ([0.1, 10.0] | {missing})^n : float|absent, ||f(scores)||_1 ~= 1"
+  "unicode": "∀ scores ∈ ([0.1, 10.0] ∪ {∅})ⁿ ⊂ ℝ, ‖f(scores)‖₁ ≈ 1",
+  "ascii": "for scores in ([0.1, 10.0] | {missing})^n : float, ||f(scores)||_1 ~= 1"
  },
  "norm_bars_squared": {
   "input": "for x in [-1e6, 1e6]^n, f(x) ~= ||x||^2",
-  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x) ≈ ‖x‖^2",
-  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x) ~= ||x||^2"
+  "unicode": "∀ x ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, f(x) ≈ ‖x‖^2",
+  "ascii": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float, f(x) ~= ||x||^2"
  },
  "norm_bars_squared_trap": {
   "input": "for x in [-1, 1]^n, f(x) ~= ||x||^2",
-  "unicode": "∀ x ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x) ≈ ‖x‖^2",
-  "ascii": "for x in ([-1.0, 1.0] | {missing})^n : float|absent, f(x) ~= ||x||^2"
+  "unicode": "∀ x ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ, f(x) ≈ ‖x‖^2",
+  "ascii": "for x in ([-1.0, 1.0] | {missing})^n : float, f(x) ~= ||x||^2"
  },
  "norm_bars_order_trap": {
   "input": "for x in [-1, 1]^n, f(x) ~= ||x||_2",
-  "unicode": "∀ x ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(x) ≈ ‖x‖₂",
-  "ascii": "for x in ([-1.0, 1.0] | {missing})^n : float|absent, f(x) ~= ||x||_2"
+  "unicode": "∀ x ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ, f(x) ≈ ‖x‖₂",
+  "ascii": "for x in ([-1.0, 1.0] | {missing})^n : float, f(x) ~= ||x||_2"
  },
  "matrix_norm_bars_frobenius": {
   "input": "for A in R^(m,n), f(A) ~= ||A||",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(A) ≈ ‖A‖",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, f(A) ~= ||A||"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(A) ≈ ‖A‖",
+  "ascii": "for A in (R | {missing})^(m,n), f(A) ~= ||A||"
  },
  "matrix_norm_bars_gram_trace": {
   "input": "for A in R^(m,n), ||A||^2 ~= f(A)",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, ‖A‖^2 ≈ f(A)",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, ||A||^2 ~= f(A)"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, ‖A‖^2 ≈ f(A)",
+  "ascii": "for A in (R | {missing})^(m,n), ||A||^2 ~= f(A)"
  },
  "matrix_norm_bars_one": {
   "input": "for A in R^(m,n), f(A) ~= ||A||_1",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(A) ≈ ‖A‖₁",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, f(A) ~= ||A||_1"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(A) ≈ ‖A‖₁",
+  "ascii": "for A in (R | {missing})^(m,n), f(A) ~= ||A||_1"
  },
  "matrix_norm_bars_inf": {
   "input": "for A in R^(m,n), f(A) ~= ||A||_inf",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(A) ≈ ‖A‖∞",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, f(A) ~= ||A||_inf"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(A) ≈ ‖A‖∞",
+  "ascii": "for A in (R | {missing})^(m,n), f(A) ~= ||A||_inf"
  },
  "matrix_norm_bars_order_trap": {
   "input": "for A in R^(m,n), f(A) ~= ||A||_inf",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(A) ≈ ‖A‖∞",
-  "ascii": "for A in (R | {missing})^(m,n)|absent, f(A) ~= ||A||_inf"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(A) ≈ ‖A‖∞",
+  "ascii": "for A in (R | {missing})^(m,n), f(A) ~= ||A||_inf"
  },
  "matrix_norm_bars_spectral": {
   "input": "for A in R^(n,n), f(A) ~= ||A||_2",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, f(A) ≈ ‖A‖₂",
-  "ascii": "for A in (R | {missing})^(n,n)|absent, f(A) ~= ||A||_2"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ, f(A) ≈ ‖A‖₂",
+  "ascii": "for A in (R | {missing})^(n,n), f(A) ~= ||A||_2"
  },
  "matrix_norm_bars_spectral_below_frobenius": {
   "input": "for A in R^(n,n), f(A) <= ||A||",
-  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, f(A) ≤ ‖A‖",
-  "ascii": "for A in (R | {missing})^(n,n)|absent, f(A) <= ||A||"
+  "unicode": "∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ, f(A) ≤ ‖A‖",
+  "ascii": "for A in (R | {missing})^(n,n), f(A) <= ||A||"
  },
  "vector_dot": {
   "input": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
@@ -615,34 +615,34 @@
   "ascii": "let q = numpy.linalg.qr, for A in (R | {missing})^(n,n)|absent, q(A)[0] @ q(A)[1] ~= A"
  },
  "table_column_attribute": {
-  "input": "for c in [-2, 2], f(df, c) == c * df.returns",
-  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df.returns",
-  "ascii": "for c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df.returns"
+  "input": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+  "unicode": "∀ df ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {∅}, f(df, c) = c*df.returns",
+  "ascii": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float, c in [-2.0, 2.0] : float|missing, f(df, c) = c*df.returns"
  },
  "table_column_item": {
-  "input": "for c in [-2, 2], f(df, c) == c * df[\"returns\"]",
-  "unicode": "∀ c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(df, c) = c*df[\"returns\"]",
-  "ascii": "for c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df[\"returns\"]"
+  "input": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df[\"returns\"]",
+  "unicode": "∀ df ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ, c ∈ [-2.0, 2.0] ⊂ ℝ ∪ {∅}, f(df, c) = c*df[\"returns\"]",
+  "ascii": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float, c in [-2.0, 2.0] : float|missing, f(df, c) = c*df[\"returns\"]"
  },
  "vector_running_maximum": {
   "input": "for a in R^n, f(a) == cummax(a)",
-  "unicode": "∀ a ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(a) = cummax(a)",
-  "ascii": "for a in (R | {missing})^n|absent, f(a) = cummax(a)"
+  "unicode": "∀ a ∈ (ℝ ∪ {∅})ⁿ, f(a) = cummax(a)",
+  "ascii": "for a in (R | {missing})^n, f(a) = cummax(a)"
  },
  "vector_between_least_and_greatest": {
   "input": "for xs in R^n, min(xs) <= f(xs) <= max(xs)",
-  "unicode": "∀ xs ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, min(xs) ≤ f(xs) ≤ max(xs)",
-  "ascii": "for xs in (R | {missing})^n|absent, min(xs) <= f(xs) <= max(xs)"
+  "unicode": "∀ xs ∈ (ℝ ∪ {∅})ⁿ, min(xs) ≤ f(xs) ≤ max(xs)",
+  "ascii": "for xs in (R | {missing})^n, min(xs) <= f(xs) <= max(xs)"
  },
  "vector_drawdown_bounds": {
   "input": "for prices in [1, 100]^n, -1 <= f(prices) <= 0",
-  "unicode": "∀ prices ∈ ([1.0, 100.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, -1 ≤ f(prices) ≤ 0",
-  "ascii": "for prices in ([1.0, 100.0] | {missing})^n : float|absent, -1 <= f(prices) <= 0"
+  "unicode": "∀ prices ∈ ([1.0, 100.0] ∪ {∅})ⁿ ⊂ ℝ, -1 ≤ f(prices) ≤ 0",
+  "ascii": "for prices in ([1.0, 100.0] | {missing})^n : float, -1 <= f(prices) <= 0"
  },
  "table_columns_dot": {
   "input": "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)",
-  "unicode": "∀ df ∈ ([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(df) ≈ dot(df.w, df.r)",
-  "ascii": "for df in ([0.0, 1.0] | {missing})^n : float|absent, f(df) ~= dot(df.w, df.r)"
+  "unicode": "∀ df ∈ ([0.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ, f(df) ≈ dot(df.w, df.r)",
+  "ascii": "for df in ([0.0, 1.0] | {missing})^n : float, f(df) ~= dot(df.w, df.r)"
  },
  "inferred_literal_domain": {
   "input": "raises(f(50, 0), ValueError)",
@@ -651,8 +651,8 @@
  },
  "let_alias": {
   "input": "let m = m1, for m1 in [0.1,1000], x1 in [-100,100], x2 in [-100,100], f(m,x1,m,x2) == (x1+x2)/2",
-  "unicode": "∀ m1 ∈ [0.1, 1000.0] ⊂ ℝ ∪ {absent, ∅}, x1 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, x2 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(m1, x1, m1, x2) = x1/2 + x2/2",
-  "ascii": "for m1 in [0.1, 1000.0] : float|absent|missing, x1 in [-100.0, 100.0] : float|absent|missing, x2 in [-100.0, 100.0] : float|absent|missing, f(m1, x1, m1, x2) = x1/2 + x2/2"
+  "unicode": "∀ m1 ∈ [0.1, 1000.0] ⊂ ℝ ∪ {∅}, x1 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {∅}, x2 ∈ [-100.0, 100.0] ⊂ ℝ ∪ {∅}, f(m1, x1, m1, x2) = x1/2 + x2/2",
+  "ascii": "for m1 in [0.1, 1000.0] : float|missing, x1 in [-100.0, 100.0] : float|missing, x2 in [-100.0, 100.0] : float|missing, f(m1, x1, m1, x2) = x1/2 + x2/2"
  },
  "let_function_dotted": {
   "input": "let g = math.sqrt, for x in (0,100], g(x) >= 0",
@@ -661,8 +661,8 @@
  },
  "forall_symbol": {
   "input": "∀ x ∈ [0, 1], f(x) ≥ 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) >= 0"
  },
  "domain_subset_symbol": {
   "input": "∀ n ∈ [0, 100] ⊂ ℤ, f(n) ≥ 0",
@@ -671,8 +671,8 @@
  },
  "domain_blackboard_reals": {
   "input": "∀ x ∈ ℝ, f(x) == 2*x",
-  "unicode": "∀ x ∈ ℝ ∪ {absent, ∅}, f(x) = 2*x",
-  "ascii": "for x in R|absent|missing, f(x) = 2*x"
+  "unicode": "∀ x ∈ ℝ ∪ {∅}, f(x) = 2*x",
+  "ascii": "for x in R|missing, f(x) = 2*x"
  },
  "relation_approx_unicode": {
   "input": "f(x) ≈ 2*x",
@@ -686,38 +686,38 @@
  },
  "sqrt_symbol": {
   "input": "∀ x ∈ [0, 1], √(f(x)) ≥ 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, sqrt(f(x)) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, sqrt(f(x)) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, sqrt(f(x)) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, sqrt(f(x)) >= 0"
  },
  "multiply_dot": {
   "input": "∀ x ∈ [0, 1], f(x) · 2 == 4*x",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, 2*f(x) = 4*x",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, 2*f(x) = 4*x"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, 2*f(x) = 4*x",
+  "ascii": "for x in [0.0, 1.0] : float|missing, 2*f(x) = 4*x"
  },
  "infinity_symbol": {
   "input": "∀ x ∈ [0, ∞), f(x) ≥ 0",
-  "unicode": "∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in [0.0, inf) : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, inf) : float|missing, f(x) >= 0"
  },
  "floor_brackets_unicode": {
   "input": "∀ x ∈ [0, 1], ⌊f(x)⌋ ≥ 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, floor(f(x)) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, floor(f(x)) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, floor(f(x)) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, floor(f(x)) >= 0"
  },
  "latex_command_forall": {
   "input": "\\forall x \\in [0, 1], f(x) \\geq 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) >= 0"
  },
  "sqrt_bare_radical": {
   "input": "∀ x ∈ [1, 4], f(x) ≥ √x",
-  "unicode": "∀ x ∈ [1.0, 4.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ sqrt(x)",
-  "ascii": "for x in [1.0, 4.0] : float|absent|missing, f(x) >= sqrt(x)"
+  "unicode": "∀ x ∈ [1.0, 4.0] ⊂ ℝ ∪ {∅}, f(x) ≥ sqrt(x)",
+  "ascii": "for x in [1.0, 4.0] : float|missing, f(x) >= sqrt(x)"
  },
  "power_superscript_negative": {
   "input": "∀ x ∈ [1, 2], f(x) ≥ x⁻¹",
-  "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 1/x",
-  "ascii": "for x in [1.0, 2.0] : float|absent|missing, f(x) >= 1/x"
+  "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 1/x",
+  "ascii": "for x in [1.0, 2.0] : float|missing, f(x) >= 1/x"
  },
  "latex_equiv": {
   "input": "let g = mathema.lexicon.double, f \\equiv g",
@@ -726,48 +726,48 @@
  },
  "latex_leqslant": {
   "input": "\\forall x \\in [0, 1], f(x) \\leqslant 2",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≤ 2",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) <= 2"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≤ 2",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) <= 2"
  },
  "latex_geqslant": {
   "input": "\\forall x \\in [0, 1], f(x) \\geqslant 0",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≥ 0",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) >= 0"
  },
  "latex_varepsilon": {
   "input": "for x in [0, 1], abs(f(x) - x) \\leq \\varepsilon",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ ε",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0] : float|missing, abs(x - f(x)) <= \\epsilon"
  },
  "latex_varphi": {
   "input": "for \\varphi in [0, 1], f(\\varphi) \\leq 1",
-  "unicode": "∀ φ ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(φ) ≤ 1",
-  "ascii": "for φ in [0.0, 1.0] : float|absent|missing, f(\\phi) <= 1"
+  "unicode": "∀ φ ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(φ) ≤ 1",
+  "ascii": "for φ in [0.0, 1.0] : float|missing, f(\\phi) <= 1"
  },
  "latex_left_right_bars": {
   "input": "for x in [-1, 1], \\left| f(x) \\right| \\leq 2",
-  "unicode": "∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, |f(x)| ≤ 2",
-  "ascii": "for x in [-1.0, 1.0] : float|absent|missing, |f(x)| <= 2"
+  "unicode": "∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {∅}, |f(x)| ≤ 2",
+  "ascii": "for x in [-1.0, 1.0] : float|missing, |f(x)| <= 2"
  },
  "named_under_test": {
   "input": "for price in [0,1000], rate in [0,1], discounted_price(price, rate) <= price",
-  "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, discounted_price(price, rate) ≤ price",
-  "ascii": "for price in [0.0, 1000.0] : float|absent|missing, rate in [0.0, 1.0] : float|absent|missing, discounted_price(price, rate) <= price"
+  "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, discounted_price(price, rate) ≤ price",
+  "ascii": "for price in [0.0, 1000.0] : float|missing, rate in [0.0, 1.0] : float|missing, discounted_price(price, rate) <= price"
  },
  "let_alias_for_under_test": {
   "input": "let net = f, for price in [0,1000], rate in [0,1], net(price, rate) <= price",
-  "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(price, rate) ≤ price",
-  "ascii": "for price in [0.0, 1000.0] : float|absent|missing, rate in [0.0, 1.0] : float|absent|missing, f(price, rate) <= price"
+  "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(price, rate) ≤ price",
+  "ascii": "for price in [0.0, 1000.0] : float|missing, rate in [0.0, 1.0] : float|missing, f(price, rate) <= price"
  },
  "let_free_var_closed": {
   "input": "let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0",
-  "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
-  "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|missing, c + f(x) >= 0"
  },
  "let_free_var_typed": {
   "input": "let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0",
-  "unicode": "let c be [1, 100] ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0",
-  "ascii": "let c be [1, 100] : int, for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0"
+  "unicode": "let c be [1, 100] ⊂ ℤ, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {∅}, c + f(x) ≥ 0",
+  "ascii": "let c be [1, 100] : int, for x in [0.0, 10.0] : float|missing, c + f(x) >= 0"
  },
  "let_pseudo_infinity": {
   "input": "let |inf| be 1e12, for x in [0, oo], f(x) >= 0",
@@ -776,8 +776,8 @@
  },
  "stress_gauge_invariance": {
   "input": "let c be [-1e6,1e6], for dh in [-1e6,1e6], t in [0,1000], ds in [-1e6,1e6], d(f(dh+c,t,ds), t) == d(f(dh,t,ds), t)",
-  "unicode": "let c be [-1000000.0, 1000000.0], ∀ dh ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, ds ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, ∂(f(c + dh, t, ds)/∂t) = ∂(f(dh, t, ds)/∂t)",
-  "ascii": "let c be [-1000000.0, 1000000.0], for dh in [-1000000.0, 1000000.0] : float|absent|missing, t in [0.0, 1000.0] : float|absent|missing, ds in [-1000000.0, 1000000.0] : float|absent|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)"
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ dh ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, t ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, ds ∈ [-1000000.0, 1000000.0] ⊂ ℝ ∪ {∅}, ∂(f(c + dh, t, ds)/∂t) = ∂(f(dh, t, ds)/∂t)",
+  "ascii": "let c be [-1000000.0, 1000000.0], for dh in [-1000000.0, 1000000.0] : float|missing, t in [0.0, 1000.0] : float|missing, ds in [-1000000.0, 1000000.0] : float|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)"
  },
  "stress_mixed_let_and_types": {
   "input": "let g = math.sqrt, let c be [1,100] subset integer, for x in (0, 100], g(x) + c >= 0",
@@ -846,23 +846,43 @@
  },
  "tolerance_epsilon": {
   "input": "for x in [0, 1], abs(f(x) - x) <= ε",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ ε",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0] : float|missing, abs(x - f(x)) <= \\epsilon"
  },
  "tolerance_eps_ascii": {
   "input": "for x in [0, 1], abs(f(x) - x) <= eps",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ eps",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= eps"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ eps",
+  "ascii": "for x in [0.0, 1.0] : float|missing, abs(x - f(x)) <= eps"
  },
  "tolerance_epsilon_word": {
   "input": "for x in [0, 1], abs(f(x) - x) <= epsilon",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ epsilon",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= epsilon"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ epsilon",
+  "ascii": "for x in [0.0, 1.0] : float|missing, abs(x - f(x)) <= epsilon"
  },
  "tolerance_epsilon_latex": {
   "input": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, abs(x - f(x)) ≤ ε",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, abs(x - f(x)) ≤ ε",
+  "ascii": "for x in [0.0, 1.0] : float|missing, abs(x - f(x)) <= \\epsilon"
+ },
+ "exact_offset_vs_approx": {
+  "input": "for x in [0, 1], f(x) ~= x",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) ≈ x",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) ~= x"
+ },
+ "exact_offset_vs_approx_trap": {
+  "input": "for x in [0, 1], f(x) == x",
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x) = x",
+  "ascii": "for x in [0.0, 1.0] : float|missing, f(x) = x"
+ },
+ "approx_taylor_sin_exact_fails": {
+  "input": "for x in [0, 0.01], f(x) == sin(x)",
+  "unicode": "∀ x ∈ [0.0, 0.01] ⊂ ℝ ∪ {∅}, f(x) = sin(x)",
+  "ascii": "for x in [0.0, 0.01] : float|missing, f(x) = sin(x)"
+ },
+ "approx_too_wide": {
+  "input": "for x in [0, 0.5], f(x) ~= sin(x)",
+  "unicode": "∀ x ∈ [0.0, 0.5] ⊂ ℝ ∪ {∅}, f(x) ≈ sin(x)",
+  "ascii": "for x in [0.0, 0.5] : float|missing, f(x) ~= sin(x)"
  },
  "derivative_call": {
   "input": "d(f(x), x) >= 0",
@@ -936,8 +956,8 @@
  },
  "assuming_inequality": {
   "input": "assuming b^2 - 4*a*c >= 0.01, for a in [1,10], b in [-10,10], c in [-10,10], d(f(a,b,c), c) <= 0",
-  "unicode": "assuming b^2 - 4*a*c >= 0.01, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, ∂(f(a, b, c)/∂c) ≤ 0",
-  "ascii": "assuming b^2 - 4*a*c >= 0.01, for a in [1.0, 10.0] : float|absent|missing, b in [-10.0, 10.0] : float|absent|missing, c in [-10.0, 10.0] : float|absent|missing, d(f(a, b, c), c) <= 0"
+  "unicode": "assuming b^2 - 4*a*c >= 0.01, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, ∂(f(a, b, c)/∂c) ≤ 0",
+  "ascii": "assuming b^2 - 4*a*c >= 0.01, for a in [1.0, 10.0] : float|missing, b in [-10.0, 10.0] : float|missing, c in [-10.0, 10.0] : float|missing, d(f(a, b, c), c) <= 0"
  },
  "assuming_nonzero": {
   "input": "assuming k != 0, f(x, k) == x/k",
@@ -946,8 +966,8 @@
  },
  "assuming_named_claim": {
   "input": "assuming real_roots, for a in [1,10], b in [-10,10], c in [-10,10], d(f(a,b,c), c) <= 0",
-  "unicode": "assuming real_roots, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, ∂(f(a, b, c)/∂c) ≤ 0",
-  "ascii": "assuming real_roots, for a in [1.0, 10.0] : float|absent|missing, b in [-10.0, 10.0] : float|absent|missing, c in [-10.0, 10.0] : float|absent|missing, d(f(a, b, c), c) <= 0"
+  "unicode": "assuming real_roots, ∀ a ∈ [1.0, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, c ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, ∂(f(a, b, c)/∂c) ≤ 0",
+  "ascii": "assuming real_roots, for a in [1.0, 10.0] : float|missing, b in [-10.0, 10.0] : float|missing, c in [-10.0, 10.0] : float|missing, d(f(a, b, c), c) <= 0"
  },
  "assuming_prerequisite_holds": {
   "input": "assuming grows holds, for x in [0,10], f(x) == 2*x",
@@ -966,58 +986,58 @@
  },
  "assuming_is_defined": {
   "input": "assuming is_defined(f), for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
-  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {absent, ∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
-  "ascii": "assuming f is defined, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined, for w in [-50.0, 50.0] : float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
  },
  "assuming_is_defined_postfix": {
   "input": "assuming f is defined, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
-  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {absent, ∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
-  "ascii": "assuming f is defined, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+  "unicode": "assuming f is defined, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined, for w in [-50.0, 50.0] : float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
  },
  "assuming_is_defined_pinned": {
   "input": "assuming is_defined(f) --> sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)",
-  "unicode": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {absent, ∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
-  "ascii": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
+  "unicode": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, ∀ w ∈ [-50.0, 50.0] ⊂ ℝ ∪ {∅}, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+  "ascii": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0] : float|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)"
  },
  "certificate_convex_lower": {
   "input": "for alpha in [0, 1], min(x) <= f(x, alpha)",
-  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, min(x) ≤ f(x, α)",
-  "ascii": "for alpha in [0.0, 1.0] : float|absent|missing, min(x) <= f(x, alpha)"
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, min(x) ≤ f(x, α)",
+  "ascii": "for alpha in [0.0, 1.0] : float|missing, min(x) <= f(x, alpha)"
  },
  "certificate_convex_upper": {
   "input": "for alpha in [0, 1], f(x, alpha) <= max(x)",
-  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x, α) ≤ max(x)",
-  "ascii": "for alpha in [0.0, 1.0] : float|absent|missing, f(x, alpha) <= max(x)"
+  "unicode": "let α = alpha, ∀ α ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, f(x, α) ≤ max(x)",
+  "ascii": "for alpha in [0.0, 1.0] : float|missing, f(x, alpha) <= max(x)"
  },
  "certificate_quadratic": {
   "input": "let |inf| be 1e100, for s1 in [0.05,0.5], s2 in [0.05,0.5], rho in [-0.9,0.9], d(f(w,s1,s2,rho), w, w) >= 0",
-  "unicode": "let ρ = rho, let |∞| be 1e+100, ∀ s1 ∈ [0.05, 0.5] ⊂ ℝ ∪ {absent, ∅}, s2 ∈ [0.05, 0.5] ⊂ ℝ ∪ {absent, ∅}, ρ ∈ [-0.9, 0.9] ⊂ ℝ ∪ {absent, ∅}, ∂²(f(w, s1, s2, ρ)/∂w²) ≥ 0",
-  "ascii": "let |inf| be 1e+100, for s1 in [0.05, 0.5] : float|absent|missing, s2 in [0.05, 0.5] : float|absent|missing, rho in [-0.9, 0.9] : float|absent|missing, d(f(w, s1, s2, rho), w, w) >= 0"
+  "unicode": "let ρ = rho, let |∞| be 1e+100, ∀ s1 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, s2 ∈ [0.05, 0.5] ⊂ ℝ ∪ {∅}, ρ ∈ [-0.9, 0.9] ⊂ ℝ ∪ {∅}, ∂²(f(w, s1, s2, ρ)/∂w²) ≥ 0",
+  "ascii": "let |inf| be 1e+100, for s1 in [0.05, 0.5] : float|missing, s2 in [0.05, 0.5] : float|missing, rho in [-0.9, 0.9] : float|missing, d(f(w, s1, s2, rho), w, w) >= 0"
  },
  "parity_identity": {
   "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], f(s,k,r,t,sigma) == s - k*exp(-r*t)",
-  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {absent, ∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {absent, ∅}, f(s, k, r, t, σ) = -k*exp(-r*t) + s",
-  "ascii": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, f(s, k, r, t, sigma) = -k*exp(-r*t) + s"
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, f(s, k, r, t, σ) = -k*exp(-r*t) + s",
+  "ascii": "for s in [50.0, 150.0] : float|missing, k in [50.0, 150.0] : float|missing, r in [0.0, 0.1] : float|missing, t in [0.1, 2.0] : float|missing, sigma in [0.05, 0.8] : float|missing, f(s, k, r, t, sigma) = -k*exp(-r*t) + s"
  },
  "greek_delta_lower": {
   "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) >= 0",
-  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {absent, ∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {absent, ∅}, ∂(f(s, k, r, t, σ)/∂s) ≥ 0",
-  "ascii": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, d(f(s, k, r, t, sigma), s) >= 0"
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, ∂(f(s, k, r, t, σ)/∂s) ≥ 0",
+  "ascii": "for s in [50.0, 150.0] : float|missing, k in [50.0, 150.0] : float|missing, r in [0.0, 0.1] : float|missing, t in [0.1, 2.0] : float|missing, sigma in [0.05, 0.8] : float|missing, d(f(s, k, r, t, sigma), s) >= 0"
  },
  "greek_delta_upper": {
   "input": "for s in [50,150], k in [50,150], r in [0.0,0.1], t in [0.1,2], sigma in [0.05,0.8], ∂(f(s,k,r,t,sigma), s) <= 1",
-  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {absent, ∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {absent, ∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {absent, ∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {absent, ∅}, ∂(f(s, k, r, t, σ)/∂s) ≤ 1",
-  "ascii": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, d(f(s, k, r, t, sigma), s) <= 1"
+  "unicode": "let σ = sigma, ∀ s ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, k ∈ [50.0, 150.0] ⊂ ℝ ∪ {∅}, r ∈ [0.0, 0.1] ⊂ ℝ ∪ {∅}, t ∈ [0.1, 2.0] ⊂ ℝ ∪ {∅}, σ ∈ [0.05, 0.8] ⊂ ℝ ∪ {∅}, ∂(f(s, k, r, t, σ)/∂s) ≤ 1",
+  "ascii": "for s in [50.0, 150.0] : float|missing, k in [50.0, 150.0] : float|missing, r in [0.0, 0.1] : float|missing, t in [0.1, 2.0] : float|missing, sigma in [0.05, 0.8] : float|missing, d(f(s, k, r, t, sigma), s) <= 1"
  },
  "sigmoid_derivative": {
   "input": "for x in [-700, 700], d(f(x), x) == f(x)*(1 - f(x))",
-  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {absent, ∅}, f'(x) = (1 - f(x))*f(x)",
-  "ascii": "for x in [-700.0, 700.0] : float|absent|missing, d(f(x), x) = (1 - f(x))*f(x)"
+  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {∅}, f'(x) = (1 - f(x))*f(x)",
+  "ascii": "for x in [-700.0, 700.0] : float|missing, d(f(x), x) = (1 - f(x))*f(x)"
  },
  "sigmoid_symmetry": {
   "input": "for x in [-700, 700], f(-x) == 1 - f(x)",
-  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {absent, ∅}, f(-x) = 1 - f(x)",
-  "ascii": "for x in [-700.0, 700.0] : float|absent|missing, f(-x) = 1 - f(x)"
+  "unicode": "∀ x ∈ [-700.0, 700.0] ⊂ ℝ ∪ {∅}, f(-x) = 1 - f(x)",
+  "ascii": "for x in [-700.0, 700.0] : float|missing, f(-x) = 1 - f(x)"
  },
  "sigmoid_limit_upper": {
   "input": "lim(f(x), x -> oo) == 1",
@@ -1036,18 +1056,18 @@
  },
  "sigmoid_bounded_below": {
   "input": "for x in [-30, 30], f(x) > 0",
-  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {absent, ∅}, f(x) > 0",
-  "ascii": "for x in [-30.0, 30.0] : float|absent|missing, f(x) > 0"
+  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {∅}, f(x) > 0",
+  "ascii": "for x in [-30.0, 30.0] : float|missing, f(x) > 0"
  },
  "sigmoid_bounded_above": {
   "input": "for x in [-30, 30], f(x) < 1",
-  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {absent, ∅}, f(x) < 1",
-  "ascii": "for x in [-30.0, 30.0] : float|absent|missing, f(x) < 1"
+  "unicode": "∀ x ∈ [-30.0, 30.0] ⊂ ℝ ∪ {∅}, f(x) < 1",
+  "ascii": "for x in [-30.0, 30.0] : float|missing, f(x) < 1"
  },
  "descent_converges": {
   "input": "for alpha in [0.01,1.9], q in [0.5,1.0], |f(alpha,q)| < 1",
-  "unicode": "let α = alpha, ∀ α ∈ [0.01, 1.9] ⊂ ℝ ∪ {absent, ∅}, q ∈ [0.5, 1.0] ⊂ ℝ ∪ {absent, ∅}, |f(α, q)| < 1",
-  "ascii": "for alpha in [0.01, 1.9] : float|absent|missing, q in [0.5, 1.0] : float|absent|missing, |f(alpha, q)| < 1"
+  "unicode": "let α = alpha, ∀ α ∈ [0.01, 1.9] ⊂ ℝ ∪ {∅}, q ∈ [0.5, 1.0] ⊂ ℝ ∪ {∅}, |f(α, q)| < 1",
+  "ascii": "for alpha in [0.01, 1.9] : float|missing, q in [0.5, 1.0] : float|missing, |f(alpha, q)| < 1"
  },
  "second_function_by_name": {
   "input": "let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(budget_line(x, I, px, py), x) == -px/py",
@@ -1066,8 +1086,8 @@
  },
  "bound_function_nested_in_f": {
   "input": "let I be [10,1000], let px be [0.5,20], let py be [0.5,20], for a in [0.1,0.9], d(f(x, budget_line(x,I,px,py), a), x) @ {x = a*I/px} == 0",
-  "unicode": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {absent, ∅}, ∂(f(x, budget_line(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
-  "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], for a in [0.1, 0.9] : float|absent|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0"
+  "unicode": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], ∀ a ∈ [0.1, 0.9] ⊂ ℝ ∪ {∅}, ∂(f(x, budget_line(x, I, px, py), a)/∂x) at {x=I*a/px} = 0",
+  "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], for a in [0.1, 0.9] : float|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0"
  },
  "recurrence_identity": {
   "input": "for n in [2, 30] subset Z, f(n) == f(n-1) + f(n-2)",
@@ -1076,8 +1096,8 @@
  },
  "chained_comparison": {
   "input": "for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2",
-  "unicode": "∀ a ∈ [0.1, 10.0] ⊂ ℝ ∪ {absent, ∅}, b ∈ [0.1, 10.0] ⊂ ℝ ∪ {absent, ∅}, 2/(1/b + 1/a) ≤ f(a, b) ≤ a/2 + b/2",
-  "ascii": "for a in [0.1, 10.0] : float|absent|missing, b in [0.1, 10.0] : float|absent|missing, 2/(1/b + 1/a) <= f(a, b) <= a/2 + b/2"
+  "unicode": "∀ a ∈ [0.1, 10.0] ⊂ ℝ ∪ {∅}, b ∈ [0.1, 10.0] ⊂ ℝ ∪ {∅}, 2/(1/b + 1/a) ≤ f(a, b) ≤ a/2 + b/2",
+  "ascii": "for a in [0.1, 10.0] : float|missing, b in [0.1, 10.0] : float|missing, 2/(1/b + 1/a) <= f(a, b) <= a/2 + b/2"
  },
  "euler_via_exp": {
   "input": "for x in [1, 5], f(x) == exp(1)",
@@ -1101,8 +1121,8 @@
  },
  "real_domain_is_not_finite": {
   "input": "for n in [2,30], f(n) >= 2",
-  "unicode": "∀ n ∈ [2.0, 30.0] ⊂ ℝ ∪ {absent, ∅}, f(n) ≥ 2",
-  "ascii": "for n in [2.0, 30.0] : float|absent|missing, f(n) >= 2"
+  "unicode": "∀ n ∈ [2.0, 30.0] ⊂ ℝ ∪ {∅}, f(n) ≥ 2",
+  "ascii": "for n in [2.0, 30.0] : float|missing, f(n) >= 2"
  },
  "floor_below_argument": {
   "input": "for x in [-20, 20], floor(x) <= x",
@@ -1151,18 +1171,18 @@
  },
  "dim_premise_vector_bound": {
   "input": "assuming n >= 5, for xs in R^n, f(xs) == xs[4]",
-  "unicode": "assuming n >= 5, ∀ xs ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, f(xs) = xs[4]",
-  "ascii": "assuming n >= 5, for xs in (R | {missing})^n|absent, f(xs) = xs[4]"
+  "unicode": "assuming n >= 5, ∀ xs ∈ (ℝ ∪ {∅})ⁿ, f(xs) = xs[4]",
+  "ascii": "assuming n >= 5, for xs in (R | {missing})^n, f(xs) = xs[4]"
  },
  "dim_premise_square_matrix": {
   "input": "assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]",
-  "unicode": "assuming n >= 3, ∀ a ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, f(a) = a[2][2]",
-  "ascii": "assuming n >= 3, for a in (R | {missing})^(n,n)|absent, f(a) = a[2][2]"
+  "unicode": "assuming n >= 3, ∀ a ∈ (ℝ ∪ {∅})ⁿˣⁿ, f(a) = a[2][2]",
+  "ascii": "assuming n >= 3, for a in (R | {missing})^(n,n), f(a) = a[2][2]"
  },
  "dim_premise_rectangular_matrix": {
   "input": "assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]",
-  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ (ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}, f(a) = a[2][2]",
-  "ascii": "assuming min(m, n) >= 3, for a in (R | {missing})^(m,n)|absent, f(a) = a[2][2]"
+  "unicode": "assuming min(m, n) >= 3, ∀ a ∈ (ℝ ∪ {∅})ᵐˣⁿ, f(a) = a[2][2]",
+  "ascii": "assuming min(m, n) >= 3, for a in (R | {missing})^(m,n), f(a) = a[2][2]"
  },
  "language_alphabet": {
   "input": "for s in L[unicode], f(f(s)) == f(s)",
@@ -1211,8 +1231,8 @@
  },
  "membership_interval_reduces_to_chain": {
   "input": "for x in [0, 1], f(x) in [0, 1]",
-  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, 0 ≤ f(x) ≤ 1",
-  "ascii": "for x in [0.0, 1.0] : float|absent|missing, 0 <= f(x) <= 1"
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, 0 ≤ f(x) ≤ 1",
+  "ascii": "for x in [0.0, 1.0] : float|missing, 0 <= f(x) <= 1"
  },
  "missing_propagates": {
   "input": "missing(f, variance) propagates",
@@ -1361,18 +1381,18 @@
  },
  "absent_key_left_out": {
   "input": "for order.side in {\"buy\", \"sell\"} | {None} \\ {null}, len(f(order)) >= 1",
-  "unicode": "∀ order.side ∈ {\"buy\", \"sell\", None} \\ {null}, len(f(order)) ≥ 1",
-  "ascii": "for order.side in {\"buy\", \"sell\", None} \\ {null}, len(f(order)) >= 1"
+  "unicode": "∀ order.side ∈ {\"buy\", \"sell\", absent} \\ {null}, len(f(order)) ≥ 1",
+  "ascii": "for order.side in {\"buy\", \"sell\", absent} \\ {null}, len(f(order)) >= 1"
  },
  "let_scale_seq_sharpe_premise": {
   "input": "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)",
-  "unicode": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(s(returns, c)) ≈ f(returns)",
-  "ascii": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(s(returns, c)) ~= f(returns)"
+  "unicode": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ, f(s(returns, c)) ≈ f(returns)",
+  "ascii": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)"
  },
  "let_scale_seq_sharpe_trap": {
   "input": "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], f(s(returns, c)) ~= f(returns)",
-  "unicode": "let s = mathema.f.scale_seq, let c be [0.1, 10.0], ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(s(returns, c)) ≈ f(returns)",
-  "ascii": "let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(s(returns, c)) ~= f(returns)"
+  "unicode": "let s = mathema.f.scale_seq, let c be [0.1, 10.0], ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ, f(s(returns, c)) ≈ f(returns)",
+  "ascii": "let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)"
  },
  "let_shift_seq_range": {
   "input": "for a in [-100, 100]^n, let s = mathema.f.shift_seq, let c be [-5, 5], f(s(a, c)) == f(a)",
@@ -1381,17 +1401,17 @@
  },
  "let_shift_seq_mean_moves": {
   "input": "for xs in [-1, 1]^n, let s = mathema.f.shift_seq, let c be [0.1, 1], f(s(xs, c)) ~= f(xs)",
-  "unicode": "let s = mathema.f.shift_seq, let c be [0.1, 1.0], ∀ xs ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(s(xs, c)) ≈ f(xs)",
-  "ascii": "let s = mathema.f.shift_seq, let c be [0.1, 1.0], for xs in ([-1.0, 1.0] | {missing})^n : float|absent, f(s(xs, c)) ~= f(xs)"
+  "unicode": "let s = mathema.f.shift_seq, let c be [0.1, 1.0], ∀ xs ∈ ([-1.0, 1.0] ∪ {∅})ⁿ ⊂ ℝ, f(s(xs, c)) ≈ f(xs)",
+  "ascii": "let s = mathema.f.shift_seq, let c be [0.1, 1.0], for xs in ([-1.0, 1.0] | {missing})^n : float, f(s(xs, c)) ~= f(xs)"
  },
  "assuming_spread_positive": {
   "input": "for returns in [-0.1, 0.1]^n, assuming std(returns, ddof=1) > 0, is_defined(f)",
-  "unicode": "assuming std(returns, ddof=1) > 0, ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f is defined",
-  "ascii": "assuming std(returns, ddof=1) > 0, for returns in ([-0.1, 0.1] | {missing})^n : float|absent, is_defined(f)"
+  "unicode": "assuming std(returns, ddof=1) > 0, ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ, f is defined",
+  "ascii": "assuming std(returns, ddof=1) > 0, for returns in ([-0.1, 0.1] | {missing})^n : float, is_defined(f)"
  },
  "dim_call_premise": {
   "input": "assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0",
-  "unicode": "assuming dim(returns) >= 2, ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(returns) ≥ 0",
-  "ascii": "assuming dim(returns) >= 2, for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(returns) >= 0"
+  "unicode": "assuming dim(returns) >= 2, ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ, f(returns) ≥ 0",
+  "ascii": "assuming dim(returns) >= 2, for returns in ([-0.1, 0.1] | {missing})^n : float, f(returns) >= 0"
  }
 }

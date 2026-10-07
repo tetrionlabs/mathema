@@ -111,6 +111,7 @@ def test_false_identity_strict_derive_is_unknown(mats):
 
 
 def test_false_identity_best_falsifies_with_witness(mats):
+    pytest.importorskip("numpy")
     pr = _one(mats.f, "det(A @ B) == det(A) + det(B)", route="best")
     assert pr.verdict == "falsified"
     assert pr.route == "probe"
@@ -127,6 +128,7 @@ def test_true_identity_best_prefers_proof(mats):
 
 
 def test_unprovable_true_identity_best_holds_by_sampling(mats):
+    pytest.importorskip("numpy")
     # the Frobenius norm is submultiplicative, but no lemma closes it;
     # the matrix-value probe samples it and reports the holds ceiling.
     pr = _one(mats.f, "norm(A @ B) <= norm(A) * norm(B)", route="best")
@@ -179,6 +181,7 @@ def test_inequality_from_assuming_premise_and_sugar_proves(mats):
 
 
 def test_false_matrix_inequality_falsifies_with_witness(mats):
+    pytest.importorskip("numpy")
     # a positive-definite matrix's determinant is never negative
     pr = _one(mats.one, "assuming A is positive definite, det(A) < 0",
               route="best")
@@ -188,6 +191,7 @@ def test_false_matrix_inequality_falsifies_with_witness(mats):
 
 
 def test_unconditional_determinant_sign_falsifies(mats):
+    pytest.importorskip("numpy")
     # det(A) > 0 is not true for every matrix; sampling finds a witness
     pr = _one(mats.f, "det(A) > 0", route="best")
     assert pr.verdict == "falsified"

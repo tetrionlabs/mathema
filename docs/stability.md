@@ -100,7 +100,7 @@ extra, so a capability you do not use is not a dependency you carry.
 
 The claims mathema ships about library functions each name the library
 versions they were checked against: numpy `>=1.24,<3` (some rows
-`>=2.4,<3`), pandas `>=2,<4`, polars `>=1,<2`. On a version outside a
+`>=2.4,<3`), pandas `>=2.2,<4`, polars `>=1,<3`. On a version outside a
 file's range that file adjudicates nothing, and `mathema compendium
 status` lists it as out of range, see
 [`mathema compendium`](modes/compendium.md).

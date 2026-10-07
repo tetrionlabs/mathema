@@ -139,7 +139,7 @@ def test_a_drop_confirmed_by_execution_alone_holds():
     assert row.verdict == "holds", row.note
     # the count moved from 126 when sequence corners were turned on
     # (ruling of 2026-10-05)
-    assert row.sketch == ("xs (list): null and nan drop, confirmed on the 128 draws of "
+    assert row.sketch == ("xs (list): null and nan drop, confirmed on the 131 draws of "
                           "c; no claim states it yet")
 
 

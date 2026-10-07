@@ -78,13 +78,8 @@ The probe computes every word exactly and rounds the result once to
 the nearest float: `mean(x)` is the exact mean of the elements drawn,
 `det([[1, 2], [3, 4]])` is exactly `-2`, and `inv` of a singular matrix
 has no value even where floating-point elimination would return one.
-The derive route
-computes over the rationals and reals, so the two routes agree on
-every word, value for value.
-
-A definition row's `~=` is exact on the mathematics line; the
-tolerance applies to the computation line, which runs the library
-itself.
+The derive route computes over the rationals and reals, so the two
+routes agree on every word, value for value.
 
 ## Words the derive route knows through bounds
 

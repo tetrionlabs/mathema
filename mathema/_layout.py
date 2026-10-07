@@ -15,7 +15,7 @@ mathematics. One line follows per aspect of what is known about it:
   `f(nan)`, `f(None)` or `f([])`.
 
 Each line starts with its verdict word (proven, holds, falsified,
-unknown, skipped). A falsified absence or missing line is followed by
+unknown); a claim mathema could not run reads unknown, with the reason. A falsified absence or missing line is followed by
 its possible fixes.
 """
 from __future__ import annotations
@@ -164,6 +164,42 @@ def _fixes(p, key: str, word: str) -> str:
                                              options(fixes).splitlines())
 
 
+def _is_return_row(p) -> bool:
+    """Whether a policy row is about what f gives back (`absent(f)
+    introduces`), rather than about a parameter."""
+    pol = (p.meta or {}).get("mathema.policy") or {}
+    return pol.get("kind") == "absent" and pol.get("parameter") is None
+
+
+def _return_fixes(pol: dict) -> str:
+    """The possible fixes under a falsified return row: its own next
+    step, each option on its own line."""
+    nxt = pol.get("next") or ""
+    if not nxt:
+        return ""
+    return "possible fixes:\n" + "\n".join(f"  {line}" for line in nxt.splitlines())
+
+
+def _conditioning_lines(p, key: str) -> list:
+    """What the conditioning says under a falsified computation line, and
+    the fixes it offers: a narrower domain where float64 can honour the
+    claim, or accepting the discovery."""
+    found = (p.meta or {}).get("mathema.conditioning")
+    if not found:
+        return []
+    from ._missing_words import options
+    fixes = []
+    if found.get("narrow"):
+        fixes.append("if inputs this large are out of scope, narrow the "
+                     f"domain: {found['narrow']}")
+    name = str(p.name).split("[", 1)[0]
+    fixes.append(f"if the loss is accepted, run: mathema accept {key} "
+                 f"{name} --as discovery")
+    return [" " * 28 + found["words"],
+            " " * 28 + "possible fixes:",
+            *(" " * 30 + line for line in options(fixes).splitlines())]
+
+
 def _split_lines(p, key: str) -> list:
     """The split a claim falsified only below some length is offered as:
     what the witnesses share, and the command that writes the claim
@@ -181,6 +217,7 @@ def _split_lines(p, key: str) -> list:
 
 
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
+    verdict = "unknown" if verdict == "skipped" else verdict
     line = f"    {verdict:<9}  {aspect:<11}  {what}"
     return f"{line}   {detail}" if detail else line
 
@@ -211,7 +248,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             continue
         under = companions.get(main.name, [])
         rows = [r for r in policy
-                if _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
+                if _is_return_row(r)
+                or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
                            r.meta["mathema.policy"].get("kind") or "")]
         if not under and not rows:
             continue
@@ -237,6 +275,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             if _verdict(main) == "falsified":
                 falsified.append(main.counterexample)
                 lines += _split_lines(main, key)
+                lines += _conditioning_lines(main, key)
         lines += _extras(main)
         for c in under:
             fam = (c.meta or {}).get("mathema.family")
@@ -257,11 +296,24 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 lines.append(_row(_verdict(c), "computation", shown,
                                   _detail(c, count_words)))
                 lines += _extras(c)
+                if _verdict(c) == "falsified":
+                    lines += _conditioning_lines(c, key)
             if _verdict(c) == "falsified":
                 falsified.append(c.counterexample)
             used.add(id(c))
         for r in rows:
             pol = r.meta["mathema.policy"]
+            if _is_return_row(r):
+                # what f gives back: the row's own statement, its reason
+                # beside it, and its next step as the possible fixes
+                lines.append(_row(_verdict(r), "policy", r.statement,
+                                  pol.get("sentence") or pol.get("reason") or ""))
+                if _verdict(r) == "falsified":
+                    falsified.append(r.counterexample)
+                    lines += [" " * 28 + part
+                              for part in _return_fixes(pol).splitlines()]
+                used.add(id(r))
+                continue
             param, kind = pol.get("parameter") or "", pol.get("kind") or ""
             word = "None" if kind == "absent" else (
                 pol.get("member") or _hole_word(main, param))
@@ -282,6 +334,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             head = min((ln.split()[0] for ln in lines if ln.split()
                         and ln.split()[0] in _STRENGTH),
                        key=_STRENGTH.__getitem__, default=_verdict(main))
+            head = "unknown" if head == "skipped" else head
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out

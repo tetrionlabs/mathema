@@ -10,14 +10,17 @@ array result compares element by element, as any array does, and a
 Decimal compares exactly.
 """
 from __future__ import annotations
-
-from decimal import Decimal
-
-import numpy as np
-import pandas as pd
 import pytest
 
-import mathema
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+from decimal import Decimal  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import mathema  # noqa: E402
 
 
 def pow2(n: int) -> int:
@@ -47,6 +50,17 @@ def test_a_power_of_two_far_beyond_float_range_is_judged_exactly():
     assert rows["f_n_ge_1"].verdict == "proven", rows["f_n_ge_1"].note
     companion = rows["f_n_ge_1[float]"]
     assert companion.verdict == "holds", (companion.verdict, companion.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_an_equality_with_a_power_of_two_is_judged_exactly():
+    rows = _rows(pow2, ["for n in [0, 2000] subset Z, f(n) == 2**n"])
+    (main,) = [p for name, p in rows.items() if "[" not in name
+               and name.startswith("f_n")]
+    assert main.verdict == "proven", (main.verdict, main.note)
+    companion = rows[f"{main.name}[float]"]
+    assert companion.verdict in ("proven", "holds"), \
+        (companion.verdict, companion.note)
 
 
 @pytest.mark.needs_full_proof_budget

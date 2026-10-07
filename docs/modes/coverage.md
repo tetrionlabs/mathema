@@ -77,7 +77,7 @@ A proof counts only once the claim has a verified record, so record the
 two docstring claims first (`mathema verify` then keeps the records
 current):
 
-<!-- example: cov run -->
+<!-- example: cov run requires=coverage -->
 ```python
 import mathema
 from ledger import running_total, settle
@@ -136,7 +136,7 @@ mathema coverage ledger --root .
 100%  ledger.settle  [test+probe]
 
 implementation coverage: 100%
-test report freshness: by file modification time (run `mathema coverage --stamp` after the tests to judge by content)
+test report freshness: by file modification time (to judge by content, after the tests run: mathema coverage --stamp)
 ```
 
 ## When a report stops counting

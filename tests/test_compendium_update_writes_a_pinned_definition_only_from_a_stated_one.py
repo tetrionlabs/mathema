@@ -45,7 +45,7 @@ def test_no_pinned_definition_without_a_stated_one(tmp_path):
              if "no definition row covers ddof=2" in ln]
     assert len(lines) == 1, r.stdout + r.stderr
     assert "to state one" in lines[0]
-    assert lines[0].rstrip().endswith('~= ..."}') and "f(a, ddof=2)" in lines[0]
+    assert lines[0].rstrip().endswith('== ..."}') and "f(a, ddof=2)" in lines[0]
     path = tmp_path / "claims" / "numpy.claims.yaml"
     if path.exists():
         rows = (yaml.safe_load(path.read_text()).get("numpy.std") or {}

@@ -13,6 +13,8 @@ point as its witness, and it gates `verify` like any claim.
 `route="derive:math_only"` states the mathematics alone and spawns
 nothing.
 """
+import pytest
+
 import mathema
 from mathema.conjecture import claim, check_conjectures
 from mathema.spec import claims_fingerprint, to_spec
@@ -274,7 +276,9 @@ def ema(x: list, alpha: float) -> float:
     return y
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_family_claim_spawns_no_float_companion():
+    # the assertions below depend on the fold equivariance proofs finishing
     from mathema import families
     rec = mathema.check(ema)
     probes = {p.name: p for p in rec.probes}

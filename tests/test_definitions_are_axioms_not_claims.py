@@ -45,6 +45,7 @@ def test_a_definition_row_reads_its_word_and_members():
 
 
 def test_the_bundled_definitions_apply():
+    pytest.importorskip("pandas")
     compendium.ensure_bundled()
     assert rt.resolve_missing("pandas.Series") == ("nan", "null", "NA", "NaT")
     assert rt.resolve_missing("polars.Series") == ("null", "nan")
@@ -52,6 +53,7 @@ def test_the_bundled_definitions_apply():
 
 
 def test_a_project_row_loads_as_an_axiom_and_composes(tmp_path):
+    pytest.importorskip("pandas")
     write(tmp_path, "project.claims.yaml", """
         polars.Series:
           defines:
@@ -68,7 +70,7 @@ def test_a_project_row_loads_as_an_axiom_and_composes(tmp_path):
             rt.definitions(("claims",)))}
         assert records["polars.Series"] == {
             "key": "polars.Series", "definition": "missing := {null}",
-            "verdict": "trusted", "route": "axiom",
+            "standing": "axiom", "route": "axiom",
             "source": "claims file project.claims.yaml", "members": ["null"]}
     finally:
         compendium.uninstall()
@@ -123,10 +125,10 @@ def test_verify_lists_definitions_outside_the_verdict_counts(tmp_path, capsys,
         compendium.uninstall()
         compendium.ensure_bundled()
     out = capsys.readouterr().out
-    assert "definitions (trusted):" in out
+    assert "definitions (axioms, taken as stated):" in out
     assert "polars.Series: missing := {null, nan}" in out
     assert "1 fresh" not in out and "polars.Series: " not in out.split(
-        "definitions (trusted):")[0]
+        "definitions (axioms, taken as stated):")[0]
 
 
 # --- a runtime that is not Python -----------------------------------------

@@ -550,7 +550,7 @@ def test_status_reports_fresh_and_stale(tmp_path):
     # simulate the code changing after the spec was recorded
     p = tmp_path / ".mathema" / "verified" / f"{key}.yaml"
     p.write_text(p.read_text().replace(mathema.analyze(tracked).form, "deadbeef0000"))
-    assert "STALE" in mathema.status(root)
+    assert "stale (code changed since spec)" in mathema.status(root)
 
 
 def test_note_writes_spec_and_returns_record(tmp_path):
@@ -737,10 +737,13 @@ def test_claim_helper_strings():
     by = {p.name: p.verdict for p in results}
     assert by["f_x_eq_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1
-    # x**3 >= 0 is false over the reals: a derive disproof with an
-    # executed witness, not an overflow
+    # x**3 >= 0 is false over the reals: a derive disproof whose
+    # witness is executed, not an overflow; the route names whether the
+    # point executed was derive's own witness or a search it seeded (the
+    # nlsat rung, when z3 is installed, seeds one)
     (neg,) = [p for p in results if p.name == "f_x_ge_0"]
-    assert (neg.verdict, neg.route) == ("falsified", "derive")
+    assert neg.verdict == "falsified", (neg.verdict, neg.note)
+    assert neg.route in ("derive", "probe:semi_analytical"), (neg.route, neg.note)
     assert neg.meta.get("mathema.corroboration") == "reproduced"
     assert float(neg.counterexample.split("=", 1)[1]) < 0, neg.counterexample
 

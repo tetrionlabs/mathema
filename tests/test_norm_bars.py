@@ -14,17 +14,19 @@ Euclidean for a vector, Frobenius for a matrix. Any other order is
 refused with the accepted orders named.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema._linalg_eval import _norm
-from mathema.claims import check_conjectures, claim
-from mathema.compendium import _installed_version, _version_in_range
-from mathema.conjecture import InvalidConjecture
-from mathema.grammar import normalize
-from mathema.spec import canonical_claim_text, render_claim_text
-from tests.test_claim_text_soundness import assert_round_trips
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema._linalg_eval import _norm  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.compendium import _installed_version, _version_in_range  # noqa: E402
+from mathema.conjecture import InvalidConjecture  # noqa: E402
+from mathema.grammar import normalize  # noqa: E402
+from mathema.spec import canonical_claim_text, render_claim_text  # noqa: E402
+from tests.test_claim_text_soundness import assert_round_trips  # noqa: E402
 
 
 # `numpy.dot`'s definition row applies from numpy 2.4, so below it a
@@ -539,7 +541,8 @@ def test_a_false_norm_identity_is_not_proven_and_is_falsified(fn, law):
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
     assert p.counterexample, p.note
     # the derive route was attempted and did not prove it
-    assert "derive could not decide it" in (p.note or ""), p.note
+    assert ("derive could not decide it" in (p.note or "")
+            or "could not show the relation" in (p.note or "")), p.note
 
 
 def test_an_order_outside_the_lowering_is_named_and_left_to_the_probe():

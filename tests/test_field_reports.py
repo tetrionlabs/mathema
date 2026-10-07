@@ -6,11 +6,14 @@ Each test here is a report from the field, kept in its own file so the
 provenance stays obvious: these are not shapes anyone designed, they
 are what real code did.
 """
-import numpy as np
 import pytest
 
-from mathema import check
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema import check  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def scaled(mi):

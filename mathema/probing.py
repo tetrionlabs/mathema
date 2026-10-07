@@ -16,7 +16,10 @@ in `claim_families.py`.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import cmath
+import contextlib
 import collections
 import dataclasses
 import math
@@ -383,10 +386,12 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
            "n": n_trials, "factors": dict(risk)}
 
 
-# the relative half of the default closeness allowance on a computation
-# line: with no declared tolerance, two values are equal when they agree
-# within this tolerance relative to the larger result, or the absolute
-# 1e-9, whichever is larger
+# the relative part of the default closeness allowance: with no declared
+# tolerance, `values_agree` reads two values as equal when they agree
+# within this tolerance relative to the larger, or the absolute 1e-9,
+# whichever is larger. A computation line compares a computed value with
+# the exact one through `_allowance` instead, where the absolute part
+# never exceeds this relative part of the result
 DEFAULT_RELATIVE_TOLERANCE = 1e-7
 
 
@@ -442,10 +447,11 @@ def _exact_pair(*values):
                  for v in values)
 
 
-def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
+def _numbers_agree(u, v, abs_tol, rel_tol: float) -> bool:
     # a NaN agrees with nothing; the same infinity is one point; a
     # finite value is close within the tolerances, complex values by
-    # abs(u - v)
+    # abs(u - v); `abs_tol` is a float, or an exact rational where it
+    # was scaled to a magnitude beyond float range
     if holds_nan(u) or holds_nan(v):
         return False
     if holds_inf(u) or holds_inf(v):
@@ -455,11 +461,18 @@ def _numbers_agree(u, v, abs_tol: float, rel_tol: float) -> bool:
         if isinstance(u, complex) or isinstance(v, complex):
             return False
         u, v = _exact_pair(u, v)
-        if not math.isfinite(abs_tol):
+        if isinstance(abs_tol, float) and not math.isfinite(abs_tol):
             return True
         allowed = max(Fraction(rel_tol) * max(abs(u), abs(v)),
                       Fraction(abs_tol))
         return abs(u - v) <= allowed
+    if isinstance(abs_tol, Fraction):
+        # a tolerance scaled to a magnitude beyond float range holds two
+        # finite floats within it
+        try:
+            abs_tol = float(abs_tol)
+        except OverflowError:
+            return True
     if isinstance(u, complex) or isinstance(v, complex):
         return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
     return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
@@ -573,13 +586,27 @@ def _synth_dict(key_tree, rng: random.Random, specials=None,
     return out
 
 
+def _within_epsilon(a, b, eps: float, rel_tol: float) -> bool:
+    """`abs(a - b) <= ε` between two executed scalars, judged in float
+    with the computation allowance on top: ε plus `rel_tol` times the
+    larger magnitude, the rounding the subtraction itself carries. A
+    NaN is within nothing; the same infinity is one point."""
+    try:
+        magnitude = max(abs(a), abs(b))
+        if not math.isfinite(magnitude):
+            return _close(a, b, tolerance=eps, rel_tol=0.0)
+        return _close(a, b, tolerance=eps + rel_tol * magnitude, rel_tol=0.0)
+    except (TypeError, OverflowError):
+        return _close(a, b, tolerance=eps, rel_tol=rel_tol)
+
+
 def _scalar_relation(a, b, relation: str, slack: float,
                      exact_inequality: bool = False,
                      rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
-    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`/
-    `~=` go through `_close`, and so does `!=` when the claim declared a
-    tolerance. With `exact_inequality`, `!=` fails only where the two
+    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`
+    goes through `_close`, `~=` through `_within_epsilon`, and so does
+    `!=` when the claim declared a tolerance. With `exact_inequality`, `!=` fails only where the two
     values are equal, so a representation tolerance never makes two
     different values a counterexample. Raises TypeError for values that
     do not order (a complex vs a real), which the caller reads as
@@ -587,8 +614,12 @@ def _scalar_relation(a, b, relation: str, slack: float,
     allowance."""
     if holds_nan(a) or holds_nan(b):
         return False
-    if relation in ("==", "~="):
+    if relation == "==":
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
+    if relation == "~=":
+        # `a ~= b` is `abs(a - b) <= ε`, the float subtraction allowed
+        # the same rounding as `==` on top of ε
+        return _within_epsilon(a, b, slack, rel_tol)
     if relation == "!=":
         if exact_inequality:
             return not (a == b)
@@ -1016,7 +1047,7 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
-def _pinned_float_env():
+def _pinned_float_env() -> contextlib.ExitStack:
     """The floating-point error regime every probe evaluation runs
     under: numpy's own defaults, pinned explicitly so a verdict never
     depends on whatever ambient `numpy.seterr` state the calling
@@ -1521,6 +1552,10 @@ def _sample_domain(rng: random.Random, dom: Domain,
             weights.append(max(hi / 2 - lo / 2, 1e-9))
         else:
             weights.append(1.0)
+    if dom.base_type == "S" and not enumerated:
+        # the type of strings alone: a string from the hazard corpus
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     for _ in range(20):
         piece = rng.choices(pieces, weights=weights, k=1)[0]
         if isinstance(piece, frozenset):
@@ -1788,6 +1823,43 @@ def _ordinary_element(rng: random.Random, lo: float, hi: float) -> float:
     return _between(lo, hi, rng.random()) if lo < hi else lo
 
 
+def _cancel_magnitudes(top: float) -> list:
+    """The magnitudes of the cancelling pairs `[M, -M]` a sequence meets
+    inside a range reaching `top` on both sides: 1e16, 1e300 and `top`
+    itself (the float limit when the range is unbounded), those within
+    it."""
+    out: list = []
+    for m in (1e16, 1e300, top):
+        if 0 < m <= top and m not in out:
+            out.append(m)
+    return out or [top]
+
+
+def sequence_corners(bounds, n: "int | None" = None) -> list:
+    """Intent:
+        The magnitude corners of a sequence whose elements range over
+        `bounds` (None the whole line, an unbounded end at the number
+        representation's reach), each a list: the pairs that cancel at
+        a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
+        range's own limit, and the range's opposite ends `[lo, hi]`;
+        every entry inside the range. With `n`, each pair is repeated
+        to length `n`, and none is given below 2. Empty when the
+        elements are not one real interval.
+    """
+    span = _element_range(bounds)
+    if span is None or (n is not None and n < 2):
+        return []
+    lo, hi = span
+    pairs: list = []
+    if lo < 0 < hi:
+        pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
+    if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
+        pairs.append([lo, hi])
+    if n is None:
+        return pairs
+    return [[pair[i % 2] for i in range(n)] for pair in pairs]
+
+
 def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
     """Intent:
         One sequence from the corners where float arithmetic breaks, or
@@ -1919,6 +1991,11 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         return _sample_bare_named_set(rng, bound_shape)
     if kind == "bool":
         return rng.random() < 0.5
+    if kind == "string":
+        # a string parameter with no finite set or language to draw
+        # from: one string from the hazard corpus, never a number
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     if kind == "int":
         if bounds is not None:
             return _synth_int_in(rng, bounds, "Z")
@@ -1960,7 +2037,7 @@ def spell_text(s: str, *, force: bool = False) -> str:
     return shown
 
 
-def sample_bound(bound, rng: random.Random, kind: str = "scalar"):
+def sample_bound(bound: Any, rng: random.Random, kind: str = "scalar") -> Any:
     """Intent:
         One value drawn from a declared bound, the draw the probe route
         makes for a parameter of `kind` with that bound: a language
@@ -2599,14 +2676,21 @@ def probe(fn, facts, domain: dict | None = None,
     # domain always wins over the inference)
     for p, vals in getattr(facts, "finite_domains", {}).items():
         domain.setdefault(p, frozenset(vals))
+    # a guard refusing every value outside a set of strings leaves that
+    # set as the working domain (decision A)
+    from .hazards import finite_guard_sets
+    for p, vals in finite_guard_sets(facts).items():
+        domain.setdefault(p, vals)
     # a string parameter with no finite domain has no honest sampling
     # story: synthesizing a float and watching the function raise would
     # manufacture a gap that is an artefact of the battery, not a fact
     # about the code, decline, naming the parameter and the spelling
     # that fixes it
+    from .domain import bare_text_type
     for p, k in zip(facts.params, kinds):
-        if k == "string" and _classify_bound(domain.get(p)) not in (
-                "frozenset", "domain", "language"):
+        if k == "string" and (_classify_bound(domain.get(p)) not in (
+                "frozenset", "domain", "language")
+                or bare_text_type(domain.get(p))):
             return [Probe(
                 "callable", callable_statement, "skipped",
                 note=string_domain_hint(p) + " in a claim, or annotate it "

@@ -13,20 +13,22 @@ the statement was stored is stale on its first carry, and is accepted
 again once.
 """
 from __future__ import annotations
-
-import textwrap
-
-import pandas as pd
 import pytest
-import yaml
 
-from mathema import compendium
-from mathema.acceptance import carry_acceptance
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("pandas")
+
+import textwrap  # noqa: E402
+
+import pandas as pd  # noqa: E402
+import yaml  # noqa: E402
+
+from mathema import compendium  # noqa: E402
+from mathema.acceptance import carry_acceptance  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 _KEY = "pandas.Series.multiply"
 _STATEMENT = ("for a in R^n \\ {∅}, other in [-1e6, 1e6], "
-              "f(a, other) ~= a * other")
+              "f(a, other) == a * other")
 
 
 def _rows_file(statement=_STATEMENT, versions=">=2", note="the product"):

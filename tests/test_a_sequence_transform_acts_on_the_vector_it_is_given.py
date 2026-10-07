@@ -13,17 +13,20 @@ the reproduction beside it; none of them may be proven, and each true
 sibling is.
 """
 from __future__ import annotations
-
-import ast
-
-import numpy as np
-import pandas as pd
 import pytest
-import sympy
 
-import mathema
-from mathema.compendium import _installed_version, _version_in_range
-from mathema.symbolic._seqir import Lowering, normalised
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import ast  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import sympy  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema.compendium import _installed_version, _version_in_range  # noqa: E402
+from mathema.symbolic._seqir import Lowering, normalised  # noqa: E402
 
 
 def running(x: np.ndarray) -> np.ndarray:

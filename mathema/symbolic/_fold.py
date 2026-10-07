@@ -18,6 +18,11 @@ rather than guessing.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..analysis import Facts
+
 import ast
 import copy
 from dataclasses import dataclass, field, replace
@@ -185,7 +190,7 @@ def lift_fold(fn, facts) -> "FoldLift | None":
     return result if isinstance(result, FoldLift) else None
 
 
-def diagnose_fold(fn, facts) -> dict | None:
+def diagnose_fold(fn: Callable[..., Any], facts: Facts) -> dict | None:
     """Why `lift_fold()` declined a loop-shaped function: the exact
     diagnosis the shared implementation produced at the first check
     that failed, `{"reason", "hint", "derive_unlock"}` (`derive_unlock` is
@@ -215,7 +220,7 @@ def _lift_fold_impl(fn, facts) -> "FoldLift | dict":
         only which reason a multi-defect function reports first.
     """
     if not facts.loops:
-        return {"reason": "no-loop", "hint": "no loop to lift as a fold",
+        return {"reason": "no-loop", "hint": "derive found no loop it can read as a running total",
                "derive_unlock": "limitation"}
     if len(facts.loops) > 1:
         return {"reason": "multiple-loops",
@@ -375,7 +380,7 @@ def _lift_fold_impl(fn, facts) -> "FoldLift | dict":
     if not isinstance(return_stmt, ast.Return) or return_stmt.value is None:
         return {"reason": "no-return-value",
                "hint": "the function has no return statement, or a bare "
-                      "`return` with no value, nothing to lift",
+                      "`return` with no value, so derive has nothing to read",
                "derive_unlock": "limitation"}
 
     other_params = {p: s for p, s in _bind_params(fn, facts)[0].items()

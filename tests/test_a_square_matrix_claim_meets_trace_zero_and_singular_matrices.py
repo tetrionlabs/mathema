@@ -4,10 +4,15 @@
 probability one, so a claim false only where the trace vanishes or the
 matrix is singular needs those matrices drawn on purpose, as the zero
 matrix and length 1 already are."""
-import numpy as np
 
-from mathema.conjecture import check_conjectures, claim
-from mathema.matrices import rank_edge
+import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
+from mathema.matrices import rank_edge  # noqa: E402
 
 
 def normalized(A: np.ndarray) -> np.ndarray:

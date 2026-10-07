@@ -5,9 +5,14 @@ place changes nothing the caller passed: numpy's `sort` function is
 pure, only the array method `sort` sorts in place. A parameter rebound
 to the same object (`numpy.asarray` of an array), or to a copy on one
 path only, is still the caller's object when the method runs."""
-import numpy as np
 
-from mathema.analysis import analyze_source
+import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.analysis import analyze_source  # noqa: E402
 
 
 def sorted_copy(a):

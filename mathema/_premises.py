@@ -89,6 +89,27 @@ def _names(src: str) -> frozenset:
     return frozenset(n.id for n in ast.walk(tree) if isinstance(n, ast.Name))
 
 
+#: the names a claim reads as its tolerance
+_EPSILON_NAMES = frozenset({"eps", "epsilon", "ε"})
+
+
+def _epsilon_as_value(src: str, tolerance: float, kinds) -> str:
+    """`src` with each `ε` (`eps`, `epsilon`) that is not a parameter
+    replaced by the tolerance it names, so `assuming x ~= 1`, read as
+    `abs((x) - (1)) <= ε`, filters with a number."""
+    names = _EPSILON_NAMES - set(kinds)
+    if not (_names(src) & names):
+        return src
+
+    class _Value(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id in names:
+                return ast.copy_location(ast.Constant(value=tolerance), node)
+            return node
+    tree = _Value().visit(ast.parse(src, mode="eval"))
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
 def compile_premises(cj, assumption, kinds, extra) -> CompiledPremises:
     """Intent:
         The conjuncts of `assumption` (the parsed `assuming` clause of
@@ -109,8 +130,10 @@ def compile_premises(cj, assumption, kinds, extra) -> CompiledPremises:
     conjuncts: list = []
     aux: set = set()
     for acj in assumption:
-        code_l, aux_l = _validate(acj.lhs, set(kinds), extra)
-        code_r, aux_r = _validate(acj.rhs, set(kinds), extra)
+        lhs = _epsilon_as_value(acj.lhs, tol, kinds)
+        rhs = _epsilon_as_value(acj.rhs, tol, kinds)
+        code_l, aux_l = _validate(lhs, set(kinds), extra)
+        code_r, aux_r = _validate(rhs, set(kinds), extra)
         scalar = {"<=": operator.le, ">=": operator.ge,
                   "<": operator.lt, ">": operator.gt,
                   "==": lambda a, b, t=tol, r=rel:
@@ -233,7 +256,50 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
     return draw
 
 
-def premise_draws(assumption, kinds: dict, domain: "dict | None" = None) -> dict:
+def _band(node, kinds: dict) -> "tuple[str, float] | None":
+    """`(name, centre)` when `node` is `abs(name - c)` or `abs(c - name)`
+    for a scalar parameter `name` and a number `c`, else None."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "abs" and len(node.args) == 1
+            and not node.keywords):
+        return None
+    inner = node.args[0]
+    if not (isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.Sub)):
+        return None
+    for name, other in ((inner.left, inner.right), (inner.right, inner.left)):
+        if isinstance(name, ast.Name) and name.id in kinds \
+                and kinds[name.id] in ("scalar", "unknown", "float") \
+                and _constant(other) is not None:
+            return name.id, float(_constant(other))
+    return None
+
+
+def _band_draw(centre: float, width: float, bound):
+    """Draws inside `[centre - width, centre + width]`, the two ends and
+    the centre first among them, each kept inside the declared `bound`
+    when that is an interval."""
+    ends = _bound_ends(bound)
+
+    def inside(v: float) -> float:
+        if ends is None:
+            return v
+        lo, hi, _c_lo, _c_hi = ends
+        return min(max(v, lo), hi)
+
+    def draw(rng, size):
+        u = rng.random()
+        if u < 0.25:
+            return inside(centre - width)
+        if u < 0.5:
+            return inside(centre + width)
+        if u < 0.6:
+            return inside(centre)
+        return inside(centre + width * (2 * rng.random() - 1))
+    return draw
+
+
+def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
+                  tolerance: "float | None" = None) -> dict:
     """Intent:
         Draws that satisfy an equality premise by construction, for the
         premises random sampling essentially never lands on, keyed by
@@ -242,8 +308,11 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None) -> dict
         constant itself, and a zero spread (`std(a, ddof=k) == 0`,
         `var(a, ...) == 0`, `max(a) == min(a)`, `max(a) - min(a) == 0`)
         a constant sequence whose element comes from the declared
-        bound in `domain`. Each draw is `draw(rng, size)`, `size` the
-        trial's planned first-axis size for the parameter, or None.
+        bound in `domain`; a band `abs(x - c) <= t` (what `x ~= c`
+        reads as, `t` then the claim's `tolerance`, 1e-9 by default)
+        draws inside `[c - t, c + t]`, its ends first among them. Each
+        draw is `draw(rng, size)`, `size` the trial's planned first-axis
+        size for the parameter, or None.
 
     Notes:
         A length premise `dim(a) == k` for k > 0 is not here: the
@@ -284,6 +353,23 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None) -> dict
 
     out: dict = {}
     for acj in assumption or ():
+        if acj.relation in ("<=", "<") and acj.rhs:
+            try:
+                left = ast.parse(acj.lhs, mode="eval").body
+                right = ast.parse(acj.rhs, mode="eval").body
+            except SyntaxError:
+                continue
+            band = _band(left, kinds)
+            width = _constant(right)
+            if width is None and isinstance(right, ast.Name) \
+                    and right.id in _EPSILON_NAMES and right.id not in kinds:
+                from .conjecture import DEFAULT_TOLERANCE
+                width = tolerance if tolerance is not None else DEFAULT_TOLERANCE
+            if band is not None and width is not None and float(width) > 0:
+                name, centre = band
+                out.setdefault(name, _band_draw(centre, float(width),
+                                                (domain or {}).get(name)))
+            continue
         if acj.relation != "==" or not acj.rhs:
             continue
         try:

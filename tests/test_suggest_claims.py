@@ -11,6 +11,8 @@ lift, not whether the claim would actually prove); route="best" for
 claims adjudicated at check-time regardless of liftability."""
 from typing import Annotated as _HintAnnotated
 
+import pytest
+
 import mathema
 from mathema.suggest import _raise_guard_types, suggest_claims
 from mathema.spec import load_declared
@@ -185,6 +187,7 @@ def test_sum_like_suggestions_are_gated_and_useful(tmp_path):
     numpy.sum comparison by dotted path); a decaying fold earns none
     of them, because its weights treat positions differently and the
     claims would be noise."""
+    pytest.importorskip("numpy")
     import textwrap
 
     p = tmp_path / "sums.py"

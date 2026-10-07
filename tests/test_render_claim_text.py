@@ -8,6 +8,7 @@ split can't do that alone). `grammar.render_domain()`/`render_law_expr()`
 are the two lower-level renderers it's built from; both also respect a
 process-wide default (`grammar.get_unicode_output()`/
 `set_unicode_output()`) when a caller doesn't state a preference."""
+import pytest
 import mathema
 from mathema.conjecture import claim
 from mathema.grammar import (get_unicode_output, normalize, render_domain,
@@ -244,6 +245,7 @@ def test_a_long_function_alias_is_kept_so_the_display_is_the_same_claim():
 
 
 def test_long_function_alias_with_a_deep_dotted_path_still_resolves(tmp_path):
+    pytest.importorskip("numpy")
     # numpy.linalg.norm, a 3-segment dotted path, exercises real
     # callable resolution end to end, not just rendering: the renamed
     # claim must still actually check successfully.

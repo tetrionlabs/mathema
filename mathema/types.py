@@ -448,7 +448,11 @@ def _policy_of_text(text: str):
             return MissingDefaults(optional, resolve_missing(inner),
                                    f"{head}[{inner}]")
         return MissingDefaults(optional, resolve_missing("list"), head)
-    return MissingDefaults(optional, (), text.strip())
+    # a name mathema cannot resolve (a library not installed here, a name
+    # the module never binds) states no policy of its own: the claim's
+    # text decides, as for a parameter with no annotation
+    return MissingDefaults(True, NO_ANNOTATION.members, text.strip(),
+                           annotated=False)
 
 
 def missing_policy_from_signature(fn) -> dict:

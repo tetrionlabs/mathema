@@ -749,8 +749,31 @@ def _type_discipline_params(fn, facts) -> set:
     type guard; representation discipline is only worth claiming
     where the author stated types structurally at all."""
     relevant = _annotated_params(facts) | set(_type_guard_params(facts))
-    return {p for p in relevant
-            if facts.param_kinds.get(p) not in SEQUENCE_KINDS}
+    return {p for p in relevant if numeric_or_enum(fn, facts, p)}
+
+
+def numeric_or_enum(fn, facts, p: str) -> bool:
+    """Whether a parameter holds a number (a scalar, int or complex
+    kind) or an Enum member, the kinds whose machine spellings
+    is_representation_safe compares."""
+    if facts.param_kinds.get(p) in ("scalar", "int", "complex"):
+        return True
+    from .runtime_types import enum_parameters
+    return p in enum_parameters(fn)
+
+
+def not_a_number(facts, p: str, family: str) -> "str | None":
+    """Why a numeric family does not run on a parameter: its kind is
+    a string, a bool or unknown, none of which holds a number. None for
+    a numeric kind."""
+    kind = facts.param_kinds.get(p, "unknown")
+    if kind in ("scalar", "int", "complex") or getattr(facts, "tree", None) is None:
+        return None
+    word = {"string": "a string", "bool": "a bool", "unknown": "of unknown kind"}.get(
+        kind, f"a {kind}")
+    return (f"{family} reads numbers, and {p} is {word} parameter"
+            if kind != "unknown" else
+            f"{family} reads numbers, and {p} is a parameter of unknown kind")
 
 
 def _string_input_params(facts) -> set:
@@ -979,3 +1002,54 @@ def careful_edges(fn, facts, domains: list) -> list[str]:
             if line not in lines:
                 lines.append(line)
     return lines
+
+
+def finite_guard_sets(facts) -> dict:
+    """Intent:
+        `{param: frozenset}` for every parameter a guard in the body
+        refuses outside a listed set of strings: `if side not in
+        {"buy", "sell"}: raise`, the set written as a set, tuple or
+        list of string literals, with `not (side in {...})` read the
+        same way. The set is the working domain the guard leaves
+        (decision A).
+    """
+    import ast
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return {}
+    params = set(getattr(facts, "params", ()) or ())
+    out: dict = {}
+
+    def listed(node):
+        if not isinstance(node, (ast.Set, ast.Tuple, ast.List)) or not node.elts:
+            return None
+        values = []
+        for elt in node.elts:
+            if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+                return None
+            values.append(elt.value)
+        return frozenset(values)
+
+    def refused_outside(test):
+        # `p not in {...}`, or `not (p in {...})`
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) \
+                and isinstance(test.operand, ast.Compare) \
+                and len(test.operand.ops) == 1 \
+                and isinstance(test.operand.ops[0], ast.In):
+            test = ast.Compare(left=test.operand.left, ops=[ast.NotIn()],
+                               comparators=test.operand.comparators)
+        if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.NotIn)
+                and isinstance(test.left, ast.Name) and test.left.id in params):
+            return None
+        values = listed(test.comparators[0])
+        return None if values is None else (test.left.id, values)
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If)
+                and any(isinstance(s, ast.Raise) for s in node.body)):
+            continue
+        found = refused_outside(node.test)
+        if found is not None and found[0] not in out:
+            out[found[0]] = found[1]
+    return out

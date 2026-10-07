@@ -4,14 +4,19 @@
 binds it: `q in [0, 1]` is a number in [0, 1], so numpy.quantile is
 exercised at a scalar q, the claim the record states, never at a list
 of levels."""
-import numpy as np
 
-from mathema.conjecture import check_conjectures, claim
+import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def test_numpy_quantile_is_called_with_a_scalar_level(monkeypatch):
     (p,) = check_conjectures(np.quantile, [claim(
-        "for a in R^n, q in [0, 1], min(a) <= f(a, q) <= max(a)",
+        "for a in [-1e6, 1e6]^n, q in [0, 1], min(a) <= f(a, q) <= max(a)",
         route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
     import mathema.probing as probing
@@ -28,6 +33,6 @@ def test_numpy_quantile_is_called_with_a_scalar_level(monkeypatch):
     import mathema.conjecture as conjecture
     monkeypatch.setattr(conjecture, "_synth", spy, raising=False)
     check_conjectures(np.quantile, [claim(
-        "for a in R^n, q in [0, 1], min(a) <= f(a, q) <= max(a)",
+        "for a in [-1e6, 1e6]^n, q in [0, 1], min(a) <= f(a, q) <= max(a)",
         route="probe")])
     assert not [v for k, v in drawn if isinstance(v, list)], drawn[:3]

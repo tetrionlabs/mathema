@@ -122,7 +122,7 @@ def adjudicate_target(target: str, claims: list | None = None,
     if not rows and include == "declared":
         out["hint"] = ("no declared claims for this function; call again "
                        "with include='suggested' to see candidates, or "
-                       "pass claims=[...] to adjudicate your own")
+                       "pass claims=[...] to check your own")
     return out
 
 
@@ -343,8 +343,8 @@ def project_index(root: str = ".") -> dict:
     import yaml
     path = os.path.join(root, ".mathema", "index.yaml")
     if not os.path.exists(path):
-        return {"error": "no index at .mathema/index.yaml; run "
-                         "`mathema docsync <target>` to generate it"}
+        return {"error": "no index at .mathema/index.yaml; to generate it, "
+                         "run: mathema docsync <target>"}
     try:
         doc = yaml.safe_load(open(path)) or {}
     except Exception as e:

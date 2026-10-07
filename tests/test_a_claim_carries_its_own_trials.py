@@ -13,6 +13,8 @@ import sys
 import textwrap
 import warnings
 
+import pytest
+
 import mathema
 from mathema.conjecture import check_conjectures, claim
 from mathema.spec import entry_claims
@@ -37,9 +39,13 @@ def test_a_claims_file_entry_takes_trials():
     assert cj.trials == 40000
 
 
+@pytest.mark.needs_full_proof_budget
 def test_claim_trials_within_the_domain_sweeps_every_point(monkeypatch):
     from mathema import gates
     # however slow the timing looks, the claim asked for every point
+    # (the sweep of 34,190 points has to finish, so the wall-clock caps
+    # are lifted by the marker; the estimate is set to zero here so the
+    # claim's own trials, not the timing, decide the full sweep)
     monkeypatch.setattr(gates, "_SWEEP_SECONDS", 0.0)
     probes = check_conjectures(exposure_formula, [claim(_LAW, trials=40000)],
                                float_companions=True)

@@ -1296,7 +1296,8 @@ def _function_key(fn) -> str:
     return _fn_key(fn)
 
 
-def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
+def default_rows(fn, facts, domain: dict, covered: set, name_of,
+                 optional_only: bool = False) -> list:
     """Intent:
         The policy rows a record carries for every parameter that admits
         a kind, beside the cases stated policy rows cover (`covered`, a
@@ -1310,7 +1311,9 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
         row states the behaviour; `absent(f) introduces` where the return
         type declares the None f gave back from present inputs. One row
         per member when the members behave differently or a stated row
-        covers some of them.
+        covers some of them. With `optional_only` (a record with no
+        written claim), only the absence of a parameter an `Optional`
+        annotation admits is judged, by calling f there.
     """
     from .domain import NO_ANNOTATION
     from .records import Probe
@@ -1327,6 +1330,8 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
             admitted = (sig.absent if kind == "absent" else bool(sig.members)) \
                 or origin is not None
             if not admitted:
+                continue
+            if optional_only and not (kind == "absent" and sig.annotated and sig.absent):
                 continue
             mine = {(m, pr) for (k, q, m, pr) in covered if k == kind and q in (p, None)}
             if (None, "") in mine:
@@ -1359,13 +1364,24 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of) -> list:
                              & (done_members | stated_members))
                      and not any((m is None or m in _members_at(c, p, kind))
                                  and _in_region(pr, c) for m, pr in premised)]
+            if not calls and kind == "absent" and sig.annotated and sig.absent \
+                    and not mine:
+                # what f does at None is judged for every Optional
+                # parameter: where no claim's draw reached it (a text
+                # parameter no claim samples), the row calls f there
+                # itself
+                calls = _run_floor(fn, facts,
+                                   _floor_points(fn, facts, p, kind, ["None"], domain),
+                                   domain)
             # a record's own rows read the calls its claims made, and run
-            # nothing of their own
+            # nothing of their own beyond that
             if not calls:
                 continue
             rows += _member_rows(fn, p, kind, calls, origin, sig, guards, current,
                                  name_of, Probe,
                                  apart=bool(stated_members or premised) and kind == "missing")
+    if optional_only:
+        return rows
     rows += _path_rows(fn, covered, current, guards, name_of)
     rows += _return_rows(fn, covered, current, name_of)
     return rows
@@ -1430,8 +1446,11 @@ def _path_rows(fn, covered: set, current: "Batch | None", guards: dict, name_of)
 
 
 def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
-    """`absent(f) introduces` from the return type, where f gave None back
-    from present inputs and its return type declares it."""
+    """`absent(f) introduces`, where f gave None back from present
+    inputs: proven from the return type where it declares the absence
+    (`-> Optional[float]`), falsified where it does not, since the None
+    contradicts the type (an observed introduction, unaccounted for
+    until the annotation or the code changes)."""
     from .records import Probe
     from ._missing_words import declared_optional_return, point_shown
     calls = list(current.introduced) if current else []
@@ -1439,9 +1458,35 @@ def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
     if not calls or ("absent", None, None, "") in covered:
         return []
     if not declared:
-        # a None under a return type that does not admit it fails the
-        # value claims and is_defined at that point; it has no row here
-        return []
+        import inspect
+
+        from ._annotation_text import annotation_text
+        try:
+            ann = inspect.signature(fn).return_annotation
+        except (TypeError, ValueError):
+            ann = inspect.Signature.empty
+        shown = ("no annotation" if ann is inspect.Signature.empty
+                 else annotation_text(ann))
+        optional = ("Optional[...]" if ann is inspect.Signature.empty
+                    else f"Optional[{shown}]")
+        policy = Policy(kind="absent", behaviour="introduces", source="observed")
+        where = point_shown(calls[0].point)
+        sentence = (f"f returned None at {where} from present inputs, and its "
+                    f"return type ({shown}) does not declare it")
+        nxt = options([f"if None is an answer f may give, declare it in the "
+                       f"return type: {optional}",
+                       "if not, make f return a value"])
+        meta = {"mathema.policy": {"kind": "absent", "parameter": None, "member": None,
+                                   "behaviour": "introduces", "exception": None,
+                                   "premise": "", "source": "observed",
+                                   "reason": sentence, "sentence": sentence,
+                                   "next": nxt,
+                                   "evidence": _confirmed(calls, current, False)},
+                "mathema.surface": "mathema"}
+        return [Probe(name_of(policy), policy_text(policy), "falsified",
+                      n=len(calls), route="probe",
+                      counterexample=f"{where}: f returned None",
+                      note=f"{sentence}. {nxt}", meta=meta)]
     policy = Policy(kind="absent", behaviour="introduces", source="annotation")
     reason = (f"from the return type {declared}: f returned None at "
               f"{point_shown(calls[0].point)} from present inputs; "

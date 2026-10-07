@@ -7,6 +7,7 @@ maps each parameter to `{member: outcome}` (`nan in, nan out
 `behaviour` names the one behaviour per member (or `mixed`), and the
 row's note says it in one sentence, with the claim to write where the
 behaviour is not what the parameter's type leads a reader to expect."""
+import pytest
 import mathema
 from mathema.conjecture import check_conjectures, claim
 from mathema.probing import ExecutedMissing
@@ -157,6 +158,7 @@ def _row(record, name):
 
 
 def test_the_entries_are_counted_over_the_draws_the_row_counts():
+    pytest.importorskip("numpy")
     import numpy  # noqa: F401
     rec = mathema.check(mean_of, claims=[mathema.claim(
         "for xs in [0, 1]^3, 0 <= f(xs) <= 1", name="unit")])
@@ -165,6 +167,7 @@ def test_the_entries_are_counted_over_the_draws_the_row_counts():
 
 
 def test_the_entries_are_counted_over_every_container():
+    pytest.importorskip("numpy")
     import numpy  # noqa: F401
     rec = mathema.check(sum_both, claims=[mathema.claim(
         "for xs in [0, 1]^3, ys in [0, 1]^2, f(xs, ys) >= 0", name="nonneg")])
@@ -173,6 +176,7 @@ def test_the_entries_are_counted_over_every_container():
 
 
 def test_a_policy_row_cites_the_draw_count_its_claim_prints():
+    pytest.importorskip("numpy")
     import numpy  # noqa: F401
     rec = mathema.check(mean_of, claims=[mathema.claim(
         "for xs in [0, 1]^n, 0 <= f(xs) <= 1", name="unit")])

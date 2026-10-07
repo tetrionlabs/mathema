@@ -96,12 +96,15 @@ mathema verify --root .
 <!-- example: library output -->
 ```text
 ok   numpy.percentile: library claims from mathema/compendium/numpy/statistics.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
+     note definition: numpy.percentile gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], q = 30.72597523513774, a magnitude corner where the exact value is finite: a finding about its computation; the row stands
 ok   numpy.sqrt: library claims from mathema/compendium/numpy/scalars.claims.yaml; no baseline record; 1 proven, 2 holds, 0 falsified
 ok   numpy.std: library claims from mathema/compendium/numpy/reductions.claims.yaml; no baseline record; 1 proven, 4 holds, 0 falsified
+     note definition: numpy.std gives no value at a = [1e+300, -1e+300], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+     note definition@ddof=1: numpy.std gives no value at a = [1e+300, -1e+300], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
 ok   risk.moves: no baseline record; 1 proven, 2 holds, 0 falsified
 ok   risk.value_at_risk: no baseline record; 1 proven, 3 holds, 0 falsified
 ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified
-0 fresh (form unchanged, skipped), 6 adjudicated, 0 problem(s)
+0 unchanged since the last run (not run again), 6 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -162,7 +165,7 @@ mathema verify --root .
 <!-- example: library output match=subset -->
 ```text
 ok   numpy.ediff1d: library claims from claims/numpy.claims.yaml; no baseline record; 1 proven, 1 holds, 0 falsified
-6 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+6 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 ```
 
 <!-- example: library run requires=numpy -->

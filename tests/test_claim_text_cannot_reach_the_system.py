@@ -108,7 +108,10 @@ _REACH = '''
     import os as osmod
     from os import system
     from shutil import rmtree
-    from pandas import read_csv
+    try:
+        from pandas import read_csv
+    except ImportError:
+        read_csv = None
 
     exec_alias = exec
 
@@ -139,6 +142,8 @@ def reach_module(tmp_path, monkeypatch):
 ])
 def test_a_system_function_reached_through_an_allowed_module_is_refused(
         reach_module, tmp_path, path, module):
+    if module == "read_csv":
+        pytest.importorskip("pandas")
     stmt = (f"let g = {path}, f(x) == f(x) + 0*g('touch PWNED_REACH')")
     rec = mathema.check(reach_module.f, claims=[claim(stmt, name="c")])
     row = next(p for p in rec.probes if p.name == "c")

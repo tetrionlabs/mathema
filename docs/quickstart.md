@@ -10,8 +10,12 @@ Work inside a virtual environment rather than against a system Python:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install mathema
+pip install "mathema[all]"
 ```
+
+`[all]` adds numpy, the z3 proof rung, the MCP server and the coverage
+reader; `pip install mathema` is the minimal core, enough for everything on
+this page.
 
 mathema is fully offline. The one command that reaches the network is
 `mathema init --agents`, which you run by name to fetch the optional agent
@@ -42,13 +46,13 @@ mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) 
 
 <!-- example: falsify output -->
 ```text
-FAIL pricing.discounted: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL pricing.discounted: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified, on the first try. That is not a bad start, it is the point.
 Asking for the counterexample says why:
 
-<!-- example: falsify run -->
+<!-- example: falsify run requires=z3 -->
 ```python
 import mathema
 from pricing import discounted
@@ -62,7 +66,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: falsify output -->
 ```text
-falsified price = -8767334983.247742, rate = 0.3637206090059846
+falsified price = -1, rate = 1
 ```
 
 The claim is wrong, not the code. A negative price multiplied by
@@ -126,7 +130,7 @@ mathema check pricing.py
 
 <!-- example: docstring output -->
 ```text
-ok   pricing.discounted: source, no side effects; claims 4/4 adjudicated (1 proven, 3 holds, 0 falsified)
+ok   pricing.discounted: source, no side effects; claims 4/4 checked (1 proven, 3 holds, 0 falsified)
 ```
 
 One claim, four checks. The first is the proof over the real numbers.

@@ -13,12 +13,14 @@ counterexample. A fixed size, `Mat(2, 2)`, holds in every draw. And
 `inv(A) @ A == I(n)` keeps both of its sides wherever it is shown.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat, Symmetric
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat, Symmetric  # noqa: E402
 
 
 def one(A: Mat("n", "n")):

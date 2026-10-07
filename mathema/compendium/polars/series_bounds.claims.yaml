@@ -4,7 +4,7 @@
 # of `returns.min()` is `a`. mathema's own test suite verifies each row
 # against the installed polars.
 compendium: polars
-versions: ">=1,<2"
+versions: ">=1,<3"
 
 polars.Series.min:
   claims:
@@ -31,17 +31,17 @@ polars.Series.abs:
 polars.Series.sqrt:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming min(a) >= 0, f(a) ~= a ** 0.5"
+      statement: "for a in R^n, assuming min(a) >= 0, f(a) == a ** 0.5"
       note: "Element by element; a negative element gives NaN."
 
 polars.Series.dot:
   claims:
     - name: definition
-      statement: "for a in R^n, other in R^n, f(a, other) ~= dot(a, other)"
+      statement: "for a in R^n, other in R^n, f(a, other) == dot(a, other)"
       note: "The inner product with a Series of the same length."
 
 polars.Series.clip:
   claims:
     - name: definition
-      statement: "for a in R^n, lower_bound in [-1e6, 1e6], upper_bound in [-1e6, 1e6], assuming lower_bound <= upper_bound, f(a, lower_bound, upper_bound) ~= ((a + lower_bound + abs(a - lower_bound)) / 2 + upper_bound - abs((a + lower_bound + abs(a - lower_bound)) / 2 - upper_bound)) / 2"
+      statement: "for a in R^n, lower_bound in [-1e6, 1e6], upper_bound in [-1e6, 1e6], assuming lower_bound <= upper_bound, f(a, lower_bound, upper_bound) == ((a + lower_bound + abs(a - lower_bound)) / 2 + upper_bound - abs((a + lower_bound + abs(a - lower_bound)) / 2 - upper_bound)) / 2"
       note: "Element by element, the larger of each element and lower_bound, then the smaller of that and upper_bound. Stated for bounds in order: polars clips reversed bounds its own way."

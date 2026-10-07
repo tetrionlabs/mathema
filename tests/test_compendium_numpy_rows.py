@@ -14,14 +14,17 @@ shadows an earlier one per function, whole entry.
 """
 from __future__ import annotations
 
-import os
-import textwrap
-
 import pytest
-import yaml
 
-from mathema.compendium import _bundled_dir
-from tests.test_definition_rows import (_applies, _definition_rows,
+pytest.importorskip("numpy")
+
+import os  # noqa: E402
+import textwrap  # noqa: E402
+
+import yaml  # noqa: E402
+
+from mathema.compendium import _bundled_dir  # noqa: E402
+from tests.test_definition_rows import (_applies, _definition_rows,  # noqa: E402
                                         _record_rows)
 
 #: a row about a numpy ufunc binds its parameters from numpy 2.4 on

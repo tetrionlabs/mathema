@@ -225,9 +225,11 @@ def walk_refusal(path: str, root: str = ".") -> "str | None":
         Why a dotted path reaches the system once resolved: the text
         check, then every object along the walk from the longest
         importable prefix (an allowed module's attribute that is a
-        denylisted module, `logging.os`), then the object it names.
-        None when nothing on the way reaches the system or the path
-        does not resolve.
+        denylisted module, `logging.os`), then the object it names. A
+        plain data value on the walk (a dict written as a schema, a
+        list of names) is judged by the module or class that holds it,
+        not by the module of its type. None when nothing on the way
+        reaches the system or the path does not resolve.
     """
     import inspect
 
@@ -252,11 +254,31 @@ def walk_refusal(path: str, root: str = ".") -> "str | None":
                 return None
             if isinstance(obj, (staticmethod, classmethod)):
                 obj = obj.__func__
+            if _plain_data(obj):
+                # a dict, list, string or number is judged by the module
+                # or class holding it, which the walk just judged; its
+                # type's module (`builtins` for a dict) says nothing
+                # about where it comes from
+                continue
             said = object_refusal(obj, path)
             if said is not None:
                 return said
         return None
     return None
+
+
+#: the types of a plain data value: a schema written as a dict, a list
+#: of names, a string, a number. A subclass is not plain data and keeps
+#: the reading its own module gives it.
+_PLAIN_DATA_TYPES = (dict, list, tuple, set, frozenset, str, bytes, int,
+                     float, complex, bool, type(None))
+
+
+def _plain_data(obj) -> bool:
+    """Whether `obj` is a plain data value (`_PLAIN_DATA_TYPES`, exact
+    type), which belongs to whatever holds it rather than to the module
+    that defines its type."""
+    return type(obj) in _PLAIN_DATA_TYPES
 
 
 def refuse_path(path: str) -> None:

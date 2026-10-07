@@ -11,13 +11,16 @@ module-level state, a decorator's own body is examined with the
 function, a generator built with no seed reads fresh entropy, and the
 iteration order of a set of strings changes from one process to the
 next. A pure function is never falsified."""
-import inspect
-import os
-import sys
 
 import pytest
 
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import inspect  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
+
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "data"))
 import examine_attacks as A  # noqa: E402

@@ -12,12 +12,14 @@ combines with a relation premise, and the identity and skew-symmetric
 premises carry to the derive route.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat  # noqa: E402
 
 
 def one(A: Mat("n", "n")):
@@ -72,7 +74,7 @@ def _holds(p):
     (transpose, "f(A) == A", False),
     (transpose, "f(A) == transpose(A)", True),
     (transpose, "f(f(A)) == A", True),
-    (inverse, "assuming det(A) != 0, f(A) @ A ~= I(n)", True),
+    (inverse, "assuming det(A) != 0, f(A) @ A ~= I(n)", "ill-conditioned"),
     (inverse, "assuming det(A) != 0, f(A) @ A ~= 2 * I(n)", False),
     (inverse, "assuming det(A) != 0, det(f(A)) ~= 1 / det(A)", True),
     (inverse, "assuming det(A) != 0, det(f(A)) ~= det(A)", False),
@@ -86,6 +88,13 @@ def _holds(p):
 ])
 def test_the_plain_probe_evaluates_the_matrix_vocabulary(fn, law, true):
     p = _one(fn, law)
+    if true == "ill-conditioned":
+        # a true identity the computation misses at an ill-conditioned
+        # draw (a near-singular A): falsified, with the conditioning in
+        # the note (ruling of 2026-10-06 on G94)
+        assert p.verdict == "falsified", (law, p.verdict, p.note)
+        assert "ill-conditioned here (κ ≈" in p.note, p.note
+        return
     assert _holds(p) is true, (law, p.verdict, p.note, p.counterexample)
 
 

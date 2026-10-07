@@ -11,13 +11,17 @@ and the claim is decided.
 """
 from __future__ import annotations
 
-import math
-from fractions import Fraction
+import pytest
 
-import numpy as np
+pytest.importorskip("numpy")
 
-from mathema._linalg_eval import FUNCTIONS
-from mathema.conjecture import _SAFE_FUNCS
+import math  # noqa: E402
+from fractions import Fraction  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
+from mathema.conjecture import _SAFE_FUNCS  # noqa: E402
 
 
 def test_sqrt_of_an_exact_value_beyond_float_range():

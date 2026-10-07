@@ -7,6 +7,8 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from ._signatures import module_scope
 import ast
 import inspect
@@ -932,9 +934,9 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         if global_vars:
             parts.append(f"inherits from global scope: {', '.join(global_vars)}")
         if unresolved:
-            parts.append(f"UNRESOLVED names: {', '.join(unresolved)}")
+            parts.append(f"unresolved names: {', '.join(unresolved)}")
         warnings.warn(f"mathema: {fdef.name} " + "; ".join(parts)
-                      + "; behavior depends on state outside the function",
+                      + "; behaviour depends on state outside the function",
                       StateDependenceWarning, stacklevel=4)
     return global_vars, global_funcs, unresolved, mutated_globals
 
@@ -1047,7 +1049,7 @@ def looks_like_wrapper(facts) -> bool:
                 and facts.call_groups.get("external"))
 
 
-def analyze_source(fn) -> Facts:
+def analyze_source(fn: Callable[..., Any]) -> Facts:
     """Read a function's real source and build its `Facts` record,
     the single entry point everything downstream (the derive-route
     lifter, the probe route, `mathema audit`'s population analyses)

@@ -7,6 +7,8 @@ verdict it reached as its claimed level, under `compendium:` and
 back by the library loader."""
 import os
 
+import pytest
+
 from mathema.compendium.export import (default_export_path,
                                        export_compendium, write_compendium)
 
@@ -53,6 +55,7 @@ def test_export_keeps_the_verified_rows_and_their_levels(tmp_path):
 
 
 def test_an_installed_library_is_ranged_from_its_installed_version(tmp_path):
+    pytest.importorskip("numpy")
     import numpy
     _seed_verified(tmp_path, "numpy.tanh", [
         {"name": "tanh_in_unit",
@@ -75,6 +78,7 @@ def test_an_installed_library_is_ranged_from_its_installed_version(tmp_path):
 
 
 def test_the_written_file_is_a_claims_file_the_loader_reads(tmp_path):
+    pytest.importorskip("numpy")
     import yaml
 
     from mathema.compendium import load_library_claims

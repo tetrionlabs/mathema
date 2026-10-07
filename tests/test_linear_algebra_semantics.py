@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat, Vec
+pytest.importorskip("numpy")
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat, Vec  # noqa: E402
 
 
 def two(A: Mat("n", "n"), B: Mat("n", "n")):
@@ -104,7 +106,9 @@ def test_vector_operators_read_as_numpy(law, true):
 @pytest.mark.parametrize("law, true", [
     ("norm(c*x) == abs(c)*norm(x)", True),
     ("norm(c*x) == c*norm(x)", False),
-    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", "corner"),
+    # no f is read: both sides are claim words, exact at every draw,
+    # so the triangle inequality holds at the float limit too
+    ("norm(x + c) <= norm(x) + abs(c)*norm(x + 1 - x)", True),
 ])
 def test_a_number_scales_and_shifts_every_element(law, true):
     p = _one(scaled, law)
@@ -130,7 +134,8 @@ def test_plus_on_vectors_is_never_concatenation(law, true):
 
 def test_a_bound_library_function_sees_the_elementwise_value():
     # `h(2*x)` passes the doubled vector, not the list repeated twice
-    p = _one(vecs, "let h = numpy.linalg.norm, h(2*x) == 2*h(x)")
+    p = _one(vecs, "for x in [-1e6, 1e6]^n, let h = numpy.linalg.norm, "
+                   "h(2*x) == 2*h(x)")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
     p = _one(vecs, "let h = numpy.linalg.norm, "
                    "h(x + y)**2 == h(x)**2 + h(y)**2")
@@ -138,11 +143,11 @@ def test_a_bound_library_function_sees_the_elementwise_value():
 
 
 def test_a_returned_list_is_read_back_as_a_vector():
-    p = _one(doubled, "f(x) == 2*x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) == 2*x")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
-    p = _one(doubled, "f(x) + f(x) == 4*x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) + f(x) == 4*x")
     assert _holds(p), (p.verdict, p.note, p.counterexample)
-    p = _one(doubled, "f(x) == x + x + x")
+    p = _one(doubled, "for x in [-1e6, 1e6]^n, f(x) == x + x + x")
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 

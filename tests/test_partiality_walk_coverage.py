@@ -96,6 +96,7 @@ def ramp(amp: float, n: float) -> "list":
 
 
 def test_linspace_with_a_non_integer_count_is_a_raise_region():
+    pytest.importorskip("numpy")
     (p,) = check_conjectures(ramp, [claim(
         "for amp in [0, 2], n in [2, 10], f(amp, n)[0] == 0", route="derive")])
     assert p.verdict != "proven", (p.verdict, p.note)

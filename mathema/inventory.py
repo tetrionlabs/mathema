@@ -19,6 +19,8 @@ surfaces functions with *zero* claims, which the declared/verified
 store alone can never show."""
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from ._signatures import module_scope
 import ast
 import inspect
@@ -26,7 +28,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .analysis import quiet_facts
+from .analysis import Facts, quiet_facts
 from .intent import _sections
 from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
@@ -933,7 +935,7 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
     return out
 
 
-def function_dependencies(fn, facts=None) -> list[dict]:
+def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
     `Facts.global_funcs`' names resolved against the function's own
@@ -1028,7 +1030,7 @@ _BLOCKER_HELP = {
                 "beyond field reads and sibling calls)",
     "loop": "the loop doesn't match a recognized fold/sum/dot shape",
     "branch": "a branch couldn't be resolved from the declared domain",
-    "recursion": "recursive calls can't be lifted",
+    "recursion": "derive cannot read recursive calls, so claims on it are decided by running the code",
     "no-parameters": "the function takes no parameters, so there's nothing to quantify over",
     "non-scalar-parameters": "a parameter isn't a scalar (or recognized sequence) of reals",
     "internal-error": "the lifter itself hit an internal error",

@@ -120,7 +120,8 @@ def _record(fn, text: str) -> str:
 
 
 def test_a_language_spells_the_words_in_both_modes():
-    assert both("L[unicode]|None") == ("L[unicode]|None", "L[unicode]|None")
+    assert both("L[unicode]|None") == ("L[unicode]|absent", "L[unicode]|absent")
+    assert both("L[unicode]|absent") == ("L[unicode]|absent", "L[unicode]|absent")
     assert both("L[unicode]") == ("L[unicode]", "L[unicode]")
 
 

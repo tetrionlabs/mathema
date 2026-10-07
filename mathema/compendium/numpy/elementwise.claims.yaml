@@ -19,7 +19,7 @@ numpy.fabs:
 numpy.square:
   claims:
     - name: definition
-      statement: "for x in R^n, f(x) ~= x ** 2"
+      statement: "for x in R^n, f(x) == x ** 2"
 
 numpy.negative:
   claims:
@@ -29,13 +29,13 @@ numpy.negative:
 numpy.maximum:
   claims:
     - name: definition
-      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) ~= (x1 + x2 + abs(x1 - x2)) / 2"
+      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) == (x1 + x2 + abs(x1 - x2)) / 2"
       note: "The larger of each pair of elements: the midpoint plus half the gap."
 
 numpy.minimum:
   claims:
     - name: definition
-      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) ~= (x1 + x2 - abs(x1 - x2)) / 2"
+      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) == (x1 + x2 - abs(x1 - x2)) / 2"
       note: "The smaller of each pair of elements: the midpoint minus half the gap."
 
 numpy.sign:

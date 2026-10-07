@@ -63,7 +63,7 @@ def test_pole_safe_disproof_the_code_does_not_reproduce_is_not_falsified():
     (p,) = check_conjectures(reciprocal_irrational_pole, [cj])
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
-    assert "UNCORROBORATED" in p.note
+    assert "derive found a disproof" in p.note
 
 
 def test_the_finiteness_statement_holds_where_float_steps_over_the_pole():
@@ -101,7 +101,7 @@ def test_a_pole_floating_point_steps_over_is_labelled_exact_arithmetic_only():
         assert p.meta.get("mathema.corroboration") == "uncorroborated"
         assert p.meta.get("mathema.corroboration_reason") == \
             "exact arithmetic only", (p.name, p.meta)
-        assert "engine bug" not in p.note, (p.name, p.note)
+        assert "mathema bug" not in p.note, (p.name, p.note)
         assert "floating point does not reproduce" in p.note, (p.name, p.note)
 
 
@@ -110,4 +110,4 @@ def test_a_guard_that_never_fires_reports_no_derive_disproof():
                name="is_missing_safe[x]", route="derive")
     (p,) = check_conjectures(guard_that_never_fires_on_missing, [cj])
     assert "mathema.corroboration_reason" not in p.meta
-    assert "engine bug" not in (p.note or "")
+    assert "mathema bug" not in (p.note or "")

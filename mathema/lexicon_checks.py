@@ -5,6 +5,10 @@
 registered one are held to the same checks by the same code. Each
 `check_*` returns a list of problems, empty when the lexicon passes;
 `lexicon_problems` runs them all and returns the ones with problems.
+A row with an example function is rendered and round-tripped as that
+function completes it (`for n in N` against `n: int` stays `N`), the
+form its record states; a row without one renders the unannotated
+default.
 
 The checks: every row parses (`parses`) and renders in both forms
 (`renders`); both rendered forms match a golden snapshot
@@ -29,6 +33,29 @@ import os
 from .lexicon import LexiconSource
 
 
+def _example_for(src: LexiconSource, key: str):
+    """The first example function demonstrating `key`, or None."""
+    for fn, keys in src.example_functions.values():
+        if key in keys:
+            return fn
+    return None
+
+
+def _as_checked(cj, fn):
+    """Intent:
+        `cj` with its bindings completed from `fn`'s annotations
+        (`conjecture._complete_missing`), the form its record states;
+        `cj` itself when there is no function.
+    """
+    if fn is None:
+        return cj
+    from dataclasses import replace
+
+    from .conjecture import _complete_missing
+    completed = _complete_missing(cj, fn)[0]
+    return replace(cj, domain=completed) if completed else cj
+
+
 def rendered(src: LexiconSource) -> dict:
     """Intent:
         `{key: {"input", "unicode", "ascii"}}` for every row, the shape
@@ -38,7 +65,7 @@ def rendered(src: LexiconSource) -> dict:
     from .spec import render_claim_text
     out = {}
     for key, law in src.rows.items():
-        cj = claim(law)
+        cj = _as_checked(claim(law), _example_for(src, key))
         out[key] = {"input": law, "unicode": render_claim_text(cj, unicode=True),
                     "ascii": render_claim_text(cj, unicode=False)}
     return out
@@ -72,7 +99,7 @@ def check_renders(src: LexiconSource) -> list:
     out = []
     for key, law in src.rows.items():
         try:
-            cj = claim(law)
+            cj = _as_checked(claim(law), _example_for(src, key))
             render_claim_text(cj, unicode=True)
             render_claim_text(cj, unicode=False)
         except Exception as exc:
@@ -99,12 +126,13 @@ def check_fixed_point(src: LexiconSource) -> list:
     from .spec import canonical_claim_text, render_claim_text
     drifted = []
     for name, law in src.rows.items():
-        conjecture = claim(law)
+        fn = _example_for(src, name)
+        conjecture = _as_checked(claim(law), fn)
         canonical = canonical_claim_text(conjecture)
         for unicode_mode in (True, False):
             once = render_claim_text(conjecture, unicode=unicode_mode)
             try:
-                reparsed = claim(once)
+                reparsed = _as_checked(claim(once), fn)
             except InvalidConjecture as exc:
                 drifted.append(f"{name}: rendered text will not reparse ({exc}): {once}")
                 continue
@@ -122,9 +150,10 @@ def check_stable_canonical(src: LexiconSource) -> list:
     from .spec import canonical_claim_text
     drifted = []
     for name, law in src.rows.items():
-        once = canonical_claim_text(claim(law))
+        fn = _example_for(src, name)
+        once = canonical_claim_text(_as_checked(claim(law), fn))
         try:
-            twice = canonical_claim_text(claim(once))
+            twice = canonical_claim_text(_as_checked(claim(once), fn))
         except InvalidConjecture as exc:
             drifted.append(f"{name}: canonical text will not reparse "
                            f"({type(exc).__name__}): {once}")
@@ -143,7 +172,8 @@ def check_same_verdict(src: LexiconSource) -> list:
             law = src.rows[key]
             try:
                 original = claim(law, route="probe")
-                restored = claim(canonical_claim_text(original), route="probe")
+                canonical = canonical_claim_text(_as_checked(original, fn))
+                restored = claim(canonical, route="probe")
             except Exception as exc:
                 diverged.append(f"{key}: canonical form will not reparse ({type(exc).__name__})")
                 continue
@@ -151,7 +181,7 @@ def check_same_verdict(src: LexiconSource) -> list:
             (after,) = check_conjectures(fn, [restored], extensive=False)
             if before.verdict != after.verdict:
                 diverged.append(f"{key}: {before.verdict} -> {after.verdict}\n    {law}"
-                                f"\n    {canonical_claim_text(original)}")
+                                f"\n    {canonical}")
     return diverged
 
 
@@ -237,7 +267,8 @@ def check_missing_policy(src: LexiconSource) -> list:
     from .spec import canonical_claim_text, render_claim_text
     out = []
     for key, law in src.rows.items():
-        cj = claim(law)
+        fn = _example_for(src, key)
+        cj = _as_checked(claim(law), fn)
         if not cj.domain or all(isinstance(b, frozenset) for b in cj.domain.values()):
             continue
         # a binding that does not state its missing-value policy renders
@@ -251,7 +282,7 @@ def check_missing_policy(src: LexiconSource) -> list:
             if unstated and not any(word in shown for word in
                                     ("absent", "None", "missing", "∅")):
                 out.append(f"{key}: the rendered domain states no missing policy: {shown}")
-            if canonical_claim_text(claim(shown)) != canonical_claim_text(cj):
+            if canonical_claim_text(_as_checked(claim(shown), fn)) != canonical_claim_text(cj):
                 out.append(f"{key}: the rendered missing policy reparses to another claim")
     return out
 
@@ -333,7 +364,9 @@ def lexicon_problems(src: LexiconSource, *, golden: str | None = None,
         when the lexicon passes them all. `golden` is the snapshot path
         (the golden check runs only with one), `expected` the pinned
         verdicts (the verdict check runs only with them), and
-        `skip_record` rows the verified-record check leaves out.
+        `skip_record` rows the verified-record check leaves out. A row
+        with an example function is rendered and round-tripped as that
+        function completes it.
     """
     checks = {
         "parses": lambda: check_parses(src),

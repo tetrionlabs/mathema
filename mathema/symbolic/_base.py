@@ -159,6 +159,24 @@ def _unmodified_params(tree: ast.FunctionDef, param_names: set) -> set:
     return param_names - reassigned
 
 
+def _ternary_truth(test: ast.AST, ctx) -> bool | None:
+    """A ternary's condition decided by the declared domain alone, the
+    way `_conditioned._branch_condition_truth` decides an `if`
+    statement's: a bare boolean name over a discrete domain, or a
+    comparison of an unmodified parameter with a literal (`side ==
+    "buy"` with `side` over one member). None when the domain leaves
+    it open, never a guess."""
+    if isinstance(test, ast.Name):
+        if test.id not in ctx.unmodified:
+            return None
+        return _bare_name_truth(test.id, ctx.domain)
+    from ._conditioned import _branch_condition_truth
+    try:
+        return _branch_condition_truth(test, ctx.domain, set(ctx.unmodified), {}, {})
+    except Exception:
+        return None
+
+
 def _bare_name_truth(name: str, domain: dict) -> bool | None:
     """A bare boolean-valued name's truth value, decided the same way
     _branch_condition_truth's own bare-name case decides an `if`
@@ -1027,9 +1045,8 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         # one of {True, False} (never a numeric interval's bare
         # truthiness, same restriction _branch_condition_truth applies)
         #, otherwise falls through unchanged.
-        if ctx is not None and isinstance(node.test, ast.Name) \
-                and node.test.id in ctx.unmodified:
-            resolved = _bare_name_truth(node.test.id, ctx.domain)
+        if ctx is not None and ctx.domain:
+            resolved = _ternary_truth(node.test, ctx)
             if resolved is not None:
                 return _expr_to_sympy(node.body if resolved else node.orelse, env, ctx, opaque)
         # otherwise: a ternary lifts to a sympy Piecewise unconditionally,
@@ -1122,7 +1139,7 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         raise NotSymbolic(
             f"a comprehension outside the recognized sum(...) shapes: "
             f"{ast.unparse(node)!r}, sum(<generator>) derives; a "
-            f"comprehension VALUE (a built list/dict) is vector-valued "
+            f"comprehension whose value is a built list or dict is vector-valued "
             f"and out of scope",
             category="unsupported-comprehension")
     if isinstance(node, ast.Lambda):

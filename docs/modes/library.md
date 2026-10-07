@@ -138,7 +138,7 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
   proven    is_deterministic: f(x, alpha) = f(x, alpha)
   proven    is_state_safe: f(x, alpha) = f(x, alpha)
   unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, x, alpha) = 1
-           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
+           derive could not decide it; the probe could not decide it either (accuracy against the exact value is read for scalar parameters only)
   holds     is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (192 draws)
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122
@@ -161,14 +161,14 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
                               (ii) guard the empty input at entry
   translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   285 entries across 67 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -194,11 +194,11 @@ empty list):
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)})
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  min(x) <= f(x, alpha)
-    holds      computation  min(x) <= f(x, alpha)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  min(x) <= f(x, alpha)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
   bounded_upper  f(x, alpha) <= max(x)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  f(x, alpha) <= max(x)
-    holds      computation  f(x, alpha) <= max(x)   227 entries across 49 draws, sizes (1, 1) to (8, 1)
+    holds      computation  f(x, alpha) <= max(x)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
 ```
 
 That is the loop in miniature: the suggestion found the assumption the

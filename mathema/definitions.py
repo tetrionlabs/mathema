@@ -279,9 +279,8 @@ def row_standing(root: "str | None", key: str, row: dict,
     if local in ("holds", "proven", "trusted"):
         return local, ""
     return None, ("it is not bundled with mathema and mathema verify has "
-                  "not recorded it holds here (run mathema verify, or "
-                  "accept it with --as trusted), so until then it feeds "
-                  "sampling only")
+                  "not recorded that it holds here, so until then it "
+                  "feeds sampling only")
 
 
 def _parse_premises(text: str) -> "list | None":
@@ -309,13 +308,15 @@ def _parse_premises(text: str) -> "list | None":
 
 def _parse_row(key: str, row: dict) -> "tuple | None":
     """`(params, rhs, pins, premises)` of a definition row, or None
-    when its statement is not `f(p, ...) == <expression>` (or `~=`)."""
+    when its statement is not the equation `f(p, ...) == <expression>`
+    (a row written with `~=` states closeness within ε, not an
+    equation)."""
     from .conjecture import _single_point, claim
     try:
         cj = claim(str(row.get("statement") or ""), name=row.get("name"))
     except Exception:
         return None
-    if cj.relation not in ("==", "~=") or cj.negated or cj.links:
+    if cj.relation != "==" or cj.negated or cj.links:
         return None
     try:
         lhs = ast.parse(cj.lhs, mode="eval").body
@@ -484,6 +485,7 @@ class RowBook:
         self._library = _library_claims(self.root, load_library_claims)
         self._rows: dict = {}
         self._withheld: dict = {}
+        self._next: dict = {}
         self._unusable: dict = {}
 
     def states(self, key: str) -> bool:
@@ -509,6 +511,14 @@ class RowBook:
             self._read(key)
         return self._withheld.get(key)
 
+    def next_step(self, key: str) -> "str | None":
+        """The command that makes a withheld row of `key` usable, with
+        its condition first: `to take definition on its word, run:
+        mathema accept KEY definition --as trusted`."""
+        if key not in self._rows:
+            self._read(key)
+        return self._next.get(key)
+
     def _read(self, key: str) -> None:
         from .compendium import _installed_version
         out: list = []
@@ -530,11 +540,23 @@ class RowBook:
                                           file_versions)
             if status is None:
                 why = why or f"{row.get('name')}: {reason}"
+                if reason.endswith("feeds sampling only"):
+                    self._next.setdefault(
+                        key, f"to take {row.get('name')} on its word, run: "
+                             f"mathema accept {key} {row.get('name')} "
+                             f"--as trusted")
                 self._unusable.setdefault(key, []).append(
                     f"{row.get('name')}: {reason}")
                 continue
             parsed = _parse_row(key, row)
             if parsed is None:
+                if " ~= " in f" {row.get('statement') or ''} ":
+                    reason = (f"definition rows are equations, and {key}'s row "
+                              f"is written with ~=, so it is not used as one")
+                    self._unusable.setdefault(key, []).append(
+                        f"{row.get('name')}: {reason}")
+                    why = why or f"{row.get('name')}: {reason}"
+                    continue
                 why = why or (f"{row.get('name')}: its statement is not "
                               f"f(...) == <expression>")
                 continue
@@ -724,8 +746,11 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
 
     def no_row(key: str) -> Decline:
         why = book.withheld(key)
+        then = book.next_step(key)
+        # the next step goes on a line of its own, the command last
         return Decline(f"{key} has no definition row"
-                       + (f" usable here ({why})" if why else ""))
+                       + (f" usable here ({why})" if why else "")
+                       + (f"\n{then}" if then else ""))
 
     receiver_type = typing.of
 
@@ -793,8 +818,8 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
         if isinstance(node, ast.Call):
             if any(k.arg is None for k in node.keywords) or any(
                     isinstance(a, ast.Starred) for a in node.args):
-                raise Decline(f"{ast.unparse(node)!r}: argument unpacking "
-                              f"is outside the rewrite")
+                raise Decline(f"derive cannot read {ast.unparse(node)!r}, a "
+                              f"call that passes its arguments on unpacked")
             args = [rewrite(a) for a in node.args]
             keywords = {k.arg: rewrite(k.value) if not isinstance(
                             k.value, ast.Constant) else k.value
@@ -835,10 +860,10 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
                         return args[0]
                     return ast.Call(func=ast.Name(id=func.id, ctx=ast.Load()),
                                     args=args, keywords=[])
-            raise Decline(f"{ast.unparse(node)!r} is outside the "
-                          f"definition rewrite")
-        raise Decline(f"{ast.unparse(node)!r} is outside the definition "
-                      f"rewrite")
+            raise Decline(f"derive cannot read {ast.unparse(node)!r} "
+                          f"through the library's definition rows")
+        raise Decline(f"derive cannot read {ast.unparse(node)!r} through "
+                      f"the library's definition rows")
 
     for node in ast.walk(fdef):
         # a method or attribute of a parameter with a runtime type names
@@ -868,9 +893,9 @@ def inline_body(fn, facts, book: RowBook) -> "Inlined | None":
             break
         else:
             raise Decline(f"line {getattr(stmt, 'lineno', '?')}: "
-                          f"{type(stmt).__name__} is outside the "
-                          f"definition rewrite (straight-line assignments "
-                          f"and one return)")
+                          f"derive reads only straight-line assignments and one "
+                          f"return here, not a {type(stmt).__name__} "
+                          f"statement")
         found = receiver_type(value)
         if found is not None:
             typing.local[target] = found
@@ -1330,17 +1355,18 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     if other:
         return ProofResult(
             "unliftable", meta=meta,
-            sketch=f"the bound function(s) {', '.join(other)} are not law "
-                   f"transforms the sequence lowering reads (scale_seq, "
-                   f"shift_seq, reverse_seq)")
+            sketch=f"derive cannot read the bound function(s) "
+                   f"{', '.join(other)} over a sequence (it reads "
+                   f"scale_seq, shift_seq and reverse_seq)")
     matrix_rows = [r for r in inlined.uses
                    if any(k == 2 for k in r.ranks.values())]
     if matrix_rows:
         row = matrix_rows[0]
         return ProofResult(
             "unliftable", meta=meta,
-            sketch=f"the definition row {row.key} {row.name} is stated over "
-                   f"matrices, outside the sequence lowering")
+            sketch=f"derive cannot read the definition row {row.key} "
+                   f"{row.name} over a sequence, since the row is "
+                   f"stated over matrices")
     names = _names_in(trees)
     seqs: dict = {}
     lengths: dict = {}
@@ -1351,8 +1377,9 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
         r = 1 if table in tables else ranks.get(n)
         if r in (2, "table"):
             return ProofResult("unliftable", meta=meta,
-                               sketch=f"{n} is a matrix or a table, outside "
-                                      f"the sequence lowering")
+                               sketch=f"derive cannot read {n} over a "
+                                      f"sequence, since it is a matrix "
+                                      f"or a table")
         if r == 1:
             # a column's own binding (`for df.w in [0, 1]^n`) before
             # the table's (`for df in [0, 1]^n`)
@@ -1522,16 +1549,16 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
             outcome = {"empty": True}
     except TimeoutError:
         return ProofResult(
-            "undecided", sketch=f"{through}, the sequence lowering "
-                                f"exceeded the wall-clock cap",
+            "undecided", sketch=f"{through}, derive ran out of "
+                                f"time",
             meta={**meta, "mathema.timeout":
                   "extensive" if extensive else "fast"})
     except NotSymbolic as e:
         return ProofResult("unliftable", sketch=f"{through}: {e}", meta=meta)
     except Exception as e:
         return ProofResult("undecided", meta=meta,
-                           sketch=f"{through}: {type(e).__name__} during "
-                                  f"the lowering: {e}")
+                           sketch=f"{through}: derive stopped on "
+                                  f"{type(e).__name__}: {e}")
     if "unstated" in outcome:
         if outcome["unstated"]:
             row, text = outcome["unstated"][0]
@@ -1549,7 +1576,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     if outcome.get("empty"):
         return ProofResult(
             "undecided", meta=meta,
-            sketch=f"{through}, lowered to sums over {vectors}: the "
+            sketch=f"{through}, read as sums over {vectors}: the "
                    f"relation holds for every length of at least one, "
                    f"and the empty vector is left to the probe")
     if outcome.get("proven"):
@@ -1575,7 +1602,7 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
                  and detail.sketch and outcome.get("bounds") else "")
         return ProofResult(
             "proven", meta=meta,
-            sketch=f"{through}, lowered to sums over {vectors} at a symbolic "
+            sketch=f"{through}, read as sums over {vectors} at a symbolic "
                    f"length: the relation holds for every length"
                    f"{at_least_one}{lemma}{fixed_clause}",
             quantifier=(f"∀ {_over(seqs, elements)} with nothing "
@@ -1583,8 +1610,12 @@ def _sequence_route(cj, fn, facts, cj_domain, shapes, assumption, extensive,
     detail = outcome.get("result")
     why = (detail.sketch if detail is not None and detail.sketch else
            "the difference of the two sides does not simplify to 0")
-    return ProofResult("undecided", sketch=f"{through}, lowered to sums over "
-                                           f"{vectors}: {why}", meta=meta)
+    # the symbolic detail stays in the record's meta; the note says
+    # in words what derive could not do
+    return ProofResult("undecided",
+                       sketch=f"derive read the claim {through} as sums over "
+                              f"{vectors} but could not show the relation",
+                       meta={**meta, "mathema.derive_detail": why})
 
 
 def _no_value(cj, fn, facts, cj_domain, assumption, unmet: list,

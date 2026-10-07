@@ -8,12 +8,14 @@ algebra reads a vector the way numpy does: `A + x @ x.T` is not
 fives), and `x.T @ A @ x` is still the quadratic form.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from mathema.types import Mat, Vec
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.types import Mat, Vec  # noqa: E402
 
 
 def rank_one_update(A: np.ndarray, x: np.ndarray) -> np.ndarray:

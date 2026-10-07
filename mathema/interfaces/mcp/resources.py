@@ -37,13 +37,13 @@ def reason_code_reference() -> str:
     from mathema.reason_codes import CODE_IDS, CODE_TABLE
 
     lines = ["# Reason codes", "",
-             "Why a function did not lift, and whose move it is.",
+             "Why derive could not read a function, and whose move it is.",
              "`actionable` means the code or the claim can change to",
              "unlock the derive route; `limitation` means the construct",
              "is fine and the derive route does not reach it yet (a",
-             "probe claim still adjudicates); `N/A` means the derive",
+             "probe claim is still checked by running the code); `N/A` means the derive",
              "route fundamentally does not apply. Nothing here is a",
-             "failure: a probe-route claim adjudicates regardless.", "",
+             "failure: a probe-route claim is checked by running the code regardless.", "",
              "| id | code | unlock | meaning | hint |",
              "|---|---|---|---|---|"]
     for code, entry in CODE_TABLE.items():
@@ -65,13 +65,14 @@ marking a subroute (`derive:extensive`, `probe:lifted_numeric`,
 | stance | verdicts | what it means |
 |---|---|---|
 | `supported` | proven, holds | evidence stands: proven is symbolic, holds is empirical |
-| `refuted` | falsified, invalidated | a counterexample was executed against the real function |
-| `blocked` | skipped, unliftable | adjudication could not engage at all |
+| `refuted` | falsified, invalidated | the claim is false, and the record carries the witness: an input the code was run at (the computation line), or an exact one on the mathematics line |
+| `blocked` | skipped, unliftable | mathema could not run the claim at all; text output shows it as unknown, with the reason |
 | `undecided` | unknown, everything else | it was attempted and did not settle |
 
-**`skipped` is not `falsified`.** A skipped claim is a gap in
-mathema's own evidence, not a fact about your code; a falsified one
-carries a counterexample that replays on every re-adjudication. Read
+**`skipped` is not `falsified`.** A skipped claim (printed as unknown,
+with the reason) is a gap in mathema's own evidence, not a fact about
+your code; a falsified one carries a witness that replays every time
+the claim is checked. Read
 the two differently: the first asks you to state the claim better, the
 second says the code or the claim is wrong.
 
@@ -128,11 +129,11 @@ def claim_this_function(target: str, root: str = ".") -> str:
         "`span`, a ready-made `sed -n` range, so read exactly it "
         "rather than the whole file.",
         "2. Lint each statement with `parse_claim(statement, "
-        f"target=\"{key}\")` before adjudicating. Passing the target "
+        f"target=\"{key}\")` before checking it. Passing the target "
         "checks the parameter names and arity against the real "
         "signature, which is the mistake that otherwise costs a full "
-        "adjudication to discover.",
-        "3. Adjudicate with `adjudicate_target`. It returns your DECLARED "
+        "check to discover.",
+        "3. Check with `adjudicate_target`. It returns your declared "
         "claims by default; pass `include=\"suggested\"` to see "
         "candidates, or `include=\"all\"` for both.",
         "4. Claim the surface that carries risk, not the surface that "
@@ -152,7 +153,7 @@ def claim_this_function(target: str, root: str = ".") -> str:
             lines.append(f"  - {row[0]}: {row[1]}{mark}")
     else:
         lines.append("mathema proposes no candidates here, state what "
-                     "the function is FOR, in its own terms.")
+                     "the function is for, in its own terms.")
     return "\n".join(lines)
 
 
@@ -172,7 +173,7 @@ def triage_repository(targets: str, root: str = ".") -> str:
    the bare ones.
 3. `filter="actionable"` finds functions where the derive route is one
    declared domain away. `limitation` rows are not broken, a probe
-   claim adjudicates there regardless, so do not skip them.
+   claim is checked there by running the code, so do not skip them.
 4. `project_index` maps intent at system, module and function level,
    with a `span` per function. Read by span, never by search.
 5. `verify_project` tells you what the store already knows and what a
@@ -184,20 +185,20 @@ a human act in the CLI."""
 
 def diagnose_falsification(target: str, claim: str, root: str = ".") -> str:
     """Intent:
-        What to do with a claim that came back refuted, the fork
+        What to do with a claim that came back falsified, the fork
         that decides whether the code or the claim was wrong.
     """
-    return f"""`{claim}` on `{target}` came back refuted. Diagnose it
+    return f"""`{claim}` on `{target}` came back falsified. Diagnose it
 before changing anything.
 
 The counterexample is an executed witness against the real function,
 so one of exactly two things is true:
 
 - **The code is wrong.** Then fix the code. The counterexample replays
-  on every re-adjudication until the claim proves, so it cannot be
+  every time the claim is checked until it proves, so it cannot be
   waved through, which is the point.
 - **The claim was wrong.** The function's actual behaviour is the
-  interesting fact. Write the claim that WOULD hold and state it
+  interesting fact. Write the claim that would hold and state it
   alongside, rather than deleting the one that failed.
 
 Decide which by reading the function at its `span` and asking what it
@@ -207,7 +208,7 @@ on code you just wrote, it favours the code.
 `describe_target` gives the fuller view, and `reason_code` explains
 any blocker in the payload.
 
-What you must NOT do is record a verdict. Accepting a falsification as
+What you must not do is record a verdict. Accepting a falsification as
 a discovery is a human decision made in the CLI (`mathema accept ...
 --as discovery`); there is deliberately no tool for it here. Leave the
 claim falsified, say what you found, and hand it over."""

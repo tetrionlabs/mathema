@@ -680,7 +680,7 @@ that only a human decision clears (fix the code, accept it
 `--as discovery`, or supersede it). That is deliberate, it is what
 stops an inconvenient result from being quietly deleted, but it means
 the cheap place to be wrong is `check`, not a claims file. `verify`
-says so the first time a claim falsifies on its first adjudication.
+says so when a claim is initially falsified.
 
 ## All four funnel into the same shape
 
@@ -689,7 +689,7 @@ cares which surface a claim came from. `mathema.write_spec()`'s worked example b
 shows claims from three different sources adjudicated together with
 zero manual wiring, for this softmax:
 
-<!-- example: write-spec run -->
+<!-- example: write-spec run requires=numpy -->
 ```python
 import math
 from typing import Annotated
@@ -726,12 +726,10 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   is_state_safe  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, scores) = 1
-           derive route unliftable; probe: unknown (accuracy against the exact value is read for scalar parameters only)
   proven    is_empty_safe[scores]: is_empty_safe(scores)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds
-    holds      computation  len(f(scores)) = len(scores)   877 entries across 185 draws, sizes (1, 1) to (8, 1)
+    holds      computation  len(f(scores)) = len(scores)   851 entries across 183 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
@@ -739,7 +737,7 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   preserves_type  type(f(scores)) = type(scores)   holds
-    holds      computation  type(f(scores)) = type(scores)   822 entries across 186 draws, sizes (1, 1) to (8, 1)
+    holds      computation  type(f(scores)) = type(scores)   817 entries across 189 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
@@ -749,15 +747,16 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   875 entries across 186 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   880 entries across 190 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
 `sums_to_one` came from the docstring `Claims:` block, and the rest are
-mathema's built-in battery: every function gets the determinism, state
-and stability probes, and a list-in, list-out function also gets the
+mathema's built-in battery: every function gets the determinism and
+state probes, a function computing a number from numbers gets the
+stability probe too, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
 permutes nor sorts its input. A third, `raises[scores]`, is a
 suggestion read off the guard: it asks whether `softmax` always raises

@@ -144,7 +144,7 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
-ok   functions.softmax: source, no side effects; claims 6/6 adjudicated (0 proven, 6 holds, 0 falsified)
+ok   functions.softmax: source, no side effects; claims 6/6 checked (0 proven, 6 holds, 0 falsified)
 ```
 
 Break it on purpose (drop the normalization, `return exps` instead of
@@ -178,7 +178,7 @@ counterexample is kept as knowledge, *and* the run fails):
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"; echo $?
-FAIL functions.softmax: source, no side effects; claims 6/6 adjudicated (0 proven, 4 holds, 2 falsified)  <- 2 falsified claim(s)
+FAIL functions.softmax: source, no side effects; claims 5/5 checked (0 proven, 3 holds, 2 falsified)  <- 2 falsified claim(s)
 1
 ```
 

@@ -95,6 +95,7 @@ def test_the_expression_postfix_spelling_reads_the_output(mats):
 
 
 def test_enforce_structure_guards_a_marked_matrix():
+    pytest.importorskip("numpy")
     import random
 
     from mathema.authoring import declared_from_function, enforce_structure

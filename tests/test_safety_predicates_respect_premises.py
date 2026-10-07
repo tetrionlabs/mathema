@@ -10,15 +10,19 @@ sequences, which random draws never produce, so the premise has a
 solved draw: a constant sequence. A premise no sampled point satisfies
 is `skipped`, never `holds`, and `n` counts admitted points only.
 """
-import math
-
-import numpy as np
-import pandas as pd
 import pytest
 
-from mathema._exact_premises import premise_functions
-from mathema._linalg_eval import FUNCTIONS
-from mathema.conjecture import check_conjectures, claim
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from mathema._exact_premises import premise_functions  # noqa: E402
+from mathema._linalg_eval import FUNCTIONS  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 SEEN: list = []
 
@@ -117,7 +121,7 @@ def test_no_admitted_point_is_skipped_not_holds():
     # the claim is unknown, as the plain probe's claims are
     p = _one(recip, "for x in [-1, 1], assuming sin(x) > 1, is_finite(f(x))")
     assert p.verdict == "unknown", (p.verdict, p.note)
-    assert ("probe: skipped (no sampled point satisfied the assuming "
+    assert ("the probe could not decide it either (no sampled point satisfied the assuming "
             "clause)") in p.note
     assert SEEN == []
 

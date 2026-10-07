@@ -18,7 +18,7 @@ pandas.Series:
 pandas.Series.mean:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= mean(a)"
+      statement: "for a in R^n, f(a) == mean(a)"
     - name: missing_skipped
       statement: "assuming count(a) >= 1, missing(f, a) drops"
       note: "skipna leaves the holes out while a value remains."
@@ -32,10 +32,10 @@ pandas.Series.mean:
 pandas.Series.std:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= std(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == std(a, ddof=1)"
       note: "The sample standard deviation: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "for a in R^n, f(a, ddof=0) ~= std(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) == std(a, ddof=0)"
     - name: empty_is_missing
       statement: "f([]) in {missing}"
       note: "The empty input has no value: nan."
@@ -43,10 +43,10 @@ pandas.Series.std:
 pandas.Series.var:
   claims:
     - name: definition
-      statement: "for a in R^n, assuming dim(a) >= 2, f(a) ~= var(a, ddof=1)"
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == var(a, ddof=1)"
       note: "The sample variance: ddof defaults to 1, unlike numpy; one element gives nan."
     - name: definition@ddof=0
-      statement: "for a in R^n, f(a, ddof=0) ~= var(a, ddof=0)"
+      statement: "for a in R^n, f(a, ddof=0) == var(a, ddof=0)"
     - name: empty_is_missing
       statement: "f([]) in {missing}"
       note: "The empty input has no value: nan."
@@ -54,7 +54,7 @@ pandas.Series.var:
 pandas.Series.sum:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= sum(a)"
+      statement: "for a in R^n, f(a) == sum(a)"
     - name: missing_skipped
       statement: "missing(f, a) drops"
       note: "skipna leaves the holes out; a Series with no value sums to 0."
@@ -62,17 +62,17 @@ pandas.Series.sum:
 pandas.Series.prod:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= prod(a)"
+      statement: "for a in R^n, f(a) == prod(a)"
 
 pandas.Series.cumsum:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= cumsum(a)"
+      statement: "for a in R^n, f(a) == cumsum(a)"
 
 pandas.Series.cumprod:
   claims:
     - name: definition
-      statement: "for a in R^n, f(a) ~= cumprod(a)"
+      statement: "for a in R^n, f(a) == cumprod(a)"
 
 pandas.Series.count:
   claims:

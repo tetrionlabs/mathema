@@ -6,10 +6,15 @@ dot-product calls, fold/sum-shaped loop headers, deliberately working
 whether or not the whole function lifts, since a syntactic pattern is
 real signal independent of full liftability, and the primary use case
 is exactly the functions that don't fully lift."""
-import numpy as np
 
-from mathema.analysis import analyze_source
-from mathema.diagnostics import (
+import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.diagnostics import (  # noqa: E402
     has_accumulator_fold, has_clamp, has_dot_product_call, motifs,
 )
 

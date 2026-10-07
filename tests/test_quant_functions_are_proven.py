@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from mathema.claims import check_conjectures, claim
-from tests.fixtures.quant import quantlib as q
+pytest.importorskip("numpy")
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from tests.fixtures.quant import quantlib as q  # noqa: E402
 
 
 def _one(fn, law, route="best", extensive=False):

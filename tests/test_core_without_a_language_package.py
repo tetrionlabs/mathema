@@ -6,8 +6,9 @@ the package too): finite sets of strings adjudicate under the plain
 `mathema` grammar, `is_language_defined` runs on core's own string
 corpus, the suggestions for a `str` parameter name none of the
 package's families, nothing names the package unless the claim writes
-`L[...]`, a written `L[unicode]` is skipped with the unresolved-language
-gap and the install hint, and a `str` parameter infers no language."""
+`L[...]`, a written `L[unicode]` is unknown (never falsified) with the
+unresolved-language gap and the install hint, and a `str` parameter
+infers no language, only the type fact `: str`."""
 import pytest
 
 import mathema.families as families
@@ -94,10 +95,12 @@ def test_nothing_names_the_package_unless_the_claim_writes_a_language(fn, law):
     assert not any(name in _text(p) for name in PACKAGE_NAMES), _text(p)
 
 
-def test_a_written_language_is_skipped_with_the_install_hint():
+def test_a_written_language_is_unknown_with_the_install_hint():
     p = _one(shout, "for s in L[unicode], f(f(s)) == f(s)")
-    assert p.verdict == "skipped"
+    assert p.verdict == "unknown"
+    assert p.counterexample is None
     assert p.meta["mathema.probe_gap"] == "language-unresolved"
+    assert "needs mathema-language" in p.note
     assert 'pip install "mathema[language]"' in p.note
     assert p.grammar == "mathema/language"
 

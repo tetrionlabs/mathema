@@ -120,5 +120,5 @@ def test_verify_after_write_names_the_contradicted_row(tmp_path, monkeypatch, ca
     assert main(["verify", "--root", str(tmp_path)]) == 1
     out = capsys.readouterr().out
     note = next(ln for ln in out.splitlines() if ln.startswith("note pw.clamp:"))
-    assert note.startswith("note pw.clamp: missing[x] falsified on first adjudication; "
+    assert note.startswith("note pw.clamp: missing[x] initially falsified; "
                            "f drops a missing x (nan in, 1.0 out)")

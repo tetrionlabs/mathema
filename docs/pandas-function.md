@@ -57,7 +57,7 @@ mathema.Record(average_return) · source, no side effects · form cb973acd88fd
     proven     mathematics  for returns in [-0.1, 0.1]^n ⊂ ℝ, min(returns) <=
         f(returns) <= max(returns)
     holds      computation  for returns in [-0.1, 0.1]^n : float, min(returns)
-        <= f(returns) <= max(returns)   205 entries across 43 draws, sizes (1,
+        <= f(returns) <= max(returns)   208 entries across 44 draws, sizes (1,
         1) to (8, 1)
     falsified  policy       f([])   f(returns) returns nan at returns = []: no
         value for no data, and no empty policy is stated
@@ -95,13 +95,13 @@ print(textwrap.fill(record.probes[0].sketch, 78))
 ```text
 link 1: min(returns) <= f(returns): taking pandas.Series.mean as mean(a)
 (axiom, bundled with mathema, pandas 2.2 to 3.x); through the
-pandas.Series.mean definition row, lowered to sums over returns at a symbolic
+pandas.Series.mean definition row, read as sums over returns at a symbolic
 length: the relation holds for every length of at least one (min(returns) is
 at most mean(returns)); link 2: f(returns) <= max(returns): taking
 pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2 to
-3.x); through the pandas.Series.mean definition row, lowered to sums over
-returns at a symbolic length: the relation holds for every length of at least
-one (max(returns) is at least mean(returns))
+3.x); through the pandas.Series.mean definition row, read as sums over returns
+at a symbolic length: the relation holds for every length of at least one
+(max(returns) is at least mean(returns))
 ```
 
 ## A claim that is wrong, and the witness
@@ -184,6 +184,12 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
         : float, f(s(returns, c)) ~= f(returns)   counterexample returns =
         [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
         -0.02405627255486045, -0.024056272554860453], c = 10
+                            conditioning unknown here: derive cannot read f, so
+                                whether this loss is inherent is not decided
+                            possible fixes:
+                              if the loss is accepted, run: mathema accept
+                                  returns.sharpe leverage_invariant --as
+                                  discovery
 ```
 
 The `mathematics` line is proven. The `computation` line runs the same
@@ -191,7 +197,12 @@ claim through the real code in floating point and is falsified at a
 series of five returns that differ only in their last digit: their
 standard deviation is about `2.5e-18`, the ratio about `-1.6e17`, and
 scaling the series by 10 moves the float result to about `-1.9e17`.
-That is a fact about the computation, not the mathematics. The premise
+That is a fact about the computation, not the mathematics. A loss like
+this is either inherent in the inputs (no float64 computation could do
+better there) or the code's own; the line says which when mathema can
+read the condition number at the witness, and says it cannot here, since
+the function's body is pandas rather than arithmetic derive can read.
+The premise
 took the one-day series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on both lines alike: mathema computes the premise's `std` exactly rather than
 through the function's floating point, so a constant series whose float
@@ -213,7 +224,7 @@ for row in proof.meta["mathema.definitions"]:
 taking pandas.Series.mean as mean(a) (axiom, bundled with mathema, pandas 2.2
 to 3.x); taking pandas.Series.std as std(a, ddof=1) (axiom, bundled with
 mathema, pandas 2.2 to 3.x); through the pandas.Series.mean definition and
-pandas.Series.std definition rows, lowered to sums over returns at a symbolic
+pandas.Series.std definition rows, read as sums over returns at a symbolic
 length: the relation holds for every length
 pandas.Series.mean mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std mathema/compendium/pandas/series.claims.yaml

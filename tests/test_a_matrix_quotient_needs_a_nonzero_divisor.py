@@ -12,12 +12,14 @@ keeps its divisor in the claim's own text: `f(A) / f(A) == 1` is never
 stored as `1 == 1`.
 """
 from __future__ import annotations
-
-import numpy as np
 import pytest
 
-import mathema
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+import mathema  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def normalized(A: np.ndarray) -> np.ndarray:

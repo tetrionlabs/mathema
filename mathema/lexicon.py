@@ -47,7 +47,7 @@ import math
 import os
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
 
@@ -122,7 +122,7 @@ LEXICON: dict[str, str] = {
     # shape is outside the space it was said to be in
     "space_output_wrong_shape": "for A in R^(n,3), f(A) in R^(n,3)",
     # a shared name draws x to A's rows; the output is A's other axis
-    "space_output_named": "for A in R^(n,15), x in R^n, f(A, x) in R^15",
+    "space_output_named": "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15",
     # a fixed shape has an outside (a wrong size on a fixed axis, a
     # wrong rank); an unguarded function accepts it and the exclusion
     # claim says so with the shape it accepted
@@ -340,8 +340,8 @@ LEXICON: dict[str, str] = {
     "matrix_qr_factors":
         "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
     # a DataFrame's column, as an attribute or an item, is a vector
-    "table_column_attribute": "for c in [-2, 2], f(df, c) == c * df.returns",
-    "table_column_item": 'for c in [-2, 2], f(df, c) == c * df["returns"]',
+    "table_column_attribute": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+    "table_column_item": 'for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df["returns"]',
     # a running maximum, the least and greatest elements, and a table's
     # columns read as vectors on the derive route
     "vector_running_maximum": "for a in R^n, f(a) == cummax(a)",
@@ -437,6 +437,14 @@ LEXICON: dict[str, str] = {
     "tolerance_eps_ascii": "for x in [0, 1], abs(f(x) - x) <= eps",
     "tolerance_epsilon_word": "for x in [0, 1], abs(f(x) - x) <= epsilon",
     "tolerance_epsilon_latex": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
+    # `~=` is `abs(a - b) <= ε`: an offset of 1e-12 is within the 1e-9
+    # default, and exact equality is falsified by it
+    "exact_offset_vs_approx": "for x in [0, 1], f(x) ~= x",
+    "exact_offset_vs_approx_trap": "for x in [0, 1], f(x) == x",
+    # a truncated Taylor series is not the sine, and on a wide enough
+    # range not within ε of it either (the gap at 0.5 is about 2.6e-4)
+    "approx_taylor_sin_exact_fails": "for x in [0, 0.01], f(x) == sin(x)",
+    "approx_too_wide": "for x in [0, 0.5], f(x) ~= sin(x)",
     # derivatives: one primitive, many spellings -------------------
     "derivative_call": "d(f(x), x) >= 0",
     "derivative_prime": "f'(x) >= 0",
@@ -769,6 +777,8 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
+        "exact_offset_vs_approx", "exact_offset_vs_approx_trap",
+        "approx_taylor_sin_exact_fails", "approx_too_wide",
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite"),
     "integer_parts": (
@@ -1089,7 +1099,7 @@ class LexiconSource:
     example_functions: dict
 
 
-def source_of(name: str, obj) -> LexiconSource:
+def source_of(name: str, obj: object) -> LexiconSource:
     """Intent:
         The `LexiconSource` an object (a module, a class, an instance)
         provides: its `LEXICON`, and its `SECTIONS`, `TAGS` and
@@ -1113,7 +1123,7 @@ lexicon_source = source_of
 
 
 def _core() -> LexiconSource:
-    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, EXAMPLE_FUNCTIONS)
+    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, _examples())
 
 
 def _entry_points() -> tuple:
@@ -1352,8 +1362,6 @@ def frob(A: "numpy.ndarray") -> float:
     return float((A * A).sum())
 
 
-@enforce_dimensions()
-@claims_decorator("for A in R^(30,15), f(A) >= 0")
 def frob_guarded(A: "numpy.ndarray") -> float:
     """The sum of squares of every entry, guarded to 30 by 15 by
     `enforce_dimensions()`, which declares the exclusion it makes true
@@ -1397,6 +1405,17 @@ def cosine_phase(φ: float) -> float:
     claim is that same parameter."""
     import math
     return math.cos(φ)
+
+
+def exact_offset(x: float) -> float:
+    """The identity plus an offset of 1e-12: not exactly the identity,
+    and within the default tolerance of it."""
+    return x + 1e-12
+
+
+def sin3(x: float) -> float:
+    """The sine's Taylor polynomial of degree 3, `x - x**3/6`."""
+    return x - x**3 / 6
 
 
 def nearly_identity(x: float) -> float:
@@ -1516,8 +1535,6 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     return (m1 * x1 + m2 * x2) / (m1 + m2)
 
 
-@enforce_domain()
-@claims_decorator("for alpha in [0, 1], f(x, alpha) <= max(x, 1)")
 def blend(x: float, alpha: float) -> float:
     """A blend of x with 1, weighted by alpha, which its guard keeps in
     [0, 1], what "enforce_domain_guard" demonstrates."""
@@ -1946,7 +1963,20 @@ def sample_std(returns: "pandas.Series") -> float:
     return returns.std(ddof=1)
 
 
-EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+#: the example functions that carry a runtime guard and a declared
+#: claim: the guard and the claims decorator are applied on the first
+#: read of `EXAMPLE_FUNCTIONS` (see `_examples`), so importing this
+#: module parses no claim
+_GUARDED: dict[str, tuple] = {
+    "frob_guarded": (lambda: enforce_dimensions(),
+                     "for A in R^(30,15), f(A) >= 0"),
+    "blend": (lambda: enforce_domain(),
+              "for alpha in [0, 1], f(x, alpha) <= max(x, 1)"),
+}
+
+#: the entries of `EXAMPLE_FUNCTIONS` as written, the guarded functions
+#: still plain
+_EXAMPLE_ENTRIES: dict[str, tuple[object, list[str]]] = {
     "collapse_spaces": (collapse_spaces, [
         "language_alphabet", "language_contraction",
         "language_missing_excluded", "language_closure", "language_length_bound",
@@ -2007,6 +2037,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "exact_offset": (exact_offset, ["exact_offset_vs_approx",
+                                    "exact_offset_vs_approx_trap"]),
+    "sin3": (sin3, ["approx_taylor_sin_exact_fails", "approx_too_wide"]),
     "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
     "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
     "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),
@@ -2102,8 +2135,39 @@ try:
     from . import _lexicon_numpy as _numpy_examples
 except ImportError:
     _numpy_examples = None
-if _numpy_examples is not None:
-    EXAMPLE_FUNCTIONS.update(_numpy_examples.EXAMPLE_FUNCTIONS)
+
+
+def _examples() -> dict:
+    """Intent:
+        `EXAMPLE_FUNCTIONS`, built on first read: the entries as written,
+        each guarded function decorated with its guard and its declared
+        claim (and rebound under its name in this module), and the numpy
+        examples added when numpy is installed. Later reads return the
+        same dict.
+    """
+    built = globals().get("EXAMPLE_FUNCTIONS")
+    if built is not None:
+        return built
+    out = dict(_EXAMPLE_ENTRIES)
+    for name, (guard, statement) in _GUARDED.items():
+        fn, keys = out[name]
+        decorated = guard()(claims_decorator(statement)(fn))
+        globals()[name] = decorated
+        out[name] = (decorated, keys)
+    if _numpy_examples is not None:
+        out.update(_numpy_examples.EXAMPLE_FUNCTIONS)
+    globals()["EXAMPLE_FUNCTIONS"] = out
+    return out
+
+
+def __getattr__(name: str) -> Any:
+    if name == "EXAMPLE_FUNCTIONS":
+        return _examples()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list:
+    return sorted(set(globals()) | {"EXAMPLE_FUNCTIONS"})
 
 
 def get(key: str | int) -> str:
@@ -2120,7 +2184,10 @@ def get(key: str | int) -> str:
 def render_both(key: str | int, *, include_internal: bool = False):
     """`(input_text, output_unicode, output_ascii)` for one `LEXICON`
     entry, `input_text` as authored, the other two from `claim()` +
-    `spec.render_claim_text()`. Use this instead of `get()` to see the
+    `spec.render_claim_text()`. A row with an example function renders
+    as that function completes it (`for n in N` against `n: int` stays
+    `N`), the form its record states; a row without one renders the
+    unannotated default. Use this instead of `get()` to see the
     rendered shape next to the input, e.g. while reviewing whether a
     rendering choice reads right.
 
@@ -2132,10 +2199,13 @@ def render_both(key: str | int, *, include_internal: bool = False):
     a free variable's assumed type made explicit, ...) rather than only
     its two surface spellings."""
     from .conjecture import claim
+    from .lexicon_checks import _as_checked, _example_for
     from .spec import render_claim_text
 
     text = get(key)
-    cj = claim(text)
+    name = key if isinstance(key, str) else list(_rows())[key]
+    src = next((s for s in sources() if name in s.rows), None)
+    cj = _as_checked(claim(text), _example_for(src, name) if src else None)
     result = (text, render_claim_text(cj, unicode=True),
              render_claim_text(cj, unicode=False))
     if not include_internal:

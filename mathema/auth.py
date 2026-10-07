@@ -187,8 +187,8 @@ def require_human(action: str) -> dict | None:
         raise HumanVerificationError(
             f"{action}: the stored credential uses {record.get('method')!r}, "
             f"which this release does not support, so nothing is written; "
-            f"delete {config_path()} yourself and run `mathema pin set` to "
-            f"set a PIN")
+            f"delete {config_path()} yourself, then to set a PIN, run: "
+            f"mathema pin set")
     for _ in range(_ATTEMPTS):
         code = _prompt_code(action)
         if verify_code(code, record=record):

@@ -12,13 +12,15 @@ witness, and the claim with it. A function that returns on the empty
 list, or refuses it behind an explicit guard, keeps its claim.
 """
 from __future__ import annotations
-
-import math
-
-import numpy as np
 import pytest
 
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def ema(x: list, alpha: float) -> float:

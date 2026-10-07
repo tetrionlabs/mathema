@@ -14,6 +14,11 @@ branch.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..analysis import Facts
+
 from .._signatures import module_scope
 import ast
 import operator
@@ -1012,7 +1017,8 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
                            opaque=OpaqueRegistry(), raise_guards=guards)
 
 
-def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
+def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
+                     max_callee_depth: int = 3,
                      _ctx: "_LiftCtx | None" = None,
                      _opaque: "OpaqueRegistry | None" = None) -> "ConditionedLift | None":
     """Like lift(), but for a function whose branches resolve under the

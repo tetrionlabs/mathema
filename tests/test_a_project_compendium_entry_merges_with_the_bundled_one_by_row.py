@@ -142,7 +142,7 @@ def test_a_replaced_definition_row_is_evidence(tmp_path):
         numpy.std:
           claims:
             - name: definition
-              statement: "for a in R^n, f(a) ~= std(a, ddof=0)"
+              statement: "for a in R^n, f(a) == std(a, ddof=0)"
     """)
     compendium.uninstall()
     compendium.install(str(tmp_path))
@@ -166,7 +166,7 @@ def test_a_replaced_definition_row_verified_here_caps_as_evidence(tmp_path):
     from mathema import compendium
     from mathema.definitions import RowBook
     from mathema.spec import verified_dir, write_yaml
-    statement = "for a in R^n, f(a) ~= std(a, ddof=0)"
+    statement = "for a in R^n, f(a) == std(a, ddof=0)"
     _write(tmp_path / "claims" / "numpy.claims.yaml", f"""
         compendium: numpy
         versions: ">=2.0"

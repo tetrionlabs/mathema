@@ -109,7 +109,7 @@ mathema.write_spec(softmax)
 $ mathema verify --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 ok   functions.softmax: fresh
-1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -148,8 +148,8 @@ and re-run:
 ```
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL functions.softmax: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -183,7 +183,7 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 $ mathema verify --root .
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   functions.softmax: form changed; 1 proven, 4 holds, 0 falsified
-1 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -217,12 +217,12 @@ A bundled file is named by the path records give it,
 ```
 $ mathema verify mathema/compendium/math.claims.yaml --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone unknown: derive route unliftable
+FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 0 holds, 0 falsified, 1 unknown  <- log_monotone unknown: derive could not decide it
        compendium:math declares 'log_monotone' for math.log; mathema verify recorded it unknown against the installed library:
        (i) to take it on its word, run: mathema accept math.log log_monotone --as trusted
        (ii) to decide it, restate the row, then run: mathema check math.log --claim "..."
 ok   math.sqrt: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-0 fresh (form unchanged, skipped), 3 adjudicated, 1 problem(s)
+0 unchanged since the last run (not run again), 3 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -269,21 +269,30 @@ the sign of the lifted sum), so the dependent claim is `unknown`.
 `shifts_with_start` proves on the derive route, and every proof spawns
 a `shifts_with_start[float]` companion, the same law checked in
 floating point (see
-[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)),
-which holds. The second proven claim in the count is
-`dependencies_current`, which `verify` adds to every record:
+[the evidence ladder](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)).
+The companion is falsified: at `xs = [1e300, -1e300, ...]` the float
+sum cancels and drops `y0`, a result no float64 computation can deliver
+at inputs of that magnitude. The note says so, with the condition
+number at the witness, and gives the ways out: narrow the domain to
+where float64 can honour the claim, or accept the discovery. The second
+proven claim in the count is `dependencies_current`, which `verify`
+adds to every record:
 
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
+note balances.running_total: shifts_with_start[float] initially falsified: ill-conditioned here (κ ≈ 5e287): no float64 computation can deliver this result at inputs of magnitude 1e300:
+  (i) if inputs this large are out of scope, narrow the domain: for xs in [-1e21, 1e21]^n
+  (ii) if the loss is accepted, run: mathema accept balances.running_total shifts_with_start --as discovery
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
+FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
+       1 falsified claim(s)
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 ok   functions.softmax: fresh
-2 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
+2 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -304,11 +313,12 @@ accepting balances.running_total :: never_overshoots_much (verdict unknown) as r
   - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
 $ mathema verify balances.running_total --root . --lenient
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
-0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+       1 falsified claim(s)
+0 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -318,12 +328,13 @@ pipeline can choose whether owned gaps block it:
 <!-- example: sweep session -->
 ```
 $ mathema verify balances.running_total --root .
-FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 1 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
+FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
+       1 falsified claim(s)
        1 accepted-risk claim(s)
-0 fresh (form unchanged, skipped), 1 adjudicated, 2 problem(s)
+0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -362,10 +373,10 @@ history over:
 ```
 $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
-FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was checked or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
 ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   functions.softmax: fresh
-2 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+2 unchanged since the last run (not run again), 0 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 

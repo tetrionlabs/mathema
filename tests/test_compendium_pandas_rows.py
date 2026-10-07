@@ -90,6 +90,7 @@ def test_the_numbers_of_pandas_rows():
      "for a in R^n \\\\ {∅}, f(a)[0] ~= mean(a.x)"),
 ])
 def test_a_wrong_pandas_row_is_falsified(tmp_path, key, name, statement):
+    pytest.importorskip("pandas")
     from mathema import compendium
     from mathema.verify import verify_project
     claims = tmp_path / "claims"

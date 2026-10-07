@@ -13,15 +13,18 @@ slots; over no value slot `sum` is 0, `prod` 1 and `count` 0, and
 computes it, and a false sibling beside it is falsified.
 """
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
 import pytest
 
-import mathema
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
 
-from mathema.claims import check_conjectures, claim
-from mathema.conjecture import InvalidConjecture
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import mathema  # noqa: E402
+
+from mathema.claims import check_conjectures, claim  # noqa: E402
+from mathema.conjecture import InvalidConjecture  # noqa: E402
 
 
 def sample_std(xs: np.ndarray):

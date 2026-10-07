@@ -67,7 +67,7 @@ def test_uncorroborated_disproof_downgrades_and_probe_supersedes(monkeypatch):
     assert p.verdict == "holds"    # empirical truth supersedes the unknown
     assert p.counterexample is None
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
-    assert "UNCORROBORATED" in p.note and "engine bug" in p.note
+    assert "derive found a disproof" in p.note and "mathema bug" in p.note
 
 
 @pytest.mark.needs_full_proof_budget

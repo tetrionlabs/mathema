@@ -116,7 +116,7 @@ def test_a_falsified_gate_prints_its_reason_and_next_step():
     under = _lines_under(rec, "c1")
     assert under[1] == (
         "           xs (list): null raises TypeError, and no claim says it may; nan "
-        "propagates, confirmed on the 43 draws of c0[float]; no claim states it yet")
+        "propagates, confirmed on the 44 draws of c0[float]; no claim states it yet")
     assert under[2] == "           counterexample xs = [null]: f raised TypeError"
     assert under[3:5] == [
         "           (i) if the raise is intended, state: missing(f, xs, null) "
@@ -345,8 +345,8 @@ def test_a_first_falsification_note_puts_each_command_last_on_its_line():
                         meta={}, verdict="falsified")
     (note,) = _initially_falsified_hint("numpy.ptp", [p], {}, "claims/numpy.claims.yaml")
     lines = note.splitlines()
-    assert lines[0] == ("note numpy.ptp: at_most_the_largest falsified on first "
-                        "adjudication: the installed library does not do what the "
+    assert lines[0] == ("note numpy.ptp: at_most_the_largest initially "
+                        "falsified: the installed library does not do what the "
                         "row states:"), lines
     assert lines[1:] == [
         "  (i) to record the falsification as a discovery, run: mathema accept "

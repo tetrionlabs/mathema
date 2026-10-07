@@ -842,8 +842,8 @@ def _compendium_hint(tag: str, name: str, key: str,
     return (f"{tag} declares {name!r} for {key}; a compendium verdict is "
             f"never trusted silently:\n"
             + options([f"to accept it, run: mathema accept {key} {name} --as trusted",
-                       "let mathema verify adjudicate it against the installed "
-                       "library"]))
+                       "to check it against the installed library, run: "
+                       "mathema verify"]))
 
 
 def _region_texts(entry: dict, families) -> list:
@@ -1398,6 +1398,22 @@ def library_key_of(fn) -> "str | None":
     return None
 
 
+def know_keys(keys) -> None:
+    """Intent:
+        Add `keys` to the library claim keys `library_key_of` recognises
+        without registering any row of theirs as a fact: the keys of a
+        compendium file verified by path outside its `versions:` range,
+        whose functions are then read as library functions (defaults
+        held, definition rows under the magnitude-corner rule, no
+        empty-input line) exactly as an in-range file's are.
+    """
+    added = frozenset(keys) - (_INSTALLED.get("keys") or frozenset())
+    if not added:
+        return
+    _INSTALLED["keys"] = (_INSTALLED.get("keys") or frozenset()) | added
+    _INSTALLED["objects"] = None
+
+
 def _engine_unwrapped(fn):
     """`fn` without the wrappers mathema calls a function through: a
     runtime type realiser (`runtime_types._Realising`) and a premise
@@ -1485,16 +1501,16 @@ def apply_definitions(root: "str | None" = ".") -> list:
 def definition_records(rows=None) -> list:
     """Intent:
         The record of each definition row in force: `{key, definition,
-        verdict, route, source, members}`, the verdict `trusted` and the
+        standing, route, source, members}`, the standing `axiom` and the
         route `axiom` (a definition is taken at face value, never
-        adjudicated), `members` the spellings the row's word stands for
+        checked, so it has no verdict), `members` the spellings the row's word stands for
         on its key once every layer up to it has applied.
     """
     from ..runtime_types import definitions, members
     out = []
     for row in rows if rows is not None else definitions():
         out.append({"key": row.key, "definition": row.text,
-                    "verdict": "trusted", "route": "axiom",
+                    "standing": "axiom", "route": "axiom",
                     "source": row.source,
                     "members": list(members(row.key, row.word))})
     return out

@@ -83,7 +83,9 @@ def test_without_an_adaptor_nothing_is_inferred(tmp_path, monkeypatch):
                 return s
         ''')
         (p,) = check_conjectures(mod.same, [claim("f(s) == s")])
-        assert "inferred" not in p.note
+        # no language: the type fact alone
+        assert "L[" not in p.note
+        assert "inferred s in : str from its own str annotation" in p.note
         assert p.verdict != "holds"
     finally:
         languages._loaded_adaptors.cache_clear()

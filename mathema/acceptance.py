@@ -206,9 +206,9 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     except TimeoutError:
         raise
     except Exception as e:
-        return None, f"the candidate did not adjudicate ({e})"
+        return None, f"the candidate could not be checked ({e})"
     if not probes:
-        return None, "the candidate did not adjudicate"
+        return None, "the candidate could not be checked"
     return probes[0], None
 
 
@@ -342,7 +342,7 @@ def _load_record(root: str, key: str):
     if not os.path.exists(path):
         raise UnknownAcceptanceTarget(f"no verified record for {key!r} at {path}, "
                               "run `mathema verify` (or `check`) first; "
-                              "acceptance annotates adjudicated evidence")
+                              "acceptance annotates the evidence verify recorded")
     from .spec import read_verified_file
     doc, reason = read_verified_file(path)
     if reason is not None or doc is None:
@@ -467,7 +467,7 @@ def plan_rename(root: str, new_key: str, old_key: str,
     if not matches:
         actions.insert(0, f"the record's form hash {recorded} differs from "
                           f"{new_key}'s {live}: it may not be the same "
-                          f"function, and the next verify re-adjudicates it")
+                          f"function, and the next verify checks it again")
     if old_key in load_locks(root):
         actions.append(f"move the lock on {old_key} to {new_key}")
     return {"path": old_path, "new_path": new_path, "doc": doc,
@@ -611,8 +611,8 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         plan["actions"].append(
             f"trust {claim_name} at its claimed level ({claimed}), on "
             f"the word of {meta.get('mathema.compendium') or 'its compendium entry'}; "
-            f"`mathema verify` re-adjudicating this key replaces the "
-            f"testimony with a local verdict")
+            f"when `mathema verify` checks this key again, a local "
+            f"verdict replaces the testimony")
         return plan
     if as_ == "superseded":
         pass       # any verdict may be superseded, handled below
@@ -639,7 +639,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         plan["actions"].append(
             f"supersede the verified {claim_name!r} with the authored "
             f"version; the old row is retained under superseded:, the "
-            f"new statement adjudicates on the next verify")
+            f"new statement is checked on the next verify")
         return plan
     if as_ == "historical":
         # a claim the code has moved past (a parameter renamed or
@@ -755,7 +755,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             if probe is None:
                 if stated:
                     raise AcceptanceError(
-                        f"--corrected {candidate!r} cannot be adjudicated: "
+                        f"--corrected {candidate!r} cannot be checked: "
                         f"{err}")
                 candidate, why_not = None, err
             else:
@@ -771,7 +771,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                         f"(counterexample: {probe.counterexample})")
                 elif not stated and base_c not in ("proven", "holds"):
                     candidate, why_not = None, (
-                        f"its mechanical inverse adjudicates "
+                        f"its mechanical inverse comes out "
                         f"{probe.verdict!r}, not a holding verdict")
                 else:
                     c_verdict = probe.verdict
@@ -790,7 +790,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             plan["actions"].append(
                 f"declare the {'stated' if stated else 'inverted'} corrected "
                 f"claim {plan['corrected_name']!r}: {candidate!r}, "
-                f"adjudicated now: {c_verdict}"
+                f"checked now: {c_verdict}"
                 + (f" over {c_n} trials" if c_n else ""))
         else:
             plan["actions"].append(
@@ -882,7 +882,7 @@ def apply_acceptance(plan: dict) -> str:
                    header=f"machine record; supersession of "
                           f"{target.get('name')}")
         return (f"superseded: {target.get('name')}, the authored "
-                f"version adjudicates on the next verify")
+                f"version is checked on the next verify")
     if plan["as"] == "historical":
         entry = doc[plan["key"]]
         claims = entry.get("claims") or []
@@ -927,7 +927,7 @@ def apply_acceptance(plan: dict) -> str:
                 "verdict": plan.get("corrected_verdict") or "declared",
                 "route": target.get("route") or "best",
                 "note": "declared by accepting the falsification of "
-                        f"{target['name']!r} as a discovery; adjudicated "
+                        f"{target['name']!r} as a discovery; checked "
                         "at acceptance",
                 "meta": meta,
             }
@@ -1005,7 +1005,7 @@ def _carry_trust(c: dict, accepted: dict, history: list) -> None:
         history.append({"at": datetime.date.today().isoformat(),
                         "event": "stale",
                         "reason": f"a local verdict ({fresh}) replaces the "
-                                  f"trusted level"})
+                                  f"level it was trusted at"})
     c["meta"] = meta
     c["accepted"] = accepted
     c["acceptance_history"] = history

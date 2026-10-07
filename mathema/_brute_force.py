@@ -81,6 +81,32 @@ def _sweep_grid(params: list, cj_domain: dict, budget: int,
     return grid
 
 
+def _within_path_bindings(grid: dict, cj_domain: dict) -> tuple:
+    """Intent:
+        `(grid, no_value)`: the grid with each parameter's members kept
+        only where the claim's path bindings on it hold (a binding is a
+        filter on a language's members), and how many members were
+        left out because a path reached no value (an index past the
+        end, a field holding None) the bound does not admit.
+    """
+    from .domain import path_bindings_verdict
+    no_value = 0
+    out = dict(grid)
+    for p, members in grid.items():
+        if not any(k.startswith(p + ".") or k.startswith(p + "[")
+                   for k in cj_domain):
+            continue
+        kept = []
+        for v in members:
+            said = path_bindings_verdict(v, p, cj_domain)
+            if said is None:
+                kept.append(v)
+            elif said == "no value":
+                no_value += 1
+        out[p] = tuple(kept)
+    return out, no_value
+
+
 def _tried(grid: dict) -> dict:
     """`{"mathema.missing": {"tried": {param: [value, ...]}}}` for the
     missing values a sweep executes, empty when it executes none."""
@@ -382,6 +408,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     grid = _sweep_grid(names, cj_domain, budget, resolution)
     if grid is None:
         return None
+    grid, no_value = _within_path_bindings(grid, cj_domain)
+    outside = (f"; {no_value} member{'s' if no_value != 1 else ''} outside "
+               f"the binding: the path has no value" if no_value else "")
+    counted = {"mathema.path_no_value": no_value} if no_value else {}
     evaluate, admits = deps["evaluate"], deps["admits"]
 
     plan = _sweep_plan(cj, fn, facts, names, grid, deps)
@@ -416,8 +446,13 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                           f"{plan.coverage.words(checked + 1)}"),
                 counterexample=_fmt_point(point, names),
                 witness=dict(point),
+                # the witness is a call of the real function at a point
+                # the domain admits: an executed witness, which the
+                # corroboration gate keeps as it is
                 meta=with_executed(
-                    {"mathema.derive_route": "brute_force", **_tried(grid),
+                    {"mathema.derive_route": "brute_force",
+                     "mathema.witness_executed": True, **_tried(grid),
+                     **counted,
                      # a value a listed sentinel stands for is only
                      # reproduced by calling with that same value
                      **({"mathema.witness_executed": True}
@@ -441,18 +476,20 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     if unexamined is not None:
         return ProofResult(
             "undecided",
-            sketch=(f"{_holds_at(total, judged)}; every point executed; "
-                    f"proven needs the function to be shown pure: "
-                    f"{unexamined}"),
+            sketch=(f"{_holds_at(total, judged)}{outside}; every point "
+                    f"executed; proven needs the function to be shown "
+                    f"pure: {unexamined}"),
             meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True, **_tried(grid)},
+                                "mathema.sweep_holds": True, **_tried(grid),
+                                **counted},
                                executed_missing(deps)))
     return ProofResult(
         "proven",
-        sketch=_holds_at(total, judged),
+        sketch=_holds_at(total, judged) + outside,
         quantifier=f"∀ {', '.join(names)} in the declared finite domain "
                    f"({_points(total)})",
-        meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
+        meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid),
+                            **counted},
                            executed_missing(deps)))
 
 

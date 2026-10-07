@@ -59,22 +59,25 @@ numpy.ptp:
 Naming the file adjudicates every row in it against the numpy that is
 installed:
 
-<!-- example: ptp run -->
+<!-- example: ptp run requires=numpy -->
 ```bash
 mathema verify claims/numpy.claims.yaml --root .
 ```
 
 <!-- example: ptp output wrap=80 -->
 ```text
-note numpy.ptp: at_most_the_largest falsified on first adjudication: the
-    installed library does not do what the row states:
+note numpy.ptp: at_most_the_largest initially falsified: the installed library
+    does not do what the row states:
   (i) to record the falsification as a discovery, run: mathema accept numpy.ptp
       at_most_the_largest --as discovery
   (ii) correct the row in claims/numpy.claims.yaml, then run: mathema accept
       numpy.ptp at_most_the_largest --as superseded
 FAIL numpy.ptp: library claims from claims/numpy.claims.yaml; no baseline
     record; 1 proven, 1 holds, 1 falsified  <- 1 falsified claim(s)
-0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+     note definition: numpy.ptp gives no value at a = [1.7976931348623157e+308,
+         -1.7976931348623157e+308], a magnitude corner where the exact value is
+         finite: a finding about its computation; the row stands
+0 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -87,7 +90,7 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a = [-73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003, -73.82223293132003], axis = None, out = None, keepdims = <no value>: 0.0 vs -73.82223293132003"
+      counterexample: "a = [-15.864774136188714], axis = None, out = None, keepdims = <no value>: 0.0 vs -15.864774136188714"
 ```
 
 One value, and a negative one: the range of `[-54.43]` is 0, and the
@@ -118,15 +121,15 @@ accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by
   - move at_most_the_largest to the record's discoveries section (superseded_by:
       at_most_the_largest_corrected), keeping its counterexample as the witness
   - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a
-      in [-100, 100]^n, f(a) == max(a) - min(a)', adjudicated now: holds over
-      130 trials
+      in [-100, 100]^n, f(a) == max(a) - min(a)', checked now: holds over 131
+      trials
   - rewrite claims/numpy.claims.yaml: replace declared claim
       'at_most_the_largest' with 'at_most_the_largest_corrected'
 written: move at_most_the_largest to the record's discoveries section
     (superseded_by: at_most_the_largest_corrected), keeping its counterexample
     as the witness; declare the stated corrected claim
     'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) -
-    min(a)', adjudicated now: holds over 130 trials; rewrite
+    min(a)', checked now: holds over 131 trials; rewrite
     claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with
     'at_most_the_largest_corrected'
 declared layer: claims/numpy.claims.yaml now declares
@@ -177,7 +180,8 @@ mathema verify claims/numpy.claims.yaml --root .
 <!-- example: ptp output -->
 ```text
 ok   numpy.ptp: library claims from claims/numpy.claims.yaml; claims changed; 1 proven, 4 holds, 0 falsified
-0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+     note definition: numpy.ptp gives no value at a = [1.7976931348623157e+308, -1.7976931348623157e+308], a magnitude corner where the exact value is finite: a finding about its computation; the row stands
+0 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
