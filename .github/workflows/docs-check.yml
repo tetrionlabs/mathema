@@ -60,7 +60,7 @@ jobs:
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - name: fetch the language reference
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tetrionlabs/mathema-language
           ref: ${{ steps.langref.outputs.ref }}

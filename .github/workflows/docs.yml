@@ -68,7 +68,7 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Fetch the language reference
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tetrionlabs/mathema-language
           ref: ${{ steps.langref.outputs.ref }}
@@ -91,7 +91,7 @@ jobs:
           uv run mkdocs build --strict
 
       - name: Deploy to Cloudflare Workers static assets
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           # Pinned to 4: this is an assets-only Worker, which has no
           # `main` script because Cloudflare serves ./site directly.
