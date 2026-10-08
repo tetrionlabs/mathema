@@ -14,6 +14,12 @@ branch.
 """
 from __future__ import annotations
 
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..analysis import Facts
+
+from .._signatures import module_scope
 import ast
 import operator
 from dataclasses import dataclass, field
@@ -26,6 +32,7 @@ from ._base import (
 )
 from ..domain import bound_to_sympy_set
 from ..finite_sets import OpaqueRegistry
+from ..runtime_types import SEQUENCE_KINDS
 
 # --- domain-conditioned branch pruning ------------------------------------
 #
@@ -239,6 +246,9 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
         return None
     op = test.ops[0]
     left, right = test.left, test.comparators[0]
+    over_reals = _real_guard_truth(left, op, right, domain, unmodified)
+    if over_reals is not None:
+        return over_reals
 
     # every case below is left/right symmetric: `flipped` records which
     # side the subject sat on, so a single loop over both orientations
@@ -284,6 +294,39 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
             py_op = _COMPARE_OPS.get(type(op))
             if py_op is not None:
                 return _decide_affine_condition(left_expr - right_expr, py_op, 0.0, domain, params)
+    return None
+
+
+def _real_domain(bound) -> bool:
+    """Whether a declared bound is a set of real numbers (an interval, a
+    named number set, a numeric `Domain` over them), not a finite set of
+    listed values or a language."""
+    from ..domain import Domain
+    if isinstance(bound, Domain):
+        return bound.base_type in ("R", "Z", "N") and not bound.dims and not (
+            bound.pieces and all(isinstance(p, frozenset) for p in bound.pieces))
+    return (isinstance(bound, tuple) and not isinstance(bound, frozenset)) \
+        or bound in ("Z", "N", "R")
+
+
+def _real_guard_truth(left, op, right, domain: dict, unmodified: set) -> "bool | None":
+    """Intent:
+        A missing-value guard on a parameter decided over the reals: a
+        real number is never `None` (`x is None` is False, `x is not
+        None` True) and always equal to itself (`x != x` is False,
+        `x == x` True). The proof is over the reals; the missing points
+        its domain admits are the computation's, executed apart.
+    """
+    for subject, other in ((left, right), (right, left)):
+        if not (isinstance(subject, ast.Name) and subject.id in unmodified
+                and _real_domain(domain.get(subject.id))):
+            continue
+        if isinstance(op, (ast.Is, ast.IsNot)) and isinstance(other, ast.Constant) \
+                and other.value is None:
+            return isinstance(op, ast.IsNot)
+        if isinstance(op, (ast.Eq, ast.NotEq)) and isinstance(other, ast.Name) \
+                and other.id == subject.id:
+            return isinstance(op, ast.Eq)
     return None
 
 
@@ -851,7 +894,7 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
         return None
     if not facts.branch_count:
         return None
-    if not facts.params or any(k == "sequence" for k in facts.param_kinds.values()):
+    if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
     params, aggregate = _bind_params(fn, facts)
     from ._normalize import normalized_body
@@ -974,7 +1017,8 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
                            opaque=OpaqueRegistry(), raise_guards=guards)
 
 
-def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
+def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
+                     max_callee_depth: int = 3,
                      _ctx: "_LiftCtx | None" = None,
                      _opaque: "OpaqueRegistry | None" = None) -> "ConditionedLift | None":
     """Like lift(), but for a function whose branches resolve under the
@@ -996,7 +1040,7 @@ def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
         return None
     if not facts.branch_count:
         return None
-    if not facts.params or any(k == "sequence" for k in facts.param_kinds.values()):
+    if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
 
     unmodified = _unmodified_params(facts.tree, set(facts.params))
@@ -1018,7 +1062,7 @@ def lift_conditioned(fn, facts, domain: dict, max_callee_depth: int = 3,
 
     from ._base import _method_ctx_fields
     _sp, _sc = _method_ctx_fields(fn, facts)
-    ctx = _ctx or _LiftCtx(globals_ns=getattr(fn, "__globals__", {}),
+    ctx = _ctx or _LiftCtx(globals_ns=module_scope(fn),
                            depth=max_callee_depth, seen=frozenset({id(fn)}),
                            domain=domain, unmodified=frozenset(unmodified),
                            self_param=_sp, self_class=_sc)

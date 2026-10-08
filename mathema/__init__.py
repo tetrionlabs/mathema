@@ -57,13 +57,16 @@ from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
 # still directly importable as `from mathema.authoring import claims`.
-from .authoring import (DomainError, claims as claims_decorator,
+from .authoring import (DomainError, MissingValueError, RangeError,
+                        claims as claims_decorator,
                         declared_from_function, enforce_dimensions, enforce_domain,
+                        enforce_range,
                         enforce_structure,
                         materialize_declared, parse_docstring_claims,
                         reject_missing, resolve_declared, retrieve)
 from .claim_families import _register_builtin_claim_families
 from .conjecture import Conjecture, check_conjectures, claim
+from .probing import quiet_while_probing as _quiet_while_probing
 from .diagnostics import critical_points
 from .compiled import CompiledForm, compile_form, numeric_check
 from .forms import (Form, SubstitutedForm, Substitution, closed_forms,
@@ -103,14 +106,14 @@ _register_dot_family()
 _register_fold_family()
 _register_sum_family()
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "status", "track_claims",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
            "__version__", "claims_decorator", "declared_from_function",
            "resolve_declared", "materialize_declared",
-           "parse_docstring_claims", "enforce_domain", "enforce_dimensions", "enforce_structure", "reject_missing",
-           "DomainError", "docstring_report", "DocstringReport", "lift_symbolic",
+           "parse_docstring_claims", "enforce_domain", "MissingValueError", "enforce_dimensions", "enforce_structure", "reject_missing",
+           "DomainError", "RangeError", "enforce_range", "docstring_report", "DocstringReport", "lift_symbolic",
            "critical_points", "suggest_claims", "Conjecture",
            "issue", "ReasonCode", "Category", "ClaimReasonCode",
            "get_unicode_output", "set_unicode_output",
@@ -120,6 +123,12 @@ __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "gate", "verify_project", "GateReport", "VerifyResult",
            "executable_forms", "CompiledForm", "compile_form",
            "numeric_check", "form_hash"]
+
+
+def _pad(text: str) -> str:
+    """`text` with each line after its first indented to sit under a
+    record line's detail column."""
+    return text.replace("\n", "\n           ")
 
 
 @dataclass
@@ -148,36 +157,113 @@ class Record:
     # namespaced extension data, the same role Probe.meta already plays
     # for one claim; this is the function-level counterpart, for data
     # that isn't a stable, always-computed field (diagnostics.
-    # diagnostic_report(), opted into per function, is the first real
-    # user: "mathema.diagnostic_report" -> its own dict). Never
-    # populated automatically by check()/write_spec(), a caller sets it
-    # explicitly when it wants the extra work done.
+    # diagnostic_report(), opted into per function, is one user:
+    # "mathema.diagnostic_report" -> its own dict). check() fills
+    # "mathema.effects" (what examining the source finds the function
+    # does, stated under it) and "mathema.not_run" (a check of its own
+    # battery mathema could not make: the call, the reason, the gap);
+    # anything else a caller sets explicitly
+    # when it wants the extra work done.
     meta: dict = field(default_factory=dict, repr=False)
+    # the dotted key the function's claims are filed under, which the
+    # printed record's commands name; the function's name when unset
+    key: str | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
         from .analysis import tier_word
-        lines = [f"mathema.Record({self.facts.name}) · {tier_word(self.facts.tier)} "
+        from ._layout import blocks
+        from ._missing_words import count_words as _count_words
+        lines = [f"mathema.Record({self.facts.name}) · "
+                 f"{tier_word(self.facts.tier, self.probes, (self.meta or {}).get('mathema.effects'))} "
                 f"· form {self.facts.form}"]
+        effects = (self.meta or {}).get("mathema.effects")
+        if effects and effects.get("line") \
+                and effects["line"] != "no side effects":
+            # the header already says a function has no side effects;
+            # anything more is stated under it
+            lines.append(f"  effects: {effects['line']}")
+        not_read = (self.meta or {}).get("mathema.compendium_not_read")
+        if not_read:
+            lines.append(f"  note: {not_read}")
+        # a claim with lines under it prints as a block (see _layout)
+        grouped = blocks(self.probes, list(self.facts.params),
+                         dict(self.facts.param_kinds), self.key or self.facts.name,
+                         _count_words)
         for p in self.probes:
-            mark = {"holds": "holds  ", "falsified": "FALSIFY", "proven": "proven ",
-                    "skipped": "skip   ", "unknown": "unknown",
-                    "invalidated": "INVALID"}.get(p.verdict.split(":", 1)[0], p.verdict)
-            if p.verdict == "proven":
-                # a proof has no trial count the way a probe does, the
-                # statement itself gets prettified into ordinary math
-                # notation, and the quantifier (who it holds for) stands
-                # in place of "(n=...)", on its own line since it's
-                # often longer than the statement it qualifies.
-                stmt = p.statement.replace("==", "=").replace("<=", "≤").replace(">=", "≥")
-                line = f"  {mark} {p.name}: {stmt}"
-                if p.condition:
-                    line += f"\n           {p.condition}"
-            else:
+            if id(p) in grouped:
+                lines.extend(grouped[id(p)])
+                continue
+            if id(p) in grouped["used"]:
+                continue
+            mark = {"holds": "holds    ", "falsified": "falsified", "proven": "proven   ",
+                    "skipped": "unknown  ", "unknown": "unknown  ",
+                    "invalidated": "invalidated"}.get(p.verdict.split(":", 1)[0], p.verdict)
+            missing = (p.meta or {}).get("mathema.missing") or {}
+            pol = (p.meta or {}).get("mathema.policy")
+            if pol:
+                # a policy row: its name and claim, where it came from, and
+                # the next step when it does not hold; a row with no single
+                # behaviour to state reads as a sentence
+                if pol.get("sentence"):
+                    line = f"  {mark} {p.name}: {pol['sentence']}"
+                elif p.verdict.startswith(("unknown", "skipped")):
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason") or p.note:
+                        line += "\n           " + _pad(str(pol.get('reason') or p.note))
+                else:
+                    line = f"  {mark} {p.name}: {p.statement}"
+                    if pol.get("reason"):
+                        line += f"   [{pol['reason']}]"
+                for extra in (pol.get("said"), pol.get("next")):
+                    if extra and p.verdict not in ("holds", "proven"):
+                        line += "\n           " + _pad(str(extra))
+                lines.append(line)
+                continue
+            gate = (p.meta or {}).get("mathema.gate")
+            if gate and p.sketch:
+                # a gate names what each parameter's members do and whose
+                # word it is; a falsified one its witness and next step
                 line = f"  {mark} {p.name}: {p.statement}"
+                line += "\n           " + _pad(str(p.sketch))
+                if p.counterexample:
+                    line += f"\n           counterexample {p.counterexample}"
+                if gate.get("next") and p.verdict not in ("holds", "proven"):
+                    line += "\n           " + _pad(str(gate['next']))
+                lines.append(line)
+                continue
+            if p.verdict == "proven":
+                # a proof has no trial count the way a probe does: the
+                # quantifier (who it holds for) stands in place of
+                # "(n=...)", on its own line since it's often longer than
+                # the statement it qualifies, with what a missing value
+                # of each parameter means
+                line = f"  {mark} {p.name}: {p.statement}"
+                detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
+                if detail:
+                    line += f"\n           {detail}"
+            else:
+                shown = p.statement
+                if (p.condition or "").startswith("let |inf| be ") \
+                        and "|inf|" not in (shown or ""):
+                    # the pseudo-infinity that bounded the computation
+                    shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
+                line = f"  {mark} {p.name}: {shown}"
                 if p.verdict == "holds" and p.n:
-                    line += f" (n={p.n})"
+                    from ._missing_words import count_words
+                    line += f" ({count_words(p.n, (p.meta or {}).get('mathema.drawn'))})"
+            if p.verdict != "proven" and p.note and (
+                    p.verdict.split(":", 1)[0] in ("unknown", "skipped")
+                    or missing.get("said") or missing.get("returned")):
+                # what happened at a missing input, or why the row is
+                # open, said once under the row
+                line += "\n           " + _pad(str(p.note))
+            elif p.verdict == "proven" and (missing.get("said") or missing.get("returned")) \
+                    and p.note:
+                line += "\n           " + _pad(str(p.note))
             if p.counterexample:
                 line += f"\n           counterexample {p.counterexample}"
+            for said in (p.meta or {}).get("mathema.let_warning") or ():
+                line += f"\n           warning: {said}"
             stratum = getattr(p, "stratum", None)
             if stratum:
                 # which stratum the falsification indicts, one line:
@@ -235,13 +321,14 @@ def _doc_only_facts(fn) -> Facts:
     import hashlib
     import inspect
 
+    from ._signatures import callable_signature
     from .intent import parse_doc
 
     doc = inspect.getdoc(fn) or ""
     parsed = parse_doc(doc)
     name = getattr(fn, "__name__", "callable")
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
         params = [n for n, p in sig.parameters.items()
                   if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
                   and p.default is p.empty]
@@ -413,11 +500,12 @@ def _domains_from_claims(claims) -> dict:
         caller sees. Where two claims bound the same parameter, the
         first stands: the battery only needs one legal region to
         synthesise a call in, and each claim is still adjudicated
-        against its own domain regardless. The built-in battery is the
-        only reader: these regions never become a function-level domain
-        for any claim.
+        against its own domain regardless. A `let` binding of a single
+        value is a pin for that claim's calls, not a region, and is left
+        out. The built-in battery is the only reader: these regions
+        never become a function-level domain for any claim.
     """
-    from .conjecture import claim as _claim
+    from .conjecture import _single_point, claim as _claim
 
     out: dict = {}
     for c in claims or ():
@@ -425,16 +513,73 @@ def _domains_from_claims(claims) -> dict:
             parsed = _claim(c) if isinstance(c, str) else c
         except Exception:
             continue
+        pinned = set(getattr(parsed, "free_vars", None) or ())
         for name, bound in (getattr(parsed, "domain", None) or {}).items():
+            if name in pinned and _single_point(bound) is not None:
+                # a `let p be 0` pin passes that value to this claim's
+                # calls only; it is no region for the battery
+                continue
             out.setdefault(name, bound)
     return out
 
 
+def _offer_splits(fn, facts, claims: list, probes: list,
+                  written: list) -> None:
+    """Record on each falsified value claim falsified only below some
+    length the split that turns it into two held rows
+    (`_split.split_offer`), as `mathema.split`, with the claim's text
+    as its author wrote it (`written`, the call-site strings), else as
+    the record renders it."""
+    from ._split import split_offer
+    from .conjecture import claim as _parse
+    from .spec import canonical_claim_text
+    texts = {}
+    for c in written:
+        try:
+            texts[_parse(c).name] = c
+        except Exception:
+            continue
+    by_name = {}
+    for c in claims:
+        try:
+            cj = _parse(c) if isinstance(c, str) else c
+            text = texts.get(cj.name) or canonical_claim_text(cj)
+        except Exception:
+            continue
+        by_name[cj.name] = (cj, text)
+    for p in probes:
+        meta = p.meta or {}
+        cj, text = by_name.get(p.name, (None, None))
+        if cj is None or meta.get("mathema.companion_of") \
+                or meta.get("mathema.policy") or p.verdict != "falsified":
+            continue
+        try:
+            offer = split_offer(fn, facts, cj, p, text)
+        except Exception:
+            offer = None
+        if offer is not None:
+            p.meta = {**meta, "mathema.split": offer,
+                      "mathema.split_statement": text}
+
+
+def _matrix_names_of(fn) -> frozenset:
+    """The parameters `fn`'s signature declares as matrices, over which
+    bars in a claim (`|A|`) read as the determinant."""
+    from .types import matrix_param_names
+    try:
+        return frozenset(matrix_param_names(fn))
+    except Exception:
+        return frozenset()
+
+
+@_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
-         trials_scale: float = 1.0, extensive: bool = False,
+         trials_downscale: float | None = None, extensive: bool = False,
          declared: dict | None = None,
-         known_premises: dict | None = None) -> Record:
+         known_premises: dict | None = None,
+         pseudo_infinity=None, runtime_types: dict | None = None,
+         trials_scale: float | None = None) -> Record:
     """Verify a function's claims, each adjudicated against the real
     function.
 
@@ -446,7 +591,14 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
 
     check is IO-free: it reads only what travels with the function
     object (decorator, docstring, type markers) and never touches the
-    filesystem. The file-declared layer, the highest-precedence
+    project's files. What mathema itself ships about libraries (the
+    bundled compendium: numpy's sqrt has no value below zero, ...)
+    applies to every call, as the engine's own knowledge; a project's
+    own compendium files apply once `compendium.install(root)` ran:
+    in a project with compendium files of its own, call
+    `mathema.compendium.install(root)` first so check() reads the rows
+    `mathema verify` reads; otherwise the record's
+    `meta["mathema.compendium_not_read"]` says the files were not read. The file-declared layer, the highest-precedence
     authoring surface, therefore reaches it only through `declared=`,
     a retrieved entry from `mathema.retrieve(fn, root)`. Call-site
     `claims=` still wins per claim name over everything retrieved.
@@ -484,6 +636,24 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     then includes. Data only; it never satisfies a premise, and
     check() itself stays IO-free.
 
+    `runtime_types` (`{param: "pandas.Series"}`, else a `declared`
+    entry's `runtime_types:`) names the runtime type of a parameter
+    whose signature names none, for code that cannot be annotated.
+
+    `pseudo_infinity` is the function level of the operational
+    infinity: how far each claim's computation (the probe route and
+    the `[float]` companion) runs along an unbounded direction, unless
+    the claim states its own `let |inf| be`. Omitted, a `declared=`
+    entry's `pseudo_infinity:` field applies, else the project's
+    `MATHEMA_PSEUDO_INFINITY`, else the number representation's maximum
+    (`sys.float_info.max` for float64). A
+    proof never reads it. Where the value that applied bounds a
+    direction of a claim's domain, the claim's computation rows show it
+    as `let |inf| be <value>` (the displayed claim, `condition` and the
+    notes) and record its level in `meta["mathema.pseudo_infinity"]`; a
+    value
+    `let |inf| be` would refuse raises `InvalidDomain`.
+
     `extensive` reaches every route this call touches: `probe()`'s own
     critical-point sampling hints and `domain_safe[...]` probe, and a
     `route="derive"` claim's case-split fallback. Default `False`
@@ -511,11 +681,22 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     authoring.declared_from_function's own decorator-over-docstring rule
     for the same reasoning one layer in).
     """
+    from .probing import resolve_trials_downscale
+    trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
+    from .compendium import ensure_bundled
     from .probing import _RISK, _SPECIALS
     from .spec import declare, entry_claims
     from .types import _TYPE_PROBE_TRIALS, domain_from_signature, type_probes
 
+    ensure_bundled()
     facts = analyze(fn)
+    if runtime_types is None and declared is not None:
+        runtime_types = declared.get("runtime_types")
+    if runtime_types:
+        # a claims-file entry names the runtime types of code its
+        # signature cannot state
+        from .analysis import with_declared_runtime_types
+        facts = with_declared_runtime_types(facts, fn, runtime_types)
     # the function-level parent domain: signature markers, then an
     # explicit domain= winning per parameter. Each claim is adjudicated
     # over this parent with its own `for` bindings overriding it per
@@ -540,9 +721,15 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
             p.meta = meta
         return ps
 
+    battery = probe(fn, facts, domain=battery_domain or None,
+                    trials=trials, trials_scale=trials_scale, extensive=extensive)
+    # a battery call mathema could not build is a check not run: it
+    # leaves no row, and what it tried and why stays in the record meta
+    not_run = [{"check": p.name, "statement": p.statement, "reason": p.note or "",
+                "gap": (p.meta or {}).get("mathema.probe_gap")}
+               for p in battery if p.name == "callable" and p.verdict == "skipped"]
     probes = _stamp_surface(
-        probe(fn, facts, domain=battery_domain or None,
-              trials=trials, trials_scale=trials_scale, extensive=extensive),
+        [p for p in battery if not (p.name == "callable" and p.verdict == "skipped")],
         "builtin")
 
     type_trials = trials or _TYPE_PROBE_TRIALS
@@ -550,8 +737,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     if scale < 1.0:
         type_trials = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
                           round(type_trials * scale))
-    probes = probes + _stamp_surface(type_probes(fn, trials=type_trials),
-                                     "types")
+    probes = probes + _stamp_surface(
+        type_probes(fn, trials=type_trials, domain=battery_domain or None),
+        "types")
 
     # whether this list is the caller's or mathema's own matters for
     # precedence below: a call-site claim is the MOST deliberate
@@ -561,7 +749,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         claims = suggest_claims(fn, facts=facts, extensive=extensive)
     claims = _expand_claim_keywords(claims, fn, facts, parent_domain,
                                     extensive)
-    built = [claim(c) if isinstance(c, str) else c for c in claims]
+    mats = _matrix_names_of(fn)
+    built = [claim(c, matrix_names=mats) if isinstance(c, str) else c
+             for c in claims]
     explicit = []
     for cj in built:
         entry = declare(cj)
@@ -597,12 +787,39 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         merged_entry = merge_entries(authored, {"claims": explicit},
                                      on_conflict="silent")
     all_claims = entry_claims(merged_entry)
+    if pseudo_infinity is None and declared is not None:
+        pseudo_infinity = declared.get("pseudo_infinity")
+    from . import policy as _policy
+    with _policy.batch():
+        if all_claims:
+            probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
+                                                trials=trials, trials_downscale=trials_scale,
+                                                facts=facts, extensive=extensive,
+                                                known_premises=known_premises,
+                                                float_companions=True,
+                                                pseudo_infinity=pseudo_infinity)
+        # what f does with a value that is not there, for every parameter
+        # that admits one and no stated policy row covers; a bare check
+        # (no claim written, only suggestions) judges only the absence an
+        # Optional annotation admits
+        written = not suggested or bool(entry_claims(authored))
+        covered = {(pol["kind"], pol.get("parameter"), pol.get("member"),
+                    pol.get("premise") or "") for pol in
+                   ((p.meta or {}).get("mathema.policy") for p in probes)
+                   if pol and pol.get("source") == "stated"}
+        probes = probes + _policy.default_rows(
+            fn, facts, parent_domain or {}, covered, _policy.row_name,
+            optional_only=not written)
     if all_claims:
-        probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
-                                            trials=trials, trials_scale=trials_scale,
-                                            facts=facts, extensive=extensive,
-                                            known_premises=known_premises,
-                                            float_companions=True)
+        # the split offer's own runs are not the record's claims: they
+        # stay out of the calls the policy rows read
+        _offer_splits(fn, facts, all_claims, probes,
+                      [c for c in (claims or ()) if isinstance(c, str)])
+    if not all_claims:
+        # a bad function-level or project value refuses even with
+        # nothing to adjudicate
+        from .records import resolve_pseudo_infinity
+        resolve_pseudo_infinity(None, pseudo_infinity)
     from .concepts import Concept, concepts_for, flat_union
     sources = concepts_for(facts, probes)
     dismissed = set(((declared or {}).get("meta") or {}).get(
@@ -620,7 +837,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                 if k in ("declared", "mechanism") and v}
     concept_objs = [Concept(name, src)
                     for src, names in asserted.items() for name in names]
-    meta = {}
+    meta: dict = {}
     if asserted or sources.get("keyword"):
         # the spec's own interop shape (a flat list under
         # meta.concepts) plus the un-flattened provenance beside it
@@ -636,8 +853,25 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         lifted = lift_symbolic(fn, facts)
     except Exception:
         lifted = None
+    from .authoring import _fn_key
+    if not_run:
+        meta = {**meta, "mathema.not_run": not_run}
+    if facts.tree is not None:
+        # what examining the source finds the function does beyond
+        # returning a value, stated under the function
+        from ._examine import effects_line
+        effects = effects_line(fn)
+        if effects is not None:
+            meta = {**meta, "mathema.effects": effects}
+    from .compendium import uninstalled_project_note
+    try:
+        not_read = uninstalled_project_note(fn)
+    except Exception:
+        not_read = None
+    if not_read:
+        meta = {**meta, "mathema.compendium_not_read": not_read}
     return Record(facts=facts, probes=probes, dependencies=deps,
-                  concepts=concept_objs, meta=meta, lifted=lifted)
+                  concepts=concept_objs, meta=meta, lifted=lifted, key=_fn_key(fn))
 
 
 def write_spec(fn, claims: list | None = None, root: str = ".",
@@ -671,10 +905,13 @@ def write_spec(fn, claims: list | None = None, root: str = ".",
     # actually checked would make `mathema verify` see a false "form
     # changed" on the very next run (the claim set it merges independently
     # wouldn't match this record's stamped fingerprint).
-    explicit = [declare(claim(c) if isinstance(c, str) else c) for c in (claims or [])]
+    mats = _matrix_names_of(fn)
+    explicit = [declare(claim(c, matrix_names=mats) if isinstance(c, str)
+                        else c) for c in (claims or [])]
     merged = merge_entries(dict(declared), {"claims": explicit},
                            on_conflict="silent")
-    rec.spec_path = record(rec, key=key, root=root, claims=merged["claims"])
+    rec.spec_path = record(rec, key=key, root=root, claims=merged["claims"],
+                           grammar=declared.get("grammar", "mathema"), fn=fn)
     return rec
 
 
@@ -767,7 +1004,7 @@ def status(root: str = ".") -> str:
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
         state = ("fresh" if stored and stored == current
-                 else "STALE (code changed since spec)" if stored else "no hash")
+                 else "stale (code changed since spec)" if stored else "no hash")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")
     return "mathema status\n" + ("\n".join(lines) if lines else

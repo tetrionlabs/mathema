@@ -105,7 +105,7 @@ def midpoint(a: float, b: float) -> float:
 $ mathema verify; echo $?
 ok   funcs.midpoint: fresh
 FAIL funcs.settle: locked at form 3eb01e1d9919 but the code is now 1ce1c0e16be4; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
-1 fresh (form unchanged, skipped), 0 adjudicated, 1 problem(s)
+1 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 1
 ```

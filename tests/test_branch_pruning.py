@@ -77,25 +77,49 @@ def test_wrong_formula_for_pinned_branch_is_falsified_not_silently_passed():
     assert results[0].verdict == "falsified"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_no_domain_gets_empirical_adjudication_after_derive_declines():
-    # no domain pins a path, so the derive route declines, and the
-    # claim then quantifies over every string scale, almost all of
-    # which raise: probing finds a raising sample, which falsifies a
-    # value claim pedantically. Empirical evidence supersedes the old
-    # resting "unknown".
+    # a domain that does not pin one path makes the derive route
+    # decline, and the claim then quantifies over the stated scales,
+    # one of which raises: probing finds the raising sample, which
+    # falsifies a value claim pedantically, with the string as witness
     results = check_conjectures(
-        strength_to_distance, [claim("f(r, scale) >= 0", route="derive")])
+        strength_to_distance,
+        [claim('for r in [0, 1], scale in {"info", "nope"}, f(r, scale) >= 0',
+               route="derive")])
     assert results[0].verdict == "falsified"
     assert "raised" in results[0].counterexample
+    assert "'nope'" in results[0].counterexample
+
+    # with no domain at all a string parameter has no honest sampling
+    # story: the probe skips naming it, and derive, which cannot pin a
+    # branch either, rests on unknown with the same fix in its note
+    results = check_conjectures(
+        strength_to_distance, [claim("f(r, scale) >= 0", route="probe")])
+    assert results[0].verdict == "skipped"
+    assert results[0].meta.get("mathema.probe_gap") == "string-domain-missing"
+    results = check_conjectures(
+        strength_to_distance, [claim("f(r, scale) >= 0", route="derive")])
+    assert results[0].verdict == "unknown"
+    assert "declare its values" in results[0].note
 
 
-def test_unbounded_claim_over_a_raising_guard_is_pedantically_falsified():
-    # with no domain, the claim quantifies over the whole line, which
-    # includes the region where clamp_floor raises. A raise is not a
-    # value, so the claim is false there: falsified, with the witness
-    # found by solving the guard region, and the remedy named.
+def test_an_unbound_claim_reads_the_working_domain_the_guard_leaves():
+    # with no domain, the claim is read over the working domain: the
+    # line minus where clamp_floor's own guard raises (x <= -1)
     results = check_conjectures(
         clamp_floor, [claim("f(x) >= -5", route="derive")])
+    assert results[0].verdict == "proven", (results[0].verdict,
+                                            results[0].sketch)
+    assert "the working domain is x in (-1, oo)" in results[0].note
+
+
+def test_a_stated_domain_over_a_raising_guard_is_pedantically_falsified():
+    # a domain the claim states is never narrowed: a raise inside it is
+    # not a value, so the claim is false there, with the witness found
+    # by solving the guard region and the remedy named
+    results = check_conjectures(
+        clamp_floor, [claim("for x in [-3, 3], f(x) >= -5", route="derive")])
     assert results[0].verdict == "falsified"
     assert "raises" in results[0].sketch
     assert "narrow the claim's domain" in results[0].sketch
@@ -130,7 +154,7 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
     # the structural diagnosis stays (in the note, since probing then
     # adjudicates the, true, claim empirically: 1/y > 0 on [1, 5])
     assert results[0].verdict == "holds"
-    assert "isn't affine" in results[0].note
+    assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
 
 
@@ -195,12 +219,14 @@ def test_raises_claim_falsified_when_pinned_branch_actually_returns():
 
 
 def test_raises_claim_with_no_domain_adjudicates_empirically():
-    # derive needs a domain to pin the raising branch; probing then
-    # samples arbitrary strings for scale, essentially all of which
-    # take the raise path, empirical support for the raises claim
+    # derive needs a domain that pins the raising branch; a set of
+    # scales none of which is a known one leaves it to probing, and
+    # every sample takes the raise path, empirical support for the
+    # raises claim
     results = check_conjectures(
-        strength_to_distance, [claim("raises(f(r, scale))", route="derive")])
-    assert results[0].verdict == "holds"
+        strength_to_distance,
+        [claim('for scale in {"nope", "bad"}, raises(f(r, scale))', route="derive")])
+    assert results[0].verdict in ("holds", "proven")
 
 
 def test_negative_literal_guard_proven_when_domain_pins_the_raising_branch():
@@ -305,8 +331,9 @@ def test_boolop_condition_with_no_domain_stays_unliftable():
     # derive stays blocked without a domain; the probe fallback then
     # supplies (weak, sampling-limited) empirical evidence
     assert results[0].verdict in ("holds", "falsified")
-    assert "routes attempted" in results[0].note
-    assert "derive: underivable" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail
+    assert "derive: underivable" in trail
 
 
 def test_wrong_formula_for_boolop_pinned_branch_is_falsified():

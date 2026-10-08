@@ -69,9 +69,12 @@ names.
 
 ## Verdict vocabulary
 
+The reference page for verdicts is [Verdicts and exit
+codes](verdicts.md); the method's own account of them follows.
+
 | Verdict | Route | Means |
 |---|---|---|
-| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the float implementation is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)). A raise inside the domain still falsifies the claim itself; see [the sigmoid case study](case-studies.md#where-it-gets-interesting-a-true-claim-that-falsifies). |
+| `proven` | derive | Established by algebra over the whole declared domain, in exact real arithmetic. That is all it says: the computation in float64 is its own claim, the `<name>[float]` companion every proof spawns (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)). A point inside the domain where the mathematics is undefined, or where the function's own source raises, still falsifies the claim itself; a failure of the computation there, an overflow say, falsifies the `[float]` companion instead; see [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). |
 | `holds (n=...)` | probe | Held on every one of `n` seeded trials. Evidence, not proof. |
 | `falsified` | either | A counterexample exists and is kept, permanently. |
 | `unknown` | either | Adjudication ran but couldn't decide (an undecided proof, inconclusive sampling). |
@@ -90,10 +93,13 @@ says more precisely why. The `route` field follows the same convention
 name the mechanism that actually decided).
 
 Verdicts are pedantic and exact: nothing is called proven that isn't,
-and a value claim whose calls raise anywhere inside its declared
-domain is falsified (a raise is not a value); the remedy is always
-claims-side, narrowing the domain or stating the raising region as its
-own `raises(...)` claim, never a softer adjudication.
+and a raise is not a value, so a value claim whose calls raise anywhere
+inside its declared domain is falsified, the `[float]` companion where
+the mathematics is proven and the raise is the number representation's (an overflow
+past what a double holds), the claim itself otherwise; the remedy is
+always claims-side, narrowing the domain, declaring an operational
+infinity, or stating the raising region as its own `raises(...)` claim,
+never a softer adjudication.
 
 The counterexample behind a `falsified` verdict is knowledge, kept
 permanently in the record, and a falsified claim fails
@@ -182,10 +188,13 @@ silently.
   for exactly what is liftable.
 - **The conjecture pipeline**: state a claim as one string
   (`"f(-x) == -f(x)"`) or a `Conjecture`. Laws are validated against a
-  strict AST whitelist before they run, so a proposal from an untrusted
-  source (a human in review, or a model) can do no more than evaluate
-  mathematics over the function, which itself runs as it would in its
-  own tests, see [Security and execution](security.md). The proposer
+  strict AST whitelist before they run. A proposal from an untrusted
+  source (a human in review, or a model) can call the function under
+  test, mathema's helpers and the functions it binds with `let`; a
+  binding that reaches the system is refused, and one into third-party
+  code runs as an import and a call in your own code would, with a
+  warning. The function itself runs as it would in its own tests, see
+  [Security and execution](security.md). The proposer
   never adjudicates its own claims.
 - **Identity hashes**: `form` (rename/format-invariant AST structure)
   and `sig` (parameter shape). Every claim binds to them, so a record
@@ -197,7 +206,8 @@ silently.
 ## Exit codes
 
 Every verb uses the same four, so a CI step can tell a failing gate
-apart from a broken invocation without parsing output:
+apart from a broken invocation without parsing output (the reference
+page is [Verdicts and exit codes](verdicts.md#exit-codes)):
 
 | Code | Meaning |
 |---|---|

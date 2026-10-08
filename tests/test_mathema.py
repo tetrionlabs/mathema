@@ -195,7 +195,17 @@ def test_total_seq_probes_hold():
     # values falls below min(x), real, not the same failure twice.
     r = mathema.check(total)
     verdicts = {p.name: p.verdict for p in r.probes}
-    assert verdicts["permutation_invariant"] == "holds"
+    # a plain float sum is order-sensitive at a cancelling pair
+    # ([1e16, -1e16, ...] or [1e300, -1e300, ...]): a carrier failure,
+    # which falsifies the computation line (rulings of 2026-10-01 and
+    # 2026-10-05); the witness, run again, really breaks the law
+    perm = next(p for p in r.probes if p.name == "permutation_invariant")
+    assert perm.verdict == "falsified", perm.note
+    (xs,) = perm.meta["mathema.counterexample_args"]
+    forward, backward = total(list(xs)), total(list(reversed(xs)))
+    assert abs(forward - backward) > 1e-9 + 1e-7 * max(abs(forward),
+                                                       abs(backward)), \
+        (perm.counterexample, forward, backward)
     # proven, not holds: the elementwise transform composes through
     # the fold's closed form on the derive route now
     assert verdicts["scale_equivariant"] == "proven"
@@ -203,10 +213,14 @@ def test_total_seq_probes_hold():
     assert verdicts["bounded_upper"] == "falsified"
 
 
-def test_effectful_tier3_probing_skipped():
+def test_effectful_tier3_probing_leaves_no_row_and_states_the_effect():
+    # the algebraic battery is not run on a function with effects, and
+    # a check mathema does not run leaves no row
     r = mathema.check(chatty)
     assert r.facts.tier == 3
-    assert any(p.verdict == "skipped" for p in r.probes)
+    assert not any(p.name == "purity" for p in r.probes)
+    assert r.meta["mathema.effects"]["line"] == (
+        "calls print(), which writes to standard output")
 
 
 def test_parity_probes():
@@ -236,11 +250,16 @@ def test_trials_budget_is_configurable():
     def double(x: float) -> float:
         return 2 * x
 
-    r = mathema.check(double, trials=10)
+    r = mathema.check(double, trials=10,
+                      claims=[mathema.claim("for x in [0, 1], f(x) <= 2")])
     # a falsification stops at its first witness, so its n counts the
-    # trials run up to it, never more than the budget
+    # trials run up to it, never more than the budget; a policy row's n
+    # counts the calls at missing inputs among those trials, and a
+    # written claim is what carries policy rows
+    policy = [p for p in r.probes if (p.meta or {}).get("mathema.policy")]
     assert all(p.n == 10 for p in r.probes
-               if p.n and p.verdict != "falsified")
+               if p.n and p.verdict != "falsified" and p not in policy)
+    assert policy and all(p.n <= 10 for p in policy)
     assert all(p.n <= 10 for p in r.probes if p.n)
 
 
@@ -257,8 +276,12 @@ def test_pole_detected_empirically():
     def reciprocal_gap(x: float) -> float:
         return 1 / (1 - x)
 
-    r = mathema.check(reciprocal_gap)
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    # the finiteness claim stated as written (the suggested
+    # is_numerically_stable reads accuracy, not finiteness)
+    from mathema.conjecture import check_conjectures, claim
+    (st,) = check_conjectures(reciprocal_gap, [claim(
+        "g(f, x) == 1", name="finite", route="best",
+        funcs={"g": "mathema.f.finite_no_error"})])
     assert st.verdict == "falsified"
     assert st.route == "probe:semi_analytical"
     assert "0 vs 1" in st.counterexample
@@ -290,7 +313,7 @@ def test_domain_boundary_edge_pole_provably_unsafe_via_derive():
         return 1 / x
 
     r = mathema.check(edge_pole, domain={"x": (0.0, 2.0)})  # pole at the edge
-    st = next(p for p in r.probes if p.name == "is_numerically_stable")
+    st = next(p for p in r.probes if p.name == "is_pole_safe[x]")
     assert st.verdict == "falsified"
     assert st.route == "examine"
 
@@ -306,11 +329,16 @@ def test_domain_restricts_probes_and_reports_enforcement():
 
     r = mathema.check(ema2, domain={"alpha": (0.0, 1.0)})
     vs = {p.name: p.verdict for p in r.probes}
-    # the convex-combination certificate proves the bound outright
-    # (the fold's weights are nonnegative and sum to 1 here); before
-    # it, in-domain sampling could only reach holds
-    assert vs["bounded_lower"] == "proven"
-    assert vs["bounded_upper"] == "proven"
+    # the convex-combination certificate proves each bound outright
+    # over non-empty lists (the fold's weights are nonnegative and sum
+    # to 1 here); ema2([]) reads x[0] with no emptiness guard, so the
+    # empty-input line is falsified, and each claim with it
+    rows = {p.name: p for p in r.probes}
+    for name in ("bounded_lower", "bounded_upper"):
+        assert vs[name] == "falsified", (name, vs[name])
+        assert "convex-combination certificate" in (rows[name].sketch or "")
+        assert rows[name].counterexample.startswith("x = []")
+    assert vs["is_empty_safe[x]"] == "falsified"
     # enforcement is not synthesized behind a mode any more: undeclared
     # means unreported; DECLARING excluded_outside_domain makes the
     # unenforced exclusion a real falsification with the witness
@@ -522,7 +550,7 @@ def test_status_reports_fresh_and_stale(tmp_path):
     # simulate the code changing after the spec was recorded
     p = tmp_path / ".mathema" / "verified" / f"{key}.yaml"
     p.write_text(p.read_text().replace(mathema.analyze(tracked).form, "deadbeef0000"))
-    assert "STALE" in mathema.status(root)
+    assert "stale (code changed since spec)" in mathema.status(root)
 
 
 def test_note_writes_spec_and_returns_record(tmp_path):
@@ -594,7 +622,8 @@ def test_probe_claim_carries_its_sampling_meta(tmp_path):
     # statement/domain on a probe row) are omitted rather than written as
     # placeholders
     assert det["meta"] and "mathema.sampling" in det["meta"]
-    assert "note" not in det and "sketch" not in det and "condition" not in det
+    # the note says what f did at each missing input the claim drew
+    assert "sketch" not in det and "condition" not in det
     assert (tmp_path / ".mathema" / "verified").exists()
 
 
@@ -653,7 +682,7 @@ def test_conjecture_pipeline_core():
     assert by["odd"].verdict == "proven"
     assert by["nonnegative"].verdict == "falsified" and by["nonnegative"].counterexample
     assert by["shift_aux"].verdict == "falsified"     # aux var sampled and reported
-    assert "c=" in by["shift_aux"].counterexample
+    assert "c = " in by["shift_aux"].counterexample
     assert by["evil"].verdict == "skipped" and "disallowed" in by["evil"].note
     assert "funcs=" not in by["evil"].note   # never suggest binding a dunder
     assert by["attr"].verdict == "skipped"
@@ -695,19 +724,28 @@ def test_conjecture_derive_route_unliftable_is_skipped():
 
 def test_claim_helper_strings():
     from mathema.claims import claim
-    c = claim("f(-x) == -f(x)", pseudo_infinity=1e100)
+    c = claim("f(-x) == -f(x)")
     assert c.lhs == "f(-x)" and c.rhs == "-f(x)" and c.relation == "=="
-    c2 = claim("min(x) <= f(x, alpha)", name="lower", pseudo_infinity=1e100)
+    c2 = claim("min(x) <= f(x, alpha)", name="lower")
     assert c2.name == "lower" and c2.relation == "<="
 
     def cube2(x: float) -> float:
         return x ** 3
 
-    results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)", pseudo_infinity=1e100),
-                                           claim("f(x) >= 0", pseudo_infinity=1e100)])
+    results = mathema.claims.check(cube2, [claim("f(-x) == -f(x)"),
+                                           claim("f(x) >= 0")])
     by = {p.name: p.verdict for p in results}
     assert by["f_x_eq_f_x"] == "proven"           # auto-named; best-route proof
     assert list(by.values()).count("falsified") == 1
+    # x**3 >= 0 is false over the reals: a derive disproof whose
+    # witness is executed, not an overflow; the route names whether the
+    # point executed was derive's own witness or a search it seeded (the
+    # nlsat rung, when z3 is installed, seeds one)
+    (neg,) = [p for p in results if p.name == "f_x_ge_0"]
+    assert neg.verdict == "falsified", (neg.verdict, neg.note)
+    assert neg.route in ("derive", "probe:semi_analytical"), (neg.route, neg.note)
+    assert neg.meta.get("mathema.corroboration") == "reproduced"
+    assert float(neg.counterexample.split("=", 1)[1]) < 0, neg.counterexample
 
 
 def test_check_accepts_claims_alongside_built_in_probes():
@@ -760,7 +798,7 @@ def test_load_claims_parses_authoring_shape_and_skips_derive_route(tmp_path):
 def test_cli_check_ci_gate(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"
@@ -780,7 +818,7 @@ def test_cli_check_ci_gate(tmp_path, capsys):
 def test_check_formats(tmp_path, capsys):
     f = tmp_path / "m.py"
     f.write_text(
-        "def ema(x: list, alpha: float) -> float:\n"
+        "def ema(x: list[float], alpha: float) -> float:\n"
         "    y = x[0]\n"
         "    for v in x[1:]:\n"
         "        y = alpha * v + (1 - alpha) * y\n"
@@ -791,8 +829,14 @@ def test_check_formats(tmp_path, capsys):
     rpt = tmp_path / "claims.json"
     # suggestions no longer count as claims: declare one explicitly so
     # the report has adopted content to verify
+    # ema reads x[0] with no emptiness guard, so a claim over every
+    # length is falsified by its empty-input line; one over a fixed
+    # length has none
     assert main(["check", str(f), "--format", "json",
-                 "--claim", "f(x, 1.0) == x[-1]",
+                 "--claim", "f(x, 1.0) == x[-1]"]) == 1
+    capsys.readouterr()
+    assert main(["check", str(f), "--format", "json",
+                 "--claim", "for x in R^3, f(x, 1.0) == x[-1]",
                  "--output", str(rpt)]) == 0
     data = _json.loads(rpt.read_text())
     assert data["tool"] == "mathema" and data["CDD_spec_version"]

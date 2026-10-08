@@ -18,7 +18,7 @@ mathema check path/to/file.py:fn [--claim "..."]
 | `--claim LAW` | ad-hoc claim to adjudicate, e.g. `"f(-x) == -f(x)"` (repeatable) |
 | `--domain name=lo:hi` | declared parameter range (repeatable) |
 | `--strict` / `--lenient` | one strictness pair shared with `verify`; lenient is the default here (the authoring loop iterates while claims are still being written); strict additionally counts skipped (unverifiable) claims and accepted risk as failures, a reporting filter over already-computed verdicts, never an adjudication mode |
-| `--trials-scale FACTOR` | shrink the trial budget by `FACTOR` (FACTOR > 0) for a faster dev loop; a value above 1 is clamped to 1, so it never scales upward |
+| `--trials-downscale FACTOR` | shrink the trial budget by `FACTOR` (FACTOR > 0) for a faster dev loop; a value above 1 is clamped to 1, so it never scales upward |
 | `--format` | `text` (default), `json`, `compact`, `junit`, `github`, `md` |
 | `--output FILE` | write the report to a file instead of stdout |
 
@@ -49,12 +49,17 @@ call, before any law runs, from the target function's own structure:
 
 - **Higher**, from a base of 128 up to a max of 256, for a
   structurally riskier function, more branches, more loops, a wider
-  or unbounded declared domain.
+  or unbounded declared domain, or a language domain, which adds 32
+  for every 32 hazards its language brings (up to three steps),
+  whether the language is written in the claim or inferred from an
+  annotation. A language whose hazards still outnumber the budget
+  raises `n` to the number of hazards, so each is tried once, and the
+  record's sampling line says it did.
 - **Lower**, down to 32, only when the derive route can *prove* the
   function is affine (a constant slope in every parameter) *and* the
   declared domain doesn't itself need the extra density, a wide or
-  float-precision-risky domain skips the reduction even for a provably
-  affine function.
+  float-precision-risky domain, or a language, skips the reduction even
+  for a provably affine function.
 
 Every verdict reports the exact `n` it used, plus a
 `meta["mathema.confidence"]` score (1-4 stars, capped below the derive
@@ -64,7 +69,7 @@ verdict deserves more or less trust without re-deriving it. From the
 library, `mathema.check(fn, trials=N)` takes an exact count, with no
 adaptivity at all.
 
-`--trials-scale FACTOR` shrinks the whole budget by a flat factor
+`--trials-downscale FACTOR` shrinks the whole budget by a flat factor
 instead; `0.25` for a much faster dev loop, say, applied to
 *everything*, an explicit `trials=N` included, not just the adaptive
 default. It only ever shrinks (a value above 1 is accepted but has no
@@ -73,8 +78,19 @@ riskier function already gets more trials on its own), and it never
 drops the budget below a floor that still means something: at least
 16 trials, and at least enough to guarantee every special sampled
 value (`0`, `±1`, `±1e-9`, `±1e6`, ...) is actually exercised once.
-`--trials-scale 0` or a negative value is a clean CLI error, not a
+`--trials-downscale 0` or a negative value is a clean CLI error, not a
 silent 0-trial `holds`.
+
+The budget above is the probe route's. The `computation` line under a
+proven claim runs on points of its own: every corner of the domain and
+points sampled inside it, with the count in its note
+(`ran at 43 points: every corner and 40 interior points`).
+`--trials-downscale` leaves it as it is. A finite domain small enough
+to run in about a second, an integer range or a small set, is swept
+point by point. A claim can carry its own budget, the `trials:` field
+of a claims-file entry or `mathema.claim(..., trials=N)`; it sets the
+count for that claim, and a finite domain whose points fit within it is
+swept in full.
 
 ## Exit code
 
@@ -98,6 +114,12 @@ Worked pipeline configs for GitHub Actions and GitLab are in
 
 ## Worked example: softmax, start to finish
 
+`softmax` takes a list of float scores and refuses an empty list with
+its own `ValueError` before `max()` can fail on it. mathema checks the
+empty input on its own line under each claim: a deliberate error at
+`[]` passes, while a crash the body merely stumbles into (`max()` of an
+empty list) falsifies the claim.
+
 <!-- example: softmax file=functions.py -->
 ```python
 # functions.py
@@ -105,12 +127,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -120,7 +144,7 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"
-ok   functions.softmax: source, no side effects; claims 3/3 adjudicated (0 proven, 3 holds, 0 falsified)
+ok   functions.softmax: source, no side effects; claims 6/6 checked (0 proven, 6 holds, 0 falsified)
 ```
 
 Break it on purpose (drop the normalization, `return exps` instead of
@@ -133,12 +157,14 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -152,7 +178,7 @@ counterexample is kept as knowledge, *and* the run fails):
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"; echo $?
-FAIL functions.softmax: source, no side effects; claims 3/3 adjudicated (0 proven, 1 holds, 2 falsified)  <- 2 falsified claim(s)
+FAIL functions.softmax: source, no side effects; claims 5/5 checked (0 proven, 3 holds, 2 falsified)  <- 2 falsified claim(s)
 1
 ```
 

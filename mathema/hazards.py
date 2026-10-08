@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Hazard knowledge: where an implementation can diverge from the
+"""Hazard knowledge: where the computation can diverge from the
 mathematics it encodes.
 
 A hazard is a concrete input location (or class of locations) where
@@ -28,6 +28,7 @@ from typing import Callable, Iterable
 
 from ._math_vocab import _call_name
 from .probing import _points_for_probe, _poles_by_var
+from .runtime_types import SEQUENCE_KINDS
 
 
 @dataclass(frozen=True)
@@ -50,11 +51,13 @@ class HazardPoint:
 # --- hazard knowledge: restricted-builtin real domains ---------------
 
 # Real math functions whose own domain is narrower than sympy's
-# symbolic generalization. Membership here is what makes a call a
-# hazard at all; _SAFE_RANGE below carries the accepted ranges for
-# the non-factorial names.
+# symbolic generalization, in math's spellings and numpy's (`arcsin`,
+# `log10`, ...; `_call_name` reduces `np.log10(x)` to `log10`).
+# Membership here is what makes a call a hazard at all; _SAFE_RANGE
+# below carries the accepted ranges for the non-factorial names.
 _RESTRICTED_DOMAIN_NAMES = frozenset(
-    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma"})
+    {"factorial", "sqrt", "log", "asin", "acos", "gamma", "lgamma",
+     "arcsin", "arccos", "log2", "log10", "log1p", "arccosh", "arctanh"})
 
 # name -> (lo, lo_inclusive, hi, hi_inclusive) real math function's own
 # accepted range. gamma/lgamma are the conservative half of their real
@@ -69,6 +72,13 @@ _SAFE_RANGE = {
     "acos": (-1.0, True, 1.0, True),
     "gamma": (0.0, False, math.inf, True),
     "lgamma": (0.0, False, math.inf, True),
+    "arcsin": (-1.0, True, 1.0, True),
+    "arccos": (-1.0, True, 1.0, True),
+    "log2": (0.0, False, math.inf, True),
+    "log10": (0.0, False, math.inf, True),
+    "log1p": (-1.0, False, math.inf, True),
+    "arccosh": (1.0, True, math.inf, True),
+    "arctanh": (-1.0, False, 1.0, False),
 }
 
 
@@ -111,15 +121,15 @@ def _restricted_domain_targets(fn, facts) -> dict:
     """Every real parameter passed bare to a math function with a
     restricted real domain (factorial/sqrt/log/asin/acos/gamma/
     lgamma), mapped to the set of such names it's passed to, the
-    is_builtin_safe relevance detector."""
+    is_number_set_safe relevance detector."""
     return _bare_call_targets(facts, _RESTRICTED_DOMAIN_NAMES)
 
 
 # Real math functions that leave float range at moderate arguments
 # (exp overflows near 710, cosh/sinh near 711, gamma near 171.6,
-# factorial for any large integer), the is_extremity_safe relevance
+# factorial for any large integer), the is_overflow_safe relevance
 # set: a parameter fed bare into one of these is where the
-# implementation's representable range ends well before the
+# computation's representable range ends well before the
 # mathematics does.
 _OVERFLOW_PRONE_NAMES = frozenset(
     {"exp", "expm1", "cosh", "sinh", "gamma", "factorial"})
@@ -127,9 +137,61 @@ _OVERFLOW_PRONE_NAMES = frozenset(
 
 def _overflow_prone_params(fn, facts) -> set:
     """Every real parameter passed bare to an overflow-prone math
-    function; the set is_extremity_safe[param] is worth suggesting
-    for at all."""
+    function, part of the set is_overflow_safe[param] is suggested
+    for."""
     return set(_bare_call_targets(facts, _OVERFLOW_PRONE_NAMES))
+
+
+# the power functions whose result leaves float range at moderate
+# arguments, beside `**` itself
+_POWER_NAMES = frozenset({"power", "float_power", "pow"})
+
+
+def _overflow_targets(fn, facts) -> set:
+    """Intent:
+        The is_overflow_safe suggestion gate: every real parameter the
+        body raises to a power (`**`, `pow`, `power`), passes inside
+        any expression to an overflow-prone function (`exp`, `cosh`,
+        ...), or feeds bare to one (`_overflow_prone_params`).
+
+    Notes:
+        A source-level scan over the whole argument expression, unlike
+        `_bare_call_targets`: `exp(2 * x)` overflows in `x` just as
+        `exp(x)` does. Sequence, string and boolean parameters are
+        not overflow targets.
+    """
+    out = set(_overflow_prone_params(fn, facts))
+    tree = facts.tree
+    if tree is None:
+        return out
+    scalars = {p for p in facts.params
+               if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string",
+                                                    "bool")}
+
+    def names_in(node) -> set:
+        return {n.id for n in ast.walk(node)
+                if isinstance(n, ast.Name) and n.id in scalars}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            out |= names_in(node)
+        elif isinstance(node, ast.Call) and _call_name(node) in (
+                _OVERFLOW_PRONE_NAMES | _POWER_NAMES):
+            for arg in node.args:
+                out |= names_in(arg)
+    return out & scalars if scalars else set()
+
+
+def _recursion_targets(fn, facts) -> set:
+    """The is_recursion_safe suggestion gate: every numeric parameter
+    of a body that calls itself (`facts.recursion`), since the depth a
+    recursion reaches is driven by its arguments; nothing for a body
+    that does not recurse."""
+    if not getattr(facts, "recursion", False):
+        return set()
+    return {p for p in facts.params
+            if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string",
+                                                 "bool")}
 
 
 # --- hazard knowledge: missing-value guards --------------------------
@@ -185,6 +247,31 @@ def _missing_guard_coverage(facts) -> dict:
     return out
 
 
+def _missing_guard_line(facts, param: str, raising: bool = True) -> "int | None":
+    """The line, counted from the `def`, of the first `if` that tests
+    `param` for a missing value (`x != x`, `x is None`, `isnan(x)`) and
+    raises in its body (or, with `raising` False, returns), else None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        acts = any(isinstance(s, ast.Raise if raising else ast.Return)
+                   for s in node.body)
+        if not acts:
+            continue
+        for sub in ast.walk(node.test):
+            if isinstance(sub, ast.Compare) and isinstance(sub.left, ast.Name) \
+                    and sub.left.id == param:
+                return node.lineno
+            if isinstance(sub, ast.Call) and _call_name(sub) in ("isnan", "isna") \
+                    and sub.args and isinstance(sub.args[0], ast.Name) \
+                    and sub.args[0].id == param:
+                return node.lineno
+    return None
+
+
 def _missing_guard_params(facts) -> set:
     """Every real parameter with ANY recognized raising missing-guard
     (whichever spelling), the is_missing_safe suggestion gate."""
@@ -199,7 +286,7 @@ def _pole_bearing_params(fn, facts) -> set:
         Every real parameter fn's own fast-path lift finds at least one
         pole for; the set is_pole_safe[param] is worth suggesting for
         at all, the same "only when actually relevant" rule
-        _restricted_domain_targets already applies for is_builtin_safe.
+        _restricted_domain_targets already applies for is_number_set_safe.
 
     Notes:
         Reuses _points_for_probe's own fast, direct-lift-only search,
@@ -244,8 +331,9 @@ def _pole_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
 def _builtin_edge_points(fn, facts, domain: dict) -> list[HazardPoint]:
     """The domain edges of every restricted builtin a parameter is
     actually passed to: log's zero, asin/acos's unit endpoints, sqrt's
-    zero, factorial's negative and non-integer neighbours. These are
-    where the implementation's accepted range ends however fine the
+    zero, factorial's negative and non-integer neighbours, and the
+    same edges of numpy's spellings (arcsin, log10, log1p's -1, ...). These are
+    where the computation's accepted range ends however fine the
     mathematics is on paper."""
     out: list[HazardPoint] = []
     for param, names in _restricted_domain_targets(fn, facts).items():
@@ -285,9 +373,13 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
 
     Notes:
         `pseudo_infinity` is the resolved (lo, hi) operational range
-        or None. Candidates are filtered by domain membership, so an
-        excluded endpoint or a bound shape domain_contains rejects
-        contributes nothing.
+        or None. Under a range, an unbounded side keeps the ladder's
+        rungs at or inside it and adds the range's own end, so the
+        overflow scales below the reach are still visited. An end a
+        `domain.ReachInterval` marks is unbounded, its value the reach.
+        Candidates are filtered by domain membership, so an excluded
+        endpoint or a bound shape domain_contains rejects contributes
+        nothing.
     """
     from .grammar import domain_contains
 
@@ -305,18 +397,29 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
             lo, hi = float(bounds[0]), float(bounds[1])
         except (TypeError, ValueError):
             lo = hi = None
-    if lo is not None and abs(lo) != float("inf"):
+    reach_lo = bool(getattr(bounds, "reach_lo", False))
+    reach_hi = bool(getattr(bounds, "reach_hi", False))
+    if reach_lo and pseudo_infinity is None and lo is not None:
+        pseudo_infinity = (lo, abs(lo))
+    if reach_hi and pseudo_infinity is None and hi is not None:
+        pseudo_infinity = (-abs(hi), hi)
+    if lo is not None and abs(lo) != float("inf") and not reach_lo:
         raw.append(lo)
-    if hi is not None and abs(hi) != float("inf"):
+    if hi is not None and abs(hi) != float("inf") and not reach_hi:
         raw.append(hi)
-    unbounded_hi = hi is None or hi == float("inf")
-    unbounded_lo = lo is None or lo == -float("inf")
+    unbounded_hi = hi is None or hi == float("inf") or reach_hi
+    unbounded_lo = lo is None or lo == -float("inf") or reach_lo
     if unbounded_hi:
-        raw.extend([pseudo_infinity[1]] if pseudo_infinity is not None
-                   else list(_REPRESENTATION_LADDER))
+        raw.extend(list(_REPRESENTATION_LADDER) if pseudo_infinity is None
+                   else [v for v in _REPRESENTATION_LADDER
+                         if v <= pseudo_infinity[1]]
+                   + [pseudo_infinity[1]])
     if unbounded_lo:
-        raw.extend([pseudo_infinity[0]] if pseudo_infinity is not None
-                   else [-v for v in _REPRESENTATION_LADDER])
+        raw.extend([-v for v in _REPRESENTATION_LADDER]
+                   if pseudo_infinity is None
+                   else [-v for v in _REPRESENTATION_LADDER
+                         if -v >= pseudo_infinity[0]]
+                   + [pseudo_infinity[0]])
     out: list[float] = []
     for cand in raw:
         if admitted(cand) and cand not in out:
@@ -444,16 +547,19 @@ def _admitted_spelling(value: float, bounds):
 
 
 def _emptiness_guard_params(facts) -> set:
-    """Every sequence parameter fn's own body guards against emptiness
-    with an explicit raising check, `if not xs: raise` or
-    `if len(xs) == 0: raise` (a compound condition counts for the
-    part that matches). The is_empty_safe relevance gate and the
-    deliberate-rejection signal its derive half reads."""
+    """Every container parameter fn's own body guards against emptiness
+    with an explicit raising check, `if not xs: raise`, `if len(xs) ==
+    0: raise`, `if xs.empty: raise` or `if xs.count() == 0: raise` (no
+    value slot, so none when it is empty either); checks joined by `or`
+    count each, and a condition that also reads anything else guards
+    nothing, since the raise then depends on more than the container. The
+    is_empty_safe relevance gate and the deliberate-rejection signal its
+    derive half reads."""
     tree = facts.tree
     if tree is None:
         return set()
     pset = {p for p in facts.params
-            if facts.param_kinds.get(p) == "sequence"}
+            if facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "table")}
     if not pset:
         return set()
 
@@ -474,14 +580,60 @@ def _emptiness_guard_params(facts) -> set:
                     and isinstance(node.comparators[0], ast.Constant)
                     and node.comparators[0].value in (0, 1)):
                 found.add(node.left.args[0].id)  # len(xs) == 0 / < 1
+            if (isinstance(node, ast.Attribute) and node.attr == "empty"
+                    and isinstance(node.value, ast.Name) and node.value.id in pset):
+                found.add(node.value.id)         # xs.empty
+            if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                    and isinstance(node.ops[0], (ast.Eq, ast.Lt, ast.LtE))
+                    and isinstance(node.left, ast.Call)
+                    and isinstance(node.left.func, ast.Attribute)
+                    and node.left.func.attr in ("count", "size")
+                    and isinstance(node.left.func.value, ast.Name)
+                    and node.left.func.value.id in pset
+                    and isinstance(node.comparators[0], ast.Constant)
+                    and node.comparators[0].value in (0, 1)):
+                found.add(node.left.func.value.id)  # xs.count() == 0
+        return found
+
+    def guard_of(test) -> set:
+        parts = test.values if isinstance(test, ast.BoolOp) \
+            and isinstance(test.op, ast.Or) else [test]
+        found: set = set()
+        for part in parts:
+            if isinstance(part, ast.BoolOp):
+                return set()
+            names = guarded_names(part)
+            read = {n.id for n in ast.walk(part) if isinstance(n, ast.Name)}
+            if len(names) != 1 or read - names - {"len"}:
+                return set()
+            found |= names
         return found
 
     out: set = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and any(isinstance(s, ast.Raise)
                                             for s in node.body):
-            out |= guarded_names(node.test)
+            out |= guard_of(node.test)
     return out
+
+
+def _emptiness_guard_line(facts, param: str) -> "int | None":
+    """The line (from the def) of the raising emptiness guard on `param`,
+    or None."""
+    tree = facts.tree
+    if tree is None:
+        return None
+    fdef = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+    first = getattr(fdef, "lineno", 1)
+    probe = type("F", (), {"tree": None, "params": facts.params,
+                            "param_kinds": facts.param_kinds})
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(isinstance(s, ast.Raise) for s in node.body):
+            probe.tree = ast.Module(body=[node], type_ignores=[])
+            if param in _emptiness_guard_params(probe):
+                return node.lineno - first + 1
+    return None
 
 
 # machine type names a raising type guard can meaningfully name for a
@@ -597,12 +749,35 @@ def _type_discipline_params(fn, facts) -> set:
     type guard; representation discipline is only worth claiming
     where the author stated types structurally at all."""
     relevant = _annotated_params(facts) | set(_type_guard_params(facts))
-    return {p for p in relevant
-            if facts.param_kinds.get(p) != "sequence"}
+    return {p for p in relevant if numeric_or_enum(fn, facts, p)}
+
+
+def numeric_or_enum(fn, facts, p: str) -> bool:
+    """Whether a parameter holds a number (a scalar, int or complex
+    kind) or an Enum member, the kinds whose machine spellings
+    is_representation_safe compares."""
+    if facts.param_kinds.get(p) in ("scalar", "int", "complex"):
+        return True
+    from .runtime_types import enum_parameters
+    return p in enum_parameters(fn)
+
+
+def not_a_number(facts, p: str, family: str) -> "str | None":
+    """Why a numeric family does not run on a parameter: its kind is
+    a string, a bool or unknown, none of which holds a number. None for
+    a numeric kind."""
+    kind = facts.param_kinds.get(p, "unknown")
+    if kind in ("scalar", "int", "complex") or getattr(facts, "tree", None) is None:
+        return None
+    word = {"string": "a string", "bool": "a bool", "unknown": "of unknown kind"}.get(
+        kind, f"a {kind}")
+    return (f"{family} reads numbers, and {p} is {word} parameter"
+            if kind != "unknown" else
+            f"{family} reads numbers, and {p} is a parameter of unknown kind")
 
 
 def _string_input_params(facts) -> set:
-    """The is_arbitrary_input_safe suggestion gate: every parameter the
+    """The is_language_defined suggestion gate: every parameter the
     body treats as a string (a bare `str`-annotated or string-inferred
     parameter). That is exactly the input the algebraic battery declines
     to sample, so it is where fuzzing for an accidental crash is worth
@@ -643,7 +818,7 @@ def _type_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
     float, bool where applicable) the representation trials compare."""
     out: list[HazardPoint] = []
     for p in facts.params:
-        if facts.param_kinds.get(p) == "sequence":
+        if facts.param_kinds.get(p) in SEQUENCE_KINDS:
             continue
         for v in _spelling_values(domain.get(p)):
             out.append(HazardPoint("type", p, str(v), float(v),
@@ -679,7 +854,7 @@ def _magnitude_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
     out = []
     kinds = getattr(facts, "param_kinds", {}) or {}
     for param in getattr(facts, "params", ()):
-        if kinds.get(param) == "sequence":
+        if kinds.get(param) in SEQUENCE_KINDS:
             continue
         for magnitude in _MAGNITUDE_DECADES:
             for value in (magnitude, -magnitude):
@@ -727,4 +902,154 @@ def hazard_points(fn, facts, domain: dict | None = None,
             out.extend(generator(fn, facts, domain or {}))
         except Exception:
             continue
+    return out
+
+
+# --- careful: known edges just outside a declared domain --------------
+
+#: an edge counts as close to a bound within this factor of it, or
+#: within `_CAREFUL_ABSOLUTE` of it for a bound near zero
+_CAREFUL_FACTOR = 10.0
+_CAREFUL_ABSOLUTE = 1.0
+
+
+def _careful_number(value: float) -> str:
+    """A number as a careful line prints it: an integer bare, a
+    magnitude of at least 1 to two decimals, anything smaller in
+    general format (`709.78`, `700`, `0.5`)."""
+    if float(value).is_integer():
+        return str(int(value))
+    if abs(value) >= 1:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    return f"{value:g}"
+
+
+def _near_bound(edge: float, bound: float) -> bool:
+    """Whether an edge outside a domain is close to the bound it lies
+    beyond: within 1 of it, or on the same side of zero and within a
+    factor of 10 of it."""
+    if abs(edge - bound) <= _CAREFUL_ABSOLUTE:
+        return True
+    if edge == 0 or bound == 0 or (edge > 0) != (bound > 0):
+        return False
+    big, small = max(abs(edge), abs(bound)), min(abs(edge), abs(bound))
+    return big <= _CAREFUL_FACTOR * small
+
+
+def _known_edges(fn, facts) -> list:
+    """Intent:
+        Every edge mathema knows about in `fn`'s own parameters, as
+        `(param, value, what)` with `what` the plain reading of the
+        edge: a covered call's overflow-safe region
+        (`compendium.computation_edges`), a restricted builtin's real
+        domain edge (`_SAFE_RANGE`), and a pole the fast critical-point
+        search finds.
+    """
+    from .compendium import computation_edges
+    out: list = []
+    for param, value, key, above in computation_edges(fn, facts):
+        side = "past" if above else "below"
+        out.append((param, value,
+                    f"{key} overflows {side} {param} = "
+                    f"{_careful_number(value)}"))
+    for param, names in _restricted_domain_targets(fn, facts).items():
+        for name in sorted(names - {"factorial"}):
+            lo, lo_incl, hi, hi_incl = _SAFE_RANGE[name]
+            if not math.isinf(lo):
+                out.append((param, lo, f"{name} needs {param} "
+                            f"{'>=' if lo_incl else '>'} "
+                            f"{_careful_number(lo)}"))
+            if not math.isinf(hi):
+                out.append((param, hi, f"{name} needs {param} "
+                            f"{'<=' if hi_incl else '<'} "
+                            f"{_careful_number(hi)}"))
+    for point in _pole_hazard_points(fn, facts, {}):
+        if point.value is not None:
+            out.append((point.param, point.value,
+                        f"a pole at {point.param} = "
+                        f"{_careful_number(point.value)}"))
+    return out
+
+
+def careful_edges(fn, facts, domains: list) -> list[str]:
+    """Intent:
+        The careful lines for `fn`: each known edge (`_known_edges`)
+        that lies outside one of `domains` but close to the bound it
+        lies beyond (`_near_bound`), read as "numpy.exp overflows past
+        x = 709.78 (the domain stops at 700)". `domains` are the
+        declared domains to read against, each a dict of parameter to
+        `(lo, hi)` floats. Information about where a passing domain
+        ends, never a verdict.
+    """
+    lines: list[str] = []
+    try:
+        edges = _known_edges(fn, facts)
+    except Exception:
+        return lines
+    for domain in domains:
+        for param, value, what in edges:
+            ends = domain.get(param)
+            if ends is None:
+                continue
+            lo, hi = ends
+            if value > hi and not math.isinf(hi) and _near_bound(value, hi):
+                where = f"the domain stops at {_careful_number(hi)}"
+            elif value < lo and not math.isinf(lo) and _near_bound(value, lo):
+                where = f"the domain starts at {_careful_number(lo)}"
+            else:
+                continue
+            line = f"careful: {what} ({where})"
+            if line not in lines:
+                lines.append(line)
+    return lines
+
+
+def finite_guard_sets(facts) -> dict:
+    """Intent:
+        `{param: frozenset}` for every parameter a guard in the body
+        refuses outside a listed set of strings: `if side not in
+        {"buy", "sell"}: raise`, the set written as a set, tuple or
+        list of string literals, with `not (side in {...})` read the
+        same way. The set is the working domain the guard leaves
+        (decision A).
+    """
+    import ast
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return {}
+    params = set(getattr(facts, "params", ()) or ())
+    out: dict = {}
+
+    def listed(node):
+        if not isinstance(node, (ast.Set, ast.Tuple, ast.List)) or not node.elts:
+            return None
+        values = []
+        for elt in node.elts:
+            if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+                return None
+            values.append(elt.value)
+        return frozenset(values)
+
+    def refused_outside(test):
+        # `p not in {...}`, or `not (p in {...})`
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) \
+                and isinstance(test.operand, ast.Compare) \
+                and len(test.operand.ops) == 1 \
+                and isinstance(test.operand.ops[0], ast.In):
+            test = ast.Compare(left=test.operand.left, ops=[ast.NotIn()],
+                               comparators=test.operand.comparators)
+        if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.NotIn)
+                and isinstance(test.left, ast.Name) and test.left.id in params):
+            return None
+        values = listed(test.comparators[0])
+        return None if values is None else (test.left.id, values)
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If)
+                and any(isinstance(s, ast.Raise) for s in node.body)):
+            continue
+        found = refused_outside(node.test)
+        if found is not None and found[0] not in out:
+            out[found[0]] = found[1]
     return out

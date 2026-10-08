@@ -64,6 +64,36 @@ _ACTIVE_TRANSFORMS: contextvars.ContextVar = contextvars.ContextVar(
 ELEM_MAP_KEY = "__mathema_elem_map__"
 
 
+def map_sequence_elements(expr, base, mapper, scalar_args: tuple):
+    """Intent:
+        Apply an elementwise law transform to a closed form: every
+        element `base[k]` of the sequence becomes
+        `mapper(base[k], *scalar_args)`, by exact structural
+        replacement (`xreplace`), so no element is matched by a
+        pattern it only resembles.
+
+    Raises:
+        NotSymbolic: when the replacement leaves the expression
+            unchanged, since a transform that was not applied would
+            read `f(g(xs, c))` as `f(xs)`.
+    """
+    if isinstance(expr, tuple):
+        mapped = tuple(_map_elements_once(t, base, mapper, scalar_args)
+                       for t in expr)
+    else:
+        mapped = _map_elements_once(expr, base, mapper, scalar_args)
+    if mapped == expr:
+        raise NotSymbolic(f"the elementwise transform leaves the closed "
+                          f"form unchanged: no element of {base} appears "
+                          f"in it")
+    return mapped
+
+
+def _map_elements_once(expr, base, mapper, scalar_args: tuple):
+    elements = [e for e in expr.atoms(sympy.Indexed) if e.base == base]
+    return expr.xreplace({e: mapper(e, *scalar_args) for e in elements})
+
+
 def transform_bindings(funcs: dict) -> dict:
     """The subset of a claim's resolved `funcs` that are registered
     elementwise transforms: law name -> mapper. Matching is by the
@@ -256,7 +286,8 @@ def _seq_law_to_sympy(node: ast.AST, view: SeqLiftView, aux: dict):
 
 
 def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
-                         view: "SeqLiftView") -> "ProofResult | None":
+                         view: "SeqLiftView",
+                         fixed: "dict | None" = None) -> "ProofResult | None":
     """Intent:
         The each-term rung for a sign claim over a symbolic-length sum:
         `init + Sum(smnd, (i, 0, L-1)) >= 0` is proven when the
@@ -269,11 +300,14 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         any sub-decision does not settle.
 
     Notes:
-        Each Indexed element is replaced by a fresh real symbol bounded
-        by its sequence's own declared element domain, so the summand
-        decision runs through the ordinary decider (Piecewise branches
-        decided one by one when it stalls). Sound for >=/<=/>/<; an
-        equality has no termwise reading here.
+        Each distinct Indexed element is replaced by its own fresh real
+        symbol bounded by its sequence's declared element domain, so
+        the summand decision runs through the ordinary decider
+        (Piecewise branches decided one by one when it stalls). A
+        summand that reads an element moving with the bound index
+        together with one that does not (`xs[i]*xs[0]`) is not decided
+        termwise: its sign depends on a pair of elements. Sound for
+        >=/<=/>/<; an equality has no termwise reading here.
     """
     import sympy
 
@@ -305,6 +339,9 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                 return sympy.Sum(coeff * inner.function, *inner.limits)
         return None
 
+    def _bound_index(t):
+        return t.limits[0][0] if t.limits else None
+
     for t in terms:
         as_sum = _as_sum(t)
         (sums if as_sum is not None else rest).append(
@@ -314,18 +351,30 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
 
     def _element_env(expr):
         subs, bounds = {}, {}
-        for idx in expr.atoms(sympy.Indexed):
+        ordered = sorted(expr.atoms(sympy.Indexed), key=sympy.default_sort_key)
+        for k, idx in enumerate(ordered):
             base = str(idx.base)
-            fresh = sympy.Symbol(f"_elt_{base}", real=True)
+            fresh = sympy.Symbol(f"_elt_{base}_{k}", real=True)
             subs[idx] = fresh
             bound = domain.get(base)
             if bound is not None:
                 bounds[str(fresh)] = bound
         return subs, bounds
 
-    def _nonneg(expr, strict: bool) -> bool:
+    def _mixes_positions(expr, index) -> bool:
+        # the term at position i reads an element that moves with i and
+        # one that does not: its sign is a fact about a pair of
+        # elements, not about each term on its own
+        elements = expr.atoms(sympy.Indexed)
+        moving = [e for e in elements
+                  if any(index in ix.free_symbols for ix in e.indices)]
+        return bool(moving) and len(moving) != len(elements)
+
+    def _nonneg(expr, strict: bool, index=None) -> bool:
+        if index is not None and _mixes_positions(expr, index):
+            return False
         subs, bounds = _element_env(expr)
-        scalar = expr.subs(subs)
+        scalar = expr.xreplace(subs)
         for s in scalar.free_symbols:
             if str(s) not in bounds and str(s) in domain:
                 bounds[str(s)] = domain[str(s)]
@@ -376,7 +425,7 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                             assum = _SIGN_ASSUMPTIONS[type(cnd)]
                             baked = sympy.Symbol(cnd.lhs.name, real=True,
                                                  **assum)
-                            value = value.subs(cnd.lhs, baked)
+                            value = value.xreplace({cnd.lhs: baked})
                         else:
                             remaining.append(cnd)
                     context = (None if not remaining
@@ -394,7 +443,7 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         return False
 
     for t in sums:
-        if not _nonneg(t.function, strict=False):
+        if not _nonneg(t.function, strict=False, index=_bound_index(t)):
             return None
     remainder = sympy.Add(*rest) if rest else sympy.S.Zero
     rem_ok_strict = False
@@ -431,7 +480,8 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
                                            None, syms).status == "proven"
             except Exception:
                 nonempty = False
-            if nonempty and _nonneg(t.function, strict=True):
+            if nonempty and _nonneg(t.function, strict=True,
+                                    index=_bound_index(t)):
                 strict_found = True
                 break
         if not strict_found:
@@ -441,8 +491,60 @@ def _termwise_sum_decide(lhs, rhs, relation: str, domain: dict,
         "proven",
         sketch=f"each term of the sum is {kind} over the declared element "
                f"domain, so the whole sum is (termwise sign, exact for any "
-               f"length)",
+               f"length){fixed_lengths_text(fixed)}",
         meta={"mathema.derive_route": "termwise_sum"})
+
+
+def _element_scalars(lhs, rhs, domain: "dict | None", view: "SeqLiftView"):
+    """Intent:
+        `(lhs, rhs, domain, params)` with every indexed element
+        (`xs[0]`, `xs[1]`) of an expanded sum replaced by a real scalar
+        symbol bounded by its sequence's element domain, so the relation
+        can be decided as an ordinary scalar fact at the fixed length.
+    """
+    import dataclasses
+
+    elem_domain = dict(domain or {})
+    params = dict(view.other_params)
+    replacements: dict = {}
+    for ix in sorted(lhs.atoms(sympy.Indexed) | rhs.atoms(sympy.Indexed),
+                     key=str):
+        base = str(ix.base)
+        index = ix.indices[0] if ix.indices else 0
+        name = f"{base}[{index}]"
+        symbol = sympy.Symbol(name, real=True)
+        replacements[ix] = symbol
+        params[name] = symbol
+        bound = elem_domain.get(base)
+        if bound is not None and getattr(bound, "dims", ()):
+            elem_domain[name] = dataclasses.replace(bound, dims=())
+        elif bound is not None:
+            elem_domain[name] = bound
+    return (lhs.xreplace(replacements), rhs.xreplace(replacements),
+            elem_domain, params)
+
+
+def fixed_lengths(view: "SeqLiftView", domain: "dict | None") -> dict:
+    """The lifted sequences whose binding fixes their length (`xs in
+    [0, 1]^30`), `{name: size}`."""
+    from .._shapes import dims_of, fixed_size
+    out: dict = {}
+    for name in view.seqs:
+        dims = dims_of((domain or {}).get(name))
+        size = fixed_size(dims[0]) if dims else None
+        if size is not None:
+            out[name] = size
+    return out
+
+
+def fixed_lengths_text(fixed: "dict | None") -> str:
+    """The clause a sketch adds for the lengths a binding fixes: "; the
+    binding fixes xs at length 30" (several: "; the binding fixes xs at
+    length 30 and ys at length 4"); empty when nothing is fixed."""
+    if not fixed:
+        return ""
+    parts = [f"{n} at length {k}" for n, k in sorted(fixed.items())]
+    return "; the binding fixes " + " and ".join(parts)
 
 
 def _length_pins(equalities, length_symbols) -> dict:
@@ -553,6 +655,126 @@ def _fold_premises(assumption, build, view, bound_context):
                                        set(view.lengths.values()))
 
 
+def _index_needs(srcs, seqs) -> dict:
+    """`{name: least length}` for the literal indices the claim text
+    reads into a sequence: `x[3]` needs four elements, `x[-1]` one."""
+    needs: dict = {}
+    for src in srcs:
+        try:
+            tree = ast.parse(src or "0", mode="eval")
+        except SyntaxError:
+            continue
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) \
+                    and n.value.id in seqs:
+                idx = _literal_int_index(n.slice)
+                if idx is None:
+                    continue
+                least = idx + 1 if idx >= 0 else -idx
+                needs[n.value.id] = max(needs.get(n.value.id, 0), least)
+    return needs
+
+
+def _shared_reads(view: "SeqLiftView", exprs) -> list:
+    """The pairs of sequences the lift reads over one length: two that
+    share a length symbol (a dot product), or one indexed by a sum that
+    runs over another's length (`for i in range(len(a)): a[i] * b[i]`
+    reads `b` at the positions of `a`)."""
+    owner: dict = {}
+    for name, length in view.lengths.items():
+        if length is not None:
+            owner.setdefault(length, []).append(name)
+    by_base = {ib: name for name, ib in view.seqs.items()}
+    pairs: set = set()
+    for names in owner.values():
+        for a in names:
+            for b in names:
+                if a < b:
+                    pairs.add((a, b))
+    for e in exprs:
+        if not hasattr(e, "atoms"):
+            continue
+        for total in e.atoms(sympy.Sum, sympy.Product):
+            for var, _lo, hi in total.limits:
+                runs = [n for length, names in owner.items()
+                        if hi.has(length) for n in names]
+                for ix in total.function.atoms(sympy.Indexed):
+                    name = by_base.get(ix.base)
+                    if name is None or not ix.indices[0].has(var):
+                        continue
+                    for a in runs:
+                        if a != name:
+                            pairs.add(tuple(sorted((a, name))))
+    return sorted(pairs)
+
+
+def signature_shapes(fn) -> dict:
+    """The Shape markers `fn`'s signature declares, `{}` when it has
+    none or they cannot be read."""
+    from ..types import shapes_from_signature
+    try:
+        return dict(shapes_from_signature(fn))
+    except Exception:
+        return {}
+
+
+def _length_ties(names, domain: dict, assumption,
+                 shapes: "dict | None" = None) -> dict:
+    """`{name: representative}` grouping the sequences the claim makes
+    one length: two sequences bound over one dimension (`for a in R^n,
+    b in R^n`, or both `R^3`), or a premise equating their lengths
+    (`len(a) == len(b)`, or each `== 3`). A sequence the claim does
+    not bind takes its signature's Shape marker from `shapes`."""
+    import re
+
+    from .._shapes import dims_of
+    parent = {n: n for n in names}
+
+    def root(n):
+        while parent[n] != n:
+            n = parent[n]
+        return n
+
+    def join(a, b):
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            lo, hi = sorted((ra, rb))
+            parent[hi] = lo
+    by_dim: dict = {}
+    for n in names:
+        dims = dims_of((domain or {}).get(n)) or dims_of((shapes or {}).get(n))
+        if dims:
+            by_dim.setdefault(("dim", dims[0]), []).append(n)
+    length = re.compile(r"^\s*(?:len\(\s*(\w+)\s*\)|dim\(\s*(\w+)\s*"
+                        r"(?:,\s*0\s*)?\))\s*$")
+    for lhs, rel, rhs in assumption or ():
+        if rel != "==":
+            continue
+        sides = []
+        for side in (str(lhs), str(rhs)):
+            m = length.match(side)
+            if m:
+                sides.append(("seq", m.group(1) or m.group(2)))
+            elif side.strip().isdigit():
+                sides.append(("dim", side.strip()))
+            else:
+                sides.append(None)
+        if None in sides:
+            continue
+        (ka, a), (kb, b) = sides
+        if ka == "seq" and kb == "seq":
+            if a in parent and b in parent:
+                join(a, b)
+        elif ka == "seq" and a in parent:
+            by_dim.setdefault((kb, b), []).append(a)
+        elif kb == "seq" and b in parent:
+            by_dim.setdefault((ka, a), []).append(b)
+    for group in by_dim.values():
+        for other in group[1:]:
+            join(group[0], other)
+    return {n: root(n) for n in names}
+
+
 def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
                   relation: str, domain: dict | None = None,
                   tolerance: float | None = None,
@@ -584,6 +806,22 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
         empty = None
     if empty is not None:
         return empty
+    from ._prove import length_admitted, lengths_judged
+    judged = lengths_judged()
+    shapes = signature_shapes(fn)
+    for name, least in sorted(_index_needs((lhs_src, rhs_src),
+                                           view.seqs).items()
+                              if judged else ()):
+        short = [k for k in range(least)
+                 if length_admitted(name, k, domain, assumption,
+                                    shapes) is not False]
+        if short:
+            return ProofResult(
+                "undecided",
+                sketch=f"the claim indexes {name} past its end where "
+                       f"len({name}) == {short[0]}, which the claim admits "
+                       f"(the index raises IndexError there); state it: "
+                       f"assuming len({name}) >= {least}")
     domain = dict(domain or {})
     if view.other_params:
         # the claim's own quantifier wins; the signature's
@@ -653,6 +891,25 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     if isinstance(lhs, tuple) or isinstance(rhs, tuple):
         return ProofResult("unliftable", sketch=f"cannot compare a tuple-valued "
                            f"expression against a {view.kind} lift")
+    present = [n for n, ib in view.seqs.items()
+               if lhs.has(ib) or rhs.has(ib)]
+    ties = _length_ties(present, domain, assumption, shapes)
+    untied = [pair for pair in _shared_reads(view, (lhs, rhs))
+              if ties.get(pair[0]) != ties.get(pair[1])]
+    if judged and untied:
+        a, b = untied[0]
+        from ._prove import _mismatch_raise
+        witness = _mismatch_raise(fn, lhs_src, rhs_src, (a, b), domain,
+                                  assumption, shapes)
+        if witness is not None:
+            return witness
+        return ProofResult(
+            "undecided",
+            sketch=f"the claim admits {a} and {b} of different lengths, "
+                   f"where the {view.kind} reads them position by position "
+                   f"and the code can raise; bind both over one length "
+                   f"(for {a} in R^n, {b} in R^n) or state it: assuming len({a}) "
+                   f"== len({b})")
     folded = _fold_premises(assumption, build, view, bound_context)
     if isinstance(folded, ProofResult):
         return folded
@@ -667,12 +924,38 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
                                  view.other_params, opaque=view.opaque)
     except Exception as e:
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
+    fixed = fixed_lengths(view, domain)
     if result.status == "undecided":
-        termwise = _termwise_sum_decide(lhs, rhs, relation, domain, view)
+        termwise = _termwise_sum_decide(lhs, rhs, relation, domain, view,
+                                        fixed=fixed)
         if termwise is not None:
             result = termwise
+    if result.status == "undecided" and fixed:
+        # a binding that fixes a length is a substitution, as a length
+        # premise is: the sums are expanded at that length, each element
+        # becomes a bounded scalar of the element domain, and the
+        # relation is decided again
+        fixed_pins = {view.lengths[n]: sympy.Integer(k)
+                      for n, k in fixed.items() if n in view.lengths
+                      and view.lengths[n] not in length_pins}
+        if fixed_pins:
+            try:
+                lhs_p = lhs.subs(fixed_pins).doit()
+                rhs_p = rhs.subs(fixed_pins).doit()
+                lhs_p, rhs_p, elem_domain, params = _element_scalars(
+                    lhs_p, rhs_p, domain, view)
+                result = _prove_relation(
+                    lhs_p, rhs_p, relation, elem_domain, bound_context,
+                    params, opaque=view.opaque)
+            except Exception as e:
+                return ProofResult("undecided",
+                                   sketch=f"{type(e).__name__} during proof: {e}")
     if result.status != "proven":
         return result
+    if fixed and (result.meta or {}).get("mathema.derive_route") != "termwise_sum":
+        clause = fixed_lengths_text(fixed)
+        result = replace(result, sketch=(f"{result.sketch}{clause}"
+                                         if result.sketch else clause.lstrip("; ")))
     # a folded sequence isn't a plain sympy.Symbol (it's an IndexedBase),
     # so it can't go through _free_names/_quantifier_clause the way a
     # scalar can; its clause is prepended by hand, merged with
@@ -687,7 +970,7 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     reserved = {n for n in view.seqs if len(n) == 1}
     scalar_clause = _quantifier_clause(scalar_names, view.sig_params, domain or {},
                                        reserved=reserved)
-    seq_part = f"{', '.join(view.seqs)} ∈ Seq(ℝ)"
+    seq_part = _seq_quantifier(view.seqs, domain or {}, fixed or {})
     if scalar_clause is None:
         quantifier = f"∀ {seq_part}"
     elif scalar_clause.startswith("where "):
@@ -696,3 +979,31 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     else:
         quantifier = scalar_clause.replace("∀ ", f"∀ {seq_part}, ", 1)
     return replace(result, quantifier=quantifier)
+
+
+def _seq_quantifier(seqs, domain: dict, fixed: dict | None = None) -> str:
+    """The quantifier over sequence parameters: one whose length a
+    binding fixes over `ℝ^k`, any other over its declared element
+    domain at every length (`xs ∈ [0.0, 1.0]ⁿ ⊂ ℝ, xs of every
+    length`), or `Seq(ℝ)` for one the claim does not bound."""
+    from ..domain import _as_domain, render_domain
+    parts, lengths = [], []
+    for name in seqs:
+        if fixed and name in fixed:
+            parts.append(f"{name} ∈ ℝ^{fixed[name]}")
+            continue
+        bound = domain.get(name)
+        dom = None
+        try:
+            dom = _as_domain(bound) if bound is not None else None
+        except Exception:
+            dom = None
+        if dom is None or not dom.dims:
+            parts.append(f"{name} ∈ Seq(ℝ)")
+            continue
+        parts.append(f"{name} ∈ {render_domain(bound, ascii_mode=False, show_missing=False)}")
+        lengths.append(name)
+    text = ", ".join(parts)
+    if lengths:
+        text += f", {' and '.join(lengths)} of every length"
+    return text

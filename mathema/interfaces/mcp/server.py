@@ -88,7 +88,7 @@ def build_server():
         "mathema",
         instructions="Claim-Driven Development: turn software intent into "
                      "verifiable evidence. You state a claim, mathema "
-                     "adjudicates it against the real function, the "
+                     "checks it against the real function, the "
                      "record keeps the evidence. No tool accepts a "
                      "verdict from you; acceptance is a human act done "
                      "in the CLI, and so are unlocking a locked "

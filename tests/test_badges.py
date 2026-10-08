@@ -8,6 +8,8 @@ git-diffable render and the four emitters."""
 import json
 import re
 
+import pytest
+
 from mathema.badges import (_SVG_PALETTE, BadgeScores, clarity_score,
                             render_svg, ci_snapshot, render_triangle,
                             repo_badges, shields_payloads, triangle_area,
@@ -241,7 +243,7 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     # no verified store here, so clarity sits at the structural floor
     # (nothing verified, only what the code visibly shows), a low number
     assert scores.clarity < 25
-    assert scores.algo == "entropy-dimensions@1.1"
+    assert scores.algo == "entropy-dimensions@1.3"
 
 
 def test_repo_badges_gives_no_implementation_credit_from_a_stale_report(tmp_path):
@@ -318,3 +320,170 @@ def test_readme_snippet_states_the_meanings_and_links(tmp_path):
     assert "github.com/tetrionlabs/mathema/blob" not in text
     assert ".mathema/badges/triangle.svg" in text
     assert "OWNER/REPO" in text                 # the paste-and-substitute hint
+
+
+# --- clarity @1.2: a call's hazard is read one level down -----------------
+
+def _store(root, key, rows):
+    import os
+
+    from mathema.spec import verified_dir, write_yaml
+    os.makedirs(verified_dir(str(root)), exist_ok=True)
+    write_yaml(os.path.join(verified_dir(str(root)), f"{key}.yaml"),
+               {key: {"name": key.rsplit(".", 1)[-1], "claims": rows}})
+
+
+def _residual(fn, root):
+    from mathema.badges import clarity_bits
+    return clarity_bits(fn, verified_claims=[], root=str(root))[1]
+
+
+_NP_CALLER = (
+    "import numpy as np\n"
+    "def root_of(x: float) -> float:\n"
+    "    '''The square root of x.'''\n"
+    "    return float(np.sqrt(x))\n")
+
+
+def test_a_verified_library_row_lowers_its_callers_residual_bits(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, "cl12_np", _NP_CALLER)
+    unverified = tmp_path / "unverified"
+    unverified.mkdir()
+    verified = tmp_path / "verified"
+    trusted = tmp_path / "trusted"
+    row = {"name": "is_defined", "statement": "x >= 0", "route": "probe",
+           "meta": {"mathema.surface": "compendium"}}
+    _store(verified, "numpy.sqrt", [dict(row, verdict="proven")])
+    _store(trusted, "numpy.sqrt", [dict(
+        row, verdict="proven",
+        accepted={"as": "trusted", "by": "test", "level": "proven"})])
+    none, held, proved = (_residual(mod.root_of, unverified),
+                          _residual(mod.root_of, trusted),
+                          _residual(mod.root_of, verified))
+    # accepted as trusted counts like holds, never like proven
+    assert proved < held < none
+
+
+def test_a_library_row_verified_as_holds_reduces_less_than_proven(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    mod = _load(tmp_path, "cl12_np_holds", _NP_CALLER)
+    held, proved = tmp_path / "held", tmp_path / "proved"
+    row = {"name": "is_defined", "statement": "x >= 0", "route": "probe"}
+    _store(held, "numpy.sqrt", [dict(row, verdict="holds")])
+    _store(proved, "numpy.sqrt", [dict(row, verdict="proven")])
+    assert _residual(mod.root_of, proved) < _residual(mod.root_of, held)
+
+
+def test_a_claims_file_alone_does_not_move_a_callers_clarity(tmp_path):
+    # testimony is not evidence: until verify records the rows, the
+    # caller's call keeps its full charge
+    mod = _load(tmp_path, "cl12_sympy",
+                "import sympy\n"
+                "def root_text(x: float) -> str:\n"
+                "    \'\'\'The square root of x, as text.\'\'\'\n"
+                "    return str(sympy.sqrt(x))\n")
+    before = clarity_score(mod.root_text, verified_claims=[],
+                           root=str(tmp_path))
+    bits = _residual(mod.root_text, tmp_path)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "sympy.claims.yaml").write_text(
+        "compendium: sympy\n"
+        "versions: '*'\n"
+        "sympy.sqrt:\n"
+        "  claims:\n"
+        "    - name: is_defined\n"
+        "      statement: 'is_defined(f)'\n")
+    from mathema.compendium import load_library_claims
+    assert "sympy.sqrt" in load_library_claims(str(tmp_path))
+    assert clarity_score(mod.root_text, verified_claims=[],
+                         root=str(tmp_path)) == before
+    assert _residual(mod.root_text, tmp_path) == bits
+
+
+_HELPER_PKG = (
+    "def helper(x: float) -> float:\n"
+    "    '''Half of x.'''\n"
+    "    return x / 2.0\n"
+    "def caller(x: float) -> float:\n"
+    "    '''Half of x, through the helper.'''\n"
+    "    return helper(x)\n")
+
+
+def test_a_first_party_helpers_proven_definedness_reduces_its_caller(
+        tmp_path):
+    mod = _load(tmp_path, "cl12_helper", _HELPER_PKG)
+    bare, proved = tmp_path / "bare", tmp_path / "proved"
+    bare.mkdir()
+    _store(proved, "cl12_helper.helper",
+           [{"name": "is_defined", "statement": "is_defined(f)",
+             "verdict": "proven", "route": "derive"}])
+    # the helper's full charge is removed by its proven definedness
+    import pytest
+
+    from mathema.badges import _BITS
+    assert _residual(mod.caller, bare) - _residual(mod.caller, proved) == \
+        pytest.approx(_BITS["hazard_call"])
+
+
+def test_a_callee_with_no_record_keeps_the_full_charge(tmp_path):
+    mod = _load(tmp_path, "cl12_norec", _HELPER_PKG)
+    from mathema.badges import _BITS, _clarity_profile, _clarity_sources
+    profile = _clarity_profile(mod.caller, root=str(tmp_path))
+    charges = [(bits, reducer) for dim, bits, reducer
+               in _clarity_sources(profile) if dim == "failure"]
+    assert charges == [(_BITS["hazard_call"], "callee:cl12_norec.helper")]
+    assert dict(profile.callees) == {"cl12_norec.helper": 0.0}
+    assert _BITS["hazard_call"] == 2.0
+
+
+def test_only_settled_definedness_rows_count_as_callee_evidence(tmp_path):
+    # a bound or an unsettled row says nothing about where the call has
+    # no value
+    mod = _load(tmp_path, "cl12_other", _HELPER_PKG)
+    bare, other = tmp_path / "bare", tmp_path / "other"
+    bare.mkdir()
+    _store(other, "cl12_other.helper",
+           [{"name": "small", "statement": "for x in [0, 1], f(x) <= 1",
+             "verdict": "proven", "route": "derive"},
+            {"name": "is_defined", "statement": "is_defined(f)",
+             "verdict": "unknown", "route": "derive"}])
+    assert _residual(mod.caller, other) == _residual(mod.caller, bare)
+
+
+def test_is_compendium_safe_is_not_a_clarity_reducer(tmp_path):
+    # it stays a family a claim can state, but the call's hazard is
+    # read from the callee's own record, never from the caller's check
+    mod = _load(tmp_path, "cl12_family", _NP_CALLER.replace(
+        "import numpy as np", "import math as np"))
+    row = {"name": "is_compendium_safe", "statement": "is_compendium_safe(numpy)",
+           "verdict": "holds", "route": "probe"}
+    assert clarity_score(mod.root_of, verified_claims=[row],
+                         root=str(tmp_path)) == \
+        clarity_score(mod.root_of, verified_claims=[], root=str(tmp_path))
+
+
+@pytest.mark.parametrize("family", [
+    "is_computation_safe", "is_repeatable",
+    "is_precision_safe", "is_order_invariant", "is_concurrency_safe",
+    "is_representation_consistent", "is_compendium_safe"])
+@pytest.mark.parametrize("verdict, route", [
+    ("proven", "derive"), ("holds", "probe"), ("falsified", "probe")])
+def test_a_roll_up_or_reserved_family_credits_no_clarity_source(
+        tmp_path, family, verdict, route):
+    mod = _load(tmp_path, f"bc_rollup_{family}",
+                "def double(x: float) -> float:\n"
+                "    '''Twice.'''\n"
+                "    return 2.0 * x\n")
+    row = {"name": family, "statement": f"{family}(f)",
+           "verdict": verdict, "route": route}
+    assert clarity_score(mod.double, verified_claims=[row]) == \
+        clarity_score(mod.double, verified_claims=[])
+
+
+def test_every_reserved_family_is_named_as_crediting_no_source():
+    from mathema.badges import _NO_SOURCE
+    from mathema.claim_families import RESERVED_FAMILIES
+    assert set(RESERVED_FAMILIES) <= _NO_SOURCE

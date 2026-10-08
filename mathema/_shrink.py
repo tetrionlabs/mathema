@@ -13,13 +13,13 @@ extends to sequences.
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 _SIMPLEST_CHARS = ("a", " ", "0")     # tried in order when simplifying
 
 
-def shrink(value, still_fails: Callable[[object], bool],
-           max_steps: int = 2000):
+def shrink(value: Any, still_fails: Callable[[object], bool],
+           max_steps: int = 2000) -> Any:
     """Intent:
         A locally-minimal value that still satisfies `still_fails` (True
         when the reduced value still triggers the failure), reached from

@@ -17,6 +17,12 @@ an `importlib.metadata` entry point under the group named by
 never overriding a built-in name outright (a same-name external entry
 is dropped with a warning, not silently preferred); a plugin adds new
 claim families, it doesn't get to silently replace mathema's own.
+
+The predicate a family owns is its registered name, so the grammar
+reads the names of the entry points without loading them; a family is
+loaded when a claim is adjudicated. An entry point whose load fails is
+warned about once and tried again on the next call, never remembered
+as absent.
 """
 from __future__ import annotations
 
@@ -25,6 +31,8 @@ import re
 import warnings
 from importlib.metadata import entry_points
 from typing import Callable, Protocol, runtime_checkable
+
+from ._signatures import callable_signature
 
 FAMILY_GROUP = "mathema.claim_families"
 
@@ -82,7 +90,7 @@ def call_route(route: Callable, /, *args, **kwargs):
     """
     import inspect
     try:
-        sig = inspect.signature(route)
+        sig = callable_signature(route)
     except (TypeError, ValueError):
         return route(*args, **kwargs)
     params = sig.parameters.values()
@@ -102,16 +110,54 @@ def register(name: str, family: ClaimFamily) -> None:
 
 
 @functools.lru_cache(maxsize=1)
+def _entry_points() -> tuple:
+    """The entry points registered under `FAMILY_GROUP`, read once per
+    process (installed metadata), none of them loaded."""
+    return tuple(entry_points(group=FAMILY_GROUP))
+
+
+#: the external families loaded so far, by entry-point name
+_LOADED: dict[str, ClaimFamily] = {}
+#: the entry points whose failed load has been warned about
+_WARNED: set = set()
+
+
 def _discovered_external() -> dict[str, ClaimFamily]:
-    discovered: dict[str, ClaimFamily] = {}
-    for ep in entry_points(group=FAMILY_GROUP):
+    """Intent:
+        Every external family that loads, by entry-point name. An entry
+        point is loaded on the first call that needs it and kept once it
+        loads; one whose load fails is skipped for this call with a
+        warning (once per entry point) and tried again on the next, so a
+        family that could not import yet, because the module importing
+        it was still being imported, is read as soon as it can be.
+    """
+    for ep in _entry_points():
+        if ep.name in _LOADED:
+            continue
         try:
-            discovered[ep.name] = ep.load()
+            _LOADED[ep.name] = ep.load()
         except Exception as e:
-            warnings.warn(f"mathema: claim family {ep.value!r} registered "
-                          f"under {ep.name!r} failed to load ({e!r}), "
-                          "skipping it", stacklevel=2)
-    return discovered
+            if (ep.name, ep.value) not in _WARNED:
+                _WARNED.add((ep.name, ep.value))
+                warnings.warn(f"mathema: claim family {ep.value!r} registered "
+                              f"under {ep.name!r} failed to load ({e!r}), "
+                              "skipping it until it loads", stacklevel=2)
+    return dict(_LOADED)
+
+
+def _registered_names() -> frozenset:
+    """Every family name, built-in or registered: the entry points'
+    names read without loading them."""
+    return frozenset(_REGISTRY) | frozenset(ep.name for ep in _entry_points())
+
+
+def _reset_discovery() -> None:
+    """Forget the entry points read, the families loaded and the loads
+    warned about, so the next call discovers afresh (for a test that
+    substitutes `entry_points`)."""
+    _entry_points.cache_clear()
+    _LOADED.clear()
+    _WARNED.clear()
 
 
 def families() -> dict[str, ClaimFamily]:
@@ -140,7 +186,7 @@ def families() -> dict[str, ClaimFamily]:
 GROUPS: dict[str, tuple[str, ...]] = {
     # all applicable hazard checks, enforced, inside the domain
     "defined_within_domain": ("is_missing_safe", "is_pole_safe",
-                              "is_builtin_safe", "is_extremity_safe",
+                              "is_number_set_safe", "is_overflow_safe",
                               "is_representation_safe", "is_empty_safe",
                               "is_defined"),
     # any point outside the declared domain causes a raise
@@ -151,6 +197,17 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # or varied on (is_deterministic is one member inside it)
     "stateless": ("is_state_safe", "is_deterministic",
                   "is_reproducible"),
+    # the children of is_computation_safe: the facts about one
+    # implementation that answer "does it run" and "is it right in
+    # float64" (is_computation_safe itself is the roll-up, declared by
+    # name; repeatability is is_repeatable's, over the stateless
+    # cluster)
+    "computation_safe": ("is_overflow_safe", "is_numerically_stable",
+                         "is_representation_safe",
+                         "is_pole_safe", "is_number_set_safe",
+                         "is_missing_safe", "is_empty_safe",
+                         "is_recursion_safe", "is_language_defined",
+                         "is_library_safe"),
 }
 
 # terse spellings (and the spaced forms a claim-text reader would
@@ -161,6 +218,7 @@ KEYWORD_ALIASES: dict[str, str] = {
     "excluding": "excluded_outside_domain",
     "excluded outside domain": "excluded_outside_domain",
     "numerically stable": "stable",
+    "computation safe": "computation_safe",
 }
 
 # one-line meanings, rendered whole in the did-you-mean error so a
@@ -174,6 +232,10 @@ KEYWORD_MEANINGS: dict[str, str] = {
     "stable": "numerical stability across the declared domain",
     "stateless": "no external state written, read, or varied on "
                  "(state safety, determinism, seeded reproducibility)",
+    "computation_safe": "every computation-safety check that applies "
+                        "(overflow, stability, representation, missing, "
+                        "recursion, determinism, state, arbitrary input, "
+                        "covered library calls), each gated on relevance",
 }
 
 
@@ -182,15 +244,48 @@ KEYWORD_MEANINGS: dict[str, str] = {
 _PREDICATE_SHAPE = re.compile(r"is_[a-z0-9][a-z0-9_]*_safe")
 
 
+# the shape a family name must have to contribute an output-contract
+# predicate (`is_sorted_output`, `output_never_none`, `output_in_language`)
+_OUTPUT_SHAPE = re.compile(r"output_[a-z0-9][a-z0-9_]*|is_[a-z0-9][a-z0-9_]*_output")
+
+
+def registered_output_predicates() -> frozenset:
+    """Output-contract predicate names contributed by registered claim
+    families: every family name shaped like `output_<slug>` or
+    `is_<slug>_output`. The registered NAME is the predicate, as for
+    the safety predicates; `routes` unions this with its static table."""
+    return frozenset(name for name in _registered_names()
+                     if _OUTPUT_SHAPE.fullmatch(name))
+
+
+#: families named in mathema's plan and not part of this release; a
+#: claim naming one fails as an unknown predicate does, with this
+#: sentence added to the error
+PLANNED_FAMILIES: dict[str, str] = {
+    "is_memory_safe": ("is_memory_safe is planned and is not part of "
+                       "this release"),
+}
+
+
+def planned_family_note(text: str) -> str | None:
+    """The sentence for the planned family `text` names as a whole
+    word, or None when it names none."""
+    for name, note in PLANNED_FAMILIES.items():
+        if re.search(rf"\b{name}\b", text):
+            return note
+    return None
+
+
 def registered_predicates() -> frozenset:
     """Safety-predicate names contributed by registered claim families:
     every family name shaped like `is_<slug>_safe`. The registered NAME
     is the predicate it owns (the same name-is-the-contract rule target
     resolvers use), so a family owning several predicates registers
-    once per predicate. `routes` unions this with its static tables;
-    with nothing registered beyond mathema's own members, the union
-    adds nothing."""
-    return frozenset(name for name in families()
+    once per predicate, and the names are read from the entry points
+    without loading a family. `routes` unions this with its static
+    tables; with nothing registered beyond mathema's own members, the
+    union adds nothing."""
+    return frozenset(name for name in _registered_names()
                      if _PREDICATE_SHAPE.fullmatch(name))
 
 
@@ -247,6 +342,41 @@ CLAIM_ASPECTS: dict[str, tuple[str, ...]] = {
 _ASPECT_OF: dict[str, str] = {member: aspect
                               for aspect, members in CLAIM_ASPECTS.items()
                               for member in members}
+
+
+#: the family names decision A retired, each an accepted spelling of
+#: the family that replaces it
+RETIRED_FAMILY_NAMES: dict[str, str] = {
+    "is_builtin_safe": "is_number_set_safe",
+    "is_extremity_safe": "is_overflow_safe",
+    "is_arbitrary_input_safe": "is_language_defined",
+    "is_compendium_safe": "is_library_safe",
+}
+
+
+def current_family_name(name: str) -> str:
+    """The family a name stands for: a retired spelling's replacement,
+    any other name itself."""
+    return RETIRED_FAMILY_NAMES.get(name, name)
+
+
+def current_claim_name(claim_name: str) -> str:
+    """A claim name with a retired family spelling in its family part
+    replaced (`is_builtin_safe[x]` is `is_number_set_safe[x]`)."""
+    base = claim_base_name(claim_name)
+    current = current_family_name(base)
+    if current == base:
+        return claim_name
+    return current + str(claim_name)[len(base):]
+
+
+def claim_base_name(claim_name: str) -> str:
+    """Intent:
+        The family part of a claim name: what precedes a pin
+        (`is_defined@axis=0`, a row pinned to a call's arguments) and a
+        bracket (`convex[x]`, `is_defined[2]`, `f_x_ge_0[float]`).
+    """
+    return str(claim_name or "").split("@", 1)[0].split("[", 1)[0]
 
 
 def claim_aspect(claim_name: str) -> tuple[str, str]:

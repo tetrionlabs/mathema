@@ -7,6 +7,9 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
+from ._signatures import module_scope
 import ast
 import inspect
 import re
@@ -15,6 +18,7 @@ from dataclasses import dataclass, field
 from . import identity
 from . import types as _types
 from .intent import parse_doc
+from ._signatures import callable_signature
 
 _IO_FUNCS = {"print", "input", "open", "exec", "eval", "__import__"}
 _IO_MODULES = {"os", "sys", "subprocess", "socket", "requests", "urllib",
@@ -100,7 +104,7 @@ class Facts:
     name: str
     signature: str
     params: list[str]
-    param_kinds: dict[str, str]        # "sequence" | "scalar" | "int" | "bool" | "complex" | "string" | "unknown"
+    param_kinds: dict[str, str]        # "sequence" | "vec" | "mat" | "table" | "scalar" | "int" | "bool" | "complex" | "string" | "unknown"
     returns_kind: str                  # "scalar" | "sequence" | "bool" | "none" | "unknown"
     docstring: str | None
     source: str
@@ -142,12 +146,31 @@ class Facts:
                                       # annotation (Literal/Enum/bool) states the whole value set
     doc_concepts: list = field(default_factory=list)          # declared Concepts:/Tags: marker
                                       # tokens (normalized; both spellings are concepts)
+    runtime_types: dict = field(default_factory=dict)         # param -> (Detection, ...): the
+                                      # runtime types the signature names (runtime_types.
+                                      # detect_parameters), the first one sampled; a param
+                                      # whose first is not a list has kind vec/mat/table
+    runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
+                                      # "type", "text"}: a body use as a vector, matrix or
+                                      # table with no runtime type named (usage_hints)
 
 
 def _root_name(node: ast.AST) -> str | None:
     while isinstance(node, (ast.Attribute, ast.Subscript, ast.Call)):
         node = node.func if isinstance(node, ast.Call) else node.value
     return node.id if isinstance(node, ast.Name) else None
+
+
+def _dotted_chain(node: ast.AST) -> str | None:
+    """`a.b.c` for an attribute chain made only of names, else None."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
 
 
 class SourceUnavailable(RuntimeError):
@@ -279,11 +302,44 @@ def _annotation_base(text: str) -> str:
         the shorthand as producing the identical markers the long form
         does, so it has to classify identically too.
     """
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        # a quoted annotation, as every annotation is under
+        # `from __future__ import annotations`: the type is the text inside
+        return _annotation_base(text[1:-1])
+    if text.startswith("typing."):
+        return _annotation_base(text[len("typing."):])
+    if text.startswith("optional[") and text.endswith("]"):
+        return _annotation_base(text[len("optional["):-1])
+    members = (_top_level_split(text[len("union["):-1], ",")
+               if text.startswith("union[") and text.endswith("]")
+               else _top_level_split(text, "|"))
+    if len(members) > 1:
+        # an optional type, `X | None` or `Union[X, None]`, has the kind
+        # of X; a union of two real types has none of its own
+        present = [m for m in members if m not in ("none", "nonetype")]
+        return _annotation_base(present[0]) if len(present) == 1 else text
     if text.startswith("annotated["):
-        return text[len("annotated["):].split(",", 1)[0].strip()
+        return _annotation_base(text[len("annotated["):].split(",", 1)[0].strip())
     if text.split("(", 1)[0].strip() in _SHAPED_LIST_FACTORY_NAMES:
         return "list"
     return text
+
+
+def _top_level_split(text: str, sep: str) -> list[str]:
+    """The parts of `text` between top-level occurrences of `sep`,
+    brackets respected, each stripped."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth -= 1
+        elif ch == sep and depth == 0:
+            parts.append(text[start:i].strip())
+            start = i + 1
+    parts.append(text[start:].strip())
+    return parts
 
 
 def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
@@ -422,7 +478,7 @@ def finite_annotation_domains(fn) -> dict:
     import typing as t
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return {}
     out = {}
@@ -465,6 +521,49 @@ def _returns_kind(fdef: ast.FunctionDef) -> str:
     return "unknown"
 
 
+#: method names that return a new object holding a copy of the data
+_COPYING_METHODS = frozenset({"copy", "flatten", "tolist", "astype"})
+#: functions that return a new object holding a copy of the data
+_COPYING_CALLS = frozenset({"list", "sorted", "tuple", "dict", "set",
+                            "copy", "deepcopy"})
+
+
+def _is_copy(value) -> bool:
+    """Whether an expression makes a new object rather than handing
+    back one it was given: a call of a copying method or function."""
+    if not isinstance(value, ast.Call):
+        return False
+    func = value.func
+    if isinstance(func, ast.Attribute):
+        return func.attr in _COPYING_METHODS or (
+            func.attr == "deepcopy")
+    return isinstance(func, ast.Name) and func.id in _COPYING_CALLS
+
+
+def _rebound_to_copy(stmts: list, name: str, lineno: int,
+                     copied: bool = False) -> bool:
+    """Whether, on every path through `stmts` before line `lineno`, the
+    name was last rebound to a copy (`copied`: whether it already was
+    on entry), so a method called on it there cannot reach the caller's
+    object."""
+    for stmt in stmts:
+        if stmt.lineno >= lineno:
+            break
+        if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name
+                for t in stmt.targets):
+            copied = _is_copy(stmt.value)
+        elif isinstance(stmt, ast.If):
+            copied = (_rebound_to_copy(stmt.body, name, lineno, copied)
+                      and _rebound_to_copy(stmt.orelse, name, lineno,
+                                           copied))
+        elif any(isinstance(n, (ast.Name)) and n.id == name
+                 and isinstance(n.ctx, ast.Store) for n in ast.walk(stmt)):
+            # rebound somewhere this reading does not follow
+            copied = False
+    return copied
+
+
 def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
     out: list[str] = []
 
@@ -489,7 +588,8 @@ def _effects(fdef: ast.FunctionDef, params: list[str]) -> list[str]:
                     note("uses randomness")
                 elif root in _CLOCK_MODULES:
                     note("reads the clock")
-                elif f.attr in _MUTATORS and root in params:
+                elif f.attr in _MUTATORS and root in params and not \
+                        _rebound_to_copy(fdef.body, root, node.lineno):
                     note(f"mutates argument '{root}'")
         elif isinstance(node, (ast.Assign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -648,7 +748,10 @@ def _call_groups(fdef: ast.FunctionDef, name: str) -> tuple[dict[str, list[str]]
                     groups["external"].append(f.id)
         elif isinstance(f, ast.Attribute):
             root = _root_name(f.value)
-            label = f"{root}.{f.attr}" if root else f.attr
+            # a plain dotted chain keeps every name (`np.linalg.norm`);
+            # a chain through a call or subscript keeps its root
+            chain = _dotted_chain(f)
+            label = chain or (f"{root}.{f.attr}" if root else f.attr)
             if root in _MATH_MODULES:
                 if label not in groups["math"]:
                     groups["math"].append(label)
@@ -720,6 +823,24 @@ def _is_definitional(value) -> bool:
            or isinstance(value, types.ModuleType))
 
 
+def _installed_code(fn) -> bool:
+    """Whether `fn` is defined in the standard library or an installed
+    package (a file under the interpreter's library paths), not in the
+    project being checked."""
+    import inspect
+    import os
+    import sysconfig
+    try:
+        path = os.path.realpath(inspect.getsourcefile(inspect.unwrap(fn)) or "")
+    except (TypeError, OSError):
+        return False
+    if not path:
+        return False
+    roots = {os.path.realpath(p) for name in ("stdlib", "platstdlib", "purelib", "platlib")
+             if (p := sysconfig.get_paths().get(name))}
+    return any(path.startswith(root + os.sep) for root in roots)
+
+
 def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         list[str], list[str], list[str], list[str]]:
     """Free names the function inherits from outside itself, split four
@@ -757,7 +878,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
             elif isinstance(node, ast.ImportFrom):
                 bound |= {(a.asname or a.name) for a in node.names}
     known = _MATH_MODULES | _IO_MODULES | _CLOCK_MODULES | _RANDOM_MODULES
-    g = getattr(fn, "__globals__", {})
+    g = module_scope(fn)
     global_vars: list[str] = []
     global_funcs: list[str] = []
     unresolved: list[str] = []
@@ -803,7 +924,7 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
                 target = global_funcs if _is_definitional(g[n]) else global_vars
                 if n not in target:
                     target.append(n)
-    if global_vars or unresolved:
+    if (global_vars or unresolved) and not _installed_code(fn):
         # global_funcs deliberately doesn't trigger this, referencing a
         # sibling function/class/module isn't "behavior depends on state
         # outside the function" the way a global variable's current
@@ -813,9 +934,9 @@ def _global_captures(fdef: ast.FunctionDef, fn) -> tuple[
         if global_vars:
             parts.append(f"inherits from global scope: {', '.join(global_vars)}")
         if unresolved:
-            parts.append(f"UNRESOLVED names: {', '.join(unresolved)}")
+            parts.append(f"unresolved names: {', '.join(unresolved)}")
         warnings.warn(f"mathema: {fdef.name} " + "; ".join(parts)
-                      + "; behavior depends on state outside the function",
+                      + "; behaviour depends on state outside the function",
                       StateDependenceWarning, stacklevel=4)
     return global_vars, global_funcs, unresolved, mutated_globals
 
@@ -886,7 +1007,7 @@ _TIER_WORDS = {0: "no source",
                3: "source, side effects"}
 
 
-def tier_word(tier: int) -> str:
+def tier_word(tier: int, rows=(), effects: "dict | None" = None) -> str:
     """The word a record shows in place of its tier number.
 
     Intent:
@@ -897,9 +1018,25 @@ def tier_word(tier: int) -> str:
         the only evidence there is; `pure` and `impure` both mean the
         source was read, and say whether effects were found. An
         unrecognised value renders as the bare number rather than
-        guessing at a word for it.
+        guessing at a word for it. `rows` (Probes or claim-row dicts)
+        can overrule "no side effects": a falsified `is_state_safe` row
+        is an observed side effect, and so is a write examining the source
+        finds a default call makes (`effects`, the record's
+        `mathema.effects`).
     """
+    if tier == 2 and (any(_state_write_observed(r) for r in rows)
+                      or (effects or {}).get("writes")):
+        return _TIER_WORDS[3]
     return _TIER_WORDS.get(tier, f"tier {tier}")
+
+
+def _state_write_observed(row) -> bool:
+    name = ((row.get("name") or row.get("claim")) if isinstance(row, dict)
+            else getattr(row, "name", ""))
+    verdict = (row.get("verdict") if isinstance(row, dict)
+               else getattr(row, "verdict", "")) or ""
+    return (str(name or "").split("[", 1)[0] == "is_state_safe"
+            and verdict.split(":", 1)[0] == "falsified")
 
 
 def looks_like_wrapper(facts) -> bool:
@@ -912,7 +1049,7 @@ def looks_like_wrapper(facts) -> bool:
                 and facts.call_groups.get("external"))
 
 
-def analyze_source(fn) -> Facts:
+def analyze_source(fn: Callable[..., Any]) -> Facts:
     """Read a function's real source and build its `Facts` record,
     the single entry point everything downstream (the derive-route
     lifter, the probe route, `mathema audit`'s population analyses)
@@ -922,6 +1059,9 @@ def analyze_source(fn) -> Facts:
 
     src, fdef = get_tree(fn)
     params = [a.arg for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]]
+    # a library method read as a function of its receiver takes its
+    # other arguments through `*args`; its required ones are parameters
+    params = list(getattr(fn, "__mathema_receiver_params__", None) or params)
     effects = _effects(fdef, params)
     groups, recursion = _call_groups(fdef, fdef.name)
     docstring_text = ast.get_docstring(fdef)
@@ -964,11 +1104,28 @@ def analyze_source(fn) -> Facts:
             continue
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
+    from .runtime_types import detect_parameters, usage_hints
+    param_kinds = _param_kinds(fdef, params)
+    detected = detect_parameters(fn)
+    hints = usage_hints(fn, fdef, params, param_kinds, detected)
+    # a parameter the body uses as a numpy array, which a list does not
+    # support, is drawn as one: the hint becomes the runtime type
+    from .runtime_types import Detection
+    for p, hint in list(hints.items()):
+        if hint.get("strong") and hint.get("type") == "numpy.ndarray" \
+                and p not in detected:
+            kind = "mat" if hint.get("usage") == "matrix" else "vec"
+            detected[p] = (Detection("numpy.ndarray", kind,
+                                     "the body uses it as a numpy array"),)
+            hints.pop(p)
+    apply_runtime_kinds(param_kinds, detected)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
         params=params,
-        param_kinds=_param_kinds(fdef, params),
+        param_kinds=param_kinds,
+        runtime_types=detected,
+        runtime_hints=hints,
         finite_domains=finite_annotation_domains(fn),
         doc_concepts=doc_concepts,
         returns_kind=_returns_kind(fdef),
@@ -999,6 +1156,40 @@ def analyze_source(fn) -> Facts:
         unresolved=unresolved,
         mutated_globals=mutated_globals,
     )
+
+
+def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
+    """Intent:
+        Set, in place, the kind of each parameter whose first runtime
+        type detection is not a list to that detection's kind (`vec`,
+        `mat` or `table`); every other parameter keeps the kind read
+        off its annotation text and body.
+    """
+    for p, found in detected.items():
+        if found and found[0].adapter != "list" and p in param_kinds:
+            param_kinds[p] = found[0].kind
+
+
+def with_declared_runtime_types(facts, fn, declared: "dict | None"):
+    """Intent:
+        `facts` with a claims-file entry's `runtime_types:` applied:
+        each parameter the signature names no runtime type for takes
+        the declared one (its kind and detection), and loses its hint.
+        The same `facts` when nothing is declared.
+    """
+    if not declared:
+        return facts
+    from dataclasses import replace
+
+    from .runtime_types import detect_parameters
+    detected = detect_parameters(fn, {str(k): str(v)
+                                      for k, v in declared.items()})
+    kinds = dict(facts.param_kinds)
+    apply_runtime_kinds(kinds, detected)
+    hints = {p: h for p, h in (facts.runtime_hints or {}).items()
+             if p not in detected}
+    return replace(facts, param_kinds=kinds, runtime_types=detected,
+                   runtime_hints=hints)
 
 
 def quiet_facts(fn) -> "Facts | None":

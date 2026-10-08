@@ -291,6 +291,58 @@ def _synth_finite(n, rng):
     return _rand(n, rng)
 
 
+def _synth_singular(n, rng):
+    # a random matrix with one row or one column zeroed: the
+    # determinant is exactly zero, and elimination meets an exactly
+    # zero pivot, so a solver reports it singular rather than returning
+    # a huge but finite inverse
+    m = _rand(n, rng)
+    k = rng.randrange(n)
+    if rng.random() < 0.5:
+        m[k] = [0.0] * n
+    else:
+        for row in m:
+            row[k] = 0.0
+    return m
+
+
+#: one draw in this many of an unstructured matrix is rank-deficient
+RANK_EDGE_EVERY = 8
+
+
+def rank_edge(m, draw: int):
+    """The matrix `m` with one row zeroed when `draw` is one of the
+    rank-deficient draws (every `RANK_EDGE_EVERY`-th, the row chosen by
+    the draw's own index), its diagonal shifted so the trace is zero on
+    the draw half a period later (a square `m` only), else `m`
+    unchanged. A random matrix is full rank and has a nonzero trace
+    with probability one, so a claim false only where the rank drops
+    (`det(A @ A.T) > 0`) or the trace vanishes (`A / trace(A)`) needs
+    its edge drawn on purpose, the way the scalar probe draws its
+    boundary values."""
+    if not m or not isinstance(m, list) or not isinstance(m[0], list):
+        return m
+    phase = draw % RANK_EDGE_EVERY
+    if phase == RANK_EDGE_EVERY // 2 - 1 and len(m) == len(m[0]) and len(m) > 1:
+        try:
+            shift = sum(float(m[i][i]) for i in range(len(m))) / len(m)
+        except (TypeError, ValueError):
+            return m
+        if shift != shift or shift in (float("inf"), float("-inf")):
+            return m
+        out = [list(row) for row in m]
+        for i in range(len(m)):
+            out[i][i] = float(m[i][i]) - shift
+        # the shift can leave a rounding residue; the last entry takes it
+        residue = sum(out[i][i] for i in range(len(m)))
+        out[-1][-1] -= residue
+        return out
+    if phase != RANK_EDGE_EVERY - 1:
+        return m
+    k = (draw // RANK_EDGE_EVERY) % len(m)
+    return [[0.0] * len(row) if i == k else row for i, row in enumerate(m)]
+
+
 # --- the registry ----------------------------------------------------
 
 @dataclass(frozen=True)

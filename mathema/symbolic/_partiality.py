@@ -18,15 +18,31 @@ so claims about its CALLERS adjudicate against its raising region too.
 True division contributes a ZeroDivisionError guard with no registry
 entry at all.
 
-Deliberately absent from the built-in rows: `x ** 0.5` (Python returns
-a complex number, no raise, the ordering machinery already refuses
-complex values) and numpy's vectorized forms (they return nan, which
-is the missing-policy axis, adjudicated by is_missing_safe, never a
-raise). A bare `sqrt` call in a body matches only through the caller's
-own scope resolving it to a registered function, the spelling alone
-never decides, since guessing the origin wrong would falsify with a
-lemma about the wrong function.
+A region where a call returns no value without raising (numpy's
+`sqrt` returns nan for a negative input, `log` an infinity at zero) is
+a guard of the same shape whose exception slot holds `NO_VALUE`: a
+value claim over it is false just the same, and its witness is
+corroborated by a call that raises or returns a non-finite value.
+Those rows come from the compendium's `is_defined` rows
+(`register_no_value_when`); a power with a negative base and a
+non-integer exponent (`x ** 0.5` at x < 0, where Python returns a
+complex number) is one too, and `math.tan` at its poles, where the
+float call returns a large finite number. A bare `sqrt` call in a body matches only
+through the caller's own scope resolving it to a registered function,
+the spelling alone never decides, since guessing the origin wrong would
+falsify with a lemma about the wrong function.
+
+Every region here is mathematics: the real domain of a primitive (`sqrt`
+below zero, `log` at or below zero, `asin` outside [-1, 1], division by
+zero, a fractional power of a negative base), a region a library's
+`is_defined` row states, or a raise the function's own source states.
+Nothing here depends on the float number representation's range or
+precision, so `math.exp` has no row and `x ** 3` has no overflow region: a
+proof over the reals is a proof over the reals, and where the computation
+leaves the doubles is found by executing it (the `[float]` companion, the
+probe route), never by this walk.
 """
+from .._signatures import module_scope
 import ast
 import contextvars
 import copy
@@ -34,6 +50,76 @@ import copy
 import sympy
 
 from ._base import NotSymbolic, _bind_params, _expr_to_sympy, strip_docstring
+
+#: the exception-name slot of a guard whose region has no value without
+#: raising: the call returns nan or an infinity there
+NO_VALUE = "no value"
+
+# the parameter symbols the current walk knows are called with an int
+_INT_SYMS: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_int_syms", default=frozenset())
+
+
+def _integer_valued(u) -> bool:
+    """Whether a lifted argument is an integer at every point, reading
+    the parameters the walk knows are ints as integers."""
+    u = sympy.sympify(u)
+    swap = {s: sympy.Dummy(s.name, integer=True)
+            for s in _INT_SYMS.get() if s in u.free_symbols}
+    return bool(u.subs(swap).is_integer) if swap else bool(u.is_integer)
+
+
+def _factorial_type_region(u):
+    """math.factorial accepts only an int: a float argument raises
+    TypeError whatever its value."""
+    return sympy.false if _integer_valued(u) else sympy.true
+
+
+def _factorial_value_region(u):
+    """math.factorial of a negative int raises ValueError."""
+    return sympy.Lt(u, 0) if _integer_valued(u) else sympy.false
+
+
+def _nonpositive_integer(u):
+    """Where `u` is 0, -1, -2, ...: the poles of the gamma function."""
+    return sympy.And(sympy.Le(u, 0), sympy.Eq(u, sympy.floor(u)))
+
+
+def _power_zero_base(base, exponent):
+    """Where a power has a zero base and a negative exponent: Python
+    raises there (ZeroDivisionError for `**`, ValueError for
+    math.pow)."""
+    return sympy.And(sympy.Eq(base, 0), sympy.Lt(exponent, 0))
+
+
+def _power_negative_base(base, exponent):
+    """Where a power has a negative base and an exponent not known to be
+    an integer: no real value at a non-integer exponent (`**` returns a
+    complex number, math.pow raises)."""
+    if exponent.is_number:
+        if exponent.is_real and float(exponent).is_integer():
+            return sympy.false
+        return sympy.Lt(base, 0)
+    if _integer_valued(exponent):
+        return sympy.false
+    # a negative base with an exponent that may be fractional: the
+    # region holds the points with an integral exponent too, where the
+    # power has a value, so only an executed witness falsifies there
+    return sympy.Lt(base, 0)
+
+
+def _log_with_base(*args):
+    """math.log(x) raises ValueError for x <= 0; math.log(x, b) also
+    for b <= 0."""
+    if len(args) == 1:
+        return sympy.Le(args[0], 0)
+    return sympy.Or(sympy.Le(args[0], 0), sympy.Le(args[1], 0))
+
+
+def _divisor_zero(*args):
+    """The second argument is zero (fmod, remainder, divmod)."""
+    return sympy.Eq(args[1], 0)
+
 
 # The partiality-lemma registry: qualified function name -> list of
 # (condition builder, exception name). A condition builder takes the
@@ -45,15 +131,35 @@ from ._base import NotSymbolic, _bind_params, _expr_to_sympy, strip_docstring
 # math.sqrt's.
 _PARTIALITY_LEMMAS: dict = {
     "math.sqrt": [(lambda u: sympy.Lt(u, 0), "ValueError")],
-    "math.log": [(lambda u: sympy.Le(u, 0), "ValueError")],
+    "math.log": [(_log_with_base, "ValueError"),
+                 # log(x, 1) divides by log(1) = 0
+                 (lambda *a: sympy.Eq(a[1], 1) if len(a) > 1 else sympy.false,
+                  "ZeroDivisionError")],
     "math.log2": [(lambda u: sympy.Le(u, 0), "ValueError")],
     "math.log10": [(lambda u: sympy.Le(u, 0), "ValueError")],
+    "math.log1p": [(lambda u: sympy.Le(u, -1), "ValueError")],
     "math.asin": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
     "math.acos": [(lambda u: sympy.Gt(sympy.Abs(u), 1), "ValueError")],
-    # exp overflows past log of the largest double, 709.782712893384
-    # (the exact binary value, so the region boundary is the real one)
-    "math.exp": [(lambda u: sympy.Gt(u, sympy.Rational(709.782712893384)),
-                  "OverflowError")],
+    "math.atanh": [(lambda u: sympy.Ge(sympy.Abs(u), 1), "ValueError")],
+    "math.acosh": [(lambda u: sympy.Lt(u, 1), "ValueError")],
+    # tan has a pole wherever cos is zero; in floats the call returns a
+    # large finite number next to it, so this region has no value in
+    # the mathematics only
+    "math.tan": [(lambda u: sympy.Eq(sympy.cos(u), 0), NO_VALUE)],
+    "numpy.tan": [(lambda u: sympy.Eq(sympy.cos(u), 0), NO_VALUE)],
+    "math.gamma": [(_nonpositive_integer, "ValueError")],
+    "math.lgamma": [(_nonpositive_integer, "ValueError")],
+    "math.pow": [(_power_zero_base, "ValueError"),
+                 (_power_negative_base, "ValueError")],
+    "builtins.pow": [(lambda b, e, *m: _power_zero_base(b, e),
+                      "ZeroDivisionError"),
+                     (lambda b, e, *m: _power_negative_base(b, e),
+                      NO_VALUE)],
+    "math.factorial": [(_factorial_type_region, "TypeError"),
+                       (_factorial_value_region, "ValueError")],
+    "math.fmod": [(_divisor_zero, "ValueError")],
+    "math.remainder": [(_divisor_zero, "ValueError")],
+    "builtins.divmod": [(_divisor_zero, "ZeroDivisionError")],
     # numpy.linspace(start, stop, num): num must be a nonnegative integer
     "numpy.linspace": [
         (lambda *a: sympy.Ne(a[2], sympy.floor(a[2])) if len(a) > 2
@@ -94,27 +200,140 @@ def register_raises_when(target, condition, exc_name: str = "ValueError") -> Non
     _PARTIALITY_LEMMAS.setdefault(key, []).append((condition, exc_name))
 
 
-def _lemmas_for_call(node: ast.Call, scope: dict) -> list:
-    """The registered partiality lemmas matching one call node.
-    Resolution goes through the enclosing function's own scope first,
-    `import math as _math; _math.sqrt(u)` reaches math.sqrt's lemma by
-    resolving the actual object, however the caller spelled the import,
-    with the literal dotted text as the fallback for a module the
-    scope can't see."""
+def register_no_value_when(target, region_builder) -> None:
+    """Intent:
+        Register the region where a call to `target` has no value
+        without raising (it returns nan or an infinity): given the
+        call's lifted arguments as sympy expressions, `region_builder`
+        returns that region. Callers' claims then treat it like a
+        raise region whose exception is `NO_VALUE`.
+
+    Notes:
+        `target` is a callable or its dotted "module.qualname" string.
+    """
+    register_raises_when(target, region_builder, NO_VALUE)
+
+
+def unregister_lemmas(target, builders: list) -> None:
+    """Intent:
+        Remove the rows registered for `target` whose builder is one of
+        `builders` (compared by identity), dropping the key when none
+        remain.
+    """
+    key = target if isinstance(target, str) else qualified_name(target)
+    have = _PARTIALITY_LEMMAS.get(key)
+    if not have:
+        return
+    kept = [row for row in have if not any(row[0] is b for b in builders)]
+    if kept:
+        _PARTIALITY_LEMMAS[key] = kept
+    else:
+        del _PARTIALITY_LEMMAS[key]
+
+
+def _call_target(node: ast.Call, scope: dict):
+    """Intent:
+        The object a call node names and the keys it may be registered
+        under, `(target, keys)`: resolution goes through the enclosing
+        function's own scope first (builtins included), so `import math
+        as _math; _math.sqrt(u)` reaches math.sqrt's lemma however the
+        caller spelled the import, then the library claim key of the
+        resolved object, with the literal dotted text as the fallback
+        for a module the scope can't see.
+    """
+    import builtins
+    target = None
+    keys: list = []
     if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
         holder = scope.get(node.func.value.id)
         target = getattr(holder, node.func.attr, None) if holder is not None \
             else None
-        key = qualified_name(target) if callable(target) else None
-        if key and key in _PARTIALITY_LEMMAS:
-            return _PARTIALITY_LEMMAS[key]
-        return _PARTIALITY_LEMMAS.get(f"{node.func.value.id}.{node.func.attr}", [])
-    if isinstance(node.func, ast.Name):
-        target = scope.get(node.func.id)
-        key = qualified_name(target) if callable(target) else None
+        literal = f"{node.func.value.id}.{node.func.attr}"
+    elif isinstance(node.func, ast.Name):
+        target = scope.get(node.func.id, getattr(builtins, node.func.id, None))
+        literal = None
+    else:
+        return None, []
+    if callable(target):
+        key = qualified_name(target)
         if key:
-            return _PARTIALITY_LEMMAS.get(key, [])
+            keys.append(key)
+        try:
+            from ..compendium import library_key_of
+            library_key = library_key_of(target)
+        except Exception:
+            library_key = None
+        if library_key and library_key not in keys:
+            keys.append(library_key)
+    if literal:
+        keys.append(literal)
+    return target, keys
+
+
+def _lemmas_for_call(node: ast.Call, scope: dict) -> list:
+    """The registered partiality lemmas matching one call node, under
+    the first key `_call_target` gives that has any."""
+    _target, keys = _call_target(node, scope)
+    for key in keys:
+        if key in _PARTIALITY_LEMMAS:
+            return _PARTIALITY_LEMMAS[key]
     return []
+
+
+#: calls that return a value at every finite real argument, by
+#: qualified name: a call to anything else that has no partiality
+#: lemma leaves the definedness region unknown
+_TOTAL_CALLS = frozenset({
+    "builtins.abs", "builtins.float", "builtins.int", "builtins.round",
+    "builtins.bool", "builtins.len", "builtins.isinstance",
+    "builtins.callable",
+    "math.exp", "math.expm1", "math.exp2", "math.sin", "math.cos",
+    "math.atan", "math.atan2", "math.sinh", "math.cosh", "math.tanh",
+    "math.asinh", "math.erf", "math.erfc", "math.fabs", "math.floor",
+    "math.ceil", "math.trunc", "math.hypot", "math.copysign",
+    "math.degrees", "math.radians", "math.cbrt", "math.isfinite",
+    "math.isnan", "math.isinf", "math.isclose", "math.fsum", "math.prod",
+    "numpy.sin", "numpy.cos", "numpy.arctan", "numpy.arctan2",
+    "numpy.tanh", "numpy.arcsinh", "numpy.absolute", "numpy.fabs",
+    "numpy.floor", "numpy.ceil", "numpy.trunc", "numpy.hypot",
+    "numpy.sign", "numpy.square", "numpy.negative", "numpy.maximum",
+    "numpy.minimum", "numpy.deg2rad", "numpy.rad2deg", "numpy.degrees",
+    "numpy.radians", "numpy.copysign", "numpy.cbrt", "numpy.isfinite",
+    "numpy.isnan", "numpy.isinf", "numpy.float64", "numpy.float32",
+    "numpy.int64",
+})
+
+#: calls total when given at least two arguments (with one, they reduce
+#: a sequence, and an empty one raises)
+_TOTAL_WITH_TWO_ARGS = frozenset({"builtins.min", "builtins.max"})
+
+
+def _states_definedness(keys: list) -> bool:
+    """Whether a library claims file states an `is_defined` row for one
+    of these keys (a bare row says the function is total)."""
+    try:
+        from ..compendium import defined_keys
+    except Exception:
+        return False
+    stated = defined_keys()
+    return any(key in stated for key in keys)
+
+
+def _opaque_call(node: ast.Call, scope: dict) -> bool:
+    """Intent:
+        Whether a call's definedness is unknown: it has no partiality
+        lemma, is not a call known to be total, and no library claims
+        file states where it is defined.
+    """
+    _target, keys = _call_target(node, scope)
+    if any(key in _PARTIALITY_LEMMAS for key in keys):
+        return False
+    if any(key in _TOTAL_CALLS for key in keys):
+        return False
+    if len(node.args) >= 2 and not node.keywords \
+            and any(key in _TOTAL_WITH_TWO_ARGS for key in keys):
+        return False
+    return not _states_definedness(keys)
 
 
 def _plain_lambda(lam: ast.Lambda) -> bool:
@@ -152,24 +371,51 @@ def _inline_lambdas(stmt: ast.stmt, lambdas: dict) -> ast.stmt:
     return _LambdaInliner(lambdas).visit(copy.deepcopy(stmt))
 
 
-_DBL_MAX = 1.7976931348623157e308
-
 # where the walk records the regions a fractional power of a negative
 # base returns a complex number, when a caller asked for them
 _COMPLEX_OUT: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_complex_regions", default=None)
 
+# where the walk records the calls whose definedness is not known, when
+# a caller asked for them
+_OPAQUE_OUT: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_opaque_calls", default=None)
 
-def _float_pow_region(base, exponent: float, int_syms: frozenset):
-    """The regions where `base ** exponent` raises OverflowError, a float
-    power whose result would exceed the largest double: the base above
-    the limit, and below its negation. An integer base (every symbol
-    integer-typed, no float constant) never overflows, so it has none."""
-    if base.free_symbols and base.free_symbols <= int_syms \
-            and not base.atoms(sympy.Float):
-        return []
-    limit = sympy.Float(_DBL_MAX ** (1.0 / exponent), 17)
-    return [sympy.Gt(base, limit), sympy.Lt(base, -limit)]
+# the names of the parameters the walk's domain binds to C
+_COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_complex_names", default=frozenset())
+
+
+def _complex_typed(expr) -> bool:
+    """Intent:
+        Whether a lifted call argument is complex-typed: known not to
+        be real (`is_extended_real is False`), or reading a symbol
+        created complex (a `complex`-annotated parameter) or a
+        parameter the walk's domain binds to C.
+    """
+    if isinstance(expr, tuple) or not isinstance(expr, sympy.Basic):
+        return False
+    if expr.is_extended_real is False:
+        return True
+    names = _COMPLEX_NAMES.get()
+    return any((sym.is_complex and sym.is_extended_real is not True)
+               or str(sym) in names for sym in expr.free_symbols)
+
+
+def _lemma_applies(condition, args: list) -> bool:
+    """Intent:
+        Whether a registered lemma speaks for a call with these
+        arguments: a region stated with an ordering (`applies_to ==
+        "real"`, a compendium `is_defined: x >= 0` row) is a statement
+        over real inputs and does not apply at a complex-typed
+        argument; a region over C (`"complex"`) applies only at one;
+        any other lemma always applies.
+    """
+    applies_to = getattr(condition, "applies_to", "all")
+    if applies_to == "all":
+        return True
+    complex_arg = any(_complex_typed(a) for a in args)
+    return complex_arg if applies_to == "complex" else not complex_arg
 
 
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
@@ -201,8 +447,10 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
 
     def has_partial(sub: ast.AST) -> bool:
         return any(isinstance(n, ast.BinOp)
-                   and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod))
-                   or isinstance(n, ast.Call) and _lemmas_for_call(n, scope)
+                   and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod,
+                                         ast.Pow))
+                   or isinstance(n, ast.Call) and (
+                       _lemmas_for_call(n, scope) or _opaque_call(n, scope))
                    for n in ast.walk(sub))
 
     if isinstance(node, ast.IfExp):
@@ -227,53 +475,29 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             miss("and/or operand")
         return
     if isinstance(node, ast.Call):
+        opaque = _OPAQUE_OUT.get()
+        if opaque is not None and _opaque_call(node, scope):
+            opaque.append(f"line {getattr(node, 'lineno', '?')}: a call to "
+                          f"{ast.unparse(node.func)}, whose definedness is "
+                          f"not known")
         for condition, exc_name in _lemmas_for_call(node, scope):
             if node.keywords:
                 miss("keyword call")
                 break
             try:
                 args = [_expr_to_sympy(a, dict(env)) for a in node.args]
+                if not _lemma_applies(condition, args):
+                    continue
                 region = condition(*args)
             except TimeoutError:
                 raise
             except Exception:
                 miss("call argument")
                 continue
-            out.append((sympy.And(path_cond, region), exc_name))
-    complex_out = _COMPLEX_OUT.get()
-    if complex_out is not None and isinstance(node, ast.BinOp) \
-            and isinstance(node.op, ast.Pow):
-        # a constant non-integer exponent (0.5, 1/3): Python returns a
-        # complex number for a negative float base, no raise
-        try:
-            exponent = _expr_to_sympy(node.right, {})
-        except NotSymbolic:
-            exponent = None
-        if exponent is not None and not isinstance(exponent, tuple) \
-                and exponent.is_number and exponent.is_integer is False:
-            try:
-                base = _expr_to_sympy(node.left, dict(env))
-            except NotSymbolic:
-                base = None
-            if base is None or isinstance(base, tuple):
-                complex_out.append(path_cond)
-            elif base.free_symbols:
-                complex_out.append(sympy.And(path_cond, base < 0))
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow) \
-            and isinstance(node.right, ast.Constant) \
-            and isinstance(node.right.value, (int, float)) \
-            and not isinstance(node.right.value, bool) \
-            and node.right.value > 1:
-        try:
-            base = _expr_to_sympy(node.left, dict(env))
-        except NotSymbolic:
-            base = None
-        if base is None or isinstance(base, tuple):
-            miss("power base")
-        elif base.free_symbols:
-            for region in _float_pow_region(base, float(node.right.value),
-                                            int_syms):
-                out.append((sympy.And(path_cond, region), "OverflowError"))
+            if region is not sympy.false:
+                out.append((sympy.And(path_cond, region), exc_name))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        _power_guards(node, env, path_cond, out, miss)
     if isinstance(node, ast.BinOp) \
             and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         try:
@@ -285,8 +509,90 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         elif denom.free_symbols:
             out.append((sympy.And(path_cond, sympy.Eq(denom, 0)),
                         "ZeroDivisionError"))
+        elif denom.is_zero:
+            # a divisor that is zero at every point (`x - x`)
+            out.append((path_cond, "ZeroDivisionError"))
     for child in ast.iter_child_nodes(node):
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
+
+
+def _power_guards(node: ast.BinOp, env: dict, path_cond, out: list,
+                  miss) -> None:
+    """Intent:
+        The regions where `base ** exponent` has no real value: a zero
+        base with a negative exponent raises ZeroDivisionError, and a
+        negative base with a non-integer exponent returns a complex
+        number. A complex-typed base has only the first. The
+        complex-number region of a constant exponent is recorded in
+        `_COMPLEX_OUT` when the walk's caller asked for it, and joins
+        the guards only on the definedness walk (`_OPAQUE_OUT` set); a
+        symbolic exponent's always joins them.
+    """
+    try:
+        exponent = _expr_to_sympy(node.right, dict(env))
+    except NotSymbolic:
+        exponent = None
+    if exponent is not None and not isinstance(exponent, tuple) \
+            and exponent.is_number and exponent.is_real \
+            and exponent >= 0 and float(exponent).is_integer():
+        return   # a nonnegative integer power is total
+    try:
+        base = _expr_to_sympy(node.left, dict(env))
+    except NotSymbolic:
+        base = None
+    if exponent is None or isinstance(exponent, tuple) \
+            or base is None or isinstance(base, tuple):
+        miss("power")
+        complex_out = _COMPLEX_OUT.get()
+        if complex_out is not None and exponent is not None \
+                and not isinstance(exponent, tuple) and exponent.is_number \
+                and exponent.is_integer is False:
+            complex_out.append(path_cond)
+        return
+    zero = _power_zero_base(base, exponent)
+    if zero is not sympy.false:
+        out.append((sympy.And(path_cond, zero), "ZeroDivisionError"))
+    if _complex_typed(base):
+        return
+    negative = _power_negative_base(base, exponent)
+    if negative is sympy.false:
+        return
+    complex_out = _COMPLEX_OUT.get()
+    if complex_out is not None and exponent.is_number:
+        complex_out.append(sympy.And(path_cond, negative))
+    opaque = _OPAQUE_OUT.get()
+    if opaque is not None or not exponent.is_number:
+        # the definedness walk reads it as a guard; a value claim reads
+        # a constant exponent's region through `complex_out`
+        out.append((sympy.And(path_cond, negative), NO_VALUE))
+    if opaque is not None and not exponent.is_number:
+        opaque.append(f"line {getattr(node, 'lineno', '?')}: a power whose "
+                      f"exponent may be an integer at a negative base")
+
+
+def _range_index(stmt: ast.For, env: dict) -> dict:
+    """Intent:
+        `{name: symbol}` for the loop variable of `for i in range(n)` or
+        `range(k, n)` with a nonnegative integer constant k: a
+        nonnegative integer at every trip. Empty for any other loop.
+    """
+    if not (isinstance(stmt.target, ast.Name)
+            and isinstance(stmt.iter, ast.Call)
+            and isinstance(stmt.iter.func, ast.Name)
+            and stmt.iter.func.id == "range"
+            and not stmt.iter.keywords
+            and len(stmt.iter.args) in (1, 2)):
+        return {}
+    if len(stmt.iter.args) == 2:
+        try:
+            start = _expr_to_sympy(stmt.iter.args[0], dict(env))
+        except NotSymbolic:
+            return {}
+        if isinstance(start, tuple) or not (start.is_integer
+                                            and start.is_nonnegative):
+            return {}
+    name = stmt.target.id
+    return {name: sympy.Dummy(name, integer=True, nonnegative=True)}
 
 
 def _integer_bound(bound) -> bool:
@@ -307,7 +613,9 @@ def partiality_guards(fn, facts) -> list:
 
 
 def partiality_walk(fn, facts, domain: "dict | None" = None,
-                    complex_out: "list | None" = None) -> "tuple[list, str | None]":
+                    complex_out: "list | None" = None,
+                    opaque_out: "list | None" = None,
+                    missed_out: "list | None" = None) -> "tuple[list, str | None]":
     """Intent:
         The implicit raise regions of a straight-line (or simply
         branched) body, as (condition, exception name) guards over the
@@ -330,6 +638,14 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         where a power with a constant non-integer exponent meets a
         negative base (`x ** 0.5` at `x < 0`): Python returns a complex
         number there rather than raising.
+
+        When `opaque_out` is a list, the walk also appends a description
+        of every call whose definedness is not known (no partiality
+        lemma, not a known total function, no library `is_defined`
+        row): the region it reports says nothing about such a call. When
+        `missed_out` is a list, it receives every operation whose raise
+        region the walk read but could not state (a divisor that does
+        not lift), apart from the statements it stopped at.
     """
     if facts.tree is None:
         return [], "no source"
@@ -344,12 +660,17 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                                _unmodified_params)
     unmodified = _unmodified_params(facts.tree, set(facts.params or ()))
     kinds = getattr(facts, "param_kinds", None) or {}
-    int_syms = frozenset(sym for name, sym in params.items()
-                         if (kinds.get(name) == "int"
-                             or _integer_bound((domain or {}).get(name)))
-                         and isinstance(sym, sympy.Symbol))
+    # a parameter is an integer where its domain says so; with no bound
+    # for it, its int annotation decides (a bound stating the reals
+    # widens an int parameter)
+    int_syms = frozenset(
+        sym for name, sym in params.items()
+        if (_integer_bound((domain or {}).get(name))
+            if (domain or {}).get(name) is not None
+            else kinds.get(name) == "int")
+        and isinstance(sym, sympy.Symbol))
 
-    scope = dict(getattr(fn, "__globals__", None) or {})
+    scope = dict(module_scope(fn))
     guards: list = []
     unread: list = []
     missed: list = []
@@ -562,11 +883,6 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                         body_cond = None
                 if body_cond is None:
                     stop(stmt)
-                if body_cond is not None:
-                    for node in ast.walk(stmt):
-                        if isinstance(node, (ast.Assign, ast.AugAssign)):
-                            _guards_in_expr(node.value, env, body_cond,
-                                            guards, scope, missed, int_syms)
                 loop_names = set()
                 for node in ast.walk(stmt):
                     if isinstance(node, ast.Name) and isinstance(
@@ -575,6 +891,16 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                 if isinstance(stmt.target, ast.Name):
                     loop_names.add(stmt.target.id)
                 env = {k: v for k, v in env.items() if k not in loop_names}
+                if body_cond is not None:
+                    # a name the body assigns changes from trip to trip,
+                    # so it does not lift inside the body; a range
+                    # index reads as a nonnegative integer symbol
+                    body_env = {**env, **_range_index(stmt, env)}
+                    for node in ast.walk(stmt):
+                        if isinstance(node, (ast.Assign, ast.AugAssign)):
+                            _guards_in_expr(node.value, body_env, body_cond,
+                                            guards, scope, missed,
+                                            int_syms)
             elif isinstance(stmt, ast.Pass):
                 continue
             elif isinstance(stmt, ast.Expr):
@@ -583,9 +909,19 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                 stop(stmt)
                 return
     token = _COMPLEX_OUT.set(complex_out)
+    opaque_token = _OPAQUE_OUT.set(opaque_out)
+    int_token = _INT_SYMS.set(int_syms)
+    names_token = _COMPLEX_NAMES.set(frozenset(
+        name for name, bound in (domain or {}).items()
+        if bound == "C" or getattr(bound, "base_type", None) == "C"))
     try:
         walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
     finally:
+        _COMPLEX_NAMES.reset(names_token)
+        _INT_SYMS.reset(int_token)
+        _OPAQUE_OUT.reset(opaque_token)
         _COMPLEX_OUT.reset(token)
+    if missed_out is not None:
+        missed_out.extend(missed)
     first = (unread or missed or [None])[0]
     return guards, first

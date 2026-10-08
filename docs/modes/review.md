@@ -61,8 +61,10 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution."""
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -91,8 +93,9 @@ git commit -qm "softmax, verified"
 
 <!-- example: delta output -->
 ```text
-ok   functions.softmax: no baseline record; 1 proven, 2 holds, 0 falsified
-0 fresh (form unchanged, skipped), 1 adjudicated, 0 problem(s)
+ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
+ok   functions.softmax: no baseline record; 1 proven, 4 holds, 0 falsified
+0 unchanged since the last run (not run again), 2 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -105,8 +108,10 @@ import math
 from typing import Annotated
 from mathema.types import Shape
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Turn a vector of real-valued scores into a probability distribution."""
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
     total = sum(exps)
@@ -133,8 +138,9 @@ mathema review HEAD
 
 <!-- example: delta output -->
 ```text
-FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
+FAIL functions.softmax: form changed; 1 proven, 5 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.
 
@@ -168,7 +174,7 @@ they answer different questions:
 - **`authored.surface`** is *where* the claim was written, the load-bearing
   gating fact: `docstring`, `claims-file` (a declared claims file),
   `decorator`, `annotation`, `inline`, `suggested` (mathema volunteered
-  it, and a suggestion never gates until a human adopts it), `builtin` (the
+  it, and a suggestion never gates until it is adopted), `builtin` (the
   structural battery), or `compendium`.
 - **`authored.by`** is *who* proposed the claim, an optional identity: an
   AI model, a harness, or a git username. It is absent unless stated,

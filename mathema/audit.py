@@ -29,6 +29,8 @@ from .inventory import (coverage_freshness, derivability_report,
                         is_test_covered, mutated_globals, purity_reason,
                         read_test_coverage, scope_dependencies,
                         structural_complexity, typing_info)
+from .runtime_types import SEQUENCE_KINDS
+from ._signatures import callable_signature
 
 
 def _source_span(fn) -> str | None:
@@ -201,8 +203,15 @@ def _describe_signature(fn) -> str:
     import inspect
     import warnings
 
+    from ._annotation_text import annotation_text
+
+    def shown(ann) -> str:
+        # a class by its qualified name, any other annotation in
+        # mathema's one spelling
+        return (inspect.formatannotation(ann) if isinstance(ann, type)
+                else annotation_text(ann))
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return "(...)"
     try:
@@ -223,15 +232,15 @@ def _describe_signature(fn) -> str:
     for name, p in sig.parameters.items():
         piece = name
         if p.annotation is not inspect.Parameter.empty:
-            piece += f": {inspect.formatannotation(p.annotation)}"
-        elif kinds.get(name) == "sequence":
+            piece += f": {shown(p.annotation)}"
+        elif kinds.get(name) in SEQUENCE_KINDS:
             piece += ": sequence (inferred)"
         if p.default is not inspect.Parameter.empty:
             piece += f" = {p.default!r}"
         parts.append(piece)
     ret = ""
     if sig.return_annotation is not inspect.Signature.empty:
-        ret = f" -> {inspect.formatannotation(sig.return_annotation)}"
+        ret = f" -> {shown(sig.return_annotation)}"
     return f"({', '.join(parts)}){ret}"
 
 
@@ -366,8 +375,9 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     step): its signature and identity hashes, every inferred domain
     (types/docstring/finite-value sources, each tagged with which one),
     every claim (file-declared merged with whatever's on the live
-    function, plus a verified verdict when one exists), and the tier
-    ladder, `source`/`normalized`/`structural` share one plain,
+    function, plus a verified verdict when one exists), the careful
+    lines (`_careful_lines`: known edges just outside a declared
+    domain, never a verdict), and the tier ladder, `source`/`normalized`/`structural` share one plain,
     indented rendering (`_tier_text.render_structure_plain`), `lifted`/
     `canonical` are a second, separate rendering of the real lift
     result's own shape (`_tier_text.render_lifted_plain` /
@@ -395,7 +405,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         else {"sig_hash": None, "form_hash": None})
 
     domains = [{"param": name, "domain": bound, "source": "types"}
-              for name, bound in domain_from_signature(fn).items()]
+              for name, bound in domain_from_signature(fn, guards=False).items()]
     for name, values in (typing_info(fn).get("finite_domains") or {}).items():
         # a plain Python list here (typing_info()'s own return shape) is
         # not part of the Interval/"Z"/"N"/frozenset domain vocabulary
@@ -411,25 +421,32 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     merged_entry = resolve_declared(fn, file_entry=file_entry)
     verified_claims = (verified.get(key, {}).get("entry", {}) or {}).get("claims") or []
     verified_by_name = {c.get("name"): c for c in verified_claims}
+    from .types import matrix_param_names
+    try:
+        matrix_names = matrix_param_names(fn)
+    except Exception:
+        matrix_names = frozenset()
     claims = []
     for c in merged_entry.get("claims") or []:
         statement = c.get("statement") or c.get("law")
         if not statement:
             continue
         try:
-            latex = to_latex(statement)
+            latex = to_latex(statement, matrix_names=matrix_names)
         except Exception as e:
             latex = f"(not available: {e})"
         v = verified_by_name.get(c.get("name"))
         claims.append({"name": c.get("name"), "statement": statement, "latex": latex,
                        "verdict": v.get("verdict") if v else None})
 
+    careful = _careful_lines(fn, facts, root, merged_entry, claims)
+
     tier_names = tiers_mod.TIERS if tier is None else (tier,)
     ladder = {}
     name_map = seq_params = None
     if facts is not None and facts.tree is not None:
         name_map = {n: f"v{i}" for i, n in enumerate(local_names(facts.tree))}
-        seq_params = frozenset(p for p, k in facts.param_kinds.items() if k == "sequence")
+        seq_params = frozenset(p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS)
 
     lift_expr = "not-attempted"   # computed lazily, at most once, only if a tier needs it
     for t in tier_names:
@@ -447,7 +464,7 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
             if lift_expr == "not-attempted":
                 lift_expr = _try_derive_lift(fn, facts)
             if lift_expr is None:
-                reason = purity_reason(fn) or "this function doesn't lift to a closed form"
+                reason = purity_reason(fn) or "derive cannot read this function as a closed form, so its claims are decided by running the code"
                 ladder[t] = {"text": reason, "available": False}
             elif t == "lifted":
                 ladder[t] = {"text": _tier_text.render_lifted_plain(lift_expr),
@@ -463,7 +480,63 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
         if facts is not None else []
     return {"key": key, "signature": _describe_signature(fn), "identity": identity,
            "domains": domains, "claims": claims, "tiers": ladder,
-           "concepts": concepts, "references": references}
+           "concepts": concepts, "references": references,
+           "careful": careful}
+
+
+def _bound_ends(bound) -> "tuple[float, float] | None":
+    """A domain bound's `(lo, hi)` as floats, +-inf for an unbounded
+    end, or None for a bound that is no set of reals."""
+    from .domain import bound_to_sympy_set
+    try:
+        sset = bound_to_sympy_set(bound)
+        return float(sset.inf), float(sset.sup)
+    except Exception:
+        return None
+
+
+def _careful_lines(fn, facts, root: str, merged_entry: dict,
+                   claims: list) -> list:
+    """Intent:
+        `describe`'s careful lines (`hazards.careful_edges`) read
+        against every domain the function declares and no record has
+        refuted: the signature's domain, and each claim's own domain
+        over it for a claim whose recorded verdict is not a refutation
+        (an unverified claim counts).
+
+    Notes:
+        Installs the project's library claims for `root`, so a covered
+        call's computation rows are known. Best-effort: any failure
+        gives no lines.
+    """
+    from .compendium import install
+    from .hazards import careful_edges
+    from .records import stance
+    from .spec import entry_claims
+    from .types import domain_from_signature
+    if facts is None:
+        return []
+    try:
+        install(root)
+        parent = {p: e for p, b in domain_from_signature(fn).items()
+                  if (e := _bound_ends(b)) is not None}
+        verdicts = {c["name"]: c["verdict"] for c in claims}
+        domains = [parent] if parent else []
+        for c in merged_entry.get("claims") or []:
+            verdict = verdicts.get(c.get("name"))
+            if verdict and stance(verdict) == "refuted":
+                continue
+            try:
+                (cj,) = entry_claims({"claims": [c]})
+            except Exception:
+                continue
+            own = {p: e for p, b in (cj.domain or {}).items()
+                   if (e := _bound_ends(b)) is not None}
+            if own:
+                domains.append({**parent, **own})
+        return careful_edges(fn, facts, domains)
+    except Exception:
+        return []
 
 
 def describe_rows(targets: list[str]) -> list[dict]:

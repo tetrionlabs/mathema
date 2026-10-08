@@ -72,14 +72,17 @@ distinct from a locally built array, which phase 4 above now handles);
 and a **reduction over a locally built array** (`np.sum`/`np.dot` on
 one, as opposed to returning it elementwise, named here, not yet
 backed by its own test case in this file)."""
-import math
-
-import numpy as np
 import pytest
 
-from mathema.conjecture import claim, check_conjectures
-from mathema.analysis import analyze_source
-from mathema.symbolic import lift_fold
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema.conjecture import claim, check_conjectures  # noqa: E402
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.symbolic import lift_fold  # noqa: E402
 
 
 # --- Physics -----------------------------------------------------------
@@ -292,7 +295,8 @@ def test_dot_product_proves():
     # to the fresh Sum index itself, and the update expression
     # subscripts *both* sequences by it.
     results = check_conjectures(
-        dot_product, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_product, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -335,7 +339,9 @@ def test_dot_weights_proves():
     # recognized directly (lift_dot(), no general vector type needed):
     # Sum(weights[k]*features[k], (k, 0, L-1)).
     results = check_conjectures(
-        dot_weights, [claim("f(weights, features) == f(weights, features)", route="derive")])
+        dot_weights, [claim("for weights in R^n, features in R^n, "
+                            "f(weights, features) == f(weights, features)",
+                            route="derive")])
     assert results[0].verdict == "proven"
 
 

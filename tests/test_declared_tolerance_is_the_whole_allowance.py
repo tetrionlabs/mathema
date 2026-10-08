@@ -3,8 +3,10 @@
 """On the probe route a declared tolerance is the whole allowance an
 equality gets: two sides count as equal when they differ by at most
 that much, with no relative allowance on top. With no tolerance
-declared, the default keeps its relative 1e-6 or absolute 1e-9,
-whichever is larger."""
+declared, the default is a relative 1e-7 or an absolute 1e-9, whichever
+is larger, and a draw that passes only through the relative part is
+decided in exact arithmetic (ruling of 2026-10-01; options O1 and O3 of
+the tolerance review)."""
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -43,7 +45,10 @@ def test_a_declared_tolerance_still_admits_a_gap_within_it():
     assert p.verdict == "holds"
 
 
-def test_the_undeclared_default_keeps_its_relative_allowance():
+def test_the_undeclared_default_decides_a_relative_pass_exactly():
+    # f's own float literal keeps it from running exactly, so every
+    # draw that passed only through the relative part is inconclusive
     (p,) = check_conjectures(
         nearly_scaled, [claim("for x in [1, 10], f(x) == x", route="probe")])
-    assert p.verdict == "holds"
+    assert p.verdict == "unknown"
+    assert "could not be evaluated in exact arithmetic" in p.note

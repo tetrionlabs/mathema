@@ -24,10 +24,10 @@ def not_heat_sol(t, x):
 
 
 def _point(text: str) -> dict:
-    """The `name=value` pairs of a rendered counterexample, a list
+    """The `name = value` pairs of a rendered counterexample, a list
     value kept whole."""
     return {m.group(1): ast.literal_eval(m.group(2))
-            for m in re.finditer(r"(\w+)=(\[[^\]]*\]|[^,]+)", text)}
+            for m in re.finditer(r"(\w+) = (\[[^\]]*\]|[^,]+)", text)}
 
 
 @pytest.mark.needs_full_proof_budget
@@ -52,11 +52,11 @@ def test_a_true_sequence_fold_claim_is_still_proven():
 @pytest.mark.needs_full_proof_budget
 def test_a_calculus_disproof_with_no_executable_witness_is_unknown():
     [p] = check_conjectures(not_heat_sol, [
-        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive", pseudo_infinity=1e100)])
+        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive")])
     assert p.verdict == "unknown"
     assert p.counterexample is None
     assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
-    assert "no executed witness" in p.note
+    assert "no run of the code confirms it" in p.note
 
 
 @pytest.mark.needs_full_proof_budget
@@ -64,7 +64,7 @@ def test_a_true_calculus_claim_is_still_proven():
     def heat_sol(t, x):
         return x**2 + 2*t
     [p] = check_conjectures(heat_sol, [
-        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive", pseudo_infinity=1e100)])
+        claim("d(f(t,x),t) == d(f(t,x),x,x)", route="derive")])
     assert p.verdict == "proven"
 
 

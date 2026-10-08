@@ -81,9 +81,13 @@ ladder, strongest rung first, and each rung may decline:
    the claim's own [tolerance](grammar.md#how-close-counts-as-equal),
    so an equivalence between a float and a fixed-point implementation
    is stated, not guessed. A draw where both sides raise the same
-   exception agrees. A draw where either side returns a non-finite
-   value or something non-numeric is not compared. Both kinds of draw
-   are counted in the record rather than dropped.
+   exception agrees, and so does a draw where both sides overflow to
+   the same infinity. A NaN computed from non-missing inputs is no
+   value and agrees with nothing, another NaN included, and an infinity
+   disagrees with a value or with the opposite infinity: each is a
+   counterexample. A draw with a missing input, or where either side
+   returns something non-numeric, is not compared. Both kinds of
+   uncompared draw are counted in the record rather than dropped.
    Evidence ceiling `holds`: sampling never proves.
 
 `f =:= g` claims `f(x) == g(x)` at every point of the domain, so a
@@ -109,7 +113,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: ratio output -->
 ```text
-falsified x=0: f raised ZeroDivisionError, g returned 1
+falsified x = 0: f raised ZeroDivisionError, g returned 1
 ```
 
 `=:=` compares behaviour, so a point where both sides raise the same
@@ -118,7 +122,7 @@ are proven equivalent over `[-1, 1]`, both raising `ZeroDivisionError`
 at `x = 0`. Different exception types at the same point are a
 disagreement, and the executed pair is the witness: against a version
 that raises `ValueError` at zero, the claim is falsified with
-`x=0: f raised ZeroDivisionError, g raised ValueError`. A complex
+`x = 0: f raised ZeroDivisionError, g raised ValueError`. A complex
 result from one side counts as a raise, unless that side is annotated
 `complex` or the claim is over `C`. A declared tolerance is the whole allowance the two values get;
 with none declared, they may differ by 1e-9 plus 1e-9 times the

@@ -111,11 +111,12 @@ def test_false_identity_strict_derive_is_unknown(mats):
 
 
 def test_false_identity_best_falsifies_with_witness(mats):
+    pytest.importorskip("numpy")
     pr = _one(mats.f, "det(A @ B) == det(A) + det(B)", route="best")
     assert pr.verdict == "falsified"
     assert pr.route == "probe"
     assert pr.counterexample
-    assert "A=" in pr.counterexample and "B=" in pr.counterexample
+    assert "A = " in pr.counterexample and "B = " in pr.counterexample
 
 
 def test_true_identity_best_prefers_proof(mats):
@@ -127,9 +128,10 @@ def test_true_identity_best_prefers_proof(mats):
 
 
 def test_unprovable_true_identity_best_holds_by_sampling(mats):
-    # the cyclic-trace law is true but sympy does not close it here; the
-    # matrix-value probe samples it and reports the holds ceiling.
-    pr = _one(mats.f, "trace(A @ B) == trace(B @ A)", route="best")
+    pytest.importorskip("numpy")
+    # the Frobenius norm is submultiplicative, but no lemma closes it;
+    # the matrix-value probe samples it and reports the holds ceiling.
+    pr = _one(mats.f, "norm(A @ B) <= norm(A) * norm(B)", route="best")
     assert pr.verdict == "holds"
     assert pr.route == "probe"
     assert pr.n > 0
@@ -179,6 +181,7 @@ def test_inequality_from_assuming_premise_and_sugar_proves(mats):
 
 
 def test_false_matrix_inequality_falsifies_with_witness(mats):
+    pytest.importorskip("numpy")
     # a positive-definite matrix's determinant is never negative
     pr = _one(mats.one, "assuming A is positive definite, det(A) < 0",
               route="best")
@@ -188,6 +191,7 @@ def test_false_matrix_inequality_falsifies_with_witness(mats):
 
 
 def test_unconditional_determinant_sign_falsifies(mats):
+    pytest.importorskip("numpy")
     # det(A) > 0 is not true for every matrix; sampling finds a witness
     pr = _one(mats.f, "det(A) > 0", route="best")
     assert pr.verdict == "falsified"
@@ -279,6 +283,25 @@ def test_the_undeclared_operand_reason_reaches_the_verdict():
     survive to the record rather than being discarded with a bare
     None."""
     import mathema
+    from mathema.types import Mat
+
+    def quad_form(A: Mat("n", "n"), x) -> float:
+        """Quadratic form, x with no shape."""
+        return float(x.T @ A @ x)
+
+    (p,) = mathema.claims.check_conjectures(
+        quad_form, [mathema.claim("x.T @ A @ x >= 0", route="derive")])
+    assert p.verdict == "unknown", p.verdict
+    assert "declared neither a vector nor a matrix" in (p.sketch or ""), \
+        p.sketch
+    assert 'Vec("n")' in (p.sketch or "") \
+        and 'Mat("n", 1)' in (p.sketch or ""), p.sketch
+
+
+def test_a_vector_quadratic_form_is_not_proven_for_any_matrix():
+    """A `Vec("n")` lifts as a vector, so `x.T @ A @ x` is a number;
+    it is not nonnegative for every A, so no proof."""
+    import mathema
     from mathema.types import Mat, Vec
 
     def quad_form(A: Mat("n", "n"), x: Vec("n")) -> float:
@@ -287,9 +310,7 @@ def test_the_undeclared_operand_reason_reaches_the_verdict():
 
     (p,) = mathema.claims.check_conjectures(
         quad_form, [mathema.claim("x.T @ A @ x >= 0", route="derive")])
-    assert p.verdict == "unknown", p.verdict
-    assert "not declared two-dimensional" in (p.sketch or ""), p.sketch
-    assert 'Mat("n", 1)' in (p.sketch or ""), p.sketch
+    assert p.verdict == "unknown", (p.verdict, p.sketch)
 
 
 def test_the_remedy_the_decline_suggests_actually_works():

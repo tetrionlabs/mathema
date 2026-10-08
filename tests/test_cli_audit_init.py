@@ -111,9 +111,9 @@ def test_audit_reports_claimed_pure_and_unclaimed(tmp_path):
     assert "trialpkg.mod.claimed_fn" in r.stdout
     assert "1/4 claimed" in r.stdout
     # two questions now, reported separately: what the derive route can
-    # do given the declared domain, and what lifts with nothing supplied
+    # do given the declared domain, and what it reads with nothing supplied
     assert "/4 derivable" in r.stdout
-    assert "3/4 lift unconditionally" in r.stdout
+    assert "3/4 derive reads with nothing supplied" in r.stdout
     assert "a probe claim can still be written" in r.stdout
     assert "no coverage.json" in r.stdout
 

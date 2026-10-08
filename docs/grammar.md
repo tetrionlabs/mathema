@@ -70,14 +70,15 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `×` | U+00D7 | times | `*` |
 | `−` | U+2212 | minus | `-` |
 | `√` | U+221A | the square root of | `sqrt` |
-| `∞` | U+221E | infinity | `oo` |
+| `∞` | U+221E | infinity, also written `oo` or `infinity` | `inf` |
 | `∂` | U+2202 | the partial derivative of | `d(` |
 | `∫` | U+222B | the integral of | `integrate(` |
 | `→` | U+2192 | tends to, inside a limit | `->` |
 | `⌊ ⌋` | U+230A, U+230B | the floor of | `floor(` |
 | `⌈ ⌉` | U+2308, U+2309 | the ceiling of | `ceil(` |
 | <code>&#124; &#124;</code> | U+007C | the absolute value of | `abs(` |
-| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of | `norm(` |
+| <code>&#124;&#124; &#124;&#124;</code> | U+007C | the norm of; `_1`, `_2` or `_inf` after the closing bars is the order | `norm(` |
+| `‖ ‖` | U+2016 | the norm of; `₁`, `₂` or `∞` after the closing glyph is the order | <code>&#124;&#124; &#124;&#124;</code> |
 | `²` | U+00B2 | squared, and likewise `³` and the rest | `^2` |
 
 Greek letters are accepted as themselves (`α`, `σ`, `Δ`), and so are the
@@ -138,23 +139,27 @@ claims in them.
 | `f =:= g` | function equivalence: two implementations of the same mathematics |
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
+| `for s in L[unicode], f(s) in L[unicode]` | membership: every output is a member of a language or a set, `∈` in Unicode |
+| `for x in [0, 1], f(x) in [0, 1]` | membership in a numeric interval, read as the chain it means |
+| `for s in L[unicode], "<" not in f(s)` | containment: the value on the left is never found in the value on the right, `∉` in Unicode |
 
 ### How close counts as equal
 
-On the derive route every relation is decided exactly: `==` and `~=` both
-ask whether the two sides are the same over the whole domain, in exact real
-arithmetic, and a proof of either is exact algebra. They part ways only
-when derive disproves the claim by a difference smaller than the probe's
-allowance (below): for `==` the real code is then run at derive's witness
-and compared exactly, while `~=`, which asks for approximate equality,
-gets no such recheck, and the allowance decides.
+`a ~= b` means `abs(a - b) <= ε`, with `ε` the claim's declared
+tolerance or else 1e-9 (see below), and the record says so: "read as
+abs(f(x) - x) <= ε, ε = 1e-9 (the default)". On the derive route every
+relation is decided exactly: `==` asks whether the two sides are the same
+over the whole domain, in exact real arithmetic, and `~=` whether their
+difference stays within `ε`, so `x + 1e-12` is not `x` under `==` and is
+under `~=`. A definition row in a compendium is an exact equation, written
+with `==`.
 
-On the probe route, which runs the real function in floating point, `==`
-and `~=` are the same comparison: the two sides count as equal when they
-agree within a relative tolerance of 1e-6 or an absolute tolerance of 1e-9,
-whichever is larger. So `x * (1 + 1e-8)` equals `x` everywhere, while a
-constant offset of `1e-7` is caught near zero, where the relative allowance
-shrinks below it. A claim sets its own absolute tolerance with the
+On the probe route, which runs the real function in floating point, `~=`
+is the same `abs(a - b) <= ε` in float64, and `==` counts the two sides as
+equal when they agree within a relative tolerance of 1e-6 or an absolute
+tolerance of 1e-9, whichever is larger. So under `==` the computation
+`x * (1 + 1e-8)` equals `x` everywhere, while a constant offset of `1e-7`
+is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
 it, with no relative tolerance on top.
@@ -183,8 +188,8 @@ mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
 
 <!-- example: eps output -->
 ```text
-ok   gaps.nearly_identity: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
-FAIL gaps.small_gap: source, no side effects; claims 1/1 adjudicated (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+ok   gaps.nearly_identity: source, no side effects; claims 3/3 checked (1 proven, 2 holds, 0 falsified)
+FAIL gaps.small_gap: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The first gap is within the default tolerance and proves for every `x` in the
@@ -202,9 +207,8 @@ to spend: when it disproves a `<=`, `>=` or `==` claim, the real code is
 run at derive's witness and compared exactly, and a violation there,
 however small, falsifies the claim with that point as the witness. So
 `f(x) == x` is falsified for `x + 1e-10`, but not for `x + 1e-20` on
-`[1, 2]`, where rounding makes the executed values exactly equal. A `~=`
-disproof never gets this exact recheck, though a `~=` proof is still exact
-algebra. For a function that returns `-1e-10`:
+`[1, 2]`, where rounding makes the executed values exactly equal. For a
+function that returns `-1e-10`:
 
 <!-- example: just-below run -->
 ```python
@@ -224,8 +228,8 @@ for route in ["probe", "derive"]:
 <!-- example: just-below output -->
 ```text
 probe   holds
-        fails by 1e-10 at (0), within the default tolerance (1e-09)
-derive  falsified x=0.0616333
+        fails by 1e-10 at x = 0, within the default tolerance (1e-09)
+derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
 ```
 
@@ -246,10 +250,25 @@ engine bug.
 | `f(x)^2 >= 0` | powers with a caret |
 | <code>&#124;f(x)&#124; &lt;= 1</code> | absolute value with bars |
 | <code>for x in [0, 1], y in [0, 1], &#124;x + y - f(x, y)&#124; &lt;= ε</code> | bars around any expression; on matrices, the determinant |
+| <code>for x in R^n, f(x) ~= &#124;&#124;x&#124;&#124;_1</code> | a norm with double bars, the order a subscript; `^2` after the bars is the square |
 | `for n in [1, 5] subset Z, f(n) <= n!` | postfix factorial |
 | `f(x, 1.0) == x[-1]` | indexing into a sequence parameter |
 | `f(\alpha) ≤ 1` | a Greek name written as a LaTeX escape |
 | `for x in [1, 5], f(x) == exp(1)` | the mathematical constants and functions |
+
+Bare bars are the Euclidean norm of a vector and the Frobenius norm of a
+matrix. `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and a whole number `_p`
+name the other orders; on a matrix `_1` is the largest column sum, `_2`
+the spectral norm and `_inf` the largest row sum, numpy's `ord`. The
+order is never a superscript, so <code>&#124;&#124;x&#124;&#124;^2</code>
+is the square of the norm. A claim written with the bars and one
+written with `norm(...)` are one claim: the claims file keeps the
+spelling you wrote, and the record's statement is the call form.
+
+What each of the grammar's words computes (`sum`, `mean`, `std`,
+`dot`, `norm`, `det`, `cumsum`, `quantile` and the rest), where it has
+a value, its keywords and what it does with a missing slot is listed on
+[the grammar's words](grammar-words.md).
 
 ## Domains: where the claim applies
 
@@ -267,6 +286,10 @@ stronger than you mean. The `for` clause narrows it:
 | `for scale in {"info", "linear"}, f(r, scale) >= 0` | a finite set of strings |
 | `for v in R^n, f(v) >= 0` | a real vector of length `n`, never empty |
 | `for A in R^(m,n), f(A) == f(A)` | an `m`-by-`n` real matrix, rows then columns |
+| `for c in [0, 1]^3, f(c) in [0, 1]` | a vector of exactly 3 elements, each in `[0, 1]`; a number written as a dimension is fixed |
+| `for A in R^(n,3), f(A) in R^(3,3)` | a matrix with 3 columns and any number of rows; the output's space, judged by the output's shape |
+| `for s in L[unicode], f(f(s)) == f(s)` | every string, the empty string included: a language |
+| `for s in L[unicode] \ {""}, len(f(s)) >= 1` | a language with the empty string excluded |
 
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
@@ -276,10 +299,29 @@ superscripts wherever they read back as the same space; a dimension
 named with an `x` (the superscript `ˣ` is the separator) or with a
 letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 
+Over `C` equality and closeness are adjudicated like any other value
+claim: `==` compares exactly and `~=` compares `abs(a - b)` against the
+same tolerance as over the reals, while an ordering (`<`, `<=`, `>`,
+`>=`) is refused, since complex numbers have no order. The computation
+companion of a claim over `C` runs in complex128 and is named
+`<claim>[complex]`, with corners on both axes at float64's largest
+magnitude; a NaN or an infinity in either component is no value.
+
 The excluded-point form is how you state a claim around a pole. The
 finite-set form is how a string-valued parameter that selects a branch
 becomes something the derive route can reason about, since it can then
 check every case rather than guessing.
+
+`L[<name>]` is a language: the set of strings, or of structured
+values, a name stands for, the way `R` is the set of reals. An
+alphabet language contains the empty string, as a Kleene star does;
+`\ {""}` removes it. The names themselves (`unicode`, `ascii`,
+`latin-1`, `json`, a schema of your own) come from the
+`mathema-language` package, installed as `mathema[language]`; a name
+mathema cannot resolve is refused with the vocabulary, never read as a
+wider set. [Language domains](language.md) says what a language
+samples, what the record states about it, and which claims a parser
+or a renderer earns over one.
 
 ## Calculus
 
@@ -302,16 +344,98 @@ check every case rather than guessing.
 
 ## Safety predicates
 
-Some questions come up so often that they have names. These adjudicate
-by examining the function rather than by algebra:
+Some questions come up so often that they have names. These are facts
+about the computation, one implementation executed in float64,
+established by running the code rather than by algebra, and each
+answers one of three questions you have about a function.
 
-| Spelling | Asks |
-|---|---|
-| `is_pole_safe(x)` | does the code guard the points where the maths blows up |
-| `is_extremity_safe(x)` | does it survive the far ends of its domain |
-| `is_representation_safe(x)` | does floating point represent these values faithfully |
-| `is_empty_safe(xs)` | does it handle an empty sequence |
-| `is_missing_safe(f)` | the whole function's policy on a missing value |
+### Which question each one answers
+
+**Does it run on my domain?** Every input the claim admits gets a
+value: no raise, no NaN, and no infinity from a finite input. When one
+of these fails, the witness names the input, the note names the call
+that failed, and the fix is usually one of the ones below.
+
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_number_set_safe(x)` | every restricted builtin the code calls (`sqrt`, `log`, `asin`, `factorial`, ...) gets an argument it accepts: no `math.sqrt` of a negative, no `math.log` of zero | narrow the domain to the builtin's range, or guard the call |
+| `is_pole_safe(x)` | the code never meets a pole, a point where the formula divides by zero or otherwise blows up (`1 / (x - 1)` at `x = 1`), anywhere in the domain | exclude the point from the domain, or guard it with an explicit raise |
+| `is_library_safe(numpy)` | every library call a [compendium](claims-transfer.md#in-the-compendium) covers returns a value on the domain | keep the call's argument inside the region the compendium states |
+| `is_overflow_safe(x)` | no result overflows to infinity and nothing raises `OverflowError` from a finite input, out to float64's maximum along an unbounded direction (bound it with <code>let &#124;inf&#124; be ...</code>); the restriction form (`name: is_overflow_safe`, `statement: "x <= 709.78"`) states the region where the computation stays in float range | narrow the domain below the overflow point, or rescale (work in logarithms) |
+| `is_missing_safe(f)` | every hole a parameter admits (`nan`, `null`, `NA`) has a policy the code follows: it raises, drops it or gives a hole back, on purpose ([missing values](missing-values.md)) | state the policy, or guard the hole at entry |
+| `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
+| `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
+| `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
+| `is_language_defined(s)` | no string input makes the function crash by accident: every member of the input's language reaches a branch that returns or raises on purpose | validate the input and raise the exception you mean |
+| `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
+| `is_dimension_safe(f)` | every operand and the result have shapes that fit (no `matmul` of mismatched matrices, no result breaking its `Vec`/`Mat` marker) | fix the shapes, or guard them with `@enforce_dimensions` |
+| `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
+
+**Is the answer right in float64?** The function returns, and the
+number it returns is the one the mathematics says.
+
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_numerically_stable` | the float64 result agrees with the exact value of the mathematics, within the claim tolerance (1e-9 plus 1e-7 times the magnitude by default), at every point tried in the working domain; stated with `mathema.f.accurate`, and the witness shows the exact and the float value | reorder or rescale the arithmetic that loses the value |
+| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
+| `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower number representation (float32, say) | |
+| `is_representation_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
+
+**Is it repeatable?** The same call gives the same answer and leaves
+nothing behind.
+
+| Spelling | What you learn | Usual fix |
+|---|---|---|
+| `is_deterministic` | the result depends on the arguments alone. mathema reads the source (and the source of every project function it reaches) and never runs it: a read of the environment, the clock, a file, a module-level value the call changes, or a draw from a shared random generator falsifies, with that read as the witness. A threaded reduction (numpy `dot`, `matmul`, `@`, `linalg`) whose rounding can depend on how its work is split, or anything mathema cannot read, leaves it `unknown` with the reason | remove the hidden input (a clock, a global counter, an unseeded random draw) |
+| `is_reproducible` | for a function that takes a seed or a generator (a parameter named `seed`, `rng`, `random_state` or `key`, or one annotated as a numpy `Generator` or `RandomState` or a `random.Random`), every draw comes through that parameter and nothing else the arguments do not carry is read, so the same seed gives the same answer. It is read from the source, as `is_deterministic` is | draw from a generator the caller can seed |
+| `is_state_safe` | the call changes nothing outside itself: no argument mutated, no global written, and no process state changed (the environment, the working directory, `sys.path`, the global random generators, logging's configuration). mathema reads the source, following aliases (`ys = xs`, `e = os.environ`) and the project functions it calls, and never runs it: a write falsifies with its site as the witness, even one in a branch the domain never reaches (the witness then says so too), and anything it cannot read (`getattr`, `exec`, a library function it has no entry for) leaves it `unknown` with the reason. Emitting a log record through the standard library's own logging, and drawing from a generator passed in, are not changes | copy before modifying, and return the result instead of storing it |
+| `is_order_invariant(f)` | reserved for a later release: the same answer whatever order a reduction runs in | |
+
+A reserved family is a known claim that is `skipped` in this release,
+with a note saying so, and it is never suggested. A platform (a GPU, a
+JIT compiler, a distributed runtime) is never part of a family name: it
+is named in the bracketed computation descriptor after a claim name
+(`[float]` today), which says which computation was attempted.
+
+The families form a tree, and a roll-up summarises its children; the
+children stay individual claims. `is_defined(f)` (a value or a
+deliberate error) has two children, `is_language_defined` and
+`is_numerically_defined`; the second rolls up `is_pole_safe`,
+`is_number_set_safe` and `is_dimension_safe`.
+`is_computation_safe(f)` rolls up `is_overflow_safe`,
+`is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
+rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
+`is_finite_over_floats(f)` is a view rather than a node: poles and
+overflow together. Each roll-up runs every child that applies to the
+function and is declared by the author, never suggested; its note
+names each child's verdict. A falsified child falsifies the roll-up with
+that child's name and witness; the roll-up is `proven` when every child
+is, and otherwise takes its weakest child's verdict.
+`is_repeatable(f)` answers the repeatability question, and the seed
+decides how: a function that takes a seed or a generator is held to
+`is_reproducible` (same seed, same answer), any other to
+`is_deterministic` (same input, same answer), and `is_state_safe`
+always joins; it is `proven` when every child is, since its children are
+read from the source and never sampled.
+
+A function's own guards cut its working domain: a conditional raise,
+`@enforce_domain` (an assert at the top of the body feeds it) and an
+entry check of `@enforce_dimensions` reject a call on purpose, so
+`is_defined(f)` and the families judge only the calls the guards let
+through, and the record names each guard by its condition. A bare
+`assert` is not a guard: a failed assert counts against `is_defined`, and
+so does a `RangeError` from `@enforce_range` (a result outside its
+declared range).
+
+The old family names `is_builtin_safe`, `is_extremity_safe`,
+`is_arbitrary_input_safe` and `is_compendium_safe` are still read, as
+`is_number_set_safe`, `is_overflow_safe`, `is_language_defined` and
+`is_library_safe`, and the record says the spelling was accepted.
+
+Whether a function is defined at a point (a square root of a negative,
+a logarithm of zero) is a question about the mathematics, the same in
+every language, and the derive route reasons about it directly; see
+[conditional claims](conditional-claims.md).
 
 ## Partiality: claims about raising
 
@@ -323,7 +447,11 @@ raises(f(50, 0), ValueError)
 ```
 
 The second form infers the domain from the literal arguments, so you do
-not restate what you already wrote. A function that raises inside a
+not restate what you already wrote. The exception is a built-in name
+(`ValueError`), a dotted path (`numpy.linalg.LinAlgError`), or a bare
+name defined on the function's own module or a parent package
+(`LinAlgError` for `numpy.linalg.inv`); a name none of these resolve
+makes the claim `skipped:misspecified`, and the note names it. A function that raises inside a
 region a claim quantifies over falsifies that claim, on either evidence
 route, because a claim about a value is not satisfied by an exception.
 
@@ -345,7 +473,7 @@ print(p.verdict, p.counterexample)
 
 <!-- example: half-power output -->
 ```text
-falsified (-1): f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
+falsified x = -1: f returned the complex value 6.12323e-17+1j, which a real claim reads as a raise; narrow the claim's domain to where every call is real, or annotate the function complex
 ```
 
 The derive route falsifies it too, with an executed witness. A function
@@ -364,6 +492,16 @@ readable and lets you talk about things that are not parameters:
 | `let c be [-1e6,1e6], for x in [0,10], f(x) + c >= 0` | a free variable over a range |
 | `let c be [1,100] subset integer, for x in [0,10], f(x) + c >= 0` | a typed free variable |
 | `let compute_square_root = numpy.sqrt, for x in [0, 100], compute_square_root(x) >= 0` | a long name, kept readable |
+| `for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, let c be [0.1, 10], assuming std(returns, ddof=1) > 0, f(s(returns, c)) ~= f(returns)` | a transform of a sequence, by dotted path: `s(returns, c)` scales every entry by `c` |
+| `for a in [-100, 100]^n, let s = mathema.f.shift_seq, let c be [-5, 5], f(s(a, c)) == f(a)` | the shift of a sequence: `s(a, c)` adds `c` to every entry |
+
+A function the claim names takes keyword arguments the way its own
+callers pass them, each a literal or a name, and the record keeps them
+as written: `let g = numpy.round, for x in [0, 1], g(x, decimals=1) <= 1`.
+The grammar's own functions keep their fixed keywords (`axis=` and
+`ddof=`). The probe route also reads `str`, a value's text, for a round
+trip through a parser that returns an object; the derive route declines
+a claim that uses it.
 
 A free variable is the difference between "this holds for the inputs"
 and "this holds for the inputs and any constant you care to add", which
@@ -379,15 +517,42 @@ without repeating `let`, so a bare `name = expr` straight after the run
 reads as one more binding; a claim written that way is refused with a
 message saying to write the relation as `==`.
 
+### Pinning a parameter: `let p be v`
+
+`let` followed by a parameter's own name and a literal value (a number,
+`None`, `True` or `False`) pins that parameter: every call the claim
+makes passes it at that value, whether or not the claim's text writes
+it into the call. It is how a claim about a library function states a
+value other than the default, since a library function's other
+parameters are otherwise passed at their defaults (see
+[Claims transfer](claims-transfer.md)):
+
+```yaml
+numpy.mean:
+  claims:
+    - name: one_mean_per_column
+      statement: "let axis be 0, for a in R^(n,n), dim(f(a)) == dim(a)"
+```
+
+The pin is part of the claim's canonical text, so it survives every
+round trip, and the record lists it among the values held at their
+defaults, `axis: 0 (pinned)` under `numpy.mean`. A pin naming something the function
+does not take is a misspecified claim, never a silent free variable.
+
 ### Operational infinity: `let |inf| be ...`
 
 One more binding uses bars around the name. It sets an operational
-infinity, the finite magnitude that stands in for `oo` wherever a
-claim's domain is unbounded, and it exists because code running on
-doubles does not reach infinity. Past about `1.34e154`, `x ** 2` raises
-`OverflowError`, and a value claim is false wherever the code raises.
-With no operational infinity declared, infinity means infinity, so an
-unbounded pointwise claim meets that overflow.
+infinity, the finite magnitude that stands in for `oo` wherever the
+computation of a claim is exercised along an unbounded direction, and it
+exists because code running on doubles does not reach infinity while the
+mathematics it implements does. A proof is about the mathematics, so it
+is over ℝ whatever the binding says, with infinity as infinity, and the
+binding bounds only the computation, namely what a proof's `[float]`
+companion and the probe route execute. Past about `1.34e154`, `x ** 2`
+raises `OverflowError`, and with no operational infinity declared the
+companion runs an unbounded direction out to float64's maximum
+(about `1.8e308`), where that
+overflow shows.
 
 The standard normal density shows both halves of the rule:
 
@@ -405,35 +570,115 @@ def gauss(x: float) -> float:
 for law in ["∫(f(x), x, -oo, oo) == 1",
             "f(x) >= 0",
             "let |inf| be 1e100, f(x) >= 0"]:
-    (p,) = mathema.claims.check(gauss, [law])
-    print(f"{law:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
+    for p in mathema.check(gauss, claims=[law]).probes:
+        if "mathema.policy" in (p.meta or {}):
+            continue    # what f does with a missing x, a row of its own
+        label = "  [float]" if p.name.endswith("[float]") else law
+        print(f"{label:31} {p.verdict:9} {p.counterexample or p.condition or ''}")
 ```
 
 <!-- example: gauss output -->
 ```text
 ∫(f(x), x, -oo, oo) == 1        proven
-f(x) >= 0                       falsified x = 2.6815615859885194e+154
-let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}
+f(x) >= 0                       proven    ∀ x ∈ ℝ
+  [float]                       falsified x = -1.7976931348623157e+308
+let |inf| be 1e100, f(x) >= 0   proven    ∀ x ∈ ℝ
+  [float]                       holds
 ```
 
-The integral over the whole line is proven: an integral, like a limit,
-is a statement about the mathematics, and an overflow in the far tail
-does not change what it equals. The pointwise claim is a statement
-about the code at every `x`, and at `x = 2.68e154` the code raises
-before it returns anything. Declaring `let |inf| be 1e100` says that
-for this claim, "every `x`" means every `x` up to `1e100` in magnitude,
-and the proof then holds, with the region it holds over stated in the
-record rather than implied.
+The integral over the whole line is proven, since an integral, like a
+limit, is a statement about the mathematics, and so is the pointwise
+claim, because the density is positive at every real `x` and the proof
+says so over ℝ. The computation is a separate question, and the `[float]`
+row under each proof answers it: at `x = -1.79769e308` the code squares `x`
+before it returns anything, the square overflows, and the companion is
+falsified with that witness while the proof stands. Declaring `let |inf|
+be 1e100` says that for this claim the computation is exercised out to
+`1e100` in magnitude, where `x ** 2` is still a finite double, so the
+companion holds; the proof is the same proof over ℝ it was without the
+binding, and the binding stays in the claim's statement, so a reader
+sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)).
 
-The bound applies to both routes: the derive route proves over it, and
-the probe route samples out to it, as does a proof's `[float]`
-companion (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
-With none declared, the companion runs an unbounded direction out to
-`1e308`. A claim can also state a half-line
-explicitly, `let |inf| be 1e12, for x in [0, oo], f(x) >= 0`, where the
-`oo` endpoint stops at `1e12`. Nothing in the claim refers to `|inf|`
-by name, so it is not an ordinary binding, and in Python the same
-setting is `claim(..., pseudo_infinity=1e100)`.
+A claim can also state a half-line explicitly, `let |inf| be 1e12, for
+x in [0, oo], f(x) >= 0`, where the probe route and the companion stop
+the `oo` endpoint at `1e12` and the proof keeps `oo`, so the proof's
+own row quantifies over `[0, oo]` and the bound appears only beside the
+executed evidence. Nothing in the claim refers to `|inf|` by name, so it
+is not an ordinary binding, and in Python the same setting is
+`claim(..., pseudo_infinity=1e100)`. A binding that can bound nothing,
+because every name the claim reads already has a bounded domain, is
+dropped from the claim's text and so from its identity.
+
+The claim is the first of three levels. A function's entry in a claims
+file can carry a `pseudo_infinity:` field beside `claims:`, which
+`mathema.check(fn, pseudo_infinity=...)` also sets, and a project sets
+one for every function with the `MATHEMA_PSEUDO_INFINITY` environment
+variable. The claim's own binding wins over the function level, the
+function level over the project, and with none of them set the
+computation runs to float64's own maximum. Only the claim's own binding
+is part of the claim: the value that applied is output. Where it bounds
+an unbounded direction of the claim's domain, the computation rows show
+it as a plain binding in front of their condition (`let |inf| be
+1e+100, for x in R`), whichever level it came from, and the level is
+recorded in `meta["mathema.pseudo_infinity"]`; `mathema verify` treats a change in it as a stale record, not a
+different claim. A claim whose every direction is bounded says nothing
+about infinity at any level:
+
+<!-- example: levels file=levels.py -->
+```python
+import math
+import sys
+
+import mathema
+
+
+def gauss(x: float) -> float:
+    """The standard normal density."""
+    return math.exp(-x ** 2 / 2) / math.sqrt(2 * math.pi)
+
+
+level = float(sys.argv[1]) if len(sys.argv) > 1 else None
+for law in ["f(x) >= 0", "for x in [-3, 3], f(x) >= 0"]:
+    rows = mathema.check(gauss, claims=[law], pseudo_infinity=level).probes
+    companion = rows[-1]
+    reach = [part for part in companion.note.split("; ")
+             if part.startswith("unbounded")]
+    print(f"{law:27} [float] {companion.verdict:9} "
+          f"{companion.meta.get('mathema.pseudo_infinity')}")
+    print(f"  {reach[0] if reach else '(every direction bounded)'}")
+```
+
+<!-- example: levels run -->
+```bash
+MATHEMA_PSEUDO_INFINITY=1e100 python levels.py
+MATHEMA_PSEUDO_INFINITY=1e100 python levels.py 1e50
+```
+
+<!-- example: levels output -->
+```text
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
+for x in [-3, 3], f(x) >= 0 [float] holds     None
+  (every direction bounded)
+f(x) >= 0                   [float] holds     None
+  (every direction bounded)
+for x in [-3, 3], f(x) >= 0 [float] holds     None
+  (every direction bounded)
+```
+
+The value a project sets hides every overflow beyond it, so `mathema
+verify` and `mathema check` warn once on stderr when
+`MATHEMA_PSEUDO_INFINITY` is below `1e100`: values beyond it are not
+checked for computation, and an explicit domain for the variables
+(`for x in [lo, hi], ...`) is usually the better way to say the same
+thing, since it is part of the claim a reader sees. The probe route reads the same value: an unbounded
+direction, declared (`for x in [0, oo)`, `for x in R`) or a parameter
+with no domain at all, is exercised with finite values only. Nine draws
+in ten stay at everyday magnitudes (the special values near zero first,
+then modest ranges), and one in ten goes toward the reach: the value
+that applied, or else float64's maximum (`sys.float_info.max`), spread
+over the decades so the far end is reached. A real domain contains no
+infinity, so the probe never calls the code at `inf` itself.
 
 ## `assuming`: stating a premise
 
@@ -453,6 +698,8 @@ watered down:
 | `assuming n >= 5, for xs in R^n, f(xs) == xs[4]` | a vector at least five long |
 | `assuming n >= 3, for a in R^(n,n), f(a) == a[2][2]` | a square matrix at least 3 by 3 |
 | `assuming min(m, n) >= 3, for a in R^(m,n), f(a) == a[2][2]` | a rectangular matrix with at least three rows and three columns |
+| `assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0` | a vector at least two long, by the parameter's `dim` |
+| `for returns in [-0.1, 0.1]^n, assuming std(returns, ddof=1) > 0, is_defined(f)` | a statistic of the vector; the premise's `std` is computed exactly, so a constant vector is outside |
 
 A vector or matrix space is never empty, since `R^n` already means at
 least one element, so a dimension premise is needed only for a bound

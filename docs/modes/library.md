@@ -18,7 +18,7 @@ mathema.registry.load_specs(root)             # read the whole spec store
 mathema.registry.load_claims(path)            # parse an authoring-shape claims file
 ```
 
-## `check(fn, claims=None, domain=None, trials=None, trials_scale=1.0, extensive=False, declared=None, known_premises=None)`
+## `check(fn, claims=None, domain=None, trials=None, trials_downscale=None, extensive=False, declared=None, known_premises=None, pseudo_infinity=None, runtime_types=None, trials_scale=None)`
 
 Verify a function's claims, each adjudicated against the real
 function: mathema's suggested standard claims when `claims` is
@@ -48,6 +48,27 @@ own bindings in its `domain` and `condition`, the parent's share in
 parent domain only: a parameter bounded only inside one claim has no
 function-level outside to exclude.
 
+`trials` sets the probe's trial budget for this call (left out, mathema
+decides it from the function's structure and domain, see
+[the trial budget](check.md#the-trial-budget)). `trials_downscale`, a
+factor no greater than 1, shrinks the budget for a fast development
+loop; it never raises it. `trials_scale` is the old spelling of
+`trials_downscale`, still accepted with a deprecation warning until 0.7.
+
+`pseudo_infinity` is the function level of the operational infinity:
+how far the computation of each claim (the probe route and the
+computation line) is exercised along an unbounded direction, unless the claim
+binds its own `let |inf| be`. Left out, a `declared=` entry's
+`pseudo_infinity:` field applies, then the project's
+`MATHEMA_PSEUDO_INFINITY`, then float64's own maximum. A proof never
+reads it; see [operational
+infinity](../grammar.md#operational-infinity-let-inf-be).
+
+`runtime_types` names the [runtime type](../runtime-types.md) of a
+parameter whose signature names none, for code that cannot be
+annotated: `runtime_types={"returns": "pandas.Series"}`. Left out, a
+`declared=` entry's `runtime_types:` field applies.
+
 A parameter or return type hinted with a mathema type marker
 (`Annotated[float, Probability]`, `Annotated[list, Shape("m", "n")]`)
 contributes its own claims automatically; see
@@ -72,7 +93,7 @@ per claim adjudicated. For the exponential moving average of the
 ```python
 import mathema
 
-def ema(x: list, alpha: float) -> float:
+def ema(x: list[float], alpha: float) -> float:
     """Exponentially weighted moving average."""
     y = x[0]
     for v in x[1:]:
@@ -83,54 +104,101 @@ def ema(x: list, alpha: float) -> float:
 <!-- example: ema repl -->
 ```python
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
-mathema.Record(ema) · source, no side effects · form 5108dc8b5d5c
-  FALSIFY monotonic_increasing[alpha]: d(f(x, alpha), alpha) >= 0
-           counterexample alpha=-5.44324 -> -504886.9526187774, alpha=9.99998 -> -2491045.924006212 (not increasing)
-  FALSIFY monotonic_decreasing[alpha]: d(f(x, alpha), alpha) <= 0
-           counterexample alpha=3.09918 -> 43.62072599569275, alpha=10 -> 21771.614551164577 (not decreasing)
-  FALSIFY affine[alpha]: d(f(x, alpha), alpha, alpha) = 0
-           counterexample alpha=3.53765, h=0.02: curvature estimate 3.12726 does not settle affine
-  FALSIFY convex[alpha]: d(f(x, alpha), alpha, alpha) >= 0
-           counterexample alpha=8.52571, h=0.02: curvature estimate -221.981 does not settle convex
-  FALSIFY concave[alpha]: d(f(x, alpha), alpha, alpha) <= 0
-           counterexample alpha=-0.594668, h=0.02: curvature estimate 1222.99 does not settle concave
-  proven  is_deterministic: f(x, alpha) = f(x, alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
-  proven  is_state_safe: f(x, alpha) = f(x, alpha)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, x, alpha) = 1 (n=192)
-  holds   is_representation_safe[alpha]: is_representation_safe(alpha) (n=20)
-  FALSIFY bounded_lower: min(x) <= f(x, alpha)
-           counterexample ([0, 902023, 21859.3, 865038, -999998, 740637, -77557.7, 946318], -8.89934): -999998.0 vs -7639061686900.594
-  FALSIFY bounded_upper: f(x, alpha) <= max(x)
-           counterexample ([103173, 1e+06, -993405, -514945, 606668, -999998], 6.56264): 6722876822.250346 vs 1000000.0
-  FALSIFY permutation_invariant: let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)
-           counterexample ([519138, 999998, 1e+06, 0, 917863, 745687, -818085], 10): -248319487748.5595 vs -814138493405.3986
-  proven  scale_equivariant: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
-  holds   scale_equivariant[float]: let g = mathema.f.scale_seq, let c be [-5.0, 5.0]:float|missing, c*f(x, alpha) = f(g(x, c), alpha) (n=48)
-  proven  translation_equivariant: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha)
-           where y=alpha: ∀ x ∈ Seq(ℝ), y ∈ [-10, 10] ⊂ ℝ ∪ {∅}
-  holds   translation_equivariant[float]: let g = mathema.f.shift_seq, let c be [-5.0, 5.0]:float|missing, c + f(x, alpha) = f(g(x, c), alpha) (n=48)
+mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
+  monotonic_increasing[alpha]  d(f(x, alpha), alpha) >= 0   falsified at alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
+    falsified  computation  d(f(x, alpha), alpha) >= 0   counterexample alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  monotonic_decreasing[alpha]  d(f(x, alpha), alpha) <= 0   falsified at alpha = -9.83680626493992 -> -1796.0154991652923, alpha = 0 -> -9.630119309794798 at x = [-9.630119309794798, 6.4611233807873525, -2.4056272554860447] (not decreasing)
+    falsified  computation  d(f(x, alpha), alpha) <= 0   counterexample alpha = -9.83680626493992 -> -1796.0154991652923, alpha = 0 -> -9.630119309794798 at x = [-9.630119309794798, 6.4611233807873525, -2.4056272554860447] (not decreasing)
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  affine[alpha]  d(f(x, alpha), alpha, alpha) = 0   falsified at alpha = 0.5942120819077363, h = 0.000594
+    falsified  computation  d(f(x, alpha), alpha, alpha) = 0   counterexample alpha = 0.5942120819077363, h = 0.000594: curvature estimate -4.01335 does not settle affine
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  convex[alpha]  d(f(x, alpha), alpha, alpha) >= 0   falsified at alpha = 4.553442718560774, h = 0.00455
+    falsified  computation  d(f(x, alpha), alpha, alpha) >= 0   counterexample alpha = 4.553442718560774, h = 0.00455: curvature estimate -849.761 does not settle convex
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  concave[alpha]  d(f(x, alpha), alpha, alpha) <= 0   falsified at alpha = 4.709760826489109, h = 0.00471
+    falsified  computation  d(f(x, alpha), alpha, alpha) <= 0   counterexample alpha = 4.709760826489109, h = 0.00471: curvature estimate 10716.6 does not settle concave
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  proven    is_deterministic: f(x, alpha) = f(x, alpha)
+  proven    is_state_safe: f(x, alpha) = f(x, alpha)
+  unknown   is_numerically_stable: let g = mathema.f.accurate, g(f, x, alpha) = 1
+           derive could not decide it; the probe could not decide it either (accuracy against the exact value is read for scalar parameters only)
+  holds     is_representation_safe[alpha]: is_representation_safe(alpha) (20 draws)
+  holds     is_dimension_safe[f]: is_dimension_safe(f) (192 draws)
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122
+    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [222791.29884554766, -852156.6094995309, -647122.5636467072, -772598.9379420548, 854595.3224724911, 999998], alpha = 4.542301584683122: -852156.6094995309 vs -656298366.2095869
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  bounded_upper  f(x, alpha) <= max(x)   falsified at x = [216941.53207844822, -368274.1184160299, 682330.1826507892], alpha = 1.7838785067417557
+    falsified  computation  f(x, alpha) <= max(x)   counterexample x = [216941.53207844822, -368274.1184160299, 682330.1826507892], alpha = 1.7838785067417557: 1865471.1484383387 vs 682330.1826507892
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [850043.9278135903, 905210.656449008, 782687.5954072354], alpha = 6.752137638609439
+    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [850043.9278135903, 905210.656449008, 782687.5954072354], alpha = 6.752137638609439: -1747388.2882860936 vs -3521213.9192287754
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
+    proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
+  translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
+    proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
+    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
+                            possible fixes:
+                              (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
+                              (ii) guard the empty input at entry
 ```
 
-Read the `FALSIFY` rows as facts about `ema`, not as bugs in it. The
+Read the falsified claims as facts about `ema`, not as bugs in it. The
 suggestions ask standard questions of any function, and a falsified
 suggestion is an answer, with the witness to prove it: an exponential
-average really is neither monotone nor order-independent in its inputs.
-Each `[float]` row is the float companion of the proof above it, the
-same law run through the real code in floating point inside the stated
-domain; both hold. Two of the answers change once the smoothing factor's
-real domain is stated. Checked with `alpha` in `(0, 1)`, the bounds that
-failed for an `alpha` outside it are proven outright, and their float
-companions hold (an excerpt):
+average really is neither monotone nor order-independent in its inputs,
+and it really does fail on an empty list, which every claim over `x`
+reports on its `policy` line. Under each claim, the `mathematics` line
+is the claim over the real numbers and the `computation` line is the
+same claim run through the real code in floating point inside the stated
+domain. Two of the answers change once the smoothing factor's real
+domain is stated. Checked with `alpha` in `(0, 1)`, the bounds that
+failed for an `alpha` outside it are proven outright, and their
+computation lines hold (an excerpt; the headline stays falsified by the
+empty list):
 
 <!-- example: ema repl match=subset -->
 ```python
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (0, 1)})
-  proven  bounded_lower: min(x) ≤ f(x, alpha)
-  holds   bounded_lower[float]: min(x) <= f(x, alpha) (n=44)
-  proven  bounded_upper: f(x, alpha) ≤ max(x)
-  holds   bounded_upper[float]: f(x, alpha) <= max(x) (n=44)
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [], alpha = 0.7579544029403025
+    proven     mathematics  min(x) <= f(x, alpha)
+    holds      computation  min(x) <= f(x, alpha)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
+    falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
+  bounded_upper  f(x, alpha) <= max(x)   falsified at x = [], alpha = 0.7579544029403025
+    proven     mathematics  f(x, alpha) <= max(x)
+    holds      computation  f(x, alpha) <= max(x)   230 entries across 50 draws, sizes (1, 1) to (8, 1)
 ```
 
 That is the loop in miniature: the suggestion found the assumption the

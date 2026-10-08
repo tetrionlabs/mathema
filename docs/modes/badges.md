@@ -89,7 +89,7 @@ thing you can know:
 | **what it accepts** | which inputs are in and out of bounds? | a domain, a marker, a `raises` on bad input |
 | **its bounds & shape** | what is the output's range and form? | a bound, monotonicity, symmetry (a proof of *what it computes* settles these too) |
 | **how safely it runs** | does it run cleanly and deterministically? | the safety families (state, determinism, numerical stability, ...) |
-| **where it can go wrong** | how and where does it fail? | a `raises` contract, `is_compendium_safe` |
+| **where it can go wrong** | how and where does it fail? | a `raises` contract; for each call, the callee's own `is_defined` or `raises` row |
 
 A few consequences worth knowing:
 
@@ -105,32 +105,94 @@ A few consequences worth knowing:
   now know where it fails); correctness is reported separately.
 - **A `[float]` companion that holds counts as numerical stability.** A
   claim the derive route proves spawns a
-  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code),
+  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation),
   the relation executed against the code in float, in the
   `is_numerically_stable` family. A companion that holds or is proven
   credits that family for its function, as a verified
   `is_numerically_stable` claim with the same verdict and route would. A
   falsified companion credits nothing: it records one relation the float
   code breaks, not the function's stability.
-- **A black-box dependency lowers clarity, and caps it.** When a function
-  calls a library that has a [compendium](../claims-transfer.md), mathema
-  has a model of where that call can fail, and `is_compendium_safe` can
-  clear it. When it calls a library with NO compendium, there is no model
-  of where it fails, and no claim you can write will settle it. That
-  uncertainty is irreducible, so such a function cannot reach 100 until a
-  compendium covers the library. Writing a compendium stub is the way to
-  lift the ceiling.
+- **The computation-safety hierarchy credits existing sources.** Every
+  safety family maps to one source of uncertainty in the *how safely it
+  runs* dimension: `is_overflow_safe` credits the representation source
+  beside `is_pole_safe`, `is_recursion_safe` credits the accidental-crash
+  source beside `is_language_defined`,
+  and `is_empty_safe` the missing-value source beside `is_missing_safe`.
+  `is_computation_safe` and `is_repeatable` credit nothing themselves,
+  since their children do. The reserved families (`is_precision_safe`,
+  `is_order_invariant`, `is_concurrency_safe`,
+  `is_representation_consistent`) are not adjudicated in this release and
+  credit nothing either. No weight moves.
+- **A call is only as clear as its callee's own record.** Every
+  function a function calls, one of your own or a library's, is a
+  source of uncertainty in *where it can go wrong*, charged in full
+  (two bits a call) until the callee's own record says where it has a
+  value. mathema looks one level down, at the callee's settled
+  definedness rows (an `is_defined` row, bare or with a region, or a
+  `raises` row): proven there, the call's charge is gone; holds reduces
+  it the way a holds reduces anything else; a row accepted with
+  `--as trusted` counts as a holds, never as proven. A callee with no
+  record, or only unsettled rows, keeps the whole charge, which caps
+  the caller below 100. For a library function the record is the one
+  `mathema verify` writes when it adjudicates the function's
+  [compendium](../claims-transfer.md) rows against the installed
+  library; a claims file nobody has verified is testimony and moves
+  nothing. It never looks further: what the callee itself calls is the
+  callee's own clarity, not the caller's. Built-in and standard-library
+  calls with no claims file stay out of the count.
+- **What it accepts is charged by what is known about the inputs.** Each
+  parameter costs the uncertainty its completed domain leaves, read from
+  the same reading every check uses: a parameter with no annotation 1.5
+  bits; a type alone (`float`, `str`, or a language admitting every
+  string) 1.0; a narrower language by its level, an alphabet 0.8, a
+  predicate 0.6, a refined language (`L[ascii, len <= 80]`) 0.4; a
+  bounded range 0.4; a finite set of k values (a `Literal`, a str
+  `Enum`, a guard to a set) `log2(k) / 10`, at most 0.3, and a proof by
+  visiting every member clears it entirely. A verified claim binding a
+  narrower domain for a parameter lowers that parameter's share. An
+  `Optional` parameter adds half a bit for its absence, cleared by its
+  `absent` row or a stated absence policy. A guarded parameter is
+  charged for its boundary as before.
 - **No claims is a low floor, not always zero.** A function nobody has
   verified is scored only on what its code visibly shows: a plainly pure,
   total, hazard-free helper reads low but not zero (it is nearly
-  transparent), while a branchy, impure, or black-box-calling function
-  floors much closer to zero. Declaring and verifying claims is what
+  transparent), while a branchy, impure, or call-heavy function floors
+  much closer to zero. Declaring and verifying claims is what
   raises the score.
 
-The scoring algorithm is versioned (`entropy-dimensions@1.1`) and recorded
+The scoring algorithm is versioned (`entropy-dimensions@1.3`) and recorded
 beside the scores, so a number is only ever compared against one computed
 the same way; a change to the algorithm reads as an algorithm change, not
-a regression. `@1.1` made two changes, and both raise clarity and overall
+a regression.
+
+`@1.3` changed how *what it accepts* is charged. Under `@1.2` every
+unguarded parameter cost the same 0.3 bits, so a bare `str` read as
+certain as a `Literal["buy", "sell"]`. Under `@1.3` each parameter costs
+what its completed domain leaves unknown, on the scale above, and an
+`Optional` parameter carries an absence source of its own. Scores move
+down for a function with unannotated or type-only parameters nobody has
+bound, and up for one whose parameters are finite sets, bounded ranges or
+narrower languages, or whose absence rows are verified. After this
+one-time move, a function's clarity changes only when its own record or
+a callee's record changes.
+
+`@1.2` changed how a call is charged. Under `@1.1` a call into a library
+some compendium file covered cost half a bit, cleared by a verified
+`is_library_safe` claim (then spelled `is_compendium_safe`) on the
+caller, and any other call outside the
+standard library cost two bits nothing could clear; your own helpers
+counted as the second kind. Under `@1.2` every call costs two bits,
+cleared only by the callee's own recorded definedness evidence, as
+described above, and `is_library_safe` no longer reduces anything (it
+is still a claim you can state and check). Scores move down for a
+function calling a covered library function whose rows are not verified
+in your store, including a standard-library function like `math.exp`,
+which `@1.1` left out; they move up for a function whose callees, your
+own helpers included, have settled definedness evidence. After this
+one-time move, a function's clarity changes only when its own record or
+a callee's record changes.
+
+`@1.1` made two changes, and both raise clarity and overall
 against `@1`. It added the `[float]` companion credit above. It also reads
 the relation of a verified claim the way the claim grammar does, so a
 stored identity (the store writes `f(x) = 2*x`, with a single `=`), or an

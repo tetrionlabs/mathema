@@ -9,12 +9,12 @@ and it never lets a weaker result be reported as a stronger one.
 <div class="mx-figure">
 <svg class="mx-diagram" viewBox="0 0 640 330" role="img" aria-labelledby="ladder-title ladder-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="ladder-title">The evidence ladder</title>
-  <desc id="ladder-desc">Six rungs, strongest at the top: derive, derive extensive, informed probing, probing, documented, declared.</desc>
+  <desc id="ladder-desc">Six rungs, strongest at the top: derive and examine, derive extensive, informed probing, probing, documented, declared.</desc>
   <g class="mx-d-rail"><line x1="40" y1="20" x2="40" y2="310"/><line x1="600" y1="20" x2="600" y2="310"/></g>
-  <g class="mx-d-rung mx-d-strong"><rect x="60" y="20" width="520" height="40" rx="3"/><text x="80" y="45" class="mx-d-label">derive</text><text x="560" y="45" class="mx-d-verdict" text-anchor="end">proven</text></g>
+  <g class="mx-d-rung mx-d-strong"><rect x="60" y="20" width="520" height="40" rx="3"/><text x="80" y="45" class="mx-d-label">derive · examine</text><text x="560" y="45" class="mx-d-verdict" text-anchor="end">proven</text></g>
   <g class="mx-d-rung mx-d-strong"><rect x="60" y="70" width="520" height="40" rx="3"/><text x="80" y="95" class="mx-d-label">derive:extensive</text><text x="560" y="95" class="mx-d-verdict" text-anchor="end">proven</text></g>
-  <g class="mx-d-rung"><rect x="60" y="120" width="520" height="40" rx="3"/><text x="80" y="145" class="mx-d-label">probe:semi_analytical · probe:algorithmic</text><text x="560" y="145" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
-  <g class="mx-d-rung"><rect x="60" y="170" width="520" height="40" rx="3"/><text x="80" y="195" class="mx-d-label">probe</text><text x="560" y="195" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
+  <g class="mx-d-rung"><rect x="60" y="120" width="520" height="40" rx="3"/><text x="80" y="145" class="mx-d-label">informed probing (four techniques)</text><text x="560" y="145" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
+  <g class="mx-d-rung"><rect x="60" y="170" width="520" height="40" rx="3"/><text x="80" y="195" class="mx-d-label">probe · probe:lifted_numeric</text><text x="560" y="195" class="mx-d-verdict" text-anchor="end">holds (n=…)</text></g>
   <g class="mx-d-rung mx-d-weak"><rect x="60" y="220" width="520" height="40" rx="3"/><text x="80" y="245" class="mx-d-label">documented</text><text x="560" y="245" class="mx-d-verdict" text-anchor="end">stated deliberately</text></g>
   <g class="mx-d-rung mx-d-weak"><rect x="60" y="270" width="520" height="40" rx="3"/><text x="80" y="295" class="mx-d-label">declared</text><text x="560" y="295" class="mx-d-verdict" text-anchor="end">inferred from a summary</text></g>
 </svg>
@@ -24,32 +24,44 @@ and it never lets a weaker result be reported as a stronger one.
 
 | Rung | Verdict | What established it |
 |---|---|---|
-| `derive` | `proven` | The function's body was lifted to a symbolic expression and the claim settled over the whole declared domain. |
+| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and no float companion was asked for (`math_only`). |
+| `examine` | `proven` | A proof from the function's structure, with nothing lifted: a guard that rejects before the body runs, or a body that writes nothing outside itself. |
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
-| `probe:semi_analytical`, `probe:algorithmic` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, or by a technique specific to the claim. |
-| `probe` | `holds (n=...)` | The real function survived `n` seeded random trials. |
+| `probe:semi_analytical`, `probe:algorithmic`, `probe:minimal_example`, `probe:counterfactual` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, by a technique specific to the claim, by fuzzing that shrinks what it finds, or by refilling a missing value to see what the function would have done. |
+| `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, where the claim takes a derivative, integral, sum or limit that running the code cannot give, mathema's own symbolic reconstruction of the function survived `n` trials (`probe:lifted_numeric`, and the note says so). |
+| `axiom` | `trusted` | A definition row in a compendium, trusted rather than adjudicated: it counts as much as a plain `holds`, never more. |
 | `documented` | none | Stated intent that a person has accepted with `mathema accept --intent`. |
 | `declared` | none | Stated intent (a docstring summary, an `Intent:` block, an `intent:` field) that no person has accepted yet, the weakest rung there is. |
 
-The two informed probing routes share a rung because they draw on different
-sources of information without either being stronger than the other. The
-ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`, and
-a route mathema does not recognise, such as one from a verification
+`derive` and `examine` share the top rung, a proof either way; the
+informed probing routes share a rung too: they draw on different
+information, and none is stronger than another. A language's own derive
+strategy reports `derive:` followed by its mechanism's name and ranks
+with `derive:extensive`; one that names no mechanism (`derive:language`)
+ranks with `derive`. The
+ladder is defined in the engine as `mathema.conjecture.EVIDENCE_LADDER`,
+and a route mathema does not recognise, such as one from a verification
 technique you have plugged in yourself, ranks below everything it does.
 
-## A proof is the mathematics; `[float]` is the code
+<a id="a-proof-is-the-mathematics-float-is-the-code"></a>
+
+## A proof is the mathematics; `[float]` is the computation
 
 A `proven` from the derive route means the claim holds in exact real
-arithmetic over the declared domain, and nothing more. It does not say
-the float implementation gets the same answer. That is a separate
-claim, and mathema makes it for you: every claim the derive route
-proves spawns a companion named `<name>[float]`, in the numerical
-stability family, adjudicated on the probe route against the real code.
+arithmetic over the declared domain, with infinity as infinity, and
+nothing more. It does not say the computation in float64 gets the same
+answer. That is a separate claim, and mathema makes it for you: every
+claim the derive route proves spawns a companion named `<name>[float]`,
+in the numerical stability family, adjudicated on the probe route
+against the real code. A printed record shows it as the `computation`
+line under the claim, beside the `mathematics` line that carries the
+proof; the record file keeps it as its own row, `<name>[float]`.
 The companion runs the relation at every corner of the declared domain
 and at sampled interior points. A raise, a `NaN`, or an `inf` or a loss
 of precision where the relation fails on the executed values falsifies
 it, with that point as the witness. An unbounded direction runs to the
-claim's `|inf|` when one is declared, and otherwise out to `1e308`,
+claim's `|inf|` when one is declared, and otherwise out to float64's
+maximum (`sys.float_info.max`, about `1.8e308`),
 sampled log-uniformly so moderate magnitudes are visited too.
 
 <!-- example: companion run -->
@@ -76,15 +88,21 @@ for law, route in [("for x in [0, 1e6], f(x) == 1", "derive"),
 ```text
 derive           one        proven
 derive           one[float] holds
+derive           missing[x] holds
 derive           one        proven
-derive           one[float] falsified x=-1e+308
+derive           one[float] falsified x = -1.7976931348623157e+308
+derive           missing[x] holds
 derive:math_only one        proven
 ```
 
-`(x + 1) - x` is `1` for every real `x`, so all three proofs stand. In
+`(x + 1) - x` is `1` for every real `x`, so all three proofs stand.
+The third row of the first block is the policy row mathema writes for a
+float's nan (what f does with a value that is not there); it holds
+because f gives nan back. In
 float64 the `+ 1` is lost once `|x|` passes `2^53`, so the companion of
 the unbounded claim is falsified, and its row names the stratum:
-mathematics sound, implementation numerically unstable. Two claims, two
+mathematics sound, its computation numerically unstable
+(`implementation:numerical-instability`). Two claims, two
 verdicts, and the companion gates `mathema verify` like any other claim.
 The remedies are the ordinary ones: narrow the domain, declare the
 `|inf|` the code has to reach, fix the code, accept the companion as a

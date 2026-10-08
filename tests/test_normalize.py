@@ -109,7 +109,7 @@ def test_module_constant_inlines_with_explicit_note(tmp_path):
         "for a in [0,5], b in [0,5], c in [0,5], "
         "f(a,b,c) == (a+b+c)/2", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.sketch)
-    assert "module constants read at adjudication: HALF = 0.5" in p.note
+    assert "module constants read when it was checked: HALF = 0.5" in p.note
     # the pedantic mirror: a float constant is its float value, never
     # the exact irrational it approximates; SQ3 == sqrt(3) must NOT
     # prove exactly

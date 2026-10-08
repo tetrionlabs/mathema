@@ -5,6 +5,7 @@
 A floor, not a ceiling. Nothing divides by it, and carrying more claims
 than it asks for is not an overrun.
 """
+import importlib.util
 import math
 import re
 
@@ -59,17 +60,31 @@ ALL = (add, scale, bs_d1, mean, parse_tag, stateful_io)
 
 # add and scale are homogeneous of degree one, so the gated
 # scale_equivariant suggestion (proven by construction) joins their
-# floor
+# floor; mean takes a sequence, so whether its operands and result have
+# the right shapes (is_dimension_safe, a child of is_numerically_defined)
+# is one of its aspects, and the sum_like comparison with numpy.sum
+# joins its floor where numpy imports
 @pytest.mark.parametrize("fn,expected", [
-    (add, 12), (scale, 9), (bs_d1, 26), (mean, 11),
+    (add, 12), (scale, 9), (bs_d1, 26),
+    pytest.param(mean, 12, marks=pytest.mark.skipif(
+        importlib.util.find_spec("numpy") is None,
+        reason="the sum_like aspect names numpy.sum")),
 ])
 def test_floor_for_liftable_shapes(fn, expected):
     assert claim_floor(fn)["floor"] == expected
 
 
+def test_a_sequence_parameter_brings_the_dimension_aspect():
+    aspects = [tuple(a) for a in claim_floor(mean)["aspects"]]
+    assert any(a[0] == "is_dimension_safe" for a in aspects), aspects
+    assert not any(a[0] == "is_dimension_safe"
+                   for a in (tuple(x) for x in claim_floor(add)["aspects"]))
+
+
 @pytest.mark.parametrize("fn,expected", [
-    (parse_tag, 6), (stateful_io, 8),
+    (parse_tag, 5), (stateful_io, 7),
 ])
+@pytest.mark.usefixtures("without_language_package")
 def test_an_unliftable_function_still_has_a_floor(fn, expected):
     """Most families offer a probe route, so nothing about the floor
     depends on lifting. It shrinks, the derive-only families gate

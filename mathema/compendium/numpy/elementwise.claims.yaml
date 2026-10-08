@@ -1,0 +1,45 @@
+# Definition rows for numpy's elementwise functions, applied to a vector
+# with nothing missing, each stated in the grammar's own words: a
+# grammar word applied to a vector acts on each element. numpy's ufuncs
+# state a signature a row's parameters bind to from numpy 2.4 on, so
+# the file applies from there.
+compendium: numpy
+versions: ">=2.4,<3"
+
+numpy.absolute:
+  claims:
+    - name: definition
+      statement: "for x in R^n, f(x) == abs(x)"
+
+numpy.fabs:
+  claims:
+    - name: definition
+      statement: "for x in R^n, f(x) == abs(x)"
+
+numpy.square:
+  claims:
+    - name: definition
+      statement: "for x in R^n, f(x) == x ** 2"
+
+numpy.negative:
+  claims:
+    - name: definition
+      statement: "for x in R^n, f(x) == -x"
+
+numpy.maximum:
+  claims:
+    - name: definition
+      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) == (x1 + x2 + abs(x1 - x2)) / 2"
+      note: "The larger of each pair of elements: the midpoint plus half the gap."
+
+numpy.minimum:
+  claims:
+    - name: definition
+      statement: "for x1 in R^n, x2 in R^n, f(x1, x2) == (x1 + x2 - abs(x1 - x2)) / 2"
+      note: "The smaller of each pair of elements: the midpoint minus half the gap."
+
+numpy.sign:
+  claims:
+    - name: times_itself_is_abs
+      statement: "for x in R^n, f(x) * x == abs(x)"
+      note: "-1, 0 or 1 by the sign of each element."

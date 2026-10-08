@@ -42,6 +42,8 @@ module entirely.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import ast
 import copy
 from dataclasses import dataclass
@@ -236,7 +238,7 @@ def render_loop_header(for_stmt: ast.For, tier: str, *, seq_params: frozenset = 
 
 
 def render_condition(test_node: ast.expr, tier: str, *, env: dict | None = None,
-                     opaque=None, name_map: dict | None = None) -> Rendered:
+                     opaque: Any = None, name_map: dict | None = None) -> Rendered:
     """Render an `if` statement's own test expression at a given tier;
     `source`/`normalized` as `render_label` does (a condition is still
     just an expression fragment at those two tiers); `structural` is a

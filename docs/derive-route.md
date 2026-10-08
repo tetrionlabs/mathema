@@ -8,10 +8,10 @@ can actually lift, which is a real subset. This page is the complete,
 current reference for what that subset is.
 
 A `proven` is the mathematics, and only the mathematics. Whether the
-float implementation carries it is a second claim, `<name>[float]`,
+computation in float64 carries it is a second claim, `<name>[float]`,
 which every proof spawns and which runs the real code at the domain's
 corners and at sampled points; `route="derive:math_only"` asks for the
-proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)
+proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)
 shows the two side by side.
 
 Lifting is honest, not clever: it never guesses at a closed form.
@@ -44,7 +44,8 @@ remain viable regardless of any of this, see [CDD in one page](cdd.md).
 | A call to a plain function this one calls (`_scale(x)`, not a method or module-qualified call) | ✅ up to 3 levels deep by default, including a callee with its own branch if the caller's domain settles it, see below |
 | A claim relating two (or more) functions, `f(x) == g(x)`, `d(f(x, g(x,I,px,py), a), x) == 0` | ✅ each bound function lifts to its own closed form and substitutes like `f`, see "Multi-function claims" below |
 | A non-scalar parameter | ❌ for `lift()` itself, with two independent exceptions: a whole body that's exactly `return np.dot(a, b)` (see "Dot products"), or a loop that sums over it; any loop, nested or sequential, whose accumulator is purely additive (see "General sum accumulation") |
-| A parameter typed as a matrix/vector | ❌ for lifting the body; a matrix claim declares its domain as `R^(m,n)` and is adjudicated by probing and the linear-algebra identities in [Matrix structure](matrix-structure.md) |
+| A parameter typed as a matrix/vector | ❌ for lifting the body in general; a matrix claim declares its domain as `R^(m,n)` and is adjudicated by probing and the linear-algebra identities in [Matrix structure](matrix-structure.md) |
+| A straight-line body over a numpy, pandas or polars vector or matrix whose library calls (`returns.std(ddof=1)`, `np.mean(x)`, `A.T`, `np.linalg.inv(A)`) all have definition rows | ✅ read through the rows, then lowered to sums over a symbolic length or decided in the matrix algebra, see "Vectors through definition rows" below |
 | A *local* array built from `np.linspace`/`np.arange`, transformed elementwise, returned bare or as one element of a tuple | ✅; index it in claim text via `f(...)[i]`, see "Local symbolic arrays" below |
 
 ## Callees
@@ -509,6 +510,55 @@ features)`, not `f(features, weights)`); swapping them would mean
 substituting a genuinely different call, not just commuting, and isn't
 attempted.
 
+## Vectors through definition rows
+
+A body over a vector or matrix whose runtime type is numpy, pandas or
+polars reads through the library's
+[definition rows](claims-transfer.md#definition-rows): each call is
+rewritten with the grammar expression its row states, so
+`returns.mean() / returns.std(ddof=1) * np.sqrt(252)` becomes
+`mean(returns) / std(returns, ddof=1) * sqrt(252)`, substituted into
+the claim for each `f(...)`. The body may assign locals before its one
+`return`; a branch, a loop or a call no row covers declines, naming
+the key (`pandas.Series.ewm has no definition row`).
+
+A matrix claim is then decided in the matrix algebra ([Matrix
+structure](matrix-structure.md)). A vector claim is lowered to sums
+over a sequence `x[0], ..., x[L - 1]` of symbolic length `L`: a
+vector-valued expression is its element at position `i` (`c * x` is
+`c*x[i]`), and each reduction closes the index:
+
+| claim word | lowering |
+|---|---|
+| `sum(v)`, `prod(v)` | `Sum(v[i], (i, 0, L - 1))`, `Product(v[i], ...)` |
+| `mean(v)` | `sum(v) / L` |
+| `var(v, ddof=k)`, `std(v, ddof=k)` | `Sum((v[i] - mean(v))**2) / (L - k)` and its square root, defined for `L > k` |
+| `count(v)`, `len(v)` | `L` |
+| `cumsum(v)`, `cumprod(v)` | the vector whose element `i` is the sum or product of `v[0..i]` |
+| `dot(v, w)`, `v @ w` | `Sum(v[i]*w[i])` |
+
+A law transform the claim binds (`let s = mathema.f.scale_seq`, or
+`shift_seq`, `reverse_seq`), a negation `-returns` and a reversal
+`returns[::-1]` rewrite every element of the sequence by structural
+replacement; a transform that leaves the expression unchanged is
+refused, never read as `f(xs)` itself. sympy does not split a sum over
+`+` or pull a constant out of one, so a normaliser does: `Sum(c*x[i] +
+k)` becomes `c*Sum(x[i]) + k*L`, a product's constant factors become
+powers, and each sum's index is renamed by its depth so equal sums
+compare equal. With it, `std(x + k) == std(x)` and `mean(c*x) ==
+c*mean(x)` are proven for every length, and `std(x + k) == std(x) + k`
+is not.
+
+Where the rewritten body has no value (a division by a quantity that
+can be zero, a sample statistic of fewer than `ddof + 1` elements), a
+proof stands only when the claim's premises exclude the region:
+the premise `std(returns, ddof=1) > 0` does, since a positive standard
+deviation is nonzero and needs two elements. When they do not, the
+function is executed at simple points of the region (vectors of zeros,
+then ones, at each short length); a point where the claim fails is an
+executed witness and the claim is `falsified`, otherwise it is left
+undecided with the premise that would exclude the region.
+
 ## General sum accumulation
 
 `lift_fold()` (above) requires the accumulator's own update to be
@@ -558,9 +608,14 @@ def dot_product(a: list, b: list) -> float:
     return total
 ```
 
+The claim binds both lists over one length, `for a in R^n, b in R^n`;
+left unbound, `a` and `b` may differ in length, and `b[i]` raises
+`IndexError` past the end of a shorter `b`, so the claim is falsified there:
+
 <!-- example: dot-loop verdicts fn=dot_product route=derive -->
 ```
-f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
+for a in R^n, b in R^n, f(a, b) == f(a, b)   # proven, Sum(a[i]*b[i], (i, 0, L_a - 1))
+f(a, b) == f(a, b)   # falsified
 ```
 
 A third loop-header form, `for i, item in enumerate(seq):`, binds both
@@ -868,7 +923,7 @@ candidate, never an authority: it's verified against the recurrence
 itself and every base value before anything adjudicates with it, and a
 nonlinear recurrence declines cleanly.
 
-Three gates keep the closed form honest about the implementation:
+Three gates keep the closed form honest about the computation:
 
 - **Integers only.** The closed form describes the integer lattice;
   the runtime recursion on a non-integer argument walks a different
@@ -877,7 +932,7 @@ Three gates keep the closed form honest about the implementation:
   integer-valued; anything else is undecided, with the `subset Z`
   remedy named.
 - **Stack depth.** The closed form settles the mathematics, but the
-  implementation still recurses about one frame per index step, so a
+  computation still recurses about one frame per index step, so a
   domain whose top implies a depth beyond the interpreter's recursion
   limit refuses to prove, `fib(100000)` raises `RecursionError`
   however true Binet is. The claim is then run once at the top of
@@ -912,11 +967,12 @@ conditions are each verified, never a "probably".
   of strictly positive factors, a one-variable quadratic with
   positive leading coefficient and negative discriminant. Its
   non-strict sibling covers `>=` the same way.
-- **The write-free certificate.** `is_state_safe(f)` is proven
-  structurally when the body contains no external-write site and
-  every name resolves; an unresolved or global read leaves room for
-  state the walk cannot see, so it falls to trials instead. The
-  sketch says which of the two happened.
+- **The write-free certificate.** `is_state_safe(f)` is proven on
+  the examine route when the body, and every project function it
+  reaches, contains no write outside the call and every name and
+  callee resolves; anything unresolved leaves it unknown with the
+  reason, never to trials. `is_deterministic` and `is_reproducible`
+  are certified the same way for hidden reads.
 - **Piecewise proof.** A claim over a finite value set is proven by
   splitting the domain into its stated values and proving each piece;
   the sketch lists the pieces.
@@ -928,9 +984,11 @@ than being asserted.
 
 ## What's not built at all
 
-**Lifting a function body over a matrix or vector parameter**, and
-everything downstream of that (general time-series recurrences, most
-of linear algebra inside a body). Matrices themselves are partly
+**Lifting a function body over a matrix or vector parameter** in
+general, and everything downstream of that (general time-series
+recurrences, most of linear algebra inside a body); a straight-line
+body of library calls with definition rows is the exception, see
+"Vectors through definition rows" above. Matrices themselves are partly
 supported: structure predicates and linear-algebra identities prove,
 and probing samples matrices by shape and structure, see
 [Matrix structure](matrix-structure.md).

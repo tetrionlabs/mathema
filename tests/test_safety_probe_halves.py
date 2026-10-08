@@ -73,10 +73,19 @@ def test_builtin_probe_holds_when_the_implementation_handles_the_edge():
     # the body guards the unsafe region (log only on the positive
     # branch), so trials AT the admitted edge values return cleanly:
     # the empirical half reports what the code actually does
+    import random
+
+    from mathema.claim_families import _builtin_probe
+    verdict, checked, cx = _builtin_probe(
+        log_guarded, analyze_source(log_guarded),
+        claim("is_builtin_safe(x)"), {"x": (-1.0, 10.0)},
+        random.Random(0), 40)
+    assert verdict == "holds" and checked > 0 and cx is None
+    # the structural half reads the branch: log is reached only where
+    # x > 0, inside its number set, so the claim is proven
     probe = _one(log_guarded, "is_builtin_safe(x)", "probe",
                  domain={"x": (-1.0, 10.0)})
-    assert probe.verdict == "holds"
-    assert probe.n > 0
+    assert probe.verdict == "proven", (probe.verdict, probe.note)
 
 
 def test_best_route_cascades_to_the_pole_probe_on_underived_bounds():

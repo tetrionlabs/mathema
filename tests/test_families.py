@@ -3,13 +3,18 @@
 """mathema/families.py: the claim-family registry, registration,
 external discovery via entry points, and the built-ins-always-win
 merge rule."""
-from unittest.mock import MagicMock, patch
 
-import numpy as np
+import pytest
 
-from mathema import families
-from mathema.conjecture import check_conjectures, claim
-from mathema.symbolic import ProofResult
+pytest.importorskip("numpy")
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from mathema import families  # noqa: E402
+from mathema.conjecture import check_conjectures, claim  # noqa: E402
+from mathema.symbolic import ProofResult  # noqa: E402
 
 # mathema.symbolic._dot registers a real "dot_product" family the
 # moment it's first imported, by anything, anywhere in the process,
@@ -24,13 +29,13 @@ def setup_function(_fn):
     # every test starts from a known-empty registry, regardless of
     # what else has run in this process before it.
     families._REGISTRY.clear()
-    families._discovered_external.cache_clear()
+    families._reset_discovery()
 
 
 def teardown_function(_fn):
     families._REGISTRY.clear()
     families._REGISTRY.update(_BASELINE)
-    families._discovered_external.cache_clear()
+    families._reset_discovery()
 
 
 class _AlwaysDeclines:
@@ -57,10 +62,12 @@ class _AlwaysHandles:
         return "sentinel-result"
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_families_empty_by_default():
     assert families.families() == {}
 
 
+@pytest.mark.usefixtures("without_language_package")
 def test_register_makes_a_family_discoverable():
     fam = _AlwaysHandles()
     families.register("always", fam)
@@ -130,6 +137,7 @@ def test_registering_a_replacement_dot_family_reroutes_try_prove():
     # this fake family's own, otherwise-unreachable verdict.
     families.register("dot_product", _FakeDotFamily())
     results = check_conjectures(
-        _dot_ab, [claim("f(a, b) == f(a, b)", route="derive")])
+        _dot_ab, [claim("assuming len(a) == len(b), f(a, b) == f(a, b)",
+                        route="derive")])
     assert results[0].verdict == "proven"
     assert "test's fake family" in results[0].sketch

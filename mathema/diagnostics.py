@@ -28,6 +28,7 @@ import sympy
 
 from ._math_vocab import _call_name
 from .symbolic import classify_loop_header
+from .runtime_types import SEQUENCE_KINDS
 
 DIAGNOSTIC_SCHEME = 3
 # diagnostic_report()'s own field-layout version. Bump it whenever
@@ -56,8 +57,10 @@ _CLAMP_CALL_NAMES = ("min", "max", "clip", "minimum", "maximum")
 
 
 def _source_file(fn) -> str:
+    """The file `fn` is defined in, read through any wrapper that names
+    it as `__wrapped__`."""
     import inspect
-    return inspect.getsourcefile(fn) or "<unknown>"
+    return inspect.getsourcefile(inspect.unwrap(fn)) or "<unknown>"
 
 
 def has_clamp(fn, facts) -> list[dict]:
@@ -96,7 +99,7 @@ def has_accumulator_fold(fn, facts) -> list[dict]:
    , a real motif even when some other, unrelated part of the
     function blocks full lifting (a branch elsewhere, an unsupported
     call in a different statement, ...)."""
-    seq_params = {p for p, k in facts.param_kinds.items() if k == "sequence"}
+    seq_params = {p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS}
     file = _source_file(fn)
     hits = []
     for node in ast.walk(facts.tree):

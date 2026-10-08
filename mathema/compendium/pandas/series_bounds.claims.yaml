@@ -1,0 +1,36 @@
+# Definition rows for the least and greatest elements, the absolute
+# value and the clipped values of a pandas.Series, stated over Series
+# with nothing missing; the receiver of `returns.min()` is `a`. pandas
+# skips a missing element in min and max and keeps it missing in abs.
+# mathema's own test suite verifies each row against the installed
+# pandas.
+compendium: pandas
+versions: ">=2.2,<4"
+
+pandas.Series.min:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == min(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
+
+pandas.Series.max:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == max(a)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: nan."
+
+pandas.Series.abs:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == abs(a)"
+      note: "Element by element, a Series of the same length."
+
+pandas.Series.clip:
+  claims:
+    - name: definition
+      statement: "for a in R^n, lower in [-1e6, 1e6], upper in [-1e6, 1e6], assuming lower <= upper, f(a, lower, upper) == ((a + lower + abs(a - lower)) / 2 + upper - abs((a + lower + abs(a - lower)) / 2 - upper)) / 2"
+      note: "Element by element, the larger of each element and lower, then the smaller of that and upper. Stated for bounds in order: pandas clips reversed bounds its own way."

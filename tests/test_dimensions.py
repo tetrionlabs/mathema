@@ -49,11 +49,16 @@ def strict_dot(tmp_path_factory):
     return m.strict_dot
 
 
+#: the element range of the strict_dot tests: the length mechanics are
+#: what they test, and a product of two entries stays finite
+_RANGE = "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^m"
+
+
 def test_an_equal_length_premise_holds_by_construction(strict_dot):
     # without the premise the free 2..8 draws mismatch and hit the
     # raise, a genuine out-of-contract falsification
-    (bare,) = check_conjectures(strict_dot,
-                                [claim("f(x, y) == f(y, x)", route="probe")])
+    (bare,) = check_conjectures(strict_dot, [claim(
+        f"{_RANGE}, f(x, y) == f(y, x)", route="probe")])
     assert bare.verdict == "falsified"
 
     # with it, lengths are drawn equal, so the raise region is never
@@ -61,7 +66,8 @@ def test_an_equal_length_premise_holds_by_construction(strict_dot):
     for spelling in ("assuming len(x) == len(y), f(x, y) == f(y, x)",
                      "assuming dim(x, 0) == dim(y, 0), f(x, y) == f(y, x)",
                      "assuming rows(x) == rows(y), f(x, y) == f(y, x)"):
-        (p,) = check_conjectures(strict_dot, [claim(spelling, route="probe")])
+        (p,) = check_conjectures(strict_dot, [claim(f"{_RANGE}, {spelling}",
+                                                    route="probe")])
         assert p.verdict == "holds", (spelling, p.note)
 
 
@@ -69,7 +75,7 @@ def test_a_bounded_length_premise_constrains_the_draw(strict_dot):
     # equal-and-at-least-4: still holds, and the plan never draws
     # below the floor (a raise on a too-short input would falsify)
     (p,) = check_conjectures(strict_dot, [claim(
-        "assuming dim(x, 0) == dim(y, 0) and dim(x, 0) >= 4, "
+        f"{_RANGE}, assuming dim(x, 0) == dim(y, 0) and dim(x, 0) >= 4, "
         "f(x, y) == f(y, x)", route="probe")])
     assert p.verdict == "holds", p.note
 
@@ -227,18 +233,20 @@ def test_space_forms_are_fixed_points_in_both_modes(spelling):
         assert getattr(again, "dims", ()) == getattr(bound, "dims", ())
 
 
-def test_the_missing_clause_trails_the_space():
+def test_the_missing_clause_sits_in_the_element_clause():
     from mathema.domain import parse_binding, render_domain
-    _, bound = parse_binding("A in R^(m*n)")
-    assert render_domain(bound, ascii_mode=False) == "ℝᵐˣⁿ ∪ {∅}"
+    _, bound = parse_binding("A in R^(m*n) \\ {None, missing}")
+    assert render_domain(bound, ascii_mode=False) == "ℝᵐˣⁿ \\ {absent, ∅}"
+    _, bound = parse_binding("A in (R | {missing})^(m*n) \\ {None}")
+    assert render_domain(bound, ascii_mode=False) == "(ℝ ∪ {∅})ᵐˣⁿ \\ {absent}"
 
 
 def test_unicode_renders_the_exponent_as_a_superscript():
     from mathema.domain import parse_binding, render_domain
     _, v = parse_binding("v in R^n")
-    assert render_domain(v, ascii_mode=False) == "ℝⁿ ∪ {∅}"
+    assert render_domain(v, ascii_mode=False) == "(ℝ ∪ {∅})ⁿ ∪ {absent}"
     _, a = parse_binding("A in R^(m*n)")
-    assert render_domain(a, ascii_mode=False) == "ℝᵐˣⁿ ∪ {∅}"
+    assert render_domain(a, ascii_mode=False) == "(ℝ ∪ {∅})ᵐˣⁿ ∪ {absent}"
 
 
 def test_a_shared_space_dimension_draws_equal_lengths(strict_dot):
@@ -246,12 +254,14 @@ def test_a_shared_space_dimension_draws_equal_lengths(strict_dot):
     # equal every trial, premise or not, the space form IS the
     # constraint
     (shared,) = check_conjectures(strict_dot, [claim(
-        "for x in R^n, y in R^n, f(x, y) == f(y, x)", route="probe")])
+        "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) == f(y, x)",
+        route="probe")])
     assert shared.verdict == "holds", (shared.verdict, shared.note)
     # distinct dimension names are free to differ, so the strict
     # function's own length guard falsifies
     (distinct,) = check_conjectures(strict_dot, [claim(
-        "for x in R^n, y in R^m, f(x, y) == f(y, x)", route="probe")])
+        "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^m, f(x, y) == f(y, x)",
+        route="probe")])
     assert distinct.verdict == "falsified"
 
 
@@ -345,9 +355,10 @@ def scale_rows(tmp_path_factory):
 def test_a_claim_dim_name_aliases_the_marker_name(scale_rows):
     # the claim names the axes p, q; the marker names them m, n. They
     # are the SAME dimensions (per axis), so the claim holds with p/q
-    # bound from the real shape, no conflict
+    # bound from the real shape, no conflict (c bounded: over R the
+    # probe reaches c = 1e308, where c * x overflows)
     (p,) = check_conjectures(scale_rows, [claim(
-        "assuming p >= 2 and q >= 2, for a in R^(p*q), c in R, "
+        "assuming p >= 2 and q >= 2, for a in R^(p*q), c in [-10, 10], "
         "dim(f(a, c), 1) == q", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
 

@@ -25,11 +25,43 @@ enough that "modulo", "round down" or a typo still land. And
 `EXAMPLE_FUNCTIONS` goes the other way, from a function to the keys it
 demonstrates.
 
+A package extends the lexicon through the `mathema.lexicon`
+entry-point group: the object registered under a name provides
+`LEXICON`, and optionally `SECTIONS`, `TAGS` and `EXAMPLE_FUNCTIONS`,
+in the shapes this module uses. When it is installed, `entries()`,
+`search()`, `find()`, `get()` and `show()` include its rows, its
+sections read `<name>/<section>`, and `origin(key)` says where a row
+came from. `LEXICON`, `SECTIONS`, `TAGS` and `EXAMPLE_FUNCTIONS` here
+stay mathema's own. `mathema.lexicon_checks` holds every check this
+lexicon is held to, callable over a package's rows.
+
 This is a first, deliberately small slice (`render_claim_text()`'s own
 preferred spellings are expected to change once real rendered output
 has been reviewed), see `spec.render_claim_text()` for the renderer
 this module exercises."""
 from __future__ import annotations
+
+import functools
+import logging
+import math
+import os
+import random
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from .authoring import claims as claims_decorator, enforce_dimensions, enforce_domain
+
+try:
+    import numpy as np
+except ImportError:   # numpy is optional; the example functions over arrays need it
+    np = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from typing import Optional
+
+    import numpy
+    import pandas
+    import polars
 
 LEXICON: dict[str, str] = {
     # one construct at a time -----------------------------------
@@ -69,7 +101,49 @@ LEXICON: dict[str, str] = {
     "space_vector_bounded": "for xs in [0, 1]^n, f(xs) <= 1",
     "space_matrix": "for A in R^(m,n), f(A) == f(A)",
     "space_shared_dim": "for x in R^n, y in R^n, f(x, y) == f(y, x)",
+    # a dimension written as a number is fixed: every draw has exactly
+    # that size, on every route and every runtime type. An RGB triple's
+    # luma stays in [0, 1] because its weights sum to one
+    "space_vector_fixed": "for c in [0, 1]^3, f(c) in [0, 1]",
+    # a per-element bound is not a bound on the sum: twelve monthly
+    # returns each within 0.1 add up past it, and the probe finds a
+    # twelve-vector that does
+    "space_vector_fixed_trap": "for r in [-0.1, 0.1]^12, f(r) <= 0.1",
+    # true at the fixed length and false for every other: the proof is
+    # made at length 12 and the sketch says so
+    "space_vector_fixed_sketch": "for r in [-0.1, 0.1]^12, f(r) >= -1.2",
+    # a fixed matrix shape; the matrix algebra proves the trace of a
+    # product with its own transpose non-negative, at 3 by 3
+    "space_matrix_fixed": "for A in [-1, 1]^(3,3), f(A) >= 0",
+    # a name and a fixed axis in one binding (n observations of 3
+    # features), and the OUTPUT's space: judged by the output's shape
+    "space_matrix_mixed": "for A in R^(n,3), f(A) in R^(3,3)",
+    # the trap: a 3 by 3 Gram matrix is not n by 3, so a wrong output
+    # shape is outside the space it was said to be in
+    "space_output_wrong_shape": "for A in R^(n,3), f(A) in R^(n,3)",
+    # a shared name draws x to A's rows; the output is A's other axis
+    "space_output_named": "for A in R^(n,15), x in [-1e6, 1e6]^n, f(A, x) in R^15",
+    # a fixed shape has an outside (a wrong size on a fixed axis, a
+    # wrong rank); an unguarded function accepts it and the exclusion
+    # claim says so with the shape it accepted
+    "space_excluded_fixed": "for A in R^(30,15), excluded_outside_domain(A)",
+    # the same claim on a function `enforce_dimensions()` guards: the
+    # decorator makes it true and declares it, so it is proven by
+    # construction; the postfix spelling reads as a sentence
+    "space_excluded_by_construction":
+        "for A in R^(30,15), A excluded outside domain",
+    # a premise the binding cannot satisfy is a vacuous claim and is
+    # reported as one, naming the premise and the fixed length
+    "dim_premise_against_fixed":
+        "for r in [0, 1]^12, assuming len(r) == 5, f(r) >= 0",
     "domain_closed_interval": "for x in [0, 1], f(x) >= 0",
+    # a function @enforce_domain() guards is checked over the domain its
+    # guard admits: a blend of x with 1 never exceeds x when x is at
+    # least 1
+    "enforce_domain_guard": "for alpha in [0, 1], x in [1, 10], f(x, alpha) <= x",
+    # a parameter the claim leaves unbound ranges over what the guard
+    # admits: alpha in [0, 1] here comes from the guard alone
+    "enforce_domain_guard_unbound": "for x in [1, 10], f(x, alpha) <= x",
     "domain_open_interval": "for x in (0, 1), f(x) >= 0",
     "domain_subset_integer": "for n in [0, 100] subset Z, f(n) >= 0",
     # a subscripted sequence element: no algebraic reading, carried
@@ -84,19 +158,41 @@ LEXICON: dict[str, str] = {
     # adjudicate it yet)
     "outcome_reference": "f(x) > 0 => self.stays_positive",
     "raises_typed": "raises(f(x), ValueError)",
+    # the same claim over a region where the function does raise
+    "raises_typed_region": "for x in [-10, -1], raises(f(x), ValueError)",
     "is_pole_safe": "is_pole_safe(x)",
     "negated_predicate": "not is_pole_safe(x)",
-    "is_extremity_safe": "is_extremity_safe(x)",
+    "is_overflow_safe": "is_overflow_safe(x)",
+    # a retired family spelling, accepted and resolved to its new name
+    "retired_family_spelling": "is_builtin_safe(x)",
     "is_representation_safe": "is_representation_safe(x)",
     "is_empty_safe": "is_empty_safe(xs)",
-    "is_arbitrary_input_safe": "is_arbitrary_input_safe(s)",
-    "is_compendium_safe": "is_compendium_safe(numpy)",
-    "is_compendium_safe_scoped":
-        "for x in [0, 1e6], is_compendium_safe(numpy)",
-    "is_arbitrary_input_safe_postfix": "s is arbitrary input safe",
+    "is_language_defined": "is_language_defined(s)",
+    "is_library_safe": "is_library_safe(numpy)",
+    "is_library_safe_scoped":
+        "for x in [0, 1e6], is_library_safe(numpy)",
+    "is_language_defined_postfix": "s is language defined",
     # the function-wide spelling: the predicate over f is the
     # conjunction over every numeric parameter
     "safety_predicate_function_wide": "is_missing_safe(f)",
+    # state safety watches the process too: an environment write, a draw
+    # from the global random generator
+    "state_safe_env_write": "is_state_safe(f)",
+    "state_safe_global_rng": "is_state_safe(f)",
+    # determinism is two calls at the same inputs, compared by kind: a
+    # global draw differs, NaN agrees with NaN, and a read of the
+    # environment holds with a note saying two calls cannot see it change
+    "deterministic_trap": "is_deterministic(f)",
+    "deterministic_nan_agrees": "is_deterministic(f)",
+    "deterministic_hidden_read": "is_deterministic(f)",
+    # emitting a log record through the standard library is not a state
+    # change; changing a logger's level is
+    "state_safe_logging": "is_state_safe(f)",
+    "state_safe_logging_config_trap": "is_state_safe(f)",
+    # drawing from a generator the caller passes in moves the caller's
+    # own generator, not shared state; the same seed gives the same draw
+    "state_safe_passed_generator": "is_state_safe(f)",
+    "reproducible_passed_generator": "is_reproducible(f)",
     # matrix structure predicates: a property of a matrix VALUE, on a
     # bare parameter (a precondition) or an f(...) output. The postfix
     # `A is symmetric` is sugar folding to the canonical call form.
@@ -131,6 +227,128 @@ LEXICON: dict[str, str] = {
     # the same bars around a matrix expression are its determinant
     "matrix_determinant_bars_compound":
         "for A in R^(n,n), B in R^(n,n), |A @ B| == |A| * |B|",
+    # linear algebra the numpy way: `*` and `**` elementwise (the
+    # Hadamard product, the elementwise power), `@` the matrix product,
+    # `matrix_power` the matrix power, an explicit `abs` elementwise
+    "matrix_hadamard_trace":
+        "for A in R^(n,n), B in R^(n,n), trace(A * B) == trace(A.T @ B)",
+    "matrix_power_word": "for A in R^(n,n), matrix_power(A, 2) == A @ A",
+    "matrix_elementwise_abs":
+        "for A in R^(n,n), trace(abs(A)) >= abs(trace(A))",
+    # norms: Euclidean on a vector, Frobenius on a matrix, `norm(A, 2)`
+    # the spectral norm
+    "vector_triangle_inequality":
+        "for x in R^n, y in R^n, norm(x + y) <= norm(x) + norm(y)",
+    "matrix_frobenius_norm":
+        "for A in R^(n,n), norm(A) ~= sqrt(trace(A.T @ A))",
+    "matrix_spectral_norm": "for A in R^(n,n), norm(A, 2) <= norm(A)",
+    # the same norms written with double bars, the order a subscript:
+    # bare bars are the Euclidean norm of a vector and the Frobenius
+    # norm of a matrix, `_1`, `_2`, `_inf` (also `_oo`, `_∞`) and an
+    # integer `_p` name the others, `_2` on a matrix the spectral norm,
+    # and `^2` after the bars is the square, never an order
+    "norm_bars_euclidean": "for x in R^n, f(x) ~= ||x||",
+    "norm_bars_two": "for x in R^n, f(x) ~= ||x||_2",
+    "norm_bars_one": "for x in R^n, f(x) ~= ||x||_1",
+    "norm_bars_inf": "for x in R^n, f(x) ~= ||x||_inf",
+    # the whole-number order: a p-norm implementation against `||x||_3`
+    "norm_bars_integer_order": "for x in [-1e6, 1e6]^n, f(x, 3) ~= ||x||_3",
+    # the chain of orders; it teaches the orders, since a function at
+    # either endpoint satisfies it too
+    "norm_bars_chain": "for x in [-1e6, 1e6]^n, ||x||_inf <= f(x) <= ||x||_1",
+    # a norm scales with the magnitude of the factor, never its sign
+    "norm_bars_homogeneous":
+        "for x in R^n, let c be [-2, 2], f(c * x) ~= |c| * ||x||",
+    "norm_bars_homogeneous_sign_trap":
+        "for x in R^n, let c be [-2, 2], f(c * x) ~= c * ||x||",
+    # a normalisation has unit length and points along its argument,
+    # away from the zero vector, which the premise excludes
+    "norm_bars_unit_vector": "assuming ||x|| > 0, for x in R^n, ||f(x)|| ~= 1",
+    "norm_bars_direction": "assuming ||x|| > 0, for x in R^n, f(x) ~= x / ||x||",
+    # a distance: the norm of the difference, symmetric, and at most
+    # the sum of the two lengths
+    "norm_bars_distance": "for x in R^n, y in R^n, f(x, y) ~= ||x - y||",
+    "norm_bars_distance_symmetric":
+        "for x in R^n, y in R^n, f(y, x) == ||x - y||",
+    "norm_bars_triangle": "for x in [-1e6, 1e6]^n, y in [-1e6, 1e6]^n, f(x, y) <= ||x|| + ||y||",
+    # a stopping criterion: the step is within the tolerance
+    "norm_bars_stopping_criterion":
+        ("for x_new in R^n, x_old in R^n, tol in [0.01, 1], "
+         "f(x_new, x_old, tol) == (||x_new - x_old|| <= tol)"),
+    # the nearest row of a matrix is no farther than its first row
+    "norm_bars_nearest_distance":
+        "for points in [-1e6, 1e6]^(m,n), q in [-1e6, 1e6]^n, f(points, q) <= ||points[0, :] - q||",
+    "norm_bars_nearest_distance_trap":
+        "for points in R^(m,n), q in R^n, f(points, q) >= ||points[0, :] - q||",
+    # a tracking error over two pandas Series, and a root mean square
+    # error
+    "norm_bars_series_tracking_error":
+        "for port in R^n, bench in R^n, f(port, bench) ~= ||port - bench||",
+    "norm_bars_rmse":
+        ("for pred in R^n, actual in R^n, "
+         "f(pred, actual) ~= ||pred - actual|| / sqrt(len(pred))"),
+    # long-only portfolio weights from positive scores sum to one, so
+    # their L1 norm is one
+    "norm_bars_portfolio_weights":
+        "for scores in [0.1, 10]^n, ||f(scores)||_1 ~= 1",
+    # `^2` after the bars is the square, never an order: a squared
+    # length is `||x||^2`, and a Manhattan length is not
+    "norm_bars_squared": "for x in [-1e6, 1e6]^n, f(x) ~= ||x||^2",
+    "norm_bars_squared_trap": "for x in [-1, 1]^n, f(x) ~= ||x||^2",
+    # the trap: a Manhattan length claimed as the Euclidean norm is
+    # falsified with a witness
+    "norm_bars_order_trap": "for x in [-1, 1]^n, f(x) ~= ||x||_2",
+    "matrix_norm_bars_frobenius": "for A in R^(m,n), f(A) ~= ||A||",
+    # the squared Frobenius norm is the trace of the Gram matrix
+    "matrix_norm_bars_gram_trace": "for A in R^(m,n), ||A||^2 ~= f(A)",
+    # numpy's matrix orders: `_1` the largest column sum, `_inf` the
+    # largest row sum, `_2` the largest singular value
+    "matrix_norm_bars_one": "for A in R^(m,n), f(A) ~= ||A||_1",
+    "matrix_norm_bars_inf": "for A in R^(m,n), f(A) ~= ||A||_inf",
+    "matrix_norm_bars_order_trap": "for A in R^(m,n), f(A) ~= ||A||_inf",
+    "matrix_norm_bars_spectral": "for A in R^(n,n), f(A) ~= ||A||_2",
+    "matrix_norm_bars_spectral_below_frobenius":
+        "for A in R^(n,n), f(A) <= ||A||",
+    # the vocabulary words
+    "vector_dot": "for x in R^n, y in R^n, dot(x, y) == dot(y, x)",
+    "vector_outer": "for x in R^n, y in R^n, outer(x, y).T == outer(y, x)",
+    "matrix_kron_transpose":
+        "for A in R^(n,n), B in R^(n,n), kron(A, B).T == kron(A.T, B.T)",
+    "matrix_diag_trace": "for A in R^(n,n), sum(diag(A)) ~= trace(A)",
+    "matrix_rank_transpose": "for A in R^(n,n), rank(A.T) == rank(A)",
+    "matrix_eigvals_trace": "for A in R^(n,n), sum(eigvals(A)) ~= trace(A)",
+    "matrix_eigvalsh_positive": ("assuming A is positive definite, "
+                                 "for A in R^(n,n), min(eigvalsh(A)) > 0"),
+    "matrix_cond_at_least_one": "for A in R^(n,n), cond(A) >= 1",
+    # a vector of the claim's own, sized by the matrix's dimension
+    "matrix_solve": ("let b be R^n, assuming det(A) != 0, "
+                     "for A in R^(n,n), A @ solve(A, b) ~= b"),
+    "matrix_pinv": "for A in R^(m,n), A @ pinv(A) @ A ~= A",
+    # `x.T @ A @ x` is a number; `x != 0` says x is not the zero vector
+    "matrix_quadratic_form": ("assuming A is positive definite and x != 0, "
+                              "for A in R^(n,n), x in R^n, x.T @ A @ x > 0"),
+    # a structure premise beside a relation premise
+    "matrix_structure_and_relation_premise":
+        ("assuming A is symmetric and det(A) != 0, "
+         "for A in R^(n,n), inv(A) ~= inv(A).T"),
+    "matrix_row_and_column": "for A in R^(n,n), A[0, :] == A.T[:, 0]",
+    "matrix_axis_sum":
+        "for A in R^(n,n), sum(A, axis=0) ~= sum(A.T, axis=1)",
+    "matrix_axis_mean":
+        "for A in R^(m,n), mean(A, axis=1) ~= sum(A, axis=1) / n",
+    # a decomposition is a claim about its factors
+    "matrix_qr_factors":
+        "let q = numpy.linalg.qr, for A in R^(n,n), q(A)[0] @ q(A)[1] ~= A",
+    # a DataFrame's column, as an attribute or an item, is a vector
+    "table_column_attribute": "for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df.returns",
+    "table_column_item": 'for df in [-1e6, 1e6]^n, c in [-2, 2], f(df, c) == c * df["returns"]',
+    # a running maximum, the least and greatest elements, and a table's
+    # columns read as vectors on the derive route
+    "vector_running_maximum": "for a in R^n, f(a) == cummax(a)",
+    "vector_between_least_and_greatest":
+        "for xs in R^n, min(xs) <= f(xs) <= max(xs)",
+    "vector_drawdown_bounds": "for prices in [1, 100]^n, -1 <= f(prices) <= 0",
+    "table_columns_dot": "for df in [0, 1]^n, f(df) ~= dot(df.w, df.r)",
     "inferred_literal_domain": "raises(f(50, 0), ValueError)",
     # let: alias, function binding, free variable -----------------
     "let_alias": ("let m = m1, for m1 in [0.1,1000], x1 in [-100,100], "
@@ -196,6 +414,9 @@ LEXICON: dict[str, str] = {
     "auto_let_long_param": "for acceleration in [0, 100], f(acceleration) >= 0",
     "auto_let_long_func": ("let compute_square_root = numpy.sqrt, for x in [0, 100], "
                           "compute_square_root(x) >= 0"),
+    # a keyword argument to a named function, kept as written --------
+    "let_function_keyword": ("let g = numpy.round, for x in [0, 1], "
+                             "g(x, decimals=1) <= 1"),
     # mixed unicode/ascii spelling in the input --------------------
     # the grammar accepts either spelling for most tokens; these mix
     # them within one claim on purpose, to check that the *output*
@@ -216,6 +437,14 @@ LEXICON: dict[str, str] = {
     "tolerance_eps_ascii": "for x in [0, 1], abs(f(x) - x) <= eps",
     "tolerance_epsilon_word": "for x in [0, 1], abs(f(x) - x) <= epsilon",
     "tolerance_epsilon_latex": "for x in [0, 1], abs(f(x) - x) \\leq \\epsilon",
+    # `~=` is `abs(a - b) <= ε`: an offset of 1e-12 is within the 1e-9
+    # default, and exact equality is falsified by it
+    "exact_offset_vs_approx": "for x in [0, 1], f(x) ~= x",
+    "exact_offset_vs_approx_trap": "for x in [0, 1], f(x) == x",
+    # a truncated Taylor series is not the sine, and on a wide enough
+    # range not within ε of it either (the gap at 0.5 is about 2.6e-4)
+    "approx_taylor_sin_exact_fails": "for x in [0, 0.01], f(x) == sin(x)",
+    "approx_too_wide": "for x in [0, 0.5], f(x) ~= sin(x)",
     # derivatives: one primitive, many spellings -------------------
     "derivative_call": "d(f(x), x) >= 0",
     "derivative_prime": "f'(x) >= 0",
@@ -244,7 +473,7 @@ LEXICON: dict[str, str] = {
                                    "f(x) == 2*x"),
     # a premise resting on ANOTHER function's claim, the key dotted
     # before the claim name; resolution prefers an in-batch sibling,
-    # then the verified layer (materialised library-stub rows included)
+    # then the verified layer (library rows verify adjudicated included)
     "assuming_qualified_prerequisite": (
         "assuming numpy.clip.clip_lower holds, "
         "for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)"),
@@ -365,6 +594,97 @@ LEXICON: dict[str, str] = {
                                   "f(a) == a[2][2]"),
     "dim_premise_rectangular_matrix": ("assuming min(m, n) >= 3, "
                                        "for a in R^(m,n), f(a) == a[2][2]"),
+    # language domains: a string parameter quantified over a named
+    # language. `L[unicode]` is every string, the empty string
+    # included; `\\ {""}` excludes it; the missing-value policy reads
+    # as it does for a number. The names resolve through the
+    # mathema-language package. The claims are the ones a parser or a
+    # normaliser earns: idempotence, a length bound, a section (an
+    # inverse on the image)
+    "language_alphabet": "for s in L[unicode], f(f(s)) == f(s)",
+    "language_contraction": "for s in L[unicode], len(f(s)) <= len(s)",
+    "language_excluding_empty":
+        'for s in L[unicode] \\ {""}, len(f(s)) >= 1',
+    "language_membership_symbol":
+        "for s ∈ L[unicode], len(f(s)) >= len(s)",
+    "language_section":
+        "let u = mathema.lexicon.unescape_angle, for s in L[unicode], "
+        "u(f(s)) == s",
+    "language_missing_excluded":
+        "for s in L[unicode] \\ {∅}, len(f(s)) <= len(s)",
+    "language_closure": "for s in L[unicode], f(s) in L[unicode]",
+    "language_length_bound": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
+    "containment_absent": 'for s in L[unicode], "<" not in f(s)',
+    "membership_interval_reduces_to_chain": "for x in [0, 1], f(x) in [0, 1]",
+    # what a function does with a value that is not there: a policy row
+    # names the kind (`missing`, a hole in a slot; `absent`, the object
+    # not there), the parameter, optionally one member, and one of five
+    # behaviours counted in no-value slots
+    "missing_propagates": "missing(f, variance) propagates",
+    "missing_drops": "missing(f, rate) drops",
+    "missing_trap_silent_drop": "missing(f, rate) propagates",
+    "missing_raises": "missing(f, ratio) raises(ValueError)",
+    "missing_converts": "missing(f, price) converts",
+    "missing_introduces": "assuming count(weights) >= 1, missing(f, weights) introduces",
+    "missing_introduces_by_shape":
+        "assuming count(prices) >= 1, missing(f, prices) introduces",
+    "absent_raises": "absent(f, score) raises(TypeError)",
+    "absent_drops": "absent(f, fx_rate) drops",
+    "absent_propagates": "absent(f, amount) propagates",
+    "absent_converts": "absent(f, price) converts",
+    "missing_member_null": "missing(f, positions, null) raises(TypeError)",
+    "missing_member_nan": "missing(f, positions, nan) propagates",
+    "missing_class_row_contradicted": "missing(f, positions) propagates",
+    "missing_premise_values_remain": "assuming count(xs) >= 1, missing(f, xs) drops",
+    "missing_premise_no_values": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+    "missing_premise_all_na_raises":
+        "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+    "missing_member_defined": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+    "missing_trap_comparison": "missing(f, score) drops",
+    "missing_predicate_sugar": "missing_propagates(f, variance)",
+    "absent_none_spelling": "None(f, score) raises",
+    "is_missing_safe_gate": "is_missing_safe(f)",
+    "is_missing_safe_gate_falsified": "is_missing_safe(f)",
+    "is_absent_safe_gate": "is_absent_safe(f)",
+    "is_absent_safe_gate_falsified": "is_absent_safe(f)",
+    "is_empty_safe_hole": "is_empty_safe(returns)",
+    "is_empty_safe_identity": "is_empty_safe(volumes)",
+    # a field or key along a path: where the None sits decides the kind,
+    # and absence has the members null (held) and unset (left out)
+    "absent_field_raises": "absent(f, trade.memo) raises(TypeError)",
+    "is_absent_safe_field": "is_absent_safe(f)",
+    "absent_key_left_out": ('for order.side in {"buy", "sell"} | {None} \\ {null}, '
+                            'len(f(order)) >= 1'),
+    # a series of returns: a transform bound by `let`, a statistic as a
+    # premise, and a length premise on a call -------------------------
+    # `mathema.f.scale_seq` scales every entry by `c`; a Sharpe ratio
+    # is unchanged by that, proven through the pandas definition rows
+    # for every length from 2
+    "let_scale_seq_sharpe_premise": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], assuming std(returns, ddof=1) > 0, "
+        "f(s(returns, c)) ~= f(returns)"),
+    # the same claim without its premise is falsified at `returns=[0.0]`,
+    # where the sample standard deviation is undefined and the ratio is
+    # NaN: the premise names the series the ratio is about
+    "let_scale_seq_sharpe_trap": (
+        "for returns in [-0.1, 0.1]^n, let s = mathema.f.scale_seq, "
+        "let c be [0.1, 10], f(s(returns, c)) ~= f(returns)"),
+    # `mathema.f.shift_seq` adds `c` to every entry; a range does not
+    # move (holds on the probe route)
+    "let_shift_seq_range": ("for a in [-100, 100]^n, let s = mathema.f.shift_seq, "
+                            "let c be [-5, 5], f(s(a, c)) == f(a)"),
+    # a mean does move under a shift: falsified, with the witness
+    "let_shift_seq_mean_moves": ("for xs in [-1, 1]^n, let s = mathema.f.shift_seq, "
+                                 "let c be [0.1, 1], f(s(xs, c)) ~= f(xs)"),
+    # a statistic of the vector as the premise; `std` is computed
+    # exactly, so a constant vector is outside however float rounds it
+    "assuming_spread_positive": ("for returns in [-0.1, 0.1]^n, "
+                                 "assuming std(returns, ddof=1) > 0, is_defined(f)"),
+    # a length premise written on the parameter's `dim`, beside the
+    # marker form `assuming n >= 2` ("dim_marker_premise")
+    "dim_call_premise": ("assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, "
+                         "f(returns) >= 0"),
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -380,17 +700,27 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "factorial_postfix", "dim_length_premise",
         "dim_conformability", "dim_marker_premise",
         "space_vector_real", "space_vector_bounded", "space_matrix",
-        "space_shared_dim",
+        "space_shared_dim", "space_vector_fixed", "space_vector_fixed_trap",
+        "space_vector_fixed_sketch", "space_matrix_fixed",
+        "space_matrix_mixed", "space_output_wrong_shape",
+        "space_output_named", "space_excluded_fixed",
+        "space_excluded_by_construction", "dim_premise_against_fixed",
         "domain_closed_interval",
         "domain_open_interval", "domain_subset_integer",
         "relation_indexing", "relation_boolean_rhs",
-        "outcome_reference", "raises_typed",
-        "is_pole_safe", "negated_predicate", "is_extremity_safe",
+        "outcome_reference", "raises_typed", "raises_typed_region",
+        "is_pole_safe", "negated_predicate", "is_overflow_safe",
+        "retired_family_spelling",
         "is_representation_safe", "is_empty_safe",
-        "is_arbitrary_input_safe", "is_arbitrary_input_safe_postfix",
-        "is_compendium_safe", "is_compendium_safe_scoped",
+        "is_language_defined", "is_language_defined_postfix",
+        "is_library_safe", "is_library_safe_scoped",
         "is_sorted_output", "output_never_none",
-        "safety_predicate_function_wide", "matrix_symmetric",
+        "safety_predicate_function_wide", "state_safe_env_write",
+        "state_safe_global_rng", "deterministic_trap",
+        "deterministic_nan_agrees", "deterministic_hidden_read",
+        "state_safe_logging", "state_safe_logging_config_trap",
+        "state_safe_passed_generator", "reproducible_passed_generator",
+        "matrix_symmetric",
         "matrix_symmetric_postfix", "matrix_symmetric_output",
         "matrix_positive_definite", "matrix_finite",
         "matrix_determinant_product", "matrix_transpose_product",
@@ -398,12 +728,39 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "matrix_output_symmetric_postfix", "matrix_transpose_sugar",
         "matrix_determinant_sugar", "matrix_determinant_bars_compound",
         "inferred_literal_domain"),
+    "linear_algebra": (
+        "matrix_hadamard_trace", "matrix_power_word",
+        "matrix_elementwise_abs", "vector_triangle_inequality",
+        "matrix_frobenius_norm", "matrix_spectral_norm",
+        "norm_bars_euclidean", "norm_bars_two", "norm_bars_one",
+        "norm_bars_inf", "norm_bars_integer_order", "norm_bars_chain",
+        "norm_bars_homogeneous", "norm_bars_homogeneous_sign_trap",
+        "norm_bars_unit_vector", "norm_bars_direction",
+        "norm_bars_distance", "norm_bars_distance_symmetric",
+        "norm_bars_triangle", "norm_bars_stopping_criterion",
+        "norm_bars_nearest_distance", "norm_bars_nearest_distance_trap",
+        "norm_bars_series_tracking_error", "norm_bars_rmse",
+        "norm_bars_portfolio_weights", "norm_bars_squared",
+        "norm_bars_squared_trap", "norm_bars_order_trap",
+        "matrix_norm_bars_frobenius", "matrix_norm_bars_gram_trace",
+        "matrix_norm_bars_one", "matrix_norm_bars_inf",
+        "matrix_norm_bars_order_trap", "matrix_norm_bars_spectral",
+        "matrix_norm_bars_spectral_below_frobenius", "vector_dot",
+        "vector_outer", "matrix_kron_transpose", "matrix_diag_trace",
+        "matrix_rank_transpose", "matrix_eigvals_trace",
+        "matrix_eigvalsh_positive", "matrix_cond_at_least_one",
+        "matrix_solve", "matrix_pinv", "matrix_quadratic_form",
+        "matrix_structure_and_relation_premise", "matrix_row_and_column",
+        "matrix_axis_sum", "matrix_axis_mean", "matrix_qr_factors",
+        "table_column_attribute", "table_column_item",
+        "vector_running_maximum", "vector_between_least_and_greatest",
+        "vector_drawdown_bounds", "table_columns_dot"),
     "lets": (
         "let_alias", "let_function_dotted", "let_free_var_closed",
         "named_under_test", "let_alias_for_under_test",
         "let_free_var_typed", "let_pseudo_infinity",
         "auto_let_greek_param", "auto_let_long_param",
-        "auto_let_long_func"),
+        "auto_let_long_func", "let_function_keyword"),
     "notation": (
         "forall_symbol", "domain_subset_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",
@@ -414,10 +771,14 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "latex_geqslant", "latex_varepsilon", "latex_varphi",
         "latex_left_right_bars"),
     "domains": (
-        "domain_excluded_point", "domain_discrete_strings",
+        "domain_excluded_point", "enforce_domain_guard",
+        "enforce_domain_guard_unbound",
+        "domain_discrete_strings",
         "domain_natural_numbers", "domain_complex", "relation_approx",
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex",
+        "exact_offset_vs_approx", "exact_offset_vs_approx_trap",
+        "approx_taylor_sin_exact_fails", "approx_too_wide",
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite"),
     "integer_parts": (
@@ -457,6 +818,30 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "mixed_backslash_greek_and_unicode_relation",
         "stress_gauge_invariance", "stress_mixed_let_and_types",
         "chained_comparison", "euler_via_exp"),
+    "missing": (
+        "missing_propagates", "missing_drops", "missing_trap_silent_drop",
+        "missing_raises", "missing_converts", "missing_introduces",
+        "missing_introduces_by_shape", "absent_raises", "absent_drops",
+        "absent_propagates", "absent_converts", "missing_member_null",
+        "missing_member_nan", "missing_class_row_contradicted",
+        "missing_premise_values_remain", "missing_premise_no_values",
+        "missing_premise_all_na_raises", "missing_member_defined",
+        "missing_trap_comparison", "missing_predicate_sugar",
+        "absent_none_spelling", "is_missing_safe_gate",
+        "is_missing_safe_gate_falsified", "is_absent_safe_gate",
+        "is_absent_safe_gate_falsified", "is_empty_safe_hole",
+        "is_empty_safe_identity", "absent_field_raises", "is_absent_safe_field",
+        "absent_key_left_out"),
+    "languages": (
+        "language_alphabet", "language_contraction",
+        "language_excluding_empty", "language_membership_symbol",
+        "language_section", "language_missing_excluded",
+        "language_closure", "language_length_bound", "containment_absent",
+        "membership_interval_reduces_to_chain"),
+    "series": (
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+        "let_shift_seq_range", "let_shift_seq_mean_moves",
+        "assuming_spread_positive", "dim_call_premise"),
 }
 
 
@@ -467,6 +852,77 @@ SECTIONS: dict[str, tuple[str, ...]] = {
 # find `%`, and someone looking for "for all" should find `∀`. Keep it
 # to vocabulary a newcomer would actually type.
 TAGS: dict[str, tuple[str, ...]] = {
+    "enforce_domain_guard_unbound": ("guard", "unbound parameter",
+                                     "enforce_domain"),
+    "state_safe_logging": ("logging", "log record", "state", "audit log"),
+    "state_safe_logging_config_trap": ("logging", "log level", "state",
+                                       "trap"),
+    "state_safe_passed_generator": ("generator", "rng", "random", "state"),
+    "reproducible_passed_generator": ("reproducible", "generator", "seed",
+                                      "rng"),
+    "raises_typed_region": ("raises", "exception", "in a range", "region",
+                            "precondition"),
+    "state_safe_env_write": ("state", "side effect", "environment variable",
+                             "os.environ", "trap"),
+    "state_safe_global_rng": ("state", "side effect", "global random",
+                              "random seed", "trap"),
+    "deterministic_trap": ("deterministic", "same answer twice", "random",
+                           "falsified", "trap"),
+    "deterministic_nan_agrees": ("deterministic", "nan determinism",
+                                 "missing", "same answer twice"),
+    "deterministic_hidden_read": ("deterministic", "hidden input",
+                                  "environment", "clock", "file"),
+    "enforce_domain_guard": ("enforce_domain guard", "guard", "decorator",
+                             "domain", "validation"),
+    "norm_bars_euclidean": ("norm", "euclidean", "length", "double bars"),
+    "norm_bars_two": ("norm", "subscript", "euclidean", "L2"),
+    "norm_bars_one": ("norm", "subscript", "manhattan", "taxicab", "L1"),
+    "norm_bars_inf": ("norm", "subscript", "infinity", "max norm",
+                      "largest magnitude"),
+    "norm_bars_integer_order": ("norm", "subscript", "p-norm", "whole number"),
+    "norm_bars_chain": ("norm", "subscript", "chain", "norm inequality"),
+    "norm_bars_homogeneous": ("norm", "euclidean", "homogeneous", "scaling",
+                              "magnitude"),
+    "norm_bars_homogeneous_sign_trap": ("norm", "falsified", "trap", "sign",
+                                        "homogeneous"),
+    "norm_bars_unit_vector": ("norm", "euclidean", "unit vector",
+                              "normalisation", "normalization", "premise"),
+    "norm_bars_direction": ("norm", "euclidean", "direction", "unit vector",
+                            "normalisation", "vector equality"),
+    "norm_bars_distance": ("norm", "euclidean", "distance"),
+    "norm_bars_distance_symmetric": ("norm", "distance", "symmetric"),
+    "norm_bars_triangle": ("norm", "distance", "triangle inequality"),
+    "norm_bars_stopping_criterion": ("norm", "distance", "converged",
+                                     "stopping", "tolerance", "boolean"),
+    "norm_bars_nearest_distance": ("norm", "distance", "nearest neighbour",
+                                   "nearest neighbor", "rows"),
+    "norm_bars_nearest_distance_trap": ("norm", "falsified", "trap",
+                                        "nearest neighbour"),
+    "norm_bars_series_tracking_error": ("norm", "pandas", "series",
+                                        "tracking error", "portfolio"),
+    "norm_bars_rmse": ("norm", "rmse", "root mean square", "error"),
+    "norm_bars_portfolio_weights": ("norm", "subscript", "portfolio",
+                                    "weights", "long only", "sum to one"),
+    "norm_bars_squared": ("norm", "euclidean", "squared", "dot product"),
+    "norm_bars_squared_trap": ("norm", "falsified", "trap", "squared",
+                               "manhattan"),
+    "norm_bars_order_trap": ("norm", "subscript", "falsified", "trap",
+                             "wrong order", "manhattan"),
+    "matrix_norm_bars_frobenius": ("norm", "frobenius", "matrix"),
+    "matrix_norm_bars_gram_trace": ("norm", "frobenius", "gram", "trace",
+                                    "matrix"),
+    "matrix_norm_bars_one": ("norm", "subscript", "matrix", "column sum"),
+    "matrix_norm_bars_inf": ("norm", "subscript", "matrix", "row sum"),
+    "matrix_norm_bars_order_trap": ("norm", "subscript", "matrix", "falsified",
+                                    "trap", "wrong order"),
+    "matrix_norm_bars_spectral": ("norm", "subscript", "spectral",
+                                  "singular value", "matrix"),
+    "matrix_norm_bars_spectral_below_frobenius": ("norm", "spectral",
+                                                  "frobenius", "matrix"),
+    "vector_running_maximum": ("cummax", "running maximum", "peak"),
+    "vector_drawdown_bounds": ("drawdown", "cummax"),
+    "vector_between_least_and_greatest": ("min", "max", "mean bounds"),
+    "table_columns_dot": ("dataframe", "weighted return", "column"),
     "relation_le_unicode": ("unicode", "symbols", "less than or equal"),
     "equivalence_canonical": ("equivalence", "two implementations",
                               "same mathematics", "refactor"),
@@ -477,6 +933,22 @@ TAGS: dict[str, tuple[str, ...]] = {
     "domain_open_interval": ("open", "exclusive", "endpoint"),
     "domain_subset_integer": ("integer", "whole numbers", "type refinement"),
     "domain_excluded_point": ("exclusion", "except", "singularity", "hole"),
+    "language_alphabet": ("string", "text", "language", "unicode",
+                          "idempotent", "normaliser"),
+    "language_contraction": ("string", "length", "shorter"),
+    "language_excluding_empty": ("string", "empty string", "non-empty"),
+    "language_membership_symbol": ("string", "escape", "longer"),
+    "language_section": ("string", "round trip", "inverse", "escape",
+                         "unescape", "parser", "renderer"),
+    "language_missing_excluded": ("string", "missing", "None"),
+    "language_length_bound": ("string", "length", "max length", "maxlength",
+                              "at most", "len", "characters"),
+    "language_closure": ("string", "in", "member", "closure", "output language",
+                         "element of"),
+    "containment_absent": ("string", "not in", "contains", "substring", "token",
+                           "never contains", "escape"),
+    "membership_interval_reduces_to_chain": ("in", "interval", "range", "between",
+                                             "chain", "bounded output"),
     "domain_natural_numbers": ("natural", "counting", "nonnegative integer"),
     "domain_complex": ("complex numbers", "imaginary", "plane"),
     "raises_typed": ("exception", "error", "raises", "precondition"),
@@ -485,6 +957,23 @@ TAGS: dict[str, tuple[str, ...]] = {
     "dim_conformability": ("shape", "conformable", "matching lengths"),
     "space_vector_real": ("vector space", "free dimension", "R^n"),
     "space_matrix": ("matrix space", "shape", "R^(m,n)"),
+    "space_vector_fixed": ("fixed size", "exactly", "fixed length", "RGB"),
+    "space_vector_fixed_trap": ("fixed size", "length 12", "sum bound",
+                                "monthly returns"),
+    "space_vector_fixed_sketch": ("fixed size", "length 12", "sketch",
+                                  "true at one length"),
+    "space_matrix_fixed": ("fixed size", "3 by 3", "fixed shape", "trace"),
+    "space_matrix_mixed": ("output shape", "mixed dimensions", "Gram matrix",
+                           "features"),
+    "space_output_wrong_shape": ("output shape", "wrong shape",
+                                 "outside the space"),
+    "space_output_named": ("output shape", "shared dimension", "named axis"),
+    "space_excluded_fixed": ("fixed size", "wrong shape", "rejects",
+                             "exclusion"),
+    "space_excluded_by_construction": ("fixed size", "enforce_dimensions",
+                                       "by construction", "guard"),
+    "dim_premise_against_fixed": ("fixed size", "length 12", "vacuous",
+                                  "contradiction"),
     "dim_premise_vector_bound": ("minimum length", "at least", "vector size"),
     "dim_premise_square_matrix": ("square matrix", "minimum size", "at least"),
     "dim_premise_rectangular_matrix": ("rectangular matrix", "rows", "columns",
@@ -505,9 +994,11 @@ TAGS: dict[str, tuple[str, ...]] = {
     "assuming_nonzero": ("premise", "nonzero", "division by zero"),
     "assuming_named_claim": ("premise", "another claim", "depends on"),
     "is_pole_safe": ("pole", "singularity", "divide by zero", "safety"),
-    "is_extremity_safe": ("extremes", "overflow", "large values", "safety"),
-    "is_arbitrary_input_safe": ("fuzz", "robustness", "arbitrary input",
-                                "safety"),
+    "is_overflow_safe": ("extremes", "overflow", "large values", "safety",
+                         "extremity"),
+    "retired_family_spelling": ("builtin", "renamed", "old name"),
+    "is_language_defined": ("fuzz", "robustness", "arbitrary input",
+                            "safety"),
     "is_empty_safe": ("empty", "empty list", "degenerate", "safety"),
     "matrix_symmetric": ("symmetric", "structure", "matrix property"),
     "matrix_determinant_product": ("determinant", "det", "multiplicative"),
@@ -540,16 +1031,185 @@ TAGS: dict[str, tuple[str, ...]] = {
                                      "conformable", "premise", "symmetry"),
     "premise_relates_two_params": ("premise", "relates two parameters",
                                    "ordering premise", "not a box"),
+    "missing_propagates": ("missing", "nan", "hole", "propagates", "policy",
+                           "volatility", "sqrt"),
+    "missing_drops": ("missing", "nan", "hole", "drops", "clamp", "stated"),
+    "missing_trap_silent_drop": ("missing", "nan", "drops", "clamp", "trap",
+                                 "silent", "contradicted", "default"),
+    "missing_raises": ("missing", "nan", "hole", "raises", "guard", "log return"),
+    "missing_converts": ("missing", "nan", "converts", "optional", "None out"),
+    "missing_introduces": ("missing", "nan", "introduces", "weights",
+                           "diff", "portfolio"),
+    "missing_introduces_by_shape": ("missing", "nan", "introduces", "rolling",
+                                    "moving average", "window", "pandas"),
+    "absent_raises": ("absent", "None", "optional", "raises", "TypeError"),
+    "absent_drops": ("absent", "None", "optional", "drops", "flag", "default",
+                     "currency"),
+    "absent_propagates": ("absent", "None", "optional", "propagates"),
+    "absent_converts": ("absent", "None", "optional", "converts", "nan out"),
+    "missing_member_null": ("missing", "null", "hole", "member", "raises",
+                            "list", "None element"),
+    "missing_member_nan": ("missing", "nan", "hole", "member", "propagates"),
+    "missing_class_row_contradicted": ("missing", "null", "nan", "mixed",
+                                       "member", "contradicted"),
+    "missing_premise_values_remain": ("missing", "NA", "skipna", "drops",
+                                      "count", "pandas", "mean"),
+    "missing_premise_no_values": ("missing", "nan", "skipna", "propagates",
+                                  "count", "all missing", "mean of nothing"),
+    "missing_premise_all_na_raises": ("missing", "NA", "raises", "count",
+                                      "all missing", "pandas"),
+    "missing_member_defined": ("missing", "null", "polars", "axiom",
+                               "definition", "drops"),
+    "missing_trap_comparison": ("missing", "nan", "drops", "comparison",
+                                "trap", "silent", "label"),
+    "missing_predicate_sugar": ("missing", "propagates", "sugar"),
+    "absent_none_spelling": ("absent", "None", "raises", "spelling"),
+    "is_missing_safe_gate": ("missing", "hole", "gate", "safety"),
+    "is_missing_safe_gate_falsified": ("missing", "hole", "gate", "safety",
+                                       "NaT", "falsified"),
+    "is_absent_safe_gate": ("absent", "None", "optional", "gate", "safety"),
+    "is_absent_safe_gate_falsified": ("absent", "None", "optional", "gate",
+                                      "unstated raise"),
+    "is_empty_safe_hole": ("empty", "empty array", "mean of nothing", "hole"),
+    "is_empty_safe_identity": ("empty", "empty series", "sum", "identity",
+                               "zero"),
+    "absent_field_raises": ("absent", "None", "field", "path", "record",
+                            "dataclass", "raises"),
+    "is_absent_safe_field": ("absent", "None", "field", "path", "gate",
+                             "unstated raise", "dataclass"),
+    "absent_key_left_out": ("absent", "unset", "null", "key", "path", "dict",
+                            "PATCH", "left out"),
 }
+
+
+LEXICON_GROUP = "mathema.lexicon"
+
+
+@dataclass(frozen=True)
+class LexiconSource:
+    """One lexicon: mathema's own, or a package's registered under
+    `mathema.lexicon`. `name` is `"mathema"` or the entry-point name;
+    `rows`, `sections`, `tags` and `example_functions` have the shapes
+    of this module's `LEXICON`, `SECTIONS`, `TAGS` and
+    `EXAMPLE_FUNCTIONS`."""
+    name: str
+    rows: dict
+    sections: dict
+    tags: dict
+    example_functions: dict
+
+
+def source_of(name: str, obj: object) -> LexiconSource:
+    """Intent:
+        The `LexiconSource` an object (a module, a class, an instance)
+        provides: its `LEXICON`, and its `SECTIONS`, `TAGS` and
+        `EXAMPLE_FUNCTIONS` where it has them. With no `SECTIONS`,
+        every row is in one section named after the source.
+    Raises:
+        TypeError: the object has no `LEXICON` mapping.
+    """
+    rows = getattr(obj, "LEXICON", None)
+    if not isinstance(rows, dict):
+        raise TypeError(f"lexicon {name!r} has no LEXICON mapping")
+    return LexiconSource(
+        name, dict(rows),
+        dict(getattr(obj, "SECTIONS", None) or {name: tuple(rows)}),
+        dict(getattr(obj, "TAGS", None) or {}),
+        dict(getattr(obj, "EXAMPLE_FUNCTIONS", None) or {}))
+
+
+#: `source_of` under the name the extension surface carries
+lexicon_source = source_of
+
+
+def _core() -> LexiconSource:
+    return LexiconSource("mathema", LEXICON, SECTIONS, TAGS, _examples())
+
+
+def _entry_points() -> tuple:
+    from importlib.metadata import entry_points
+    return tuple(sorted(entry_points(group=LEXICON_GROUP), key=lambda ep: ep.name))
+
+
+@functools.lru_cache(maxsize=1)
+def _extensions() -> tuple:
+    """Intent:
+        Every registered package lexicon, loaded, in entry-point name
+        order. One that fails to load or has no `LEXICON` is skipped
+        with a warning, and so is a row whose key another lexicon
+        already uses: mathema's own rows always win.
+    """
+    import warnings
+    taken = set(LEXICON)
+    out = []
+    for ep in _entry_points():
+        try:
+            found = source_of(ep.name, ep.load())
+        except Exception as e:
+            warnings.warn(f"mathema: lexicon {ep.value!r} registered under "
+                          f"{ep.name!r} failed to load ({e!r}), skipping it",
+                          stacklevel=2)
+            continue
+        clash = sorted(set(found.rows) & taken)
+        if clash:
+            warnings.warn(f"mathema: lexicon {ep.name!r} reuses the keys "
+                          f"{', '.join(clash)}, skipping those rows",
+                          stacklevel=2)
+        rows = {k: v for k, v in found.rows.items() if k not in taken}
+        taken |= set(rows)
+        out.append(LexiconSource(
+            found.name, rows,
+            {s: tuple(k for k in keys if k in rows) for s, keys in found.sections.items()},
+            {k: v for k, v in found.tags.items() if k in rows},
+            found.example_functions))
+    return tuple(out)
+
+
+def sources(*, extensions: bool = True) -> tuple:
+    """Every lexicon, mathema's own first, then each registered
+    package's, as `LexiconSource`s."""
+    return (_core(), *(_extensions() if extensions else ()))
+
+
+def _rows(extensions: bool = True) -> dict:
+    out: dict = {}
+    for src in sources(extensions=extensions):
+        out.update(src.rows)
+    return out
+
+
+def _sections(extensions: bool = True) -> dict:
+    out = dict(SECTIONS)
+    for src in sources(extensions=extensions)[1:]:
+        for name, keys in src.sections.items():
+            out[f"{src.name}/{name}"] = tuple(keys)
+    return out
+
+
+def _tags(extensions: bool = True) -> dict:
+    out: dict = {}
+    for src in sources(extensions=extensions):
+        out.update(src.tags)
+    return out
+
+
+def origin(key: str) -> str:
+    """Where a lexicon row came from: `"mathema"` for this module's own,
+    else the name its package registered under `mathema.lexicon`.
+    `KeyError` when no lexicon has the key."""
+    for src in sources():
+        if key in src.rows:
+            return src.name
+    raise KeyError(key)
 
 
 def _searchable(key: str) -> str:
     """Everything one entry can be found by, as one lowercased blob:
     its key, its law text, the section it belongs to, and any `TAGS`
     synonyms. Underscores become spaces so a key reads as words."""
-    section = next((name for name, keys in SECTIONS.items() if key in keys), "")
-    parts = [key.replace("_", " "), LEXICON.get(key, ""), section,
-             " ".join(TAGS.get(key, ()))]
+    section = next((name for name, keys in _sections().items() if key in keys), "")
+    parts = [key.replace("_", " "), _rows().get(key, ""), section,
+             " ".join(_tags().get(key, ()))]
     return " ".join(parts).lower()
 
 
@@ -585,8 +1245,9 @@ def search(query: str, *, limit: int = 8) -> list[tuple[str, str]]:
     words = [w for w in query.lower().replace("_", " ").split() if w]
     if not words:
         return []
+    rows = _rows()
     scored: list[tuple[float, str]] = []
-    for key in LEXICON:
+    for key in rows:
         blob = _searchable(key)
         haystack = blob.split()
         key_text = key.replace("_", " ").lower()
@@ -608,7 +1269,7 @@ def search(query: str, *, limit: int = 8) -> list[tuple[str, str]]:
         if score >= 0.6:
             scored.append((score, key))
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    return [(key, LEXICON[key]) for _score, key in scored[:limit]]
+    return [(key, rows[key]) for _score, key in scored[:limit]]
 
 
 def find(query: str, *, limit: int = 8) -> None:
@@ -622,23 +1283,27 @@ def find(query: str, *, limit: int = 8) -> None:
         return
     width = max(len(key) for key, _law in hits)
     for key, law in hits:
-        print(f"  {key:<{width}}  {law}")
+        where = origin(key)
+        print(f"  {key:<{width}}  {law}" + ("" if where == "mathema" else f"  [{where}]"))
 
 
-def entries(*sections: str) -> dict[str, str]:
-    """The lexicon, or just the named `SECTIONS` of it, as key -> law.
+def entries(*sections: str, extensions: bool = True) -> dict[str, str]:
+    """The lexicon, or just the named sections of it, as key -> law.
     No argument means everything: a full-sweep test iterates
-    `entries()`, a targeted one `entries("domains", "assuming")`.
-    An unknown section name raises with the roster."""
+    `entries()`, a targeted one `entries("domains", "assuming")`. A
+    registered package's rows are included, its sections named
+    `<name>/<section>`; `extensions=False` is mathema's own alone. An
+    unknown section name raises with the roster."""
+    rows, table = _rows(extensions), _sections(extensions)
     if not sections:
-        return dict(LEXICON)
+        return dict(rows)
     out: dict[str, str] = {}
     for name in sections:
-        if name not in SECTIONS:
+        if name not in table:
             raise KeyError(f"unknown lexicon section {name!r}; "
-                           f"sections: {', '.join(SECTIONS)}")
-        for key in SECTIONS[name]:
-            out[key] = LEXICON[key]
+                           f"sections: {', '.join(table)}")
+        for key in table[name]:
+            out[key] = rows[key]
     return out
 
 
@@ -653,6 +1318,87 @@ def matmul(A, B):
     return A @ B
 
 
+def luma(c: list) -> float:
+    """The luma of an RGB triple, a weighted sum whose weights add to
+    one; "space_vector_fixed": a vector of exactly three entries."""
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def year_total(r: list) -> float:
+    """The total of twelve monthly returns ("space_vector_fixed_trap",
+    "space_vector_fixed_sketch", "dim_premise_against_fixed")."""
+    return sum(r)
+
+
+def energy(v: list) -> float:
+    """The sum of squares of a vector's entries, never negative over
+    any length ("space_vector_real")."""
+    return sum(x * x for x in v)
+
+
+def gram_trace(A: "numpy.ndarray") -> float:
+    """The trace of A times its transpose, the sum of squares of every
+    entry; "space_matrix_fixed" proves it non-negative at 3 by 3 through
+    the matrix algebra."""
+    return float(np.trace(A @ A.T))
+
+
+def gram(A: "numpy.ndarray") -> "numpy.ndarray":
+    """The Gram matrix of n observations of 3 features, a 3 by 3 matrix
+    ("space_matrix", "space_matrix_mixed", "space_output_wrong_shape")."""
+    return A.T @ A
+
+
+def atx(A: "numpy.ndarray", x: "numpy.ndarray") -> "numpy.ndarray":
+    """A transposed times x: a vector as long as A has columns
+    ("space_output_named")."""
+    return A.T @ x
+
+
+def frob(A: "numpy.ndarray") -> float:
+    """The sum of squares of every entry, whatever the shape: an
+    unguarded function, so "space_excluded_fixed" falsifies with the
+    shape it accepted."""
+    return float((A * A).sum())
+
+
+def frob_guarded(A: "numpy.ndarray") -> float:
+    """The sum of squares of every entry, guarded to 30 by 15 by
+    `enforce_dimensions()`, which declares the exclusion it makes true
+    ("space_excluded_by_construction")."""
+    return float((A * A).sum())
+
+
+def scale_column(df: "pandas.DataFrame", c: float):
+    """The `returns` column of a pandas DataFrame, scaled by `c`."""
+    return df["returns"] * c
+
+
+def running_peak(a: "pandas.Series"):
+    """The running maximum of a Series: element `i` is the greatest of
+    elements `0..i`."""
+    return a.cummax()
+
+
+def series_mean(xs: "pandas.Series") -> float:
+    """The mean of a Series, which lies between its least and greatest
+    element ("vector_between_least_and_greatest")."""
+    return float(xs.mean())
+
+
+def max_drawdown(prices: "pandas.Series") -> float:
+    """The largest fall of a price path from its running peak, as a
+    fraction of that peak: between -1 and 0 for positive prices
+    ("vector_drawdown_bounds")."""
+    return float((prices / prices.cummax() - 1.0).min())
+
+
+def weighted_return(df: "pandas.DataFrame") -> float:
+    """The return of a portfolio with weights `w` and returns `r`, the
+    dot product of the two columns ("table_columns_dot")."""
+    return float((df.w * df.r).sum())
+
+
 def cosine_phase(φ: float) -> float:
     """The cosine of a phase angle, written with the Greek letter as its
     parameter name, what "latex_varphi" demonstrates: `\\varphi` in a
@@ -661,15 +1407,115 @@ def cosine_phase(φ: float) -> float:
     return math.cos(φ)
 
 
+def exact_offset(x: float) -> float:
+    """The identity plus an offset of 1e-12: not exactly the identity,
+    and within the default tolerance of it."""
+    return x + 1e-12
+
+
+def sin3(x: float) -> float:
+    """The sine's Taylor polynomial of degree 3, `x - x**3/6`."""
+    return x - x**3 / 6
+
+
 def nearly_identity(x: float) -> float:
     """The identity plus an offset far below the default tolerance."""
     return x + 1e-10
 
 
 def double(x: float) -> float:
-    """f(x) = 2x, the plain function every single-construct LEXICON
-    entry above (relation/power/abs/domain shapes) is checked against."""
+    """f(x) = 2x, the plain function most single-construct LEXICON
+    entries above (power and domain shapes, the notation) are checked
+    against."""
     return 2 * x
+
+
+def celsius_round_trip(x: float) -> float:
+    """A temperature in Celsius converted to Fahrenheit and back, what
+    "relation_eq" demonstrates: `f(x) == x`, an exact equality, proven as
+    mathematics, while its `[float]` companion is the computation."""
+    return ((x * 9 / 5) + 32 - 32) * 5 / 9
+
+
+def checked_sqrt(x: float) -> float:
+    """A square root that refuses a negative input, the second function
+    for "raises_typed": it raises only below zero, so the unbounded claim
+    is falsified at zero, and "raises_typed_region" proves it over the
+    negative numbers."""
+    if x < 0:
+        raise ValueError("negative")
+    return math.sqrt(x)
+
+
+def remember_fx_rate(rate: float) -> float:
+    """Stores an exchange rate in the environment for later calls, what
+    "state_safe_env_write" demonstrates: a write to os.environ."""
+    os.environ["FX_RATE"] = str(rate)
+    return rate
+
+
+def noisy_quote(price: float) -> float:
+    """A price with a little noise from the global random generator, what
+    "state_safe_global_rng" and "deterministic_trap" demonstrate: the
+    draw advances shared state, and reads it as an input the arguments
+    do not carry."""
+    return price * (1 + 0.001 * random.gauss(0, 1))
+
+
+def log_return(p0: float, p1: float) -> float:
+    """The log return from p0 to p1, NaN where either price is not
+    positive, what "deterministic_nan_agrees" demonstrates: a NaN answer is
+    still a deterministic one."""
+    return math.log(p1 / p0) if p0 > 0 and p1 > 0 else math.nan
+
+
+#: a logger of the pricing service's own, attached to no handlers
+_audit_log = logging.Logger("pricing.audit")
+_pricing_log = logging.getLogger("mathema.lexicon.pricing")
+
+
+def price_with_audit_log(price: float) -> float:
+    """A price with 20 percent added, logged on the way, what
+    "state_safe_logging" demonstrates: emitting a log record changes no
+    state."""
+    _audit_log.info("pricing %s", price)
+    return round(price * 1.2, 2)
+
+
+def quiet_pricing(price: float) -> float:
+    """The same price, after turning the pricing logger down to
+    warnings, what "state_safe_logging_config_trap" demonstrates: a
+    logger's level is shared configuration."""
+    _pricing_log.setLevel(logging.WARNING)
+    return round(price * 1.2, 2)
+
+
+def price_in_fx(price: float) -> float:
+    """A price converted at the rate the environment holds, what
+    "deterministic_hidden_read" demonstrates: a read of an input the
+    arguments do not carry."""
+    return price * float(os.environ.get("FX_RATE", "1"))
+
+
+def triangular_number(n: int) -> int:
+    """The n-th triangular number, 0 + 1 + ... + n, the count of pairs
+    among n + 1 items; what "domain_subset_integer" and its symbol
+    spelling demonstrate: a domain of whole numbers."""
+    return n * (n + 1) // 2
+
+
+def removed_endpoint(x: float) -> float:
+    """A function kept only to point callers at its replacement: every
+    call raises, what "raises_typed" demonstrates, a claim that the
+    function raises one named exception."""
+    raise ValueError("removed_endpoint was retired, call rate() instead")
+
+
+def simple_interest_balance(x: float) -> float:
+    """A million at five percent simple interest, after `x` years; what
+    the "let_free_var_*" entries demonstrate: `c`, a free variable the
+    claim quantifies over, with nothing in the function to alias."""
+    return 1_000_000 * (1 + 0.05 * x)
 
 
 def discount(price: float, code: float) -> float:
@@ -689,6 +1535,12 @@ def center_of_mass_two_body(m1: float, x1: float, m2: float, x2: float) -> float
     return (m1 * x1 + m2 * x2) / (m1 + m2)
 
 
+def blend(x: float, alpha: float) -> float:
+    """A blend of x with 1, weighted by alpha, which its guard keeps in
+    [0, 1], what "enforce_domain_guard" demonstrates."""
+    return alpha * x + (1 - alpha) * 1.0
+
+
 def gibbs_free_energy(dh: float, t: float, ds: float) -> float:
     """delta-G = delta-H - T*delta-S, undefined below absolute zero,
     what "stress_gauge_invariance" demonstrates: a free variable (`c`,
@@ -705,7 +1557,12 @@ def quadratic_root_plus(a: float, b: float, c: float) -> float:
     """(-b + sqrt(b^2 - 4ac)) / 2a, what the `assuming_*` entries
     demonstrate: the unconditional monotonicity claim falsifies (the
     sqrt raises where the discriminant goes negative), while the same
-    claim under `assuming b^2 - 4*a*c >= 0.01` proves."""
+    claim under `assuming b^2 - 4*a*c >= 0.01` proves, and so does the
+    claim resting on `real_roots` below, which borrows its relation.
+
+    Claims:
+        real_roots: b^2 - 4*a*c >= 0.01
+    """
     import math
     return (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
 
@@ -773,8 +1630,8 @@ def cubed(x: float) -> float:
 
 def unit_sqrt(x: float) -> float:
     """numpy.sqrt returns nan for x < 0 without raising, so
-    "is_compendium_safe_scoped" holds only because the domain [0, 1e6]
-    excludes that region: is_compendium_safe(numpy) over a guarded
+    "is_library_safe_scoped" holds only because the domain [0, 1e6]
+    excludes that region: is_library_safe(numpy) over a guarded
     domain. numpy is imported lazily so the lexicon stays import-free of
     it."""
     import numpy as np
@@ -783,7 +1640,7 @@ def unit_sqrt(x: float) -> float:
 
 def clipped_ratio(x: float) -> float:
     """numpy.clip keeps the result finite for every input, so
-    "is_compendium_safe" holds unconditionally: a covered numpy call that
+    "is_library_safe" holds unconditionally: a covered numpy call that
     can never leak a nan/inf."""
     import numpy as np
     return float(np.clip(x, 0.0, 1.0))
@@ -791,8 +1648,8 @@ def clipped_ratio(x: float) -> float:
 
 def unguarded_arcsin(x: float) -> float:
     """numpy.arcsin returns nan for abs(x) > 1 without raising, so
-    "is_compendium_safe" FALSIFIES here (the unguarded counterpart to
-    unit_sqrt): the bound `for x in [-1, 1], is_compendium_safe(numpy)`,
+    "is_library_safe" FALSIFIES here (the unguarded counterpart to
+    unit_sqrt): the bound `for x in [-1, 1], is_library_safe(numpy)`,
     or a guard, supersedes the finding once re-verified."""
     import numpy as np
     return float(np.arcsin(x))
@@ -953,18 +1810,259 @@ def gd_convergence_factor(alpha: float, q: float) -> float:
     return 1.0 - alpha * q
 
 
-EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
+def collapse_spaces(s: str) -> str:
+    """Runs of whitespace collapsed to one space, the ends stripped: a
+    normaliser, so applying it twice is applying it once, and the
+    result is never longer than the input."""
+    return " ".join(s.split())
+
+
+def escape_angle(s: str) -> str:
+    """Angle brackets and ampersands written as their entities, so the
+    s is inert markup. Never shorter than its input, and
+    `unescape_angle` undoes it exactly; it is not idempotent, since an
+    ampersand it wrote is escaped again on a second pass."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def unescape_angle(s: str) -> str:
+    """The inverse of `escape_angle` on its image."""
+    return s.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+
+
+def sharpe_annualised(returns: "pandas.Series") -> float:
+    """The Sharpe ratio annualised over 252 trading days, written with a
+    power, the second function for the "let_scale_seq_sharpe_*" entries:
+    `252 ** 0.5` lowers as `sqrt(252)` does."""
+    return returns.mean() / returns.std(ddof=1) * 252 ** 0.5
+
+
+def volatility(variance: float) -> float:
+    """The standard deviation for a variance: `math.sqrt` gives a hole
+    back for a hole."""
+    import math
+    return math.sqrt(variance)
+
+
+def clamp_discount(rate: float) -> float:
+    """A discount rate held to [0, 1]; `min(1.0, nan)` is 1.0, so a
+    missing rate becomes a full discount (a drop)."""
+    return max(0.0, min(1.0, rate))
+
+
+def log_of_ratio(ratio: float) -> float:
+    """The log of a price ratio, refusing a missing ratio with a guard."""
+    import math
+    if ratio != ratio:
+        raise ValueError("ratio is missing")
+    return math.log(ratio)
+
+
+def price_or_none(price: float) -> "Optional[float]":
+    """A quoted price, None for a missing quote: a hole in, `None` out
+    (converts)."""
+    return None if price != price else price
+
+
+def price_as_float(price: "Optional[float]") -> float:
+    """A price as a float, `nan` for no quote: `None` in, a hole out
+    (converts)."""
+    return float("nan") if price is None else price
+
+
+def converted_amount(amount: "Optional[float]") -> "Optional[float]":
+    """An amount at a fixed rate, `None` passed through (propagates)."""
+    return None if amount is None else 1.1 * amount
+
+
+def weight_changes(weights: "numpy.ndarray"):
+    """Each portfolio weight's change since the one before it: the first
+    has nothing before it, so it is a hole whatever the input
+    (introduces)."""
+    import numpy
+    return numpy.diff(weights, prepend=numpy.nan)
+
+
+def rolling_average(prices: "pandas.Series"):
+    """The three-period moving average of a price series: its first two
+    slots are holes whatever the input (introduces)."""
+    return prices.rolling(3).mean()
+
+
+def in_base_currency(amount: float, fx_rate: "Optional[float]" = None) -> float:
+    """An amount converted at `fx_rate`, `None` meaning it is already in
+    base: the flag is replaced, so an absent rate is dropped."""
+    if fx_rate is None:
+        fx_rate = 1.0
+    return amount * fx_rate
+
+
+def total_exposure(positions: list) -> float:
+    """`sum` over a list of positions: a `None` element (the member null)
+    raises, a `nan` element propagates."""
+    return sum(positions)
+
+
+def risk_label(score: "Optional[float]") -> str:
+    """"high" above one half, else "low": `nan > 0.5` is False, so a
+    missing score reads as "low" (a drop), and `None` raises."""
+    return "high" if score > 0.5 else "low"  # type: ignore[operator]
+
+
+def average_return(returns: "numpy.ndarray") -> float:
+    """The mean of a return series; the mean of an empty array is
+    `nan`."""
+    import numpy as np
+    return float(np.mean(returns))
+
+
+def session_volume(volumes: "pandas.Series") -> float:
+    """The traded volume over a session; the sum over nothing is 0."""
+    return float(volumes.sum())
+
+
+@dataclass
+class Trade:
+    """A booked trade; its memo is optional."""
+    amount: float = 100.0
+    memo: "str | None" = None
+
+
+def memo_length(trade: Trade) -> int:
+    """The length of a trade's memo; a trade with no memo raises."""
+    return len(trade.memo)  # type: ignore[arg-type]
+
+
+def side_label(order: dict) -> str:
+    """An order's side in capitals; an order with no side key raises."""
+    return order["side"].upper()
+
+
+def polars_mean(xs: "polars.Series") -> float:
+    """The mean of a polars Series, which skips its nulls while values
+    remain."""
+    return float(xs.mean())
+
+
+def sharpe(returns: "pandas.Series") -> float:
+    """The Sharpe ratio of a series of returns at a zero risk-free rate,
+    unannualised: the mean over the sample standard deviation
+    ("let_scale_seq_sharpe_premise", "assuming_spread_positive")."""
+    return returns.mean() / returns.std(ddof=1)
+
+
+def spread(a) -> float:
+    """The range of a sequence: its greatest element minus its least
+    ("let_shift_seq_range")."""
+    return max(a) - min(a)
+
+
+def sample_std(returns: "pandas.Series") -> float:
+    """The sample standard deviation of a series of returns
+    ("dim_call_premise")."""
+    return returns.std(ddof=1)
+
+
+#: the example functions that carry a runtime guard and a declared
+#: claim: the guard and the claims decorator are applied on the first
+#: read of `EXAMPLE_FUNCTIONS` (see `_examples`), so importing this
+#: module parses no claim
+_GUARDED: dict[str, tuple] = {
+    "frob_guarded": (lambda: enforce_dimensions(),
+                     "for A in R^(30,15), f(A) >= 0"),
+    "blend": (lambda: enforce_domain(),
+              "for alpha in [0, 1], f(x, alpha) <= max(x, 1)"),
+}
+
+#: the entries of `EXAMPLE_FUNCTIONS` as written, the guarded functions
+#: still plain
+_EXAMPLE_ENTRIES: dict[str, tuple[object, list[str]]] = {
+    "collapse_spaces": (collapse_spaces, [
+        "language_alphabet", "language_contraction",
+        "language_missing_excluded", "language_closure", "language_length_bound",
+    ]),
+    "escape_angle": (escape_angle, [
+        "language_membership_symbol", "language_section",
+        "language_excluding_empty", "containment_absent",
+    ]),
     "add_two": (add_two, ["abs_bars_compound"]),
     "matmul": (matmul, ["matrix_determinant_bars_compound"]),
+    "luma": (luma, ["space_vector_fixed"]),
+    "year_total": (year_total, [
+        "space_vector_fixed_trap", "space_vector_fixed_sketch",
+        "dim_premise_against_fixed",
+    ]),
+    "energy": (energy, ["space_vector_real"]),
+    "gram_trace": (gram_trace, ["space_matrix_fixed"]),
+    "gram": (gram, ["space_matrix", "space_matrix_mixed",
+                    "space_output_wrong_shape"]),
+    "atx": (atx, ["space_output_named"]),
+    "frob": (frob, ["space_excluded_fixed"]),
+    "frob_guarded": (frob_guarded, ["space_excluded_by_construction"]),
+    "scale_column": (scale_column, ["table_column_attribute",
+                                    "table_column_item"]),
+    "running_peak": (running_peak, ["vector_running_maximum"]),
+    "series_mean": (series_mean, ["vector_between_least_and_greatest",
+                                  "missing_premise_values_remain",
+                                  "missing_premise_no_values",
+                                  "missing_premise_all_na_raises"]),
+    "volatility": (volatility, ["missing_propagates", "missing_predicate_sugar",
+                                "is_missing_safe_gate"]),
+    "clamp_discount": (clamp_discount, ["missing_drops"]),
+    # the same function with the default word, apart: two words for one
+    # case in one batch are refused as a clash
+    "clamp_discount_default": (clamp_discount, ["missing_trap_silent_drop"]),
+    "log_of_ratio": (log_of_ratio, ["missing_raises"]),
+    "price_or_none": (price_or_none, ["missing_converts"]),
+    "price_as_float": (price_as_float, ["absent_converts"]),
+    "converted_amount": (converted_amount, ["absent_propagates", "is_absent_safe_gate"]),
+    "weight_changes": (weight_changes, ["missing_introduces"]),
+    "rolling_average": (rolling_average, ["missing_introduces_by_shape"]),
+    "in_base_currency": (in_base_currency, ["absent_drops"]),
+    "total_exposure": (total_exposure, ["missing_member_null", "missing_member_nan",
+                                        "missing_class_row_contradicted",
+                                        "is_missing_safe_gate_falsified"]),
+    "risk_label": (risk_label, ["missing_trap_comparison", "absent_raises",
+                                "absent_none_spelling"]),
+    "risk_label_gate": (risk_label, ["is_absent_safe_gate_falsified"]),
+    "average_return": (average_return, ["is_empty_safe_hole"]),
+    "session_volume": (session_volume, ["is_empty_safe_identity"]),
+    "polars_mean": (polars_mean, ["missing_member_defined"]),
+    "memo_length": (memo_length, ["absent_field_raises"]),
+    "memo_length_gate": (memo_length, ["is_absent_safe_field"]),
+    "side_label": (side_label, ["absent_key_left_out"]),
+    "max_drawdown": (max_drawdown, ["vector_drawdown_bounds"]),
+    "weighted_return": (weighted_return, ["table_columns_dot"]),
     "nearly_identity": (nearly_identity, [
         "tolerance_epsilon", "tolerance_eps_ascii", "tolerance_epsilon_word",
         "tolerance_epsilon_latex", "latex_varepsilon",
     ]),
+    "exact_offset": (exact_offset, ["exact_offset_vs_approx",
+                                    "exact_offset_vs_approx_trap"]),
+    "sin3": (sin3, ["approx_taylor_sin_exact_fails", "approx_too_wide"]),
+    "celsius_round_trip": (celsius_round_trip, ["relation_eq"]),
+    "checked_sqrt": (checked_sqrt, ["raises_typed", "raises_typed_region"]),
+    "remember_fx_rate": (remember_fx_rate, ["state_safe_env_write"]),
+    "noisy_quote": (noisy_quote, ["state_safe_global_rng",
+                                  "deterministic_trap"]),
+    "log_return": (log_return, ["deterministic_nan_agrees"]),
+    "price_in_fx": (price_in_fx, ["deterministic_hidden_read"]),
+    "blend": (blend, ["enforce_domain_guard", "enforce_domain_guard_unbound"]),
+    "price_with_audit_log": (price_with_audit_log, ["state_safe_logging"]),
+    "quiet_pricing": (quiet_pricing, ["state_safe_logging_config_trap"]),
+    "sharpe_annualised": (sharpe_annualised, [
+        "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap"]),
+    "triangular_number": (triangular_number, [
+        "domain_subset_integer", "domain_subset_symbol",
+    ]),
+    "removed_endpoint": (removed_endpoint, ["raises_typed"]),
+    "simple_interest_balance": (simple_interest_balance, [
+        "let_free_var_closed", "let_free_var_typed",
+    ]),
     "double": (double, [
-        "relation_eq", "relation_le_unicode", "power_caret", "abs_bars",
+        "power_caret",
         "domain_closed_interval", "domain_open_interval",
-        "domain_subset_integer",
-        "forall_symbol", "domain_subset_symbol",
+        "forall_symbol",
         "domain_blackboard_reals", "relation_approx_unicode",
         "power_superscript", "sqrt_symbol", "multiply_dot",
         "infinity_symbol", "floor_brackets_unicode",
@@ -973,11 +2071,9 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
         "latex_geqslant", "latex_left_right_bars",
     ]),
     "cosine_phase": (cosine_phase, ["latex_varphi"]),
-    "discount": (discount, ["raises_typed", "inferred_literal_domain"]),
+    "discount": (discount, ["inferred_literal_domain"]),
     "center_of_mass_two_body": (center_of_mass_two_body, ["let_alias"]),
-    "gibbs_free_energy": (gibbs_free_energy, [
-        "let_free_var_closed", "let_free_var_typed", "stress_gauge_invariance",
-    ]),
+    "gibbs_free_energy": (gibbs_free_energy, ["stress_gauge_invariance"]),
     "quadratic_root_plus": (quadratic_root_plus, [
         "assuming_inequality", "assuming_named_claim",
     ]),
@@ -998,6 +2094,7 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     ]),
     "put_call_parity_gap": (put_call_parity_gap, ["parity_identity"]),
     "logistic_standard": (logistic_standard, [
+        "relation_le_unicode", "abs_bars",
         "sigmoid_derivative", "sigmoid_symmetry", "sigmoid_limit_upper",
         "sigmoid_limit_lower", "sigmoid_density_integrates",
         "sigmoid_bounded_below", "sigmoid_bounded_above",
@@ -1007,10 +2104,10 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "discounted_price": (discounted_price, [
         "named_under_test", "let_alias_for_under_test",
     ]),
-    "cubed": (cubed, ["odd_function"]),
-    "unit_sqrt": (unit_sqrt, ["is_compendium_safe_scoped"]),
-    "clipped_ratio": (clipped_ratio, ["is_compendium_safe"]),
-    "unguarded_arcsin": (unguarded_arcsin, ["is_compendium_safe"]),
+    "cubed": (cubed, ["odd_function", "membership_interval_reduces_to_chain"]),
+    "unit_sqrt": (unit_sqrt, ["is_library_safe_scoped"]),
+    "clipped_ratio": (clipped_ratio, ["is_library_safe"]),
+    "unguarded_arcsin": (unguarded_arcsin, ["is_library_safe"]),
     "divisor_count": (divisor_count, [
         "finite_domain_pinned", "finite_domain_small_range",
         "finite_domain_discrete_set", "real_domain_is_not_finite",
@@ -1023,7 +2120,54 @@ EXAMPLE_FUNCTIONS: dict[str, tuple[object, list[str]]] = {
     "fifth_element": (fifth_element, ["dim_premise_vector_bound"]),
     "third_diagonal": (third_diagonal, ["dim_premise_square_matrix",
                                         "dim_premise_rectangular_matrix"]),
+    "sharpe": (sharpe, ["let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
+                        "assuming_spread_positive"]),
+    "spread": (spread, ["let_shift_seq_range"]),
+    "series_mean_shifted": (series_mean, ["let_shift_seq_mean_moves"]),
+    "sample_std": (sample_std, ["dim_call_premise"]),
 }
+
+
+# the numpy examples import numpy at the top of their own module, so
+# the derive route reads them; numpy is an extra, so the module is
+# imported only when it is installed and the rows stay text without it
+try:
+    from . import _lexicon_numpy as _numpy_examples
+except ImportError:
+    _numpy_examples = None
+
+
+def _examples() -> dict:
+    """Intent:
+        `EXAMPLE_FUNCTIONS`, built on first read: the entries as written,
+        each guarded function decorated with its guard and its declared
+        claim (and rebound under its name in this module), and the numpy
+        examples added when numpy is installed. Later reads return the
+        same dict.
+    """
+    built = globals().get("EXAMPLE_FUNCTIONS")
+    if built is not None:
+        return built
+    out = dict(_EXAMPLE_ENTRIES)
+    for name, (guard, statement) in _GUARDED.items():
+        fn, keys = out[name]
+        decorated = guard()(claims_decorator(statement)(fn))
+        globals()[name] = decorated
+        out[name] = (decorated, keys)
+    if _numpy_examples is not None:
+        out.update(_numpy_examples.EXAMPLE_FUNCTIONS)
+    globals()["EXAMPLE_FUNCTIONS"] = out
+    return out
+
+
+def __getattr__(name: str) -> Any:
+    if name == "EXAMPLE_FUNCTIONS":
+        return _examples()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list:
+    return sorted(set(globals()) | {"EXAMPLE_FUNCTIONS"})
 
 
 def get(key: str | int) -> str:
@@ -1031,15 +2175,19 @@ def get(key: str | int) -> str:
     or an int index into insertion order. `KeyError`/`IndexError` if it
     doesn't exist, same as indexing the underlying dict/list directly
     would."""
+    rows = _rows()
     if isinstance(key, int):
-        return LEXICON[list(LEXICON)[key]]
-    return LEXICON[key]
+        return rows[list(rows)[key]]
+    return rows[key]
 
 
 def render_both(key: str | int, *, include_internal: bool = False):
     """`(input_text, output_unicode, output_ascii)` for one `LEXICON`
     entry, `input_text` as authored, the other two from `claim()` +
-    `spec.render_claim_text()`. Use this instead of `get()` to see the
+    `spec.render_claim_text()`. A row with an example function renders
+    as that function completes it (`for n in N` against `n: int` stays
+    `N`), the form its record states; a row without one renders the
+    unannotated default. Use this instead of `get()` to see the
     rendered shape next to the input, e.g. while reviewing whether a
     rendering choice reads right.
 
@@ -1051,10 +2199,13 @@ def render_both(key: str | int, *, include_internal: bool = False):
     a free variable's assumed type made explicit, ...) rather than only
     its two surface spellings."""
     from .conjecture import claim
+    from .lexicon_checks import _as_checked, _example_for
     from .spec import render_claim_text
 
     text = get(key)
-    cj = claim(text)
+    name = key if isinstance(key, str) else list(_rows())[key]
+    src = next((s for s in sources() if name in s.rows), None)
+    cj = _as_checked(claim(text), _example_for(src, name) if src else None)
     result = (text, render_claim_text(cj, unicode=True),
              render_claim_text(cj, unicode=False))
     if not include_internal:
@@ -1071,7 +2222,7 @@ def show(key: str | int, *, include_internal: bool = False) -> None:
     already answers "what keys exist" without a separate function.
     `include_internal=True` also prints the parsed `Conjecture`'s own
     fields, see `render_both`."""
-    name = key if isinstance(key, str) else list(LEXICON)[key]
+    name = key if isinstance(key, str) else list(_rows())[key]
     result = render_both(key, include_internal=include_internal)
     text, unicode_form, ascii_form = result[:3]
     print(f"{name}")

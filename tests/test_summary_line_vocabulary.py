@@ -31,8 +31,9 @@ def test_every_nonzero_state_is_named_by_its_verdict():
     line = _format_check([_row(holds=2, falsified=1, invalidated=1,
                                unknown=1, skipped=3, accepted_risk=1)],
                          "text")
-    assert ("0 proven, 2 holds, 1 falsified, 1 invalidated, 1 unknown, "
-            "3 skipped, 1 accepted risk") in line
+    # a claim mathema could not run reads unknown: 1 + 3
+    assert ("0 proven, 2 holds, 1 falsified, 1 invalidated, 4 unknown, "
+            "1 accepted risk") in line
     assert not _FOREIGN.search(line)
 
 
@@ -52,8 +53,7 @@ def test_an_invalidated_claim_is_not_reported_as_falsified():
 def test_strict_names_skipped_and_accepted_risk_separately():
     report = gate([Probe("a", "s", "skipped"), Probe("b", "s", "unknown")],
                   strict=True, accepted_risk=frozenset({"b"}))
-    assert report.problems == ["1 skipped claim(s)",
-                               "1 accepted-risk claim(s)"]
+    assert report.problems == ["a unknown", "1 accepted-risk claim(s)"]
 
 
 def test_verify_and_check_share_one_summary():

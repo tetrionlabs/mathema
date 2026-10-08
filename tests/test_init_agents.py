@@ -157,7 +157,7 @@ def test_ci_flag_scaffolds_the_github_verify_gate(tmp_path):
     # the header must not promise a green first run: strict is the
     # default and fails unverifiable claims too, which most stores have
     header = wf.read_text()
-    assert "STRICT by default" in header and "--lenient" in header
+    assert "strict by default" in header and "--lenient" in header
     # already present means untouched: it is the adopter's file now
     wf.write_text(wf.read_text() + "# my edit\n")
     r2 = _init(proj, "init", "--ci", "github")

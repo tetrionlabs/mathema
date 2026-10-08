@@ -20,8 +20,13 @@ and `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` mean `abs(x)`/`norm(x)`/`floor(x)`/`ceil(x
 an operand cannot end and closes where one can, so `|x + y - f(x)|`
 and `|x| + |y|` both read as written, and a pair whose content is
 exactly one further pair is a norm (`||x||`), while `||a| - |b||` is an
-absolute value of a difference. On a matrix expression the same bars
-are the determinant (see linalg.apply_matrix_sugar). `normalize()` maps any of these spellings to
+absolute value of a difference. A norm's order is a subscript on the
+closing bars, `||x||_1`, `||x||_2`, `||x||_inf` (also `_oo`, `_∞`) and
+`||x||_p` for an integer p >= 1, reading as `norm(x, 1)` and so on; the
+order is never a superscript, so `||x||^2` is the square of the norm.
+The unicode `‖x‖`, `‖x‖₂`, `‖x‖∞` spell the same. On a matrix
+expression single bars are the determinant (see
+linalg.apply_matrix_sugar) and double bars its norm. `normalize()` maps any of these spellings to
 the one canonical Python-expression form the probe and derive routes
 both consume, so `f(x)^2 ≥ 0` and `f(x)**2 >= 0` are the same statement
 with the same identity.
@@ -99,21 +104,26 @@ sugar for the same 4-argument call.
 from __future__ import annotations
 
 import ast
+import contextlib
+import contextvars
 import re
+from dataclasses import dataclass
 
 import sympy
 from sympy.printing.str import StrPrinter
 
+from ._float_text import exact_float_text
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
-from ._scan import (_split_commas, mask_strings, outside_strings,
-                    sub_outside_strings, unmask_strings)
+from ._scan import (_split_commas, blank_strings, mask_strings,
+                    outside_strings, sub_outside_strings, unmask_strings)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
 from .domain import (MISSING as MISSING, Domain as Domain,
                      Interval as Interval, InvalidDomain as InvalidDomain,
+                     LanguageRef as LanguageRef,
                      _MEMBERSHIP_OPS as _MEMBERSHIP_OPS,
                      desuperscript_spaces as _desuperscript_spaces,
                      _as_domain as _as_domain,
@@ -128,18 +138,27 @@ from .domain import (MISSING as MISSING, Domain as Domain,
                      split_quantifier as split_quantifier)
 from .domain import bound_to_sympy_set
 from .routes import MATRIX_PREDICATES as _MATRIX_PREDICATES
-from .routes import OUTPUT_PREDICATES as _OUTPUT_PREDICATES
 from .linalg import (RENDER_CALLS as _MATRIX_RENDER_CALLS,
                      RENDER_DIM as _MATRIX_RENDER_DIM,
                      operand_matrix_names as _matrix_names)
+
+
+def _output_predicates() -> frozenset:
+    # the LIVE output-contract vocabulary (the static table plus the
+    # predicates registered claim families own), read per parse
+    from .routes import output_predicates
+    return output_predicates()
 
 
 def _domain_safety_predicates() -> frozenset:
     # the LIVE examine vocabulary (static tables plus predicates owned
     # by registered claim families), read per parse rather than bound
     # at import so a family registered later is still recognized
+    from .families import RETIRED_FAMILY_NAMES
     from .routes import examine_predicates
-    return examine_predicates()
+    # a retired family spelling is still read, and resolves to its
+    # replacement when the claim is built
+    return examine_predicates() | frozenset(RETIRED_FAMILY_NAMES)
 
 
 # \alpha, \beta, ... as identifier spellings: unlike \pi/\infty (math
@@ -333,25 +352,30 @@ def auto_short_names(param_names: list, func_names: list, *, unicode: bool,
 # only: superscript *letters* exist for the whole alphabet in Unicode
 # (via two different blocks, confirmed with `unicodedata.lookup`,
 # not guessed), but nothing in this grammar's own `^`/`_` positions is
-# ever a bare letter, so there's no meaning to map one to. No matching
-# INPUT rule for subscript digits: every `_`-position this grammar has
-# (`Sum`/`Prod`'s own index) is always `name=value`, never a bare
-# digit. Subscript digits are still used on the *output* side, purely
-# decoratively: `_print_Integral` attaches a definite integral's own
-# integer bounds directly to its `∫` (subscript lower, superscript
-# upper, `∫₀¹`), redundantly with the same bounds already spelled out in
-# the call's own arguments, decoration only, never load-bearing, so
-# no matching input rule is needed there either.
+# ever a bare letter, so there's no meaning to map one to. Subscript
+# digits have one INPUT rule: a run on a norm's closing `‖` is the
+# norm's order (`‖x‖₂` is `||x||_2`, see `_double_bar_glyphs`); every
+# other `_`-position this grammar has (`Sum`/`Prod`'s own index) is
+# `name=value`, never a bare digit. On the *output* side they are the
+# norm's order again (`display_norm_bars`) and, purely decoratively,
+# `_print_Integral`'s own `∫₀¹`: a definite integral's integer bounds
+# attached to its `∫` (subscript lower, superscript upper), redundant
+# with the same bounds spelled out in the call's own arguments.
 _SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 _SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
 _SUPERSCRIPT_TO_DIGIT = str.maketrans(_SUPERSCRIPT_DIGITS, "0123456789")
+_SUBSCRIPT_TO_DIGIT = str.maketrans(_SUBSCRIPT_DIGITS, "0123456789")
 _DIGIT_TO_SUPERSCRIPT = str.maketrans("0123456789", _SUPERSCRIPT_DIGITS)
 _DIGIT_TO_SUBSCRIPT = str.maketrans("0123456789", _SUBSCRIPT_DIGITS)
 _SUPERSCRIPT_RUN = re.compile(f"⁻?[{_SUPERSCRIPT_DIGITS}]+")
 
 _UNICODE = {
     "≤": "<=", "≥": ">=", "≠": "!=", "−": "-", "·": "*", "×": "*",
-    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∞": "oo",
+    "π": "pi", "√": "sqrt", "∀": "for ", "∈": " in ", "∉": " not in ", "∞": "oo",
+    # the double-struck L (U+1D543) spells a language domain on input,
+    # `𝕃[ascii]`; the rendered form is always the plain `L[...]`, so a
+    # record displays the same everywhere
+    "\U0001d543": "L",
     **_GREEK_LETTERS,
     **_PSEUDO_GREEK_LETTERS,
     # ⩽/⩾ ("less/greater-than-or-slanted-equal", U+2A7D/2A7E): an
@@ -740,6 +764,21 @@ _LET_PSEUDO_INF = re.compile(
     r"|(?P<rejected>(?:\+-|±|\+/-)?\s*(?:inf|oo|infinity)))"
     r"\s+be\s+(?P<rhs>.+)$", re.DOTALL)
 _LET_SEGMENT_HAS_IN = re.compile(r"\bin\b")
+# `let axis be None` / `let keepdims be True`: a literal value for a
+# named parameter, passed on every call the claim makes rather than
+# sampled (a number already reads as a single-point `let ... be` bound)
+_LET_PIN_LITERALS = {"None": None, "True": True, "False": False}
+
+
+@dataclass(frozen=True)
+class ParameterPin:
+    """A `let <parameter> be <literal>` binding whose literal is not a
+    number (`None`, `True`, `False`): the value the parameter is
+    passed at on every call the claim makes."""
+    value: object
+
+    def render(self) -> str:
+        return repr(self.value)
 _LET_FUNC_VALUE = re.compile(r"^\w+(?:\.\w+)+$")
 # `d(<expr>/d<var>)` -> `d(<expr>, <var>)` (also mixed/higher-order,
 # `d(<expr>/dx^2dy)` -> `d(<expr>, x, x, y)`, and curly `∂` instead of
@@ -883,12 +922,13 @@ def _parse_pseudo_infinity(form: str, rhs: str) -> float:
     return magnitude
 
 
-# the named sets a representation declaration rebinds, and the carrier
-# vocabulary it rebinds them to (`let Z be i64`). Reserved: the parser
-# refuses both spellings with guidance rather than reading either as an
-# ordinary free-variable binding, so the future meaning stays free.
+# the named sets a representation declaration rebinds, and the number
+# representation vocabulary it rebinds them to (`let Z be i64`). Reserved:
+# the parser refuses both spellings with guidance rather than reading
+# either as an ordinary free-variable binding, so the future meaning stays
+# free.
 _BASE_SET_NAMES = frozenset({"R", "Z", "N", "C"})
-_RESERVED_CARRIERS = frozenset({
+_RESERVED_REPRESENTATIONS = frozenset({
     "i8", "i16", "i32", "i64", "i128",
     "u8", "u16", "u32", "u64", "u128",
     "f16", "f32", "f64", "bigint", "f64int",
@@ -1019,19 +1059,26 @@ def extract_let_bindings(
                 fname = dm.group(1)
                 bounds = unmask_strings(dm.group(2).strip(), literals)
                 _refuse_binding_subject(fname)
-                if fname in _BASE_SET_NAMES or bounds in _RESERVED_CARRIERS:
-                    # the representation-declaration spelling: rebinding
-                    # a named set's machine carrier, the same shape as
-                    # `let |inf| be 1e6` rebinding infinity. Reserved
-                    # rather than squattable, so the future meaning is
-                    # not taken by an accidental free-variable binding.
+                if bounds in _LET_PIN_LITERALS:
+                    free_domain[fname] = ParameterPin(
+                        _LET_PIN_LITERALS[bounds])
+                    text = ",".join(segments[1:]).strip()
+                    continue
+                if (fname in _BASE_SET_NAMES
+                        or bounds in _RESERVED_REPRESENTATIONS):
+                    # the representation-declaration spelling: rebinding a
+                    # named set's machine number representation, the same
+                    # shape as `let |inf| be 1e6` rebinding infinity.
+                    # Reserved rather than squattable, so the future
+                    # meaning is not taken by an accidental free-variable
+                    # binding.
                     raise InvalidDomain(
                         f"`let {fname} be {bounds}` is reserved for "
                         f"representation declarations (binding a named "
-                        f"set to a machine carrier such as i64 or f32), "
-                        f"which are not supported yet; a free variable "
-                        f"cannot be named {fname!r} and a carrier name "
-                        f"cannot be a bound")
+                        f"set to a machine number representation such as "
+                        f"i64 or f32), which are not supported yet; a free "
+                        f"variable cannot be named {fname!r} and a number "
+                        f"representation name cannot be a bound")
                 parsed_binding = parse_binding(f"{fname} in {bounds}")
                 if parsed_binding is None:
                     # parse_binding has no bare-scalar shape (`for x in
@@ -1118,6 +1165,10 @@ def extract_let_bindings(
                 f"no claim after the let run; if it is the claim, write it "
                 f"with `==`: `{name} == {unmask_strings(expr, literals)}`")
         if _LET_FUNC_VALUE.match(expr):
+            from ._claim_reach import path_refusal
+            refused = path_refusal(expr)
+            if refused is not None:
+                raise InvalidDomain(f"`let {name} = {expr}`: {refused}")
             funcs[name] = expr
             text = rest
         else:
@@ -1733,6 +1784,9 @@ def apply_unicode_synonyms(text: str) -> str:
     otherwise be converted to `^<digits>` and glued onto `integral`
     with no separator."""
     def substitute(masked: str) -> str:
+        # the norm glyph and its order glyphs first, so a closing
+        # `‖∞` is read as the order before `∞` becomes the constant `oo`
+        masked = _double_bar_glyphs(masked)
         masked = _desuperscript_spaces(masked)
         masked = _radical_to_call(_collapse_integral_marks(masked))
         masked = _LATEX_COMMAND.sub(
@@ -1761,7 +1815,9 @@ def normalize(text: str) -> str:
     evaluation-bar sugar; Unicode math symbols to ASCII; `||x||`/`|x|`/
     `⌊x⌋`/`⌈x⌉` to `norm(x)`/`abs(x)`/`floor(x)`/`ceil(x)` (double bars
     matched before single, so they can never be misread as nested
-    single bars); `^` to `**`. Idempotent. `extract_diff_fraction_sugar()`
+    single bars), a norm's subscript order to the call's second
+    argument (`||x||_2` and `‖x‖₂` to `norm(x, 2)`, `_inf`/`_oo`/`_∞`
+    and `‖x‖∞` to `norm(x, inf)`); `^` to `**`. Idempotent. `extract_diff_fraction_sugar()`
     (the `d(<expr>/d<var>)` fraction spelling) and `extract_let_bindings()`
     are separate, `claim()`-level passes that run on raw text *before*
     this function ever sees it, see their own docstrings.
@@ -1828,6 +1884,27 @@ def _fold_dim_sugar(text: str) -> str:
     return text
 
 
+_DIM_CALL = re.compile(r"\bdim\(")
+
+
+def display_len(text: str) -> str:
+    """Intent:
+        `dim(X, 0)` -> `len(X)` in rendered claim text, nested calls
+        included; every other axis keeps `dim`, and a quoted literal is
+        left untouched. The inverse of the `len` half of
+        `_fold_dim_sugar`, so the displayed text parses back to the same
+        canonical form.
+    """
+    def rewrite(m, args, call_end):
+        parts = _split_commas(args)
+        if len(parts) == 2 and parts[1].strip() == "0":
+            return f"len({display_len(parts[0].strip())})"
+        return f"dim({display_len(args)})"
+
+    return outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _DIM_CALL, rewrite), text)
+
+
 def _replace_pv_call(text: str) -> str:
     """`P.V.(` -> `cauchy_pv(`: the principal-value operator renders
     and reads as the traditional `P.V.` spelling, but that text isn't
@@ -1842,12 +1919,15 @@ _SPACED_PREDICATES = {
     "is defined": "is_defined",
     "is pole safe": "is_pole_safe",
     "is builtin safe": "is_builtin_safe",
+    "is number set safe": "is_number_set_safe",
     "is missing safe": "is_missing_safe",
     "is extremity safe": "is_extremity_safe",
     "is representation safe": "is_representation_safe",
     "is empty safe": "is_empty_safe",
     "is arbitrary input safe": "is_arbitrary_input_safe",
+    "is language defined": "is_language_defined",
     "is compendium safe": "is_compendium_safe",
+    "is library safe": "is_library_safe",
     "excluded outside domain": "excluded_outside_domain",
 }
 
@@ -1958,13 +2038,16 @@ def _lim_direction(text: str) -> str:
 # opening bar, or one of these words
 _BAR_OPENING_CHARS = frozenset("([{,+-*/^%=<>&@~:")
 _BAR_OPENING_WORDS = frozenset({"not", "and", "or", "in", "if", "else",
-                                "is", "return", "lambda"})
+                                "is", "return", "lambda", "assuming"})
 
 
-def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
+def _bar_pairs(text: str, lenient: bool = False) -> "list[tuple[int, int]] | None":
     """Intent:
         The matched `|...|` pairs in `text` as (open, close) index
-        pairs, or None when the bars do not pair up.
+        pairs, or None when the bars do not pair up. With `lenient`, a
+        bar with no partner is passed over and the pairs that do match
+        are returned, for reading a norm spelling out of a whole claim
+        whose domain clause carries a `|missing` bar of its own.
 
     Notes:
         A bar opens when what precedes it cannot end an operand (see
@@ -1998,20 +2081,214 @@ def _bar_pairs(text: str) -> "list[tuple[int, int]] | None":
             kinds[i] = "open"
             stack.append(i)
         else:
-            if not stack:
-                return None
             kinds[i] = "close"
+            if not stack:
+                if lenient:
+                    continue
+                return None
             pairs.append((stack.pop(), i))
+    if lenient:
+        return pairs
     return None if stack else pairs
+
+
+#: the names bars read as matrices while a claim is parsed: bars
+#: around one of them (or an expression over them that is a matrix)
+#: are its determinant
+_BAR_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "bar_matrices", default=frozenset())
+
+
+@contextlib.contextmanager
+def bars_over_matrices(names):
+    """Within the block, bars around a matrix expression over `names`
+    fold to `det(...)` rather than `abs(...)`."""
+    token = _BAR_MATRICES.set(frozenset(names))
+    try:
+        yield
+    finally:
+        _BAR_MATRICES.reset(token)
+
+
+#: the names read as matrices while a claim is rendered: each is a
+#: noncommuting symbol, so a product over them keeps its written order
+_ORDERED_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "ordered_matrices", default=frozenset())
+
+#: math-constant names (`pi`, `oo`, `inf`, `infinity`) that a real
+#: parameter shadows while a claim is rendered: each stays a symbol
+_SHADOWED_CONSTANTS: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "shadowed_constants", default=frozenset())
+
+#: calls whose value is a matrix when their argument is one
+_MATRIX_VALUED_CALLS = frozenset({"inv", "transpose", "matrix_power", "pinv",
+                                  "kron", "outer", "I", "abs", "Abs"})
+
+
+#: the matrix names a caller holding the function's signature supplies
+#: to rendering
+_RENDER_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "render_matrices", default=frozenset())
+
+
+@contextlib.contextmanager
+def matrices_in_view(names):
+    """Within the block, `render_claim_text` reads `names` as matrices
+    as well as the claim's own declared ones (a function's signature
+    markers and matrix runtime types), so a product over them renders
+    in its written order."""
+    token = _RENDER_MATRICES.set(_RENDER_MATRICES.get() | frozenset(names))
+    try:
+        yield
+    finally:
+        _RENDER_MATRICES.reset(token)
+
+
+def _matrix_valued(node: ast.AST, names: frozenset) -> bool:
+    """Whether a claim subexpression denotes a matrix or vector value,
+    given the names that are matrices: a `@` product, a transpose, an
+    elementwise operation with a matrix operand, or a matrix-valued
+    call over one."""
+    if isinstance(node, ast.Name):
+        return node.id in names
+    if isinstance(node, ast.Attribute):
+        return node.attr == "T" or _matrix_valued(node.value, names)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.MatMult):
+            return True
+        if isinstance(node.op, ast.Pow):
+            return _matrix_valued(node.left, names)
+        return (_matrix_valued(node.left, names)
+                or _matrix_valued(node.right, names))
+    if isinstance(node, ast.UnaryOp):
+        return _matrix_valued(node.operand, names)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in _MATRIX_VALUED_CALLS:
+        return node.func.id == "I" or any(
+            _matrix_valued(a, names) for a in node.args)
+    return False
+
+
+def _bars_hold_matrix(content: str, names: frozenset) -> bool:
+    from .linalg import is_matrix_expr
+    try:
+        node = ast.parse(_caret_to_power(content.strip()), mode="eval").body
+    except SyntaxError:
+        return False
+    return is_matrix_expr(node, names)
+
+
+#: the order written after a norm's closing bars: `_` and the token
+#: up to the next operator or space, read by `_norm_order`
+_NORM_ORDER_SUFFIX = re.compile(r"_([-\w.∞]+)")
+
+#: the unicode norm glyph, with the order glyphs a closing one carries
+_DOUBLE_BAR_GLYPH = re.compile(rf"‖([{_SUBSCRIPT_DIGITS}∞]*)")
+
+#: a run of order glyphs after ascii bars (`||x||₂`, `||x||_∞`)
+_GLYPH_ORDER_AFTER_BARS = re.compile(rf"\|\|_?([{_SUBSCRIPT_DIGITS}∞]+)")
+
+#: the spellings of an infinite order, each lowered to `inf`
+_INFINITE_ORDERS = frozenset({"inf", "oo", "∞"})
+
+
+def _order_refusal(written: str, inner: str) -> str:
+    """The message for an order the bars do not read: what the author
+    wrote after the closing bars, the orders that are read, and the
+    call to write for any other order."""
+    return (f"`{written}` after the closing bars is not an order the norm "
+            f"reads. Write _1, _2, a whole number such as _3, or _inf (also "
+            f"_oo or _∞). For a fractional or zero order write the call "
+            f"norm({inner}, 0.5); for an order held in a name bind it "
+            f"first, let p be 3, then write norm({inner}, p)")
+
+
+def _norm_order(token: str, inner: str) -> str:
+    """Intent:
+        The second argument `norm(inner, ...)` takes for the subscript
+        `token` written after a norm's closing bars: `inf` for `inf`,
+        `oo` and `∞`, the integer itself for an integer literal of one
+        or more.
+
+    Raises:
+        UnreadableSpelling: any other token (`0`, `0.5`, `-1`, a name),
+        naming the token as written and the orders the bars read.
+    """
+    if token in _INFINITE_ORDERS:
+        return "inf"
+    if token.isascii() and token.isdigit() and token == str(int(token)) \
+            and int(token) >= 1:
+        return token
+    raise UnreadableSpelling(_order_refusal(f"_{token}", inner))
+
+
+def _glyph_order(run: str, inner: str) -> str:
+    """The ascii subscript for a run of order glyphs on the closing bars
+    (`₂` -> `_2`, `₁₂` -> `_12`, `∞` -> `_inf`); a run that is neither
+    digits nor a single `∞` is refused naming the glyphs written."""
+    if not run:
+        return ""
+    if run == "∞":
+        return "_inf"
+    if "∞" not in run:
+        return "_" + run.translate(_SUBSCRIPT_TO_DIGIT)
+    raise UnreadableSpelling(_order_refusal(run, inner))
+
+
+def _double_bar_glyphs(text: str) -> str:
+    """`‖e‖` -> `||e||`, and the order glyphs on a closing `‖` (`‖x‖₂`,
+    `‖x‖₁₂`, `‖x‖∞`) -> the ascii subscript `||x||_2`, `||x||_12`,
+    `||x||_inf`, for `_fold_bars` to read; the same glyphs after ascii
+    bars (`||x||₂`, `||x||_∞`) read the same way. The first step of
+    `apply_unicode_synonyms`, ahead of its symbol table, so the `∞`
+    here is the norm's order rather than the constant `oo`. Doubled
+    glyphs (`‖‖x‖‖`) are refused: they are more bars than a norm
+    reads."""
+    if "‖" not in text and not _GLYPH_ORDER_AFTER_BARS.search(text):
+        return text
+    doubled = re.search(r"‖‖(.*?)‖‖", text)
+    if doubled is not None:
+        raise UnreadableSpelling(
+            f"`{doubled.group(0)}` has more bars than a norm reads: write "
+            f"‖{doubled.group(1)}‖ for the norm of {doubled.group(1)}")
+
+    def inner_before(start: int, opening: str) -> str:
+        at = text.rfind(opening, 0, start)
+        return text[at + len(opening):start] if at >= 0 else "..."
+
+    def glyph_bars(m):
+        run = m.group(1)
+        after = text[m.end():m.end() + 1]
+        if run and after and (after.isalnum() or after in "_("):
+            # a glyph run on an OPENING bar (`‖₂x‖`): the order belongs
+            # after the closing bars
+            rest = text[m.end():]
+            close = rest.find("‖")
+            inner = rest[:close] if close >= 0 else rest
+            raise UnreadableSpelling(
+                f"`{run}` after the opening bars is not read; the order goes "
+                f"after the closing bars, ‖{inner}‖{run}")
+        return "||" + _glyph_order(run, inner_before(m.start(), "‖"))
+
+    def ascii_bars(m):
+        return "||" + _glyph_order(m.group(1), inner_before(m.start(), "||"))
+
+    text = _DOUBLE_BAR_GLYPH.sub(glyph_bars, text)
+    return _GLYPH_ORDER_AFTER_BARS.sub(ascii_bars, text)
 
 
 def _fold_bars(text: str) -> str:
     """`|expr|` -> `abs(expr)` for any expression between the bars, and
     `||expr||` -> `norm(expr)`: a pair whose content is exactly one
     further pair reads as a norm, so `||a| - |b||` (content not a
-    single pair) stays an absolute value of a difference. Text whose
-    bars do not pair up is returned unchanged for the claim parser to
-    refuse. A matrix operand turns `abs` into `det` later, by type."""
+    single pair) stays an absolute value of a difference. A subscript
+    on the norm's closing bars is its order, `||expr||_2` ->
+    `norm(expr, 2)` and `||expr||_inf` (or `_oo`, `_∞`) ->
+    `norm(expr, inf)`, see `_norm_order`; a `^` after the bars is the
+    ordinary power, so `||expr||^2` is the square of the norm. Text
+    whose bars do not pair up is returned unchanged for the claim
+    parser to refuse. Within `bars_over_matrices`, single bars around
+    a matrix expression are its determinant, `det(expr)`."""
     if "|" not in text:
         return text
     pairs = _bar_pairs(text)
@@ -2024,10 +2301,31 @@ def _fold_bars(text: str) -> str:
             continue
         inner = close_of.get(o + 1)
         if inner is not None and inner == c - 1:
+            if close_of.get(o + 2) == c - 2:
+                # the whole run of bars the author wrote, however many
+                lo, hi = o, c
+                while lo > 0 and close_of.get(lo - 1) == hi + 1:
+                    lo, hi = lo - 1, hi + 1
+                content = text[lo:hi + 1].strip("|")
+                raise UnreadableSpelling(
+                    f"`{text[lo:hi + 1]}` has more bars than a norm reads: "
+                    f"write ||{content}|| for the norm of {content}, or "
+                    f"|| |{content}| || with a space for the norm of its "
+                    f"absolute value")
             replace[o], replace[c] = "norm(", ")"
             replace[o + 1] = replace[c - 1] = ""
+            suffix = _NORM_ORDER_SUFFIX.match(text, c + 1)
+            if suffix is not None:
+                order = _norm_order(suffix.group(1), text[o + 2:c - 1].strip())
+                replace[c] = f", {order})"
+                for k in range(c + 1, suffix.end()):
+                    replace[k] = ""
         else:
-            replace[o], replace[c] = "abs(", ")"
+            mats = _BAR_MATRICES.get()
+            opening = ("det(" if mats and "|" not in text[o + 1:c]
+                       and _bars_hold_matrix(text[o + 1:c], mats)
+                       else "abs(")
+            replace[o], replace[c] = opening, ")"
     return "".join(replace.get(i, ch) for i, ch in enumerate(text))
 
 
@@ -2045,6 +2343,99 @@ def _fold_brackets(text: str, opening: str, closing: str, name: str) -> str:
     if depth:
         return text
     return text.replace(opening, f"{name}(").replace(closing, ")")
+
+
+def norm_bars_written(text: str) -> bool:
+    """Intent:
+        Whether `text` spells a norm with double bars (`||x||`,
+        `||x||_2`, `‖x‖`), the spelling `spec.render_claim_text` keeps
+        when it renders the claim back.
+
+    Notes:
+        Read from the pairing `_fold_bars` uses, leniently, since the
+        text may be a whole claim whose domain clause (`R^n|missing`)
+        carries a bar of its own: `||a| - |b||` (an absolute value of a
+        difference) is no norm, and a bar with no partner is passed
+        over. Quoted literals are not read.
+    """
+    masked = blank_strings(text)
+    if "‖" in masked:
+        return True
+    if "||" not in masked:
+        return False
+    pairs = _bar_pairs(masked, lenient=True)
+    if not pairs:
+        return False
+    close_of = dict(pairs)
+    return any(close_of.get(o + 1) == c - 1 for o, c in pairs)
+
+
+_NORM_CALL = re.compile(r"\bnorm\(")
+
+
+def _display_order(order: str) -> "str | None":
+    """The ascii subscript for a rendered order (`inf` for the infinite
+    order however the printer spelled it, `2`, `12`), or None for an
+    order the bars do not spell (`0.5`, a name)."""
+    if order in ("inf", "∞", "oo"):
+        return "inf"
+    if order.isascii() and order.isdigit() and int(order) >= 1:
+        return order
+    return None
+
+
+def display_norm_bars(text: str, unicode: bool = False) -> str:
+    """Intent:
+        `norm(e)` -> `||e||` and `norm(e, k)` -> `||e||_k` in rendered
+        claim text, nested calls included, for an order the bars read
+        (`1`, `2`, an integer p >= 1, `inf`); in unicode `‖e‖`, `‖e‖₂`,
+        `‖e‖∞`. The inverse of the norm half of `_fold_bars`, so the
+        displayed text parses back to the same canonical form.
+
+    Notes:
+        A norm whose argument already holds a bar (`norm(|x|)`), or
+        whose order is anything else (`norm(x, p)`, `norm(x, oo)`),
+        keeps the call spelling around a respelled argument; a quoted
+        literal is left untouched.
+    """
+    def rewrite(m, args, call_end):
+        parts = [p.strip() for p in _split_commas(args)]
+        inner = display_norm_bars(parts[0], unicode)
+        order = _display_order(parts[1]) if len(parts) == 2 else ""
+        if len(parts) > 2 or order is None or "|" in inner or "‖" in inner:
+            return f"norm({display_norm_bars(args, unicode)})"
+        if not unicode:
+            return f"||{inner}||" + (f"_{order}" if order else "")
+        glyph = ("" if not order else "∞" if order == "inf"
+                 else order.translate(_DIGIT_TO_SUBSCRIPT))
+        return f"‖{inner}‖{glyph}"
+
+    return outside_strings(
+        lambda masked: _rewrite_balanced_calls(masked, _NORM_CALL, rewrite), text)
+
+
+#: an infinite order as a call's second argument: `oo`, `infinity` (`∞`
+#: and `\infty` are `oo` by this point) or `inf`
+_INFINITE_ORDER_ARG = re.compile(r"^(oo|infinity|inf)$")
+
+
+def _norm_call_order(text: str) -> str:
+    """`norm(e, oo)` and `norm(e, infinity)` -> `norm(e, inf)`: the one
+    spelling of an infinite order in the call form, the same the bar
+    sugar lowers `_inf`/`_oo`/`_∞` to, so every spelling evaluates and
+    renders alike. Runs after the unicode synonyms, so `∞` and
+    `\\infty` arrive here as `oo`; a nested norm inside the argument is
+    rewritten too."""
+    if "norm(" not in text:
+        return text
+
+    def rewrite(m, args, call_end):
+        parts = _split_commas(args)
+        if len(parts) != 2 or _INFINITE_ORDER_ARG.match(parts[1].strip()) is None:
+            return None
+        return f"norm({_norm_call_order(parts[0].strip())}, inf)"
+
+    return _rewrite_balanced_calls(text, _NORM_CALL, rewrite)
 
 
 def _floor_bars(text: str) -> str:
@@ -2140,8 +2531,13 @@ _NORMALIZE_PASSES: tuple = (
     _expand_integral_bare,
     _integral_word_to_call,
     _expand_integrate_at,
+    # `apply_unicode_synonyms` reads the norm glyph `‖` and its order
+    # glyphs into the ascii bars and subscript first of all, so the
+    # bars fold below sees `||x||_inf` for a written `‖x‖∞`
     apply_unicode_synonyms,
     _fold_bars,
+    # an infinite order in the call form spelled as the sugar lowers it
+    _norm_call_order,
     _floor_bars,
     _ceil_bars,
     # after the bar sugars (so `|x|!` sees the already-folded
@@ -2188,9 +2584,12 @@ def _canonical_assuming(clause: str) -> str:
     and an authored `assuming f is defined` are the same claim
     everywhere downstream, same statement, same fingerprint. The
     dimension sugar (`len`/`rows`/`cols`) folds to canonical `dim`
-    here too, for the same reason: a length premise has one identity
-    however it was spelled."""
-    return _fold_dim_sugar(_DEFINED_CALL.sub(r"\1 is defined", clause))
+    here too, and the bars fold to their calls (`||x||` to `norm(x)`,
+    `|x|` to `abs(x)`, an infinite order to `inf`), for the same
+    reason: a premise has one identity however it was spelled; the
+    display puts the author's bars back."""
+    folded = _norm_call_order(_fold_bars(apply_unicode_synonyms(clause)))
+    return _fold_dim_sugar(_DEFINED_CALL.sub(r"\1 is defined", folded))
 
 
 _OUTCOME_MARKER = re.compile(r"=>|-->|⟹|\\implies")
@@ -2273,6 +2672,37 @@ def split_relation(law: str) -> tuple[str, str, str]:
     raise NoRelation(f"no relation (==, !=, <=, >=, <, >) in {law!r}")
 
 
+_MEMBERSHIP = re.compile(r"\s+(not\s+in|in)\s+")
+
+
+def split_membership(law: str) -> "tuple[str, str, str] | None":
+    """`(lhs, relation, rhs)` at the first top-level `in` or `not in`
+    of a law that carries no ordinary relation at the top level, the
+    relation `"in"` or `"not in"`; None otherwise. The keyword is
+    word-bounded, so `sin(x)` never splits, and string literals are
+    masked, so an `in` inside one is data. The right-hand side is
+    either a domain (`L[slug]`, `[0, 1]`, `{"a", "b"}`), read by the
+    domain grammar, or a value the left-hand side is looked up in."""
+    text = law.strip()
+    if _split_top_level(text, RELATIONS) is not None \
+            or _split_top_level(text, ("=",)) is not None:
+        return None
+    masked, literals = mask_strings(text)
+    depth = 0
+    for i, ch in enumerate(masked):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch.isspace():
+            m = _MEMBERSHIP.match(masked, i)
+            if m is not None and masked[:i].strip():
+                rel = "not in" if m.group(1).startswith("not") else "in"
+                return (unmask_strings(masked[:i], literals).strip(), rel,
+                        unmask_strings(masked[m.end():], literals).strip())
+    return None
+
+
 _AST_REL = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=",
             ast.Eq: "==", ast.NotEq: "!="}
 
@@ -2332,7 +2762,27 @@ def _verbatim_atom(node: ast.AST):
     text = ast.unparse(node)
     if isinstance(node, (ast.Compare, ast.BoolOp)):
         text = f"({text})"
+    ordered = _ORDERED_MATRICES.get()
+    if ordered and _matrix_valued(node, ordered):
+        return sympy.Symbol(text, commutative=False)
     return sympy.Symbol(text, real=True)
+
+
+def _string_literals(node: ast.AST) -> list:
+    """Every string literal in a subtree that is a value, in source
+    order: a subscript's key (`df["returns"]`, a column) names a part
+    of its container and is not one."""
+    keys = {id(n.slice) for n in ast.walk(node) if isinstance(n, ast.Subscript)}
+    return [n.value for n in ast.walk(node)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in keys]
+
+
+class ClaimKeyword(sympy.Function):
+    """A keyword argument of a call to a function the claim names,
+    `k=2`, held as the last arguments of that call so the claim prints
+    and fingerprints with it."""
+    nargs = 2
 
 
 def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
@@ -2354,8 +2804,32 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             return sympy.Transpose(
                 _node_to_sympy(node.value, funcs, matrix_names))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult):
-            return (_node_to_sympy(node.left, funcs, matrix_names)
-                    * _node_to_sympy(node.right, funcs, matrix_names))
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr) \
+                    and isinstance(right, sympy.MatrixExpr):
+                # unevaluated, so `inv(A) @ A` renders as written rather
+                # than as the identity it equals
+                factors = [*(left.args if isinstance(left, sympy.MatMul)
+                             else (left,)),
+                           *(right.args if isinstance(right, sympy.MatMul)
+                             else (right,))]
+                return sympy.MatMul(*factors, evaluate=False)
+            return left * right
+        if isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                      (ast.Mult, ast.Pow)):
+            left = _node_to_sympy(node.left, funcs, matrix_names)
+            right = _node_to_sympy(node.right, funcs, matrix_names)
+            if isinstance(left, sympy.MatrixExpr):
+                # `*` and `**` act element by element on matrices: the
+                # Hadamard product and power, written A ∘ B and A^∘k
+                from sympy.matrices.expressions.hadamard import (
+                    HadamardPower, HadamardProduct)
+                if isinstance(node.op, ast.Pow):
+                    return HadamardPower(left, right)
+                if isinstance(right, sympy.MatrixExpr):
+                    return HadamardProduct(left, right)
+            return _BINOPS[type(node.op)](left, right)
     if isinstance(node, ast.Constant):
         if isinstance(node.value, complex) and not isinstance(node.value, (int, float)):
             v = node.value
@@ -2377,19 +2851,32 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         # either already-adjudicated Conjecture text (misspecification
         # would have been caught earlier) or a caller's own direct,
         # exploratory use, not itself a claim-validation surface.
-        if node.id in _MATH_ATTRS:
+        if node.id in _MATH_ATTRS and node.id not in _SHADOWED_CONSTANTS.get():
             return _MATH_ATTRS[node.id]
         if node.id in matrix_names:
             return sympy.MatrixSymbol(node.id, _MATRIX_RENDER_DIM,
                                       _MATRIX_RENDER_DIM)
+        if node.id in _ORDERED_MATRICES.get():
+            # a matrix: its products keep their written order
+            return sympy.Symbol(node.id, commutative=False)
         return sympy.Symbol(node.id, real=True)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v
+    if isinstance(node, ast.BinOp) and _string_literals(node):
+        # an operator over a string literal is concatenation or
+        # repetition, which does not commute: sympy's sum would reorder
+        # `s + "0"` into `"0" + s`, a different claim, so the whole
+        # operation is one verbatim atom, rendered as written
+        return _verbatim_atom(node)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _quotient(_operand(node.left, node, funcs, matrix_names),
+                         _operand(node.right, node, funcs, matrix_names),
+                         node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         return _BINOPS[type(node.op)](
-            _node_to_sympy(node.left, funcs, matrix_names),
-            _node_to_sympy(node.right, funcs, matrix_names))
+            _operand(node.left, node, funcs, matrix_names),
+            _operand(node.right, node, funcs, matrix_names))
     if isinstance(node, ast.Call):
         fname = node.func.id if isinstance(node.func, ast.Name) else None
         arg_nodes = node.args
@@ -2400,6 +2887,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # straight off the node
             arg_nodes = arg_nodes[:3]
         args = [_node_to_sympy(a, funcs, matrix_names) for a in arg_nodes]
+        if matrix_names and len(args) == 1 and fname == "I":
+            # the identity renders without its size, so one square
+            # placeholder dimension serves every `I(n)`
+            return sympy.Identity(_MATRIX_RENDER_DIM)
         if matrix_names and len(args) == 1 and fname in _MATRIX_RENDER_CALLS:
             return _MATRIX_RENDER_CALLS[fname](args[0])
         special = _SPECIAL_RENDER_CALLS.get(fname)
@@ -2411,7 +2902,10 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
             # the ordinary bound-function/vocabulary lookups below, the
             # same as any other unrecognized call.
         if fname in funcs:
-            return sympy.Function(fname)(*args)
+            keywords = [ClaimKeyword(sympy.Symbol(k.arg),
+                                     _node_to_sympy(k.value, funcs, matrix_names))
+                        for k in node.keywords if k.arg is not None]
+            return sympy.Function(fname)(*args, *keywords)
         name = _call_name(node)
         if name in ("min", "max") and len(args) == 1:
             # `min(xs)` over a SEQUENCE is an aggregation, a fold over
@@ -2430,6 +2924,50 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if name in _SYMPY_FUNCS:
             return _SYMPY_FUNCS[name](*args)
     return _verbatim_atom(node)
+
+
+def _quotient(left, right, node: ast.BinOp):
+    """`left / right` as sympy reads it, unless that reading cancels the
+    divisor: `f(x) / f(x)` evaluates to 1 and `x*y / y` to `x`, which
+    drops the point where the divisor is zero and the quotient has no
+    value. A quotient whose evaluated form no longer divides by `right`
+    is kept unevaluated, so the claim still says it divides there; one
+    over matrices, whose products keep their written order, is kept as
+    its own parenthesised spelling."""
+    quotient = left / right
+    if getattr(right, "is_number", False) or \
+            isinstance(right, sympy.MatrixExpr) or \
+            isinstance(quotient, sympy.MatrixExpr):
+        return quotient
+    divisors = [b for b, e in (f.as_base_exp() for f in
+                               sympy.Mul.make_args(right))
+                if not b.is_number and getattr(e, "is_positive", False)]
+    inverted = {p.base for p in quotient.atoms(sympy.Pow)
+                if getattr(p.exp, "is_negative", False)}
+    if all(b in inverted for b in divisors):
+        return quotient
+    if not (left.is_commutative and right.is_commutative):
+        return sympy.Symbol(f"({ast.unparse(node)})", commutative=False)
+    return sympy.Mul(left, sympy.Pow(right, -1, evaluate=False),
+                     evaluate=False)
+
+
+def _operand(child: ast.AST, parent: ast.BinOp, funcs: frozenset,
+             matrix_names: frozenset):
+    """One operand of an arithmetic operator, as `_node_to_sympy` reads
+    it. While matrices are rendered in order, a `@` product that is the
+    right operand of `*` or `/`, or the base of `**`, is one atom
+    spelled with its parentheses: printed bare, `C * (A @ B)` would
+    read back as `(C * A) @ B`."""
+    ordered = _ORDERED_MATRICES.get()
+    if ordered and not matrix_names \
+            and isinstance(child, ast.BinOp) \
+            and isinstance(child.op, ast.MatMult) \
+            and ((child is parent.right
+                  and isinstance(parent.op, (ast.Mult, ast.Div)))
+                 or (child is parent.left and isinstance(parent.op, ast.Pow))):
+        return sympy.Symbol(f"({ast.unparse(child)})", commutative=False)
+    return _node_to_sympy(child, funcs, matrix_names)
 
 
 def _render_d_call(node, args):
@@ -2525,7 +3063,8 @@ _SPECIAL_RENDER_CALLS = {
 def parse_raises(law: str) -> tuple[str, str | None] | None:
     """Recognize the raises(...) predicate form (declared-schema.md,
     "Domain is a claim field"): `raises(f(x))` asserts the call raises,
-    `raises(f(x), ValueError)` asserts it raises specifically that.
+    `raises(f(x), ValueError)` asserts it raises specifically that, the
+    name bare or dotted (`raises(f(a), numpy.linalg.LinAlgError)`).
     Returns (call_source, exception_name | None), or None when the law
     isn't a raises predicate at all."""
     try:
@@ -2541,13 +3080,23 @@ def parse_raises(law: str) -> tuple[str, str | None] | None:
         return ast.unparse(node.args[0]), None
     if len(node.args) == 2 and isinstance(node.args[1], ast.Name):
         return ast.unparse(node.args[0]), node.args[1].id
+    if len(node.args) == 2 and _is_dotted_name(node.args[1]):
+        # a dotted exception path, `numpy.linalg.LinAlgError`
+        return ast.unparse(node.args[0]), ast.unparse(node.args[1])
     return None
+
+
+def _is_dotted_name(node) -> bool:
+    """True for an `a.b.c` attribute chain rooted at a plain name."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name)
 
 
 
 
 def parse_domain_safety(law: str) -> tuple[str, str] | None:
-    """Recognize the `is_pole_safe(param)`/`is_builtin_safe(param)`/
+    """Recognize the `is_pole_safe(param)`/`is_number_set_safe(param)`/
     `is_missing_safe(param)` predicate forms: a family-adjudicated fact
     about param's own declared domain, whether it excludes every pole,
     fits a restricted-domain builtin it's passed to, or (for
@@ -2574,7 +3123,7 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
         # is a matrix predicate examining a VALUE; a safety predicate is
         # a fact about the code for one bare argument, never an
         # expression.
-        if predicate in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+        if predicate in _MATRIX_PREDICATES | _output_predicates():
             try:
                 ast.parse(subject, mode="eval")
             except SyntaxError:
@@ -2604,13 +3153,14 @@ def parse_domain_safety(law: str) -> tuple[str, str] | None:
     # symmetric, `is_symmetric(A @ B)` the product is. A safety
     # predicate stays bare-parameter-only (it is a fact about the code
     # for one argument, with nothing to compute).
-    if node.func.id in _MATRIX_PREDICATES | _OUTPUT_PREDICATES:
+    if node.func.id in _MATRIX_PREDICATES | _output_predicates():
         return negated + node.func.id, ast.unparse(arg)
     return None
 
 
 
-def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
+def to_latex(law: str, funcs: frozenset = frozenset({"f"}),
+             matrix_names: frozenset = frozenset()) -> str:
     """Intent:
         Render a whole claim as LaTeX: a `\\forall` over each quantified
         name's domain, the `assuming` premise, the relation (or a chained
@@ -2621,13 +3171,18 @@ def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
         the same parse adjudication uses, so every spelling the grammar
         accepts renders the same way. A fragment `claim()` does not
         accept as a whole claim (a bare premise such as `n >= 2`) renders
-        as a single relation.
+        as a single relation. `matrix_names` are names the caller knows
+        to be matrices (a signature's markers or runtime types); with
+        the claim's own `R^(m,n)` names they render as matrices, so
+        `A * B` is the elementwise `A \\circ B`, never the product `A B`.
     """
     try:
         from .conjecture import claim
         parsed = claim(law)
     except Exception:
-        return _relation_latex(law, funcs)
+        return _relation_latex(law, funcs, frozenset(matrix_names))
+    from .linalg import declared_matrix_names
+    mats = frozenset(matrix_names) | declared_matrix_names(parsed.domain)
     names = frozenset(funcs) | frozenset(parsed.funcs)
 
     prefix = []
@@ -2641,19 +3196,19 @@ def to_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
 
     if parsed.links:
         body = _relation_latex(f"{parsed.links[0][0]} {parsed.links[0][1]} "
-                               f"{parsed.links[0][2]}", names)
+                               f"{parsed.links[0][2]}", names, mats)
         for _lhs, rel, rhs in parsed.links[1:]:
             body += f" {_REL_LATEX[rel]} " + _relation_latex(
-                f"0 == {rhs}", names).split(" = ", 1)[1]
+                f"0 == {rhs}", names, mats).split(" = ", 1)[1]
     elif parsed.relation in _REL_LATEX:
         body = _relation_latex(
-            f"{parsed.lhs} {parsed.relation} {parsed.rhs}", names)
+            f"{parsed.lhs} {parsed.relation} {parsed.rhs}", names, mats)
     elif parsed.relation == "raises":
         body = _relation_latex(
             f"raises({parsed.lhs}, {parsed.rhs})" if parsed.rhs
-            else f"raises({parsed.lhs})", names)
+            else f"raises({parsed.lhs})", names, mats)
     else:
-        subject = (_relation_latex(f"0 == {parsed.lhs}", names).split(" = ", 1)[1]
+        subject = (_relation_latex(f"0 == {parsed.lhs}", names, mats).split(" = ", 1)[1]
                    if parsed.lhs else "")
         body = (rf"\mathrm{{{_latex_text(parsed.relation)}}}"
                 rf"\left({subject}\right)")
@@ -2704,7 +3259,8 @@ def _domain_latex(bound) -> str:
     return text
 
 
-def _relation_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
+def _relation_latex(law: str, funcs: frozenset = frozenset({"f"}),
+                    matrix_names: frozenset = frozenset()) -> str:
     """Render one relation as LaTeX: `lhs rel rhs`, or the partiality
     notation f(x)↑ for a raises predicate. The matrix vocabulary
     (`A.T`, `A @ B`, `det`/`inv`/`trace`, `I(n)`) renders through sympy's
@@ -2732,7 +3288,8 @@ def _relation_latex(law: str, funcs: frozenset = frozenset({"f"})) -> str:
         return rf"\mathrm{{{predicate}}}({param})"
     lhs, rel, rhs = split_relation(normalize(law))
     mats = (_matrix_names(ast.parse(lhs, mode="eval"))
-            | _matrix_names(ast.parse(rhs, mode="eval")))
+            | _matrix_names(ast.parse(rhs, mode="eval"))
+            | frozenset(matrix_names))
     return f"{side(lhs, mats)} {_REL_LATEX[rel]} {side(rhs, mats)}"
 
 
@@ -2772,6 +3329,19 @@ class _CanonicalPrinter(StrPrinter):
         # own note on why this exists.
         self._suppress_glyphs = suppress_glyphs
 
+    def _print_ClaimKeyword(self, expr):
+        name, value = expr.args
+        return f"{name}={self._print(value)}"
+
+    def _print_Float(self, expr):
+        # a float from a claim literal carries float64 precision, which
+        # sympy prints at 15 significant digits; a value needing 16 or 17
+        # gets them, so the text reads back as the same float
+        text = super()._print_Float(expr)
+        if expr._prec > 53:
+            return text
+        return exact_float_text(float(expr), text)
+
     def _print_Abs(self, expr):
         return f"abs({self._print(expr.args[0])})"
 
@@ -2788,7 +3358,9 @@ class _CanonicalPrinter(StrPrinter):
         return f"lgamma({self._print(expr.args[0])})"
 
     def _print_Exp1(self, expr):
-        return "e"
+        # `e` reads back as the constant only when no bound name is `e`;
+        # `exp(1)` reads back as the constant always
+        return "exp(1)" if "e" in self._suppress_glyphs else "e"
 
     def _print_Pi(self, expr):
         # unicode only, "π" already round-trips back to "pi" on input
@@ -2822,15 +3394,22 @@ class _CanonicalPrinter(StrPrinter):
         # read back as an ordinary variable, never the unit.
         return "\U0001d456" if self._unicode else "1j"
 
+    def _infinity_word(self) -> str:
+        # `inf` is the one ascii spelling, the same the domain grammar
+        # writes for an infinite bound; unicode prints the glyph. A real
+        # parameter named `oo`, `inf` or `infinity` is the same sympy
+        # object as the constant by render time (see `_print_Pi`), so it
+        # prints under its own name in both modes
+        named = sorted(self._suppress_glyphs & {"oo", "inf", "infinity"})
+        if named:
+            return named[0]
+        return "∞" if self._unicode else "inf"
+
     def _print_Infinity(self, expr):
-        if "oo" in self._suppress_glyphs:
-            return super()._print_Infinity(expr)
-        return "∞" if self._unicode else super()._print_Infinity(expr)
+        return self._infinity_word()
 
     def _print_NegativeInfinity(self, expr):
-        if "oo" in self._suppress_glyphs:
-            return super()._print_NegativeInfinity(expr)
-        return "-∞" if self._unicode else super()._print_NegativeInfinity(expr)
+        return "-" + self._infinity_word()
 
     def _print_Derivative(self, expr):
         var_args = [a for spec in expr.variable_count for a in ((spec[0],) * spec[1])]
@@ -2994,14 +3573,19 @@ def _abs_calls_to_bars(text: str) -> str:
         bar of its own. `|x - 1|` is not one, so `abs(x - 1)` keeps
         the call spelling (the grammar reads `|x - 1|` on input too);
         every string this returns folds back to the same `abs(...)`
-        calls under `_fold_bars`. The scan is by balanced parens
+        calls under `_fold_bars`. Within `bars_over_matrices`, the
+        `abs` of a matrix keeps the call spelling, since bars around a
+        matrix are its determinant. The scan is by balanced parens
         (`_find_balanced_call`), since an argument can itself contain
         parens, and inner calls are rewritten first, so an outer
         argument holding an inner `|y|` keeps the call spelling too.
     """
+    mats = _BAR_MATRICES.get()
+
     def rewrite(m, args, call_end):
         inner = _abs_calls_to_bars(args)
-        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner):
+        if "|" not in inner and re.fullmatch(_BAR_TOKEN, inner) \
+                and not (mats and _bars_hold_matrix(inner, mats)):
             return f"|{inner}|"
         return f"abs({inner})"
 
@@ -3009,7 +3593,8 @@ def _abs_calls_to_bars(text: str) -> str:
 
 
 def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = True,
-                    suppress_glyphs: frozenset = frozenset()) -> str:
+                    suppress_glyphs: frozenset = frozenset(),
+                    matrix_names: frozenset = frozenset()) -> str:
     """One side of a claim (`cj.lhs`/`cj.rhs`) -> preferred-spelling claim
     text: parsed and re-emitted through the same sympy round trip
     identity/fingerprinting already uses (`_node_to_sympy`/
@@ -3027,9 +3612,11 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
     callers should compare re-parsed *meaning*, never rendered text
     byte-for-byte.
 
-    `norm(x)` (the `||x||` input spelling) renders as the `norm(x)` call
-    in both modes, kept apart from `abs(x)`: the two agree on a scalar
-    and differ on a vector, so they are different claims.
+    `norm(x)` renders as the `norm(x)` call in both modes here, kept
+    apart from `abs(x)`: the two agree on a scalar and differ on a
+    vector, so they are different claims. A claim whose author wrote
+    the double bars gets them back from `spec.render_claim_text`, which
+    respells the rendered statement with `display_norm_bars`.
 
     In ASCII mode, a Greek-letter identifier that has a known backslash
     spelling (`α` -> `\\alpha`, see `_GREEK_TO_BACKSLASH`) is converted
@@ -3043,9 +3630,29 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
 
     `suppress_glyphs` forwards to `to_canonical`; see
     `_CanonicalPrinter._print_Pi`'s own note on why a caller (spec.
-    render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here."""
+    render_claim_text) would ever pass `{"pi"}`/`{"oo"}` here.
+
+    `matrix_names` are the names that denote matrices. Each reads as a
+    noncommuting symbol, and so does every matrix-valued term, so a
+    product keeps its written order: `A * B == B * A` (the elementwise
+    product, commutative only as a stated identity) renders as
+    written, never as `A*B = A*B`."""
     funcs = funcs | {"f"}
-    expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
+    # a literal a double does not read exactly renders as the exact
+    # fraction it names, so the rendered claim reads back as the same
+    # number
+    from ._float_text import exact_literal_text
+    text = exact_literal_text(text)
+    token = _ORDERED_MATRICES.set(frozenset(matrix_names))
+    # a real parameter named for a constant (`pi`, `inf`) is a symbol
+    # here, so `inf + 1` stays `inf + 1` rather than folding into the
+    # constant; `suppress_glyphs` names exactly those parameters
+    shadow = _SHADOWED_CONSTANTS.set(frozenset(suppress_glyphs) & set(_MATH_ATTRS))
+    try:
+        expr = _node_to_sympy(ast.parse(text, mode="eval"), funcs)
+    finally:
+        _ORDERED_MATRICES.reset(token)
+        _SHADOWED_CONSTANTS.reset(shadow)
     def respell(s: str) -> str:
         s = _abs_calls_to_bars(s.replace("**", "^"))
         if not unicode:
@@ -3053,5 +3660,78 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
                 s = s.replace(symbol, backslash_name)
         return s
 
-    return outside_strings(
-        respell, to_canonical(expr, funcs, unicode, suppress_glyphs))
+    return _double_quoted(outside_strings(
+        respell, to_canonical(expr, funcs, unicode, suppress_glyphs)))
+
+
+_SINGLE_QUOTED = re.compile(r"(?<![\w)\]'])'((?:[^'\\\"]|\\.)*)'(?!')")
+
+
+def _double_quoted(text: str) -> str:
+    """`text` with each single-quoted string literal written in double
+    quotes, the one quote style a statement uses (a set member renders
+    `{"a"}`); a literal holding a double quote keeps its own."""
+    return _SINGLE_QUOTED.sub(lambda m: f'"{m.group(1)}"', text)
+
+
+class InvalidDefinition(ValueError):
+    """A `defines:` row that does not read as `<word> := {<members>}`."""
+
+
+#: the words a definition row may define: the hole class and absence
+#: (`absent`, with `None` its synonym, both read as the absence word)
+DEFINABLE_WORDS = ("missing", "absent", "None")
+_DEFINITION = re.compile(
+    r"^\s*(?P<word>[^\s:=]+)\s*:=\s*\{\s*(?P<members>.*?)\s*\}\s*$")
+_SPELLING = re.compile(r"^[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*$")
+
+
+def parse_definition(text: str) -> tuple:
+    """Intent:
+        One definition row, `<word> := {<members>}`, as `(word,
+        members, extends)`: the word defined (`missing`, the hole class,
+        or `None` for the object's absence, written `absent` or `None`),
+        the spellings the set names
+        with the word itself left out, and whether the set extends what
+        the key already had (the word appears inside it, `missing :=
+        {missing, NaT}`) rather than replacing it. Read only from a
+        key's `defines:`; a claim or a binding never holds `:=`.
+
+    Raises:
+        InvalidDefinition: the text is not a definition of a word this
+            grammar defines, or a member is not a spelling (a name,
+            `Option::None` style paths allowed).
+    """
+    m = _DEFINITION.match(str(text))
+    if m is None:
+        raise InvalidDefinition(
+            f"{text!r} is not a definition; a definition row is "
+            f"`<word> := {{<members>}}`, `missing := {{null, nan}}`")
+    word = m.group("word")
+    if word == "∅":
+        word = "missing"
+    if word not in DEFINABLE_WORDS:
+        raise InvalidDefinition(
+            f"{text!r} defines {word!r}; a definition row defines "
+            f"`missing` (the hole class) or `absent` (the object's absence)")
+    synonyms = ("absent", "None") if word in ("absent", "None") else (word, "∅")
+    if word == "absent":
+        word = "None"
+    members: list = []
+    extends = False
+    for part in _split_commas(m.group("members")):
+        spelling = part.strip()
+        if not spelling:
+            continue
+        if spelling in synonyms:
+            extends = True
+            continue
+        if not _SPELLING.match(spelling):
+            raise InvalidDefinition(
+                f"{text!r}: {spelling!r} is not a spelling (a name such as "
+                f"`nan`, `NaT` or `Option::None`)")
+        if spelling not in members:
+            members.append(spelling)
+    if not members and not extends:
+        raise InvalidDefinition(f"{text!r} names no spelling")
+    return word, tuple(members), extends

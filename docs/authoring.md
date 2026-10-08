@@ -20,6 +20,7 @@ f(x) == g(x)                        # relate two implementations (funcs={"g": ot
 ```
 
 Shorthand: `|x|`/`||x||`/`⌊x⌋`/`⌈x⌉` for `abs`/`norm`/`floor`/`ceil`,
+the norm's order a subscript on the closing bars (`||x||_1`, `||x||_inf`),
 each wrapping any expression, so `|x + y - f(x, y)|` is the absolute value
 of the whole difference; `!=`/`≈` as their own relations. Every claim renders to LaTeX
 exactly (`mathema.grammar.to_latex`), going *through* sympy so it's
@@ -201,49 +202,136 @@ for n in Z, ...                                # bare, unbounded, still a stated
 
 ### Missing values
 
-A sequence-typed parameter (a `list`/array/Series, not a scalar) can
-contain a missing value, `None`, NaN, or another library's own null
-sentinel. Whether that's allowed is governed by one rule, applied the
-same way regardless of which library produced the vector: **a missing
-value is allowed unless the domain excludes it with `\ {∅}`.** Stating a
-type does not change this.
+A value can be not there in two ways: **absent** (`None`, the object
+itself) and **missing** (a hole in a slot: `nan`, a `None` element,
+`pd.NA`). A domain says which it admits (`: float|missing`, `\ {absent}`),
+and a binding without a type clause takes that from the annotation. What
+a function does with each is its policy, stated as a claim
+(`missing(f, x) propagates`). [Missing values](missing-values.md) is the
+full account. The statement shows what the domain admits:
 
-```
-for x in [0, 100], ...              # missing allowed
-for x in [0, 100] ⊂ Z, ...          # missing allowed
-for x in [0, 100] \ {∅}, ...        # missing excluded
-for x in [0, 100] ⊂ Z \ {∅}, ...    # missing excluded
-```
+<!-- example: missing-default run -->
+```python
+import math
+import mathema
 
-The missing-value sentinel is `∅`, or the ASCII spellings
-`missing`/`NA`/`nan`. Writing `∪ {∅}` (or `∪ {missing}`) states the
-default explicitly and changes nothing.
+def root(x: float) -> float:
+    return math.sqrt(x)
 
-Detection is dependency-free: `None`, a Python/numpy/pandas float NaN
-(all ordinary IEEE-754 under the hood, caught by one self-inequality
-check with no import of any of them), and a small, extensible set of
-other known missing-sentinel type names (pandas' `pd.NA`/`pd.NaT`,
-neither of which is NaN-like), never a hard dependency on any one
-data-science library.
-
-Input stays terse, nothing above is required beyond an ordinary
-interval, but every place mathema *renders* a domain back (a proof
-sketch's `∀ x ∈ ...` clause, `enforce_domain()`'s own violation message)
-always states the resolved missing-value policy explicitly, via the same
-`∪ {∅}` / `\ {∅}` notation, never left for a reader to infer from what's
-absent:
-
-```
-∀ x ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}     # from [0, 100]: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ ∪ {∅}         # from [0, 100] ⊂ Z: missing allowed
-∀ x ∈ [0, 100] ⊂ ℤ \ {∅}         # from [0, 100] ⊂ Z \ {∅}: missing excluded
+row = mathema.check(root, claims=["for x in [0, 1], f(x) >= 0"]).probes[0]
+print(row.statement)
+print(row.meta["mathema.missing"]["admitted"])
 ```
 
-`enforce_domain()` (and, in `strict=True` probing, the `domain_enforced`
-prober) checks a sequence argument element by element against its
-declared domain, including this missing-value policy, an out-of-bounds
-or unexpectedly-missing element is rejected the same way a scalar
-argument outside its own domain already is.
+<!-- example: missing-default output -->
+```text
+for x in [0.0, 1.0] : float|missing, f(x) >= 0
+{'x': {'absent': False, 'missing': ['nan']}}
+```
+
+The canonical text lists what the domain admits in the order `absent`,
+`missing`, then member words, fused onto the type in ASCII and written
+as a union in unicode. It shows an exclusion only when the exclusion
+removes something the annotation would admit and no type clause says
+so already. Every spelling from an earlier release
+(`[0.0, 1.0]:float|missing`, `∪ {∅}`, `\ {∅}`) still reads and comes
+back in this form:
+
+<!-- example: missing-spelling run inline -->
+```python
+from mathema import claim
+from mathema.spec import render_claim_text
+
+render_claim_text(claim("for x in [0, 1] ⊂ ℝ ∪ {None, ∅}, f(x) >= 0"), unicode=False)  # 'for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0'
+render_claim_text(claim("for x in [0, 1] : float|None, f(x) >= 0"), unicode=True)  # '∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent}, f(x) ≥ 0'
+render_claim_text(claim("for xs in [0, 1]^n : float|missing, f(xs) >= 0"), unicode=False)  # 'for xs in ([0.0, 1.0] | {missing})^n : float, f(xs) >= 0'
+```
+
+`enforce_domain()` checks a sequence argument element by element
+against its declared domain, including this missing-value policy; an
+out-of-bounds or unexpectedly-missing element is rejected the same way
+a scalar argument outside its own domain already is.
+`enforce_dimensions()` (see [shape
+markers](#shape-markers-and-their-shorthand)) rejects a wrong shape the
+same way. Both decorators declare what they make true: one
+`excluded_outside_domain(p)` claim per guarded parameter, proven by
+construction. The author can state the same claim with the `excluding`
+keyword.
+
+### Language domains
+
+A function over text has a domain too: not an interval of numbers but
+a language, a set of strings. `L[<name>]` quantifies over one:
+
+```
+for s in L[unicode], f(f(s)) == f(s)
+for s in L[unicode], len(f(s)) <= len(s)
+for s in L[digit] \ {""}, f(s + "0") == 10 * f(s)
+```
+
+The names come from the `mathema-language` package (`pip install
+"mathema[language]"`), which follows Python's own reading of each
+alphabet: `ascii` (`str.isascii`), `latin-1` (what the codec encodes),
+`unicode` (every `str`, lone surrogates included), `printable`, `digit`,
+`alpha`, `alnum`, `identifier` (`str.isidentifier`), `json` (what
+`json.loads` accepts) and more; [Language domains](language.md) lists
+them and shows how to register your own. An alphabet language is a
+Kleene star: it contains the empty string, and `L[ascii] \ {""}` is
+the way to exclude it. Union with a finite set of members, and what the domain admits,
+read exactly as they do for a numeric domain:
+`L[alnum] ∪ {"n/a"}`. A length bound goes inside
+the brackets, `L[ascii, len <= 80]`, `L[unicode, len > 20]` or
+`L[unicode, len in [1, 80]]`, lengths counted in code points as Python's
+`len` counts them; without one, a very long input is a hazard the probe
+visits on its own. A name
+mathema cannot resolve is refused with the vocabulary and the package
+that provides one; nothing is ever read as a wider language than the
+one written.
+
+Think of the function as a map between languages, and the claims
+write themselves. A normaliser is idempotent (`collapse` above) and a
+contraction (`len(f(s)) <= len(s)`); an escaper never shortens
+(`len(f(s)) >= len(s)`); a parser and its renderer are a section
+and a retraction, stated with a `let`-bound inverse:
+
+```
+let u = html.unescape, for s in L[unicode], u(f(s)) == s
+let dump = json.dumps, for s in L[json], f(dump(f(s))) == f(s)
+```
+
+A `let` binding imports the function it names and calls it, the same
+as importing it in your own code. For third-party code whose effects
+mathema cannot establish, the claim's line carries a warning saying so,
+and a binding that reaches the system (`os`, `subprocess` and the
+like) is refused; see [Security and execution](security.md).
+
+A parser of decimal digits is a homomorphism from concatenation to
+arithmetic, which is what `f(s + "0") == 10 * f(s)` says. Where a
+function raises inside the language it was declared over, the claim
+is falsified with that member as the witness, the same rule a numeric
+domain follows; a parser that rejects some of the language is declared
+over the language it accepts, or its raising region is stated as its
+own `raises(...)` claim.
+
+The probe samples members: the language's own hazards first (the
+empty string, whitespace, NUL and the other control code points, the
+alphabet's boundary, a long member, a lone surrogate, a byte-order
+mark), then random members, and it never draws a value outside the
+language. Every record states what a
+language resolved to (`meta["mathema.language"]`: the name, its
+source, its level and kind, and its persisted form), and the
+statement carries what the domain admits, as usual. The
+derive route has no reading of a string, so it declines with the
+reason rather than proving real-only facts about a symbol standing in
+for one; a finite language (an enumeration a package registers) is
+the exception, swept point by point and proven or falsified with the
+member. `is_language_defined(text)` keeps fuzzing a string
+parameter for accidental crashes as before.
+
+Without the package installed, a claim over `L[unicode]` is not wrong,
+only unresolved: it is `unknown`, with a note saying it needs mathema-language,
+and the finite-set spelling (`scale in {"info", "linear"}`) keeps
+working as it always has.
 
 ## Calling the derive route directly
 
@@ -310,13 +398,14 @@ behind sampling hints, `is_pole_safe[...]`, and the case-split fallback
 to also consider a fold/dot/sum-lifted function, not just a directly
 liftable one. This can make a partially-liftable function's own
 sampling genuinely hybrid, part real symbolic resolution, part
-empirical, not just the same analysis run slower. Off by default
-everywhere; results are cached by the function's form, so the cost,
-when paid, is paid at most once per distinct function shape per
-process.
+empirical, not just the same analysis run slower. Off by default;
+results are cached by the function's form, so the cost, when paid, is
+paid at most once per distinct function shape per process.
 
-On the derive route, extensive is a strategy ladder, not just a wider
-budget: exact real-root isolation (Sturm), adaptive interval
+On the derive side the extra effort is a strategy ladder, not just a
+wider budget. A claim on the default route (`best`) already climbs it
+when the first attempt leaves the claim undecided; `extensive=True`
+gives it to a claim pinned to `route="derive"` as well: exact real-root isolation (Sturm), adaptive interval
 refinement over the domain box, change-of-variable substitutions
 (t = sqrt(x)/erf(x)/tanh(x), atan compactification for unbounded
 claims), residue contour evaluation for trigonometric integrals, and
@@ -337,7 +426,24 @@ process, the same read-once-at-import pattern as `MATHEMA_UNICODE`:
 `MATHEMA_EXTENSIVE_TIMEOUT` (default 15 seconds), whole seconds;
 the knob for a claim whose computation is long but finite.
 
-### `is_pole_safe(param)` / `is_builtin_safe(param)`
+`MATHEMA_PSEUDO_INFINITY` is the project level of the operational
+infinity, how far the computation of every claim is exercised along an
+unbounded direction, and it is read on every call rather than once at
+import. A function's claims-file entry can set its own with a
+`pseudo_infinity:` field beside `claims:`, and a claim's `let |inf| be`
+wins over both; with none of the three set, the computation runs to
+float64's maximum, `sys.float_info.max` (about `1.8e308`). A proof never reads any of them. `mathema
+verify` and `mathema check` warn once on stderr when the project value
+is below `1e100`, since values beyond it are then not checked for
+computation, and suggest an explicit domain for the variables instead; see
+[operational infinity](grammar.md#operational-infinity-let-inf-be).
+
+A claims-file entry's `runtime_types:` field names the runtime type of
+a parameter whose signature names none, for code that cannot be
+annotated (`runtime_types: {returns: pandas.Series}`); see [runtime
+types](runtime-types.md).
+
+### `is_pole_safe(param)` / `is_number_set_safe(param)`
 
 Two family-derive-only predicates (`route="derive"` always, neither
 has a probe-route meaning), suggested automatically wherever they
@@ -345,7 +451,8 @@ apply: `is_pole_safe(param)` asks whether param's declared domain
 provably excludes every pole mathema can find in the function's own
 body (including gamma/loggamma's own pole at every non-positive integer
 of their argument, not just an ordinary denominator's finite root set);
-`is_builtin_safe(param)` asks whether param's declared domain is safe
+`is_number_set_safe(param)` (read from the old spelling
+`is_builtin_safe` too) asks whether param's declared domain is safe
 for every restricted-domain math function it's actually passed to
 (`factorial`/`sqrt`/`log`/`asin`/`acos`/`gamma`/`lgamma`, sympy's own
 symbolic generalization is often wider than the real function's own
@@ -360,6 +467,31 @@ safety family. Whether the code REJECTS out-of-domain input is the
 declared `excluded_outside_domain(p)` claim, stated explicitly,
 opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` (the decorator that makes it true).
+
+`@enforce_domain` also reads the function's policy claims, what it
+does with a value that is not there. It is opt-in, like every
+enforcement. A `raises` row rejects the input at entry: under
+`absent(f, x) raises(TypeError)`, `f(None)` raises the `TypeError` the
+row names ("enforce_domain is active and raised TypeError because x is
+None"; a row naming no exception raises mathema's `DomainError`); under
+`missing(f, xs, null) raises(ValueError)`, `f([1.0, None])` raises
+`ValueError` because `xs` holds a `null` slot, while a `nan` slot passes
+through. A `drops`
+or `propagates` row is checked at exit, by counting the output's
+no-value slots: under `missing(f, x) propagates`, a function that
+returns `1.0` for `nan` raises there. `converts` and `introduces`
+enforce nothing.
+
+`is_missing_safe(f)` and `is_absent_safe(f)` are the gates over those
+rows: every parameter that admits the kind has a policy the code
+follows at every member. Proven when each member's policy is derived
+(a guard in the body, a library's own policy row f calls) or stated
+and confirmed; holds when some member is confirmed by execution alone,
+even when f was called at every case; falsified on a policy the code
+contradicts, a member treated more than one way, a raise no claim
+accounts for, or a None from present inputs the return type does not
+declare. mathema never asserts them for you; `mathema claims KEY
+--suggest` offers them.
 
 ### `mathema.suggest_claims(fn)`
 
@@ -548,7 +680,7 @@ that only a human decision clears (fix the code, accept it
 `--as discovery`, or supersede it). That is deliberate, it is what
 stops an inconvenient result from being quietly deleted, but it means
 the cheap place to be wrong is `check`, not a claims file. `verify`
-says so the first time a claim falsifies on its first adjudication.
+says so when a claim is initially falsified.
 
 ## All four funnel into the same shape
 
@@ -557,7 +689,7 @@ cares which surface a claim came from. `mathema.write_spec()`'s worked example b
 shows claims from three different sources adjudicated together with
 zero manual wiring, for this softmax:
 
-<!-- example: write-spec run -->
+<!-- example: write-spec run requires=numpy -->
 ```python
 import math
 from typing import Annotated
@@ -566,12 +698,17 @@ import mathema
 from mathema.types import Shape
 
 
-def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
+def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape("n")]:
     """Normalised exponentials of a list of scores.
 
     Claims:
         sums_to_one: sum(f(scores)) == 1
+
+    Raises:
+        ValueError: scores is empty.
     """
+    if not scores:
+        raise ValueError("softmax needs at least one score")
     top = max(scores)
     exps = [math.exp(s - top) for s in scores]
     total = sum(exps)
@@ -581,26 +718,52 @@ def softmax(scores: Annotated[list, Shape("n")]) -> Annotated[list, Shape("n")]:
 <!-- example: write-spec repl -->
 ```
 >>> mathema.write_spec(softmax, root='.')
-mathema.Record(softmax) · source, no side effects · form 7982b776d687
-  holds   shape: shape(softmax(scores)) == ('n',), for shared dims ['n'] (n=32)
-  holds   is_deterministic: f(scores) = f(scores) (n=192)
-  holds   is_state_safe: f(scores) = f(scores) (n=48)
-  holds   is_numerically_stable: let g = mathema.f.finite_no_error, g(f, scores) = 1 (n=192)
-  holds   preserves_length: dim(f(scores), 0) = dim(scores, 0) (n=192)
-  FALSIFY is_permutation_of_input: sorted(f(scores)) = sorted(scores)
-           counterexample ([0, 6.12225]): [0.0021887084924676944, 0.9978112915075322] vs [0.0, 6.122252531363742]
-  holds   preserves_type: type(f(scores)) = type(scores) (n=192)
-  FALSIFY is_sorted_output: is_sorted_output(f(scores))
-           counterexample ([4.86304, 8.4521, -9.06059, -3.61645]): output [0.02688154996295693, 0.9731128430407592, 2.412672431510259e-08, 5.582869559580238e-06] fails is_sorted_output
-  holds   sums_to_one: sum(f(scores)) = 1 (n=192)
+mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+  holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  is_deterministic  f(scores) = f(scores)   holds
+    proven     mathematics  f(scores) = f(scores)
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_state_safe  f(scores) = f(scores)   holds
+    proven     mathematics  f(scores) = f(scores)
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  proven    is_empty_safe[scores]: is_empty_safe(scores)
+  holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
+  preserves_length  len(f(scores)) = len(scores)   holds
+    holds      computation  len(f(scores)) = len(scores)   851 entries across 183 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
+    falsified  computation  sorted(f(scores)) = sorted(scores)   counterexample scores = [0]: [1.0] vs [0.0]
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  preserves_type  type(f(scores)) = type(scores)   holds
+    holds      computation  type(f(scores)) = type(scores)   817 entries across 189 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
+    falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
+    falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  sums_to_one  sum(f(scores)) = 1   holds
+    holds      computation  sum(f(scores)) = 1   880 entries across 190 draws, sizes (1, 1) to (8, 1)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
-`shape` came from the `Annotated[list, Shape("n")]` hints,
+`result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
 `sums_to_one` came from the docstring `Claims:` block, and the rest are
-mathema's built-in battery: every function gets the determinism, state
-and stability probes, and a list-in, list-out function also gets the
+mathema's built-in battery: every function gets the determinism and
+state probes, a function computing a number from numbers gets the
+stability probe too, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
-permutes nor sorts its input.
+permutes nor sorts its input. A third, `raises[scores]`, is a
+suggestion read off the guard: it asks whether `softmax` always raises
+`ValueError`, and the witness `[0]` shows it does not. The guard raises
+only for an empty list, which `is_empty_safe[scores]` reports, proven.
+The `policy` lines under each claim say what `softmax` does with an
+empty list and with a `nan` score.
 
 ## Shape markers and their shorthand
 
@@ -628,3 +791,76 @@ the same parameter, the marker is authoritative on RANK: a claim that
 gives it a different number of axes is a conflict, skipped with the
 reason. A different NAME at the same axis is not a conflict, it aliases
 the claim's name to the signature's, so the two are one dimension.
+
+A dimension written as a number is fixed: `for A in R^(30,15)` draws a
+30 by 15 matrix on every trial, on every runtime type the parameter is
+realised as, and `Mat(30, 15)` or `Vec(30)` fixes a marker the same
+way. A fixed axis and a name mix in one binding (`R^(n,15)`).
+
+A value of another shape (another size on a fixed axis, or another
+rank) is outside the domain. So a claim stating the output's space,
+`f(A) in R^(4,3)`, is judged by the output's shape, and
+`excluded_outside_domain(A)` has a wrong-shaped value to try. The proof
+sketch adds one clause for what was fixed: `the binding fixes A at 30
+by 15`, `the binding fixes xs at length 30`.
+
+<!-- example: fixed-shape run requires=numpy -->
+```python
+import numpy as np
+
+def gram_trace(A: np.ndarray) -> float:
+    return float(np.trace(A @ A.T))
+
+def same(A: np.ndarray) -> np.ndarray:
+    return A
+```
+
+<!-- example: fixed-shape verdicts fn=gram_trace -->
+```
+for A in [-1, 1]^(30,15), f(A) >= 0   # proven
+```
+
+<!-- example: fixed-shape verdicts fn=same -->
+```
+for A in R^(3,4), f(A) in R^(3,4)   # holds
+for A in R^(3,4), f(A) in R^(4,3)   # falsified
+```
+
+Over `R^(30,15)` with no bound on the entries, the companion's corners
+run to the largest float and `trace(A @ A.T)` overflows, so the example
+bounds the entries; the companion says so when they are not.
+
+`@enforce_dimensions()` makes these dimensions a runtime guard, the
+way `@enforce_domain()` guards values, and the two stack. At entry,
+every shaped argument has the rank and the fixed sizes its marker or
+binding states, and a dimension name shared across parameters agrees
+across the actual arguments; at exit, the result matches the return
+marker with the names the call bound. Each failure is a
+`DimensionError` (a `ValueError`) naming the parameter (or the result),
+the shape found and the shape expected:
+
+<!-- example: enforce-dimensions-shapes run inline -->
+```python
+from mathema import enforce_dimensions, enforce_domain
+from mathema.types import Mat, Vec
+
+@enforce_dimensions()
+@enforce_domain()
+def matvec(a: Mat("m", "n"), x: Vec("n")) -> Vec("m"):
+    return [sum(a[i][j] * x[j] for j in range(len(x)))
+            for i in range(len(a))]
+
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1])   # [10, 10, 10]
+matvec([[1, 2, 3, 4]] * 3, [1, 1, 1, 1, 1])   # DimensionError: matvec: x has length 5; a is 3 by 4, so x must have length 4
+```
+
+From the same markers, `mathema.check` adds three rows.
+`result_dimensions` checks the output's shape against the return
+marker, reading a claim's binding as well as a marker; a raise at a
+consistent input is its counterexample. `dimensions_enforced` asks
+whether the function rejects a mismatch on a shared dimension.
+`size_enforced` asks whether it rejects a wrong fixed size a marker
+states; a size fixed only by a claim's binding adds no row, since
+whether the code rejects it is the declared `excluded_outside_domain(p)`
+claim's question. A guarded function declares those dimensions to every
+row, so the engine never draws what the guard rejects.

@@ -6,7 +6,8 @@ A page that shows code next to its output makes two promises: the code
 runs, and it prints what the page says. This module holds the pages to
 the second one. It reads the markdown, runs each marked example in a
 fresh temporary directory, and compares what came out with what the
-page shows, allowing only timing figures and absolute paths to differ.
+page shows, allowing only timing figures, absolute paths and the date
+a run writes to differ.
 
 Marking an example
 ------------------
@@ -42,6 +43,11 @@ Options:
 - `match=subset`: the shown output is an excerpt. Every shown line
   appears in the real output in the same order, and a detail line
   indented under an entry follows that entry directly.
+- `wrap=N` (on an `output` block): the shown text is the real output
+  re-flowed at spaces to N columns, a line wider than N continued on
+  the next line four spaces further in. The real run is re-flowed the
+  same way before the comparison, so the shown block is the real
+  output with only its line breaks changed and nothing cut.
 - `after=ID`: first replay example ID's files and Python silently, for
   a page that builds one example on another.
 - `route=ROUTE` (on `verdicts`): the route each claim is adjudicated on.
@@ -51,6 +57,10 @@ Options:
 
 A fence that looks like output but shows no run (a diagram, a
 figure drawn for the page) is marked `<!-- illustration -->` instead.
+A command a reader runs by hand, which this harness cannot (it writes
+to a tool's configuration, reaches the network, or prompts at a
+terminal), is marked `<!-- checked by hand -->`; the checklist lists it
+so the hand check is on record.
 
 `tests/data/docs_examples.txt` is the checklist: every marked example
 by page, and every page's fenced blocks that look like output but are
@@ -65,6 +75,7 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 
 import pytest
 
@@ -77,6 +88,7 @@ _MARK = re.compile(r"^<!-- example: (.+?) -->\n```(\w*)\n(.*?)^```",
 _FENCE = re.compile(r"^```(\w*)\n(.*?)^```", re.M | re.S)
 _ROLES = {"file", "run", "output", "repl", "session", "verdicts"}
 _ILLUSTRATION = "<!-- illustration -->"
+_HAND = "<!-- checked by hand -->"
 
 
 def _pages():
@@ -163,8 +175,9 @@ def inventory():
              "# [x] page:id  roles         a marked example, run and compared",
              "# [ ] page:line               an unmarked fence that shows output",
              "# [-] page:line               marked as an illustration, not a run",
+             "# [h] page:line               a command checked by hand, not run here",
              ""]
-    covered = unchecked = 0
+    covered = unchecked = hand = 0
     for page in _pages():
         text = open(page, encoding="utf-8").read()
         marked_at = {m.start(0) + len(m.group(0).split("\n", 1)[0]) + 1
@@ -180,35 +193,62 @@ def inventory():
         for m in _FENCE.finditer(text):
             if m.start() in marked_at:
                 continue
+            line = text.count("\n", 0, m.start()) + 1
+            before = text[:m.start()]
+            if before.endswith(_HAND + "\n"):
+                rows.append(f"[h] {_rel(page)}:{line}")
+                hand += 1
+                continue
             if _looks_like_output(m.group(1), m.group(2)):
-                line = text.count("\n", 0, m.start()) + 1
-                if text[:m.start()].endswith(_ILLUSTRATION + "\n"):
+                if before.endswith(_ILLUSTRATION + "\n"):
                     rows.append(f"[-] {_rel(page)}:{line}")
                     continue
                 rows.append(f"[ ] {_rel(page)}:{line}")
                 unchecked += 1
         lines += rows
     lines += ["", f"# {covered} examples checked, {unchecked} output fences "
-                  "not yet marked", ""]
+                  f"not yet marked, {hand} commands checked by hand", ""]
     return "\n".join(lines)
 
 
 # --- comparison ----------------------------------------------------------
 
 _DURATION = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|sec|seconds)\b")
+_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 def normalise(text, workdir):
     """Intent:
         The text with what legitimately differs between runs replaced:
-        the working directory's absolute path and timing figures.
-        Trailing whitespace and surrounding blank lines are dropped.
+        the working directory's absolute path, timing figures and the
+        ISO date a run writes. Trailing whitespace and surrounding blank
+        lines are dropped.
     """
     for d in {workdir, os.path.realpath(workdir)}:
         text = text.replace(d, "<tmp>")
     text = _DURATION.sub("<time>", text)
+    text = _DATE.sub("<date>", text)
     lines = [ln.rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip("\n")
+
+
+def rewrap(text, width):
+    """Intent:
+        The text with every line wider than `width` re-flowed at spaces
+        to fit, each continuation line indented four spaces past the
+        line it continues. Words are never split, so a token wider than
+        `width` stays whole. Only the line breaks change, which is what
+        `wrap=N` shows a reader in place of a line that would scroll.
+    """
+    out = []
+    for ln in text.splitlines():
+        if len(ln) <= width:
+            out.append(ln)
+            continue
+        indent = ln[:len(ln) - len(ln.lstrip())]
+        out.extend(textwrap.wrap(ln, width=width, subsequent_indent=indent + "    ",
+                                 break_long_words=False, break_on_hyphens=False))
+    return "\n".join(out)
 
 
 def _indent(line):
@@ -303,6 +343,7 @@ class _Driver:
         os.environ.setdefault("MATHEMA_EXTENSIVE_TIMEOUT", "120")
         env = dict(os.environ)
         env.pop("VIRTUAL_ENV", None)
+        env.pop("MATHEMA_PSEUDO_INFINITY", None)
         env["PATH"] = _wrappers(workdir) + os.pathsep + env.get("PATH", "")
         self.env = env
 
@@ -533,6 +574,7 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
                    "before": before}, fh)
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
+    env.pop("MATHEMA_PSEUDO_INFINITY", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
     env["MATHEMA_FAST_TIMEOUT"] = "60"
     env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
@@ -548,6 +590,9 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
         if shown is None:
             continue
         compared += 1
+        wrap = part["options"].get("wrap")
+        if wrap:
+            actual = rewrap(actual, int(wrap))
         shown_n, actual_n = normalise(shown, workdir), normalise(actual, workdir)
         subset = part["options"].get("match") == "subset"
         assert matches(shown_n, actual_n, subset), (
@@ -563,6 +608,12 @@ def test_only_timing_and_paths_are_allowed_to_differ():
     assert normalise("proven, n=12", "/t/w") != normalise("proven, n=13", "/t/w")
 
 
+def test_the_date_a_run_writes_is_allowed_to_differ():
+    assert normalise("contradicted on 2026-09-30: f drops", "/t/w") == \
+        normalise("contradicted on 2026-10-01: f drops", "/t/w")
+    assert normalise("form 2026abc", "/t/w") != normalise("form 2027abc", "/t/w")
+
+
 def test_an_excerpt_keeps_each_detail_under_its_own_entry():
     real = "rec\n  A\n     detail a\n  B\n     detail b\n  C"
     assert matches("rec\n  A\n     detail a\n  C", real, subset=True)
@@ -572,6 +623,18 @@ def test_an_excerpt_keeps_each_detail_under_its_own_entry():
     # order matters, and an excerpt is not a whole
     assert not matches("rec\n  C\n  A", real, subset=True)
     assert not matches("rec\n  A", real)
+
+
+def test_a_wrapped_block_changes_only_where_lines_break():
+    long = "FAIL k: a line of output that is wider than the width  <- and its remedy clause"
+    short = "  - kept"
+    out = rewrap(f"{long}\n{short}", 40)
+    assert all(len(ln) <= 40 for ln in out.splitlines())
+    assert out.split() == f"{long} {short}".split()
+    assert out.splitlines()[-1] == short
+    assert out.splitlines()[1].startswith("    ")
+    # a token wider than the width stays whole rather than being cut
+    assert rewrap("x" * 50, 40) == "x" * 50
 
 
 def test_every_marker_is_well_formed():
@@ -609,3 +672,39 @@ if __name__ == "__main__":
         print(f"wrote {_rel(_INVENTORY)}")
     else:
         sys.exit("usage: test_docs_outputs.py --write-inventory")
+
+
+def test_the_three_layers_triangle_is_the_billing_modules_real_state(tmp_path):
+    """docs/three-layers.md draws `mathema badges` over the billing module
+    that docs/existing-codebase.md builds; the figure is an illustration
+    block (the page has no files of its own), so this replays that page's
+    example and checks the figure against a real run."""
+    import re
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(here, "docs", "three-layers.md"),
+              encoding="utf-8") as fh:
+        page = fh.read()
+    shown = re.search(r"```text\n(\s+CLARITY .*?)```", page, re.S).group(1)
+    example = _BY_ID["docs/existing-codebase.md"]["codebase"]
+    workdir = str(tmp_path)
+    spec_path = os.path.join(workdir, ".example.json")
+    with open(spec_path, "w") as fh:
+        json.dump({"workdir": workdir, "parts": example["parts"],
+                   "before": []}, fh)
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("MATHEMA_PSEUDO_INFINITY", None)
+    env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
+    env["MATHEMA_FAST_TIMEOUT"] = "60"
+    env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
+    r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
+                        spec_path], cwd=workdir, env=env, capture_output=True,
+                       text=True, timeout=600)
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; from mathema.cli import main; "
+                        "sys.exit(main(sys.argv[1:]))",
+                        "badges", "billing", "--root", workdir], cwd=workdir,
+                       env=env, capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.rstrip("\n") == shown.rstrip("\n"), r.stdout

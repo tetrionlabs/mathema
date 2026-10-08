@@ -16,10 +16,16 @@ in `claim_families.py`.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import cmath
+import contextlib
+import collections
+import dataclasses
 import math
 import random
 from dataclasses import dataclass
+from fractions import Fraction
 
 import sympy
 
@@ -28,11 +34,15 @@ from ._sampling import (
     _SpecialCycle as _SpecialCycle, _finite_bounds as _finite_bounds,
     _synth_scalar as _synth_scalar,
 )
+from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
+from .domain import _sentinel_piece, numeric_excluded
+from .runtime_types import SEQUENCE_KINDS
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
 from .records import Probe as Probe
+from ._signatures import callable_signature
 
 
 # Adaptive trial budget. A flat n for every law spends the same effort on a
@@ -83,6 +93,8 @@ class _RiskPolicy:
     free_params: int = 2             # first two params add no combinatorial risk
     max_wide_domain_risk: int = 2
     max_float_extreme_risk: int = 2
+    max_language_risk: int = 3
+    language_hazards_per_unit: int = 32   # hazards one unit of language risk stands for
     wide_span: float = 1e4
     tiny_magnitude: float = 1e-6
     huge_magnitude: float = 1e9
@@ -91,6 +103,7 @@ class _RiskPolicy:
     param_penalty: float = 0.5
     wide_domain_penalty: float = 1.0
     float_extreme_penalty: float = 1.0
+    language_penalty: float = 1.0
     score_min: float = 1.0
     score_max: float = 10.0
     budget_step_per_unit: int = 32    # extra trials per unit of starting complexity
@@ -275,7 +288,10 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     the space of *combinations*; `wide_domain`/`float_extremes` flag a
     declared domain a fixed sample density thins out fast (unbounded or
     very wide) or where float precision itself becomes a risk (very
-    large or very near-zero magnitudes)."""
+    large or very near-zero magnitudes). `language` counts the hazards
+    a language-bound parameter's language brings, one unit per
+    `language_hazards_per_unit`, and is present only when some
+    parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
         bounds = domain.get(p)
@@ -287,13 +303,34 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
         if (0 < abs(lo) < policy.tiny_magnitude) or (0 < abs(hi) < policy.tiny_magnitude) \
                 or abs(lo) > policy.huge_magnitude or abs(hi) > policy.huge_magnitude:
             float_extremes += 1
-    return {
+    risk = {
         "branches": min(facts.branch_count, policy.max_branch_risk),
         "loops": min(len(facts.loops), policy.max_loop_risk),
         "params": max(0, len(facts.params) - policy.free_params),
         "wide_domain": min(wide_domain, policy.max_wide_domain_risk),
         "float_extremes": min(float_extremes, policy.max_float_extreme_risk),
     }
+    language = _language_risk(facts.params, domain, policy)
+    if language is not None:
+        risk["language"] = language
+    return risk
+
+
+def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
+    """Intent:
+        The `language` risk factor: for each parameter bound to a
+        language, one unit per `language_hazards_per_unit` hazards its
+        lap visits, summed and capped at `max_language_risk`. `None`
+        when no parameter is bound to a language.
+    """
+    units, bound = 0, False
+    for p in params:
+        dom = domain.get(p)
+        if _classify_bound(dom) != "language":
+            continue
+        bound = True
+        units += math.ceil(len(_language_hazards(dom)) / policy.language_hazards_per_unit)
+    return min(units, policy.max_language_risk) if bound else None
 
 
 def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> int:
@@ -306,10 +343,13 @@ def _starting_budget(risk: dict, affine: bool, policy: _RiskPolicy = _RISK) -> i
     well-behaved in *shape*, but a wide or float-precision-risky domain
     (`risk["wide_domain"]`/`risk["float_extremes"]`) still needs real
     coverage regardless of shape, so affine-ness is ignored rather than
-    overriding that."""
-    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0:
+    overriding that, and the same holds for a language domain's hazards
+    (`risk["language"]`)."""
+    if affine and risk["wide_domain"] == 0 and risk["float_extremes"] == 0 \
+            and not risk.get("language"):
         return policy.affine_budget
-    complexity = risk["branches"] + risk["loops"] + risk["wide_domain"]
+    complexity = (risk["branches"] + risk["loops"] + risk["wide_domain"]
+                  + risk.get("language", 0))
     return min(_N_MAX, _N_BASE + complexity * policy.budget_step_per_unit)
 
 
@@ -335,6 +375,7 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
     score -= risk["params"] * policy.param_penalty
     score -= risk["wide_domain"] * policy.wide_domain_penalty
     score -= risk["float_extremes"] * policy.float_extreme_penalty
+    score -= risk.get("language", 0) * policy.language_penalty
     # centered on _N_BASE, not linear: doubling n from there is worth a
     # flat +1, same as halving it costs a flat -1, extra trials past a
     # point buy steadily less legibility, not steadily less risk.
@@ -345,10 +386,143 @@ def _probe_density(risk: dict, n_trials: int, policy: _RiskPolicy = _RISK) -> di
            "n": n_trials, "factors": dict(risk)}
 
 
-# the relative half of the default closeness allowance: with no declared
-# tolerance, two values are equal when they agree within this relative
-# tolerance or the absolute 1e-9, whichever is larger
-DEFAULT_RELATIVE_TOLERANCE = 1e-6
+# the relative part of the default closeness allowance: with no declared
+# tolerance, `values_agree` reads two values as equal when they agree
+# within this tolerance relative to the larger, or the absolute 1e-9,
+# whichever is larger. A computation line compares a computed value with
+# the exact one through `_allowance` instead, where the absolute part
+# never exceeds this relative part of the result
+DEFAULT_RELATIVE_TOLERANCE = 1e-7
+
+
+def plain_value(v):
+    """Intent:
+        An executed value in the plain Python form the comparisons
+        read: a numpy scalar or a 0-d array becomes its Python number,
+        an array becomes nested lists, anything else is returned as it
+        is.
+    """
+    if type(v) in (bool, int, float, complex, str, type(None)):
+        return v
+    if hasattr(v, "shape") and hasattr(v, "tolist"):
+        try:
+            return v.tolist()
+        except Exception:
+            return v
+    if hasattr(v, "dtype") and hasattr(v, "item"):
+        try:
+            return v.item()
+        except Exception:
+            return v
+    return v
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float, complex, Fraction)) \
+        and not isinstance(v, bool)
+
+
+def _beyond_float(v) -> bool:
+    """Whether `v` is an integer too large for a float."""
+    if not isinstance(v, int) or isinstance(v, bool):
+        return False
+    try:
+        float(v)
+    except OverflowError:
+        return True
+    return False
+
+
+def _exact_pair(*values):
+    """`values` with each finite float and integer read as the exact
+    rational it is when one of them is an exact rational (a claim word's
+    value beyond float range) or an integer beyond float range, so they
+    compare and subtract without overflowing; unchanged otherwise. An
+    infinity or nan stays the float it is."""
+    if not any(isinstance(v, Fraction) or _beyond_float(v) for v in values):
+        return values
+    return tuple(Fraction(v) if (isinstance(v, int)
+                                 and not isinstance(v, bool))
+                 or (isinstance(v, float) and math.isfinite(v)) else v
+                 for v in values)
+
+
+def _numbers_agree(u, v, abs_tol, rel_tol: float) -> bool:
+    # a NaN agrees with nothing; the same infinity is one point; a
+    # finite value is close within the tolerances, complex values by
+    # abs(u - v); `abs_tol` is a float, or an exact rational where it
+    # was scaled to a magnitude beyond float range
+    if holds_nan(u) or holds_nan(v):
+        return False
+    if holds_inf(u) or holds_inf(v):
+        return u == v
+    if isinstance(u, Fraction) or isinstance(v, Fraction) \
+            or _beyond_float(u) or _beyond_float(v):
+        if isinstance(u, complex) or isinstance(v, complex):
+            return False
+        u, v = _exact_pair(u, v)
+        if isinstance(abs_tol, float) and not math.isfinite(abs_tol):
+            return True
+        allowed = max(Fraction(rel_tol) * max(abs(u), abs(v)),
+                      Fraction(abs_tol))
+        return abs(u - v) <= allowed
+    if isinstance(abs_tol, Fraction):
+        # a tolerance scaled to a magnitude beyond float range holds two
+        # finite floats within it
+        try:
+            abs_tol = float(abs_tol)
+        except OverflowError:
+            return True
+    if isinstance(u, complex) or isinstance(v, complex):
+        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+    return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def values_agree(u, v, tolerance: float | None = None,
+                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
+                 broadcast: bool = False) -> "bool | None":
+    """Intent:
+        Whether two executed values are equal, the one reading every
+        comparison shares: Python numbers, numpy scalars, 0-d arrays,
+        arrays and nested lists alike, arrays and lists compared
+        element by element. A NaN agrees with nothing, another NaN
+        included; two sides at the same infinity agree; complex values
+        compare by `abs(u - v)`; finite values agree within `tolerance`
+        (absolute, 1e-9 when None) or `rel_tol` (relative), whichever
+        is larger.
+
+    Notes:
+        `None` when the two sides have different shapes. With
+        `broadcast`, a number against an array or list is compared
+        with every element. A bool, and a value that is not a number,
+        agrees only by exact equality.
+    """
+    abs_tol = tolerance if tolerance is not None else 1e-9
+    u, v = plain_value(u), plain_value(v)
+
+    def walk(x, y):
+        xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if xs and ys:
+            if len(x) != len(y):
+                return None
+            parts = [walk(a, b) for a, b in zip(x, y)]
+        elif xs or ys:
+            if not broadcast:
+                return None
+            parts = ([walk(a, y) for a in x] if xs
+                     else [walk(x, b) for b in y])
+        elif _is_number(x) and _is_number(y):
+            return _numbers_agree(x, y, abs_tol, rel_tol)
+        else:
+            try:
+                return bool(x == y)
+            except Exception:
+                return False
+        if any(pt is None for pt in parts):
+            return None
+        return all(parts)
+
+    return walk(u, v)
 
 
 def _close(u, v, tolerance: float | None = None,
@@ -357,57 +531,100 @@ def _close(u, v, tolerance: float | None = None,
     tolerance (declared-schema.md) governs its own comparison outright;
     the 1e-9 default is only a floating-point-representation fudge factor
     for claims that never declared one. `rel_tol` is the relative
-    allowance on top of it, 0 for a claim that declared its tolerance."""
-    if isinstance(u, bool) or isinstance(v, bool):
-        return u == v
-    abs_tol = tolerance if tolerance is not None else 1e-9
-    if isinstance(u, (int, float)) and isinstance(v, (int, float)):
-        if math.isnan(u) and math.isnan(v):
-            return True
-        return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (int, float, complex)) and isinstance(v, (int, float, complex)):
-        return cmath.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
-    if isinstance(u, (list, tuple)) and isinstance(v, (list, tuple)):
-        return len(u) == len(v) and all(_close(a, b, tolerance, rel_tol)
-                                        for a, b in zip(u, v))
-    return u == v
+    allowance on top of it, 0 for a claim that declared its tolerance.
+    The reading is `values_agree`'s: a NaN is close to nothing, and two
+    values of different shapes are not close."""
+    return bool(values_agree(u, v, tolerance, rel_tol))
 
 
-def _synth_dict(key_tree, rng: random.Random, specials=None) -> dict:
+def values_differ(u, v, tolerance: float | None = None,
+                  rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> bool:
+    """Intent:
+        Whether `u != v` holds between two executed values: they do not
+        agree (`values_agree`), and neither holds a NaN, since a NaN is
+        no value and fails every relation, `!=` included.
+    """
+    if holds_nan(plain_value(u)) or holds_nan(plain_value(v)):
+        return False
+    return not values_agree(u, v, tolerance, rel_tol)
+
+
+def _synth_dict(key_tree, rng: random.Random, specials=None,
+                fields: "dict | None" = None) -> dict:
     """A dict matching the (possibly NESTED) key structure the body
     reads (`_dict_key_tree`): a key with children becomes a nested dict,
     a leaf key a synthesized scalar, so `cfg["a"]["b"]` finds `cfg["a"]`
     a dict rather than a scalar. An empty structure (the body only
     iterates, `d.values()`) gets a few generic scalar keys, plus
-    sometimes an extra key the body never asks for."""
+    sometimes an extra key the body never asks for.
+
+    `fields` maps a top-level key to the bound a claim's path binding
+    states for it (`d.note in {"a", "b"} | {None}`): the key's value is
+    drawn from the bound's values, and where the bound admits absence
+    one draw in three is absent instead, a member it admits: `unset`
+    leaves the key out, `null` holds `None`."""
+    from .domain import absence_members, without_sentinels
+    fields = fields or {}
     if not key_tree:
         key_tree = {f"k{i}": {} for i in range(rng.randint(1, 4))}
-    out = {k: (_synth_dict(sub, rng, specials) if sub
-               else _synth_scalar(rng, specials=specials))
-           for k, sub in key_tree.items()}
+    key_tree = {**key_tree, **{k: {} for k in fields if k not in key_tree}}
+    out: dict = {}
+    for k, sub in key_tree.items():
+        bound = fields.get(k)
+        if bound is None:
+            out[k] = (_synth_dict(sub, rng, specials) if sub
+                      else _synth_scalar(rng, specials=specials))
+            continue
+        members = absence_members(bound)
+        if members and rng.random() < 1 / 3:
+            if rng.choice(members) == "null":
+                out[k] = None
+            continue
+        out[k] = _synth("float", rng, without_sentinels(bound), specials=specials)
     if rng.random() < 0.3:
         out[f"extra{rng.randint(0, 9)}"] = _synth_scalar(rng, specials=specials)
     return out
+
+
+def _within_epsilon(a, b, eps: float, rel_tol: float) -> bool:
+    """`abs(a - b) <= ε` between two executed scalars, judged in float
+    with the computation allowance on top: ε plus `rel_tol` times the
+    larger magnitude, the rounding the subtraction itself carries. A
+    NaN is within nothing; the same infinity is one point."""
+    try:
+        magnitude = max(abs(a), abs(b))
+        if not math.isfinite(magnitude):
+            return _close(a, b, tolerance=eps, rel_tol=0.0)
+        return _close(a, b, tolerance=eps + rel_tol * magnitude, rel_tol=0.0)
+    except (TypeError, OverflowError):
+        return _close(a, b, tolerance=eps, rel_tol=rel_tol)
 
 
 def _scalar_relation(a, b, relation: str, slack: float,
                      exact_inequality: bool = False,
                      rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """One scalar comparison for the elementwise walk. A strict `<`/`>`
-    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`/
-    `~=` go through `_close`, and so does `!=` when the claim declared a
-    tolerance. With `exact_inequality`, `!=` fails only where the two
+    gets no tolerance credit; a closed `<=`/`>=` gets the slack; `==`
+    goes through `_close`, `~=` through `_within_epsilon`, and so does
+    `!=` when the claim declared a tolerance. With `exact_inequality`, `!=` fails only where the two
     values are equal, so a representation tolerance never makes two
     different values a counterexample. Raises TypeError for values that
     do not order (a complex vs a real), which the caller reads as
     'unanswerable', not 'false'. `rel_tol` is `_close`'s relative
     allowance."""
-    if relation in ("==", "~="):
+    if holds_nan(a) or holds_nan(b):
+        return False
+    if relation == "==":
         return _close(a, b, tolerance=slack, rel_tol=rel_tol)
+    if relation == "~=":
+        # `a ~= b` is `abs(a - b) <= ε`, the float subtraction allowed
+        # the same rounding as `==` on top of ε
+        return _within_epsilon(a, b, slack, rel_tol)
     if relation == "!=":
         if exact_inequality:
-            return not (a == b or (a != a and b != b))
+            return not (a == b)
         return not _close(a, b, tolerance=slack, rel_tol=rel_tol)
+    a, b, slack = _exact_pair(a, b, slack)
     if relation == "<=":
         return a <= b + slack
     if relation == ">=":
@@ -415,6 +632,411 @@ def _scalar_relation(a, b, relation: str, slack: float,
     if relation == "<":
         return a < b
     return a > b
+
+
+class ExecutedMissing:
+    """What the code did at each missing input a route executed: `table`,
+    `{param: {member: outcome}}` with the first outcome per member kept;
+    `policy`, the behaviour per (parameter, kind, member) over every
+    call (`_missing_policy.PolicyTable`); and how many points were
+    classified rather than judged."""
+
+    def __init__(self) -> None:
+        from ._missing_policy import PolicyTable
+        self.table: dict = {}
+        self.said: dict = {}
+        # `{param: default}` of the function called, set by the route:
+        # `defaults` the knobs never counted as an input, `flags` every
+        # default
+        self.defaults: dict = {}
+        self.flags: dict = {}
+        # the first call per (parameter, member): (value, output, raised,
+        # behaviour)
+        self.first: dict = {}
+        # the first point where a declared `Optional` return gave None
+        # from present inputs: `{"at": "x = 0.75", "declared": text}`
+        self.introduced: dict = {}
+        self.policy = PolicyTable()
+        self.classified = 0
+        self.last_classified = False
+        # `{param: [path, ...]}`: the paths the claim binds, whose
+        # absences and holes are missing inputs too
+        self.paths: dict = {}
+        # how to call f again with a hole filled (`call_at(point)` gives
+        # `(output, raised)`), the fill per parameter where the argument
+        # holds no present value, and per parameter the calls whose hole
+        # f is indifferent to and those whose refill said nothing
+        self.refill_at = None
+        self.given: "tuple | None" = None
+        self.fills: dict = {}
+        self.indifferent: dict = {}
+        self.inconclusive: dict = {}
+        self.not_repeatable: dict = {}
+
+    def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
+        """File one call at `point` (its arguments by name) that returned
+        `output` or raised `raised`."""
+        from ._missing_policy import classify_call, keys_of, unseen_kinds
+        # a parameter left at its own default (numpy's `axis=None`) is no
+        # missing input
+        point = {p: v for p, v in point.items()
+                 if not (p in self.defaults and v is self.defaults[p])}
+        keys = keys_of(point, self.paths)
+        if not keys:
+            return
+        # a parameter at its own default (`scale=None` meaning "no
+        # scale") speaks for itself only when no drawn input is missing
+        at_default = {p for p, _k, _m in keys
+                      if p in self.flags and point[p] is self.flags[p]}
+        if at_default and any(p not in at_default for p, _k, _m in keys):
+            point = {p: v for p, v in point.items() if p not in at_default}
+            keys = keys_of(point, self.paths)
+        from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, MISSING, NOT_REPEATABLE,
+                                      raise_is_the_absences, refill)
+        given, refill_at = self.given, self.refill_at
+        pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
+                         self.fills)
+                  if refill_at is not None and not self.paths else None)
+        if pieces is None and refill_at is not None and raise_is_the_absences(
+                lambda at: refill_at(at, given), point, raised, self.fills):
+            # the raise is the absence's: filed under it alone, and the
+            # holes beside it are inconclusive
+            for p, kind, _m in keys:
+                if kind == MISSING:
+                    self.inconclusive[p] = self.inconclusive.get(p, 0) + 1
+            absent_keys = [k for k in keys if k[1] != MISSING]
+            self._file(point, output, raised, absent_keys,
+                       classify_call(point, output, raised,
+                                     unseen_kinds(point, absent_keys)))
+            return
+        if pieces is None:
+            self._file(point, output, raised, keys,
+                       classify_call(point, output, raised, unseen_kinds(point, keys)))
+            return
+        for at, got, err, behaviour in pieces:
+            if behaviour in (INDIFFERENT, INCONCLUSIVE, NOT_REPEATABLE):
+                # no fill changed the output (f is indifferent to the
+                # slot), the filled call gave no value back, or the call
+                # did not repeat
+                counted = {INDIFFERENT: self.indifferent, INCONCLUSIVE: self.inconclusive,
+                           NOT_REPEATABLE: self.not_repeatable}[behaviour]
+                if behaviour == NOT_REPEATABLE:
+                    # an executed witness against determinism
+                    from .policy import record_unrepeatable
+                    record_unrepeatable(at, (output, raised), (got, err))
+                for p, _k, _m in keys_of(at):
+                    counted[p] = counted.get(p, 0) + 1
+                if behaviour == INDIFFERENT:
+                    # a value returned with the hole there: evidence against
+                    # raises and propagates only
+                    from .policy import record_call
+                    record_call(at, got, err, keys=keys_of(at, self.paths),
+                                behaviour="drops", indifferent=True,
+                                origin=point if at is not point else None)
+                continue
+            self._file(at, got, err, keys_of(at, self.paths), behaviour,
+                       origin=point if at is not point else None)
+
+    def _file(self, point: dict, output, raised: "str | None", keys: list,
+              behaviour: str, origin: "dict | None" = None) -> None:
+        """File one call's behaviour under every key it holds."""
+        from ._missing_policy import is_path, member_changes, no_value_slots
+        from ._missing_words import outcome_entry, path_said, said, value_shown
+        # a hole returned in its slot spelled as another member is said
+        # slot by slot: `values[1]=None returned as nan`
+        respelled: dict = {}
+        if raised is None:
+            for p, position, drawn, back in member_changes(point, output):
+                where = "".join(f"[{i}]" for i in position)
+                word = next(sl.member for sl in no_value_slots(point[p]).slots
+                            if sl.position == position)
+                shown = "None" if drawn is None else value_shown(drawn)
+                respelled.setdefault((p, word),
+                                     f"{p}{where}={shown} returned as {back}")
+        from .policy import record_call
+        record_call(point, output, raised, keys=keys, behaviour=behaviour, origin=origin)
+        for p, kind, member in keys:
+            if is_path(p):
+                # a field's or key's no-value, said by its path
+                self.table.setdefault(p, {}).setdefault(
+                    member, outcome_entry(member, output, raised=raised,
+                                          behaviour=behaviour))
+                self.said.setdefault(p, {}).setdefault(
+                    member, path_said(p, member, point, output, raised, behaviour,
+                                      kind=kind))
+                self.first.setdefault((p, member), (None, output, raised, behaviour))
+                continue
+            in_slot = no_value_slots(point[p]).shape != ()
+            entry = (outcome_entry(member, raised=raised) if raised is not None
+                     else outcome_entry(member, output, behaviour=behaviour,
+                                        respelled=respelled.get((p, member)),
+                                        in_slot=in_slot))
+            self.table.setdefault(p, {}).setdefault(member, entry)
+            self.said.setdefault(p, {}).setdefault(
+                member, said(p, member, {p: point[p]}, output, raised, behaviour))
+            self.first.setdefault((p, member), (point[p], output, raised, behaviour))
+        self.policy.add(point, output, raised, paths=self.paths, behaviour=behaviour)
+
+    def returned_absent(self, point: dict, declared: str) -> None:
+        """File a None the function returned from present inputs, which
+        its return type declares."""
+        from ._missing_words import point_shown
+        from .policy import record_introduced
+        record_introduced(point)
+        self.introduced = self.introduced or {"at": point_shown(point),
+                                              "declared": declared}
+        self.classified += 1
+        self.last_classified = True
+
+    def meta(self) -> dict:
+        out: dict = {}
+        if self.indifferent:
+            out["indifferent"] = dict(self.indifferent)
+        if self.inconclusive:
+            out["inconclusive"] = dict(self.inconclusive)
+        if self.not_repeatable:
+            out["not_repeatable"] = dict(self.not_repeatable)
+        if self.introduced:
+            out["returned"] = {"absent": "introduces", "source": "annotation",
+                               **self.introduced}
+        if self.table:
+            out["executed"] = {p: dict(v) for p, v in self.table.items()}
+            out["behaviour"] = self.policy.summary()
+            out["said"] = {p: dict(v) for p, v in self.said.items()}
+            mixed = self.policy.mixed()
+            if mixed:
+                out["mixed"] = mixed
+                raised = self.policy.mixed_raised()
+                if raised:
+                    out["raised"] = raised
+        return out
+
+
+class LastCall:
+    """The calls a wrapped function made since the last `record`, for the
+    executed missing inputs: `wrap(fn)` returns fn recording each
+    outcome."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def wrap(self, fn):
+        def recorded(*a, **k):
+            try:
+                out = fn(*a, **k)
+            except Exception as exc:
+                self.calls.append(("raised", type(exc).__name__, a, k))
+                raise
+            self.calls.append(("returned", out, a, k))
+            return out
+        return recorded
+
+    def reset(self) -> None:
+        self.calls = []
+
+    #: `{param: default}` of the function the calls are made to
+    defaults: dict = {}
+
+    def raised(self) -> bool:
+        return any(c[0] == "raised" for c in self.calls)
+
+    def outputs(self) -> list:
+        return [c[1] for c in self.calls if c[0] == "returned"]
+
+    def record(self, executed: "ExecutedMissing", point: dict) -> None:
+        """File every call since the last record at the arguments it was
+        given (the drawn `point` where they cannot be read by name), then
+        forget them."""
+        executed.flags = self.defaults
+        for kind, value, *given in self.calls:
+            actual = (_called_at(point, given[0], given[1], self.defaults)
+                      if len(given) == 2 else point)
+            # the arguments as given, for calling f again with a hole filled
+            executed.given = tuple(given) if len(given) == 2 else None
+            if not inputs_missing(actual.values()) and not (
+                    executed.paths and _paths_reach(actual, executed.paths)):
+                continue
+            if kind == "raised":
+                executed.add_call(actual, raised=value)
+            else:
+                executed.add_call(actual, output=value)
+        self.calls = []
+
+
+def _paths_reach(point: dict, paths: dict) -> bool:
+    """Whether a path a claim binds reaches no value in `point`."""
+    from ._missing_policy import keys_of
+    return any(q not in point for q, _k, _m in keys_of(point, paths))
+
+
+def _called_at(point: dict, args: tuple, kwargs: dict, defaults: dict) -> dict:
+    """The arguments one call was given, by the parameter names `point`
+    lists in order, each one left out at its default from `defaults`;
+    `point` itself when they do not line up."""
+    names = list(point)
+    if len(args) > len(names) or any(k not in names for k in kwargs):
+        return point
+    actual = dict(zip(names, args))
+    actual.update(kwargs)
+    actual = {p: _as_drawn(point.get(p), v) for p, v in actual.items()}
+    if len(actual) == len(names):
+        return actual
+    # a parameter the call left out took its default
+    return {**actual, **{p: defaults[p] for p in names
+                         if p not in actual and p in defaults}}
+
+
+def _as_drawn(drawn, given):
+    """An argument as the record shows it: the drawn value when the call
+    got that value converted to an array, a numpy array as a plain list
+    with the holes it stands for restored, anything else as given."""
+    from ._missing_policy import _array_list, _hole_word, _is_ndarray
+    if isinstance(drawn, dict) and type(given).__name__ == "Table":
+        return drawn
+    if not _is_ndarray(given):
+        return given
+    cells = _array_list(given)
+
+    def same(a, b) -> bool:
+        wa, wb = _hole_word(a), _hole_word(b)
+        if wa is not None or wb is not None:
+            return wa == wb or (wa is not None and wb == "nan")
+        try:
+            return bool(a == b)
+        except Exception:
+            return False
+    if isinstance(drawn, (list, tuple)) and len(drawn) == len(cells) \
+            and all(same(a, b) for a, b in zip(drawn, cells)):
+        return drawn
+    return cells
+
+
+def parameter_defaults(fn) -> dict:
+    """`{param: default}` for every parameter of `fn` that has one."""
+    import inspect
+
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    return {p: q.default for p, q in sig.parameters.items()
+            if q.default is not inspect.Parameter.empty}
+
+
+def signature_defaults(fn) -> dict:
+    """`{param: default}` for every parameter of `fn` that has a default
+    and no annotation: a library's knob left alone (`axis=None`), not an
+    input a claim draws. An annotated parameter's default (`scale:
+    Optional[float] = None`) is a value like any other."""
+    import inspect
+
+    from ._signatures import callable_signature
+    try:
+        sig = callable_signature(fn)
+    except (TypeError, ValueError):
+        return {}
+    return {p: q.default for p, q in sig.parameters.items()
+            if q.default is not inspect.Parameter.empty
+            and q.annotation is inspect.Parameter.empty}
+
+
+def executed_missing(kit: dict) -> "ExecutedMissing | None":
+    """The executed missing inputs a point-runtime kit's `evaluate`
+    records, when it has them (a foreign runner's evaluator need not)."""
+    return getattr(kit.get("evaluate"), "executed", None)
+
+
+def with_executed(meta: "dict | None", executed: "ExecutedMissing | None") -> "dict | None":
+    """`meta` with the outcomes and behaviours at the executed missing
+    inputs merged under `mathema.missing`; `meta` unchanged when there
+    are none."""
+    extra = executed.meta() if executed is not None else {}
+    if not extra:
+        return meta
+    out = dict(meta or {})
+    missing = dict(out.get("mathema.missing") or {})
+    if extra.get("returned") and "returned" not in missing:
+        missing["returned"] = extra["returned"]
+    for key in ("indifferent", "inconclusive", "not_repeatable"):
+        # the calls indifferent to the hole, and those whose refill said
+        # nothing, per parameter
+        if extra.get(key):
+            counted = dict(missing.get(key) or {})
+            for p, n in extra[key].items():
+                counted[p] = counted.get(p, 0) + n
+            missing[key] = counted
+    for key in ("executed", "behaviour", "said", "mixed", "raised"):
+        merged = {p: dict(v) for p, v in (missing.get(key) or {}).items()}
+        for p, members in extra.get(key, {}).items():
+            for word, said in members.items():
+                merged.setdefault(p, {}).setdefault(word, said)
+        if merged:
+            missing[key] = merged
+    out["mathema.missing"] = missing
+    return out
+
+
+def missing_class(value) -> "str | None":
+    """Intent:
+        The kind of missing value `value` is: `"absent"` for `None`,
+        `"hole"` for a value with no computable content (NaN, `pd.NA`,
+        `NaT`, a hole a runtime type's adapter reads back), None for a
+        value that is not missing. A container is not itself a missing
+        value, whatever it holds.
+    """
+    from .domain import absence_word, is_missing
+    if absence_word(value) is not None:
+        return "absent"
+    if isinstance(value, (list, tuple, dict, str)) or _is_matrix_value(value):
+        return None
+    try:
+        return "hole" if is_missing(value) else None
+    except Exception:
+        return None
+
+
+def inputs_missing(args) -> bool:
+    """Intent:
+        Whether any argument is missing or holds a missing value: `None`,
+        a hole, or a vector, matrix, table or record holding one (read
+        through the runtime type adapters' `observe`).
+    """
+    from .runtime_types import observed_plain
+
+    def holds(v) -> bool:
+        if missing_class(v) is not None:
+            return True
+        if isinstance(v, dict):
+            return any(holds(x) for x in v.values())
+        if isinstance(v, (list, tuple)):
+            return any(holds(x) for x in v)
+        if _is_matrix_value(v) or type(v).__module__.split(".")[0] in ("pandas",
+                                                                       "polars"):
+            try:
+                seen = observed_plain(v)
+            except Exception:
+                return False
+            return seen is not v and holds(seen)
+        from ._missing_policy import _fields
+        fields = _fields(v) if not isinstance(v, (str, bytes, int, float)) else None
+        # a record (a pydantic model, a dataclass) holds a missing value
+        # where one of its own fields is one; a path reaches further in
+        return bool(fields) and any(missing_class(x) is not None for x in fields.values())
+
+    return any(holds(a) for a in args)
+
+
+def classified(args, outputs, raised: bool = False) -> bool:
+    """Intent:
+        Whether a point is classified rather than judged: an argument is
+        missing, and the call raised or returned a missing value (a
+        hole or `None`, or a container holding one). A value claim is
+        judged only where the function returns a value; the behaviour
+        at a missing output is recorded, never compared.
+    """
+    return inputs_missing(args) and (
+        raised or any(inputs_missing([o]) for o in outputs))
 
 
 def _is_matrix_value(v) -> bool:
@@ -425,53 +1047,262 @@ def _is_matrix_value(v) -> bool:
     return hasattr(v, "shape") and hasattr(v, "__array__")
 
 
+def _pinned_float_env() -> contextlib.ExitStack:
+    """The floating-point error regime every probe evaluation runs
+    under: numpy's own defaults, pinned explicitly so a verdict never
+    depends on whatever ambient `numpy.seterr` state the calling
+    process happens to carry (an invalid operation is a NaN, never a
+    FloatingPointError), with the RuntimeWarning numpy emits for it
+    silenced (`quiet_callee_warnings`). Without numpy, only the
+    silencing."""
+    import contextlib
+    stack = contextlib.ExitStack()
+    stack.enter_context(quiet_callee_warnings())
+    try:
+        import numpy
+    except Exception:
+        return stack
+    stack.enter_context(numpy.errstate(divide="warn", over="warn",
+                                       under="ignore", invalid="warn"))
+    return stack
+
+
+def quiet_callee_warnings():
+    """Intent:
+        A context in which a RuntimeWarning is not shown: what the code
+        under test emits while it is probed (numpy's "invalid value
+        encountered", "overflow", "Mean of empty slice") is the value
+        being measured, a nan or an inf, and never a message for the
+        person running mathema. mathema's own warnings are other
+        categories and still show.
+    """
+    import warnings
+    ctx = warnings.catch_warnings()
+
+    class _Quiet:
+        def __enter__(self):
+            ctx.__enter__()
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return self
+
+        def __exit__(self, *exc):
+            return ctx.__exit__(*exc)
+    return _Quiet()
+
+
+def quiet_while_probing(func):
+    """Run `func` inside `quiet_callee_warnings`."""
+    import functools
+
+    @functools.wraps(func)
+    def run(*args, **kwargs):
+        with quiet_callee_warnings():
+            return func(*args, **kwargs)
+    return run
+
+
+def _keeps_default(fn, parameter) -> bool:
+    """Intent:
+        Whether a parameter that has a default, and that no claim
+        binds, is passed at its default when the built-in battery
+        builds a call, rather than sampled like any other parameter:
+        True for a library function (a key of a registered
+        `compendium:` file), False for any other function, whose
+        defaulted parameters are sampled.
+
+    Notes:
+        A claim's own calls follow the same rule
+        (`conjecture.call_defaults`). A record built without Python
+        source lists only the parameters without defaults
+        (`_doc_only_facts`), so its defaulted parameters are never
+        passed at all.
+    """
+    from .compendium import library_key_of
+    return (parameter.default is not parameter.empty
+            and library_key_of(fn) is not None)
+
+
+def call_arguments(fn, params, values: dict) -> "tuple[list, dict]":
+    """Intent:
+        The positional and keyword arguments that call `fn` with
+        `values[p]` for every parameter `p` in `params` that `values`
+        holds: a keyword-only parameter by keyword, every other one
+        positionally, in order, until a parameter is left out (it then
+        takes its default), after which each goes by keyword. A
+        callable whose signature cannot be read takes every value
+        positionally.
+    """
+    try:
+        spec = callable_signature(fn).parameters
+    except (TypeError, ValueError):
+        spec = {}
+    args: list = []
+    kwargs: dict = {}
+    order = [p for p, param in spec.items()
+             if param.kind in (param.POSITIONAL_ONLY,
+                               param.POSITIONAL_OR_KEYWORD)]
+    gap = False
+    for p in params:
+        if p not in values:
+            continue
+        param = spec.get(p)
+        if p in order:
+            # a positional parameter before this one that no value
+            # fills leaves a gap only a keyword can step over
+            gap = gap or any(q not in values for q in
+                             order[:order.index(p)])
+        if param is not None and (param.kind is param.KEYWORD_ONLY
+                                  or (gap and param.kind is
+                                      param.POSITIONAL_OR_KEYWORD)):
+            kwargs[p] = values[p]
+        else:
+            args.append(values[p])
+    return args, kwargs
+
+
+def holds_nan(value) -> bool:
+    """True when a value is a NaN or contains one: a Python or numpy
+    float NaN, a complex value with a NaN component, or a NaN element
+    of a numpy array or a nested list or tuple. A value that is not numeric at all holds no NaN."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return value != value
+    if isinstance(value, complex):
+        # no value when either component is a NaN
+        return value.real != value.real or value.imag != value.imag
+    if isinstance(value, (list, tuple)):
+        return any(holds_nan(v) for v in value)
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        try:
+            import numpy
+            arr = numpy.asarray(value)
+            if arr.dtype.kind == "O":
+                return any(holds_nan(v) for v in arr.ravel().tolist()
+                           if isinstance(v, (float, complex, list, tuple)))
+            if arr.dtype.kind != "c":
+                arr = arr.astype(float)
+            return bool(numpy.isnan(arr).any())
+        except (TypeError, ValueError, ImportError):
+            return False
+    return False
+
+
+def holds_inf(value) -> int:
+    """Intent:
+        The sign of an infinity a value is or contains: 1 for `inf`, -1
+        for `-inf` (when both occur, the first found), 0 for none. Reads
+        Python and numpy floats, complex values (the real part, then
+        the imaginary part), numpy arrays, and nested lists and
+        tuples; a value that is not numeric holds no infinity.
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, float):
+        return (1 if value > 0 else -1) if value in (_INF, -_INF) else 0
+    if isinstance(value, complex):
+        return holds_inf(value.real) or holds_inf(value.imag)
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            sign = holds_inf(v)
+            if sign:
+                return sign
+        return 0
+    if hasattr(value, "dtype") and hasattr(value, "shape"):
+        try:
+            import numpy
+            arr = numpy.asarray(value)
+            if arr.dtype.kind == "O":
+                return holds_inf([v for v in arr.ravel().tolist()
+                                  if isinstance(v, (float, complex, list,
+                                                    tuple))])
+            if arr.dtype.kind == "c":
+                arr = numpy.concatenate([arr.real.ravel(), arr.imag.ravel()])
+            else:
+                arr = arr.astype(float)
+            found = arr[numpy.isinf(arr)]
+        except (TypeError, ValueError, ImportError):
+            return 0
+        return (1 if found.flat[0] > 0 else -1) if found.size else 0
+    return 0
+
+
+_INF = float("inf")
+
+
+def same_infinity(lv, rv) -> bool:
+    """Intent:
+        Whether two values are the same infinity, inf and inf or -inf
+        and -inf: two overflows toward one infinity are the same
+        extended-real point, so the computation is consistent there.
+        Two complex values are the same point only when both
+        components agree, one of them infinite.
+        A NaN is the absence of a value and never the same as anything,
+        another NaN included; a finite value is not an infinity.
+    """
+    def sign(v):
+        if isinstance(v, bool) or not isinstance(v, float):
+            return 0
+        return 1 if v == _INF else -1 if v == -_INF else 0
+    if isinstance(lv, complex) or isinstance(rv, complex):
+        # one point of the plane only when both components agree, an
+        # infinite one among them and no NaN in either
+        if not all(isinstance(v, (int, float, complex))
+                   and not isinstance(v, bool) for v in (lv, rv)):
+            return False
+        a, b = complex(lv), complex(rv)
+        if holds_nan(a) or holds_nan(b) or not holds_inf(a):
+            return False
+        return a.real == b.real and a.imag == b.imag
+    return sign(lv) != 0 and sign(lv) == sign(rv)
+
+
 def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
     side is matrix/array-valued, the relation at EVERY element (a scalar
-    broadcasts against a matrix). numpy fast path when either side is an
-    array, a recursive walk over nested lists otherwise. Returns
+    broadcasts against a matrix), numpy values read as the plain values
+    they hold (`plain_value`). `==`, `~=` and `!=` over arrays are one
+    fact about the whole value (`values_agree`), so `!=` holds when some
+    element differs; an ordering holds when it holds at every element. A
+    NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values, or mismatched
     shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
-    and a toleranced `!=` get on top of `slack`."""
+    and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
+    numpy scalar) is a scalar. Over complex values `==`, `~=` and `!=`
+    compare by `abs(a - b)`, with the tolerance rules of reals; an
+    ordering over a complex value is unanswerable. Two values of
+    different lengths or shapes are unequal outright under `==`, `~=`
+    and `!=`; an ordering over them is unanswerable. Leaves that are
+    not numbers (a record, a string, `None`) are equal only by their
+    own equality."""
+    lv, rv = plain_value(lv), plain_value(rv)
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
                                          exact_inequality, rel_tol))
         except TypeError:
             return None
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None and (hasattr(lv, "__array__") or hasattr(rv, "__array__")
-                           or isinstance(lv, (list, tuple))
-                           or isinstance(rv, (list, tuple))):
-        try:
-            a = np.asarray(lv, dtype=float)
-            b = np.asarray(rv, dtype=float)
-        except Exception:
-            return None
-        try:
-            if relation in ("==", "~="):
-                return bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "!=":
-                if exact_inequality:
-                    return not bool(np.array_equal(a, b, equal_nan=True))
-                return not bool(np.allclose(a, b, rtol=rel_tol, atol=slack))
-            if relation == "<=":
-                return bool((a <= b + slack).all())
-            if relation == ">=":
-                return bool((a >= b - slack).all())
-            if relation == "<":
-                return bool((a < b).all())
-            return bool((a > b).all())
-        except (ValueError, TypeError):
-            return None       # incompatible shapes: unanswerable
+    if relation in ("==", "~=", "!="):
+        # equality of two arrays is one fact about every element; a
+        # NaN anywhere is no value and fails the relation, `!=` too
+        if holds_nan(lv) or holds_nan(rv):
+            return False
+        exact = relation == "!=" and exact_inequality
+        agree = values_agree(lv, rv, 0.0 if exact else slack,
+                             0.0 if exact else rel_tol, broadcast=True)
+        if agree is None:
+            # two values of different shapes are unequal outright
+            return relation == "!="
+        return agree if relation != "!=" else not agree
 
     def _walk(x, y):
+        # an ordering, at every element: over sequences of different
+        # length, or leaves that do not order, it is unanswerable
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
         if xs and ys:
             if len(x) != len(y):
@@ -543,7 +1374,7 @@ def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
     if any(_bound_is_complex(b) for b in (cj_domain or {}).values()):
         return False
     try:
-        sig = inspect.signature(callee)
+        sig = callable_signature(callee)
     except (TypeError, ValueError):
         return True
     annotations = [sig.return_annotation,
@@ -569,8 +1400,16 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
                 or not isinstance(lv, (int, float)) \
                 or not isinstance(rv, (int, float)):
             return 0.0
-        gap = sign * (lv - rv)
-        return gap if gap > 0 and math.isfinite(gap) else 0.0
+        # the difference is taken exactly, so an integer too large for
+        # a float never has to be converted unless it is the answer
+        exact = (lv - rv) if relation == "<=" else (rv - lv)
+        if exact <= 0:
+            return 0.0
+        try:
+            gap = float(exact)
+        except OverflowError:
+            return 0.0
+        return gap if math.isfinite(gap) else 0.0
     from .matrices import _numpy
     np = _numpy()
     if np is None:
@@ -592,6 +1431,18 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
 # importers of mathema.probing.
 
 
+def _complex_component(rng: random.Random) -> float:
+    """One part of a complex draw: uniform on [-10, 10], or with the
+    far share a draw along the whole line out to complex128's
+    per-component maximum (`_sampling._far_draw`)."""
+    from ._sampling import _FAR_SHARE, _far_draw
+    from .representations import PY_COMPLEX128
+    if rng.random() < _FAR_SHARE:
+        reach = float(PY_COMPLEX128.max_magnitude or 0.0)
+        return _far_draw(rng, -reach, reach, True, True)
+    return rng.uniform(-10, 10)
+
+
 def _sample_bare_named_set(rng: random.Random, name: str):
     if name == "Z":
         return (rng.choice([0, 1, -1, 2, -2]) if rng.random() < 0.3
@@ -599,12 +1450,16 @@ def _sample_bare_named_set(rng: random.Random, name: str):
     if name == "N":
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 1000)
     if name == "C":
-        # a square patch of the plane, with the plane's own landmark
-        # values favored the way the real specials pool favors 0/1/-1.
+        # the plane's own landmark values favored the way the real
+        # specials pool favors 0/1/-1; otherwise the real and the
+        # imaginary part are each drawn from the everyday/far split: a
+        # square patch around the origin, or (the far share) a
+        # magnitude log-uniform over the decades out to complex128's
+        # per-component maximum
         if rng.random() < 0.3:
             return rng.choice([0j, 1 + 0j, -1 + 0j, 1j, -1j,
                                1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j])
-        return complex(rng.uniform(-10, 10), rng.uniform(-10, 10))
+        return complex(_complex_component(rng), _complex_component(rng))
     return rng.uniform(-10, 10)   # "R"
 
 
@@ -613,12 +1468,17 @@ def _integer_range(piece, base_type: str) -> "tuple[int, int]":
         The first and last integers an interval piece admits, an open
         end excluding its endpoint and a fractional end rounding inward
         (`(0, 5]` gives 1..5, `[0.5, 5]` gives 1..5), with an unbounded
-        side capped the way `_finite_bounds` caps a real one. `first >
-        last` when no integer lies inside.
+        side (an infinite end, or the reach a `ReachInterval` marks)
+        capped the way `_finite_bounds` caps a real one. `first > last`
+        when no integer lies inside.
     """
     from .domain import _integer_span
     first, last = _integer_span(piece, base_type)
-    flo, fhi = _finite_bounds(float(piece[0]), float(piece[1]))
+    if getattr(piece, "reach_lo", False):
+        first = -math.inf
+    if getattr(piece, "reach_hi", False):
+        last = math.inf
+    flo, fhi = _moderate_bounds(*_reach_ends(piece))
     if math.isinf(first):
         first = math.ceil(flo)
     if math.isinf(last):
@@ -638,6 +1498,27 @@ def _synth_int_in(rng: random.Random, piece, base_type: str) -> int:
     return rng.randint(first, last)
 
 
+def _draw_member(rng: random.Random, values: list, lap=None):
+    """Intent:
+        One member of a finite set, a sentinel among them drawn as a
+        real value it stands for (`None` for absence, a member's value
+        for a hole), never the sentinel itself; with a lap given, a
+        sentinel draw takes the lap's next value, so the members the
+        claim resolved are the ones used.
+    """
+    from .domain import is_sentinel, realise_sentinel
+    choice = rng.choice(values)
+    if not is_sentinel(choice):
+        return choice
+    if lap is not None:
+        return lap.next()
+    realised = realise_sentinel(choice)
+    if realised:
+        return rng.choice(realised)
+    concrete = [v for v in values if not is_sentinel(v)]
+    return rng.choice(concrete) if concrete else None
+
+
 def _sample_domain(rng: random.Random, dom: Domain,
                    specials: "_SpecialCycle | None" = None):
     """Sample one value from a `Domain` (grammar.py's exclusion/union/
@@ -652,25 +1533,39 @@ def _sample_domain(rng: random.Random, dom: Domain,
         return (isinstance(p, tuple) and not isinstance(p, frozenset)
                 and any(isinstance(v, complex) for v in p))
 
-    pieces = dom.pieces or (dom.base_type,)
+    from .domain import _is_enumerated, is_sentinel
+    # a sentinel piece beside an interval or a named type is not drawn
+    # at random; a finite set's own sentinels are its members
+    enumerated = _is_enumerated(dom)
+    pieces = tuple(p for p in dom.pieces
+                   if enumerated or not (isinstance(p, frozenset) and p
+                                         and all(is_sentinel(v) for v in p))) \
+        or (dom.base_type,)
     weights = []
     for p in pieces:
         if _rectangle(p):
             weights.append(1.0)
         elif isinstance(p, tuple):
-            lo, hi = _finite_bounds(*p)
-            weights.append(max(hi - lo, 1e-9))
+            lo, hi = _moderate_bounds(*_reach_ends(p))
+            # half widths, so the widest pieces near the float limit
+            # still have a finite weight
+            weights.append(max(hi / 2 - lo / 2, 1e-9))
         else:
             weights.append(1.0)
+    if dom.base_type == "S" and not enumerated:
+        # the type of strings alone: a string from the hazard corpus
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     for _ in range(20):
         piece = rng.choices(pieces, weights=weights, k=1)[0]
         if isinstance(piece, frozenset):
-            value = rng.choice(list(piece))
+            value = _draw_member(rng, list(piece))
         elif _rectangle(piece):
             c1, c2 = complex(piece[0]), complex(piece[1])
+            from ._sampling import _uniform
             value = complex(
-                rng.uniform(min(c1.real, c2.real), max(c1.real, c2.real)),
-                rng.uniform(min(c1.imag, c2.imag), max(c1.imag, c2.imag)))
+                _uniform(rng, min(c1.real, c2.real), max(c1.real, c2.real)),
+                _uniform(rng, min(c1.imag, c2.imag), max(c1.imag, c2.imag)))
         elif isinstance(piece, tuple):
             value = _synth_scalar(rng, piece, specials=specials)
             if dom.base_type in ("Z", "N"):
@@ -684,14 +1579,171 @@ def _sample_domain(rng: random.Random, dom: Domain,
                 value = min(max(int(round(value)), first), max(first, last))
         else:
             value = _sample_bare_named_set(rng, piece)
-        if value not in dom.excluded:
+        try:
+            kept = value not in dom.excluded
+        except TypeError:
+            kept = True
+        if kept:
+            return value
+    return value
+
+
+#: the hazard kinds the lap visits first: a length and a shape, which
+#: is where a refinement's members at its bounds sit
+_BOUND_KINDS = ("length", "shape")
+
+
+def _language_lap(rng: random.Random, dom) -> "_SpecialCycle | None":
+    """Intent:
+        One lap over every hazard of a language domain, for the first
+        draws of a parameter bound to it: the length and shape hazards
+        (a refinement's members at its bounds among them) first, in the
+        language's order, then the rest once each in a seeded order. `None` when
+        the bound is not a language domain or has no hazard to visit.
+    """
+    if _classify_bound(dom) != "language":
+        return None
+    values = _language_hazards(dom)
+    if not values:
+        return None
+    pairs = _language_hazards(dom, kinds=True)
+    lengths = [v for v, kind in pairs if kind in _BOUND_KINDS]
+    rest = [v for v, kind in pairs if kind not in _BOUND_KINDS]
+    return _SpecialCycle(rng, values=rest, first=lengths)
+
+
+class _Resolved:
+    """One language piece of a domain, resolved once, its hazards built
+    on first use and kept."""
+
+    def __init__(self, piece) -> None:
+        from .languages import resolve_language
+        self.language = resolve_language(piece)
+        self._hazards: "tuple | None" = None
+
+    def hazards(self) -> tuple:
+        if self._hazards is None:
+            self._hazards = tuple(self.language.hazards())
+        return self._hazards
+
+
+#: recently sampled domains, each with its resolved pieces and the
+#: registry generation they were resolved under
+_RESOLVED: "collections.OrderedDict[int, tuple]" = collections.OrderedDict()
+_RESOLVED_KEEP = 32
+
+
+def _resolved(dom, piece) -> _Resolved:
+    """Intent:
+        `piece` of `dom` resolved, reused across a claim's draws until a
+        language or refinement is registered or removed.
+
+    Raises:
+        UnknownLanguage, UnknownRefinement: as resolution does.
+    """
+    from .languages import generation
+    now = generation()
+    entry = _RESOLVED.get(id(dom))
+    if entry is None or entry[0] is not dom or entry[1] != now:
+        entry = (dom, now, {})
+        _RESOLVED[id(dom)] = entry
+        while len(_RESOLVED) > _RESOLVED_KEEP:
+            _RESOLVED.popitem(last=False)
+    else:
+        _RESOLVED.move_to_end(id(dom))
+    pieces = entry[2]
+    if piece not in pieces:
+        pieces[piece] = _Resolved(piece)
+    return pieces[piece]
+
+
+def _language_hazards(dom, kinds: bool = False) -> list:
+    """Intent:
+        Every hazard of a language domain's pieces, the members of the
+        domain's excluded set left out, in the languages' own order;
+        with `kinds`, `(value, kind)` pairs.
+    """
+    from .domain import LanguageRef
+    values: list = []
+    for piece in dom.pieces or ():
+        if not isinstance(piece, LanguageRef):
+            continue
+        try:
+            hazards = _resolved(dom, piece).hazards()
+        except Exception:
+            continue
+        for h in hazards:
+            try:
+                excluded = h.value in dom.excluded
+            except TypeError:
+                excluded = False
+            if not excluded:
+                values.append((h.value, h.kind) if kinds else h.value)
+    return values
+
+
+class LanguageDrawFailed(Exception):
+    """A language could not produce a member to sample (a schema whose
+    checks reject every record drawn): the claim over it cannot be
+    evaluated at all, on any route."""
+
+    def __init__(self, piece, error: Exception) -> None:
+        super().__init__(f"L[{getattr(piece, 'text', piece)}] produced no member to "
+                         f"sample ({type(error).__name__}: {error})")
+
+
+def _sample_language(rng: random.Random, dom: Domain):
+    """Intent:
+        One member of a language domain: a piece chosen uniformly (a
+        language or a finite set of members), then a hazard value of
+        that language three draws in ten and a random member
+        otherwise, retried a bounded number of times to avoid an
+        excluded member.
+
+    Notes:
+        The hazard corpus is the language's own (`Language.hazards`,
+        every value of which is a member), so a draw never leaves the
+        declared language; the guaranteed lap over every hazard is
+        `_language_lap`, the per-parameter cycle the claim loop threads
+        in through `_synth`'s `lap`.
+    """
+    from .domain import LanguageRef, is_sentinel
+    pieces = dom.pieces or ()
+    value = None
+    for _ in range(20):
+        piece = rng.choice(pieces)
+        if isinstance(piece, frozenset):
+            members = [v for v in piece if not is_sentinel(v)]
+            if not members:
+                continue
+            value = rng.choice(members)
+        elif isinstance(piece, LanguageRef):
+            resolved = _resolved(dom, piece)
+            hazards = resolved.hazards()
+            if hazards and rng.random() < 0.3:
+                value = rng.choice(hazards).value
+            else:
+                try:
+                    value = resolved.language.sample(rng)
+                except TimeoutError:
+                    raise
+                except Exception as e:
+                    raise LanguageDrawFailed(piece, e) from e
+        else:
+            continue
+        try:
+            excluded = value in dom.excluded
+        except TypeError:
+            excluded = False
+        if not excluded:
             return value
     return value
 
 
 def _classify_bound(bounds) -> str:
     """The domain-bound shape, independent of a parameter's own
-    inferred kind, "domain" (a grammar.Domain: union/exclusion/an
+    inferred kind, "language" (a Domain over `L[...]` pieces),
+    "domain" (a grammar.Domain: union/exclusion/an
     explicit type refinement), "frozenset" (a discrete set), "Z"/"N"
     (a named integer set), "interval" (a plain (lo, hi) tuple), or
     "none". Shared by every consumer that needs to dispatch on a
@@ -701,7 +1753,7 @@ def _classify_bound(bounds) -> str:
     Domain object _synth already knew how to handle, the first time a
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
-        return "domain"
+        return "language" if bounds.base_type == "L" else "domain"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -717,28 +1769,181 @@ def _classify_bound(bounds) -> str:
     return "other"
 
 
+#: the share of sequence draws taken from `_sequence_corner`
+_SEQUENCE_CORNER_SHARE = 0.15
+
+
+def _element_range(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The real interval a sequence's elements range over, `(lo, hi)`
+        with an unbounded end at the number representation's reach, or
+        None when the elements are not one real interval (an integer
+        lattice, a finite set, a union).
+    """
+    from ._sampling import _reach_ends, representation_reach
+    if bounds is None:
+        reach = representation_reach()
+        return -reach, reach
+    pieces = getattr(bounds, "pieces", None)
+    if pieces is not None:
+        def numeric(v) -> bool:
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+        # sentinels (an absence, a hole, the empty container) are not
+        # elements of the real range
+        if getattr(bounds, "base_type", "R") != "R" or any(
+                numeric(v) for v in (getattr(bounds, "excluded", None) or ())):
+            return None
+        sets = [p for p in pieces if isinstance(p, frozenset)]
+        if any(numeric(v) for p in sets for v in p):
+            return None
+        real = [p for p in pieces if not isinstance(p, frozenset)]
+        if not real:
+            reach = representation_reach()
+            return -reach, reach
+        if len(real) != 1:
+            return None
+        bounds = real[0]
+    if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
+            and len(bounds) == 2:
+        try:
+            lo, hi, _ul, _uh = _reach_ends(bounds)
+        except (TypeError, ValueError):
+            return None
+        return lo, hi
+    return None
+
+
+def _ordinary_element(rng: random.Random, lo: float, hi: float) -> float:
+    """An element drawn inside [lo, hi]: from its part within [-10, 10]
+    when it meets that range, else uniformly from the whole range."""
+    from ._sampling import _between
+    a, b = max(lo, -10.0), min(hi, 10.0)
+    if a <= b:
+        return rng.uniform(a, b) if a < b else a
+    return _between(lo, hi, rng.random()) if lo < hi else lo
+
+
+def _cancel_magnitudes(top: float) -> list:
+    """The magnitudes of the cancelling pairs `[M, -M]` a sequence meets
+    inside a range reaching `top` on both sides: 1e16, 1e300 and `top`
+    itself (the float limit when the range is unbounded), those within
+    it."""
+    out: list = []
+    for m in (1e16, 1e300, top):
+        if 0 < m <= top and m not in out:
+            out.append(m)
+    return out or [top]
+
+
+def sequence_corners(bounds, n: "int | None" = None) -> list:
+    """Intent:
+        The magnitude corners of a sequence whose elements range over
+        `bounds` (None the whole line, an unbounded end at the number
+        representation's reach), each a list: the pairs that cancel at
+        a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
+        range's own limit, and the range's opposite ends `[lo, hi]`;
+        every entry inside the range. With `n`, each pair is repeated
+        to length `n`, and none is given below 2. Empty when the
+        elements are not one real interval.
+    """
+    span = _element_range(bounds)
+    if span is None or (n is not None and n < 2):
+        return []
+    lo, hi = span
+    pairs: list = []
+    if lo < 0 < hi:
+        pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
+    if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
+        pairs.append([lo, hi])
+    if n is None:
+        return pairs
+    return [[pair[i % 2] for i in range(n)] for pair in pairs]
+
+
+def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
+    """Intent:
+        One sequence from the corners where float arithmetic breaks, or
+        None when the elements' domain is not one real interval:
+        entries that cancel at a large magnitude (`[M, -M, ...]`),
+        entries at the range's stated ends, or a series one ulp from
+        constant. Every entry lies inside the element range.
+    """
+    span = _element_range(bounds)
+    if span is None:
+        return None
+    lo, hi = span
+    from ._sampling import representation_reach
+    reach = representation_reach()
+    # entries at the range's own ends only where the claim states them;
+    # an unbounded side's float limit is the reach draws' business
+    stated = not (lo == -reach and hi == reach)
+    shapes = ["near-constant"] + (["edges"] if stated else [])
+    if n >= 2 and lo < 0 < hi:
+        shapes.append("cancel")
+    shape = rng.choice(shapes)
+    if shape == "cancel":
+        top = min(-lo, hi)
+        m = rng.choice([v for v in (1e16, 1e300) if 0 < v <= top]
+                       or [top])
+        rest = [_ordinary_element(rng, lo, hi) for _ in range(n - 2)]
+        return [m, -m] + rest
+    if shape == "edges":
+        return [rng.choice([lo, hi]) for _ in range(n)]
+    base = _ordinary_element(rng, lo, hi)
+    up = math.nextafter(base, math.inf)
+    if up > hi:
+        up = math.nextafter(base, -math.inf)
+        if up < lo:
+            return [base] * n
+    return [base if i % 2 == 0 else up for i in range(n)]
+
+
 def _synth(kind: str, rng: random.Random, bounds=None,
           specials: "_SpecialCycle | None" = None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
-          length: "int | None" = None):
+          length: "int | None" = None,
+          lap: "_SpecialCycle | None" = None):
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if _classify_bound(bounds) == "language":
+        # a language bound is the parameter's own domain whatever kind
+        # the body suggested (a mapping read, an iteration): the author
+        # said the value IS a member, so it is drawn as one, the
+        # language's hazards first when a lap is threaded in
+        if lap is not None and lap.guaranteed_remaining():
+            return lap.next()
+        return _sample_language(rng, bounds)
+    waited = False
+    if lap is not None and lap.guaranteed_remaining() \
+            and kind not in (*SEQUENCE_KINDS, "dict", "table"):
+        # the sentinels a scalar's domain admits, each drawn once
+        # before any random draw, after the draws another parameter's
+        # sentinels take
+        from ._sampling import WAIT
+        value = lap.next()
+        if value is not WAIT:
+            return value
+        waited = True
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
         # that only iterates its values. The claim path uses
         # `_synth_dict(keys, ...)` with the body's real keys instead.
         return _synth_dict([], rng, specials=specials)
-    if kind == "sequence":
+    if kind in SEQUENCE_KINDS:
         # `length`, when a dimension premise fixed it for this trial,
-        # overrides the free 2..8 draw so the premise holds by
+        # overrides the free 1..8 draw so the premise holds by
         # construction rather than by rejection
-        n = length if length is not None else rng.randint(2, 8)
+        n = length if length is not None else rng.randint(1, 8)
+        if rng.random() < _SEQUENCE_CORNER_SHARE:
+            corner = _sequence_corner(rng, n, bounds)
+            if corner is not None:
+                return corner
         if bounds is not None:
             # a declared element domain, generate elements that
             # respect it (recursing through _synth's own scalar
@@ -773,14 +1978,24 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # exclusion/explicit type refinement) is handled the same way, by
     # its own dedicated sampler, also regardless of kind.
     bound_shape = _classify_bound(bounds)
+    if bound_shape in ("domain", "frozenset") and lap is not None and not waited \
+            and lap.guaranteed_remaining():
+        # a finite set's listed sentinels, each realised member drawn
+        # once before any random draw
+        return lap.next()
     if bound_shape == "domain":
         return _sample_domain(rng, bounds, specials=specials)
     if bound_shape == "frozenset":
-        return rng.choice(list(bounds))
+        return _draw_member(rng, list(bounds), lap)
     if bound_shape in ("Z", "N", "C"):
         return _sample_bare_named_set(rng, bound_shape)
     if kind == "bool":
         return rng.random() < 0.5
+    if kind == "string":
+        # a string parameter with no finite set or language to draw
+        # from: one string from the hazard corpus, never a number
+        from ._sampling import _synth_string
+        return _synth_string(rng)
     if kind == "int":
         if bounds is not None:
             return _synth_int_in(rng, bounds, "Z")
@@ -788,11 +2003,111 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def _annotation_text(param) -> str:
+    """A signature parameter's annotation as source text, or ''."""
+    import inspect
+    ann = getattr(param, "annotation", inspect.Parameter.empty)
+    if ann is inspect.Parameter.empty:
+        return ""
+    from ._annotation_text import annotation_text
+    return annotation_text(ann)
+
+
+def _hides_characters(s: str) -> bool:
+    """Whether printing `s` would hide some of its characters from a
+    reader: a combining mark, a format character, or a space other than
+    the ordinary one. Controls need no help; `repr` escapes them."""
+    import unicodedata
+    for c in s:
+        cat = unicodedata.category(c)
+        if cat in ("Mn", "Mc", "Me", "Cf", "Zl", "Zp") or (cat == "Zs" and c != " "):
+            return True
+    return False
+
+
+def spell_text(s: str, *, force: bool = False) -> str:
+    """A string for a witness: its repr, followed by its escaped form in
+    parentheses when printing it would hide characters (or `force`, for
+    two sides that differ yet read the same)."""
+    shown = repr(s)
+    if force or _hides_characters(s):
+        escaped = ascii(s)
+        if escaped != shown:
+            return f"{shown} ({escaped})"
+    return shown
+
+
+def sample_bound(bound: Any, rng: random.Random, kind: str = "scalar") -> Any:
+    """Intent:
+        One value drawn from a declared bound, the draw the probe route
+        makes for a parameter of `kind` with that bound: a language
+        member for a language bound, an element of a finite set, an
+        integer or a real inside an interval, a list for `"sequence"`.
+        The extension surface's sampling seam, so a registered family
+        or a language package draws members the way the probe does.
+    """
+    return _synth(kind, rng, bound)
+
+
+def _nesting(v) -> tuple:
+    """`(levels, records)`: how many container levels a value nests,
+    counted with an explicit stack over lists, tuples, sets, dicts and
+    the fields of objects with a `__dict__`, and the most values of the
+    value's own type along any one path (0 unless it is such an
+    object)."""
+    root_type = type(v) if hasattr(v, "__dict__") and not isinstance(v, type) else None
+    deepest = most = 0
+    stack = [(v, 0, 0)]
+    seen: set = set()
+    while stack:
+        node, level, records = stack.pop()
+        if isinstance(node, (str, bytes, int, float, complex, bool)) or node is None:
+            deepest = max(deepest, level)
+            continue
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if root_type is not None and type(node) is root_type:
+            records += 1
+            most = max(most, records)
+        if isinstance(node, dict):
+            kids = list(node.values())
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            kids = list(node)
+        elif hasattr(node, "__dict__"):
+            kids = list(vars(node).values())
+        else:
+            deepest = max(deepest, level)
+            continue
+        deepest = max(deepest, level + 1)
+        stack.extend((k, level + 1, records) for k in kids)
+    return deepest, most
+
+
+def _deep_summary(v) -> str:
+    """A value too deep to print, by its type and how deep it nests: a
+    tree of records by the records along its deepest path, the depth a
+    record tree is measured in, anything else by its container levels."""
+    levels, records = _nesting(v)
+    name = type(v).__name__
+    if records:
+        return f"<{name} tree {records} records deep>"
+    return f"<{name} nested {levels} levels deep>"
+
+
 def _fmt_value(v) -> str:
     """One computed or sampled value, legibly, shared by _fmt() (an
     argument tuple) and every check closure's own failure `detail`
     string (the actual result(s) being compared, not just the inputs
-    that produced them)."""
+    that produced them). A value nested too deep for Python to print
+    is named by its type and its depth instead."""
+    try:
+        return _fmt_value_of(v)
+    except RecursionError:
+        return _deep_summary(v)
+
+
+def _fmt_value_of(v) -> str:
     if isinstance(v, float):
         return f"{v:.6g}"
     if isinstance(v, complex):
@@ -800,26 +2115,75 @@ def _fmt_value(v) -> str:
         # Python's parenthesized repr
         return f"{v.real:.6g}{v.imag:+.6g}j"
     if isinstance(v, list):
-        return "[" + ", ".join(_fmt_value(x) for x in v) + "]"
+        return "[" + ", ".join(_fmt_value_of(x) for x in v) + "]"
     if isinstance(v, tuple):
-        return "(" + ", ".join(_fmt_value(x) for x in v) + ")"
-    return repr(v)
+        return "(" + ", ".join(_fmt_value_of(x) for x in v) + ")"
+    if isinstance(v, str):
+        return spell_text(v)
+    shown = repr(v)
+    if shown.startswith("<") and " object" in shown and hasattr(v, "__dict__"):
+        # a record whose repr is only its class (an ORM row): its public
+        # fields say which record it is
+        fields = {k: x for k, x in vars(v).items() if not k.startswith("_")}
+        if fields:
+            return (f"{type(v).__name__}("
+                    + ", ".join(f"{k}={_fmt_value_of(x)}" for k, x in fields.items()) + ")")
+    return shown
 
 
-def _fmt(args: tuple, names: tuple[str, ...] | None = None) -> str:
+def _fmt_coordinate(v) -> str:
+    """Intent:
+        One witness coordinate at full precision: a float keeps its
+        six-digit spelling when that reads back as the same float, and
+        otherwise prints every digit it needs (`exact_float_text`), so
+        a point read back from the record is the point that was
+        checked. Containers recurse; anything else is `_fmt_value`.
+    """
+    from ._float_text import exact_float_text
+    if isinstance(v, float):
+        return exact_float_text(v, f"{v:.6g}")
+    if isinstance(v, complex):
+        re_text = exact_float_text(v.real, f"{v.real:.6g}")
+        im_text = exact_float_text(v.imag, f"{v.imag:.6g}")
+        sign = "" if im_text.startswith("-") else "+"
+        return f"{re_text}{sign}{im_text}j"
+    if isinstance(v, list):
+        return "[" + ", ".join(_fmt_coordinate(x) for x in v) + "]"
+    if isinstance(v, tuple):
+        return "(" + ", ".join(_fmt_coordinate(x) for x in v) + ")"
+    return _fmt_value(v)
+
+
+def _fmt(args: tuple, names: tuple[str, ...] | None = None,
+         shown: "set[str] | None" = None) -> str:
     """A counterexample's argument tuple, legible on its own: labeled
-    `name=value` pairs when the caller's own parameter names are known,
-    a bare positional tuple otherwise. Unlabeled, a two-element
+    `name = value` pairs when the caller's own parameter names are known,
+    a bare positional tuple otherwise, each value at full precision
+    (`_fmt_coordinate`). Unlabeled, a two-element
     counterexample like `([...], -5.54)` reads as (input, output);
-    it's actually (x, alpha), both inputs."""
+    it's actually (x, alpha), both inputs. With `shown`, only the named
+    arguments in it appear (all of them when none is)."""
+    from ._shapes import witness_text
     if names is not None and len(names) == len(args):
-        return ", ".join(f"{n}={_fmt_value(a)}" for n, a in zip(names, args))
-    return "(" + ", ".join(_fmt_value(a) for a in args) + ")"
+        pairs = list(zip(names, args))
+        if shown is not None and any(n in shown for n, _ in pairs):
+            pairs = [(n, a) for n, a in pairs if n in shown]
+        # a large vector or matrix prints its shape, a first row and a
+        # count; the full value rides in the counterexample's arguments
+        return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
+                         else f"{n} = {_fmt_coordinate(a)}" for n, a in pairs)
+    return "(" + ", ".join(witness_text(a) or _fmt_coordinate(a) for a in args) + ")"
 
 
 def _sampling_shorthand(kinds: dict, domain: dict, n: int,
                         critical_hints: dict[str, list[float]] | None = None,
-                        truncated_hints: "set[str] | None" = None) -> str:
+                        truncated_hints: "set[str] | None" = None,
+                        observed_lengths: "dict[str, set] | None" = None,
+                        premise_drawn: "set[str] | None" = None,
+                        runtime_names: "dict[str, str] | None" = None,
+                        nested: "set[str] | None" = None,
+                        lap_floor: "tuple[int, int] | None" = None,
+                        holes: "dict[str, list] | None" = None) -> str:
     """How a probe actually sampled, in compact mathematical notation: the
     distribution per parameter, the seed, the trial count. Meant to make a
     `holds (n=...)` verdict legible and reproducible from the record alone,
@@ -833,7 +2197,20 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
     parameter whose own discovered-point count was capped (see
     `_hints_from_points`'s own `max_critical_hints_per_param`), appending
     `[truncated@N]` so a reader knows `n` covers a capped hint pool plus
-    ordinary sampling, not every point that was actually found."""
+    ordinary sampling, not every point that was actually found.
+
+    A sequence parameter states the lengths its checked samples had
+    (`observed_lengths`: one length as `len=20`, several as their
+    range, none recorded as the free draw's `len∈[1,8]`) and how its
+    elements were drawn: the declared element domain (`elem~...`, the
+    special shapes are not used under one), the free draw with its
+    shapes, or `drawn on the premise` for a parameter in
+    `premise_drawn`, which an equality premise draws directly. A
+    parameter in `runtime_names` states the runtime type each draw was
+    realised as (`as pandas.Series`); one in `nested`, drawn as nested
+    lists, states the size cap per axis those are drawn up to.
+    `lap_floor`, `(lap, budget)`, says the trial count was raised from
+    the budget to a language's lap so every hazard is visited."""
     critical_hints = critical_hints or {}
     truncated_hints = truncated_hints or set()
 
@@ -844,48 +2221,143 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         trunc = f"[truncated@{len(hints)}]" if p in truncated_hints else ""
         return "⊕crit{" + ", ".join(f"{v:g}" for v in hints) + "}" + trunc
 
-    parts = []
-    for p, k in kinds.items():
-        bounds = domain.get(p) if k != "sequence" else None
+    def far_suffix(bounds) -> str:
+        # an unbounded direction's far draws, out to its reach
+        lo, hi, un_lo, un_hi = _reach_ends(bounds)
+        reach = max(abs(lo) if un_lo else 0.0, abs(hi) if un_hi else 0.0)
+        return f"⊔far(≤{reach:g})"
+
+    lengths_seen = observed_lengths or {}
+    premise_drawn = premise_drawn or set()
+
+    def size_text(p: str, free: str) -> str:
+        # the sizes the checked samples had: one length as `len=20`,
+        # several as their range, a matrix as `size=(30,15)` or the
+        # range of the sizes seen; none recorded is the free draw
+        seen = sorted({(s,) if isinstance(s, int) else tuple(s)
+                       for s in (lengths_seen.get(p) or ())})
+        if not seen:
+            return free
+        if all(len(s) == 1 for s in seen):
+            lengths = [s[0] for s in seen]
+            if len(lengths) == 1:
+                return f"len={lengths[0]}"
+            return f"len∈[{lengths[0]},{lengths[-1]}]"
+        compact = ["(" + ",".join(str(n) for n in s) + ")" for s in seen]
+        if len(compact) == 1:
+            return f"size={compact[0]}"
+        return f"size∈[{compact[0]},{compact[-1]}]"
+
+    def sequence_text(p: str) -> str:
+        size = size_text(p, "len∈[1,8]")
+        element_bound = domain.get(p)
+        if p in premise_drawn:
+            draw = "drawn on the premise"
+        elif element_bound is not None:
+            draw = "elem~" + element_text(p, element_bound)
+        else:
+            draw = "shape∈{U,const,sorted,rev,+0,extreme}[p=.3]"
+        admitted = (holes or {}).get(p)
+        if admitted:
+            from ._missing_words import value_shown
+            words = ", ".join(dict.fromkeys(value_shown(h, in_slot=True)
+                                            for h in admitted))
+            draw += f"; holes {{{words}}} at p=.15, degenerate lap first"
+        realised = (runtime_names or {}).get(p)
+        if realised:
+            draw += f"; as {realised}"
+        elif p in (nested or ()):
+            from .runtime_types import ListAdapter
+            draw += (f"; as nested lists, at most {ListAdapter.SIZE_CAP} "
+                     f"per axis")
+        return f"Seq({size}; {draw})"
+
+    def element_text(p: str, bound) -> str:
+        # a space binding (`[0, 1]^n`, `R^n`) is a Domain with `dims`,
+        # each element drawn from the Domain without them
+        if isinstance(bound, Domain) and bound.dims:
+            element = dataclasses.replace(bound, dims=())
+            values = [pc for pc in element.pieces if not _sentinel_piece(pc)]
+            if not numeric_excluded(element) and element.base_type == "R":
+                if not values:
+                    return "U(-10,10)"
+                if len(values) == 1 and isinstance(values[0], (tuple, list)):
+                    lo, hi = values[0]
+                    return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+            return one(p, "float", element)
+        return one(p, "float", bound)
+
+    def one(p: str, k: str, bounds) -> str:
+        if k == "table":
+            return (f"Table(equal-length columns, {size_text(p, 'len∈[1,8]')}, "
+                    f"each drawn as a free Seq)")
+        if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
+                and getattr(bounds.pieces[0], "bare", False)
+                and not numeric_excluded(bounds)):
+            # a bare real line given the reach samples as a bare parameter
+            bounds = bounds.pieces[0]
+        if getattr(bounds, "bare", False):
+            return (f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]"
+                    f"{far_suffix(bounds)}[p=.1]{crit_suffix(p)}")
+        if isinstance(bounds, tuple) and k != "int" and (
+                getattr(bounds, "reach_lo", False)
+                or getattr(bounds, "reach_hi", False)):
+            mlo, mhi = _moderate_bounds(*_reach_ends(bounds))
+            return (f"U({mlo:g},{mhi:g})⊔{{lo,hi,mid,±ε}}[p=.3]"
+                    f"{far_suffix(bounds)}{crit_suffix(p)}")
         bound_shape = _classify_bound(bounds)
         if bound_shape == "frozenset":
-            parts.append(f"{p}~U{{{', '.join(str(v) for v in sorted(bounds))}}}")
-        elif bound_shape == "Z":
-            parts.append(f"{p}~{{0,±1,±2}}[p=.3]⊔U{{-1000..1000}}")
-        elif bound_shape == "N":
-            parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..1000}}")
-        elif k == "sequence":
-            parts.append(f"{p}~Seq(len∈[2,8]; shape∈{{U,const,sorted,rev,+0,extreme}}[p=.3])")
-        elif k == "int" and (bounds is None or isinstance(bounds, tuple)):
+            from .domain import _member_sort_key
+            members = sorted(bounds, key=_member_sort_key)
+            return f"U{{{', '.join(str(v) for v in members)}}}"
+        if bound_shape == "Z":
+            return "{0,±1,±2}[p=.3]⊔U{-1000..1000}"
+        if bound_shape == "N":
+            return "{0,1,2}[p=.3]⊔U{0..1000}"
+        if k in SEQUENCE_KINDS:
+            return sequence_text(p)
+        if k == "int" and (bounds is None or isinstance(bounds, tuple)):
             # only a plain (lo, hi) tuple/Interval is subscriptable; a
             # Domain-typed bound (a `⊂ Z` refinement) falls through to
-            # the set-notation rendering below, subscripting it blind
-            # was a real crash on the empirical-fallback path
-            # the integers actually drawn: an open or fractional end
-            # rounds inward and an unbounded end is capped, as
-            # `_synth_int_in` samples them
+            # the set-notation rendering below. The integers actually
+            # drawn: an open or fractional end rounds inward and an
+            # unbounded end is capped, as `_synth_int_in` samples them
             if bounds:
                 first, last = _integer_range(bounds, "Z")
-                parts.append(f"{p}~U{{{first}..{last}}}")
-            else:
-                parts.append(f"{p}~{{0,1,2}}[p=.3]⊔U{{0..10}}")
-        elif bound_shape == "interval":
+                return f"U{{{first}..{last}}}"
+            return "{0,1,2}[p=.3]⊔U{0..10}"
+        if bound_shape == "interval":
             lo, hi = bounds
-            parts.append(f"{p}~U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}")
-        elif bound_shape != "none":
+            return f"U({lo:g},{hi:g})⊔{{lo,hi,mid,±ε}}[p=.3]{crit_suffix(p)}"
+        if (isinstance(bounds, Domain) and bounds.base_type in ("Z", "N")
+                and len(bounds.pieces) == 1
+                and isinstance(bounds.pieces[0], tuple)
+                and not numeric_excluded(bounds)):
+            # an interval of integers: the integers actually drawn, as
+            # for an int parameter's plain interval
+            first, last = _integer_range(bounds.pieces[0], bounds.base_type)
+            return f"U{{{first}..{last}}}"
+        if bound_shape != "none":
             # "domain" (grammar.Domain: union/exclusion/an explicit
-            # type refinement) or "other", a richer shape this
-            # function's own compact notation has no bespoke rendering
-            # for. Fall back to the same canonical set-notation text a
-            # person would type for it, rather than assuming every
-            # non-plain-tuple bound is a (lo, hi) pair, the real gap
-            # that used to crash here on a Domain object _synth already
-            # knew how to handle.
+            # type refinement) or "other": the canonical set-notation
+            # text a person would type for it
             from .grammar import render_domain_bound
-            parts.append(f"{p}~{render_domain_bound(bounds)}{crit_suffix(p)}")
-        else:
-            parts.append(f"{p}~U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}")
-    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}"
+            return f"{render_domain_bound(bounds)}{crit_suffix(p)}"
+        return f"U(-10,10)⊔{{0,±1,±.5,2,±1e-9,±1e6}}[p=.3]{crit_suffix(p)}"
+
+    def bound_of(p: str, k: str):
+        # a sequence's declared bound is its element domain, read by
+        # `sequence_text`; a language bound is the parameter's own
+        # domain whatever its kind
+        bound = domain.get(p)
+        if k in SEQUENCE_KINDS and _classify_bound(bound) != "language":
+            return None
+        return bound
+
+    parts = [f"{p}~{one(p, k, bound_of(p, k))}" for p, k in kinds.items()]
+    floor = (f", n raised to {lap_floor[0]} to visit every hazard (budget {lap_floor[1]})"
+             if lap_floor else "")
+    return ", ".join(parts) + f", seed={_RNG_SEED}, n={n}" + floor
 
 
 def _out_of_domain_candidates(bounds) -> list:
@@ -903,6 +2375,10 @@ def _out_of_domain_candidates(bounds) -> list:
         span = (hi - lo) or 1.0
         return [lo - 0.5 * span, hi + 0.5 * span]
     if isinstance(bounds, Domain):
+        if bounds.base_type == "L":
+            # a language's own near non-members are its `outside`
+            # draws, which the safety families read directly
+            return []
         candidates = []
         for piece in bounds.pieces:
             if isinstance(piece, tuple):
@@ -1020,6 +2496,9 @@ class SamplingSetup:
     truncated_hints: set
     extra_cycles: dict
     route: str
+    affine: bool = False
+    explicit_trials: bool = False
+    scale: float = 1.0
     # "probe" or "probe:semi_analytical", the route value the evidence
     # honestly earns, per record-schema.md's open route field.
 
@@ -1056,7 +2535,8 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     rng = random.Random(_RNG_SEED)
     specials = _SpecialCycle(rng)
     risk = _structural_risk(facts, domain)
-    budget = trials if trials is not None else _starting_budget(risk, _affine_hint(fn, facts))
+    affine = trials is None and _affine_hint(fn, facts)
+    budget = trials if trials is not None else _starting_budget(risk, affine)
     points = _points_for_probe(fn, facts, domain, extensive)
     critical_hints, truncated_hints = _hints_from_points(points)
     # the route subroute below keys on ANALYTICAL discoveries about
@@ -1073,9 +2553,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     extra_cycles = {p: _SpecialCycle(rng, values=critical_hints[p])
                     for p in facts.params if p in critical_hints}
     scale = min(1.0, trials_scale)
-    if scale < 1.0:
-        budget = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
-                     round(budget * scale))
+    budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
     # states plainly that at least one parameter's own sampling was
     # informed by an analytically discovered critical point this run,
@@ -1084,7 +2562,65 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
-                         extra_cycles=extra_cycles, route=route_value)
+                         extra_cycles=extra_cycles, route=route_value,
+                         affine=affine, explicit_trials=trials is not None,
+                         scale=scale)
+
+
+def _scaled_budget(budget: int, scale: float) -> int:
+    """Intent:
+        `budget` shrunk by `trials_scale` when it is below one, never
+        under `min_trials_floor_when_scaled` or one lap of the specials.
+    """
+    if scale < 1.0:
+        return max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
+                   round(budget * scale))
+    return budget
+
+
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+    """Intent:
+        The risk and trial budget for one claim: the function's own
+        setup, with the `language` factor read off the claim's domain
+        (a written binding or an inferred one), and the budget set from
+        the complexity that factor adds. An explicit trial count is kept
+        as given.
+    """
+    language = _language_risk(facts.params, cj_domain)
+    if language is None or language == setup.risk.get("language"):
+        return setup.risk, setup.budget
+    risk = {**setup.risk, "language": language}
+    if setup.explicit_trials:
+        return risk, setup.budget
+    return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
+
+
+def string_domain_hint(p: str) -> str:
+    """Intent:
+        Why a string parameter `p` with no domain is not sampled, and
+        the spelling that declares one: `L[unicode]` when that string
+        language is installed, a finite set of strings otherwise.
+    """
+    from .languages import resolves
+    example = (f"'for {p} in L[unicode], ...'" if resolves("unicode")
+               else f"'for {p} in {{\"a\", \"b\"}}, ...'")
+    return (f"parameter {p!r} is a string with no declared domain; "
+            f"declare its values, e.g. {example}")
+
+
+def resolve_trials_downscale(downscale: "float | None",
+                             old: "float | None") -> float:
+    """Intent:
+        The factor that shrinks the trial budget, from `trials_downscale`
+        or its deprecated spelling `trials_scale` (which warns); 1.0
+        when neither is given.
+    """
+    if old is not None:
+        from ._deprecation import warn_deprecated
+        warn_deprecated("trials_scale", use="trials_downscale", remove_in="0.7")
+        if downscale is None:
+            downscale = old
+    return 1.0 if downscale is None else float(downscale)
 
 
 def probe(fn, facts, domain: dict | None = None,
@@ -1121,15 +2657,13 @@ def probe(fn, facts, domain: dict | None = None,
     opt-in cost; default `False` keeps today's cheap, direct-lift-only
     behavior."""
     if facts.is_pure is False:
-        # False is established impurity; None means purity could not
-        # be analysed at all (no source), which is not a statement
-        # that effects exist, so probing proceeds against the live
-        # callable as it always did for doc-only records
-        return [Probe("purity", "", "skipped",
-                      note="function has effects; algebraic probing not "
-                           "meaningful"
-                           + (": " + "; ".join(facts.effects)
-                              if facts.effects else ""))]
+        # False is established impurity: the algebraic battery is not
+        # run, and a check mathema chooses not to run leaves no row (the
+        # effects are stated under the function); None means purity
+        # could not be analysed at all (no source), which is not a
+        # statement that effects exist, so probing proceeds against the
+        # live callable as it always did for doc-only records
+        return []
     kinds = [facts.param_kinds.get(p, "unknown") for p in facts.params]
     if not kinds:
         return []
@@ -1142,20 +2676,25 @@ def probe(fn, facts, domain: dict | None = None,
     # domain always wins over the inference)
     for p, vals in getattr(facts, "finite_domains", {}).items():
         domain.setdefault(p, frozenset(vals))
+    # a guard refusing every value outside a set of strings leaves that
+    # set as the working domain (decision A)
+    from .hazards import finite_guard_sets
+    for p, vals in finite_guard_sets(facts).items():
+        domain.setdefault(p, vals)
     # a string parameter with no finite domain has no honest sampling
     # story: synthesizing a float and watching the function raise would
     # manufacture a gap that is an artefact of the battery, not a fact
     # about the code, decline, naming the parameter and the spelling
     # that fixes it
+    from .domain import bare_text_type
     for p, k in zip(facts.params, kinds):
-        if k == "string" and _classify_bound(domain.get(p)) not in (
-                "frozenset", "domain"):
+        if k == "string" and (_classify_bound(domain.get(p)) not in (
+                "frozenset", "domain", "language")
+                or bare_text_type(domain.get(p))):
             return [Probe(
                 "callable", callable_statement, "skipped",
-                note=f"parameter {p!r} is a string with no declared "
-                     f"domain; declare its values, e.g. 'for {p} in "
-                     f'{{"a", "b"}}, ...\' in a claim, or annotate it '
-                     f"Literal[...]",
+                note=string_domain_hint(p) + " in a claim, or annotate it "
+                     "Literal[...]",
                 meta={"mathema.probe_gap": "string-domain-missing"})]
     # budget/risk/route_value aren't needed here, domain_enforced below
     # is the only law left in this function (everything else migrated to
@@ -1165,12 +2704,59 @@ def probe(fn, facts, domain: dict | None = None,
     rng, specials = setup.rng, setup.specials
     critical_hints, extra_cycles = setup.critical_hints, setup.extra_cycles
 
-    def args_for() -> tuple:
-        out = []
-        for p, k in zip(facts.params, kinds):
-            out.append(_synth(k, rng, domain.get(p), specials=specials,
-                              extra=critical_hints.get(p), extra_cycle=extra_cycles.get(p)))
-        return tuple(out)
+    try:
+        signature = callable_signature(fn).parameters
+    except (TypeError, ValueError):
+        signature = {}
+
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=domain)
+    except _dims.DimensionConflict:
+        resolver = None
+
+    def value_for(p, k, sizes):
+        param = signature.get(p)
+        if (param is not None and p not in domain
+                and _keeps_default(fn, param)):
+            return param.default
+        shape = resolver.shapes.get(p) if resolver is not None else None
+        if k == "table":
+            # a table: equal-length columns, each drawn as a sequence,
+            # at the length a vector domain on the table fixes
+            n = (sizes.get(resolver.key(p, 0)) if shape is not None
+                 else None) or rng.randint(2, 8)
+            return {c: _synth("sequence", rng, None, specials=specials,
+                              length=n) for c in ("a", "b")}
+        if shape is not None and shape.ndim >= 1 and (
+                shape.ndim >= 2 or k not in SEQUENCE_KINDS):
+            # a matrix-shaped parameter (a marker, or a space binding
+            # such as `R^(m,n)`), or a space binding on a parameter
+            # whose kind the signature does not state: nested to its
+            # axes, sizes from the plan, so a fixed size is that size
+            return resolver.synth(
+                p, sizes, lambda: _synth("float", rng, domain.get(p),
+                                         specials=specials), rng)
+        # a 1-D sequence takes the length its marker or binding fixes
+        # or shares; an anonymous axis keeps the sampler's own draw
+        length = None
+        if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
+            length = sizes.get(resolver.key(p, 0))
+        drawn = _synth(k, rng, domain.get(p), specials=specials,
+                       extra=critical_hints.get(p),
+                       extra_cycle=extra_cycles.get(p), length=length)
+        if inputs_missing([drawn]):
+            # the smoke call asks whether f can be called with a value;
+            # a claim's own missing points are its own to execute
+            return _synth(k, rng, None, specials=specials, length=length)
+        return drawn
+
+    def args_for() -> "tuple[list, dict]":
+        sizes = resolver.draw_sizes(rng) if resolver is not None else {}
+        return call_arguments(fn, facts.params, {
+            p: value_for(p, k, sizes) for p, k in zip(facts.params, kinds)})
 
     # A parameter's own critical-point hint is drawn deterministically
     # exactly once (extra_cycle's own guaranteed lap), which may be
@@ -1178,16 +2764,32 @@ def probe(fn, facts, domain: dict | None = None,
     # signature mismatch (fails identically every time) apart from a
     # one-off arithmetic exception from landing exactly on a pole.
     last_exc: Exception | None = None
+    from .runtime_types import calling
+    call = calling(fn, facts)
     for _ in range(3):
         try:
-            fn(*args_for())
+            call_args, call_kwargs = args_for()
+            call(*call_args, **call_kwargs)
             break
         except Exception as e:
             last_exc = e
     else:
+        hints = "".join(f"; {h['text']}" for h in
+                        (getattr(facts, "runtime_hints", None) or {}).values())
+        if getattr(last_exc, "at_exit", False):
+            # a shape guard refused the RESULT: the inputs were fine,
+            # the body's answer was not
+            return [Probe("callable", callable_statement, "skipped",
+                          note=f"the call raised after the body returned: "
+                               f"{last_exc}" + hints,
+                          meta={"mathema.probe_gap": "result-shape"})]
+        shown = ", ".join(
+            f"{name}: {_annotation_text(param)}" if _annotation_text(param)
+            else name for name, param in signature.items())
         return [Probe("callable", callable_statement, "skipped",
-                      note="could not synthesize valid inputs from the "
-                           f"signature ({type(last_exc).__name__}: {last_exc})",
+                      note=f"f could not be called with a value mathema built "
+                           f"from the signature ({shown}): "
+                           f"{type(last_exc).__name__}: {last_exc}" + hints,
                       meta={"mathema.probe_gap": "input-synthesis"})]
 
     probes: list[Probe] = []

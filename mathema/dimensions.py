@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from .runtime_types import SEQUENCE_KINDS
 
 
 class DimensionConflict(ValueError):
@@ -63,6 +64,9 @@ class DimResolver:
     # name for the same axis: `Shape("n")` with a claim `R^k` reads as
     # "k is n", so both resolve to one dimension rather than clashing.
     aliases: dict = field(default_factory=dict)    # claim name -> canonical
+    # a dimension name a binding fixes at a size: `Shape("n")` with a
+    # claim `[0, 1]^30` pins n at 30, everywhere n appears
+    fixed: dict = field(default_factory=dict)      # canonical name -> size
 
     def canonical(self, name):
         """A dimension name resolved through the alias map to the
@@ -88,9 +92,11 @@ class DimResolver:
 
     def marker_names(self) -> set:
         """Every dimension name usable as a symbol in a premise or law:
-        the signature's own names and every claim alias of them."""
+        the signature's own names and every claim alias of them. A
+        fixed size is not a name."""
         names = {a for shape in self.shapes.values()
-                 for a in shape.axes if isinstance(a, str)}
+                 for a in shape.axes if isinstance(a, str)
+                 and not a.isdigit()}
         return names | set(self.aliases)
 
     def anchor(self, name: str):
@@ -139,24 +145,49 @@ class DimResolver:
 
     def draw_sizes(self, rng: random.Random,
                    lo: "dict | None" = None,
-                   hi: "dict | None" = None) -> dict:
+                   hi: "dict | None" = None,
+                   floor: "int | None" = None) -> dict:
         """One size per distinct dimension key for a trial. Shared keys
         get one draw, so two arguments naming the same dimension agree
         by construction; a key with a premise bound draws inside it.
-        The default range keeps sequences small and cheap."""
+        The default range keeps sequences small and cheap, and starts
+        at one: a length-1 vector and a 1-by-1, 1-by-n or n-by-1
+        matrix are ordinary members of the domain.
+
+        `floor` is the round of a claim's guaranteed small draws: round
+        0 sets every free key to its least size (a length-1 vector, a
+        1-by-1 matrix), round 1 sets the first axis of every matrix to
+        its least size and the other axes to at least two (1-by-n),
+        round 2 the second axis (n-by-1); None draws normally."""
         lo, hi = lo or {}, hi or {}
+        rows = {self.key(p, 0) for p, s in self.shapes.items()
+                if s.ndim == 2}
+        cols = {self.key(p, 1) for p, s in self.shapes.items()
+                if s.ndim == 2}
         out: dict = {}
         for k in self.distinct_keys():
             if isinstance(k, str) and k.isdigit():
                 # a fixed numeric dimension (`R^2`) is exactly that size
                 out[k] = int(k)
                 continue
-            # the default range matches the free sequence draw (2..8);
-            # a premise bound narrows or lowers it (a `>= 1` floor lets
-            # a length-1 vector through, the default never does)
-            k_lo = lo.get(k, 2)
-            k_hi = hi.get(k, 8)
-            out[k] = rng.randint(max(1, k_lo), max(k_lo, k_hi))
+            if k in self.fixed:
+                # a name a binding fixes is exactly that size
+                out[k] = self.fixed[k]
+                continue
+            # the default range matches the free sequence draw (1..8);
+            # a premise bound narrows it, and a floor with no ceiling
+            # draws up to four times the floor
+            k_lo = max(1, lo.get(k, 1))
+            k_hi = max(k_lo, hi.get(k, max(8, 4 * k_lo)))
+            least = floor == 0 or (floor == 1 and k in rows) \
+                or (floor == 2 and k in cols)
+            other = floor in (1, 2) and k in rows | cols and not least
+            if least:
+                out[k] = k_lo
+            elif other and k_hi >= 2:
+                out[k] = rng.randint(max(2, k_lo), k_hi)
+            else:
+                out[k] = rng.randint(k_lo, k_hi)
         return out
 
     def synth(self, param: str, sizes: dict, element_synth, rng: random.Random):
@@ -175,22 +206,22 @@ class DimResolver:
                 return element_synth()
             n = sizes.get(self.key(param, axis))
             if n is None:
-                n = rng.randint(2, 6)
+                n = rng.randint(1, 6)
             return [build(axis + 1) for _ in range(n)]
 
         return build(0)
 
 
-def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> dict:
+def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
     """Reconcile a claim's space form with the signature's `Shape`
-    marker for `param`. A RANK mismatch is a real conflict (a 2-D
-    matrix cannot also be a 1-D vector) and raises. A NAME mismatch at
-    the same axis is not a conflict: the claim introduces its own name
-    for a dimension the signature already named, so the two are the
-    SAME dimension, returned as an alias (`claim name -> marker name`).
-    A fixed numeric claim size names no dimension and is left alone;
-    a bound the code must actually satisfy is the sampler's concern,
-    not an aliasing one."""
+    marker for `param`: `(aliases, fixed)`. A RANK mismatch is a real
+    conflict (a 2-D matrix cannot also be a 1-D vector) and raises. A
+    NAME mismatch at the same axis is not a conflict: the claim
+    introduces its own name for a dimension the signature already
+    named, so the two are the SAME dimension, returned as an alias
+    (`claim name -> marker name`). A fixed numeric claim size on an
+    axis the marker names pins that name (`fixed`: marker name ->
+    size), so every parameter sharing the name is drawn at it."""
     if len(marker_dims) != len(claim_dims):
         raise DimensionConflict(
             f"{param}: the claim gives it {len(claim_dims)} dimension"
@@ -200,12 +231,28 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> dict:
             f"({', '.join(map(str, marker_dims))}); the signature is "
             f"authoritative on how many axes a parameter has")
     aliases: dict = {}
+    fixed: dict = {}
     for md, cd in zip(marker_dims, claim_dims):
         if not isinstance(cd, str) or cd.isdigit():
+            size = _axis(cd)
+            if size is not None and size.isdigit() and isinstance(md, str) \
+                    and not md.isdigit():
+                fixed[md] = int(size)
             continue
         if isinstance(md, str) and md != cd:
             aliases[cd] = md      # the claim's cd is the marker's md
-    return aliases
+    return aliases, fixed
+
+
+def _axis(dim):
+    """One axis of a declared shape: a dimension name as itself, a
+    fixed size (`Mat(2, 2)`, `R^3`) as its digits, which `draw_sizes`
+    holds at exactly that size."""
+    if isinstance(dim, bool):
+        return None
+    if isinstance(dim, int):
+        return str(dim)
+    return dim if isinstance(dim, str) else None
 
 
 def resolve(facts, shapes: "dict | None" = None,
@@ -218,6 +265,8 @@ def resolve(facts, shapes: "dict | None" = None,
     measures correctly even before the sampler synthesises it)."""
     out: dict = {}
     aliases: dict = {}
+    fixed: dict = {}
+    fixed_by: dict = {}
     shapes = shapes or {}
     claim_domain = claim_domain or {}
     for p in getattr(facts, "params", ()):
@@ -225,17 +274,24 @@ def resolve(facts, shapes: "dict | None" = None,
         declared = getattr(claim_domain.get(p), "dims", ())
         marker_dims = getattr(marker, "dims", ()) if marker is not None else ()
         if marker_dims and declared:
-            aliases.update(_reconcile_dims(p, marker_dims, declared))
+            new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            aliases.update(new_aliases)
+            for name, size in new_fixed.items():
+                if name in fixed and fixed[name] != size:
+                    raise DimensionConflict(
+                        f"{name} is fixed to two sizes: {fixed[name]} by "
+                        f"{fixed_by[name]}'s binding and {size} by {p}'s "
+                        f"binding; one shared dimension has one size")
+                fixed[name] = size
+                fixed_by[name] = p
         if marker_dims:
-            out[p] = ParamShape(axes=tuple(
-                d if isinstance(d, str) else None for d in marker_dims))
+            out[p] = ParamShape(axes=tuple(_axis(d) for d in marker_dims))
         elif declared:
             # a claim-declared space (`for xs in R^n`): its dims name
             # the axes even with no type marker on the parameter
-            out[p] = ParamShape(axes=tuple(
-                d if isinstance(d, str) else None for d in declared))
-        elif facts.param_kinds.get(p) == "sequence":
+            out[p] = ParamShape(axes=tuple(_axis(d) for d in declared))
+        elif facts.param_kinds.get(p) in SEQUENCE_KINDS:
             out[p] = ParamShape(axes=(None,))
         else:
             out[p] = ParamShape(axes=())
-    return DimResolver(shapes=out, aliases=aliases)
+    return DimResolver(shapes=out, aliases=aliases, fixed=fixed)

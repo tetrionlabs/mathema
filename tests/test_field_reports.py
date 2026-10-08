@@ -6,11 +6,14 @@ Each test here is a report from the field, kept in its own file so the
 provenance stays obvious: these are not shapes anyone designed, they
 are what real code did.
 """
-import numpy as np
 import pytest
 
-from mathema import check
-from mathema.claims import check_conjectures, claim
+pytest.importorskip("numpy")
+
+import numpy as np  # noqa: E402
+
+from mathema import check  # noqa: E402
+from mathema.claims import check_conjectures, claim  # noqa: E402
 
 
 def scaled(mi):
@@ -302,9 +305,11 @@ def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
     ]
     def declared(rec):
         # the rows the claims themselves produce; each proof also
-        # spawns its `[float]` companion row
+        # spawns its `[float]` companion row, and the record carries
+        # the policy row mathema writes for the parameter
         return [p for p in rec.probes
-                if "mathema.companion_of" not in (p.meta or {})]
+                if "mathema.companion_of" not in (p.meta or {})
+                and "mathema.policy" not in (p.meta or {})]
 
     # identical auto-names are refused, asking for explicit names
     from mathema.conjecture import InvalidConjecture, claim

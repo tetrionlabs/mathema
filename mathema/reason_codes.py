@@ -74,7 +74,7 @@ class ClaimReasonCode:
     the full story and carries no code; the one exception is a
     falsification whose stratum pins the failure on the implementation
     (`meta["mathema.stratum"]`), which carries its `implementation:`
-    cause so tooling can separate a broken carrier from broken
+    cause so tooling can separate a broken number representation from broken
     mathematics without parsing prose.
 
     `DERIVE_TIMEOUT` is the one real code change behind this registry,
@@ -409,7 +409,7 @@ CODE_TABLE: dict[str, dict] = {
                 "parameters"},
     "branch:no-parameter-dependence": {
         "derive_unlock": _LIMITATION,
-        "meaning": "the condition's TRACED form contains no unmodified "
+        "meaning": "the condition, traced back to the parameters, contains no unmodified "
                    "parameter; either it genuinely uses none (a module "
                    "flag, a constant guard) or the trace lost the "
                    "dependence on the way",
@@ -449,7 +449,7 @@ CODE_TABLE: dict[str, dict] = {
                    "shapes (a built list/dict value, a dict/set comp)",
         "hint": "sum(<generator>) derives; rewrite the aggregation "
                 "as sum(...) or an explicit accumulator loop; a "
-                "comprehension VALUE is vector-valued and out of scope"},
+                "comprehension whose value is a list or dict is vector-valued and out of scope"},
     "unsupported:unsupported-lambda": {
         "derive_unlock": _LIMITATION,
         "meaning": "a lambda outside the recognized shapes",
@@ -459,7 +459,7 @@ CODE_TABLE: dict[str, dict] = {
         "derive_unlock": _LIMITATION,
         "meaning": "a call with no symbolic mapping",
         "hint": "only the mapped math vocabulary derives; the claim "
-                "still adjudicates empirically"},
+                "is still decided by running the code"},
     "unsupported:unsupported-attribute": {
         "derive_unlock": _LIMITATION,
         "meaning": "an attribute access with no symbolic meaning",
@@ -513,8 +513,9 @@ CODE_TABLE: dict[str, dict] = {
     "implementation:overflow": {
         "derive_unlock": _NOT_APPLICABLE,
         "meaning": "the call overflowed at an admitted point",
-        "hint": "the carrier is too narrow for the domain; widen the "
-                "representation, guard the range, or narrow the "
+        "hint": "the number representation is too narrow for the "
+                "domain; widen the representation, guard the range, "
+                "or narrow the "
                 "claim's domain below the overflow threshold"},
     "implementation:recursion-depth": {
         "derive_unlock": _NOT_APPLICABLE,
@@ -764,7 +765,9 @@ def claim_reason_code(probe) -> str | None:
     if meta.get("mathema.derive_status") == "unliftable":
         return ClaimReasonCode.DERIVE_UNLIFTABLE
     note = probe.note or ""
-    if "does not yet lift multi-function or != claims" in note:
+    # the current wording, and the one older records carry
+    if ("cannot yet read a raises claim over several functions" in note
+            or "does not yet lift multi-function" in note):
         return ClaimReasonCode.UNSUPPORTED_MULTI_FUNCTION
     if "unknown route" in note:
         return ClaimReasonCode.UNKNOWN_ROUTE

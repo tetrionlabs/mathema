@@ -2,10 +2,10 @@
 # Copyright 2026 Tetrion Ltd
 """The representation-declaration spelling is reserved, not squattable.
 
-`let Z be i64` will one day rebind a named set's machine carrier, the
-same shape `let |inf| be 1e6` already rebinds infinity. Until it does,
-the parser refuses both halves of the spelling with guidance, so no
-free-variable binding accidentally takes the meaning.
+`let Z be i64` will one day rebind a named set's machine number
+representation, the same shape `let |inf| be 1e6` already rebinds
+infinity. Until it does, the parser refuses both halves of the spelling
+with guidance, so no free-variable binding accidentally takes the meaning.
 """
 import pytest
 
@@ -16,7 +16,7 @@ from mathema.conjecture import InvalidConjecture, claim
     "let Z be i64, for n in [0,100] subset Z, f(n) >= 0",
     "let R be f32, for x in [0,1], f(x) >= 0",
     "let N be u64, for n in [0,10] subset N, f(n) >= 0",
-    # a carrier name as a bound is reserved whatever the variable
+    # a number representation name as a bound is reserved whatever the variable
     "let c be i64, f(c) >= 0",
     "let step be f32, f(step) >= 0",
 ])

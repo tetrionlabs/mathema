@@ -1,18 +1,241 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Coverage over `mathema.lexicon`: every entry parses and renders
-without raising, and both rendered forms match a golden snapshot
-(`data/lexicon_golden.json`). The snapshot is a characterization net;
-it pins current behavior so refactors can't shift rendered output
-unnoticed, not a sign-off of the spellings, which are still under
-review; a deliberate rendering change regenerates it (see
+without raising, both rendered forms match a golden snapshot
+(`data/lexicon_golden.json`), and every row with an example function
+lands on its pinned verdict (`PINNED`). The snapshot is a
+characterization net; it pins current behavior so refactors can't shift
+rendered output unnoticed, not a sign-off of the spellings, which are
+still under review; a deliberate rendering change regenerates it (see
 `test_rendered_output_matches_golden_snapshot`) with the diff reviewed
-as part of that change."""
+as part of that change. The verdict table is the same kind of net for
+adjudication: a row whose verdict moves is a change to review."""
+import importlib.util
+import os
+
 import pytest
 
+from mathema import lexicon_checks
+from mathema.compendium import _installed_version, _version_in_range
 from mathema.conjecture import claim
-from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show
+from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON, get, render_both, show, sources
 from mathema.spec import render_claim_text
+
+#: mathema's own lexicon, never a registered package's
+CORE = sources(extensions=False)[0]
+
+#: the rows over a language, adjudicated only with `mathema-language`
+#: installed; without it each is skipped with the reason
+_LANGUAGE_ROWS = (
+    "containment_absent", "language_alphabet", "language_closure",
+    "language_contraction", "language_excluding_empty",
+    "language_length_bound", "language_membership_symbol",
+    "language_missing_excluded", "language_section",
+)
+
+#: the verdict every row with an example function lands on, or
+#: `(verdict, text the witness contains)`
+PINNED: dict = {
+    "abs_bars": "proven",
+    "abs_bars_compound": "proven",
+    "assuming_inequality": "proven",
+    "assuming_is_defined": "proven",
+    "assuming_is_defined_pinned": "proven",
+    "assuming_is_defined_postfix": "proven",
+    "assuming_named_claim": "proven",
+    "bound_function_nested_in_f": "proven",
+    "certificate_convex_lower": "proven",
+    "certificate_convex_upper": "proven",
+    "ceil_div_lower_bound": "proven",
+    "certificate_quadratic": "proven",
+    "chained_comparison": "proven",
+    "descent_converges": "proven",
+    "dim_premise_pins_length": "proven",
+    "dim_premise_rectangular_matrix": "holds",
+    "dim_premise_square_matrix": "holds",
+    "dim_premise_ties_two_lengths": "holds",
+    "dim_premise_vector_bound": "holds",
+    "domain_blackboard_reals": "proven",
+    "domain_closed_interval": "proven",
+    "domain_open_interval": "proven",
+    "domain_subset_integer": "proven",
+    "domain_subset_symbol": "proven",
+    "finite_domain_discrete_set": "proven",
+    "finite_domain_pinned": "proven",
+    "finite_domain_small_range": "proven",
+    "floor_brackets_unicode": "holds",
+    "floor_div_evaluable": "proven",
+    "forall_symbol": "proven",
+    "greek_delta_lower": "proven",
+    "greek_delta_upper": "proven",
+    "inferred_literal_domain": "proven",
+    "infinity_symbol": "proven",
+    # two functions demonstrate the same row to opposite ends: numpy.clip
+    # never leaks a nan, numpy.arcsin does past 1
+    "is_library_safe": {"clipped_ratio": "holds",
+                           "unguarded_arcsin": ("falsified", "output nan")},
+    "is_library_safe_scoped": "holds",
+    "latex_command_forall": "proven",
+    "latex_equiv": "proven",
+    "latex_geqslant": "proven",
+    "latex_left_right_bars": "proven",
+    "latex_leqslant": "proven",
+    "latex_varepsilon": "proven",
+    "latex_varphi": "proven",
+    "let_alias": "proven",
+    "let_alias_for_under_test": "proven",
+    "let_free_var_closed": "proven",
+    "let_free_var_typed": "proven",
+    "matrix_determinant_bars_compound": "proven",
+    "membership_interval_reduces_to_chain": "proven",
+    "multiply_dot": "proven",
+    "named_under_test": "proven",
+    "odd_function": "proven",
+    "parity_identity": "proven",
+    "power_caret": "proven",
+    "power_superscript": "proven",
+    "power_superscript_negative": "proven",
+    "premise_relates_two_params": "proven",
+    # a function that always raises holds; one that raises only below
+    # zero is falsified at zero, and proves over the negative numbers
+    "raises_typed": {"removed_endpoint": "holds",
+                     "checked_sqrt": ("falsified",
+                                      "returned 0.0 instead of raising")},
+    "raises_typed_region": "proven",
+    "state_safe_env_write": ("falsified", "changes os.environ"),
+    "state_safe_global_rng": ("falsified",
+                              "advances the shared random generator"),
+    "deterministic_trap": ("falsified",
+                           "draws from the shared random generator"),
+    "deterministic_nan_agrees": "proven",
+    "deterministic_hidden_read": ("falsified", "reads os.environ"),
+    "enforce_domain_guard": "proven",
+    "enforce_domain_guard_unbound": "proven",
+    "state_safe_logging": "proven",
+    "state_safe_logging_config_trap": ("falsified",
+                                       "_pricing_log.setLevel"),
+    "state_safe_passed_generator": "proven",
+    "reproducible_passed_generator": "proven",
+    "real_domain_is_not_finite": "holds",
+    "recurrence_identity": "proven",
+    "relation_approx_unicode": "proven",
+    "relation_eq": "proven",
+    "relation_le_unicode": "proven",
+    "sigmoid_bounded_above": "proven",
+    "sigmoid_bounded_below": "proven",
+    "sigmoid_density_integrates": "proven",
+    "sigmoid_derivative": "proven",
+    "sigmoid_limit_lower": "proven",
+    "sigmoid_limit_upper": "proven",
+    "sigmoid_symmetry": "proven",
+    "sqrt_bare_radical": "proven",
+    "sqrt_symbol": "proven",
+    "stress_gauge_invariance": "proven",
+    "table_column_attribute": "holds",
+    # a bound table lifts, and the item form proves; the attribute form
+    # is read by the probe (the same asymmetry docs/runtime-types.md shows)
+    "table_column_item": "proven",
+    "table_columns_dot": "proven",
+    "tolerance_eps_ascii": "proven",
+    "tolerance_epsilon": "proven",
+    "exact_offset_vs_approx": "proven",
+    "exact_offset_vs_approx_trap": "falsified",
+    "approx_taylor_sin_exact_fails": "falsified",
+    "approx_too_wide": "falsified",
+    "tolerance_epsilon_latex": "proven",
+    "tolerance_epsilon_word": "proven",
+    "vector_between_least_and_greatest": "proven",
+    "vector_drawdown_bounds": "proven",
+    "vector_running_maximum": "proven",
+    # the space rows: a fixed size in a binding, the output's space, the
+    # exclusion over a space, a premise against a fixed length
+    "space_vector_real": "proven",
+    "space_matrix": "proven",
+    "space_vector_fixed": "holds",
+    "space_vector_fixed_trap": "falsified",
+    "space_vector_fixed_sketch": "proven",
+    "space_matrix_fixed": "proven",
+    "space_matrix_mixed": "holds",
+    "space_output_wrong_shape": "falsified",
+    "space_output_named": "holds",
+    "space_excluded_fixed": ("falsified", "A of shape (31, 15)"),
+    "space_excluded_by_construction": "proven",
+    "dim_premise_against_fixed": "skipped",
+    # the missing section: a policy row per behaviour and kind, the
+    # member and premise forms, the traps and the gates
+    "missing_propagates": "holds",
+    "missing_drops": "holds",
+    "missing_trap_silent_drop": ("falsified", "rate = nan: f returned 1.0"),
+    "missing_raises": "proven",
+    "missing_converts": "holds",
+    "missing_introduces": "holds",
+    "missing_introduces_by_shape": "holds",
+    "absent_raises": "holds",
+    "absent_drops": "proven",
+    "absent_propagates": "holds",
+    "absent_converts": "holds",
+    "missing_member_null": "holds",
+    "missing_member_nan": "holds",
+    "missing_class_row_contradicted": ("falsified", "positions = [null]: f raised TypeError"),
+    "missing_premise_values_remain": "holds",
+    "missing_premise_no_values": "holds",
+    "missing_premise_all_na_raises": "holds",
+    "missing_member_defined": "holds",
+    "missing_trap_comparison": "holds",
+    "missing_predicate_sugar": "holds",
+    "absent_none_spelling": "holds",
+    "is_missing_safe_gate": "proven",
+    "is_missing_safe_gate_falsified": ("falsified", "positions = [null]: f raised TypeError"),
+    "is_absent_safe_gate": "holds",
+    "is_absent_safe_gate_falsified": ("falsified", "score = None: f raised TypeError"),
+    "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
+    "is_empty_safe_identity": "proven",
+    "absent_field_raises": "holds",
+    "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
+    "absent_key_left_out": "holds",
+    # the norm written with double bars, each against its function in
+    # mathema/_lexicon_numpy.py
+    "norm_bars_euclidean": "proven",
+    "norm_bars_two": "proven",
+    "norm_bars_one": "proven",
+    "norm_bars_inf": "proven",
+    "norm_bars_integer_order": "holds",
+    "norm_bars_chain": "holds",
+    "norm_bars_homogeneous": "proven",
+    "norm_bars_homogeneous_sign_trap": "falsified",
+    "norm_bars_unit_vector": "proven",
+    "norm_bars_direction": "proven",
+    "norm_bars_distance": "proven",
+    "norm_bars_distance_symmetric": "proven",
+    "norm_bars_triangle": "holds",
+    "norm_bars_stopping_criterion": "holds",
+    "norm_bars_nearest_distance": "holds",
+    "norm_bars_nearest_distance_trap": "falsified",
+    "norm_bars_series_tracking_error": "proven",
+    "norm_bars_rmse": "proven",
+    "norm_bars_portfolio_weights": "proven",
+    # `numpy.dot`'s definition row applies from numpy 2.4; below it the
+    # squared length is sampled
+    "norm_bars_squared": ("proven" if _version_in_range(
+        _installed_version("numpy") or "0", ">=2.4") else "holds"),
+    "norm_bars_squared_trap": "falsified",
+    "norm_bars_order_trap": "falsified",
+    "matrix_norm_bars_frobenius": "proven",
+    "matrix_norm_bars_gram_trace": "proven",
+    "matrix_norm_bars_one": "holds",
+    "matrix_norm_bars_inf": "holds",
+    "matrix_norm_bars_order_trap": "falsified",
+    "matrix_norm_bars_spectral": "holds",
+    "matrix_norm_bars_spectral_below_frobenius": "holds",
+    "let_scale_seq_sharpe_premise": "proven",
+    "let_scale_seq_sharpe_trap": ("falsified", "returns = [0.0]"),
+    "let_shift_seq_range": "holds",
+    "let_shift_seq_mean_moves": "falsified",
+    "assuming_spread_positive": "holds",
+    "dim_call_premise": "holds",
+}
+if importlib.util.find_spec("mathema_language") is None:
+    PINNED.update({key: "unknown" for key in _LANGUAGE_ROWS})
 
 
 @pytest.mark.parametrize("key", list(LEXICON))
@@ -49,6 +272,46 @@ def test_show_does_not_raise(capsys):
     assert "input:" in capsys.readouterr().out
 
 
+#: the extras an example function's annotations can name, by the
+#: spellings the lexicon uses
+_EXTRA_SPELLINGS = {"numpy": ("numpy.", "np."), "pandas": ("pandas.", "pd."),
+                    "polars": ("polars.", "pl.")}
+
+
+def _numpy_example_rows() -> set:
+    """The rows `mathema._lexicon_numpy` demonstrates, read from its
+    source, so they are known without numpy installed."""
+    import ast
+    import mathema
+    path = os.path.join(os.path.dirname(mathema.__file__), "_lexicon_numpy.py")
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        target = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+        if isinstance(target, ast.Name) and target.id == "EXAMPLE_FUNCTIONS":
+            return {k.value for entry in node.value.values
+                    for k in entry.elts[1].elts}
+    return set()
+
+
+def _extra_the_row_needs(key: str) -> "str | None":
+    """The uninstalled extra a row's example function takes a type
+    from (an annotation naming it, or the numpy examples module), else
+    None. Such a row renders as its function completes it only with
+    the extra installed."""
+    installed = {m: importlib.util.find_spec(m) is not None for m in _EXTRA_SPELLINGS}
+    if not installed["numpy"] and key in _numpy_example_rows():
+        return "numpy"
+    for fn, keys in EXAMPLE_FUNCTIONS.values():
+        if key not in keys:
+            continue
+        words = " ".join(str(a) for a in getattr(fn, "__annotations__", {}).values())
+        for extra, spellings in _EXTRA_SPELLINGS.items():
+            if not installed[extra] and any(sp in words for sp in spellings):
+                return extra
+    return None
+
+
 @pytest.mark.parametrize("key", list(LEXICON))
 def test_rendered_output_matches_golden_snapshot(key):
     """Characterization net for refactoring, not a sign-off of the
@@ -67,6 +330,10 @@ def test_rendered_output_matches_golden_snapshot(key):
     import json
     import os
 
+    needs = _extra_the_row_needs(key)
+    if needs is not None:
+        pytest.skip(f"{key}'s example function takes a {needs} type, and "
+                    f"{needs} is not installed")
     path = os.path.join(os.path.dirname(__file__), "data", "lexicon_golden.json")
     with open(path) as fh:
         golden = json.load(fh)
@@ -77,12 +344,7 @@ def test_rendered_output_matches_golden_snapshot(key):
 
 
 def test_example_functions_are_checkable_against_their_own_lexicon_keys():
-    from mathema.conjecture import check_conjectures
-
-    for fn, keys in EXAMPLE_FUNCTIONS.values():
-        for key in keys:
-            cj = claim(get(key), route="probe")
-            check_conjectures(fn, [cj], extensive=False)
+    assert lexicon_checks.check_examples(CORE, every_row=False) == []
 
 
 def test_every_spelling_is_a_render_parse_render_fixed_point():
@@ -102,46 +364,25 @@ def test_every_spelling_is_a_render_parse_render_fixed_point():
     display must also have the original's canonical text, the claim's
     identity.
     """
-    from mathema.conjecture import InvalidConjecture, claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text, render_claim_text
-
-    drifted = []
-    for name, law in LEXICON.items():
-        conjecture = claim(law)
-        canonical = canonical_claim_text(conjecture)
-        for unicode_mode in (True, False):
-            once = render_claim_text(conjecture, unicode=unicode_mode)
-            try:
-                reparsed = claim(once)
-            except InvalidConjecture as exc:
-                drifted.append(f"{name}: rendered text will not reparse "
-                               f"({exc}): {once}")
-                continue
-            twice = render_claim_text(reparsed, unicode=unicode_mode)
-            if once != twice:
-                drifted.append(f"{name}:\n    {once}\n    {twice}")
-            if canonical_claim_text(reparsed) != canonical:
-                drifted.append(f"{name}: display reparses to another claim"
-                               f"\n    {canonical}"
-                               f"\n    {canonical_claim_text(reparsed)}")
+    drifted = lexicon_checks.check_fixed_point(CORE)
     assert not drifted, "rendered claims drift on reparse:\n" + "\n".join(drifted)
 
 
-def test_a_rendered_domain_always_states_its_missing_policy():
+def test_a_rendered_domain_always_states_what_it_admits():
     """Terse input, explicit output: nothing has to say anything about
     missing values, and a rendered domain always does."""
     from mathema.conjecture import claim
     from mathema.spec import render_claim_text
 
     allowed = claim("for x in [0,10], f(x) >= 0")
-    assert "∪ {∅}" in render_claim_text(allowed, unicode=True)
-    assert "|missing" in render_claim_text(allowed, unicode=False)
+    assert "∪ {absent, ∅}" in render_claim_text(allowed, unicode=True)
+    assert "|absent|missing" in render_claim_text(allowed, unicode=False)
 
     excluded = claim("for x in [0,10] \\ {missing}, f(x) >= 0")
-    assert "\\ {∅}" in render_claim_text(excluded, unicode=True)
-    assert "|missing" not in render_claim_text(excluded, unicode=False)
-    assert "\\ {missing}" in render_claim_text(excluded, unicode=False)
+    # the type clause states what it admits, so the excluded hole needs
+    # no exclusion beside it
+    assert "⊂ ℝ ∪ {absent}" in render_claim_text(excluded, unicode=True)
+    assert ": float|absent," in render_claim_text(excluded, unicode=False)
 
     from mathema.spec import canonical_claim_text
     for conjecture in (allowed, excluded):
@@ -149,6 +390,7 @@ def test_a_rendered_domain_always_states_its_missing_policy():
             shown = render_claim_text(conjecture, unicode=unicode_mode)
             assert canonical_claim_text(claim(shown)) == \
                 canonical_claim_text(conjecture)
+    assert lexicon_checks.check_missing_policy(CORE) == []
 
 
 def test_every_spelling_survives_the_declared_store():
@@ -163,31 +405,7 @@ def test_every_spelling_survives_the_declared_store():
 
     Every spelling the lexicon documents is checked here, so a section
     added to the grammar later cannot quietly skip the store."""
-    from mathema.conjecture import claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text, declare, entry_claims
-
-    lost = []
-    for name, law in LEXICON.items():
-        original = claim(law)
-        try:
-            restored = entry_claims({"claims": [declare(original)]})[0]
-        except Exception as exc:
-            lost.append(f"{name}: will not reparse ({type(exc).__name__}: {exc})")
-            continue
-        for what, before, after in (
-            ("statement", (original.lhs, original.relation, original.rhs),
-                          (restored.lhs, restored.relation, restored.rhs)),
-            ("links", original.links, restored.links),
-            ("free_vars", set(original.free_vars), set(restored.free_vars)),
-            ("funcs", set(original.funcs), set(restored.funcs)),
-            ("assuming", original.assuming, restored.assuming),
-            ("tolerance", original.tolerance, restored.tolerance),
-            ("canonical text", canonical_claim_text(original),
-                               canonical_claim_text(restored)),
-        ):
-            if before != after:
-                lost.append(f"{name}: {what} {before!r} -> {after!r}")
+    lost = lexicon_checks.check_declared_store(CORE)
     assert not lost, "the declared store loses part of the claim:\n" + "\n".join(lost)
 
 
@@ -233,14 +451,10 @@ def test_sections_partition_the_lexicon():
     """`SECTIONS` is the lexicon's exact table of contents: every key
     in exactly one section, no key invented, so `entries("domains")`
     can never silently under-cover the grammar it names."""
-    from mathema.lexicon import LEXICON, SECTIONS, entries
+    from mathema.lexicon import LEXICON, entries
 
-    seen: list[str] = []
-    for keys in SECTIONS.values():
-        seen.extend(keys)
-    assert sorted(seen) == sorted(set(seen)), "a key appears twice"
-    assert set(seen) == set(LEXICON)
-    assert entries() == dict(LEXICON)
+    assert lexicon_checks.check_sections(CORE) == []
+    assert entries(extensions=False) == dict(LEXICON)
     import pytest as _pytest
     with _pytest.raises(KeyError, match="unknown lexicon section"):
         entries("no-such-section")
@@ -256,52 +470,7 @@ def test_every_paired_spelling_survives_the_verified_record():
     store could contradict itself on the second run: the record held a
     weaker claim than the one adjudicated, and nothing noticed until a
     field run did."""
-    from mathema.conjecture import check_conjectures, claim
-    from mathema.lexicon import EXAMPLE_FUNCTIONS, LEXICON
-    from mathema.spec import entry_claims
-
-    _ROW_STILL_DRIFTS = {"bound_function_nested_in_f"}
-    drift = []
-    for fname, (fn, keys) in EXAMPLE_FUNCTIONS.items():
-        laws = [claim(LEXICON[k], name=k) for k in keys]
-        probes = check_conjectures(fn, laws)
-        for p in probes:
-            row = {"name": p.name, "statement": p.statement,
-                   "route": (p.route or "best").split(":", 1)[0]}
-            if row["route"] not in ("derive", "probe"):
-                row["route"] = "best"
-            for field_name in ("domain", "grammar", "tolerance"):
-                if getattr(p, field_name, None) is not None:
-                    row[field_name] = getattr(p, field_name)
-            try:
-                (rebuilt,) = entry_claims({"claims": [row]})
-            except Exception as exc:
-                drift.append(f"{fname}/{p.name}: row will not reconstruct "
-                             f"({type(exc).__name__}: {exc})")
-                continue
-            (p2,) = check_conjectures(fn, [rebuilt])
-            if p.name in _ROW_STILL_DRIFTS:
-                # the one known, tracked drift. Its BINDING half is
-                # now closed: canonical text keeps real function names,
-                # so a scope-bound second function rebinds from f's
-                # module on reconstruction rather than arriving as an
-                # orphan short name that resolves to nothing. What is
-                # left is narrower and is not a lost reference: the
-                # reconstructed expression is a harder one for the
-                # derive route, which returns `undecided` where the
-                # original proved. Pinned exactly, not tolerated.
-                assert p2.verdict == "unknown", (
-                    f"{p.name} now reaches {p2.verdict!r}; the tracked "
-                    f"drift changed, re-examine it rather than editing "
-                    f"this pin")
-                assert p2.meta.get("mathema.derive_status") == "undecided", (
-                    f"{p.name} is unknown for a NEW reason ({p2.meta}); "
-                    f"an uncorroborated disproof here would be a "
-                    f"different and more serious problem")
-                continue
-            if p2.verdict != p.verdict:
-                drift.append(f"{fname}/{p.name}: {p.verdict} -> {p2.verdict}"
-                             f" (statement {p.statement!r})")
+    drift = lexicon_checks.check_verified_record(CORE, skip=set())
     assert not drift, ("a record row adjudicates differently than the "
                        "claim it recorded:\n" + "\n".join(drift))
 
@@ -311,8 +480,7 @@ def test_every_paired_spelling_survives_the_verified_record():
 def test_tags_only_name_real_entries():
     """A tag on a key that no longer exists is a silent dead end in the
     search index, so the table is pinned as a subset of the lexicon."""
-    from mathema.lexicon import LEXICON, TAGS
-    unknown = sorted(set(TAGS) - set(LEXICON))
+    unknown = lexicon_checks.check_tags(CORE)
     assert not unknown, f"TAGS names entries that do not exist: {unknown}"
 
 
@@ -328,6 +496,8 @@ def test_search_finds_an_entry_by_a_word_it_does_not_contain():
         "brute force": "finite_domain_pinned",
         "absolute value": "abs_bars",
         "fibonacci": "recurrence_identity",
+        "manhattan": "norm_bars_one",
+        "singular value": "matrix_norm_bars_spectral",
     }
     for query, expected in cases.items():
         hits = [key for key, _law in search(query, limit=5)]
@@ -342,9 +512,10 @@ def test_search_tolerates_a_typo():
 
 
 def test_search_returns_laws_that_are_really_in_the_lexicon():
-    from mathema.lexicon import LEXICON, search
+    from mathema.lexicon import entries, search
+    rows = entries()
     for key, law in search("domain", limit=20):
-        assert LEXICON[key] == law, key
+        assert rows[key] == law, key
 
 
 def test_search_is_empty_for_a_query_that_matches_nothing():
@@ -380,21 +551,7 @@ def test_every_spelling_has_a_stable_canonical_form():
     collapsing to `x` (a strictly different, usually false assertion)
     and `∂σ` degrading into an ordinary quotient (a proven claim coming
     back unknown)."""
-    from mathema.conjecture import InvalidConjecture, claim
-    from mathema.lexicon import LEXICON
-    from mathema.spec import canonical_claim_text
-
-    drifted = []
-    for name, law in LEXICON.items():
-        once = canonical_claim_text(claim(law))
-        try:
-            twice = canonical_claim_text(claim(once))
-        except InvalidConjecture as exc:
-            drifted.append(f"{name}: canonical text will not reparse "
-                           f"({type(exc).__name__}): {once}")
-            continue
-        if once != twice:
-            drifted.append(f"{name}:\n    {once}\n    {twice}")
+    drifted = lexicon_checks.check_stable_canonical(CORE)
     assert not drifted, ("canonical claim text drifts on reparse:\n"
                          + "\n".join(drifted))
 
@@ -409,26 +566,62 @@ def test_the_canonical_form_reaches_the_same_verdict_everywhere():
     adjudicate the original and its canonical form and require the same
     verdict. This is the guard that catches a meaning-changing
     canonicalisation, which the fixed-point tests cannot see."""
-    from mathema.conjecture import check_conjectures, claim
-    from mathema.lexicon import EXAMPLE_FUNCTIONS, get
-    from mathema.spec import canonical_claim_text
-
-    diverged = []
-    for fn, keys in EXAMPLE_FUNCTIONS.values():
-        for key in keys:
-            law = get(key)
-            try:
-                original = claim(law, route="probe")
-                restored = claim(canonical_claim_text(original), route="probe")
-            except Exception as exc:
-                diverged.append(f"{key}: canonical form will not reparse "
-                                f"({type(exc).__name__})")
-                continue
-            (before,) = check_conjectures(fn, [original], extensive=False)
-            (after,) = check_conjectures(fn, [restored], extensive=False)
-            if before.verdict != after.verdict:
-                diverged.append(f"{key}: {before.verdict} -> {after.verdict}"
-                                f"\n    {law}"
-                                f"\n    {canonical_claim_text(original)}")
+    diverged = lexicon_checks.check_same_verdict(CORE)
     assert not diverged, ("a canonical form changed the verdict:\n"
                           + "\n".join(diverged))
+
+
+def test_every_row_with_a_function_has_a_pinned_verdict():
+    with_function = {key for _fn, keys in EXAMPLE_FUNCTIONS.values() for key in keys}
+    unpinned = sorted(key for key in with_function
+                      if key not in PINNED and key not in _LANGUAGE_ROWS)
+    assert not unpinned, unpinned
+    assert not sorted(set(PINNED) - set(LEXICON)), sorted(set(PINNED) - set(LEXICON))
+
+
+@pytest.mark.needs_full_proof_budget
+def test_every_row_lands_on_its_pinned_verdict():
+    """The verdict table over the whole lexicon: a row with no example
+    function is unpinned (None), one over a language is pinned only
+    without `mathema-language`, every other row must land where the
+    table says."""
+    pytest.importorskip("numpy")
+    expected = {**{key: None for key in LEXICON}, **PINNED}
+    assert lexicon_checks.check_verdicts(CORE, expected) == []
+
+
+
+def test_the_equality_row_is_proven_and_its_float_companion_is_the_computation():
+    import mathema
+    from mathema.lexicon import celsius_round_trip
+    rows = {p.name: p for p in mathema.check(
+        celsius_round_trip, claims=[LEXICON["relation_eq"]]).probes}
+    (name,) = [n for n in rows if n.endswith("[float]")]
+    main = rows[name[:-len("[float]")]]
+    assert (main.verdict, main.route) == ("proven", "derive")
+    assert rows[name].verdict == "falsified", rows[name].note
+
+
+def test_the_hidden_read_row_names_the_read():
+    from mathema.conjecture import check_conjectures, claim
+    from mathema.lexicon import price_in_fx
+    (p,) = check_conjectures(price_in_fx,
+                             [claim(LEXICON["deterministic_hidden_read"])])
+    assert p.verdict == "falsified"
+    assert "price_in_fx reads os.environ" in p.counterexample, p
+
+
+@pytest.mark.parametrize("key, query", [
+    ("raises_typed_region", "raises in a range"),
+    ("state_safe_env_write", "environment variable"),
+    ("state_safe_global_rng", "global random"),
+    ("deterministic_trap", "same answer twice"),
+    ("deterministic_nan_agrees", "nan determinism"),
+    ("deterministic_hidden_read", "hidden input"),
+    ("enforce_domain_guard", "enforce_domain guard"),
+])
+def test_the_rows_for_state_and_determinism_are_found_by_what_a_reader_types(
+        key, query):
+    from mathema.lexicon import TAGS, search
+    assert TAGS.get(key), key
+    assert key in [k for k, _law in search(query, limit=8)], (key, search(query))

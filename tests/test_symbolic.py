@@ -5,17 +5,20 @@ primitive that turns ordinary equality/inequality claims into calculus,
 PDE, and Ito-lemma coefficient-matching claims), domain-aware bounds,
 np.clip, ternary expressions, and branch conditions over affine local
 variables."""
-import math
-import random
-
-import numpy as np
 import pytest
-import sympy
 
-from mathema.analysis import analyze_source
-from mathema.conjecture import claim, check_conjectures
-from mathema.grammar import to_latex
-from mathema.symbolic import diagnose_fold, lift, lift_dot, lift_fold, lift_sum
+pytest.importorskip("numpy")
+
+import math  # noqa: E402
+import random  # noqa: E402
+
+import numpy as np  # noqa: E402
+import sympy  # noqa: E402
+
+from mathema.analysis import analyze_source  # noqa: E402
+from mathema.conjecture import claim, check_conjectures  # noqa: E402
+from mathema.grammar import to_latex  # noqa: E402
+from mathema.symbolic import diagnose_fold, lift, lift_dot, lift_fold, lift_sum  # noqa: E402
 
 
 def cube(x: float) -> float:
@@ -35,13 +38,13 @@ def sq(t: float, x: float, sigma: float) -> float:
 
 
 def test_monotonicity_via_first_derivative():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
     assert results[0].verdict == "proven"
 
 
 def test_pde_heat_equation_proven():
     results = check_conjectures(
-        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
+        heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -50,7 +53,7 @@ def test_pde_wrong_solution_is_unknown_without_an_executed_witness():
     # point evaluation against the function, so no executed witness
     # exists and a falsification needs one
     results = check_conjectures(
-        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive", pseudo_infinity=1e100)])
+        not_heat_sol, [claim("d(f(t, x), t) == d(f(t, x), x, x)", route="derive")])
     assert results[0].verdict == "unknown"
     assert results[0].meta["mathema.corroboration"] == "uncorroborated"
 
@@ -96,13 +99,17 @@ def test_lowercase_sum_on_derive_route_hints_at_capitalized_form():
 
 def test_not_equal_and_approx_equal_relations_on_probe_route():
     # sq(t, x, sigma) = x**2, always >= 0, so it's genuinely never -1,
-    # unlike cube(x) = x**3, which *does* equal -1 at x = -1.
-    assert check_conjectures(sq, [claim("f(t, x, sigma) != -1", route="probe")])[0].verdict == "holds"
-    assert check_conjectures(cube, [claim("f(x) ~= x^3", route="probe")])[0].verdict == "holds"
+    # unlike cube(x) = x**3, which *does* equal -1 at x = -1. Both are
+    # bounded: over the whole line the probe reaches x = 1e308, where
+    # x ** 2 and x ** 3 raise OverflowError.
+    assert check_conjectures(sq, [claim("for x in [-1e6, 1e6], f(t, x, sigma) != -1",
+                                        route="probe")])[0].verdict == "holds"
+    assert check_conjectures(cube, [claim("for x in [-1e6, 1e6], f(x) ~= x^3",
+                                          route="probe")])[0].verdict == "holds"
 
 
 def test_approx_equal_provable_on_derive_route_like_equality():
-    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("f(x) ~= x^3", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -189,7 +196,7 @@ def test_ito_drift_coefficient_matching():
     results = check_conjectures(sq, [claim(
         "let mu be [-5, 5], "
         "2*mu*x + sigma**2 == d(f(t,x,sigma), t) + mu*d(f(t,x,sigma), x) "
-        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive", pseudo_infinity=1e100)])
+        "+ 0.5*sigma**2*d(f(t,x,sigma), x, x)", route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -705,7 +712,8 @@ def test_affine_local_branch_with_no_domain_lifts_piecewise_but_stays_honest():
     # and the actionable domain hint survives in the sketch
     results = check_conjectures(denom_local, [claim("f(x, y) >= 0", route="derive")])
     assert results[0].verdict == "falsified"
-    assert "routes attempted" in results[0].note and "derive: undecided" in results[0].note
+    trail = results[0].meta["mathema.routes_attempted"]
+    assert "routes attempted" in trail and "derive: undecided" in trail
     assert "needs a domain specific enough" in results[0].note
 
 
@@ -958,7 +966,8 @@ def test_lift_dot_closed_form_matches_real_execution():
 
 def test_dot_claim_reflexivity_proven():
     results = check_conjectures(
-        dot_ab, [claim("f(a, b) == f(a, b)", route="derive")])
+        dot_ab, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                       route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -993,7 +1002,8 @@ def test_dot_claim_law_can_call_a_math_function():
     # own sign-decidability gap on an unassumed Abs is a separate,
     # pre-existing limitation this test isn't meant to close.
     results = check_conjectures(
-        dot_ab, [claim("abs(f(a, b)) >= 0.0", route="derive")])
+        dot_ab, [claim("assuming len(a) == len(b), abs(f(a, b)) >= 0.0",
+                       route="derive")])
     haystack = (results[0].sketch or "") + (results[0].note or "")
     assert "NameError" not in haystack
     assert "Abs(" in haystack
@@ -1158,7 +1168,8 @@ def test_lift_sum_two_pass_variance_closed_form_matches_real_execution():
 
 def test_sum_claim_index_dot_reflexivity_proven():
     results = check_conjectures(
-        index_dot, [claim("f(a, b) == f(a, b)", route="derive")])
+        index_dot, [claim("for a in R^n, b in R^n, f(a, b) == f(a, b)",
+                          route="derive")])
     assert results[0].verdict == "proven"
 
 
@@ -1269,15 +1280,22 @@ def test_fold_claim_symbolic_alpha_is_falsified_never_falsely_proven():
 
 
 def test_fold_claim_wrong_argument_count_is_skipped_not_an_error():
+    # f(x) cannot bind to ema(x, alpha): the claim is misspecified
     results = check_conjectures(ema, [claim("f(x) == x[-1]", route="derive")])
-    assert results[0].verdict == "unknown"
+    assert results[0].verdict == "skipped:misspecified"
 
 
 def test_fold_claim_non_bare_first_argument_is_skipped():
-    # the fold lift declines the sliced argument; probing then
-    # evaluates the slice for real, and with alpha = 1.0 the average
-    # collapses to the last element, so the claim holds empirically
+    # the fold lift declines the sliced argument, and probing evaluates
+    # the slice for real: a single element leaves x[1:] empty, where
+    # ema raises, a witness at length 1
     results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert results[0].verdict == "falsified"
+    assert results[0].counterexample.startswith("x = [")
+    # from two elements on, with alpha = 1.0 the average collapses to
+    # the last element, so the claim holds empirically
+    results = check_conjectures(ema, [claim(
+        "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]", route="derive")])
     assert results[0].verdict == "holds"
 
 
@@ -1403,9 +1421,9 @@ def test_proven_fold_claim_reaches_the_reasoning_chain():
 # --- proof quantifiers and readable sketches --------------------------------
 
 def test_proven_scalar_claim_carries_a_quantifier():
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive", pseudo_infinity=1e100)])
+    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="derive")])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ [-1e+100, 1e+100] ⊂ ℝ ∪ {∅}"
+    assert results[0].condition == "∀ x ∈ ℝ"
 
 
 def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
@@ -1415,7 +1433,7 @@ def test_proven_scalar_claim_quantifier_reflects_a_declared_domain():
     results = check_conjectures(
         clamp01, [claim("for x in [0, 1], f(x) == x", route="derive")])
     assert results[0].verdict == "proven"
-    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+    assert results[0].condition == "∀ x ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_proven_fold_claim_quantifies_over_the_sequence():
@@ -1448,7 +1466,7 @@ def test_quantifier_groups_shared_domains_and_remaps_long_names():
         "some_var + some_other_var + other_var", route="derive")])
     assert results[0].verdict == "proven"
     assert results[0].condition == \
-        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}"
+        "where x=some_var, y=some_other_var, z=other_var: ∀ x, y ∈ ℝ, z ∈ [0.0, 1.0] ⊂ ℝ"
 
 
 def test_disproven_and_undecided_claims_have_no_quantifier():
@@ -1994,7 +2012,7 @@ def gaussian_pdf(x: float, mu: float, sigma: float) -> float:
 def test_derivative_at_a_point_proves_projectile_range_maximized_at_45_degrees():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], "
-                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive", pseudo_infinity=1e100)])
+                                 "d(f(v0,theta,g), theta)@{theta=pi/4} == 0", route="derive")])
     # g bounded away from 0: the division's raising region is excluded
     assert results[0].verdict == "proven"
 
@@ -2010,7 +2028,7 @@ def test_derivative_at_a_point_with_multiple_substitutions():
 def test_plain_derivative_claim_without_evaluation_bar_still_works():
     results = check_conjectures(
         projectile_range, [claim("for g in [9, 10], d(f(v0,theta,g), theta) "
-                                 "== 2*v0**2*cos(2*theta)/g", route="derive", pseudo_infinity=1e100)])
+                                 "== 2*v0**2*cos(2*theta)/g", route="derive")])
     assert results[0].verdict == "proven"
 
 

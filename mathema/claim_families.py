@@ -11,7 +11,7 @@ Two kinds live here:
   convexity/concavity), the route a `route="best"` claim falls back to.
 - derive-route families, symbolic/structural checks with no sampling
   at all (`is_numerically_stable`'s pole-containment disproof,
-  `is_builtin_safe[param]`'s restricted-real-domain check,
+  `is_number_set_safe[param]`'s restricted-real-domain check,
   `is_pole_safe[param]`'s pole-containment check), each returning a
   `symbolic.ProofResult` or `None` to decline. The safety predicates
   also carry targeted empirical halves (`_pole_probe`/
@@ -24,14 +24,19 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
-import math
-import random
-from typing import TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .records import Probe
+    from .analysis import Facts
+
+import math
+import numbers
+import random
+from decimal import Decimal
+from fractions import Fraction
 
 from ._sampling import _finite_bounds as _finite_bounds, _synth_scalar as _synth_scalar
+from .f import _is_nonfinite as _is_nonfinite
 from .grammar import Domain
 # hazard knowledge (which parameters face which hazard kinds, and the
 # restricted builtins' own accepted ranges) lives in mathema.hazards,
@@ -41,7 +46,10 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
                       _missing_guard_params as _missing_guard_params,
                       _pole_bearing_params as _pole_bearing_params,
                       _restricted_domain_targets as _restricted_domain_targets)
-from .probing import _fmt, _points_for_probe, _pole_safety, _poles_by_var, _synth
+from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_probe, _pole_safety,
+                      _poles_by_var, _synth, call_arguments)
+from .runtime_types import SEQUENCE_KINDS
+from ._signatures import callable_signature
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
 #
@@ -65,7 +73,8 @@ def _claim_target_param(name: str) -> str | None:
     return None
 
 
-def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random):
+def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
+                        rng: random.Random) -> list:
     """One synthesized positional-argument list for every parameter of
     fn except target, in facts.params order; target itself is left
     as None, filled in by the caller once per sample point."""
@@ -75,23 +84,57 @@ def _synth_other_params(fn, facts, target: str, domain: dict, rng: random.Random
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
-        args.append(_synth(k, rng, domain.get(p) if k != "sequence" else None))
+        args.append(_synth(k, rng, domain.get(p) if k not in SEQUENCE_KINDS
+                           else None))
     return args
 
 
-def _call_with_target(fn, facts, target: str, args: list, value):
-    args = list(args)
-    args[facts.params.index(target)] = value
-    return fn(*args)
+def _call_with_target(fn: Callable[..., Any], facts: Facts, target: str, args: list,
+                      value: Any) -> Any:
+    values = dict(zip(facts.params, args))
+    values[target] = value
+    call_args, call_kwargs = call_arguments(fn, facts.params, values)
+    return fn(*call_args, **call_kwargs)
 
 
-def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
-                  trials: int, trial):
+def _placed(values: dict, rng: random.Random, keep=(),
+            solve: bool = True) -> "dict | None":
+    """Intent:
+        `values` (parameter to drawn value) on the surface of the
+        running claim's equality premises (`_premises.current()`),
+        leaving the parameters in `keep` as drawn: a premise-drawn
+        parameter is redrawn on its surface and, when `solve`, the
+        solved equality's variable is computed from the others. None
+        when the solved value falls outside its declared bound (the
+        point is not a trial); `values` unchanged when the claim has
+        no premise.
+    """
+    from . import _premises
+    guard = _premises.current()
+    if guard is None:
+        return values
+    only = frozenset(values) - frozenset(keep)
+    return guard.place(values, rng, only=only, solve=solve)
+
+
+def _admitted(values: dict) -> bool:
+    """Whether `values` is inside the running claim's premises; True
+    when the claim has none."""
+    from . import _premises
+    guard = _premises.current()
+    return guard is None or guard.admits_point(values)
+
+
+def _probe_trials(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
+                  rng: random.Random, trials: int,
+                  trial: Callable[[list], Any]) -> tuple[str, int, Any]:
     """Intent:
         The one trial loop every probe:algorithmic technique runs:
-        synthesize the non-target arguments, hand them to `trial`,
+        synthesize the non-target arguments (a parameter an equality
+        premise fixes is drawn on its surface), hand them to `trial`,
         count only the evaluable rounds, stop at the first
-        counterexample.
+        counterexample. A round whose call lies outside the claim's
+        premises (`_premises.PremiseRejected`) is not a trial.
 
     Notes:
         `trial(args)` returns None (nothing evaluable this round,
@@ -103,10 +146,20 @@ def _probe_trials(fn, facts, target: str, domain: dict, rng: random.Random,
         is "holds", never "proven", because a sampling loop can
         witness violation but not absence.
     """
+    from ._premises import PremiseRejected
     checked = 0
     for _ in range(trials):
         args = _synth_other_params(fn, facts, target, domain, rng)
-        outcome = trial(args)
+        placed = _placed(dict(zip(facts.params, args)), rng, keep=(target,),
+                         solve=False)
+        if placed is None:
+            continue
+        args = [placed[p] for p in facts.params]
+        try:
+            outcome = trial(args)
+        except PremiseRejected:
+            # a call outside the claim's premises is not a trial
+            continue
         if outcome is None:
             continue
         checked += 1
@@ -138,6 +191,17 @@ def _interval_ends(bounds) -> "tuple[float, float] | None":
     return None
 
 
+def _held_text(facts, target: str, args: list) -> str:
+    """Intent:
+        The parameters a pairwise trial held fixed while it moved
+        `target`, as `name = value` pairs (a large container by its
+        shape and a first row); empty for a one-parameter function.
+    """
+    from ._shapes import witness_text
+    return ", ".join(f"{p} = {witness_text(v) or _witness_coordinate(v)}"
+                     for p, v in zip(facts.params, args) if p != target)
+
+
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     trials: int, *, increasing: bool):
     """Pairwise-sampling monotonicity: per trial, two ordered values of
@@ -154,6 +218,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if facts.param_kinds.get(target) != "scalar":
         return None
     bounds = domain.get(target)
+    no_value: dict = {}
 
     def trial(args):
         x1 = _synth("float", rng, bounds)
@@ -167,22 +232,95 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v2 = _call_with_target(fn, facts, target, args, x2)
         except Exception:
             return None
-        ok = (v1 <= v2 + 1e-9) if increasing else (v1 >= v2 - 1e-9)
+        for x, v in ((x1, v1), (x2, v2)):
+            if not _a_value(v):
+                # a point with no value to order is skipped, and said
+                no_value.setdefault("at", (x, v))
+                return None
+        e1, e2 = _exact_real(v1), _exact_real(v2)
+        if e1 is None or e2 is None:
+            # an overflow or a nan says nothing about direction
+            return None
+        slack = Fraction(1, 10 ** 9)
+        ok = (e1 <= e2 + slack) if increasing else (e1 >= e2 - slack)
         if ok:
             return True
         direction = "increasing" if increasing else "decreasing"
-        return f"{target}={x1:.6g} -> {v1!r}, {target}={x2:.6g} -> {v2!r} (not {direction})"
+        held = _held_text(facts, target, args)
+        return (f"{target} = {_fmt_coordinate(x1)} -> {v1!r}, "
+                f"{target} = {_fmt_coordinate(x2)} -> {v2!r}"
+                f"{f' at {held}' if held else ''} (not {direction})")
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
+
+
+def _a_value(v) -> bool:
+    """Whether `v` is a real number a probe can compare: not None, not a
+    NaN, not something that is no number at all. An integer beyond float
+    range is a value."""
+    if isinstance(v, bool) or v is None:
+        return False
+    if isinstance(v, numbers.Integral):
+        return True
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    except OverflowError:
+        return True
+    return f == f
+
+
+def _is_array_like(v) -> bool:
+    """Whether `v` is an array, a Series or another value whose `==`
+    answers element by element."""
+    return hasattr(v, "shape") and hasattr(v, "__array__")
+
+
+def _exact_real(v) -> "Fraction | None":
+    """A real result as the exact rational it is (an integer of any
+    size, a float, a Decimal, a Fraction), None for an infinity, a nan
+    or a value that is no real number."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, numbers.Integral):
+        return Fraction(int(v))
+    if isinstance(v, (Fraction, Decimal)):
+        try:
+            return Fraction(v)
+        except (ValueError, OverflowError):
+            return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return Fraction(f) if math.isfinite(f) else None
+
+
+def _with_no_value_note(result, fn, target: str, cj, no_value: dict):
+    """A family probe's result with a sentence saying it skipped the
+    points where the function gave no value, when it did."""
+    if not no_value or result is None:
+        return result
+    from ._missing_words import declared_optional_return, value_shown
+    x, v = no_value["at"]
+    declared = declared_optional_return(fn)
+    what = "returns None" if v is None else f"returns {value_shown(v)}"
+    family = (cj.name or "").split("[", 1)[0]
+    said = (f"f {what} at {target} = {value_shown(x)}"
+            + (f" ({declared})" if declared and v is None else "")
+            + f"; the {family} check skipped the points with no value")
+    return (*result, {"mathema.sampled": said})
 
 
 def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                              trials: int, *, kind: str):
     """Finite-difference second-derivative sign: per trial, a base
-    point x0 and a small step h (scaled to the declared domain's own
-    width, or a fixed small default when unbounded), checking the
-    discrete second difference f(x0-h) - 2*f(x0) + f(x0+h) against
-    zero; "affine" wants ~=0, "convex" wants >= -tolerance, "concave"
+    point x0 and a small step h (scaled to |x0|, and to the declared
+    domain's width when that is narrower), checking the curvature the
+    discrete second difference f(x0-h) - 2*f(x0) + f(x0+h) gives
+    against zero within a tolerance relative to f's own size there; "affine" wants ~=0, "convex" wants >= -tolerance, "concave"
     wants <= tolerance. A real approximation, not exact: finite-
     difference noise means a genuinely borderline function can go
     either way near the tolerance band, the same honesty every other
@@ -194,11 +332,22 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     bounds = domain.get(target)
     lo, hi = _interval_ends(bounds) or (None, None)
+    no_value: dict = {}
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
-        span = (hi - lo) if lo is not None and hi is not None else max(1.0, abs(x0)) * 2
-        h = max(span * 1e-3, 1e-6)
+        if not math.isfinite(x0):
+            return None
+        # a step on the scale of the point itself (and of the domain when
+        # it is narrower), kept inside the domain
+        h = abs(x0) * 1e-3 or 1e-6
+        if lo is not None and hi is not None:
+            h = min(h, (hi / 2 - lo / 2) * 2e-3) if hi > lo else h
+            room = min(x0 - lo, hi - x0)
+            if room <= 0:
+                return None
+            h = min(h, room)
+        h = max(h, abs(x0) * 1e-12, 1e-300)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
             return None
         try:
@@ -207,7 +356,18 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
             v_hi = _call_with_target(fn, facts, target, args, x0 + h)
         except Exception:
             return None
-        second_diff = v_lo - 2 * v_mid + v_hi
+        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+            if not _a_value(v):
+                no_value.setdefault("at", (x, v))
+                return None
+        try:
+            values = (float(v_lo), float(v_mid), float(v_hi))
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(v) for v in values):
+            # an overflow or a nan says nothing about how f bends
+            return None
+        second_diff = values[0] - 2 * values[1] + values[2]
         # curvature, not the raw second difference: dividing by h*h
         # recovers an actual f''(x0) estimate, scale-independent of h
         # itself (a pure quadratic's curvature comes back exact
@@ -216,23 +376,32 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         # tolerance scaled only to the function's own value magnitude
         # is the wrong reference scale entirely; it was off by orders
         # of magnitude for a real quadratic before this fix, silently
-        # calling every shape "affine". A fixed absolute tolerance on
-        # the recovered curvature is still an approximation, not exact;
-        # a function whose real curvature is tiny relative to its
-        # own value scale (or exactly at the tolerance boundary) can
-        # still be misjudged, the same honest limit every probe
+        # calling every shape "affine". A finite difference is still an
+        # approximation, not exact: a curvature at the tolerance
+        # boundary can be misjudged, the same honest limit every probe
         # technique in this module already carries.
-        curvature = second_diff / (h * h)
-        tol = 1e-4
+        # divided by h twice, so a step near the float limit never
+        # overflows h * h
+        curvature = (second_diff / h) / h
+        # the tolerance is relative: the bend f's own size gives at this
+        # point (|f| over the squared distance from the origin, or the
+        # step for a point at it), and never below the rounding noise
+        # of the three values the difference is taken over
+        size = max(abs(v) for v in values)
+        reach = max(abs(x0), h)
+        natural = (size / reach) / reach
+        noise = 16 * (((8 * 2.220446049250313e-16 * size) / h) / h)
+        tol = max(1e-4 * natural, noise)
         ok = (abs(curvature) <= tol if kind == "affine" else
              curvature >= -tol if kind == "convex" else
              curvature <= tol)
         if ok:
             return True
-        return (f"{target}={x0:.6g}, h={h:.3g}: curvature estimate "
+        return (f"{target} = {_fmt_coordinate(x0)}, h = {h:.3g}: curvature estimate "
                 f"{curvature:.6g} does not settle {kind}")
 
-    return _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    return _with_no_value_note(result, fn, target, cj, no_value)
 
 
 def _raise_or_nonfinite(out) -> "str | None":
@@ -297,8 +466,8 @@ def _uncorroborated_family_disproof(sketch: str, why: str,
         meta["mathema.corroboration_reason"] = reason
     return ProofResult(
         "undecided",
-        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
-               f"falsification needs an executed witness",
+        sketch=f"{sketch}; derive found a disproof but {why}, and a "
+               f"falsification needs a run of the code that shows it",
         meta=meta)
 
 
@@ -368,8 +537,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
         value = None
     if value is None:
         return _uncorroborated_family_disproof(
-            sketch, f"the pole {pole_text} has no machine spelling the "
-                    f"domain admits, so no call could be made there")
+            sketch, f"the pole {pole_text} is not a value a float can "
+                    f"hold inside the domain, so the code could not be "
+                    f"run there")
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
@@ -389,38 +559,113 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
               "mathema.witness_executed": True})
 
 
+def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                    trials: int):
+    """Intent:
+        Empirical half of is_numerically_stable: at each corner of the
+        domain and at sampled points, compare the float result of the
+        call with the exact value of the function's mathematics
+        (`f.exact_value`, each float argument read as the exact binary
+        number it is), within the computation allowance
+        (`_allowance.allowance`: the claim tolerance, else the default
+        rule against the exact value). The first point
+        past it is the witness, with its exact and float values. A point
+        where the call raises, returns no finite number, or the
+        mathematics has no value is no trial (another family's
+        question), and the note counts them by reason; with no exact
+        form at all, or no point that allowed a comparison, the verdict
+        is unknown.
+    """
+    import inspect
+    import itertools
+
+    from .f import _is_nonfinite, exact_value
+    from .gates import _fmt_point
+    body = inspect.unwrap(fn)
+    names = list(facts.params)
+    if not names or any(facts.param_kinds.get(p) in SEQUENCE_KINDS
+                        for p in names):
+        return ("unknown", 0, "accuracy against the exact value is read "
+                "for scalar parameters only")
+    if not any(facts.param_kinds.get(p) in ("scalar", "int", "complex")
+               for p in names):
+        return ("unknown", 0, "accuracy against the exact value is read "
+                "for a number computed from numbers, and no parameter "
+                "holds a number")
+    if exact_value(body, *[1.0] * len(names)) is None \
+            and exact_value(body, *[0.5] * len(names)) is None:
+        return ("unknown", 0, "the body has no exact form to compare the "
+                "float result with")
+    corners = []
+    ends = [_interval_ends((domain or {}).get(p)) for p in names]
+    if all(e is not None for e in ends):
+        corners = [dict(zip(names, combo))
+                   for combo in itertools.product(*[(lo, hi)
+                                                    for lo, hi in ends])]
+    state = {"i": 0}
+    missed = {"raised": 0, "non-finite": 0, "no exact value": 0}
+
+    def trial(args):
+        values = dict(zip(names, args))
+        if state["i"] < len(corners):
+            values = corners[state["i"]]
+            state["i"] += 1
+        else:
+            values[names[0]] = _synth(facts.param_kinds.get(names[0],
+                                                          "unknown"),
+                                      rng, (domain or {}).get(names[0]))
+        point = [values[p] for p in names]
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               for v in point):
+            return None
+        try:
+            call_args, call_kwargs = call_arguments(fn, names, values)
+            with _pinned_float_env():
+                out = fn(*call_args, **call_kwargs)
+        except Exception:
+            missed["raised"] += 1
+            return None
+        if isinstance(out, bool) or not isinstance(out, (int, float)) \
+                or _is_nonfinite(out):
+            missed["non-finite"] += 1
+            return None
+        exact = exact_value(body, *point)
+        if exact is None:
+            missed["no exact value"] += 1
+            return None
+        from ._allowance import allowance
+        allowed = allowance(float(exact), cj.tolerance)
+        if abs(out - exact) <= allowed:
+            return True
+        return (f"{_fmt_point(values, names)}: exact {float(exact)!r}, "
+                f"float {out!r}, apart by {float(abs(out - exact)):.3g}, "
+                f"past the allowance {float(allowed):.3g}")
+
+    verdict, checked, cx = _probe_trials(fn, facts, names[0], domain, rng,
+                                         max(trials, len(corners)), trial)
+    said = {"raised": "where f raised", "non-finite":
+            "where f returned a non-finite value",
+            "no exact value": "with no exact value"}
+    counts = ", ".join(f"{n} {said[why]}" for why, n in missed.items() if n)
+    if checked == 0:
+        return ("unknown", 0, "no point allowed a comparison"
+                + (f" ({counts})" if counts else ""))
+    if not counts:
+        return verdict, checked, cx
+    return (verdict, checked, cx,
+            {"mathema.caveat": f"points not compared: {counts}"})
+
+
 def _is_numerically_stable_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
-    """Intent:
-        A derive-route half for is_numerically_stable: when a
-        declared-domain parameter's own pole provably lies inside its
-        bound (the reasoning is_pole_safe[param] uses, via the shared
-        _pole_exclusion_proof), disproven if the executed call there
-        raises or returns a non-finite value, else the uncorroborated
-        undecided; None (falling through to the probe check) otherwise.
-
-    Notes:
-        Pole exclusion never proves the claim. `finite_no_error(f, ...)
-        == 1` also fails on an overflow (exp past 709.78) and on a NaN,
-        neither of which is a pole, so with every pole excluded the
-        claim is still open and the probe decides it. lhs_src/rhs_src/
-        relation are unused, kept for protocol uniformity with every
-        other derive-route family.
-    """
-    domain = domain or {}
-    if not domain:
-        return None
-    proof = _pole_exclusion_proof(
-        fn, facts, domain, list(domain),
-        proven_sketch="every declared-domain parameter's own poles are "
-                      "excluded by its bound")
-    if proof is None or proof.status == "proven":
-        return None
-    return proof
+    """Structural half of is_numerically_stable: decline. Whether the
+    float result is accurate is a fact about one computation, settled
+    by executing it (`_accuracy_probe`)."""
+    return None
 
 
-# --- is_builtin_safe[param]: a declared-domain parameter fed into a
+# --- is_number_set_safe[param]: a declared-domain parameter fed into a
 # real math function whose own domain is narrower than sympy's symbolic
 # generalization (factorial/gamma/lgamma need an integer or positive
 # argument; sqrt/log/asin/acos need a non-negative/positive/[-1,1]
@@ -579,21 +824,22 @@ def _check_restricted_domain(name: str, dom) -> str:
     Notes:
         factorial gets its own dedicated check (_factorial_verdict);
         it needs an integer *type* guarantee, not just a range, unlike
-        the other five. Every other name here reduces to "is dom a
-        subset of this function's own safe range" via
-        _domain_pieces/_range_piece_verdict/_combine_piece_verdicts,
-        the same three-step shape regardless of which of the five it is.
+        every other name. Every other name here reduces to "is dom a
+        subset of this function's own safe range" (its `_SAFE_RANGE`
+        row) via _domain_pieces/_range_piece_verdict/
+        _combine_piece_verdicts, the same three-step shape whichever
+        name it is.
     """
     if name == "factorial":
         return _factorial_verdict(dom)
     return _combine_piece_verdicts([_range_piece_verdict(name, p) for p in _domain_pieces(dom)])
 
 
-def _is_builtin_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_number_set_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                             relation: str, domain: dict | None = None,
                             tolerance: float | None = None):
     """Intent:
-        A derive-route check for is_builtin_safe[param]: proven when
+        A derive-route check for is_number_set_safe[param]: proven when
         param's own declared domain is safe for every restricted-domain
         math function it's actually passed to in fn's body, disproven
         when provably unsafe for at least one, undecided otherwise
@@ -606,8 +852,8 @@ def _is_builtin_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         domain calls against the declared domain), kept for protocol
         uniformity with every other derive-route family. `lhs_src` is
         param itself: grammar.parse_domain_safety() parses
-        "is_builtin_safe(param)" straight into
-        `Conjecture(lhs=param, relation="is_builtin_safe", rhs="")`, no
+        "is_number_set_safe(param)" straight into
+        `Conjecture(lhs=param, relation="is_number_set_safe", rhs="")`, no
         f(...) wrapper and no name-parsing needed here.
     """
     from .symbolic import ProofResult
@@ -625,13 +871,64 @@ def _is_builtin_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         # proves the inference wrong. The code is the arbiter: decline
         # here and let the trials at the admitted edge values decide
         # (an unguarded body falsifies there with a real witness; a
-        # guarding body holds).
-        return None
+        # guarding body holds), unless the body's own guard provably
+        # keeps the call inside its number set
+        return _working_number_set_proof(fn, facts, param, names, domain)
     if all(v == "proven" for v in verdicts.values()):
         return ProofResult("proven",
                            sketch=f"{param}'s declared domain is safe for "
                                   f"{', '.join(sorted(names))}")
-    return None
+    return _working_number_set_proof(fn, facts, param, names, domain)
+
+
+def _working_number_set_proof(fn, facts, param: str, names, domain: dict):
+    """Intent:
+        is_number_set_safe[param] over the working domain: proven when
+        the raise-region walk reads the whole body and every region
+        where one of its calls leaves its number set misses the domain,
+        each region conditioned on the path that reaches the call (so a
+        guard raising first cuts it out, decision A). None otherwise.
+    """
+    from .conjecture import guard_cut_texts
+    from .symbolic import ProofResult
+    from .symbolic._partiality import partiality_walk
+    from .symbolic._proof_support import _relational_truth_over_domain
+    if not domain or param not in domain:
+        return None
+    from .symbolic._partiality import _integer_bound
+    if any(facts.param_kinds.get(p) == "int"
+           and not _integer_bound(domain.get(p)) for p in facts.params):
+        # the walk reads an int-annotated parameter as an integer, but a
+        # real domain is drawn and called with non-integers too
+        return None
+    opaque: list = []
+    try:
+        guards, unread = partiality_walk(fn, facts, domain,
+                                         opaque_out=opaque)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    if unread:
+        return None
+    for cond, _exc in guards:
+        symbols = {str(s): s for s in cond.free_symbols}
+        if param not in symbols:
+            continue
+        if not all(name in domain for name in symbols):
+            return None
+        try:
+            if _relational_truth_over_domain(cond, domain, symbols) is not False:
+                return None
+        except Exception:
+            return None
+    cuts = guard_cut_texts(fn, facts)
+    return ProofResult(
+        "proven",
+        sketch=f"every call reading {param} stays inside its number set "
+               f"over the working domain ({', '.join(sorted(names))})"
+               + (f"; f's own guard raises where {' or '.join(cuts)}, "
+                  f"which cuts the working domain" if cuts else ""))
 
 
 def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -647,7 +944,7 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     Notes:
         rhs_src/relation/tolerance are unused, kept for protocol
         uniformity with every other derive-route family (see
-        _is_builtin_safe_derive's own note on why). `lhs_src` is param
+        _is_number_set_safe_derive's own note on why). `lhs_src` is param
         itself. The containment reasoning is the shared
         _pole_exclusion_proof, restricted to this one parameter.
     """
@@ -658,23 +955,9 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return _pole_exclusion_proof(
         fn, facts, domain, [param],
         proven_sketch=f"the declared domain for {param} excludes every "
-                      f"DISCOVERED pole of {facts.name} (pole discovery "
+                      f"pole of {facts.name} that mathema found (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
-
-
-def _pinned_float_env():
-    """The floating-point error regime every hazard trial runs under:
-    numpy's own defaults, pinned explicitly so a verdict never depends
-    on whatever ambient `numpy.seterr` state the calling process
-    happens to carry. A no-op context when numpy isn't importable."""
-    import contextlib
-    try:
-        import numpy
-    except Exception:
-        return contextlib.nullcontext()
-    return numpy.errstate(divide="warn", over="warn", under="ignore",
-                          invalid="warn")
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -691,7 +974,9 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
         Candidates are already filtered to the declared domain by the
         caller: everything tried here is a point the domain admits, so
         a failure is the claim's own falsification, never an
-        out-of-domain artifact. A non-numeric return (a tuple, a
+        out-of-domain artifact. A call the function's own guard rejects
+        (`deliberate_raise`) is outside its working domain and no trial.
+        A non-numeric return (a tuple, a
         sequence) is out of scope for a numeric-hazard trial and
         passes. Declines (None) when the claim names no real scalar
         parameter or no candidate survives the domain filter;
@@ -700,7 +985,7 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
     if not candidates:
         return None
@@ -713,6 +998,11 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
+            from .conjecture import deliberate_raise
+            if deliberate_raise(exc, fn):
+                # the function's own guard rejects the call: the point is
+                # outside its working domain, no trial (decision A)
+                return None
             return describe(value, f"raised {type(exc).__name__}")
         try:
             as_float = float(out)
@@ -739,6 +1029,10 @@ def _pole_probe(fn, facts, cj, domain: dict, rng: random.Random,
     target = cj.lhs
     if target not in facts.params:
         return None
+    from .hazards import not_a_number
+    reason = not_a_number(facts, target, "is_pole_safe")
+    if reason is not None:
+        return ("unknown", 0, reason)
     bounds = domain.get(target)
 
     candidates: list = []
@@ -764,237 +1058,108 @@ def _pole_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 candidates.append(spelled)
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
+        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but sits at or beside a "
                              f"pole: the call {what}"))
 
 
-def _is_extremity_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
-                            relation: str, domain: dict | None = None,
-                            tolerance: float | None = None):
+def _examined_verdict(found: list, unread: list, clean: str,
+                      effects=None, domain: dict | None = None):
     """Intent:
-        The range-analysis half of is_extremity_safe[param]: proven when
-        the rigorous interval hull of the lifted form over the declared
-        domain box provably stays inside float range (the true range is
-        contained in the hull, so containment IS representability
-        everywhere); undecided (None) otherwise, falling through to
-        the extreme-trial probe half.
-
-    Notes:
-        Analysis never falsifies here: interval arithmetic
-        over-approximates, so a hull escaping float range does not
-        witness any attained overflow, and even an attained
-        mathematical overflow says nothing certain about code that
-        clamps before it. Violation is the probe half's to witness
-        with a real call. Requires every declared bound along the way
-        to be finite (an unbounded box has an unbounded hull); the
-        probe half owns the unbounded case through its
-        pseudo-infinity scoping.
+        The ProofResult of an examination: disproven at the first site
+        found (its sentence is the witness), undecided naming what could
+        not be read, proven otherwise, saying what the examination
+        established (`clean`). A site whose enclosing branch cannot run
+        anywhere in `domain` still disproves, and its witness says so.
     """
-    import sys
+    from .symbolic import ProofResult
+    if found:
+        witness = found[0].text
+        guard = (effects.guards.get(found[0], ()) if effects is not None
+                 else ())
+        dead = _branch_dead_over(guard, domain)
+        if dead:
+            witness += (f"; the branch it sits in cannot run over the "
+                        f"domain ({dead} never holds there)")
+        return ProofResult("disproven", sketch=witness,
+                           counterexample=witness)
+    if unread:
+        return ProofResult("undecided", sketch="; ".join(
+            site.text for site in unread))
+    assumes = sorted(getattr(effects, "assumes", ()) or ())
+    return ProofResult("proven", sketch=f"examined from its source: the "
+                                        f"function {clean}" + "".join(
+                                            f"; it assumes {a}"
+                                            for a in assumes))
 
+
+def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":
+    """Intent:
+        The branch condition, of those in `guard` (pairs of a condition's
+        source and whether the branch is its body or its else), that no
+        point of `domain` satisfies, or None when none is shown to fail
+        everywhere. A condition counts only when it reads a single
+        parameter the domain bounds by an interval; any other is taken
+        as possibly true.
+    Raises:
+        Nothing: a condition sympy cannot read, or one whose solving
+        runs past the fast cap, is taken as possibly true.
+    """
+    if not guard or not domain:
+        return None
+    import sympy
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    from .symbolic import ProofResult, lift
-    param = lhs_src
-    if param not in facts.params:
-        return None
-    domain = domain or {}
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        return None
-    if lifted is None or isinstance(lifted.expr, tuple):
-        return None
-    expr = lifted.expr
-    params = {s.name: s for s in expr.free_symbols}
-    if param not in params:
-        return None
-    try:
-        from .symbolic._proof_support import _interval_bounds
-        hull = _with_timeout(
-            lambda: _interval_bounds(expr, domain, params),
-            FAST_TIMEOUT_SECONDS)
-    except Exception:
-        return None
-    if hull is None:
-        return None
-    lo = getattr(hull, "min", hull)
-    hi = getattr(hull, "max", hull)
-    float_max = sys.float_info.max
-    try:
-        within = bool((lo > -float_max) == True         # noqa: E712
-                      and (hi < float_max) == True)     # noqa: E712
-    except Exception:
-        return None
-    if not within:
-        return None
-    return ProofResult(
-        "proven",
-        sketch=f"the value hull over the declared domain stays inside "
-               f"float range, so no admitted input can push the "
-               f"result past what a float represents ({param} "
-               f"included at its declared extremes)")
-
-
-def _extreme_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                   trials: int):
-    """Empirical half of is_extremity_safe[param]: trials at the
-    representation-extreme inputs the declared domain admits, the
-    finite declared endpoints, and (for an unbounded side) the
-    pseudo-infinity cap when the claim states one, else the true
-    representation ladder (float max, the x*x-overflow scale, the
-    exp-overflow threshold, the denormal band). Reaching true float
-    extremes on an unbounded, uncapped domain is this member's
-    explicit job; every trial point is still admitted by the domain.
-    A raise or non-finite return falsifies with that witness."""
-    from .hazards import _extreme_candidates
-    from .records import pseudo_infinity_range
-    target = cj.lhs
-    if target not in facts.params:
-        return None
-    pinf = pseudo_infinity_range(getattr(cj, "pseudo_infinity", None))
-    candidates = _extreme_candidates(domain.get(target),
-                                     pseudo_infinity=pinf)
-    return _hazard_value_probe(
-        fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
-                             f"declared domain but the implementation "
-                             f"leaves float range there: the call {what}"))
+    for source, taken in guard:
+        shown = source if taken else f"not ({source})"
+        try:
+            condition = sympy.sympify(
+                source, locals={name: sympy.Symbol(name, real=True)
+                                for name in domain})
+        except Exception:
+            continue
+        if not taken:
+            condition = sympy.Not(condition)
+        names = {str(sym) for sym in getattr(condition, "free_symbols", ())}
+        if len(names) != 1:
+            continue
+        (name,) = names
+        bounds = domain.get(name)
+        if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
+                and all(isinstance(b, (int, float)) for b in bounds)):
+            continue
+        lo, hi = (sympy.oo if b == math.inf else -sympy.oo if b == -math.inf
+                  else sympy.nsimplify(b) for b in bounds)
+        symbol = next(iter(condition.free_symbols))
+        try:
+            found = _with_timeout(
+                lambda c=condition, x=symbol, a=lo, b=hi: sympy.solveset(
+                    c, x, sympy.Interval(a, b)), FAST_TIMEOUT_SECONDS)
+        except Exception:
+            continue
+        if found is sympy.S.EmptySet:
+            return shown
+    return None
 
 
 def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                           relation: str, domain: dict | None = None,
                           tolerance: float | None = None):
     """Intent:
-        The structural half of is_state_safe (the mutation member of
-        the stateless cluster): calling the function mutates no
-        external state, no argument in place, no global, no module
-        attribute. Proven under the write-free certificate (no
-        syntactic external-write site anywhere in the body, every
-        name resolved) or a full lift (an expression has nothing to
-        mutate with). A detected write site stays undecided (None):
-        structure can't tell whether the writing branch executes, so
-        the snapshot trials decide.
-
-    Notes:
-        WRITES only, deliberately: external READS are
-        is_deterministic's territory; together the two bracket the
-        purity story core-side (the T0-T5 tiering itself is not a
-        core concern). rhs_src/relation/tolerance kept for protocol
-        uniformity.
+        is_state_safe by examination (`_examine.examine`): falsified at
+        the first write outside the call (the site is the witness),
+        undecided with the reasons when something cannot be read, and
+        proven when the body and every project function it reaches
+        write nothing outside the call. A draw from a generator passed
+        in is the caller's and is not a write.
     """
-    from .hazards import _write_free
-    from .symbolic import ProofResult, lift
-    if _write_free(facts):
-        return ProofResult(
-            "proven",
-            sketch="no external-write site exists in the body (no "
-                   "argument mutation, no global or module write, no "
-                   "dynamic escape) and every name resolves; there "
-                   "is no state to mutate")
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        lifted = None
-    if lifted is not None:
-        return ProofResult(
-            "proven",
-            sketch="the body lifts to a closed expression, which "
-                   "mutates nothing by construction")
-    return None
-
-
-def _state_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                 trials: int):
-    """Empirical half of is_state_safe: deep-copy the arguments and
-    snapshot the function's module globals (data entries only) before
-    a call, compare after, an observed mutation falsifies naming
-    the mutated target. Clean rounds hold: an unexecuted branch may
-    still hide a write, so trials never establish this fact."""
-    import copy
-    import types
-    if not facts.params:
-        return None
-    target = facts.params[0]
-    module_dict = getattr(fn, "__globals__", {}) or {}
-
-    def data_globals():
-        out = {}
-        for name, value in module_dict.items():
-            if name.startswith("__"):
-                continue
-            if isinstance(value, (types.ModuleType, types.FunctionType,
-                                  types.BuiltinFunctionType, type)):
-                continue
-            out[name] = value
-        return out
-
-    def trial(args):
-        call_args = list(args)
-        call_args[facts.params.index(target)] = _synth(
-            facts.param_kinds.get(target, "unknown"), rng,
-            domain.get(target))
-        try:
-            originals = copy.deepcopy(call_args)
-        except Exception:
-            return None
-        before = data_globals()
-        try:
-            before_copy = {k: copy.deepcopy(v) for k, v in before.items()}
-        except Exception:
-            before_copy = None
-        try:
-            with _pinned_float_env():
-                fn(*call_args)
-        except Exception:
-            return None   # a raising point says nothing about mutation
-        for p, original, after in zip(facts.params, originals, call_args):
-            same = (original == after
-                    or (isinstance(original, float) and original != original
-                        and isinstance(after, float) and after != after))
-            if not same:
-                return (f"calling the function mutated its own argument "
-                        f"{p!r}: {original!r} became {after!r}")
-        after_globals = data_globals()
-        if set(after_globals) != set(before):
-            changed = sorted(set(after_globals) ^ set(before))
-            return (f"calling the function changed module state: "
-                    f"{', '.join(changed)}")
-        if before_copy is not None:
-            for name, value in before_copy.items():
-                current = after_globals[name]
-                if current is not before[name]:
-                    # rebound to a different object: a real change,
-                    # whatever the type, and no comparison needed
-                    return (f"calling the function rebound module-level "
-                            f"{name!r}: {value!r} became {current!r}")
-                if type(current).__eq__ is object.__eq__:
-                    # equality is identity for this type, and `value` is
-                    # a deep copy, so the comparison below can only ever
-                    # say "changed", which is how a module carrying
-                    # `from __future__ import annotations` got reported
-                    # as mutating its `annotations` global, with a
-                    # witness whose before and after printed identically
-                    # (`__future__._Feature` defines no `__eq__`). The
-                    # object is the same one; in-place mutation of a
-                    # type like this is simply not detectable here, and
-                    # claiming it is a false positive.
-                    continue
-                try:
-                    unchanged = bool(current == value)
-                except Exception:
-                    # a numpy array (or anything else whose `==` is
-                    # elementwise) has no single truth value, the
-                    # identity check above already covered rebinding,
-                    # so say nothing rather than raise
-                    continue
-                if not unchanged:
-                    return (f"calling the function mutated module-level "
-                            f"{name!r}: {value!r} became {current!r}")
-        return True
-
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials // 4, 8), trial)
+    from ._examine import examine, writes_at_defaults
+    effects = examine(fn, _generator_parameter(fn, facts))
+    # the default call is judged: a write that needs an argument the
+    # caller passes (`out=` left at None) is not one it makes
+    return _examined_verdict(writes_at_defaults(fn, effects),
+                             [*effects.unknowns, *effects.unknown_writes],
+                             "writes nothing outside the call",
+                             effects, domain)
 
 
 def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1004,17 +1169,17 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         The structural half of excluded_outside_domain[param]: the
         function must raise on any input outside param's declared
         domain. Proven when the function is wrapped by
-        @enforce_domain covering this parameter, rejection by
-        construction, the wrapper checks every call before the body
-        runs. Undecided (None) otherwise: the trials at concrete
-        out-of-domain values decide empirically.
+        @enforce_domain (values) or @enforce_dimensions (shape) covering
+        this parameter, rejection by construction, the wrapper checks
+        every call before the body runs. Undecided (None) otherwise:
+        the trials at concrete out-of-domain values decide empirically.
 
     Notes:
         This claim is never battery-suggested: it is DECLARED,
         explicitly, via the `excluding` keyword, or automatically by
-        @enforce_domain itself (the decorator that makes it true also
-        declares it). rhs_src/relation/tolerance kept for protocol
-        uniformity.
+        @enforce_domain or @enforce_dimensions itself (the decorator
+        that makes it true also declares it). rhs_src/relation/tolerance
+        kept for protocol uniformity.
     """
     from .symbolic import ProofResult
     param = lhs_src
@@ -1024,6 +1189,14 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
             "proven",
             sketch=f"rejection by construction: the enforce_domain "
                    f"wrapper checks {param} against its declared domain "
+                   f"before the body ever runs")
+    shaped = getattr(fn, "__mathema_enforced_dimensions__", None)
+    if shaped is not None and param in shaped:
+        from ._shapes import expected
+        return ProofResult(
+            "proven",
+            sketch=f"rejection by construction: the enforce_dimensions "
+                   f"wrapper checks {param}'s shape ({expected(shaped[param])}) "
                    f"before the body ever runs")
     return None
 
@@ -1044,150 +1217,332 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     bounds = domain.get(target)
     if bounds is None:
         return None   # an unstated domain admits everything: no outside
-    candidates = [c for c in _out_of_domain_candidates(bounds)
-                  if not is_missing(c)]   # missing spellings are
-    # is_missing_safe's own hazard, not this member's
-    if not candidates:
+    language_bound = getattr(bounds, "base_type", None) == "L"
+    if language_bound:
+        # a language's own near non-members, each named for the language
+        # it lies outside; a language admitting every value of its kind
+        # has no outside to draw, which is a skip with the reason
+        names, candidates = _outside_language(bounds, rng)
+        if not candidates:
+            return ("skipped", 0,
+                    f"L[{names}] has no outside this route can draw: "
+                    f"every value of its kind is a member")
+    else:
+        candidates = [c for c in _out_of_domain_candidates(bounds)
+                      if not is_missing(c)]   # missing spellings are
+        # is_missing_safe's own hazard, not this member's
+    from . import _shapes
+    # a space domain (`R^(30,15)`, `[0, 1]^30`) has an outside of its
+    # own: a value of another shape, its elements inside the domain
+    space_dims = _shapes.dims_of(bounds) if not language_bound else ()
+    if not candidates and not space_dims:
         return None
-    sequence_target = facts.param_kinds.get(target) == "sequence"
+    element_bound = bounds
+    if space_dims:
+        import dataclasses
+        element_bound = dataclasses.replace(bounds, dims=())
+    sequence_target = ((facts.param_kinds.get(target) in SEQUENCE_KINDS
+                        or bool(space_dims)) and not language_bound)
+    # the function receives each value as its own runtime type
+    from .runtime_types import calling
+    call = calling(fn, facts)
     state = {"idx": 0}
+    # every shape just outside the space, each tried in turn: a fixed
+    # axis one up and one down, one rank up, one rank down
+    outsides = _shapes.outside_shapes(bounds) if space_dims else []
+    cycle = len(candidates) + len(outsides)
 
     def trial(args):
-        bad = candidates[state["idx"] % len(candidates)]
+        slot = state["idx"] % cycle
         state["idx"] += 1
-        if sequence_target:
+        if slot >= len(candidates):
+            shape = outsides[slot - len(candidates)]
+            value = _shapes.build_shape(
+                shape, lambda: _synth("float", rng, element_bound))
+            spelled = (f"{target} of shape {_shapes.shape_text(shape)} is "
+                       f"outside the declared domain "
+                       f"{_shapes.space_text(bounds)}")
+        elif language_bound:
+            bad = candidates[slot]
+            value = bad
+            spelled = (f"{target} = {_witness_value(bad)} "
+                       f"(outside L[{names}]{_why_outside(bad, bounds)})")
+        elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
-            # a fresh in-domain sequence with one out-of-domain entry
-            seq = [rng.uniform(-10, 10) for _ in range(4)]
-            seq[rng.randrange(len(seq))] = bad
-            value: object = seq
+            # a fresh in-domain sequence with one out-of-domain entry,
+            # of the shape the space fixes when it fixes one
+            bad = candidates[slot]
+            if space_dims:
+                seq = _shapes.shaped(
+                    bounds, rng, lambda: _synth("float", rng, element_bound))
+                leaf = seq
+                while leaf and isinstance(leaf[0], list):
+                    leaf = leaf[0]
+                leaf[rng.randrange(len(leaf))] = bad
+            else:
+                seq = [rng.uniform(-10, 10) for _ in range(4)]
+                seq[rng.randrange(len(seq))] = bad
+            value = seq
             spelled = f"{target}[...] = {bad!r}"
         else:
+            bad = candidates[slot]
             value = bad
             spelled = f"{target} = {bad!r}"
         try:
-            out = _call_with_target(fn, facts, target, args, value)
+            out = _call_with_target(call, facts, target, args, value)
         except Exception:
             return True   # rejected, as the claim demands
+        if spelled.endswith(_shapes.space_text(bounds)):
+            # the shape round's sentence already says where the value lies
+            from .probing import _fmt_value
+            return (f"{spelled} but was accepted (returned {_fmt_value(out)}); "
+                    f"the exclusion is asserted, not enforced")
         return (f"{spelled} is outside the declared domain but was "
                 f"accepted (returned {out!r}); the exclusion is "
                 f"asserted, not enforced")
 
-    rounds = max(len(candidates), min(trials, len(candidates) * 4))
+    rounds = max(cycle, min(trials, cycle * 4))
     return _probe_trials(fn, facts, target, domain, rng, rounds, trial)
+
+
+def _language_pieces(bounds) -> list:
+    """Intent:
+        `[(name, language)]` for every language piece of a language
+        bound, resolved through the registry.
+    """
+    from .domain import LanguageRef
+    from .languages import resolve_language
+    return [(piece.text, resolve_language(piece)) for piece in bounds.pieces
+            if isinstance(piece, LanguageRef)]
+
+
+def _language_names(bounds) -> str:
+    return " | ".join(name for name, _ in _language_pieces(bounds))
+
+
+def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
+    """Intent:
+        `(names, values)`: up to eight distinct near non-members per
+        language piece, each checked against the WHOLE bound (a value
+        outside one language of a union may lie inside another), and
+        the joined language names for the witness. Missing values are
+        `is_missing_safe`'s hazard and are left out.
+    """
+    from .domain import domain_contains, is_missing
+    pieces = _language_pieces(bounds)
+    out: list = []
+    for _, language in pieces:
+        for _ in range(8):
+            value = language.outside(rng)
+            if value is None or is_missing(value):
+                continue
+            if domain_contains(value, bounds):
+                continue
+            if not any(value == seen for seen in out):
+                out.append(value)
+    return " | ".join(name for name, _ in pieces), out
+
+
+def _witness_value(value) -> str:
+    """A witness value as a counterexample shows it: a string by its
+    repr, anything else as the probe formats it, so a record with only a
+    default repr shows its fields."""
+    if isinstance(value, str):
+        return repr(value)
+    from .probing import _fmt_value
+    return _fmt_value(value)
+
+
+def _witness_coordinate(value) -> str:
+    """A witness coordinate at full precision (`probing._fmt_coordinate`),
+    a string by its repr, so the point reads back as the one checked."""
+    if isinstance(value, str):
+        return repr(value)
+    return _fmt_coordinate(value)
+
+
+def _why_outside(value, bounds) -> str:
+    """Intent:
+        Why `value` is not a member, as the witness states it: the first
+        problem the bound's first language explains, ` at <path>: <why>`,
+        or `: <why>` for the value as a whole; empty when no language
+        explains it.
+    """
+    for _, language in _language_pieces(bounds):
+        try:
+            problems = language.explain(value) or []
+        except Exception:
+            continue
+        if problems:
+            first = problems[0]
+            where = f" at {first.path}" if first.path else ""
+            return f"{where}: {first.predicate}"
+    return ""
+
+
+def _language_corpus(bounds, rng: random.Random) -> "tuple[str, list]":
+    """Intent:
+        The fuzz corpus for a parameter bound to a language:
+        `(label, [(value, side)])` with the language's own hazards and
+        four draws, each on the side of the claim's domain it falls (a
+        value the claim excludes is outside), then its near non-members
+        outside, so a crash is reported for the side it happened on;
+        `label` names the domain as the claim writes it.
+    """
+    from .domain import domain_contains, is_missing, render_domain
+    names, outsides = _outside_language(bounds, rng)
+    drawn: list = []
+    for _, language in _language_pieces(bounds):
+        drawn.extend(h.value for h in language.hazards())
+        drawn.extend(language.sample(rng) for _ in range(4))
+    if any(not is_missing(v) for v in getattr(bounds, "excluded", ()) or ()):
+        # a value the claim excludes is outside its domain, and the label
+        # is the domain as written, exclusion included
+        label = render_domain(bounds, show_missing=False, ascii_mode=True)
+    else:
+        label = f"L[{names}]"
+    sides = [(v, "inside" if domain_contains(v, bounds) else "outside") for v in drawn]
+    return label, sides + [(v, "outside") for v in outsides]
+
+
+def _shrink_in_language(value, still_fails, bounds):
+    """Intent:
+        A smaller witness that `still_fails`, tried first through each
+        language's own `shrink` candidates (which stay members) and
+        then through the generic deletion shrinker; `still_fails`
+        carries the side condition, so the witness never crosses the
+        language boundary.
+    """
+    from ._shrink import shrink
+    best = value
+    changed = True
+    while changed:
+        changed = False
+        for _, language in _language_pieces(bounds):
+            for candidate in language.shrink(best):
+                if len(str(candidate)) < len(str(best)) and still_fails(candidate):
+                    best, changed = candidate, True
+                    break
+            if changed:
+                break
+    return shrink(best, still_fails)
 
 
 def _is_deterministic_derive(fn, facts, lhs_src: str, rhs_src: str,
                              relation: str, domain: dict | None = None,
                              tolerance: float | None = None):
     """Intent:
-        The structural half of is_deterministic (the STRONG member of
-        the stateless cluster): the function runs the same way every
-        time, nothing external can change state within it and no
-        seed is involved anywhere. A body that lifts to a closed
-        symbolic form is deterministic by construction: the form has
-        no state to vary with. Undecided (None) otherwise: the
-        generic empirical loop (f(...) == f(...), re-evaluated per
-        trial) is the runtime half that catches a body reading time,
-        RNG state, or mutable globals.
-
-    Notes:
-        The maths is deterministic by definition; determinism is the
-        IMPLEMENTATION's claim. Deterministic implies reproducible
-        (the weaker, up-to-a-seed member below). rhs_src/relation/
-        tolerance kept for protocol uniformity.
+        is_deterministic by examination (`_examine.examine`): falsified
+        at the first hidden input (the environment, the clock, a file, a
+        module-level value the call changes, a draw from a shared
+        generator), undecided with the reasons when something cannot be
+        read or a threaded reduction is reached, proven when the result
+        depends on the arguments alone.
     """
-    from .symbolic import ProofResult, lift
-    try:
-        lifted = lift(fn, facts)
-    except Exception:
-        return None
-    if lifted is None:
-        return None
-    return ProofResult(
-        "proven",
-        sketch="the body lifts to a closed symbolic form, which is "
-               "deterministic by construction; there is no state for "
-               "the same inputs to vary with")
+    from ._examine import examine
+    effects = examine(fn)
+    return _examined_verdict(effects.hidden_reads,
+                             [*effects.unknowns, *effects.order_sensitive],
+                             "reads nothing its arguments do not carry",
+                             effects, domain)
+
+
 
 
 def _is_reproducible_derive(fn, facts, lhs_src: str, rhs_src: str,
                             relation: str, domain: dict | None = None,
                             tolerance: float | None = None):
     """Intent:
-        The structural half of is_reproducible (the WEAKER member of
-        the stateless cluster): reproducible UP TO an RNG seed, fix
-        the seed, rerun, get the same output. A deterministic body is
-        a fortiori reproducible, so this accepts determinism's own
-        proof (the lift); everything else falls to the paired
-        seed-restored trials.
+        is_reproducible by examination: as is_deterministic, with every
+        draw allowed only from the generator or seed the function takes
+        (`seed_parameter`), so all its randomness comes through that
+        parameter.
     """
-    proof = _is_deterministic_derive(fn, facts, lhs_src, rhs_src,
-                                     relation, domain=domain,
-                                     tolerance=tolerance)
-    if proof is None:
+    from ._examine import examine
+    generator = _generator_parameter(fn, facts)
+    effects = examine(fn, generator)
+    return _examined_verdict(effects.hidden_reads,
+                             [*effects.unknowns, *effects.order_sensitive],
+                             "draws only from the generator it is passed "
+                             "and reads nothing else its arguments do not "
+                             "carry" if generator else
+                             "reads nothing its arguments do not carry, "
+                             "no random generator included",
+                             effects, domain)
+
+
+#: parameter names read as a seed or a random generator
+_SEED_NAMES = frozenset({"seed", "rng", "random_state", "key"})
+
+
+def _seed_annotation_kind(annotation) -> "str | None":
+    """Intent:
+        Which generator type a parameter annotation names:
+        `"generator"` (numpy's `Generator`), `"random_state"` (numpy's
+        `RandomState`), `"random"` (`random.Random`), or None. A string
+        annotation is read by its last dotted name.
+    """
+    if annotation is None:
         return None
-    from .symbolic import ProofResult
-    return ProofResult(
-        "proven",
-        sketch="deterministic by construction (the body lifts to a "
-               "closed form), and deterministic implies reproducible")
+    text = annotation if isinstance(annotation, str) else (
+        f"{getattr(annotation, '__module__', '')}."
+        f"{getattr(annotation, '__qualname__', repr(annotation))}")
+    last = text.strip("'\" ").rsplit(".", 1)[-1]
+    if last == "Generator" and ("numpy" in text or "np." in text
+                                or text.strip("'\" ") == "Generator"):
+        return "generator"
+    if last == "RandomState":
+        return "random_state"
+    if last == "Random" and ("random" in text.lower()):
+        return "random"
+    return None
 
 
-def _reproducible_probe(fn, facts, cj, domain: dict, rng: random.Random,
-                        trials: int):
-    """Empirical half of is_reproducible: two calls at the same inputs
-    with the recognized RNG state captured and restored between them
-    (the stdlib `random` global state, and numpy's legacy global state
-    when numpy is importable) must return the same value, same seed,
-    same run. Divergence falsifies with the pair as witness; a
-    passed-in generator object is out of this v1's scope. Agreement
-    across trials holds (specific states were tested, not all)."""
-    if not facts.params:
+def _generator_parameter(fn, facts) -> "str | None":
+    """Intent:
+        The parameter that passes in a random generator (a numpy
+        `Generator` or `RandomState`, or a `random.Random`, by annotation,
+        or a parameter named `rng` or `random_state`), or None. Drawing
+        from it moves the caller's own generator, which is not a state
+        change for is_state_safe.
+    """
+    import inspect
+    param = seed_parameter(fn, facts)
+    if param is None:
         return None
-    target = facts.params[0]
+    try:
+        annotation = callable_signature(fn).parameters[param].annotation
+    except (TypeError, ValueError, KeyError):
+        annotation = inspect.Parameter.empty
+    if annotation is not inspect.Parameter.empty \
+            and _seed_annotation_kind(annotation) is not None:
+        return param
+    return param if param in ("rng", "random_state") else None
 
-    def rng_states():
-        states = [("random", random.getstate, random.setstate)]
-        try:
-            import numpy
-            states.append(("numpy", numpy.random.get_state,
-                           numpy.random.set_state))
-        except Exception:
-            pass
-        return states
 
-    def trial(args):
-        call_args = list(args)
-        call_args[facts.params.index(target)] = _synth(
-            facts.param_kinds.get(target, "unknown"), rng,
-            domain.get(target))
-        captured = [(setter, getter()) for _, getter, setter in rng_states()]
-        try:
-            with _pinned_float_env():
-                first = fn(*call_args)
-        except Exception:
-            return None   # a raising point says nothing about seeds
-        for setter, state in captured:
-            setter(state)
-        try:
-            with _pinned_float_env():
-                second = fn(*call_args)
-        except Exception as exc:
-            return (f"same inputs, same restored RNG state: the first "
-                    f"call returned {first!r} but the second raised "
-                    f"{type(exc).__name__}")
-        agree = (first == second
-                 or (isinstance(first, float) and isinstance(second, float)
-                     and (first != first and second != second)))
-        if not agree:
-            return (f"same inputs, same restored RNG state, different "
-                    f"results: {first!r} then {second!r}, the "
-                    f"implementation is not reproducible up to its seed")
-        return True
+def seed_parameter(fn, facts) -> "str | None":
+    """Intent:
+        The parameter that seeds `fn`'s randomness: one named `seed`,
+        `rng`, `random_state` or `key`, or one annotated as a numpy
+        `Generator` or `RandomState` or a `random.Random`; the first
+        such parameter, or None when the function takes none.
+    """
+    import inspect
+    try:
+        signature = callable_signature(fn)
+    except (TypeError, ValueError):
+        signature = None
+    for p in facts.params:
+        if p in _SEED_NAMES:
+            return p
+        if signature is not None and p in signature.parameters:
+            annotation = signature.parameters[p].annotation
+            if annotation is not inspect.Parameter.empty \
+                    and _seed_annotation_kind(annotation) is not None:
+                return p
+    return None
 
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials // 4, 8), trial)
+
 
 
 def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1195,85 +1550,244 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                           tolerance: float | None = None):
     """Intent:
         The structural half of is_empty_safe[xs]: proven when the
-        sequence parameter carries an explicit raising emptiness guard
-        (`if not xs: raise`, `if len(xs) == 0: raise`), the empty
-        boundary is deliberately rejected, which is safe handling.
-        Undecided (None) otherwise: the probe decides empirically
-        whether an empty input crashes by accident.
+        container parameter carries an explicit raising emptiness guard
+        (`if not xs: raise`, `if len(xs) == 0: raise`) and f, called
+        with the empty container, does raise there: the empty boundary
+        is deliberately rejected. Undecided (None) otherwise: the probe
+        decides what f does at the empty input.
 
     Notes:
         rhs_src/relation/tolerance kept for protocol uniformity;
         `lhs_src` is the parameter itself.
     """
-    from .hazards import _emptiness_guard_params
+    from .hazards import _emptiness_guard_line, _emptiness_guard_params
     from .symbolic import ProofResult
     param = lhs_src
-    if facts.param_kinds.get(param) != "sequence":
+    if facts.param_kinds.get(param) not in (*SEQUENCE_KINDS, "table"):
         return None
-    if param in _emptiness_guard_params(facts):
+    if param not in _emptiness_guard_params(facts):
+        return None
+    value, shown = _empty_value(fn, facts, param, None)
+    args = _synth_other_params(fn, facts, param, domain or {}, random.Random(0))
+    try:
+        with _pinned_float_env():
+            _call_with_target(fn, facts, param, args, value)
+    except Exception as exc:
+        line = _emptiness_guard_line(facts, param)
         return ProofResult(
             "proven",
-            sketch=f"the empty {param} is deliberately rejected by an "
-                   f"explicit raising guard; the boundary is handled, "
-                   f"not stumbled into")
+            sketch=f"{shown}: f raised {type(exc).__name__} behind the guard"
+                   + (f" on line {line}" if line else ""),
+            meta={"mathema.witness_executed": True})
+    return None
+
+
+def _uses_as_matrix(facts, target: str) -> bool:
+    """Whether the body reads a parameter as a matrix: a matrix marker,
+    or the parameter handed to a `linalg` function, `trace`, `@`, or
+    `.T`."""
+    import ast
+    if facts.param_kinds.get(target) == "mat":
+        return True
+    tree = getattr(facts, "tree", None)
+    if tree is None:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and any(
+                isinstance(a, ast.Name) and a.id == target for a in node.args):
+            func = node.func
+            dotted = ast.unparse(func)
+            if ".linalg." in f".{dotted}" or dotted.endswith(("trace", "linalg.det")):
+                return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult) and any(
+                isinstance(side, ast.Name) and side.id == target
+                for side in (node.left, node.right)):
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "T" \
+                and isinstance(node.value, ast.Name) and node.value.id == target:
+            return True
+    return False
+
+
+def _empty_value(fn, facts, target: str, cj=None) -> tuple:
+    """Intent:
+        `(value, shown)`: the empty container for `target`, realised
+        through its runtime type, and how the record says what was
+        built: `xs = [] (an empty float Series)`, `A = [] (an empty 0 by
+        0 numpy.ndarray)`, `df = {r: []} (a frame with zero rows)`. An
+        empty matrix has zero rows by the column count a claim's binding
+        fixes, else 0 by 0.
+    """
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a"]
+        shown = f"{target} = {{{', '.join(f'{c}: []' for c in columns)}}} (a frame with zero rows)"
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series([], dtype=pl.Float64)
+                                 for c in columns}), shown
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series([], dtype=float) for c in columns}), shown
+    if _uses_as_matrix(facts, target):
+        import numpy as np
+        from ._floor import fixed_sizes
+        bound = (getattr(cj, "domain", None) or {}).get(target) if cj is not None else None
+        fixed = fixed_sizes(bound)
+        cols = fixed[1] if len(fixed) > 1 and fixed[1] is not None else 0
+        value = np.zeros((0, cols))
+        if adapter not in ("numpy.ndarray", ""):
+            value = value.tolist()
+        runtime = "numpy.ndarray" if adapter in ("numpy.ndarray", "") else "matrix"
+        return value, f"{target} = [] (an empty 0 by {cols} {runtime})"
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array([], dtype=float), f"{target} = [] (an empty numpy.ndarray)"
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series([], dtype=float), f"{target} = [] (an empty float Series)"
+    if adapter == "polars.Series":
+        import polars as pl
+        return (pl.Series([], dtype=pl.Float64),
+                f"{target} = [] (an empty Float64 polars Series)")
+    return [], f"{target} = [] (an empty list)"
+
+
+def _realised(fn, facts, target: str, cells: list, cj=None):
+    """A container of `cells` for `target`, through its runtime type: a
+    float numpy array, a float pandas or polars Series, a frame whose
+    columns (the ones the body reads) hold `cells` each, a plain list for
+    a list parameter; the empty container through `_empty_value`."""
+    if not cells:
+        return _empty_value(fn, facts, target, cj)[0]
+    from .runtime_types import realised_parameters
+    adapter = getattr(realised_parameters(facts).get(target), "adapter", None) or ""
+    kind = facts.param_kinds.get(target)
+    if kind == "table" or adapter in ("pandas.DataFrame", "polars.DataFrame"):
+        from .conjecture import _table_columns
+        columns = _table_columns(target, cj, facts) if cj is not None else ["a", "b"]
+        if adapter == "polars.DataFrame":
+            import polars as pl
+            return pl.DataFrame({c: pl.Series(cells, dtype=pl.Float64) for c in columns})
+        import pandas as pd
+        return pd.DataFrame({c: pd.Series(cells, dtype=float) for c in columns})
+    if _uses_as_matrix(facts, target):
+        import numpy as np
+        side = int(math.isqrt(len(cells))) or 1
+        grid = np.array(cells[: side * side], dtype=float).reshape(side, side)
+        return grid if adapter in ("numpy.ndarray", "") else grid.tolist()
+    if adapter == "numpy.ndarray":
+        import numpy as np
+        return np.array(cells, dtype=float)
+    if adapter == "pandas.Series":
+        import pandas as pd
+        return pd.Series(cells, dtype=float)
+    if adapter == "polars.Series":
+        import polars as pl
+        return pl.Series(cells, dtype=pl.Float64)
+    return list(cells)
+
+
+def _empty_outcome(out, declared: "str | None") -> "str | None":
+    """Why a value returned for the empty input fails, or None: a hole,
+    an undeclared None, an infinity."""
+    from ._missing_words import value_shown
+    from .domain import member_of
+    if out is None:
+        if declared:
+            return None
+        return ("f returned None for the empty input; declare the return type "
+                "Optional[float], raise, or return a value")
+    try:
+        word = member_of(out)
+    except Exception:
+        word = None
+    if word not in (None, "None"):
+        return f"f returned {word} for the empty input; raise, or return a value"
+    try:
+        as_float = float(out)
+    except (TypeError, ValueError):
+        # a container: each slot is read as a returned value is
+        from ._missing_policy import no_value_slots
+        from .probing import holds_inf
+        if no_value_slots(out).count() or holds_inf(out):
+            return (f"f returned {value_shown(out)} for the empty input; raise, or "
+                    f"return a value")
+        return None
+    if math.isinf(as_float):
+        return (f"f returned {value_shown(as_float)} for the empty input; raise, or "
+                f"return a value")
     return None
 
 
 def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
     """Empirical half of is_empty_safe[xs]: call fn with the empty
-    sequence, a single-element sequence, and a longer one (every other
-    parameter freshly sampled). An UNGUARDED raise on the empty input
-    is an accidental boundary crash and falsifies with that witness
-    (min/max/mean of [] raise however sound the maths); a raise
-    behind a recognized emptiness guard is deliberate rejection and
-    passes. A raise or non-finite result on the non-empty sanity
-    inputs falsifies outright."""
+    container, realised through the parameter's runtime type, then a
+    single-element and a longer one (every other parameter freshly
+    sampled). At the empty input a raise behind a recognized emptiness
+    guard passes, an unguarded raise fails, a finite value passes, a
+    hole fails, and a None fails unless the return type declares it. A
+    raise or non-finite result on the non-empty inputs fails outright.
+    The row says what f did at the empty input."""
+    from ._missing_words import declared_optional_return, value_shown
     from .hazards import _emptiness_guard_params
     target = cj.lhs
-    if facts.param_kinds.get(target) != "sequence":
+    if facts.param_kinds.get(target) not in (*SEQUENCE_KINDS, "table"):
         return None
     guarded = target in _emptiness_guard_params(facts)
+    declared = declared_optional_return(fn)
     shapes = ("empty", "single", "longer")
-    state = {"idx": 0}
+    state: dict = {"idx": 0, "said": None}
+    empty, shown = _empty_value(fn, facts, target, cj)
 
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
-        value = ([] if shape == "empty"
+        cells = ([] if shape == "empty"
                  else [rng.uniform(-10, 10)] if shape == "single"
                  else [rng.uniform(-10, 10) for _ in range(5)])
+        value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
+            name = type(exc).__name__
             if shape == "empty":
                 if guarded:
+                    state["said"] = state["said"] or f"{shown}: f raised {name} behind a guard"
                     return True   # deliberate rejection
-                return (f"{target} = [] raised {type(exc).__name__} with no "
-                        f"emptiness guard in the body, the empty boundary "
-                        f"is stumbled into, not handled")
-            return (f"{target} = {value!r} raised {type(exc).__name__}")
+                return (f"{shown}: f raised {name} with no guard for the empty input; "
+                        f"guard it (`if not {target}: raise ValueError(...)`) so the "
+                        f"raise is deliberate, or return a value")
+            return (f"{target} = {cells!r} raised {name}")
+        if shape == "empty":
+            why = _empty_outcome(out, declared)
+            if why is not None:
+                return f"{shown}: {why}"
+            state["said"] = state["said"] or (
+                f"{shown}: f returned None, as its return type {declared} declares"
+                if out is None else f"{shown}: f returned {value_shown(out)}")
+            return True
         try:
             as_float = float(out)
         except (TypeError, ValueError):
             return True
-        if shape != "empty" and (as_float != as_float
-                                 or math.isinf(as_float)):
-            return (f"{target} = {value!r} returned {out!r}")
+        if as_float != as_float or math.isinf(as_float):
+            return (f"{target} = {cells!r} returned {out!r}")
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 9), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the empty-sequence hazard is one input,
-        # and with no other parameter to vary, observing that one call
-        # behave IS the whole hazard class
-        return ("proven", checked, None,
-                "the empty-sequence hazard is a single input; with one "
-                "parameter the call at [] was observed to behave, so the "
-                "examination is exhaustive")
+        # the empty container is one input, and with no other parameter
+        # to vary, calling f with it is the whole case
+        return ("proven", checked, None, state["said"])
+    if verdict == "holds" and state["said"]:
+        return ("holds", checked, None, state["said"])
     return result
 
 
@@ -1284,11 +1798,11 @@ _ACCIDENTAL_CRASHES = (TypeError, IndexError, UnicodeError, RecursionError,
                        AttributeError, KeyError, OverflowError)
 
 
-def _is_arbitrary_input_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                                     relation: str, domain: dict | None = None,
                                     tolerance: float | None = None):
     """Intent:
-        Structural half of is_arbitrary_input_safe: decline. "No
+        Structural half of is_language_defined: decline. "No
         accidental crash on ANY string" is not something the derive
         route can establish symbolically over arbitrary code, so the
         member is empirical, this returns None and the fuzz + shrink
@@ -1299,7 +1813,7 @@ def _is_arbitrary_input_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
 
 def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                            trials: int):
-    """Empirical half of is_arbitrary_input_safe[s]: feed the target
+    """Empirical half of is_language_defined[s]: feed the target
     string parameter every edge case in the corpus (empty, whitespace,
     control chars, combining/zero-width marks, non-ascii, a very long
     string, injection-/format-/path-shaped strings) plus a few random
@@ -1314,9 +1828,12 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from ._sampling import _STRING_SPECIALS, _synth_string
     from ._shrink import shrink
     from .analysis import _guards
+    from .domain import domain_contains
 
     target = cj.lhs
-    if facts.param_kinds.get(target) != "string":
+    bound = domain.get(target)
+    language_bound = getattr(bound, "base_type", None) == "L"
+    if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
     guarded = _guards(facts.tree, facts.params).get(target) in ("raise", "assert")
 
@@ -1330,23 +1847,58 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None       # a deliberate/other exception is not a crash
         return None
 
-    corpus = list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]
+    from .conjecture import _text_set_members
+    members = _text_set_members(bound)
+    sampled = None
+    if language_bound:
+        # the declared language's own hazards and members, then its
+        # near non-members: a crash is reported for the side it happened
+        # on, and the witness shrinks without crossing the boundary
+        names, corpus = _language_corpus(bound, rng)
+    elif members is not None:
+        # a finite set of strings: every member works, and nothing
+        # outside the set is the parameter's
+        names = ""
+        corpus = [(v, None) for v in members]
+        sampled = (f"every member of {target} tried "
+                   f"({len(members)} member{'s' if len(members) != 1 else ''})")
+    else:
+        names = ""
+        corpus = [(v, None) for v in
+                  list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]]
     state = {"i": 0}
 
     def trial(args):
         if state["i"] >= len(corpus):
             return True
-        value = corpus[state["i"]]
+        value, side = corpus[state["i"]]
         state["i"] += 1
         exc = crash_on(args, value)
         if exc is None:
             return True
-        minimal = shrink(value, lambda s: crash_on(args, s) is not None)
-        return (f"{target} = {minimal!r} raised {exc} on arbitrary input, "
-                f"an unguarded crash, not a declared rejection")
+        if side is None and members is not None:
+            return (f"{target} = {value!r}, a member of its set, raised {exc}, "
+                    f"an unguarded crash, not a declared rejection")
+        if side is None:
+            minimal = shrink(value, lambda s: crash_on(args, s) is not None)
+            return (f"{target} = {minimal!r} raised {exc} on arbitrary input, "
+                    f"an unguarded crash, not a declared rejection")
+        inside = side == "inside"
 
-    return _probe_trials(fn, facts, target, domain, rng,
-                         max(trials, len(corpus)), trial)
+        def still_fails(s):
+            return (crash_on(args, s) is not None
+                    and bool(domain_contains(s, bound)) == inside)
+
+        minimal = _shrink_in_language(value, still_fails, bound)
+        return (f"{target} = {_witness_value(minimal)} ({side} {names}) raised {exc} on "
+                f"arbitrary input, an unguarded crash, not a declared "
+                f"rejection")
+
+    verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
+                                         max(trials, len(corpus)), trial)
+    if sampled is not None:
+        return verdict, checked, cx, {"mathema.sampled": sampled}
+    return verdict, checked, cx
 
 
 def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1379,6 +1931,9 @@ def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .symbolic import ProofResult
     param = lhs_src
     if param not in facts.params:
+        return None
+    from .hazards import numeric_or_enum
+    if not numeric_or_enum(fn, facts, param):
         return None
     domain = domain or {}
     bounds = domain.get(param)
@@ -1424,6 +1979,67 @@ def _is_representation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _enum_spelling_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                         trials: int, target: str, enum_cls):
+    """Intent:
+        is_representation_safe on an Enum parameter: at each member,
+        the call with the member against the call with the member's
+        value, the one real cross-type spelling. The value spelling is
+        outside the annotation, so f may refuse it (a raise); a value
+        it returns must agree with the member's and keep the return
+        type f declares. The first member that breaks this is the
+        witness.
+    """
+    import inspect
+    import typing
+    raw = inspect.unwrap(fn)
+    try:
+        declared = typing.get_type_hints(raw).get("return")
+    except Exception:
+        declared = None
+    members = list(enum_cls)
+    if not members:
+        return None
+    state = {"i": 0}
+
+    def agrees(a, b) -> bool:
+        if a == b:
+            return True
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            tol = cj.tolerance if cj.tolerance is not None else 1e-9
+            return abs(float(a) - float(b)) <= tol
+        return False
+
+    def trial(args):
+        member = members[state["i"] % len(members)]
+        state["i"] += 1
+        outcomes = []
+        for label, spelled in (("member", member), ("value", member.value)):
+            try:
+                with _pinned_float_env():
+                    out = _call_with_target(raw, facts, target, args, spelled)
+                outcomes.append((label, "returned", out))
+            except Exception as exc:
+                outcomes.append((label, "raised", type(exc).__name__))
+        (_m, what_m, out_m), (_v, what_v, out_v) = outcomes
+        if what_m == "raised":
+            return (f"{target} = {member} is a member of {enum_cls.__name__} "
+                    f"but the call raised {out_m}")
+        if what_v == "raised":
+            return True
+        if not agrees(out_m, out_v):
+            return (f"{target} = {member} returned {out_m!r} but the value "
+                    f"spelling {member.value!r} returned {out_v!r}")
+        if isinstance(declared, type) and not isinstance(out_v, declared):
+            return (f"{target} = {member.value!r} returned {out_v!r} "
+                    f"({type(out_v).__name__}) where f declares -> "
+                    f"{declared.__name__}")
+        return True
+
+    return _probe_trials(fn, facts, target, domain, rng,
+                         max(trials, len(members)), trial)
+
+
 def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                           trials: int):
     """Empirical half of is_representation_safe[param]: at each
@@ -1433,21 +2049,38 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     admitted spellings must all return math-equal results (an
     admitted spelling raising, or two admitted spellings diverging
     past tolerance, falsifies with the pair as witness), and a
-    policy-excluded spelling must raise (a clean return means the
-    type exclusion is asserted, not enforced). What runs here is what
+    policy-excluded spelling (2.0 for `n: int`, or True) may raise, or
+    return a value that agrees with the admitted spelling's and keeps
+    the return type f declares (a float where f declares `-> int`
+    falsifies). What runs here is what
     mypy cannot ask: whether f(2), f(2.0), and f(True) AGREE."""
     from .grammar import domain_contains
-    from .hazards import _spelling_values
+    from .hazards import _spelling_values, not_a_number
+    from .runtime_types import enum_parameters
     target = cj.lhs
     if target not in facts.params:
         return None
-    if facts.param_kinds.get(target) == "sequence":
+    if facts.param_kinds.get(target) in SEQUENCE_KINDS:
         return None
+    enum_cls = enum_parameters(fn).get(target)
+    if enum_cls is not None:
+        return _enum_spelling_probe(fn, facts, cj, domain, rng, trials, target, enum_cls)
+    reason = not_a_number(facts, target, "is_representation_safe")
+    if reason is not None:
+        return ("unknown", 0, reason)
     bounds = domain.get(target)
     values = _spelling_values(bounds)
     if not values:
         return None
     tol = cj.tolerance if cj.tolerance is not None else 1e-9
+    # the return type f declares, read from its annotation
+    import inspect
+    import typing
+    try:
+        declared = typing.get_type_hints(inspect.unwrap(fn)).get("return")
+    except Exception:
+        declared = inspect.signature(fn).return_annotation
+    declared_int = declared is int or declared == "int"
 
     def admitted(value) -> bool:
         try:
@@ -1473,6 +2106,10 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 outcomes.append((label, spelled, "raised",
                                  type(exc).__name__))
         def agrees(a, b) -> bool:
+            from .probing import values_agree
+            if _is_array_like(a) or _is_array_like(b):
+                # an array or Series result compares element by element
+                return bool(values_agree(a, b, tol, 0.0))
             if a == b:
                 return True
             if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
@@ -1499,21 +2136,18 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
                             f"returned {reference[2]!r} but the {label} "
                             f"spelling returned {out!r}")
             elif what == "returned":
-                if label == "bool":
-                    # bool is Python's own subtype of int: no domain
-                    # vocabulary excludes it by name, so a returning
-                    # bool spelling is judged on AGREEMENT only (a
-                    # raise would also have been acceptable rejection)
-                    if reference is not None and not agrees(out, reference[2]):
-                        return (f"f at {target} = {v} diverges across "
-                                f"machine spellings: the {reference[0]} "
-                                f"spelling returned {reference[2]!r} but "
-                                f"the bool spelling returned {out!r}")
-                    continue
-                return (f"{target} = {spelled!r} (the {label} spelling) is "
-                        f"excluded by the declared domain's representation "
-                        f"policy but returned {out!r}, the type exclusion "
-                        f"is asserted, not enforced")
+                # a spelling the domain excludes may be refused (a raise)
+                # or answered; an answer must agree with the in-domain
+                # spelling's value and keep the return type f declares
+                if reference is not None and not agrees(out, reference[2]):
+                    return (f"f at {target} = {v} diverges across "
+                            f"machine spellings: the {reference[0]} "
+                            f"spelling returned {reference[2]!r} but "
+                            f"the {label} spelling returned {out!r}")
+                if declared_int and (isinstance(out, bool)
+                                     or not isinstance(out, int)):
+                    return (f"{target} = {spelled!r} returned {out!r} "
+                            f"({type(out).__name__}) where f declares -> int")
         return True
 
     rounds = max(len(values), min(trials, len(values) * 4))
@@ -1522,7 +2156,7 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
 def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
                    trials: int):
-    """Empirical half of is_builtin_safe[param]: trials at the domain
+    """Empirical half of is_number_set_safe[param]: trials at the domain
     edges of every restricted builtin the parameter is actually passed
     to (log's zero, asin/acos's unit endpoints, sqrt's negatives,
     factorial's negative and non-integer neighbours), clipped to the
@@ -1531,6 +2165,11 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .hazards import (_SAFE_RANGE, _admitted_spelling,
                           _restricted_domain_targets)
     target = cj.lhs
+    if target in facts.params:
+        from .hazards import not_a_number
+        reason = not_a_number(facts, target, "is_number_set_safe")
+        if reason is not None:
+            return ("unknown", 0, reason)
     names = _restricted_domain_targets(fn, facts).get(target)
     if not names:
         return None
@@ -1553,7 +2192,7 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 candidates.append(spelled)
     return _hazard_value_probe(
         fn, facts, cj, domain, rng, trials, candidates,
-        lambda value, what: (f"{target} = {value:.6g} is admitted by the "
+        lambda value, what: (f"{target} = {_fmt_coordinate(value)} is admitted by the "
                              f"declared domain but lies outside a "
                              f"restricted builtin's own real domain "
                              f"({', '.join(sorted(names))}): the call "
@@ -1567,7 +2206,7 @@ def _builtin_probe(fn, facts, cj, domain: dict, rng: random.Random,
 # this family is the mechanism that lets a claim actually earn the
 # narrower domain. Tests literal NaN-in behavior only: a domain-invalid
 # *non-NaN* input that produces NaN downstream is is_pole_safe/
-# is_builtin_safe territory, a separable code path (verified empirically
+# is_number_set_safe territory, a separable code path (verified empirically
 # against numpy: NaN-in never raises even under seterr(all='raise'),
 # while domain-invalid inputs go through a different, global-state-
 # dependent path). ---------------------------------------------------
@@ -1591,7 +2230,7 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     Notes:
         rhs_src/relation/tolerance are unused, kept for protocol
         uniformity with the other derive-route families. `lhs_src` is
-        param itself, same as is_pole_safe/is_builtin_safe. This reads
+        param itself, same as is_pole_safe/is_number_set_safe. This reads
         only what is actually written in the source: no guard is never
         evidence of acceptance, and a guard is never assumed to cover
         spellings it doesn't test; either gap stays undecided rather
@@ -1612,26 +2251,30 @@ def _is_missing_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                   "enforced by explicit raising guards for both "
                                   "missing spellings (NaN and None)")
     if included and coverage:
-        sketch = (f"the declared domain admits a missing {param} (missing "
-                  "is included by default; no \\ {∅} exclusion is stated) "
-                  "but the body has a raising guard for it")
+        # a raising guard is a policy: the function rejects the missing
+        # values it tests for, on purpose (R20)
+        from .hazards import _missing_guard_line
         spellings = [(label, value) for key, label, value in
                      (("nan", "nan", float("nan")), ("none", "None", None))
                      if key in coverage]
-        executed = 0
+        raised = []
         for label, value in spellings:
-            what, calls = _executed_family_witness(fn, facts, param, value,
-                                                   domain)
-            executed += calls
-            if what is not None:
-                return ProofResult(
-                    "disproven", sketch=sketch,
-                    counterexample=f"{param} = {label} {what}",
-                    meta={"mathema.corroboration": "reproduced",
-                          "mathema.witness_executed": True})
-        return _uncorroborated_family_disproof(
-            sketch, f"no call with a missing {param} raised ({executed} "
-                    f"call(s) made)")
+            what, _calls = _executed_family_witness(fn, facts, param, value,
+                                                    domain)
+            if what is None or not what.startswith("raised "):
+                return None
+            raised.append(what[len("raised "):])
+        line = _missing_guard_line(facts, param)
+        exc = raised[0] if len(set(raised)) == 1 else " or ".join(dict.fromkeys(raised))
+        words = " and ".join(label for label, _v in spellings)
+        return ProofResult(
+            "proven",
+            sketch=(f"{words} {'are' if len(spellings) > 1 else 'is'} "
+                    f"rejected by the guard"
+                    + (f" on line {line}" if line else "")
+                    + f" (raises {exc}); that counts as a policy, "
+                      f"`missing(f, {param}) raises({exc})`"),
+            meta={"mathema.witness_executed": True})
     return None
 
 
@@ -1646,17 +2289,36 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
     two missing spellings only, never a domain-invalid ordinary
     number: missing-in and domain-invalid-producing-NaN are separable
     code paths, and the latter belongs to is_pole_safe/
-    is_builtin_safe. Returns (verdict, n_checked, counterexample) or
+    is_number_set_safe. Returns (verdict, n_checked, counterexample) or
     None to decline."""
     from .domain import missing_included
+    from .types import missing_policy_from_signature
+    from ._missing_words import value_shown
     target = cj.lhs
     if target not in facts.params:
         return None
     if facts.param_kinds.get(target) not in ("scalar", "unknown"):
         return None
     included = missing_included(domain.get(target))
-    spellings = (("nan", float("nan")), ("None", None))
+    # only the missing values the parameter's type admits are tried: a
+    # float is never None
+    policy = missing_policy_from_signature(fn).get(target)
+    spellings = [("nan", float("nan"))] if (policy is None or policy.members) else []
+    if policy is None or policy.absent:
+        spellings.append(("None", None))
+    if not spellings:
+        return None
+    annotation = None
+    try:
+        import inspect
+        ann = inspect.signature(fn).parameters[target].annotation
+        if ann is not inspect.Parameter.empty:
+            from ._annotation_text import annotation_text
+            annotation = annotation_text(ann)
+    except (TypeError, ValueError, KeyError):
+        annotation = None
     state = {"idx": 0}
+    returned: dict = {}
 
     def trial(args):
         label, missing_value = spellings[state["idx"] % len(spellings)]
@@ -1665,29 +2327,83 @@ def _missing_probe(fn, facts, cj, domain: dict, rng: random.Random,
             value = _call_with_target(fn, facts, target, args, missing_value)
         except Exception as exc:
             if included:
-                return (f"{target}={label} raised {type(exc).__name__} but the "
-                        "declared domain admits a missing value (missing is "
-                        "included by default; no \\ {∅} exclusion is stated)")
+                name = type(exc).__name__
+                if label == "None":
+                    why = ("the parameter is unannotated" if annotation is None
+                           else f"{target} is {annotation}")
+                    fix = (f"Annotate {target} as float to exclude None, or state "
+                           f"`absent(f, {target}) raises({name})`."
+                           if annotation is None else
+                           f"Handle None in f, or state `absent(f, {target}) "
+                           f"raises({name})`.")
+                    return (f"f raised {name} at {target} = None, and the claim "
+                            f"admits None for {target} ({why}). {fix}")
+                return (f"f raised {name} at {target} = nan, and {target}'s type "
+                        f"admits nan. State `missing(f, {target}) raises({name})`, "
+                        f"or make f return a value there.")
+            returned.setdefault(label, _Raised(type(exc).__name__))
             return True
         if not included:
-            return (f"{target}={label} returned {value!r} but the declared "
-                    "domain excludes missing; the exclusion is asserted, "
-                    "not enforced")
+            return (f"f returned {value_shown(value)} at {target} = {label}, but "
+                    f"the claim excludes it; guard {target} in f so the exclusion "
+                    f"holds, or remove the exclusion")
+        returned.setdefault(label, value)
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
                            max(trials // 4, 8), trial)
     verdict, checked, cx = result
     if verdict == "holds" and len(facts.params) == 1:
-        # exhaustive coverage: the missing hazard class is exactly two
-        # spellings, and with no other parameter to vary, calling this
-        # function at both IS the whole class, an established fact
+        # exhaustive coverage: the missing values the type admits are one
+        # call each, and with no other parameter to vary, calling the
+        # function at each IS every case
         return ("proven", checked, None,
-                "the missing hazard class is exactly two spellings (NaN "
-                "and None); with a single parameter both were called and "
-                "behaved per the declared policy, so the examination is "
-                "exhaustive")
+                _missing_safe_sketch(fn, facts, target, returned, policy))
     return result
+
+
+class _Raised:
+    """What a call at a missing value raised, for a sketch."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _missing_safe_sketch(fn, facts, target: str, returned: dict, policy) -> str:
+    """What the function did at each missing value its parameter admits,
+    for a proven `is_missing_safe`: `x: None and nan both return 0.0
+    (the guard on line 2 replaces them), so f drops missing and absent
+    input; every case was called`."""
+    from .hazards import _missing_guard_line
+    from ._missing_words import value_shown
+    values = list(returned.values())
+    labels = list(returned)
+    all_values = values and not any(isinstance(v, _Raised) for v in values) and all(
+        v == v and v is not None for v in values
+        if isinstance(v, (int, float)) or v is None)
+    same = len({value_shown(v) for v in values}) == 1
+    if len(labels) > 1 and same and all_values:
+        line = _missing_guard_line(facts, target, raising=False)
+        where = f" (the guard on line {line} replaces them)" if line else ""
+        return (f"{' and '.join(labels)} both return "
+                f"{value_shown(values[0])}{where}, so f drops missing and absent "
+                f"input; every case was called")
+    parts = []
+    for label, value in returned.items():
+        if isinstance(value, _Raised):
+            parts.append(f"{label} is rejected (f raises {value.name}), as the claim's "
+                         f"exclusion says")
+            continue
+        shown = value_shown(value)
+        if shown == label:
+            pair = "missing in, missing out" if label != "None" else "absent in, absent out"
+            parts.append(f"{label} comes back as {shown} ({pair})")
+        else:
+            parts.append(f"{label} returns {shown}")
+    text = ", and ".join(parts)
+    if policy is not None and not policy.absent:
+        text += f", and {target} is a {policy.slot_type}, so it is never None"
+    return text + "; every case was called"
 
 
 class _NamedClaimFamily:
@@ -1708,18 +2424,44 @@ class _NamedClaimFamily:
         return self._routes
 
 
-def _guarded_safety_derive(derive):
+def _guarded_safety_derive(derive, outside_domain: bool = False):
     """Wrap a safety member's derive half in the family verdict
     contract: a disproof must carry a concrete counterexample (a
     safety falsification without a witness is not evidence), and the
     status vocabulary is closed. A violation raises; it is a family
-    implementation bug, never a claim outcome."""
+    implementation bug, never a claim outcome.
+
+    The claim's premises (`assumption`) reach the derive half as a
+    narrower domain (`_premises.narrowed_domain`): each conjunct that
+    bounds one scalar parameter by a number narrows that parameter's
+    interval, so a proof covers the premise region and a disproof's
+    witness lies inside it. When some conjunct cannot be folded in, a
+    proof over the wider domain still covers the premise region, but a
+    disproof's witness may lie outside it, so the disproof becomes
+    undecided and the probe route decides over admitted points. A
+    member whose trials set its own parameter outside the domain
+    (`outside_domain`) keeps that parameter's declared bound."""
     def run(fn, facts, lhs_src, rhs_src, relation, domain=None,
-            tolerance=None):
+            tolerance=None, assumption=None):
+        complete = True
+        if assumption:
+            from ._premises import narrowed_domain
+            keep = frozenset({lhs_src.strip()}) if outside_domain \
+                else frozenset()
+            domain, complete = narrowed_domain(
+                domain or {}, assumption, facts.param_kinds, keep=keep)
         proof = derive(fn, facts, lhs_src, rhs_src, relation,
                        domain=domain, tolerance=tolerance)
         if proof is None:
             return None
+        if proof.status == "disproven" and not complete:
+            from .symbolic import ProofResult
+            return ProofResult(
+                "undecided",
+                sketch=f"{proof.sketch}; the witness "
+                       f"({proof.counterexample}) is not known to satisfy "
+                       f"the claim's premises, so a falsification is left "
+                       f"to execution at admitted points")
         if proof.status not in ("proven", "disproven", "undecided"):
             raise ValueError(f"safety derive returned status "
                              f"{proof.status!r}, not in the closed "
@@ -1732,43 +2474,83 @@ def _guarded_safety_derive(derive):
     return run
 
 
+def split_probe_result(result) -> tuple:
+    """Intent:
+        A family probe's result as `(verdict, checked, cx, established,
+        meta)`. The accepted forms are `(verdict, checked, cx)` and
+        `(verdict, checked, cx, established)`, either one optionally
+        followed by a mapping merged into the record's `meta`; a missing
+        sketch or mapping comes back as `None`.
+    Raises:
+        ValueError: the result has neither three nor four elements
+        before the optional mapping.
+    """
+    from collections.abc import Mapping
+    items = tuple(result)
+    meta = None
+    if len(items) in (4, 5) and isinstance(items[-1], Mapping):
+        meta, items = dict(items[-1]), items[:-1]
+    if len(items) == 3:
+        verdict, checked, cx = items
+        established = None
+    elif len(items) == 4:
+        verdict, checked, cx, established = items
+    else:
+        raise ValueError(f"a family probe returned {len(tuple(result))} "
+                         f"elements; expected (verdict, checked, cx), "
+                         f"optionally with an established sketch, then "
+                         f"optionally a meta mapping")
+    return verdict, checked, cx, established, meta
+
+
 def _guarded_safety_probe(probe):
     """Wrap a safety member's empirical half in the family verdict
-    contract. Trials may falsify (with a witness), hold, or decline;
-    they may claim "proven" ONLY by returning the 4-tuple form
-    (verdict, checked, cx, established) with a non-empty
-    `established` sketch naming why the coverage was EXHAUSTIVE,
-    the hazard class fully enumerated and every case observed. The
-    verdict carries surety, so an established empirical examination
-    proves; anything short of exhaustive coverage holds at best. A
-    contract violation raises, same as the derive guard."""
+    contract. Trials may falsify (with a witness), hold, decline, or
+    report `unknown` (the member examined the function and could not
+    settle it, a roll-up with an unsettled child); they may claim
+    "proven" ONLY by returning the 4-tuple form (verdict, checked, cx,
+    established) with a non-empty `established` sketch naming why the
+    coverage was EXHAUSTIVE, the hazard class fully enumerated and
+    every case observed. The verdict carries surety, so an established
+    empirical examination proves; anything short of exhaustive
+    coverage holds at best. A trailing meta mapping (see `split_probe_result`)
+    passes through untouched. A contract violation raises, same
+    as the derive guard."""
     def run(fn, facts, cj, domain, rng, trials):
         result = probe(fn, facts, cj, domain, rng, trials)
         if result is None:
             return None
-        if len(result) == 4:
-            verdict, checked, cx, established = result
-        else:
-            verdict, checked, cx = result
-            established = None
+        verdict, checked, cx, established, meta = split_probe_result(result)
         if verdict == "proven" and not established:
             raise ValueError("safety trials claimed proven without an "
                              "established-coverage sketch, sampling "
                              "alone never proves; only an exhaustive "
                              "examination (stated as such) does")
-        if verdict not in ("proven", "falsified", "holds", "skipped"):
+        if verdict not in ("proven", "falsified", "holds", "skipped",
+                           "unknown"):
             raise ValueError(f"safety probe returned verdict {verdict!r}, "
                              f"outside the closed vocabulary")
         if verdict == "falsified" and not cx:
             raise ValueError("safety probe falsified without a concrete "
                              "counterexample, a safety falsification "
                              "must carry its witness")
-        return (verdict, checked, cx, established)
+        if meta is None:
+            return (verdict, checked, cx, established)
+        return (verdict, checked, cx, established, meta)
     return run
 
 
+#: the safety families whose trials set their own parameter outside the
+#: domain on purpose (a missing value, the empty sequence, a value past
+#: the domain's edge, a string off the corpus): the premises hold every
+#: other parameter, never the target itself
+_OUTSIDE_DOMAIN_FAMILIES = frozenset({
+    "is_missing_safe", "is_empty_safe", "excluded_outside_domain",
+    "is_language_defined"})
+
+
 class SafetyFamily(_NamedClaimFamily):
-    """One implementation-safety member: a claim family whose evidence
+    """One computation-safety member: a claim family whose evidence
     concerns a hazard class (where the CODE's runtime behaviour can
     diverge from the mathematics) rather than the claim's own
     algebraic text.
@@ -1782,8 +2564,12 @@ class SafetyFamily(_NamedClaimFamily):
 
     def __init__(self, base_name: str, *, derive, probe=None,
                  suggest_targets=None,
-                 probe_route="probe:algorithmic"):
-        family_routes = {"derive": _guarded_safety_derive(derive)}
+                 probe_route="probe:algorithmic",
+                 whole_function: bool = False,
+                 reserved: "str | None" = None,
+                 examined_only: bool = False):
+        family_routes = {"derive": _guarded_safety_derive(
+            derive, outside_domain=base_name in _OUTSIDE_DOMAIN_FAMILIES)}
         if probe is not None:
             family_routes["probe:algorithmic"] = _guarded_safety_probe(probe)
         super().__init__(base_name, family_routes)
@@ -1794,6 +2580,17 @@ class SafetyFamily(_NamedClaimFamily):
         # shrink -> "probe:minimal_example") names it here so the record
         # reflects the real mechanism.
         self.probe_route = probe_route
+        # a member that examines the whole function at once: its `(f)`
+        # spelling is adjudicated as one claim, not expanded into the
+        # conjunction over every numeric parameter
+        self.whole_function = whole_function
+        # a member decided by examining the source alone: its derive half
+        # always answers, and nothing about it runs the function
+        self.examined_only = examined_only
+        # a member defined but not adjudicated in this release: both
+        # halves report `skipped` with this reason, so a claim naming it
+        # is a known claim that is not yet decided, never a misspelling
+        self.reserved = reserved
 
     def suggest_targets(self, fn, facts) -> list:
         """The parameters this member is structurally relevant for,
@@ -1847,7 +2644,8 @@ def _gap_at(gap, point: dict) -> "float | None":
 
 
 def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
-                         premises: list) -> "tuple[dict | None, int]":
+                         premises: list,
+                         working: bool = False) -> "tuple[dict | None, int]":
     """Intent:
         A concrete point where the real `fn` disagrees with a
         definedness claim: it raises where `says_defined(point)` is
@@ -1865,15 +2663,17 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         offset a little each way. A candidate must lie in `domain` and
         satisfy every premise in `premises` (sympy `(gap, relation)`
         pairs). Only scalar parameters are searched, and only a
-        function whose signature binds them. The whole search runs
+        function whose signature binds them. With `working`, a call the
+        function's own guard rejects (`deliberate_raise`) is outside its
+        working domain and no trial. The whole search runs
         under the fast wall-clock cap; a cap that fires ends it.
     """
-    import inspect
     import itertools
 
     import sympy as _sympy
 
     from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
+    from .conjecture import deliberate_raise
     from ._timeout import _with_timeout as _capped
     from .domain import domain_contains
 
@@ -1882,7 +2682,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     if not params or any(k not in _WITNESS_SCALAR_KINDS for k in kinds.values()):
         return None, 0
     try:
-        signature = inspect.signature(fn)
+        signature = callable_signature(fn)
         signature.bind(**{p: 0 for p in params})
     except (TypeError, ValueError):
         return None, 0
@@ -1928,7 +2728,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                 return False
         return True
 
+    from .probing import _bound_is_complex
+    # over real arguments a complex result is no value
+    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
     executed = 0
+    caught: dict = {}
 
     def search():
         nonlocal executed
@@ -1951,11 +2755,19 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     for p, v in point.items()}
             executed += 1
             try:
-                fn(**call)
-            except Exception:
+                out = fn(**call)
+            except Exception as exc:
+                if working and deliberate_raise(exc, fn):
+                    # the function's own guard: outside its working
+                    # domain, no trial
+                    continue
                 returned = False
+                from .authoring import RangeError
+                caught["range"] = isinstance(exc, RangeError)
             else:
-                returned = True
+                caught["range"] = False
+                returned = _has_value(out, None) and not (
+                    real_only and isinstance(out, complex) and out.imag != 0)
             if returned != claimed:
                 return call
         return None
@@ -1964,26 +2776,132 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         found = _capped(search, _FAST)
     except TimeoutError:
         found = None
+    if found is not None and caught.get("range"):
+        found = _RangeCaught(found)
     return found, executed
 
 
+class _RangeCaught(dict):
+    """A definedness witness whose call raised enforce_range's
+    RangeError: its counterexample says the range violation was
+    caught."""
+
+
+def _witness_text(point: dict, facts) -> str:
+    """A definedness witness as its counterexample text."""
+    from .gates import _fmt_point
+    text = _fmt_point(point, list(facts.params))
+    if isinstance(point, _RangeCaught):
+        text = f"{text}: f raised RangeError, range violation caught"
+    return text
+
+
+def _working_bounds(fn, domain: "dict | None") -> dict:
+    """Intent:
+        The claim's domain with each parameter `@enforce_domain` guards
+        cut to the guard's interval, where both are plain intervals:
+        the working domain the bare `is_defined` reads.
+    """
+    from .domain import Interval
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    out = dict(domain or {})
+    for p, guard in enforced.items():
+        here = out.get(p)
+        if here is None:
+            out[p] = guard
+            continue
+        if isinstance(here, tuple) and isinstance(guard, tuple) \
+                and len(here) == 2 and len(guard) == 2:
+            lo = max(here[0], guard[0])
+            hi = min(here[1], guard[1])
+            if lo <= hi:
+                out[p] = Interval(lo, hi,
+                                  getattr(here if here[0] >= guard[0]
+                                          else guard, "closed_lo", True),
+                                  getattr(here if here[1] <= guard[1]
+                                          else guard, "closed_hi", True))
+    return out
+
+
+def _every_link_holds(rels: list, domain: dict) -> bool:
+    """Whether every relation holds at every point of the domain box."""
+    from .symbolic._proof_support import _relational_truth_over_domain
+    if not domain:
+        return False
+    for rel in rels:
+        params = {str(sym): sym for sym in rel.free_symbols}
+        if not params or not all(name in domain for name in params):
+            return False
+        try:
+            if _relational_truth_over_domain(rel, domain, params) is not True:
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _certified_undefined_point(computed_rels: list, facts,
+                               domain) -> "tuple[str, str] | None":
+    """Intent:
+        `(witness text, certificate)` when some condition f needs in
+        order to return provably fails somewhere in the domain, by
+        certified interval arithmetic (`symbolic._prove._certified_guard`)
+        around a solution of its boundary; None otherwise. Only a
+        condition over one parameter is tried.
+    """
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic._prove import _certified_guard
+    fails = {"!=": _sympy.Eq, ">": _sympy.Le, ">=": _sympy.Lt,
+             "<": _sympy.Ge, "<=": _sympy.Gt}
+    for rel, gap in computed_rels:
+        build = fails.get(rel)
+        free = list(gap.free_symbols)
+        if build is None or len(free) != 1:
+            continue
+        sym = free[0]
+        name = str(sym)
+        bound = (domain or {}).get(name)
+        try:
+            lo, hi = float(bound[0]), float(bound[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        try:
+            roots = _with_timeout(
+                lambda: _sympy.solveset(_sympy.Eq(gap, 0), sym,
+                                        _sympy.Interval(lo, hi)),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            continue
+        except Exception:
+            continue
+        if not isinstance(roots, _sympy.FiniteSet):
+            continue
+        for root in roots:
+            text = _certified_guard(build(gap, 0), {sym: root}, {name: sym},
+                                    domain)
+            if text is not None:
+                return f"{name} = {root}", text
+    return None
+
+
 def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
-                        premises):
+                        premises, working: bool = False):
     """Intent:
         The is_defined disproof as it may be reported: `disproven` with
         the executed witness as its counterexample when one reproduces,
         otherwise `undecided` carrying the corroboration flags (and the
         unexecutable flag when no candidate could be called at all).
     """
-    from .gates import _fmt_point
     from .symbolic import ProofResult
 
     point, executed = _definedness_witness(fn, facts, gaps, says_defined,
-                                           domain, premises)
+                                           domain, premises, working)
     if point is not None:
         return ProofResult(
             "disproven", sketch=sketch,
-            counterexample=_fmt_point(point, list(facts.params)),
+            counterexample=_witness_text(point, facts),
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     meta = {"mathema.corroboration": "uncorroborated"}
@@ -1995,8 +2913,8 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
                f"checked in the domain)")
     return ProofResult(
         "undecided",
-        sketch=f"{sketch}; uncorroborated disproof: {why}, and a "
-               f"falsification needs an executed witness",
+        sketch=f"{sketch}; derive found a disproof but {why}, and a "
+               f"falsification needs a run of the code that shows it",
         meta=meta)
 
 
@@ -2016,23 +2934,46 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         validates it.
 
     Notes:
-        Always returns a ProofResult, never None: an is_defined claim
-        must not fall through to the ordinary relation prover, whose
-        reading (is the relation TRUE?) is a different question from
-        region equivalence. A structural disproof no executed point
-        reproduces comes back undecided with the corroboration flags
-        (`_witnessed_disproof`).
+        Returns a ProofResult whenever the function has Python source:
+        an is_defined claim must not fall through to the ordinary
+        relation prover, whose reading (is the relation TRUE?) is a
+        different question from region equivalence. A structural
+        disproof no executed point reproduces comes back undecided with
+        the corroboration flags (`_witnessed_disproof`). With no source
+        (`facts.tree is None`) there is no body to compute a region
+        from, and it declines (None); the probe half
+        (`_is_defined_probe`) adjudicates by execution.
     """
+    if facts.tree is None:
+        return None
+    if _may_return_undeclared_none(fn, facts):
+        # a None under a return type that does not admit it is no value;
+        # the region the body's raises carve says nothing about it, so
+        # the calls decide
+        return None
     import ast as _ast
 
     import sympy as _sympy
 
-    from .conjecture import _definedness_region
     from .grammar import normalize as _normalize
     from .symbolic import ProofResult
     from .symbolic._base import NotSymbolic, _expr_to_sympy
 
-    computed = _definedness_region(fn, facts)
+    region_gaps: list = []
+    from .conjecture import _definedness_region_structured, guard_cut_texts
+    from .symbolic._base import REL_TEXT as rel_of
+    # the bare predicate reads the working domain: the function's own
+    # guards cut it, and only a failure inside it counts (decision A)
+    bare = relation == "is_defined"
+    structured = _definedness_region_structured(fn, facts, region_gaps,
+                                                working=bare, domain=domain)
+    cuts = guard_cut_texts(fn, facts) if bare else []
+    cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
+                f"cuts the working domain)" if cuts else "")
+    if bare:
+        domain = _working_bounds(fn, domain)
+    computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
+                for rel in structured]
 
     def to_expr(src: str):
         env = {p: _sympy.Symbol(p, real=True) for p in facts.params}
@@ -2045,10 +2986,8 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     # the SAME structural region the suggestion and expansion read;
     # one source, so the family can never disagree with them
-    from .conjecture import _definedness_region_structured
-    from .symbolic._base import REL_TEXT as rel_of
     computed_rels = [(rel_of[type(rel)], rel.lhs - rel.rhs)
-                     for rel in _definedness_region_structured(fn, facts)]
+                     for rel in structured]
     computed_gaps = [gap for _rel, gap in computed_rels]
 
     # the premises a witness must satisfy, as (gap, relation) pairs; a
@@ -2063,7 +3002,25 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     def disproof(sketch: str, gaps: list, says_defined):
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
-                                   domain, premises)
+                                   domain, premises, working=bare)
+
+    def incomplete(sketch: str, gaps: list, says_defined):
+        # the computed region is not the whole definedness region: only
+        # an executed disagreement decides
+        point, _executed = _definedness_witness(fn, facts, gaps,
+                                                says_defined, domain,
+                                                premises, working=bare)
+        if point is not None:
+            return ProofResult(
+                "disproven", sketch=sketch,
+                counterexample=_witness_text(point, facts),
+                meta={"mathema.corroboration": "reproduced",
+                      "mathema.witness_executed": True})
+        return ProofResult(
+            "undecided",
+            sketch=f"is_defined: the definedness region of the current "
+                   f"body is not known in full ({region_gaps[0]}), so "
+                   f"the claim is left to execution")
 
     if relation == "is_defined":
         # the BARE predicate (`is_defined(f)` / `f is defined`) states
@@ -2072,17 +3029,42 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         # region at all; falsified when it has one and a point in the
         # domain executes and raises. A stated region falls through
         # to the restriction reading below.
+        if region_gaps:
+            return incomplete(
+                "is_defined: f is not defined everywhere, an executed "
+                "call has no value"
+                + (", and it returns at most on " + " and ".join(computed)
+                   if computed else ""),
+                computed_gaps, lambda point: True)
         if not computed:
             return ProofResult(
                 "proven",
-                sketch="is_defined: the body has no raise region, so "
-                       "every call returns and f is defined on the whole "
-                       "domain")
-        return disproof(
-            "is_defined: f is not defined everywhere, it returns "
-            "only on " + " and ".join(computed)
-            + "; state that region to claim the restriction",
-            computed_gaps, lambda point: True)
+                sketch=("is_defined: every call inside the working domain "
+                        "returns, so f is defined on it" + cut_text)
+                if cuts else
+                "is_defined: the body has no raise region, so "
+                "every call returns and f is defined on the whole "
+                "domain")
+        if _every_link_holds(structured, domain):
+            return ProofResult(
+                "proven",
+                sketch=f"is_defined: f returns wherever "
+                       f"{' and '.join(computed)}, which holds over the "
+                       f"whole domain, so f is defined on it{cut_text}")
+        sketch = ("is_defined: f is not defined everywhere, it returns "
+                  "only on " + " and ".join(computed)
+                  + "; state that region to claim the restriction")
+        result = disproof(sketch, computed_gaps, lambda point: True)
+        if result.status == "undecided":
+            certified = _certified_undefined_point(computed_rels, facts,
+                                                   domain)
+            if certified is not None:
+                where, text = certified
+                return ProofResult(
+                    "disproven", sketch=f"{sketch}; {text}",
+                    counterexample=where,
+                    meta={"mathema.witness_certified": text})
+        return result
 
     stated_l, stated_r = to_expr(lhs_src), to_expr(rhs_src or "0")
     if stated_l is None or stated_r is None:
@@ -2096,6 +3078,11 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         return None if value is None else _gap_satisfies(relation, value)
 
     witness_gaps = computed_gaps + [stated_gap]
+    if region_gaps:
+        return incomplete(
+            "is_defined: the stated region disagrees with the current "
+            "body at an executed point",
+            witness_gaps, stated_says_defined)
     if not computed:
         return disproof(
             "is_defined: the current body has no raise regions at "
@@ -2146,12 +3133,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             if matches(comp_rel, comp_gap):
                 part = ("" if len(computed_rels) == 1
                         else f" (conjunct {k + 1} of {len(computed_rels)})")
+                # which conjunct of how many matched: an unindexed row
+                # (which names the whole region) is proven by it only
+                # when there is one, and a chained row's links must
+                # cover them all
                 return ProofResult(
                     "proven",
                     sketch=f"is_defined: the stated region matches the "
                            f"computed definedness region of the current "
                            f"body{part}, full region: {region_text}",
-                    meta={"mathema.derive_route": "definedness_equivalence"})
+                    meta={"mathema.derive_route": "definedness_equivalence",
+                          "mathema.definedness_conjunct":
+                              [k + 1, len(computed_rels)]})
         except TimeoutError:
             raise
     # provable drift: same relation as some conjunct, constant offset
@@ -2180,16 +3173,685 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                                             stated_says_defined, domain,
                                             premises)
     if point is not None:
-        from .gates import _fmt_point
         return ProofResult(
             "disproven",
             sketch=f"is_defined: the stated region disagrees with the "
                    f"current body at an executed point, fresh region: "
                    f"{region_text}",
-            counterexample=_fmt_point(point, list(facts.params)),
+            counterexample=_witness_text(point, facts),
             meta={"mathema.corroboration": "reproduced",
                   "mathema.witness_executed": True})
     return ProofResult("undecided", sketch=undecided_sketch)
+
+
+def _may_return_undeclared_none(fn, facts) -> bool:
+    """Whether f's body can hand back None (a `return None`, a bare
+    `return`, or a way to the end of the body with no return) while its
+    return type does not declare it."""
+    import ast as _ast
+
+    from ._missing_words import declared_optional_return
+    if declared_optional_return(fn):
+        return False
+    fdef = next((n for n in _ast.walk(facts.tree)
+                 if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))), None)
+    if fdef is None:
+        return False
+
+    def gives_none(value) -> bool:
+        return value is None or (isinstance(value, _ast.Constant) and value.value is None)
+    for node in _ast.walk(fdef):
+        if isinstance(node, _ast.Return) and gives_none(node.value):
+            return True
+        if isinstance(node, _ast.IfExp) and (gives_none(node.body) or gives_none(node.orelse)):
+            return True
+
+    def always_leaves(block) -> bool:
+        # every way through `block` ends at a return or a raise
+        if not block:
+            return False
+        last = block[-1]
+        if isinstance(last, (_ast.Return, _ast.Raise)):
+            return True
+        if isinstance(last, _ast.If):
+            return always_leaves(last.body) and always_leaves(last.orelse)
+        if isinstance(last, (_ast.With, _ast.AsyncWith)):
+            return always_leaves(last.body)
+        if isinstance(last, _ast.Try):
+            return (always_leaves(last.body) or always_leaves(last.orelse)) \
+                and all(always_leaves(h.body) for h in last.handlers)
+        if isinstance(last, _ast.While) and isinstance(last.test, _ast.Constant) \
+                and last.test.value is True:
+            return True
+        return False
+    body = [st for st in fdef.body if not (isinstance(st, _ast.Expr)
+                                           and isinstance(st.value, _ast.Constant)
+                                           and isinstance(st.value.value, str))]
+    return not always_leaves(body)
+
+
+def _has_value(out, exc) -> bool:
+    """Whether an executed call had a value: it returned, and the
+    result is finite. A raise, a nan and an infinity are no value."""
+    return exc is None and not _is_nonfinite(out)
+
+
+def _no_overflow(out, exc) -> bool:
+    """Whether an executed call stayed inside float range: it neither
+    raised an OverflowError (or a FloatingPointError reporting an
+    overflow) nor returned an infinity. A nan, a finite value and any
+    other raise are not an overflow."""
+    from .probing import holds_inf
+    if exc is not None:
+        return not (isinstance(exc, OverflowError)
+                    or (isinstance(exc, FloatingPointError)
+                        and "overflow" in str(exc).lower()))
+    return not holds_inf(out)
+
+
+#: the two region families (`conjecture.REGION_ROW_STRATA`): what an
+#: executed call must do inside the stated region
+_REGION_SAFE = {"is_defined": _has_value, "is_overflow_safe": _no_overflow}
+
+#: the words the record uses for each outcome of a region family
+_REGION_WORDS: dict = {
+    "is_defined": {
+        "bare": "so it is not defined on the whole domain",
+        "outside": "a value outside the stated region",
+        "sampled_bare": "{checked} executed points in the domain, each "
+                        "returning a finite value",
+        "sampled_conjunct": "{n_out} executed points outside the stated "
+                            "conjunct returned no value and {n_in} were "
+                            "sampled inside it, where the region's other "
+                            "conjuncts decide",
+        "sampled": "{n_in} executed points inside the stated region "
+                   "returned a finite value and {n_out} outside it "
+                   "returned no value",
+    },
+    "is_overflow_safe": {
+        "bare": "so it is not overflow-safe on the whole domain",
+        "outside": "no overflow outside the stated region",
+        "sampled_bare": "{checked} executed points in the domain, none "
+                        "overflowing",
+        "sampled_conjunct": "{n_out} executed points outside the stated "
+                            "conjunct overflowed and {n_in} were sampled "
+                            "inside it, where the region's other conjuncts "
+                            "decide",
+        "sampled": "{n_in} executed points inside the stated region "
+                   "returned without overflow and {n_out} outside it "
+                   "overflowed",
+    },
+}
+
+
+def _region_interval(region, symbol):
+    """Intent:
+        The real interval a one-parameter region describes, as
+        `(lo, hi, closed_lo, closed_hi)` with infinite ends where the
+        region is unbounded, or None when the region is not one
+        interval in that symbol (another variable, a union, an
+        unsolvable relation). Each conjunct is solved on its own under
+        the fast wall-clock cap and the results intersected.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    parts = list(region.args) if isinstance(region, sympy.And) else [region]
+    hull = sympy.S.Reals
+    for part in parts:
+        if not isinstance(part, sympy.core.relational.Relational):
+            return None
+        if part.free_symbols != {symbol}:
+            return None
+        try:
+            solved = _with_timeout(
+                lambda: sympy.solveset(part, symbol, sympy.S.Reals),
+                FAST_TIMEOUT_SECONDS)
+        except Exception:
+            return None
+        hull = hull.intersect(solved)
+    if not isinstance(hull, sympy.Interval):
+        return None
+    try:
+        return (float(hull.inf), float(hull.sup),
+                not hull.left_open, not hull.right_open)
+    except (TypeError, ValueError):
+        return None
+
+
+def _squashed_link(link) -> tuple:
+    """A `(lhs, relation, rhs)` link with the whitespace removed from
+    each side, so two spellings of one link compare equal."""
+    return tuple("".join(str(part or "").split()) for part in link)
+
+
+def _overflow_safe_rows(fn, cj) -> "tuple[list, list, str]":
+    """Intent:
+        The recorded `is_overflow_safe` region of the function a claim
+        is about, as `(links, texts, owner)`: its `(lhs, relation, rhs)`
+        links, the texts the record quotes, and the name the note
+        gives the function. Read from a library key's compendium rows
+        and from the project's own `is_overflow_safe` claims adjudicated
+        beside this one (`Conjecture.overflow_safe`); empty lists when
+        neither records one.
+    """
+    from .compendium import computation_region, library_key_of
+    from .conjecture import claim
+    key = library_key_of(fn)
+    links: list = []
+    texts: list = []
+    if key is not None:
+        for row in computation_region(key, "is_overflow_safe"):
+            for text in row["texts"]:
+                try:
+                    parsed = claim(text, name="is_overflow_safe")
+                except Exception:
+                    continue
+                links.extend(parsed.links
+                             or [(parsed.lhs, parsed.relation, parsed.rhs)])
+                texts.append(text)
+    # a link the compendium row and a sibling claim both state (the
+    # row adjudicated beside this claim) is kept once
+    seen = {_squashed_link(link) for link in links}
+    for link in getattr(cj, "overflow_safe", ()) or ():
+        if _squashed_link(link) in seen:
+            continue
+        seen.add(_squashed_link(link))
+        links.append(link)
+        lhs, rel, rhs = link
+        texts.append(f"{lhs} {rel} {rhs}")
+    owner = key if key is not None else str(getattr(fn, "__name__", "f"))
+    return links, texts, owner
+
+
+def _is_defined_reach(fn, cj, params: list, domain: dict, shapes: dict,
+                      links: list, texts: list, owner: str):
+    """Intent:
+        How far an `is_defined` probe runs each scalar parameter, for any
+        function: inside its recorded `is_overflow_safe` region (`links`,
+        see `_overflow_safe_rows`) when one is recorded, since where the
+        computation overflows is that claim's fact and not this one's;
+        else to the claim's pseudo-infinity, else to the number
+        representation's maximum; each intersected with the parameter's
+        own declared bound. Returns `(reach, note)`: the per-parameter
+        `(lo, hi)` the corners are taken from and outside which a draw
+        is not a trial, and the text the record carries.
+    """
+    import math as _math
+
+    import sympy
+
+    from ._sampling import representation_reach
+    from .compendium import _relation
+    from .records import operational_range
+    pinf = operational_range(cj)
+    reach_max = representation_reach()
+    default_lo, default_hi = (pinf if pinf is not None
+                              else (-reach_max, reach_max))
+    env = {p: sympy.Symbol(p, real=True) for p in params}
+    regions: dict = {}
+    for lhs, rel, rhs in links:
+        try:
+            region = _relation(lhs, rel, rhs, env)
+        except Exception:
+            continue
+        for p in params:
+            found = _region_interval(region, env[p])
+            if found is None:
+                continue
+            lo, hi, c_lo, c_hi = regions.get(
+                p, (-_math.inf, _math.inf, True, True))
+            if found[0] > lo or (found[0] == lo and not found[2]):
+                lo, c_lo = found[0], found[2]
+            if found[1] < hi or (found[1] == hi and not found[3]):
+                hi, c_hi = found[1], found[3]
+            regions[p] = (lo, hi, c_lo, c_hi)
+    reach: dict = {}
+    for p in params:
+        if shapes.get(p) is not None:
+            continue
+        ends = _interval_ends((domain or {}).get(p))
+        lo, hi = ends if ends is not None else (-_math.inf, _math.inf)
+        r_lo, r_hi, closed_lo, closed_hi = regions.get(
+            p, (-_math.inf, _math.inf, True, True))
+        lo, hi = max(lo, r_lo), min(hi, r_hi)
+        if not closed_lo and lo == r_lo:
+            lo = _math.nextafter(lo, _math.inf)
+        if not closed_hi and hi == r_hi:
+            hi = _math.nextafter(hi, -_math.inf)
+        if _math.isinf(lo):
+            lo = default_lo
+        if _math.isinf(hi):
+            hi = default_hi
+        if lo <= hi:
+            reach[p] = (lo, hi)
+    if texts:
+        note = (f"sampled inside the overflow-safe region of {owner} "
+                f"({' and '.join(texts)})")
+    elif pinf is not None:
+        from .records import operational_infinity
+        note = f"unbounded directions run to {operational_infinity(cj).render()}"
+    else:
+        note = (f"unbounded directions run to magnitude "
+                f"{representation_reach():g}")
+    return reach, note
+
+
+def _compiled_links(links: list, params: list) -> list:
+    """Intent:
+        `(lhs, relation, rhs)` links compiled for evaluation at a point
+        over `params`; [] when a link is not a comparison or reads a
+        name outside `params`.
+    """
+    from .conjecture import _validate
+    out: list = []
+    for lhs, rel, rhs in links:
+        if rel not in _COMPARISONS or not rhs:
+            return []
+        try:
+            out.append((_validate(lhs, set(params), frozenset())[0], rel,
+                        _validate(rhs, set(params), frozenset())[0]))
+        except Exception:
+            return []
+    return out
+
+
+def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                  trials: int, kind: str):
+    """Intent:
+        The empirical half shared by the two region families
+        (`_REGION_SAFE`): `is_defined`, where a call inside the region
+        must have a value (a finite return) and a call outside must
+        not, and `is_overflow_safe`, where a call inside must not
+        overflow and a call outside must. The bare claim (`is_defined(f)`,
+        `is_overflow_safe(x)`) asks the inside condition at every
+        sampled point of the domain. A stated region asks it at every
+        sampled point inside and the outside condition at every
+        sampled point outside. An indexed row (`is_defined[2]`) states
+        one conjunct of the region, so it asks only the outside
+        condition: inside, the other conjuncts decide. The first point
+        that disagrees is the executed witness.
+
+    Notes:
+        Points come from the domain's corners, then points around the
+        region's boundary (each link solved for one parameter under the
+        fast wall-clock cap, the root offset a little each way), then
+        seeded draws from the domain. The bare `is_overflow_safe` also
+        tries the representation extremes the domain admits (the float
+        corner, the exp threshold, the denormal band, or the claim's
+        pseudo-infinity), since overflow lives there. An `is_defined`
+        probe takes its corners from `_is_defined_reach` and treats a
+        draw outside that reach, or outside the function's recorded
+        `is_overflow_safe` region, as no trial. A point with
+        a missing argument, or outside the domain, is not a trial.
+        Returns the `(verdict, checked, counterexample, established,
+        meta)` shape, with the counts inside and outside the region in
+        `meta`, or None when a link is not a comparison.
+    """
+    import math as _math
+
+    from .conjecture import _SAFE_FUNCS, MATH_CONSTANTS, _validate, call_defaults
+    from .domain import domain_contains, is_missing
+    from .gates import _fmt_point
+    from .probing import _fmt_value
+    words = _REGION_WORDS[kind]
+    safe = _REGION_SAFE[kind]
+    from ._missing_words import declared_optional_return
+    declared_none = bool(declared_optional_return(fn))
+
+    # a library function's defaulted parameters the claim leaves alone
+    # are not passed (they take their defaults); a pinned one is
+    # passed at its pin
+    kept, call_pins, _problem = call_defaults(fn, cj)
+    params = [p for p in facts.params if p not in kept]
+    if not params:
+        return None
+    bare = cj.relation == kind
+    # an indexed row names one conjunct by number (`is_defined[2]`,
+    # pinned `is_defined[2]@axis=1`); a row pinned to a call's
+    # arguments (`is_defined@axis=1`) states the whole region
+    import re as _re
+    conjunct = not bare and bool(_re.search(
+        r"\[\d+\]$", str(cj.name).split("@", 1)[0]))
+    links = [] if bare else (list(cj.links)
+                             or [(cj.lhs, cj.relation, cj.rhs)])
+    compiled = []
+    for lhs, rel, rhs in links:
+        if rel not in _COMPARISONS or not rhs:
+            return None
+        try:
+            code_l, _aux = _validate(lhs, set(params), frozenset())
+            code_r, _aux = _validate(rhs, set(params), frozenset())
+        except Exception:
+            return None
+        compiled.append((code_l, rel, code_r))
+    # the claim's own premise: a point outside it is not a trial. The
+    # running claim's premise guard decides when there is one; a claim
+    # adjudicated without one (a pinned definedness premise) reads its
+    # comparisons here
+    from . import _premises
+    from .conjecture import _parse_assuming_links, _split_top_and
+    guard = _premises.current()
+    premise = "" if guard is not None else (cj.assuming or "").strip()
+    if premise.startswith("assuming"):
+        premise = premise[len("assuming"):].strip()
+    assumed = []
+    for part in (_split_top_and(premise) if premise else ()):
+        premise_links = _parse_assuming_links(part)
+        if premise_links is None:
+            return None
+        for rel_parts in premise_links:
+            if rel_parts.relation not in _COMPARISONS:
+                return None
+            try:
+                assumed.append((
+                    _validate(rel_parts.lhs, set(params), frozenset())[0],
+                    rel_parts.relation,
+                    _validate(rel_parts.rhs, set(params), frozenset())[0]))
+            except Exception:
+                return None
+    compare = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+               "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+               ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
+
+    def satisfies(relations: list, point: dict) -> "bool | None":
+        env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **point}
+        try:
+            return all(bool(compare[rel](eval(cl, {"__builtins__": {}}, env),
+                                         eval(cr, {"__builtins__": {}}, env)))
+                       for cl, rel, cr in relations)
+        except Exception:
+            return None
+
+    def inside(point: dict) -> "bool | None":
+        return satisfies(compiled, point)
+
+    shapes = _region_shapes(links, params, domain)
+    reach, reach_note = ({}, None)
+    overflow_safe: list = []
+    overflow_texts: list = []
+    if kind == "is_defined":
+        links_o, overflow_texts, owner = _overflow_safe_rows(fn, cj)
+        reach, reach_note = _is_defined_reach(fn, cj, params, domain,
+                                              shapes, links_o,
+                                              overflow_texts, owner)
+        overflow_safe = _compiled_links(links_o, params)
+
+    def admitted(point: dict) -> bool:
+        if overflow_safe and satisfies(overflow_safe, point) is False:
+            return False
+        for p, v in point.items():
+            if is_missing(v):
+                return False
+            if kind == "is_overflow_safe" and isinstance(v, float) \
+                    and _math.isinf(v):
+                # overflow is an infinity from finite inputs; an
+                # infinite input is not a trial
+                return False
+            bound = (domain or {}).get(p)
+            span = reach.get(p)
+            if span is not None and isinstance(v, (int, float)) \
+                    and not span[0] <= v <= span[1]:
+                return False
+            if bound is None:
+                continue
+            dims = getattr(bound, "dims", None)
+            if dims:
+                # a space binding (`R^n`, `R^(n,n)`): a non-empty array
+                # with that many axes
+                if not _has_axes(v, len(dims)):
+                    return False
+                continue
+            try:
+                if not domain_contains(v, bound):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+    def draw_one(p: str):
+        from .matrices import _rand
+        if p in call_pins:
+            return call_pins[p]
+        if shapes.get(p) == "matrix":
+            return _rand(rng.randint(2, 5), rng)
+        if shapes.get(p) == "sequence":
+            return [rng.uniform(-10.0, 10.0)
+                    for _ in range(rng.randint(1, 6))]
+        return _synth(facts.param_kinds.get(p, "unknown"), rng,
+                      (domain or {}).get(p))
+
+    def draw() -> dict:
+        point = {p: draw_one(p) for p in params}
+        placed = _placed(point, rng, keep=tuple(call_pins))
+        return point if placed is None else placed
+
+    def shape_boundaries():
+        # the edge of a shape region: a singular matrix sits on
+        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`
+        from .matrices import _synth_singular
+        for p, shape in sorted(shapes.items()):
+            for _ in range(3):
+                yield {**draw(), p: (_synth_singular(rng.randint(2, 5), rng)
+                                     if shape == "matrix" else [])}
+
+    def corners():
+        from .probing import _bound_is_complex
+        from .representations import PY_COMPLEX128
+        for p in params:
+            if p in call_pins:
+                continue
+            if _bound_is_complex((domain or {}).get(p)):
+                # the plane's far points on both axes, at the reach
+                span = reach.get(p)
+                r = (max(abs(span[0]), abs(span[1])) if span is not None
+                     else float(PY_COMPLEX128.max_magnitude or 0.0))
+                for v in (complex(-r, 0.0), complex(r, 0.0),
+                          complex(0.0, -r), complex(0.0, r)):
+                    yield {**draw(), p: v}
+                continue
+            ends = reach.get(p) or _interval_ends((domain or {}).get(p))
+            if ends is None:
+                continue
+            lo, hi = ends
+            for v in (lo, hi, (lo + hi) / 2):
+                yield {**draw(), p: v}
+
+    def extremes():
+        # the bare overflow claim: the representation extremes each
+        # scalar parameter's bound admits, where overflow lives
+        from .hazards import _extreme_candidates
+        from .records import operational_range
+        pinf = operational_range(cj)
+        for p in params:
+            if p in call_pins or shapes.get(p) is not None \
+                    or facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "string"):
+                continue
+            for v in _extreme_candidates((domain or {}).get(p),
+                                         pseudo_infinity=pinf):
+                yield {**draw(), p: v}
+
+    def near_boundaries():
+        import sympy as _sympy
+
+        from ._timeout import FAST_TIMEOUT_SECONDS as _FAST
+        from ._timeout import _with_timeout as _capped
+        from .grammar import _node_to_sympy
+        import ast as _ast
+        for lhs, _rel, rhs in links:
+            try:
+                gap = (_node_to_sympy(_ast.parse(lhs, mode="eval").body)
+                       - _node_to_sympy(_ast.parse(rhs, mode="eval").body))
+            except Exception:
+                continue
+            by_name = {str(sym): sym for sym in gap.free_symbols}
+            for p in params:
+                if p not in by_name:
+                    continue
+                base = draw()
+                held = gap.subs({by_name[q]: base[q] for q in params
+                                 if q != p and q in by_name
+                                 and isinstance(base[q], (int, float))})
+                try:
+                    roots = _capped(lambda: _sympy.solve(held, by_name[p]),
+                                    _FAST)
+                except TimeoutError:
+                    return
+                except Exception:
+                    continue
+                for root in roots:
+                    if root.free_symbols or not root.is_real:
+                        continue
+                    for off in _WITNESS_OFFSETS + (1e-6, -1e-6, 10.0, -10.0):
+                        yield {**base, p: float(root) + off}
+
+    def candidates():
+        yield from corners()
+        if bare and kind == "is_overflow_safe":
+            yield from extremes()
+        if not bare:
+            yield from shape_boundaries()
+            yield from near_boundaries()
+        for _ in range(trials):
+            yield draw()
+
+    from .conjecture import deliberate_raise, guard_cut_texts
+    checked = n_in = n_out = cut = 0
+    seen: set = set()
+    for point in candidates():
+        key = tuple(repr(point[p]) for p in params)
+        if key in seen or not admitted(point) \
+                or (assumed and not satisfies(assumed, point)) \
+                or (guard is not None and not guard.admits_point(point)):
+            continue
+        seen.add(key)
+        where = True if bare else inside(point)
+        if where is None:
+            continue
+        try:
+            call_args, call_kwargs = call_arguments(fn, params, point)
+            with _pinned_float_env():
+                out = fn(*call_args, **call_kwargs)
+        except _premises.PremiseRejected:
+            continue
+        except Exception as exc:
+            if kind == "is_defined" and bare and deliberate_raise(exc, fn):
+                # the function's own guard rejects the call: outside its
+                # working domain (decision A), no trial
+                cut += 1
+                continue
+            out, raised = None, exc
+            what = f"raised {type(exc).__name__}"
+        else:
+            raised = None
+            what = f"returned {_fmt_value(out)}"
+        checked += 1
+        n_in, n_out = n_in + bool(where), n_out + (not where)
+        ok = safe(out, raised)
+        if kind == "is_defined" and raised is None and out is None and not declared_none:
+            # None under a return type that does not admit it is no value
+            ok, what = False, "returned None, which its return type does not admit"
+        if ok == where or (conjunct and where):
+            continue
+        at = _fmt_point(point, params)
+        if bare:
+            cx = f"{at}: f {what}, {words['bare']}"
+        elif where:
+            cx = f"{at}: inside the stated region, f {what}"
+        else:
+            cx = f"{at}: f {what}, {words['outside']}"
+        found = {"mathema.witness_executed": True}
+        if kind == "is_defined" and not overflow_texts \
+                and not _no_overflow(out, raised):
+            # the missing value is an overflow of the computation
+            found["mathema.sampled"] = (
+                "the computation overflows there; state the region where "
+                "it stays in float range as an is_overflow_safe claim "
+                "and is_defined is sampled inside it")
+        return ("falsified", checked, cx, None, found)
+    if checked == 0:
+        return "skipped", 0, None
+    sampled = (words["sampled_bare"] if bare else
+               words["sampled_conjunct"] if conjunct else
+               words["sampled"]).format(checked=checked, n_in=n_in,
+                                        n_out=n_out)
+    if reach_note:
+        sampled = f"{sampled}; {reach_note}"
+    if cut:
+        cuts = guard_cut_texts(fn, facts)
+        sampled = (f"{sampled}; {cut} drawn points lie where f's own guard "
+                   f"rejects the call"
+                   + (f" ({' or '.join(cuts)})" if cuts else "")
+                   + ", outside its working domain")
+    return "holds", checked, None, None, {"mathema.sampled": sampled}
+
+
+def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                      trials: int):
+    """Empirical half of `is_defined`, for any target whose region
+    equivalence (the derive half) declines or does not decide: the
+    `_region_probe` with "has a value" (a finite return) as the inside
+    condition. The bare `is_defined(f)` is also the parent of
+    is_language_defined and is_numerically_defined: falsified where one
+    of them is, and no stronger than the weakest of them."""
+    own = _region_probe(fn, facts, cj, domain, rng, trials, "is_defined")
+    if cj.relation != "is_defined" or own is None:
+        return own
+    verdict, checked, cx, established, meta = split_probe_result(own)
+    if verdict == "falsified":
+        return own
+    from ._premises import unguarded
+    rolled = _roll_up(unguarded(fn), facts,
+                      _tree_children(unguarded(fn), facts, cj, domain,
+                                     _DEFINED_CHILDREN), trials)
+    if rolled is None:
+        return own
+    c_verdict, c_checked, c_cx, _c_est, c_meta = rolled
+    meta = {**(meta or {}),
+            "mathema.children": c_meta["mathema.children"]}
+    if c_verdict == "falsified":
+        if c_meta.get("mathema.cause"):
+            meta["mathema.cause"] = c_meta["mathema.cause"]
+        return "falsified", checked + c_checked, c_cx, None, meta
+    order = ("unknown", "skipped", "holds", "proven")
+    weakest = min((verdict, c_verdict), key=order.index)
+    if weakest == "proven":
+        return verdict, checked, cx, established, meta
+    if weakest == "skipped":
+        weakest = verdict
+    return weakest, checked, cx, None, meta
+
+
+def _has_axes(value, axes: int) -> bool:
+    """Whether `value` is a non-empty nested list or tuple (or array)
+    `axes` levels deep, with real numbers at the bottom."""
+    if axes == 0:
+        return (isinstance(value, (int, float))
+                and not isinstance(value, bool)) or (
+            hasattr(value, "dtype") and getattr(value, "shape", None) == ())
+    if hasattr(value, "tolist") and hasattr(value, "shape"):
+        value = value.tolist()
+    return (isinstance(value, (list, tuple)) and len(value) >= 1
+            and all(_has_axes(v, axes - 1) for v in value))
+
+
+def _region_shapes(links: list, params: list, domain: dict) -> dict:
+    """Intent:
+        The parameters an `is_defined` region reads as arrays, mapped to
+        `"matrix"` or `"sequence"`: a parameter bound over `R^(n,n)` or
+        read through `det(...)` is a square matrix, one bound over `R^n`
+        or read through `dim(...)` is a sequence.
+    """
+    import re
+    out: dict = {}
+    text = " ".join(f"{lhs} {rhs}" for lhs, _rel, rhs in links)
+    for p in params:
+        dims = getattr((domain or {}).get(p), "dims", None) or ()
+        if len(dims) == 2 or re.search(rf"\bdet\s*\(\s*{p}\s*\)", text):
+            out[p] = "matrix"
+        elif len(dims) == 1 or re.search(rf"\bdim\s*\(\s*{p}\b", text):
+            out[p] = "sequence"
+    return out
 
 
 def _matrix_property(name: str):
@@ -2201,11 +3863,23 @@ def _synth_matrix(n: int, rng: random.Random) -> list:
     return [[rng.uniform(-5, 5) for _ in range(n)] for _ in range(n)]
 
 
+def _non_finite_matrix(n: int, rng: random.Random) -> list:
+    """A random n-by-n matrix with one entry a NaN or an infinity."""
+    m = _synth_matrix(n, rng)
+    m[rng.randrange(n)][rng.randrange(n)] = rng.choice(
+        (float("nan"), float("inf"), float("-inf")))
+    return m
+
+
 def _violating_matrix(prop, n: int, rng: random.Random,
                       tries: int = 20) -> "list | None":
     """A random n-by-n matrix that does NOT have `prop`, for the guard
     check; None when none turned up (a property almost every random
-    matrix satisfies, so the guard question is not meaningful)."""
+    matrix satisfies, so the guard question is not meaningful). A
+    finiteness guard is tried against a matrix holding a NaN or an
+    infinity."""
+    if prop.name == "is_finite":
+        return _non_finite_matrix(n, rng)
     for _ in range(tries):
         m = _synth_matrix(n, rng)
         if prop.check(m) is False:
@@ -2213,45 +3887,144 @@ def _violating_matrix(prop, n: int, rng: random.Random,
     return None
 
 
+def _premise_structures(cj) -> dict:
+    """The structure premises of a claim's `assuming` clause,
+    `{param: (prop, ...)}` entailment-closed (`assuming A is
+    symmetric` gives `{"A": ("is_symmetric",)}`)."""
+    import re
+
+    from .conjecture import _split_top_and
+    from .grammar import parse_domain_safety
+    from .matrices import PROPERTIES, entailed
+    text = re.sub(r"^\s*assuming\s+", "", (cj.assuming or "").strip())
+    found: dict = {}
+    for part in _split_top_and(text) if text else ():
+        parsed = parse_domain_safety(part.strip())
+        if (parsed is not None and not parsed[0].startswith("not ")
+                and parsed[0] in PROPERTIES and parsed[1].isidentifier()):
+            found.setdefault(parsed[1], set()).add(parsed[0])
+    return {p: tuple(sorted(entailed(props))) for p, props in found.items()}
+
+
+def _structured_draws(fn, facts, cj, domain: dict):
+    """Intent:
+        A per-trial drawer of every parameter for a matrix property
+        claim: a matrix sized by its `Shape` marker or `R^(m,n)` domain
+        (shared dimension names share one size, a fixed size stays
+        fixed) and synthesised with its structure markers and
+        structure premises; a vector sized the same way; a number
+        from its domain. A parameter with no shape and no domain is a
+        square matrix of a random size, as before any shape was known.
+    """
+    from . import dimensions
+    from .matrices import synth_for
+    from .types import shapes_from_signature, structures_from_signature
+    shapes = shapes_from_signature(fn)
+    structures = dict(structures_from_signature(fn))
+    for p, props in _premise_structures(cj).items():
+        structures[p] = tuple(sorted(set(structures.get(p, ())) | set(props)))
+    try:
+        resolver = dimensions.resolve(facts, shapes, claim_domain=domain)
+    except dimensions.DimensionConflict:
+        resolver = dimensions.resolve(facts, shapes)
+
+    from .matrices import rank_edge
+    drawn = [0]
+
+    def draw(rng: random.Random) -> list:
+        drawn[0] += 1
+        sizes = resolver.draw_sizes(rng, hi={k: 5 for k in
+                                             resolver.distinct_keys()})
+        out = []
+        for p in facts.params:
+            shape = resolver.shapes.get(p)
+            declared = p in shapes or getattr((domain or {}).get(p),
+                                              "dims", ())
+            ndim = shape.ndim if shape is not None and declared else 0
+            props = structures.get(p, ())
+            kind = facts.param_kinds.get(p, "scalar")
+            if ndim == 2 or (ndim == 0 and (props or kind in SEQUENCE_KINDS)):
+                if ndim == 2:
+                    rows = sizes.get(resolver.key(p, 0)) or 3
+                    cols = sizes.get(resolver.key(p, 1)) or 3
+                else:
+                    rows = cols = rng.randint(1, 5)
+                if props and rows == cols:
+                    out.append(synth_for(props, rows, rng))
+                else:
+                    out.append(rank_edge(
+                        [[rng.uniform(-5, 5) for _ in range(cols)]
+                         for _ in range(rows)], drawn[0] - 1))
+            elif ndim == 1:
+                n = sizes.get(resolver.key(p, 0)) or 3
+                bound = (domain or {}).get(p)
+                if getattr(bound, "pieces", None):
+                    # a declared element bound (`[a, b]^n`) holds every
+                    # element of the draw
+                    out.append([_synth("float", rng, bound)
+                                for _ in range(n)])
+                else:
+                    out.append([rng.uniform(-5, 5) for _ in range(n)])
+            else:
+                out.append(_synth("float", rng, (domain or {}).get(p)))
+        return out
+    return draw
+
+
 def _matrix_output_probe(prop):
     """The output/expression check: per trial synthesize every
-    parameter, evaluate the predicate's argument expression (which
-    calls `f` and may combine matrices), and test the resulting value
-    for the property. Holds when every evaluable value has it,
-    falsifies with the witnessing arguments when one does not, skips
-    when the property could not be decided on any value (a spectral
-    check with no numpy)."""
+    parameter (with its shape, structure markers and structure
+    premises) and place it on the claim's equality premises, keep
+    only points inside every premise, evaluate the predicate's
+    argument expression (which calls `f` and may combine matrices) in
+    the claim namespace every probe shares, and test the resulting
+    value for the property. A raise from `f` at such a point is no
+    value and falsifies, the exception named; a raise from the
+    expression around it is a broken sample. Holds when every
+    evaluable value has the property, falsifies with the witnessing
+    arguments when one does not, skips when the property could not be
+    decided on any value (a spectral check with no numpy, or no point
+    inside the premises)."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
+        from .domain import is_missing
+        from ._premises import PremiseRejected
         try:
-            arg_ast = _ast.parse(cj.lhs, mode="eval").body
+            code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
         except SyntaxError:
             return None
-        undecided = [0]
-
-        def trial(args):
-            filled = [_synth_matrix(rng.randint(1, 5), rng)
-                      if a is None else a for a in args]
-            env = dict(zip(facts.params, filled))
+        draw = _structured_draws(fn, facts, cj, domain)
+        checked = 0
+        for _ in range(trials):
+            point = _placed(dict(zip(facts.params, draw(rng))), rng)
+            if point is None or not _admitted(point):
+                continue
+            filled = [point[p] for p in facts.params]
+            raised: list = []
             try:
-                value = _eval_matrix_expr(arg_ast, env, fn)
+                value = _eval_matrix_expr(code, point, fn, raised=raised)
+            except PremiseRejected:
+                continue
             except Exception:
-                return None
+                # a raise at a missing input is classified, not judged
+                if raised and not any(is_missing(v) for v in filled):
+                    checked += 1
+                    return ("falsified", checked,
+                            f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
+                            f"{type(raised[0]).__name__}, no value", None)
+                continue
             got = prop.check(value)
             if got is None:
-                undecided[0] += 1
-                return None
-            if got is True:
-                return True
-            return f"{_fmt(tuple(filled))}: result is not {prop.name[3:]}"
-
-        verdict, checked, cx = _probe_trials(
-            fn, facts, _first_matrix_param(facts), domain, rng, trials, trial)
-        if checked == 0 and undecided[0]:
-            return ("skipped", 0, None,
-                    None)
-        return (verdict, checked, cx, None)
+                continue
+            checked += 1
+            if got is not True:
+                return ("falsified", checked,
+                        f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
+                        f"{prop.name[3:]}", None)
+        if checked == 0:
+            return ("skipped", 0, None, None)
+        return ("holds", checked, None, None)
     return probe
 
 
@@ -2262,6 +4035,7 @@ def _matrix_guard_probe(prop):
     Holds when a synthesized violating input raises or returns None;
     falsifies with that input when the function silently accepts it."""
     def probe(fn, facts, cj, domain, rng, trials):
+        from ._premises import PremiseRejected
         target = cj.lhs.strip()
         if target not in facts.params:
             return None
@@ -2274,230 +4048,46 @@ def _matrix_guard_probe(prop):
             args = _synth_other_params(fn, facts, target, domain, rng)
             try:
                 out = _call_with_target(fn, facts, target, args, bad)
+            except PremiseRejected:
+                checked -= 1  # outside the claim's premises, not a trial
+                continue
             except Exception:
                 continue     # rejected: the guard fired
             if out is None:
                 continue     # a graceful decline is a guard too
             return ("falsified", checked,
                     f"{prop.name[3:]} not enforced: accepted "
-                    f"{_fmt(tuple([bad]))}", None)
+                    f"{_fmt((bad,), (target,))}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
     return probe
 
 
-def _first_matrix_param(facts) -> str:
-    for p in facts.params:
-        if facts.param_kinds.get(p) == "sequence":
-            return p
-    return facts.params[0] if facts.params else ""
+def _eval_matrix_expr(code, env: dict, fn, raised: "list | None" = None):
+    """Evaluate a claim expression (compiled) over drawn values in the
+    one namespace every probe of a claim shares
+    (`_linalg_eval.FUNCTIONS`): vectors and matrices are numpy arrays,
+    `f(...)` calls the real function with its own runtime types, and
+    the value comes back as plain lists, the form the matrix property
+    checks read. Each exception `f` itself raises is appended to
+    `raised` when given."""
+    from . import _linalg_eval as lae
+    call = lae.law_callable(fn)
+    if raised is not None:
+        inner = call
 
-
-def _eval_matrix_expr(node, env: dict, fn):
-    """Evaluate a matrix predicate's argument expression over `env`:
-    `f(...)` calls the real function, `A @ B`/`A.T`/`det`/`inv`/
-    `trace` and elementwise `+`/`-`/scalar-`*` are computed on concrete
-    values. numpy when present (fast, full operator set); a small
-    pure-Python core otherwise for the common shapes."""
-    import ast as _ast
-
-    def ev(n):
-        if isinstance(n, _ast.Name):
-            return env[n.id]
-        if isinstance(n, _ast.Constant):
-            return n.value
-        if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name):
-            args = [ev(a) for a in n.args]
-            if n.func.id == "f":
-                return fn(*args)
-            return _matrix_call(n.func.id, args)
-        if isinstance(n, _ast.Attribute) and n.attr == "T":
-            return _transpose(ev(n.value))
-        if isinstance(n, _ast.BinOp):
-            return _matrix_binop(n.op, ev(n.left), ev(n.right))
-        raise ValueError(f"unsupported matrix expression {_ast.unparse(n)!r}")
-
-    return ev(node)
-
-
-def _to_np(value):
-    from .matrices import _numpy
-    np = _numpy()
-    return (np, np.asarray(value, dtype=float)) if np is not None else (None, value)
-
-
-def _transpose(m):
-    np, a = _to_np(m)
-    if np is not None:
-        return a.T
-    return [list(row) for row in zip(*m)]
-
-
-def _matrix_call(name: str, args: list):
-    np, _ = _to_np(args[0]) if args else (None, None)
-    if name == "det":
-        if np is None:
-            raise ValueError("det needs numpy")
-        return float(np.linalg.det(np.asarray(args[0], dtype=float)))
-    if name == "inv":
-        if np is None:
-            raise ValueError("inv needs numpy")
-        return np.linalg.inv(np.asarray(args[0], dtype=float))
-    if name == "trace":
-        a = args[0]
-        return sum(a[i][i] for i in range(len(a))) if np is None             else float(np.trace(np.asarray(a, dtype=float)))
-    if name == "transpose":
-        return _transpose(args[0])
-    raise ValueError(f"unsupported matrix function {name!r}")
-
-
-def _matrix_binop(op, left, right):
-    import ast as _ast
-
-    from .matrices import _numpy
-    np = _numpy()
-    if isinstance(op, _ast.MatMult):
-        if np is not None:
-            return np.asarray(left, dtype=float) @ np.asarray(right, dtype=float)
-        n, m, p = len(left), len(right), len(right[0])
-        return [[sum(left[i][k] * right[k][j] for k in range(m))
-                 for j in range(p)] for i in range(n)]
-    if isinstance(op, (_ast.Add, _ast.Sub)):
-        sign = 1 if isinstance(op, _ast.Add) else -1
-        if np is not None:
-            return np.asarray(left, dtype=float) + sign * np.asarray(right, dtype=float)
-        return [[left[i][j] + sign * right[i][j] for j in range(len(left[0]))]
-                for i in range(len(left))]
-    if isinstance(op, _ast.Mult):
-        scalar, mat = (left, right) if not isinstance(left, list) else (right, left)
-        if np is not None:
-            return float(scalar) * np.asarray(mat, dtype=float)
-        return [[scalar * v for v in row] for row in mat]
-    raise ValueError("unsupported matrix operator")
-
-
-_MATRIX_PROBE_SEED = 0x9E3779B9
-
-
-def _random_matrix(rows: int, cols: int, rng: random.Random) -> list:
-    """A plain rows-by-cols matrix of reals, for a matrix parameter that
-    carries a shape but no structure to synthesise from."""
-    return [[rng.uniform(-5, 5) for _ in range(cols)] for _ in range(rows)]
-
-
-def _as_list(value):
-    """A sampled matrix as nested Python lists, whether it came back a
-    numpy array or already a list, so a counterexample renders plainly."""
-    return value.tolist() if hasattr(value, "tolist") else value
-
-
-def _matrix_close(a, b, tol: float) -> bool:
-    """Whether two evaluated results (each a scalar or a matrix) agree to
-    `tol`. numpy when present, an elementwise walk otherwise."""
-    from .matrices import _numpy
-    np = _numpy()
-    if np is not None:
-        aa, bb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-        return aa.shape == bb.shape and bool(
-            np.allclose(aa, bb, rtol=0, atol=tol))
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return abs(a - b) <= tol
-    try:
-        return (len(a) == len(b)
-                and all(_matrix_close(x, y, tol) for x, y in zip(a, b)))
-    except TypeError:
-        return False
-
-
-def _relation_holds(lv, rv, relation: str, tol: float) -> bool:
-    """Whether a sampled draw satisfies the claim's relation: `==`/`~=`
-    by closeness, `!=` by its negation, and the orderings on the scalar
-    results (a determinant, a trace). A strict `<`/`>` gets no tolerance
-    credit (`0 > 0` must fail); a closed `<=`/`>=` gets the slack a float
-    wobble can need, mirroring the ordinary probe's own rule. Raises
-    TypeError when an ordering is asked of matrix-valued sides (an
-    undefined matrix ordering), which the caller treats as unsampleable."""
-    if relation in ("==", "~="):
-        return _matrix_close(lv, rv, tol)
-    if relation == "!=":
-        return not _matrix_close(lv, rv, tol)
-    a, b = float(lv), float(rv)
-    if relation == "<=":
-        return a <= b + tol
-    if relation == ">=":
-        return a >= b - tol
-    if relation == "<":
-        return a < b
-    return a > b
-
-
-def matrix_relation_probe(cj, fn, dims: dict, structures: dict,
-                          statement: str, note: str,
-                          rounds: int = 40) -> "Probe | None":
-    """Sample concrete matrices for a matrix-algebra relation claim the
-    symbolic backend could not close, and decide it by evaluation:
-    `holds` when both sides agree on every draw, `falsified` with the
-    witnessing matrices when a draw disagrees. Structure markers and
-    premises (`structures`) narrow each draw to a matrix that has the
-    property. Returns None when the claim is not sampleable here (an
-    operation such as `det`/`inv` that needs numpy while numpy is
-    absent, or an expression outside the evaluation core); the caller
-    then reports the honest derive `unknown`."""
-    import ast as _ast
-
-    from .linalg import undeclared_matrix_operands
-    from .matrices import synth_for
-    from .records import Probe
-    try:
-        lhs_ast = _ast.parse(cj.lhs, mode="eval").body
-        rhs_ast = _ast.parse(cj.rhs or "", mode="eval").body
-    except SyntaxError:
-        return None
-    if undeclared_matrix_operands((cj.lhs, cj.rhs), dims):
-        # a name used as a matrix that `dims` never sized cannot be put
-        # in `env`, so every draw below would fail inside the per-round
-        # `except Exception` and the loop would spend its whole budget
-        # to arrive at the same decline. The symbolic route carries the
-        # reason on the result the caller reports.
-        return None
-    tol = cj.tolerance if cj.tolerance is not None else 1e-6
-    rng = random.Random(_MATRIX_PROBE_SEED)
-    checked = 0
-    for _ in range(rounds):
-        sizes: dict = {}
-        env: dict = {}
-        for p, (rd, cd) in dims.items():
-            r = rd if isinstance(rd, int) else sizes.setdefault(
-                rd, rng.randint(2, 4))
-            c = cd if isinstance(cd, int) else sizes.setdefault(
-                cd, rng.randint(2, 4))
-            props = structures.get(p, ())
-            env[p] = (synth_for(props, r, rng) if props and r == c
-                      else _random_matrix(r, c, rng))
-        try:
-            lv = _eval_matrix_expr(lhs_ast, env, fn)
-            rv = _eval_matrix_expr(rhs_ast, env, fn)
-        except ValueError:
-            return None       # needs numpy (det/inv), or outside the core
-        except Exception:
-            continue          # a degenerate draw (e.g. a singular inv)
-        try:
-            holds = _relation_holds(lv, rv, cj.relation, tol)
-        except TypeError:
-            return None       # an ordering over matrix-valued sides: undefined
-        checked += 1
-        if not holds:
-            witness = _fmt(tuple(_as_list(env[p]) for p in dims),
-                           names=tuple(dims))
-            return Probe(cj.name, statement, "falsified", n=checked,
-                         counterexample=witness, note=note, route="probe",
-                         sketch="a sampled matrix violates the relation")
-    if checked == 0:
-        return None
-    return Probe(cj.name, statement, "holds", n=checked, note=note,
-                 route="probe",
-                 sketch=f"relation held on {checked} sampled matrix draws")
+        def call(*args, **kwargs):
+            try:
+                return inner(*args, **kwargs)
+            except Exception as exc:
+                raised.append(exc)
+                raise
+    names = {"f": call, **lae.FUNCTIONS,
+             **{k: lae.as_array(v) for k, v in env.items()}}
+    with _pinned_float_env():
+        value = eval(code, {"__builtins__": {}}, names)
+    return lae.to_plain(value)
 
 
 class MatrixPropertyFamily:
@@ -2551,24 +4141,35 @@ _OUTPUT_CHECKS = {
 
 def _output_predicate_probe(check):
     """A probe over a function's OUTPUT value: per trial synthesize every
-    argument by its kind, call f, and test the returned value with
-    `check` (True has the property, False does not with a witness, None
-    undecided/uncallable this round)."""
+    argument by its kind (on the claim's equality premises), call f, and
+    test the returned value with `check` (True has the property, False
+    does not with a witness, None undecided this round). A raise at a
+    point without a missing argument is no output and falsifies."""
     def probe(fn, facts, cj, domain, rng, trials):
+        from .domain import is_missing
+
         def trial(_args):
-            filled = [_synth(facts.param_kinds.get(p, "scalar"), rng,
-                             (domain or {}).get(p)) for p in facts.params]
+            point = _placed({p: _synth(facts.param_kinds.get(p, "scalar"),
+                                       rng, (domain or {}).get(p))
+                             for p in facts.params}, rng)
+            if point is None:
+                return None
+            filled = [point[p] for p in facts.params]
             try:
                 with _pinned_float_env():
                     out = fn(*filled)
-            except Exception:
-                return None
+            except Exception as exc:
+                if any(is_missing(v) for v in filled):
+                    # a raise at a missing input is classified, not judged
+                    return None
+                return (f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
+                        f"{type(exc).__name__}, no output")
             got = check(out)
             if got is None:
                 return None
             if got is True:
                 return True
-            return f"{_fmt(tuple(filled))}: output {out!r} fails {cj.relation}"
+            return f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} fails {cj.relation}"
         target = facts.params[0] if facts.params else ""
         return _probe_trials(fn, facts, target, domain, rng, trials, trial)
     return probe
@@ -2592,45 +4193,55 @@ class OutputPredicateFamily:
         return {"probe:algorithmic": self._probe}
 
 
-def _is_nonfinite(out) -> bool:
-    """True when a value is a silent non-finite number (nan/inf), scalar
-    or numpy array; False for a genuinely non-numeric value, which is not
-    this predicate's concern."""
-    import math
-    if isinstance(out, bool):
-        return False
-    if isinstance(out, (int, float)):
-        return math.isnan(out) or math.isinf(out)
-    try:
-        import numpy as np
-    except ImportError:
-        return False
-    try:
-        arr = np.asarray(out, dtype=float)
-    except (TypeError, ValueError):
-        return False
-    return not bool(np.isfinite(arr).all())
-
-
-def _is_compendium_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+def _is_library_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
                                relation: str, domain: dict | None = None,
                                tolerance: float | None = None):
-    """Structural half of is_compendium_safe: decline. Whether a covered
+    """Structural half of is_library_safe: decline. Whether a covered
     library call ever reaches its nan region over the declared domain is
     established empirically by the probe (which samples the domain and
     the boundary specials), not proved symbolically here."""
     return None
 
 
+def _raised_by_library(exc: BaseException, library: str) -> bool:
+    """Intent:
+        Whether an exception is the library failing rather than the
+        caller refusing an input: a floating-point error, or a raise
+        whose traceback passes through a file of the library's own
+        package.
+    """
+    import importlib
+    import os
+    if isinstance(exc, FloatingPointError):
+        return True
+    try:
+        pkg = os.path.dirname(os.path.realpath(
+            importlib.import_module(library).__file__ or ""))
+    except Exception:
+        return False
+    if not pkg:
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        path = os.path.realpath(tb.tb_frame.f_code.co_filename)
+        if path.startswith(pkg + os.sep):
+            return True
+        tb = tb.tb_next
+    return False
+
+
 def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
-    """Empirical half of is_compendium_safe(<library>): sample the
+    """Empirical half of is_library_safe(<library>): sample the
     function's inputs (respecting a declared domain, and hitting the
     negative / out-of-unit boundary specials that trigger a covered
     library's nan regions), call f, and check the output is FINITE. A
     silent nan/inf produced through an unguarded call into a covered
-    library function (numpy.sqrt on a negative, numpy.arcsin past 1) is
-    the counterexample; a finite result on every trial holds. Declines
-    when f does not call a covered function of the named library."""
+    library function (numpy.sqrt on a negative, numpy.arcsin past 1),
+    or a raise from inside the library itself (`_raised_by_library`), is
+    the counterexample; a finite result on every trial holds, and a
+    raise of the caller's own (a guard) is not the library failing.
+    Declines when f does not call a covered function of the named
+    library."""
     from .compendium import libraries_called
     library = cj.lhs.strip()
     if library not in libraries_called(fn, facts):
@@ -2641,29 +4252,477 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
     # sequences, never the empty boundary. One empty trial per sequence
     # parameter catches it.
     empties = [p for p in facts.params
-               if facts.param_kinds.get(p) == "sequence"]
+               if facts.param_kinds.get(p) in SEQUENCE_KINDS]
 
     def _sample(force_empty=None):
-        return [[] if p == force_empty
-                else _synth(facts.param_kinds.get(p, "scalar"), rng,
-                            (domain or {}).get(p))
-                for p in facts.params]
+        point = {p: ([] if p == force_empty
+                     else _synth(facts.param_kinds.get(p, "scalar"), rng,
+                                 (domain or {}).get(p)))
+                 for p in facts.params}
+        placed = _placed(point, rng, keep=(force_empty,))
+        return [(placed or point)[p] for p in facts.params]
+
+    def diagnosed(cx: str, filled: list) -> str:
+        # the covered call's computation region, when the compendium
+        # states one (numpy.exp is overflow-safe only for x <= 709.78)
+        from .compendium import computation_diagnosis
+        region = computation_diagnosis(fn, facts,
+                                       dict(zip(facts.params, filled)))
+        return f"{cx}; {region}" if region else cx
 
     def trial(_args):
         filled = _sample(empties.pop() if empties else None)
         try:
             with _pinned_float_env():
                 out = fn(*filled)
-        except Exception:
+        except Exception as e:
+            if _raised_by_library(e, library):
+                return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: raised "
+                                 f"{type(e).__name__} inside {library}",
+                                 filled)
             return None
         if _is_nonfinite(out):
-            return (f"{_fmt(tuple(filled))}: output {out!r} is a silent "
-                    f"non-finite value from an unguarded {library} call")
+            return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: output {out!r} is a "
+                             f"silent non-finite value from an unguarded "
+                             f"{library} call", filled)
         return True
 
     target = facts.params[0] if facts.params else ""
     return _probe_trials(fn, facts, target, domain, rng,
                          max(trials, len(facts.params) + 4), trial)
+
+
+# --- the computation-safety hierarchy (P13): is_computation_safe(f) rolls
+# up its children for one implementation; each child is adjudicated by
+# execution, and a child's restriction form states the region where the
+# computation is safe in that respect. -------------------------------
+
+
+def _is_overflow_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                             relation: str, domain: dict | None = None,
+                             tolerance: float | None = None):
+    """Structural half of is_overflow_safe: decline. Whether a
+    computation overflows is a fact about one number representation,
+    established by executing it (P3, P13); a derive proof over the
+    reals says nothing about it."""
+    return None
+
+
+def _overflow_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                    trials: int):
+    """Empirical half of is_overflow_safe: the `_region_probe` with
+    "does not overflow" (no infinity returned, no OverflowError) as
+    the inside condition. The bare claim also tries the representation
+    extremes the domain admits, where overflow lives."""
+    if cj.lhs in facts.params:
+        from .hazards import not_a_number
+        reason = not_a_number(facts, cj.lhs, "is_overflow_safe")
+        if reason is not None:
+            return ("unknown", 0, reason)
+    return _region_probe(fn, facts, cj, domain, rng, trials,
+                         "is_overflow_safe")
+
+
+def _is_recursion_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                              relation: str, domain: dict | None = None,
+                              tolerance: float | None = None):
+    """Structural half of is_recursion_safe: decline. The recursion
+    limit is the runtime's, reached or not by executing the call."""
+    return None
+
+
+def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                     trials: int):
+    """Empirical half of is_recursion_safe: call fn at the corners of
+    the declared domain (the far end of each numeric parameter first,
+    where a recursion driven by it runs deepest) and at sampled points;
+    a RecursionError at an admitted point is the counterexample. Any
+    other raise is not the recursion limit and passes; so does a
+    normal return. `is_recursion_safe(n)` focuses the corners on `n`,
+    `is_recursion_safe(f)` takes every numeric parameter's."""
+    from .gates import _fmt_point
+    target = cj.lhs
+    numeric = [p for p in facts.params
+               if facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string")]
+    if target in facts.params:
+        focus = [target]
+    elif target == "f" and numeric:
+        focus = numeric
+    else:
+        return None
+    anchor = focus[0]
+    corners: list = []
+    for p in focus:
+        ends = _interval_ends((domain or {}).get(p))
+        if ends is not None:
+            lo, hi = ends
+            corners.extend((p, v) for v in (hi, lo, (lo + hi) / 2))
+    state = {"i": 0}
+
+    def trial(args):
+        values = dict(zip(facts.params, args))
+        values[anchor] = _synth(facts.param_kinds.get(anchor, "unknown"),
+                                rng, (domain or {}).get(anchor))
+        corner = None
+        if state["i"] < len(corners):
+            corner, v = corners[state["i"]]
+            state["i"] += 1
+            values[corner] = v
+        values = _placed(values, rng, keep=(corner,))
+        if values is None:
+            return None
+        try:
+            call_args, call_kwargs = call_arguments(fn, facts.params, values)
+            with _pinned_float_env():
+                fn(*call_args, **call_kwargs)
+        except RecursionError:
+            return (f"{_fmt_point(values, list(facts.params))}: f raised "
+                    f"RecursionError, the recursion limit is reached "
+                    f"inside the declared domain")
+        except Exception:
+            return True
+        return True
+
+    verdict, checked, cx = _probe_trials(fn, facts, anchor, domain, rng,
+                                         max(trials, len(corners)), trial)
+    if verdict != "holds":
+        return verdict, checked, cx
+    return ("holds", checked, None, None,
+            {"mathema.sampled": f"{checked} executed points, none reaching "
+                                f"the recursion limit"})
+
+
+#: computation-safety families named now and adjudicated in a later
+#: release, with the question each answers
+RESERVED_FAMILIES = {
+    "is_precision_safe": "right in a narrower number representation",
+    "is_order_invariant": "the same answer whatever the reduction order",
+    "is_concurrency_safe": "runs correctly under concurrent calls",
+    "is_representation_consistent": "the same answer across the "
+                                    "computations the descriptor names",
+}
+
+
+def _reserved_note(name: str) -> str:
+    """Why a reserved family reports skipped."""
+    return (f"{name} ({RESERVED_FAMILIES[name]}) is reserved for a later "
+            f"release and not checked in this one")
+
+
+def _reserved_derive(fn, facts, lhs_src: str, rhs_src: str,
+                     relation: str, domain: dict | None = None,
+                     tolerance: float | None = None):
+    """Structural half of a reserved family: decline."""
+    return None
+
+
+def _reserved_probe(name: str):
+    """The empirical half of a reserved family: skipped, with the
+    reason, so a claim naming it is a known claim, not a
+    misspelling."""
+    def probe(fn, facts, cj, domain: dict, rng: random.Random,
+              trials: int):
+        return "skipped", 0, _reserved_note(name)
+    return probe
+
+
+#: the children of is_computation_safe, in the order the roll-up runs
+#: and reports them: the facts about one number representation that
+#: answer "does the computation run on my domain". Each runs at every
+#: target its suggestion gate names.
+_COMPUTATION_CHILDREN = (
+    "is_overflow_safe", "is_representation_safe", "is_recursion_safe")
+_ALWAYS_RELEVANT_CHILDREN: frozenset = frozenset()
+
+#: the definedness tree's roll-ups and views, each with its children:
+#: is_numerically_defined (over the claim's number set: no pole, every
+#: call inside its number set, every shape agreeing), is_input_safe
+#: (missing, absent and empty inputs), and the views
+#: is_finite_over_floats (no pole, no overflow)
+_TREE_CHILDREN = {
+    "is_numerically_defined": ("is_pole_safe", "is_number_set_safe",
+                               "is_dimension_safe"),
+    "is_input_safe": ("is_missing_safe", "is_absent_safe",
+                      "is_empty_safe"),
+    "is_finite_over_floats": ("is_pole_safe", "is_overflow_safe"),
+    "is_computation_safe": _COMPUTATION_CHILDREN,
+}
+
+#: the children of a bare is_defined(f): it is also falsified where one
+#: of these is, besides any failing call it sees itself
+_DEFINED_CHILDREN = ("is_language_defined", "is_numerically_defined")
+
+
+def _tree_children(fn, facts, cj, domain: dict, names) -> list:
+    """Intent:
+        The child claims a roll-up runs for this function: each child
+        family at every target its suggestion gate names, and a roll-up
+        child as its own whole-function claim, all over the roll-up's
+        domain, premise and pseudo-infinity.
+    """
+    from . import families as _families
+    from .conjecture import claim
+    registry = _families.families()
+    out: list = []
+    for name in names:
+        if name in ("is_missing_safe", "is_absent_safe"):
+            # the policy gates, one claim over every parameter that
+            # admits the kind
+            from .policy import _admits
+            kind = "absent" if name == "is_absent_safe" else "missing"
+            if any(_admits(fn, p, kind) for p in facts.params):
+                out.append(claim(f"{name}(f)", name=f"{name}[f]",
+                                 route="best"))
+            continue
+        family = registry.get(name)
+        if family is None:
+            continue
+        if name == "is_empty_safe":
+            # every container parameter, guarded or not
+            for target in facts.params:
+                if facts.param_kinds.get(target) in (*SEQUENCE_KINDS,
+                                                     "table"):
+                    out.append(claim(f"{name}({target})",
+                                     name=f"{name}[{target}]",
+                                     route="best"))
+            continue
+        if name in _TREE_CHILDREN:
+            if _tree_children(fn, facts, cj, domain, _TREE_CHILDREN[name]):
+                out.append(claim(f"{name}(f)", name=f"{name}[f]",
+                                 route="best"))
+            continue
+        for target in family.suggest_targets(fn, facts):
+            out.append(claim(f"{name}({target})",
+                             name=f"{name}[{target}]", route="best"))
+    return _over_parent(out, cj, domain)
+
+
+def _tree_probe(names):
+    """The empirical half of a roll-up over the children `names`
+    (`_roll_up` of `_tree_children`)."""
+    def probe(fn, facts, cj, domain: dict, rng: random.Random,
+              trials: int):
+        from ._premises import unguarded
+        fn = unguarded(fn)
+        return _roll_up(fn, facts,
+                        _tree_children(fn, facts, cj, domain, names),
+                        trials)
+    return probe
+
+
+def _tree_derive(fn, facts, lhs_src: str, rhs_src: str, relation: str,
+                 domain: dict | None = None, tolerance: float | None = None):
+    """Structural half of a roll-up: decline; the roll-up reads its
+    children's verdicts (`_tree_probe`)."""
+    return None
+
+
+def _dimension_targets(fn, facts) -> list:
+    """The is_dimension_safe suggestion gate: `f` when a parameter or
+    the result has a shape (a `Vec`/`Mat` marker) or a parameter is a
+    sequence."""
+    from .types import shapes_from_signature
+    try:
+        shaped = shapes_from_signature(fn)
+    except Exception:
+        shaped = {}
+    if shaped or any(k in SEQUENCE_KINDS
+                     for k in (facts.param_kinds or {}).values()):
+        return ["f"]
+    return []
+
+
+#: the words of a numpy (or mathema) error about operand shapes
+_SHAPE_WORDS = ("shape", "broadcast", "aligned", "dimension", "mismatch")
+
+
+def _shape_failure(exc) -> "str | None":
+    """Why an exception is a shape failure, or None: an
+    `enforce_dimensions` exit failure (the result broke its marker), or
+    a ValueError about the operands' shapes. An entry DimensionError is
+    the guard cutting the working domain, not a failure."""
+    from .authoring import DimensionError
+    if isinstance(exc, DimensionError):
+        return f"the result has the wrong shape: {exc}" if exc.at_exit \
+            else None
+    if isinstance(exc, ValueError) and any(
+            word in str(exc).lower() for word in _SHAPE_WORDS):
+        return f"f raised ValueError ({exc})"
+    return None
+
+
+def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                     trials: int):
+    """Intent:
+        Empirical half of is_dimension_safe(f): call fn with every
+        shaped parameter drawn in the shape its binding or marker
+        states (each named axis one size per call, shared across the
+        parameters naming it) and report the first call whose operands
+        or result do not fit (`_shape_failure`). Any other raise belongs
+        to another family and passes.
+    """
+    from . import _shapes
+    from .gates import _fmt_point
+    from .types import shapes_from_signature
+    try:
+        markers = shapes_from_signature(fn)
+    except Exception:
+        markers = {}
+    dims = {p: (_shapes.dims_of((domain or {}).get(p))
+                or _shapes.dims_of(markers.get(p)))
+            for p in facts.params}
+    if not any(dims.values()) and not any(
+            facts.param_kinds.get(p) in SEQUENCE_KINDS for p in facts.params):
+        return None
+
+    def trial(args):
+        values = dict(zip(facts.params, args))
+        sizes: dict = {}
+        for p in facts.params:
+            shape = dims.get(p)
+            if not shape:
+                continue
+            fixed = [_shapes.fixed_size(d) or sizes.setdefault(
+                d, rng.randint(1, 4)) for d in shape]
+
+            def build(axis, fixed=fixed):
+                if axis == len(fixed):
+                    return rng.uniform(-10, 10)
+                return [build(axis + 1) for _ in range(fixed[axis])]
+            values[p] = build(0)
+        try:
+            call_args, call_kwargs = call_arguments(fn, facts.params, values)
+            fn(*call_args, **call_kwargs)
+        except Exception as exc:
+            why = _shape_failure(exc)
+            if why is None:
+                return True
+            return f"{_fmt_point(values, list(facts.params))}: {why}"
+        return True
+
+    anchor = facts.params[0] if facts.params else None
+    if anchor is None:
+        return None
+    verdict, checked, cx = _probe_trials(fn, facts, anchor, domain, rng,
+                                         trials, trial)
+    return verdict, checked, cx
+
+
+def _is_computation_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
+                                relation: str, domain: dict | None = None,
+                                tolerance: float | None = None):
+    """Structural half of is_computation_safe: decline. The roll-up is
+    the conjunction of executed facts and holds at best (P3)."""
+    return None
+
+
+def _computation_children(fn, facts, cj, domain: dict) -> list:
+    """The child claims is_computation_safe runs for this function:
+    every child at each target its suggestion gate names, over the
+    roll-up's domain and pseudo-infinity."""
+    return _tree_children(fn, facts, cj, domain, _COMPUTATION_CHILDREN)
+
+
+def _over_parent(children: list, cj, domain: dict) -> list:
+    """A roll-up's child claims over the roll-up's own domain, premise
+    and pseudo-infinity."""
+    from dataclasses import replace as _replace
+    return [_replace(c, domain=dict(domain or {}),
+                     assuming=getattr(cj, "assuming", "") or "",
+                     pseudo_infinity=getattr(cj, "pseudo_infinity", None),
+                     resolved_pseudo_infinity=getattr(
+                         cj, "resolved_pseudo_infinity", None))
+            for c in children]
+
+
+def _computation_probe(fn, facts, cj, domain: dict, rng: random.Random,
+                       trials: int):
+    """Empirical half of is_computation_safe(f): the roll-up
+    (`_roll_up`) of every relevant child (`_computation_children`)."""
+    from ._premises import unguarded
+    fn = unguarded(fn)
+    return _roll_up(fn, facts, _computation_children(fn, facts, cj, domain),
+                    trials)
+
+
+def _repeatable_children(fn, facts, cj, domain: dict) -> list:
+    """The child claims is_repeatable runs for this function, over the
+    roll-up's domain: `is_reproducible` (same seed, same answer) when
+    the function takes a seed or a generator (`seed_parameter`), else
+    `is_deterministic` (same input, same answer), and `is_state_safe`
+    always."""
+    from .conjecture import claim
+    call = f"f({', '.join(facts.params)})"
+    first = ("is_reproducible" if seed_parameter(fn, facts) is not None
+             else "is_deterministic")
+    out = [claim(f"{call} == {call}", name=name, route="best")
+           for name in (first, "is_state_safe")]
+    return _over_parent(out, cj, domain)
+
+
+def _is_repeatable_derive(fn, facts, lhs_src: str, rhs_src: str,
+                          relation: str, domain: dict | None = None,
+                          tolerance: float | None = None):
+    """Intent:
+        is_repeatable from its children (`_repeatable_children`), each
+        examined: falsified when a child is, with that child's witness;
+        proven when every child is proven; undecided otherwise, naming
+        the undecided children.
+    """
+    from .conjecture import check_conjectures
+    from .symbolic import ProofResult
+    children = _repeatable_children(fn, facts, None, domain or {})
+    probes = check_conjectures(fn, children, facts=facts)
+    meta = {"mathema.children": {p.name: p.verdict for p in probes}}
+    for p in probes:
+        if p.verdict == "falsified":
+            return ProofResult("disproven",
+                               sketch=f"{p.name} is falsified",
+                               counterexample=f"{p.name}: {p.counterexample}",
+                               meta=meta)
+    if all(p.verdict == "proven" for p in probes):
+        return ProofResult("proven", sketch="; ".join(
+            f"{p.name}: proven" for p in probes), meta=meta)
+    return ProofResult("undecided", sketch="; ".join(
+        f"{p.name}: {p.verdict} ({p.note or p.sketch or 'no reason given'})"
+        for p in probes if p.verdict != "proven"), meta=meta)
+
+
+def _roll_up(fn, facts, children: list, trials: int):
+    """Intent:
+        Adjudicate a roll-up's child claims in one nested
+        `check_conjectures` call and roll the verdicts up: any child
+        falsified falsifies the roll-up with that child's name and
+        witness; every child proven proves it; otherwise it takes the
+        weakest child's verdict (holds, else unknown). The note lists
+        each child's verdict and `meta["mathema.children"]` carries them
+        as a mapping. None when there are no children.
+    """
+    from ._premises import unguarded
+    from .conjecture import check_conjectures
+    if not children:
+        return None
+    probes = check_conjectures(unguarded(fn), children, facts=facts,
+                               trials=trials)
+    verdicts = {p.name: p.verdict for p in probes}
+    checked = sum(p.n or 0 for p in probes)
+    meta = {"mathema.children": verdicts,
+            "mathema.sampled": ", ".join(f"{n}: {v}"
+                                         for n, v in verdicts.items())}
+    failed = [p for p in probes if p.verdict == "falsified"]
+    if failed:
+        first = failed[0]
+        cause = (first.stratum or {}).get("cause")
+        if cause:
+            meta["mathema.cause"] = cause
+        return ("falsified", checked,
+                f"{first.name}: {first.counterexample}", None, meta)
+    if all(v == "proven" for v in verdicts.values()):
+        return ("proven", checked, None,
+                "every child is proven: " + ", ".join(verdicts), meta)
+    if all(v in ("holds", "proven") for v in verdicts.values()):
+        return "holds", checked, None, None, meta
+    return "unknown", checked, None, None, meta
 
 
 def _register_builtin_claim_families() -> None:
@@ -2685,9 +4744,16 @@ def _register_builtin_claim_families() -> None:
     for _kind in ("affine", "convex", "concave"):
         _families.register(_kind, _NamedClaimFamily(
             _kind, {"probe:algorithmic": _functools.partial(_second_difference_probe, kind=_kind)}))
-    _families.register("is_defined", _NamedClaimFamily(
-        "is_defined", {"derive": _is_defined_derive}))
-    # the implementation-safety members, one SafetyFamily each: the
+    _defined = _NamedClaimFamily(
+        "is_defined", {"derive": _is_defined_derive,
+                       "probe:algorithmic": _is_defined_probe})
+    # the bare `is_defined(f)` is one question about the whole function
+    # (the derive half reads the body's raise regions, the probe half
+    # samples every parameter jointly), so it is not expanded into a
+    # conjunction over the parameters
+    _defined.whole_function = True
+    _families.register("is_defined", _defined)
+    # the computation-safety members, one SafetyFamily each: the
     # derive/probe halves and the suggestion gate are the member's
     # injected parts, and every half runs inside the family verdict
     # contract. is_missing_safe carries a real probe fallback, unlike
@@ -2695,9 +4761,10 @@ def _register_builtin_claim_families() -> None:
     # (calling fn with a literal NaN) is empirical, so it reports
     # under a probe route, never relabeled as derive.
     _families.register("is_numerically_stable", SafetyFamily(
-        "is_numerically_stable", derive=_is_numerically_stable_derive))
-    _families.register("is_builtin_safe", SafetyFamily(
-        "is_builtin_safe", derive=_is_builtin_safe_derive,
+        "is_numerically_stable", derive=_is_numerically_stable_derive,
+        probe=_accuracy_probe))
+    _families.register("is_number_set_safe", SafetyFamily(
+        "is_number_set_safe", derive=_is_number_set_safe_derive,
         probe=_builtin_probe,
         suggest_targets=_restricted_domain_targets))
     _families.register("is_pole_safe", SafetyFamily(
@@ -2708,11 +4775,17 @@ def _register_builtin_claim_families() -> None:
         "is_missing_safe", derive=_is_missing_safe_derive,
         probe=_missing_probe,
         suggest_targets=lambda fn, facts: _missing_guard_params(facts)))
-    from .hazards import _overflow_prone_params, _type_discipline_params
-    _families.register("is_extremity_safe", SafetyFamily(
-        "is_extremity_safe", derive=_is_extremity_safe_derive,
-        probe=_extreme_probe,
-        suggest_targets=_overflow_prone_params))
+    from .hazards import _type_discipline_params
+    # is_overflow_safe: no infinity and no OverflowError from finite
+    # inputs (P13); its restriction form states the region where the
+    # computation stays in float range, the row a
+    # compendium carries for numpy.exp. Suggested wherever a parameter
+    # is raised to a power or reaches an overflow-prone function.
+    from .hazards import _overflow_targets
+    _families.register("is_overflow_safe", SafetyFamily(
+        "is_overflow_safe", derive=_is_overflow_safe_derive,
+        probe=_overflow_probe,
+        suggest_targets=_overflow_targets))
     _families.register("is_representation_safe", SafetyFamily(
         "is_representation_safe", derive=_is_representation_safe_derive,
         probe=_representation_probe,
@@ -2722,22 +4795,30 @@ def _register_builtin_claim_families() -> None:
         "is_empty_safe", derive=_is_empty_safe_derive,
         probe=_empty_probe,
         suggest_targets=lambda fn, facts: _emptiness_guard_params(facts)))
-    # is_arbitrary_input_safe fuzzes a string parameter and shrinks any
+    # is_language_defined fuzzes a string parameter and shrinks any
     # crash to a minimal witness, so its empirical verdict is stamped
     # probe:minimal_example. Suggested for every bare-string parameter.
     from .hazards import _string_input_params
-    _families.register("is_arbitrary_input_safe", SafetyFamily(
-        "is_arbitrary_input_safe", derive=_is_arbitrary_input_safe_derive,
+    _families.register("is_language_defined", SafetyFamily(
+        "is_language_defined", derive=_is_language_defined_derive,
         probe=_arbitrary_input_probe,
         suggest_targets=lambda fn, facts: _string_input_params(facts),
         probe_route="probe:minimal_example"))
-    # is_compendium_safe(<library>): the function never silently produces
+    # is_recursion_safe: no RecursionError over the domain, suggested
+    # when the body calls itself; `(f)` is one claim over the whole
+    # function, not a conjunction over its parameters
+    from .hazards import _recursion_targets
+    _families.register("is_recursion_safe", SafetyFamily(
+        "is_recursion_safe", derive=_is_recursion_safe_derive,
+        probe=_recursion_probe,
+        suggest_targets=_recursion_targets, whole_function=True))
+    # is_library_safe(<library>): the function never silently produces
     # a non-finite output (nan/inf) through an unguarded call into a
     # compendium-covered library function. Parameterised by library
-    # (is_compendium_safe[numpy]); expandable by adding a compendium YAML.
+    # (is_library_safe[numpy]); expandable by adding a compendium YAML.
     from .compendium import libraries_called as _libs_called
-    _families.register("is_compendium_safe", SafetyFamily(
-        "is_compendium_safe", derive=_is_compendium_safe_derive,
+    _families.register("is_library_safe", SafetyFamily(
+        "is_library_safe", derive=_is_library_safe_derive,
         probe=_compendium_probe,
         suggest_targets=lambda fn, facts: sorted(_libs_called(fn, facts))))
     # excluded_outside_domain is never battery-suggested (no
@@ -2747,16 +4828,42 @@ def _register_builtin_claim_families() -> None:
         "excluded_outside_domain", derive=_excluded_outside_domain_derive,
         probe=_excluded_probe))
     # the stateless cluster's name-keyed members (claim NAMES, not
-    # predicate relations). is_deterministic is the STRONG one: the
-    # generic f(...) == f(...) re-evaluation loop is its empirical
-    # half, so only a derive half registers. is_reproducible is
-    # weaker (up to an RNG seed): its probe runs paired calls with
-    # the recognized RNG states captured and restored.
-    _families.register("is_deterministic", SafetyFamily(
-        "is_deterministic", derive=_is_deterministic_derive))
-    _families.register("is_reproducible", SafetyFamily(
-        "is_reproducible", derive=_is_reproducible_derive,
-        probe=_reproducible_probe))
-    _families.register("is_state_safe", SafetyFamily(
-        "is_state_safe", derive=_is_state_safe_derive,
-        probe=_state_probe))
+    # predicate relations), decided by examining the source only:
+    # is_deterministic (what flows in), is_reproducible (the same up to
+    # a seed or generator the function takes), is_state_safe (what
+    # flows out)
+    for _name, _derive in (("is_deterministic", _is_deterministic_derive),
+                           ("is_reproducible", _is_reproducible_derive),
+                           ("is_state_safe", _is_state_safe_derive)):
+        _families.register(_name, SafetyFamily(
+            _name, derive=_derive, whole_function=True, examined_only=True))
+    # reserved: named now, adjudicated later, never suggested; a
+    # platform (GPU, JIT, distributed) is named in the bracketed
+    # computation descriptor, never in a family name
+    for _rname in RESERVED_FAMILIES:
+        _families.register(_rname, SafetyFamily(
+            _rname, derive=_reserved_derive,
+            probe=_reserved_probe(_rname), whole_function=True,
+            reserved=_reserved_note(_rname)))
+    _families.register("is_computation_safe", SafetyFamily(
+        "is_computation_safe", derive=_is_computation_safe_derive,
+        probe=_computation_probe, whole_function=True))
+    # the definedness tree: is_dimension_safe (operands and result
+    # agree in shape), the roll-ups is_numerically_defined and
+    # is_input_safe, and the view is_finite_over_floats
+    _families.register("is_dimension_safe", SafetyFamily(
+        "is_dimension_safe", derive=_tree_derive, probe=_dimension_probe,
+        suggest_targets=_dimension_targets, whole_function=True))
+    for _tname, _tchildren in _TREE_CHILDREN.items():
+        if _tname == "is_computation_safe":
+            continue
+        _families.register(_tname, SafetyFamily(
+            _tname, derive=_tree_derive, probe=_tree_probe(_tchildren),
+            whole_function=True))
+    # is_repeatable is the roll-up for "is it repeatable": the seed
+    # decides whether its first child is is_reproducible or
+    # is_deterministic, and is_state_safe always joins; declared by the
+    # author, never battery-suggested
+    _families.register("is_repeatable", SafetyFamily(
+        "is_repeatable", derive=_is_repeatable_derive,
+        whole_function=True, examined_only=True))

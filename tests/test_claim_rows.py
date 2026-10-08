@@ -82,10 +82,9 @@ def test_check_stamps_battery_and_suggestion_surfaces(tmp_path):
             """Doubles."""
             return 2.0 * x
 
-        def noisy(x: float) -> float:
-            """Prints."""
-            print(x)
-            return x
+        def shout(s: str) -> str:
+            """Upper case."""
+            return s.upper()
         '''))
     sys.path.insert(0, str(tmp_path))
     try:
@@ -96,11 +95,11 @@ def test_check_stamps_battery_and_suggestion_surfaces(tmp_path):
         sources = {p.name: row_source(p.meta, p.note or "")
                    for p in rec.probes}
         assert sources.get("affine[x]") == "suggested"
-        # a structural gap row from probe() itself is labeled builtin
-        rec = mathema.check(mod.noisy, claims=[])
-        sources = {p.name: row_source(p.meta, p.note or "")
-                   for p in rec.probes}
-        assert sources.get("purity") == "builtin"
+        # a battery call probe() could not build leaves no row; what it
+        # tried is in the record meta
+        rec = mathema.check(mod.shout, claims=[])
+        assert "callable" not in {p.name for p in rec.probes}
+        assert [r["check"] for r in rec.meta["mathema.not_run"]] == ["callable"]
     finally:
         sys.path.remove(str(tmp_path))
         del sys.modules["rowpkg"]

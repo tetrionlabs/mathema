@@ -30,13 +30,18 @@ def _v(fn, law, route, **kw):
 
 
 def test_an_exact_derive_disproof_inside_the_allowance_is_falsified():
+    # the witness, run again, violates the ordering (ruling of
+    # 2026-10-06: the allowance is relative to the result, so near 0
+    # the 1e-10 is a plain miss and needs no exact re-check)
+    import re
     for route in ("derive", "best"):
         p = _v(just_above, "for x in [0, 1], f(x) <= x", route)
         assert p.verdict == "falsified", (route, p.verdict, p.note)
         assert p.counterexample
         assert p.meta.get("mathema.corroboration") == "reproduced"
-        assert "engine bug" not in (p.note or "")
-        assert "exactly" in (p.note or "")
+        assert "mathema bug" not in (p.note or "")
+        x = float(re.search(r"x = ([-+0-9.e]+)", p.counterexample).group(1))
+        assert just_above(x) > x, p.counterexample
 
 
 def test_the_greater_or_equal_side_is_exact_too():
@@ -52,8 +57,10 @@ def test_the_unbounded_example_falsifies():
 
 
 def test_the_probe_keeps_its_allowance_and_says_what_it_absorbed():
-    p = _v(just_above, "for x in [0, 1], f(x) <= x", "probe")
-    assert p.verdict == "holds"
+    # over [1, 2] the allowance (relative to the result) absorbs the
+    # 1e-10 at every draw; near 0 it would not (ruling of 2026-10-06)
+    p = _v(just_above, "for x in [1, 2], f(x) <= x", "probe")
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
     assert "within the default tolerance" in (p.note or "")
     assert "fails by 1e-10" in (p.note or "")
 
@@ -93,7 +100,7 @@ def test_rounding_the_ordering_violation_away_is_exact_arithmetic_only():
             assert p.meta.get("mathema.corroboration") == "uncorroborated"
             assert p.meta.get("mathema.corroboration_reason") == \
                 "exact arithmetic only", (law, route, p.meta)
-            assert "engine bug" not in (p.note or ""), (law, route, p.note)
+            assert "mathema bug" not in (p.note or ""), (law, route, p.note)
             assert "floating point does not reproduce" in (p.note or "")
 
 
@@ -119,5 +126,5 @@ def test_a_violation_inside_a_declared_tolerance_is_not_an_engine_bug():
     p = _v(just_above, "for x in [0, 1], f(x) <= x", "best",
            tolerance=1e-9)
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "engine bug" not in (p.note or "")
+    assert "mathema bug" not in (p.note or "")
     assert p.meta.get("mathema.corroboration") is None

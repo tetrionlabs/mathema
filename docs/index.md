@@ -161,11 +161,12 @@ print(mathema.check(midpoint, claims=[
 <!-- example: midpoint output -->
 ```text
 mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
-  proven  between_integers: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) ≤ f(a, b) ≤ max(a, b)
-           for a in [0, 100]:int|missing, b in [0, 100]:int|missing
-  holds   between_integers[float]: for a in [0, 100]:int|missing, b in [0, 100]:int|missing, min(a, b) <= f(a, b) <= max(a, b) (n=44)
-  FALSIFY between_reals: for a in [0.0, 100.0]:float|missing, b in [0.0, 100.0]:float|missing, min(a, b) <= f(a, b) <= max(a, b)
-           counterexample link 1: min(a, b) <= f(a, b): (99.9999, 100): 99.9999 vs 99.0
+  proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
+           for a in [0, 100] : int, b in [0, 100] : int
+  between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
+    falsified  computation  for a in [0.0, 100.0] : float, b in [0.0, 100.0] : float, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
+    holds      policy       f(a=nan)   no missing policy stated; assumed propagates
+    holds      policy       f(b=nan)   no missing policy stated; assumed propagates
 ```
 
 So the test established that the function works at two integer points. mathema
@@ -190,12 +191,16 @@ mathema check mid.py:midpoint --claim "for a in [0, 100], b in [0, 100], min(a, 
 
 <!-- example: midpoint output -->
 ```text
-ok   mid.midpoint: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   mid.midpoint: source, no side effects; claims 4/4 checked (1 proven, 3 holds, 0 falsified)
 ```
 
-One claim, two rows: the proof, and its `[float]` companion, which runs the
-proven claim through the real code in floating point at the region's corners
-and at sampled points inside it, and holds.
+One claim, four lines under it in the full record. The mathematics line is
+the proof over the real numbers. The computation line runs the same claim
+through the real code in floating point, at the region's corners and at
+sampled points inside it, and holds. The two policy lines cover a value that
+is not there: a float may be `nan`, nothing in the claim says what `midpoint`
+should do with one, so mathema assumes the `nan` passes through to the result
+(it propagates) and checks that it does.
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">A whole codebase</span><span class="brk r"></span></span>
 
@@ -209,7 +214,7 @@ prove things about it, what state outside its parameters it reads or writes,
 whether any test report covers it, and how well its docstring states its
 intent. Here is one module of mathema's own source:
 
-<!-- example: audit run -->
+<!-- example: audit run requires=mathema_language -->
 ```bash
 mathema audit mathema.intent --root .
 ```
@@ -219,13 +224,13 @@ mathema audit mathema.intent --root .
                          ||             || derive route                                                        || typing                || globals                                                                  ||           || docs    ||
 key           | span     || claims      || derives | cx | reason                         | code                || typed | finite_domain || vars                      | mutates | funcs                              || tested    || quality || docsync
 mathema.intent
- ._references | 92:145p  || {6 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 50%
+ ._references | 92:145p  || {5 | 0 | -} || no      | 15 | 9 branches, 3 loops (1 nested) | loop:multiple-loops || yes   | -             || _REF_SECTIONS, _URL, _DOI | -       | re                                 || no-report || 0/4     || 50%
  ._sections   | 67:73p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION                  | -       | -                                  || no-report || 0/3     || 50%
  ._summary    | 76:80p   || {5 | 0 | -} || no      | 2  | 1 loop                         | loop:not-a-fold     || yes   | -             || _SECTION, _GOOGLE_HEADER  | -       | -                                  || no-report || 0/2     || 44%
  .parse_doc   | 148:162p || {5 | 0 | -} || no      | 4  | 2 branches, 1 loop             | loop:not-a-fold     || yes   | -             || KEYWORDS                  | -       | DocIntent, _sections, _summary, +1 || no-report || 2/3     || 40%
 
-0/4 claimed, 0/4 derivable, 0/4 lift unconditionally, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
-`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe the UNCONDITIONAL lift, the body with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and adjudicated for every function here.
+0/4 claimed, 0/4 derivable, 0/4 derive reads with nothing supplied, 4/4 fully typed, 2/12 docstring quality criteria met, no coverage.json/.coverage report found, 4/4 depend on state outside their own parameters (see the global_vars/unresolved columns), mean docsync 46%.
+`derives` is what the derive route can do here, given the domain the signature, docstring and claims declare. The reason/code cells describe what derive reads with nothing supplied, so a branch:needs-domain row reads blocked there and derives all the same, once a claim declares the domain that prunes the branch. Neither is a ceiling: a probe claim can still be written and checked for every function here.
 ```
 
 `sed -n 149,163p mathema/intent.py` prints `parse_doc` and nothing else, which
@@ -325,19 +330,20 @@ between machines, whether a proof finishes inside its time cap, is written
 into the record whenever the cap was hit, so a `holds` that would have been
 a `proven` on a quieter machine says so.
 
-When a proof matters more than the time it takes, `extensive=True` asks for
-more. It is off by default and costs real time. The ordinary proof attempt
-gets up to 15 seconds instead of 3, and a claim it still leaves undecided goes
-on to a ladder of genuinely different strategies, each given 3 seconds of its
-own: exact root isolation for polynomial differences, interval refinement over
+A claim the ordinary proof attempt leaves undecided does not stop there.
+On the default route, `best`, it goes on to a ladder of genuinely different
+strategies, each given a time cap of its own: exact root isolation for polynomial differences, interval refinement over
 the domain, a gallery of equivalent rewrites, a library of changes of
 variable, and z3's nonlinear real arithmetic when the `smt` extra is
 installed, followed by one more try of the ordinary attempt at 15 seconds.
 Behind all of that sits a failsafe: whatever happens, the ladder stops at 45
-seconds, so a single claim can never hold up a run indefinitely. Probing
-searches harder at the same time, spending the wider cap on finding the
-critical points worth sampling, and a proof found this way records its route
-as `derive:extensive`, so the extra effort is visible in the record.
+seconds, so a single claim can never hold up a run indefinitely. A proof
+found this way records its route as `derive:extensive`, so the extra effort
+is visible in the record. When a proof matters more than the time it takes,
+`extensive=True` asks for more, at real cost: it gives the same ladder to a
+claim pinned to the derive route, widens the time caps, and makes probing
+search harder for the critical points worth sampling. It changes where the
+probe looks, never how many points it runs.
 
 That is the division of labour the rest of this page assumes. Let a model
 propose the code and the claims, which is what models are good at, and let
@@ -347,40 +353,15 @@ something that cannot be persuaded decide which of them are true.
 
 ## One engine, several jobs
 
-- **If you work alongside a coding agent**, mathema is the part of the loop the
-  agent cannot talk its way past: it states claims, mathema checks them, you
-  accept or reject, and the functions you have signed off stay locked. Set a
-  PIN the agent does not know and it cannot sign off for you;
-  [working with coding agents](agents.md) covers that and the optional agent
-  tooling.
-- **If you have just inherited a codebase**, [`mathema audit`](modes/audit.md)
-  is the first hour of reading done for you: every function, where it lives as
-  a ready-made `sed -n` line range, what it touches, whether anything tests or
-  claims it, and whether it could be proven, with `--index` writing the whole
-  map to a file you can keep.
-- **If you write numerical or financial code**, the derive route proves
-  identities, bounds, derivatives, limits and integrals about ordinary Python
-  functions, and the probe route goes looking for poles, overflow and
-  non-finite results where random testing would not.
-- **If you run CI**, [`mathema verify`](modes/verify.md) gates the whole
-  store and re-checks only what changed, [`mathema check`](modes/check.md)
-  speaks JUnit and GitHub annotations, and the exit codes keep a failing claim
-  apart from a broken invocation.
-- **If you review changes**, [`mathema review`](modes/review.md) shows the
-  claim-level difference since any git ref: which verdicts flipped, which
-  claims appeared or went away.
-- **If you answer to an auditor or a model validator**, every acceptance,
-  unlock and lock is in the record with who made it and when, PIN-stamped when
-  a PIN is set, under an integrity checksum that catches edits made outside
-  mathema. [Governance and audit](governance.md) sets out who can decide what,
-  and [Security and execution](security.md) states exactly what runs when a
-  claim is checked.
-- **If you set engineering standards across teams**, mathema gives
-  AI-assisted development one gate that works the same everywhere: claims live beside the
-  code they describe, every verdict is reproducible and bound to the exact
-  code that earned it, and [Guarantees and limits](guarantees.md) states what
-  each verdict is worth, so a team's evidence means the same thing in every
-  repository.
+- **If you check numerical code**, your own or the pandas and numpy calls
+  inside it: [checking a numerical library
+  function](start.md#checking-a-numerical-library-function).
+- **If you maintain a codebase with a test suite**: [adding claims to an
+  existing codebase](start.md#adding-claims-to-an-existing-codebase).
+- **If you run CI**: [gating a pipeline with mathema
+  verify](start.md#gating-a-pipeline-with-mathema-verify).
+- **If you work alongside a coding agent**: [building with a coding
+  agent](start.md#building-with-a-coding-agent).
 
 <span class="brkw eyebrow"><span class="brk l"></span><span class="bin">Case study</span><span class="brk r"></span></span>
 
@@ -419,14 +400,15 @@ mathema check options.py --claim "for s in [50,150], k in [50,150], \
 
 <!-- example: parity output -->
 ```text
-ok   options.put_call_parity_gap: source, no side effects; claims 2/2 adjudicated (1 proven, 1 holds, 0 falsified)
+ok   options.put_call_parity_gap: source, no side effects; claims 7/7 checked (1 proven, 6 holds, 0 falsified)
 ```
 
 `proven`, over every point of a five-dimensional region of prices, rates,
 maturities and volatilities: mathema read the body as mathematics, both
-Gaussian terms cancelled, and `sigma` disappeared. The `holds` is the proof's
-float companion, the same identity run through the real code in floating
-point. No number of test cases
+Gaussian terms cancelled, and `sigma` disappeared. Of the six `holds`, one
+is the proof's computation line, the same identity run through the real code
+in floating point, and five are policy lines, one for a `nan` in each
+argument. No number of test cases
 could establish that. The [case studies](case-studies.md#put-call-parity-and-the-greeks)
 go on to the Greeks, stated as the partial derivatives they are.
 
@@ -492,7 +474,7 @@ whatever cannot yet be settled says so.
 ## Stop measuring how much code you have. Measure how much you know about it.
 
 ```bash
-pip install mathema
+pip install "mathema[all]"
 ```
 
 <p class="mx-actions">

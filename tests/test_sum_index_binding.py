@@ -54,12 +54,12 @@ def test_a_false_closed_form_is_falsified_with_an_executed_witness(fn, law):
     probe = _probe(fn, law)
     assert probe.verdict == "falsified", (probe.verdict, probe.note)
     assert probe.meta.get("mathema.corroboration") == "reproduced"
-    assert probe.counterexample and "n=" in probe.counterexample
+    assert probe.counterexample and "n = " in probe.counterexample
 
 
 def test_a_bound_index_is_not_a_sampled_coordinate_of_the_witness():
     probe = _probe(summand, "let n be [1, 20] subset Z, Sum(f(i), i, 1, n) == n*(n + 2)")
-    assert "i=" not in probe.counterexample
+    assert "i = " not in probe.counterexample
 
 
 def test_a_sum_the_code_disagrees_with_at_one_bound_only_is_falsified():

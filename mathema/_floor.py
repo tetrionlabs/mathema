@@ -1,0 +1,265 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""The degenerate containers every claim over a vector, a matrix or a
+table meets before any random draw, and the holes a random draw carries.
+
+The floor, once per claim and parameter, in order:
+
+- a vector: the zero vector (when the element domain holds 0), a
+  constant vector, a vector of length 1; per admitted hole member, an
+  all-hole vector of length 1 and of length 2, and a vector with one
+  hole at the first position and one at the last; per two admitted
+  members, a vector of the two alone and one holding both beside a
+  value;
+- a matrix: the zero matrix (when the entries may be 0), a constant
+  matrix, a rank-deficient one (its second row a copy of its first);
+  per admitted member, one hole entry and an all-hole row; per two
+  members, a first row holding both;
+- a table: per admitted member, one hole in every column and an
+  all-hole first column; per two members, a first column holding both;
+- the container itself absent, when its domain admits that.
+
+A length the claim's shape plan fixes, or a literal size in the
+binding (`^30`, `^(30,15)`), is kept: the length-1 and length-2 items
+then take that length, and every draw has that size. After the floor, a draw
+carries holes at `HOLE_RATE`: one to three positions, one member per
+draw, the members taken in turn.
+"""
+from __future__ import annotations
+
+HOLE_RATE = 0.15
+
+
+def fixed_sizes(bound) -> tuple:
+    """The size a binding's space fixes on each axis, None for an axis a
+    name leaves free: `(30,)` for `^30`, `(None, 15)` for `^(n,15)`, `()`
+    for a scalar or an unbound parameter."""
+    out = []
+    for d in tuple(getattr(bound, "dims", ()) or ()):
+        text = str(d).strip()
+        out.append(int(text) if text.isdigit() else None)
+    return tuple(out)
+
+
+def sizes(bound, rng, free=(2, 8), ndim: int = 1) -> tuple:
+    """One draw's size on each of `ndim` axes: the binding's fixed size
+    where it states one, a draw from `free` elsewhere, the two axes of a
+    square space (`^(n,n)`) equal."""
+    fixed = fixed_sizes(bound)
+    dims = tuple(getattr(bound, "dims", ()) or ())
+    out: list = []
+    for k in range(ndim):
+        size = fixed[k] if k < len(fixed) else None
+        if size is None and k > 0 and k < len(dims) and dims[k] == dims[0] \
+                and out:
+            size = out[0]
+        out.append(size if size is not None else rng.randint(*free))
+    return tuple(out)
+
+
+def vector_floor(holes: list, admits_zero: bool, length_free: bool,
+                 absent: bool = False) -> list:
+    """Intent:
+        The floor of a vector parameter, as functions of the trial's
+        random draw `base` (a list): each returns the degenerate vector
+        built from it, or None when it cannot be built from `base`.
+        `holes` are the realised hole values admitted, one per member.
+    """
+    items: list = []
+    if admits_zero:
+        items.append(lambda base: [0.0] * len(base) if base else None)
+    items.append(lambda base: [base[0]] * len(base) if base else None)
+    if length_free:
+        items.append(lambda base: [base[0]] if base else None)
+    for h in holes:
+        if length_free:
+            items.append(lambda base, h=h: [h])
+            items.append(lambda base, h=h: [h, h])
+        else:
+            items.append(lambda base, h=h: [h] * len(base) if base else None)
+        items.append(lambda base, h=h: [h, *base[1:]] if base else None)
+        items.append(lambda base, h=h: [*base[:-1], h] if len(base) > 1 else None)
+    for h, g in _pairs(holes):
+        if length_free:
+            items.append(lambda base, h=h, g=g: [h, g])
+            items.append(lambda base, h=h, g=g: [h, g, base[0]] if base else None)
+        else:
+            items.append(lambda base, h=h, g=g: [h, g, *base[2:]] if len(base) > 1
+                         else None)
+    if absent:
+        items.append(lambda base: _ABSENT)
+    return items
+
+
+#: the ordinary draws a vector takes before its magnitude corners, so
+#: a claim false at ordinary points falls there first
+_DRAWS_BEFORE_CORNERS = 4
+
+
+def corner_floor(corners: list, length_free: bool) -> list:
+    """Intent:
+        Floor items for a vector's magnitude corners
+        (`probing.sequence_corners`), one per corner, after
+        `_DRAWS_BEFORE_CORNERS` items that pass the trial's random draw
+        through unchanged: the pair itself when the length is free, else
+        the pair repeated to the trial's length (None below 2).
+    """
+    if not corners:
+        return []
+    items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
+    for pair in corners:
+        if length_free:
+            items.append(lambda base, pair=pair: list(pair))
+        else:
+            items.append(lambda base, pair=pair: [pair[i % 2] for i in range(len(base))]
+                         if len(base) > 1 else None)
+    return items
+
+
+def table_corner_floor(corners: list) -> list:
+    """Intent:
+        Floor items for a table's magnitude corners, one per corner,
+        after `_DRAWS_BEFORE_CORNERS` items that pass the draw through:
+        every column set to the pair repeated to the column's length
+        (the pair itself for a column shorter than 2).
+    """
+    if not corners:
+        return []
+    items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
+
+    def column(pair, col):
+        n = len(col) if isinstance(col, (list, tuple)) and len(col) > 1 else 2
+        return [pair[i % 2] for i in range(n)]
+    for pair in corners:
+        items.append(lambda base, pair=pair: {c: column(pair, col)
+                                              for c, col in base.items()}
+                     if isinstance(base, dict) and base else None)
+    return items
+
+
+def _pairs(holes: list) -> list:
+    """Every two of the admitted hole values, in order, that one
+    container can hold apart: `pd.NA` is a nullable column's hole, which
+    pandas turns `nan` into and an object column of numbers does not
+    aggregate, so it pairs with nothing."""
+    def alone(h) -> bool:
+        return type(h).__name__ == "NAType"
+    return [(h, g) for i, h in enumerate(holes) for g in holes[i + 1:]
+            if not (alone(h) or alone(g))]
+
+
+def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
+    """Intent:
+        The floor of a matrix parameter, as functions of the trial's
+        random draw `base` (a list of equal-length rows).
+    """
+    items: list = []
+    if admits_zero:
+        items.append(lambda base: [[0.0] * len(r) for r in base] if base else None)
+    items.append(lambda base: [[base[0][0]] * len(r) for r in base]
+                 if base and base[0] else None)
+    items.append(lambda base: [list(base[0]), list(base[0]), *map(list, base[2:])]
+                 if len(base) > 1 else None)
+    for h in holes:
+        items.append(lambda base, h=h: [[h, *base[0][1:]], *map(list, base[1:])]
+                     if base and base[0] else None)
+        items.append(lambda base, h=h: [[h] * len(base[0]), *map(list, base[1:])]
+                     if base and base[0] else None)
+    for h, g in _pairs(holes):
+        items.append(lambda base, h=h, g=g: [[h, g, *base[0][2:]], *map(list, base[1:])]
+                     if base and len(base[0]) > 1 else None)
+    if absent:
+        items.append(lambda base: _ABSENT)
+    return items
+
+
+def table_floor(holes: list, absent: bool = False) -> list:
+    """Intent:
+        The floor of a table parameter, as functions of the trial's
+        random draw `base` (a dict of equal-length column lists).
+    """
+    items: list = []
+    for h in holes:
+        items.append(lambda base, h=h: {c: [h, *col[1:]] for c, col in base.items()}
+                     if base else None)
+        items.append(lambda base, h=h: {c: ([h] * len(col) if k == 0 else list(col))
+                                        for k, (c, col) in enumerate(base.items())}
+                     if base else None)
+    for h, g in _pairs(holes):
+        items.append(lambda base, h=h, g=g: {c: ([h, g, *col[2:]] if k == 0 else list(col))
+                                             for k, (c, col) in enumerate(base.items())}
+                     if base and len(next(iter(base.values()))) > 1 else None)
+    if absent:
+        items.append(lambda base: _ABSENT)
+    return items
+
+
+class _Absent:
+    """The floor's item for the container itself absent."""
+
+
+_ABSENT = _Absent()
+
+
+def gapped(values: list, holes: list, rng, turn: int) -> "tuple[list, int]":
+    """Intent:
+        `values` with one to three positions holding a hole, at rate
+        `HOLE_RATE`, the member the `turn`-th of `holes`, as `(values,
+        next turn)`; `values` unchanged when the draw carries none or
+        no member is admitted.
+    """
+    if not holes or not values or rng.random() >= HOLE_RATE:
+        return values, turn
+    h = holes[turn % len(holes)]
+    out = list(values)
+    for k in rng.sample(range(len(out)), min(len(out), rng.randint(1, 3))):
+        out[k] = h
+    return out, turn + 1
+
+
+def gapped_rows(rows: list, holes: list, rng, turn: int) -> "tuple[list, int]":
+    """`gapped` over a matrix's entries."""
+    if not holes or not rows or not rows[0] or rng.random() >= HOLE_RATE:
+        return rows, turn
+    h = holes[turn % len(holes)]
+    out = [list(r) for r in rows]
+    cells = [(i, j) for i in range(len(out)) for j in range(len(out[i]))]
+    for i, j in rng.sample(cells, min(len(cells), rng.randint(1, 3))):
+        out[i][j] = h
+    return out, turn + 1
+
+
+class ContainerDraws:
+    """Intent:
+        One container parameter's draws: the floor's items in order, one
+        per trial, then random draws carrying holes at `HOLE_RATE`.
+        `shape` is `"vec"`, `"mat"` or `"table"`.
+    """
+
+    def __init__(self, shape: str, floor: list, holes: list):
+        self.shape, self.floor, self.holes = shape, list(floor), list(holes)
+        self.turn = 0
+
+    def remaining(self) -> int:
+        return len(self.floor)
+
+    def next(self, base, rng):
+        """The value this trial draws, from the random draw `base`."""
+        while self.floor:
+            made = self.floor.pop(0)(base)
+            if made is _ABSENT:
+                return None
+            if made is not None:
+                return made
+        if self.shape == "vec":
+            out, self.turn = gapped(base, self.holes, rng, self.turn)
+            return out
+        if self.shape == "mat":
+            out, self.turn = gapped_rows(base, self.holes, rng, self.turn)
+            return out
+        if isinstance(base, dict):
+            out = {}
+            for c, col in base.items():
+                out[c], self.turn = gapped(col, self.holes, rng, self.turn)
+            return out
+        return base

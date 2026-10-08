@@ -19,9 +19,15 @@ new code should import from here.
 """
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sympy
+
+import fractions
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
 from ._scan import _split_commas
@@ -180,7 +186,10 @@ _FOR_PREFIX = re.compile(r"^\s*for\s+", re.DOTALL)
 _MEMBERSHIP_OPS = r"(?:in|\\elem|\\in|∈)"
 # the name may be dotted (`self.rate`, `cfg.a`): a bundled parameter's
 # field is quantified exactly like a scalar parameter
-_MEMBERSHIP_PREFIX = re.compile(rf"^\s*(?P<name>\w+(?:\.\w+)?)\s+{_MEMBERSHIP_OPS}\s+")
+# a binding's name: a parameter, or a path into one through fields and
+# indices, `o.qty`, `o.address.zip`, `o.lines[0].sku`, `o.lines[*].qty`
+_PATH = r"\w+(?:\.\w+|\[(?:\d+|\*)\])*"
+_MEMBERSHIP_PREFIX = re.compile(rf"^\s*(?P<name>{_PATH})\s+{_MEMBERSHIP_OPS}\s+")
 # "D ⊂ R/Z/N" / "D \sub R/Z/N" / "D \subset R/Z/N", a type refinement,
 # found anywhere in the binding text rather than anchored to the end, so
 # a missing-value override (∪ {∅} / \ {∅}, below) reads naturally on
@@ -202,10 +211,10 @@ _SUBSET_OPS = r"(?:\\subset|\\sub|subset|⊂)"
 # `subset`/`⊂` keyword, see render_domain's own ascii-mode preference
 # for this spelling over `subset R`/`subset Z`.
 _SUBSET_ANYWHERE = re.compile(
-    rf"\s*(?:{_SUBSET_OPS}\s+|:\s*)(?P<type>R|Z|N|C|ℝ|ℤ|ℕ|ℂ|real|float|integer|int|complex)\s*")
+    rf"\s*(?:{_SUBSET_OPS}\s+|:\s*)(?P<type>R|Z|N|C|ℝ|ℤ|ℕ|ℂ|real|float|integer|int|complex|str)\s*")
 _SUBSET_ASCII = {"ℝ": "R", "ℤ": "Z", "ℕ": "N", "ℂ": "C",
                 "real": "R", "float": "R", "integer": "Z", "int": "Z",
-                "complex": "C"}
+                "complex": "C", "str": "S"}
 # "D \ {v1, v2, ...}" / "D, exclude={v1, v2, ...}", a trailing
 # exclusion, subtracted from whatever D's own pieces already cover.
 # `_EXCLUDE_SUFFIX` is the inline spelling, anchored to the end of one
@@ -220,24 +229,6 @@ _STANDALONE_EXCLUDE = re.compile(r"^\s*exclude\s*=\s*\{\s*(?P<set>.*?)\s*\}\s*$"
 # trailing exclusion/type-refinement clauses have already been peeled
 # off it).
 _UNION_SPLIT = re.compile(r"\s*(?:\||∪)\s*")
-# The rendered missing-value clause, union side (`∪ {∅}` / `| {missing}`).
-# Missing is included by default, so this states the resolved policy
-# rather than changing it, but it has to be peeled off before the
-# union split, or `ℕ ∪ {∅}` reads as two pieces (a named set unioned
-# with a set containing the missing sentinel) instead of "ℕ, missing
-# allowed", and `[0,1] \ {1} ⊂ ℝ ∪ {∅}` folds the clause into the
-# exclusion set and fails to parse at all. The exclusion side
-# (`\ {∅}`) is deliberately NOT matched here: excluding missing is a
-# real narrowing and belongs in `_EXCLUDE_SUFFIX`'s hands.
-#
-# Two spellings, because rendering has two: the unicode set clause
-# (`∪ {∅}`) and the ascii annotation-fused one (`:float|missing`, or a
-# bare `N|missing`). The ascii form matters as much as the unicode one;
-# `|` is also the union operator, so an unstripped `N|missing` reads
-# as "the named set N unioned with a set called missing".
-_UNION_MISSING_SUFFIX = re.compile(
-    r"\s*(?:(?:\||∪)\s*\{\s*(?:∅|missing|NA|nan|None)\s*\}"
-    r"|\|\s*(?:missing|NA|nan|None))\s*$")
 # One union piece: an interval (either spelling, `(0, 1]` bracket
 # semantics as ever), a discrete set, or a bare named set (R/Z/N),
 # the same three shapes `split_quantifier()` always supported, just
@@ -247,11 +238,31 @@ _PIECE_RANGE = re.compile(r"^([\[\(])\s*([^,]+?)\s*,\s*\.\.\.\s*,\s*(.+?)\s*([\]
 _PIECE_INTERVAL = re.compile(r"^([\[\(])\s*([^,]+?)\s*,\s*(.+?)\s*([\]\)])$")
 _PIECE_SET = re.compile(r"^\{\s*(.*?)\s*\}$")
 _PIECE_NAMED = re.compile(r"^(R|Z|N|C|ℝ|ℤ|ℕ|ℂ)$")
+# a language piece, `L[ascii]`, `L[latin-1]`, `L[myapp.models.Order]`:
+# a name, or a dotted path an adaptor resolves; the double-struck `𝕃`
+# (U+1D543) is the same piece on input. A bare `L` is not a piece (it
+# is refused, as any unknown bare name is), so `L^2` never reads as a
+# space.
+_PIECE_LANGUAGE = re.compile(
+    r"^(?:L|\U0001d543)\[\s*(?P<name>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\s*"
+    r"(?:,\s*(?P<refine>.+?))?\s*\]$")
+# a refinement inside a language piece, `L[ascii, len <= 80]`,
+# `L[json, depth <= 6]`: a key and one bound, or a key and an interval
+# of whole numbers; the key means whatever the language that serves it
+# says, and core reads none of them
+_REFINE_BOUND = re.compile(r"^(?P<key>[A-Za-z_]\w*)\s*(?P<op><=|<|>=|>)\s*(?P<n>\d+)$")
+_REFINE_INTERVAL = re.compile(
+    r"^(?P<key>[A-Za-z_]\w*)\s+in\s+(?P<lb>[\[(])\s*(?P<lo>\d+)\s*,\s*(?P<hi>\d+)\s*"
+    r"(?P<rb>[\])])$")
 # Sampling-intensity modifiers, not a parameter binding at all: `n=500`
 # in the same comma-list sets domain["n"] (how many draws/rows, not a
 # bound on any variable); domain means scope *and* intensity of
 # verification, not just numeric range.
 _BINDING_INTENSITY = re.compile(r"^\s*n\s*=\s*(\d+)\s*$")
+# something that reads as a path binding but is not a path, refused by
+# name rather than left to read as a second relation
+_PATH_LIKE_BINDING = re.compile(
+    rf"^\s*(?P<path>\w+[.\[][^\s]*)\s+{_MEMBERSHIP_OPS}\s+")
 _BOUND_CONSTS = {"pi": math.pi, "-pi": -math.pi, "e": math.e,
                  "oo": math.inf, "-oo": -math.inf,
                  "infinity": math.inf, "-infinity": -math.inf}
@@ -260,10 +271,13 @@ _BOUND_CONSTS = {"pi": math.pi, "-pi": -math.pi, "e": math.e,
 _INTEGER_MEMBER = re.compile(r"^[+-]?\d+$")
 
 
-def _set_value(s: str):
-    """One element of a discrete-set domain (`x in {...}`): the missing-
-    value sentinel (`∅`/`missing`/`NA`/`nan`/`None`, checked first since
-    none of these could plausibly mean anything else in this position),
+def _set_value(s: str, *, in_element: bool = False, on_field: bool = False):
+    """One element of a discrete-set domain (`x in {...}`): a sentinel
+    (`None`/`absent` for absence, `∅`/`missing` for the hole class,
+    `nan`/`NA`/`null`/`NaT` or a defined spelling for one hole member;
+    checked first since none of these could plausibly mean anything
+    else in this position, and inside an element clause a `None` is the
+    `null` member),
     a quoted string literal, a bare `True`/`False`, or else the same
     numeric/named-constant parsing _bound() does for interval bounds.
     Kept separate from _bound() rather than widening what an interval
@@ -282,8 +296,9 @@ def _set_value(s: str):
     themselves, and rendering them back as `{1.0, 2.0, 3.0}` would
     describe a different set than the one written."""
     s = s.strip()
-    if s in _MISSING_TOKENS:
-        return MISSING
+    sentinel = _sentinel_of(s, in_element=in_element, on_field=on_field)
+    if sentinel is not None:
+        return sentinel
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
         return s[1:-1]
     if s in ("True", "False"):
@@ -381,24 +396,149 @@ class Interval(tuple):
         return f"{left}{self[0]}, {self[1]}{right}"
 
 
-class _MissingType:
-    """The one canonical sentinel for a missing/null value inside a
-    domain's `excluded`/unioned set, spelled `∅`/`missing`/`NA`/`nan`
-    on input, always this one object internally (identity-compared, so
-    `MISSING in dom.excluded` is a plain membership test regardless of
-    which spelling produced it)."""
+class ReachInterval(Interval):
+    """The computation's reading of an unbounded direction: an
+    `Interval` whose `reach_lo`/`reach_hi` end is the finite magnitude
+    (the pseudo-infinity, else the number representation's maximum)
+    standing in for an infinite end, closed there. A sampler reads the
+    marked end as unbounded, drawing log-uniformly over the decades up to
+    it, and every other consumer sees an ordinary finite interval. `bare`
+    marks a parameter no domain was declared for, sampled as an undeclared
+    parameter is, plus the far draws."""
+    def __new__(cls, lo: float, hi: float, closed_lo: bool = True,
+                closed_hi: bool = True, *, reach_lo: bool = False,
+                reach_hi: bool = False, bare: bool = False):
+        self = super().__new__(cls, lo, hi, closed_lo, closed_hi)
+        self.reach_lo = reach_lo
+        self.reach_hi = reach_hi
+        self.bare = bare
+        return self
+
+
+class _Sentinel:
+    """A missing value as a domain states it, never a value a function
+    receives. Two kinds: `absent` is the absence of the object (the
+    parameter, the container, the field is `None`), and `missing` is a
+    hole in a slot, an element-wise value with no computable content.
+    A hole sentinel names either the whole class (`member` None, spelled
+    `missing` or `∅`) or one member of it (`nan`, `NA`, `null`, `NaT`,
+    or a spelling a definition row adds). An absence sentinel names the
+    class (`member` None, spelled `absent` or `None`) or one of its two
+    members: `null`, the field or key is there holding `None`, and
+    `unset`, no key, no attribute, an index past the end, or a step
+    below an absent object. Equal and hashed by `(kind, member)`, so
+    `MISSING in dom.excluded` is a plain membership test whichever
+    spelling produced it."""
+    __slots__ = ("kind", "member")
+
+    def __init__(self, kind: str, member: "str | None" = None) -> None:
+        self.kind = kind
+        self.member = member
+
+    @property
+    def word(self) -> str:
+        """The canonical ascii word: `None`, `missing`, or the member."""
+        if self.kind == "absent":
+            return self.member if self.member is not None else "None"
+        return self.member if self.member is not None else "missing"
+
     def __repr__(self) -> str:
-        return "∅"
+        if self.kind == "missing" and self.member is None:
+            return "∅"
+        return self.word
 
     def __eq__(self, other) -> bool:
-        return self is other
+        return (isinstance(other, _Sentinel) and self.kind == other.kind
+                and self.member == other.member)
 
     def __hash__(self) -> int:
-        return hash("mathema.MISSING")
+        return hash(("mathema.sentinel", self.kind, self.member))
+
+    def __reduce__(self):
+        return (_Sentinel, (self.kind, self.member))
 
 
-MISSING = _MissingType()
-_MISSING_TOKENS = {"∅", "missing", "NA", "nan", "None"}
+#: the older name of the sentinel type
+_MissingType = _Sentinel
+
+#: a hole in a slot, the whole class: every member the slot type has
+MISSING = _Sentinel("missing")
+#: the absence of the object
+ABSENT = _Sentinel("absent")
+#: the absence member `null`: the field or key is there, holding `None`
+ABSENT_NULL = _Sentinel("absent", "null")
+#: the absence member `unset`: no key, no attribute, an index past the
+#: end, or a step below an absent object
+ABSENT_UNSET = _Sentinel("absent", "unset")
+
+
+def member(name: str) -> _Sentinel:
+    """The hole sentinel naming one member of the class, `member("nan")`."""
+    return _Sentinel("missing", str(name))
+
+
+#: spellings of absence: at the top level of a binding they set
+#: `Domain.absent`; inside an element clause a `None` is the `null` hole
+_ABSENCE_TOKENS = frozenset({"None", "absent"})
+#: spellings of a hole: the class (`∅`, `missing`) and the built-in
+#: members; a definition row adds the spellings it names
+_HOLE_TOKENS = {"∅", "missing", "nan", "NA", "null", "NaT"}
+#: the class spellings among the hole tokens
+_CLASS_TOKENS = frozenset({"∅", "missing"})
+#: every sentinel spelling, the older name
+_MISSING_TOKENS = _HOLE_TOKENS | _ABSENCE_TOKENS
+
+
+def sentinel_tokens() -> frozenset:
+    """Every word read as a sentinel: the absence words and the hole
+    words, defined spellings included."""
+    return frozenset(_ABSENCE_TOKENS | _HOLE_TOKENS | {"unset"})
+
+
+def add_hole_spelling(word: str) -> None:
+    """Read `word` as a hole member from now on (a definition row's
+    spelling, `NaN` for a runtime that spells its hole that way)."""
+    _HOLE_TOKENS.add(str(word))
+
+
+def unset_refusal(param: str) -> str:
+    """Why `unset` cannot describe a parameter: a call always passes it."""
+    return (f"{param} is a parameter, which every call passes, so it cannot be "
+            f"unset; unset is a key or field left out of a record. The absence "
+            f"of a parameter's value is None: write absent")
+
+
+def _sentinel_of(token: str, *, in_element: bool = False,
+                 on_field: bool = False) -> "_Sentinel | None":
+    """The sentinel a word spells, or None when it spells none. A `None`
+    inside an element clause is the `null` member of the hole class.
+    `unset` is always the absence member; `null` is the absence member
+    on a path that ends at a field (`on_field`), and the hole member
+    anywhere else."""
+    token = token.strip()
+    if token in _ABSENCE_TOKENS:
+        return member("null") if in_element else ABSENT
+    if token == "unset":
+        return ABSENT_UNSET
+    if token == "null" and on_field and not in_element:
+        return ABSENT_NULL
+    if token in _CLASS_TOKENS:
+        return MISSING
+    if token in _HOLE_TOKENS:
+        return member(token)
+    return None
+
+
+def is_sentinel(value) -> bool:
+    """Whether `value` is one of this module's sentinels."""
+    return isinstance(value, _Sentinel)
+
+
+def is_hole_sentinel(value) -> bool:
+    """Whether `value` is a hole sentinel, the class or a member."""
+    return isinstance(value, _Sentinel) and value.kind == "missing"
+
+
 # Type names of known missing-value sentinels that aren't themselves
 # IEEE-754 NaN-like (pandas' pd.NA/pd.NaT: `pd.NA != pd.NA` is itself a
 # non-boolean NA, not a clean True/False, so the self-inequality check
@@ -407,16 +547,18 @@ _MISSING_TOKENS = {"∅", "missing", "NA", "nan", "None"}
 # library's own null type name is one more string here) without ever
 # turning pandas, or anything else, into a hard dependency of core.
 _MISSING_TYPE_NAMES = frozenset({"NAType", "NaTType"})
+_MEMBER_TYPE_NAMES = {"NAType": "NA", "NaTType": "NaT"}
 
 
 def is_missing(value) -> bool:
-    """A value is missing if it's `None`, this module's own `MISSING`
-    sentinel, IEEE-754 NaN (self-inequality catches a Python `float`, a
+    """A value is missing if it's `None`, one of this module's
+    sentinels, IEEE-754 NaN (self-inequality catches a Python `float`, a
     numpy `float64`, and a pandas float uniformly, all three being
     ordinary IEEE-754 under the hood, with no import of any of them
     needed), or one of a small, extensible set of known missing-
-    sentinel type names checked by name alone."""
-    if value is None or value is MISSING:
+    sentinel type names checked by name alone. This is the slot
+    reading: a `None` held in a slot is the `null` hole."""
+    if value is None or isinstance(value, _Sentinel):
         return True
     try:
         if value != value:
@@ -426,17 +568,315 @@ def is_missing(value) -> bool:
     return type(value).__name__ in _MISSING_TYPE_NAMES
 
 
+def is_absent(value) -> bool:
+    """Whether `value` is the absence of an object: `None`, or an
+    absence sentinel (the class or a member)."""
+    return value is None or (isinstance(value, _Sentinel) and value.kind == "absent")
+
+
+def member_of(value) -> "str | None":
+    """The member word a missing slot value is (`nan`, `NA`, `NaT`, and
+    `null` for a `None` held in a slot), the sentinel's own word for a
+    sentinel, or None for a value that is not missing."""
+    if isinstance(value, _Sentinel):
+        return value.word
+    if value is None:
+        return "null"
+    name = _MEMBER_TYPE_NAMES.get(type(value).__name__)
+    if name is not None:
+        return name
+    try:
+        if value != value:
+            return "nan"
+    except Exception:
+        return None
+    return None
+
+
 # transitional alias: is_missing was _is_missing until the 2026-08
 # refactor; slated for removal once nothing references the old name.
 _is_missing = is_missing
 
 
 @dataclass(frozen=True)
+class LanguageRef:
+    """One language piece of a domain, `L[ascii]`: the name a language
+    resolves under (`mathema.languages.resolve_language`). It sits in
+    `Domain.pieces` beside an `Interval` or a `frozenset`, under
+    `base_type` `"L"`, so a union with a finite set, an exclusion and
+    the missing-value policy all read as they do for a numeric domain.
+    Membership, sampling and the record's description of the language
+    all go through the resolved `Language`; nothing here interprets
+    the name. A frozen dataclass rather than a tuple, since every
+    interval test in this module reads a tuple piece as `(lo, hi)`."""
+    name: str
+    #: the refinements the piece carries, `(key, Interval)` pairs in key
+    #: order (`L[json, depth <= 6, nodes <= 200]`); a key is served by
+    #: whatever refinement is registered under it
+    refinements: tuple = ()
+
+    def refinement(self, key: str):
+        """The interval refinement `key` states, or None."""
+        return dict(self.refinements).get(key)
+
+    @property
+    def text(self) -> str:
+        """What sits inside the brackets: the name, then each
+        refinement, `json, depth <= 6, nodes <= 200`."""
+        return ", ".join([self.name, *(render_refinement(key, interval)
+                                       for key, interval in self.refinements)])
+
+    def __repr__(self) -> str:
+        return f"L[{self.text}]"
+
+
+def _whole(v) -> str:
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def render_refinement(key: str, interval) -> str:
+    """A refinement as text: `key <= 80` or `key < 80` for an upper
+    bound from zero, `key >= 1` or `key > 20` for a lower bound alone,
+    and `key in [1, 80]` for both."""
+    lo, hi = interval[0], interval[1]
+    closed_lo = getattr(interval, "closed_lo", True)
+    closed_hi = getattr(interval, "closed_hi", True)
+    if hi == float("inf"):
+        return f"{key} {'>=' if closed_lo else '>'} {_whole(lo)}"
+    if lo == 0 and closed_lo:
+        return f"{key} {'<=' if closed_hi else '<'} {_whole(hi)}"
+    return (f"{key} in {'[' if closed_lo else '('}{_whole(lo)}, "
+            f"{_whole(hi)}{']' if closed_hi else ')'}")
+
+
+def refinement_range(interval) -> "tuple[int, int | None]":
+    """The closed range of whole numbers a refinement keeps, the upper
+    end None when unbounded."""
+    lo, hi = interval[0], interval[1]
+    first = int(lo) if getattr(interval, "closed_lo", True) else int(lo) + 1
+    if hi == float("inf"):
+        return first, None
+    last = int(hi) if getattr(interval, "closed_hi", True) else int(hi) - 1
+    return first, last
+
+
+def _parse_refinement(text: str, whole: str) -> tuple:
+    """`(key, Interval)` for one refinement, or InvalidDomain naming the
+    spellings that are read."""
+    t = text.strip()
+    m = _REFINE_BOUND.match(t)
+    if m is not None:
+        key, n, op = m.group("key"), float(m.group("n")), m.group("op")
+        interval = {"<=": Interval(0.0, n), "<": Interval(0.0, n, True, False),
+                    ">=": Interval(n, float("inf")),
+                    ">": Interval(n, float("inf"), False, True)}[op]
+    else:
+        m = _REFINE_INTERVAL.match(t)
+        if m is None:
+            raise InvalidDomain(
+                f"{whole!r}: a language refinement is `key <= n`, `key < n`, "
+                f"`key >= n`, `key > n` or `key in [lo, hi]` with whole "
+                f"numbers, `len <= 80` or `depth in [1, 6]`; {t!r} is not one")
+        key = m.group("key")
+        interval = Interval(float(m.group("lo")), float(m.group("hi")),
+                            m.group("lb") == "[", m.group("rb") == "]")
+    first, last = refinement_range(interval)
+    if last is not None and last < max(first, 0):
+        raise InvalidDomain(f"{whole!r}: no {key} satisfies {t!r}")
+    return key, interval
+
+
+def _parse_refinements(text: str, whole: str) -> tuple:
+    """Every refinement a piece states, in key order; a key stated twice
+    is refused."""
+    found: dict = {}
+    for part in _split_commas(text):
+        key, interval = _parse_refinement(part, whole)
+        if key in found:
+            raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
+        found[key] = interval
+    return tuple(sorted(found.items()))
+
+
+_PATH_STEP = re.compile(r"\.(\w+)|\[(\d+|\*)\]")
+
+
+def path_steps(path: str) -> "list[str | int]":
+    """The steps of a path after its root: a field name, an index, or
+    `"*"` for every element (`.lines[*].qty` is `["lines", "*",
+    "qty"]`)."""
+    steps: list = []
+    for field_name, index in _PATH_STEP.findall(path):
+        steps.append(field_name if field_name else ("*" if index == "*" else int(index)))
+    return steps
+
+
+def path_leaves(value, steps) -> list:
+    """Intent:
+        Every `(where, leaf)` a path reaches from `value`, `where` the
+        concrete steps taken (an index in place of each `"*"`): one
+        leaf, or one per element where a step is `"*"`. Where the `None`
+        sits decides the kind: a field, attribute or key holding `None`
+        reaches `ABSENT_NULL`; a key or attribute not there, an index
+        past the end, or a step below an absent object reaches
+        `ABSENT_UNSET`; an element holding `None` reaches the hole
+        member `null`, and so does every step below it; a NaN is a hole
+        wherever it sits and is reached as itself, as is a step below
+        it. Walked with an explicit stack, never by recursion.
+    """
+    out: list = []
+    # (current value, next step, steps taken, reached as an element)
+    stack = [(value, 0, (), False)]
+    while stack:
+        current, i, where, element = stack.pop()
+        if i == len(steps):
+            if current is None:
+                current = member("null") if element else ABSENT_NULL
+            out.append((where, current))
+            continue
+        step = steps[i]
+        if current is None:
+            out.append((where, member("null") if element else ABSENT_UNSET))
+            continue
+        if isinstance(current, _Sentinel) or is_missing(current):
+            out.append((where, current))
+            continue
+        if step == "*":
+            try:
+                items = list(current)
+            except TypeError:
+                out.append((where, ABSENT_UNSET))
+                continue
+            stack.extend((item, i + 1, where + (k,), True)
+                         for k, item in reversed(list(enumerate(items))))
+            continue
+        if isinstance(step, int):
+            try:
+                stack.append((current[step], i + 1, where + (step,), True))
+            except (IndexError, KeyError, TypeError):
+                out.append((where + (step,), ABSENT_UNSET))
+            continue
+        if isinstance(current, dict):
+            if step in current:
+                stack.append((current[step], i + 1, where + (step,), False))
+            else:
+                out.append((where + (step,), ABSENT_UNSET))
+        elif hasattr(current, step):
+            stack.append((getattr(current, step), i + 1, where + (step,), False))
+        else:
+            out.append((where + (step,), ABSENT_UNSET))
+    return out
+
+
+def path_values(value, steps) -> list:
+    """Every value a path reaches from `value` (`path_leaves` without
+    where each was reached)."""
+    return [leaf for _where, leaf in path_leaves(value, steps)]
+
+
+def without_sentinels(bound):
+    """`bound` with every sentinel left out, the values alone a value is
+    drawn from: a set's sentinel members, a domain's sentinel pieces
+    and its absence."""
+    from dataclasses import replace
+    if isinstance(bound, frozenset):
+        return frozenset(v for v in bound if not isinstance(v, _Sentinel))
+    if not isinstance(bound, Domain):
+        return bound
+    pieces = []
+    for p in bound.pieces:
+        if isinstance(p, frozenset):
+            p = frozenset(v for v in p if not isinstance(v, _Sentinel))
+            if not p:
+                continue
+        pieces.append(p)
+    return replace(bound, pieces=tuple(pieces), absent=False,
+                   excluded=frozenset(v for v in bound.excluded
+                                      if not isinstance(v, _Sentinel)))
+
+
+def absence_members(bound) -> tuple:
+    """The members of absence a binding states it admits, `("null",
+    "unset")` for `| {None}`, one of them when the other is excluded;
+    `()` where the binding does not state absence."""
+    dom = _as_domain(bound)
+    if not (_absence_decided(dom) or _is_enumerated(dom)):
+        return ()
+    return tuple(m.member for m in (ABSENT_NULL, ABSENT_UNSET) if admits(dom, m))
+
+
+def path_text(root: str, where: tuple) -> str:
+    """The concrete path `where` spells from `root`: `o.lines[1].qty`."""
+    return root + "".join(f"[{s}]" if isinstance(s, int) else f".{s}" for s in where)
+
+
+def leaf_words(path: str, leaf) -> "str | None":
+    """How a witness names what a path reached when it is not a value:
+    `d.note = null (absent)`, `d.note unset`, `o.lines[1] = null
+    (hole)`, `o.lines[0].qty = nan`; None for a value."""
+    if leaf == ABSENT_UNSET:
+        return f"{path} unset"
+    if leaf == ABSENT_NULL:
+        return f"{path} = null (absent)"
+    word = member_of(leaf)
+    if word is None:
+        return None
+    return f"{path} = null (hole)" if word == "null" else f"{path} = {word}"
+
+
+def path_bindings_verdict(value, root: str, bindings: dict) -> "str | None":
+    """Intent:
+        How the path bindings rooted at `root` (`{"o.lines[*].qty":
+        bound}`) judge `value`: None when every value each path reaches
+        is in its bound; `"no value"` when a path reaches an absence or
+        a hole (a key left out, an index past the end, a field holding
+        None, a nan) the bound does not admit; `"outside"` when it
+        reaches a value outside the bound. Each bound is read as a path
+        bound (`PATH_DEFAULTS`): it admits neither kind of absence
+        unless it says so.
+    """
+    for key, bound in bindings.items():
+        if not (key.startswith(root + ".") or key.startswith(root + "[")):
+            continue
+        dom = complete(bound, PATH_DEFAULTS)
+        for leaf in path_values(value, path_steps(key[len(root):])):
+            try:
+                inside = domain_contains(leaf, dom)
+            except Exception:
+                inside = False
+            if inside:
+                continue
+            if isinstance(leaf, _Sentinel) or is_missing(leaf):
+                return "no value"
+            return "outside"
+    return None
+
+
+def path_bindings_hold(value, root: str, bindings: dict) -> bool:
+    """Intent:
+        Whether every path binding rooted at `root` holds of `value`
+        (`path_bindings_verdict` finds nothing outside).
+    """
+    return path_bindings_verdict(value, root, bindings) is None
+
+
+def language_ref(text: str) -> "LanguageRef | None":
+    """The `LanguageRef` the inside of `L[...]` spells (`unicode`,
+    `unicode, len <= 80`), or None when it spells none."""
+    m = _PIECE_LANGUAGE.match(f"L[{text}]")
+    if m is None:
+        return None
+    refine = m.group("refine")
+    return LanguageRef(m.group("name"), _parse_refinements(refine, text) if refine else ())
+
+
+@dataclass(frozen=True)
 class Domain:
     """A domain that's more than one bare `Interval`/`"Z"`/`"N"`/
     `frozenset` (`split_quantifier()`'s original three shapes): a union
-    of one or more `pieces` (each an `Interval` or a discrete-value
-    `frozenset`), restricted to `base_type` (`"R"`/`"Z"`/`"N"`), minus
+    of one or more `pieces` (each an `Interval`, a discrete-value
+    `frozenset`, or under `base_type` `"L"` a `LanguageRef`),
+    restricted to `base_type` (`"R"`/`"Z"`/`"N"`/`"C"`/`"L"`), minus
     whatever concrete values sit in `excluded` (which may include
     `MISSING`). Every domain the rest of the codebase already produces
     is the trivial case of this shape, `split_quantifier()` only
@@ -464,14 +904,34 @@ class Domain:
     # measures the k-th dim, and each name is a first-class symbol in
     # a premise or law.
     dims: tuple = ()
+    # the object itself may be absent (`None`): the parameter, or the
+    # whole vector or matrix of a space
+    absent: bool = False
+    # the members the hole class stands for on this slot type, resolved
+    # once by `complete()` from the annotation, the runtime type and the
+    # definition rows (`("nan",)` for a float slot); never rendered, the
+    # class renders as its word
+    members: tuple = field(default=(), compare=False)
+    # the defaults `complete()` filled the domain from, which the
+    # rendering reads to state an exclusion that narrows them
+    policy: "MissingDefaults | None" = field(default=None, compare=False,
+                                             repr=False)
+    # a `⊂ T` / `: T` clause stated the whole missing-value policy: what
+    # it does not admit it excludes
+    clause: bool = False
 
 
 # the closed vocabulary of base types a Domain may carry. Every
 # function that projects a domain into sympy or answers membership
 # checks against this set and refuses an unknown name loudly, an
 # unrecognized type silently treated as real is a wrong proof waiting
-# to happen, not a default.
-KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C"})
+# to happen, not a default. `"L"` is a language domain (`L[ascii]`):
+# its pieces are `LanguageRef`s and finite sets, it has no real-set
+# reading, and its members are strings or structured values.
+#: `S` is the type of strings, the fact a `str` annotation states: it
+#: has no pieces of its own beyond a finite set of members, and no
+#: real-set reading
+KNOWN_BASE_TYPES = frozenset({"R", "Z", "N", "C", "L", "S"})
 
 
 def _require_known_base_type(base_type: str) -> None:
@@ -497,11 +957,12 @@ def _real_scalar(value):
     Notes:
         A `complex` with zero imaginary part reads as its real part
         (3+0j is the number 3); one with a nonzero imaginary part is
-        not a member of any R/Z/N domain.
+        not a member of any R/Z/N domain. A `Fraction` is its own exact
+        value, compared exactly against the endpoints.
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, fractions.Fraction)):
         return value
     if isinstance(value, complex):
         return value.real if value.imag == 0 else None
@@ -515,16 +976,16 @@ def _as_domain(bound) -> Domain:
         render_domain().
 
     Notes:
-        A bare "Z"/"N" string carries no missing-value exclusion by
-        default, the same as parse_binding() applies for grammar-parsed
-        text; missing is included unless a binding's own text
-        explicitly excludes it. A hand-built Domain object is returned
-        unchanged.
+        A bare "Z"/"N" string is a named type, which states the whole
+        missing-value policy (nothing admitted); a bare interval states
+        none of it. A hand-built Domain object is returned unchanged.
     """
     if bound is None:
         return Domain()
     if isinstance(bound, Domain):
         return bound
+    if isinstance(bound, LanguageRef):
+        return Domain(base_type="L", pieces=(bound,), explicit_type=True)
     if isinstance(bound, str):
         return Domain(base_type=bound, explicit_type=True)
     if isinstance(bound, frozenset):
@@ -532,6 +993,181 @@ def _as_domain(bound) -> Domain:
     if isinstance(bound, tuple):
         return Domain(pieces=(bound,))
     return Domain()
+
+
+# --- the missing-value policy of a domain ------------------------------
+#
+# A domain states two things about missing values: whether the object
+# may be absent (`absent`) and which holes a slot may hold (sentinel
+# pieces). A domain with a type clause, a named type, a language, or an
+# enumerated set states both (what it does not admit it excludes); a
+# bare interval states neither, and `complete()` fills each unstated
+# kind from the parameter's annotation.
+
+
+@dataclass(frozen=True)
+class MissingDefaults:
+    """What an annotation implies about missing values: whether the
+    object may be absent, the members of the hole class on its slots
+    (empty when the slot type has no hole), the slot type named in the
+    note that states the resolution, whether an annotation said so, and
+    the spellings the object's absence is realised as."""
+    absent: bool
+    members: tuple
+    slot_type: str
+    annotated: bool = True
+    absence: tuple = ("None",)
+
+
+#: the defaults of a parameter with no annotation, and of a claim read
+#: without its function: the object may be absent and a slot may hold
+#: the scalar runtime's own hole
+NO_ANNOTATION = MissingDefaults(True, ("nan",), "unannotated", annotated=False)
+#: the defaults of a path binding (`o.qty`): what a field may hold is its
+#: language's business, so a binding that does not state it admits
+#: neither kind
+PATH_DEFAULTS = MissingDefaults(False, (), "field", annotated=False)
+
+
+def _is_enumerated(dom: Domain) -> bool:
+    """A domain that lists its members: every piece a finite set. A
+    named type with only sentinels beside it (`R|missing`) is the whole
+    type, not a set of sentinels."""
+    if not dom.pieces or not all(isinstance(p, frozenset) for p in dom.pieces):
+        return False
+    return not dom.explicit_type or any(
+        not isinstance(v, _Sentinel) for p in dom.pieces for v in p)
+
+
+def bare_text_type(bound) -> bool:
+    """Whether a bound is the type of strings alone (`: str`, with or
+    without its absence): a type fact with no members listed, which
+    admits every string and so has no finite set or language to draw
+    from."""
+    return (isinstance(bound, Domain) and bound.base_type == "S"
+            and not any(isinstance(p, frozenset) and not _sentinel_piece(p)
+                        for p in bound.pieces))
+
+
+def _sentinel_piece(piece) -> bool:
+    return (isinstance(piece, frozenset) and bool(piece)
+            and all(isinstance(v, _Sentinel) for v in piece))
+
+
+def _absence_decided(dom: "Domain") -> bool:
+    return (dom.clause or dom.absent or ABSENT in dom.excluded
+            or ABSENT in _set_sentinels(dom))
+
+
+def _holes_decided(dom: "Domain") -> bool:
+    return (dom.clause or any(s.kind == "missing" for s in _set_sentinels(dom))
+            or any(is_hole_sentinel(v) for v in dom.excluded))
+
+
+def stated(bound) -> bool:
+    """Whether a domain states its whole missing-value policy: a
+    language, an enumerated set, or a domain that decides both kinds (a
+    `⊂ T` / `: T` clause does, admitting what it lists and excluding the
+    rest). A bare interval or a bare named space (`[0, 1]`, `R^n`, `Z`)
+    states nothing, and each kind it leaves open is completed from the
+    annotation."""
+    dom = _as_domain(bound)
+    return (dom.base_type == "L" or _is_enumerated(dom)
+            or (_absence_decided(dom) and _holes_decided(dom)))
+
+
+def _set_sentinels(dom: Domain) -> list:
+    return [v for p in dom.pieces if isinstance(p, frozenset)
+            for v in p if isinstance(v, _Sentinel)]
+
+
+def admitted(bound, defaults: "MissingDefaults | None" = None) -> tuple:
+    """Intent:
+        `(absent, holes)`: whether the domain admits the absence of the
+        object, and the hole sentinels it admits (the class, members),
+        each kind the domain does not state read from `defaults`
+        (`NO_ANNOTATION` when not given). A language states both kinds.
+    """
+    dom = _as_domain(bound)
+    defaults = defaults or NO_ANNOTATION
+    listed = _set_sentinels(dom)
+    holes = tuple(s for s in listed if s.kind == "missing")
+    if _is_enumerated(dom) or dom.base_type == "L":
+        absent = (dom.absent or ABSENT in listed) and ABSENT not in dom.excluded
+        return absent, holes
+    if _absence_decided(dom):
+        absent = dom.absent or ABSENT in listed
+    else:
+        absent = defaults.absent
+    if ABSENT in dom.excluded or (ABSENT_NULL in dom.excluded
+                                  and ABSENT_UNSET in dom.excluded):
+        # an excluded class, or both members excluded, leave no absence
+        absent = False
+    if not _holes_decided(dom):
+        holes = (MISSING,) if defaults.members else ()
+    return absent, holes
+
+
+def admits(bound, sentinel) -> bool:
+    """Whether the domain admits `sentinel`: the absence sentinel, the
+    class, or one member (admitted by name, or through the class when
+    the domain's resolved members include it or are unresolved)."""
+    absent, holes = admitted(bound)
+    if sentinel == ABSENT:
+        return absent
+    if isinstance(sentinel, _Sentinel) and sentinel.kind == "absent":
+        # a member of absence: admitted with the class unless excluded
+        return absent and sentinel not in _as_domain(bound).excluded
+    if sentinel in holes:
+        return True
+    if isinstance(sentinel, _Sentinel) and sentinel.member is not None \
+            and MISSING in holes:
+        members = _as_domain(bound).members
+        return not members or sentinel.member in members
+    return sentinel == MISSING and bool(holes)
+
+
+def numeric_excluded(dom: Domain) -> frozenset:
+    """The values a domain excludes, its sentinels left out."""
+    return frozenset(v for v in dom.excluded if not isinstance(v, _Sentinel))
+
+
+def complete(bound, defaults: MissingDefaults):
+    """Intent:
+        The domain with every kind it does not state filled from
+        `defaults`: absence admitted (`absent`) or excluded (the absence
+        sentinel in `excluded`), the hole class admitted (a `{missing}`
+        piece) or excluded, the class's resolved members recorded on
+        `members`, and `defaults` itself on `policy`, which the rendering
+        reads to state an exclusion that narrows them. A stated domain
+        keeps its own policy; an enumerated set is exactly its members.
+        `None` stays `None`.
+    """
+    from dataclasses import replace
+    if bound is None:
+        return None
+    dom = _as_domain(bound)
+    if _is_enumerated(dom) or dom.base_type == "L":
+        listed = tuple(defaults.members) if MISSING in _set_sentinels(dom) else ()
+        return replace(dom, members=listed, policy=defaults)
+    absent, holes = admitted(dom, defaults)
+    pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    excluded = set(dom.excluded)
+    if holes:
+        pieces.append(frozenset(holes))
+    elif not _holes_decided(dom):
+        excluded.add(MISSING)
+    if not absent:
+        excluded.add(ABSENT)
+    members: tuple = ()
+    if MISSING in holes:
+        members = tuple(defaults.members)
+    elif holes:
+        members = tuple(s.member for s in holes if s.member is not None)
+    return Domain(base_type=dom.base_type, pieces=tuple(pieces),
+                  excluded=frozenset(excluded), explicit_type=dom.explicit_type,
+                  dims=dom.dims, absent=absent, members=members, policy=defaults,
+                  clause=dom.clause)
 
 
 def _piece_contains(value, piece) -> bool:
@@ -576,12 +1212,168 @@ def _piece_contains_complex(value, piece) -> bool:
     return _piece_contains(value, piece)
 
 
-def finite_members(bound, limit: int):
+def _safe_in(value, values) -> bool:
+    """`value in values` for a value that may not be hashable (a
+    mapping member of a schema language), which is then in no set."""
+    try:
+        return value in values
+    except TypeError:
+        return False
+
+
+def _language_piece_contains(value, piece) -> bool:
+    """Membership of `value` in one piece of a language domain: a
+    `LanguageRef` asks the resolved language, a finite set is checked
+    directly, and nothing else is a piece of a language domain."""
+    if isinstance(piece, LanguageRef):
+        from .languages import resolve_language
+        return bool(resolve_language(piece).contains(value))
+    if isinstance(piece, frozenset):
+        return _safe_in(value, piece)
+    return False
+
+
+def _language_members(dom: "Domain", limit: int):
+    """Every member of a language domain when each piece is finite
+    and the union has at most `limit` members, else `None`; a
+    language answering `members(limit)` with more than `limit` values
+    is read as infinite, never as a prefix to sweep."""
+    from .languages import resolve_language
+    out: list = []
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            values = [v for v in piece if not isinstance(v, _Sentinel)]
+        elif isinstance(piece, LanguageRef):
+            members = resolve_language(piece).members(limit)
+            if members is None or len(members) > limit:
+                return None
+            values = list(members)
+        else:
+            return None
+        for v in values:
+            if not _safe_in(v, out):
+                out.append(v)
+        if len(out) > limit:
+            return None
+    out = [v for v in out if not _safe_in(v, dom.excluded)]
+    if not out:
+        return None
+    return tuple(sorted(out, key=_member_sort_key))
+
+
+def _pandas_value(name: str):
+    def value():
+        import importlib
+        return getattr(importlib.import_module("pandas"), name)
+    return value
+
+
+#: how each member word is realised as the value a function receives;
+#: a definition row's spelling registers its own (`register_spelling`)
+_SPELLING_VALUES: dict = {"nan": lambda: math.nan, "null": lambda: None,
+                          "NA": _pandas_value("NA"), "NaT": _pandas_value("NaT")}
+
+
+def register_spelling(word: str, realise) -> None:
+    """Realise the member `word` by calling `realise()` from now on, and
+    read `word` as a hole member in claim text."""
+    _SPELLING_VALUES[str(word)] = realise
+    add_hole_spelling(word)
+
+
+#: how each spelling of absence is realised; `None` is Python's own
+_ABSENCE_VALUES: dict = {"None": lambda: None}
+#: how each spelling of absence other than `None` is recognised
+_ABSENCE_DETECTORS: dict = {}
+
+
+def register_absence_spelling(word: str, realise, detect=None) -> None:
+    """Realise the absence spelling `word` by calling `realise()`, and
+    recognise a value as that absence with `detect(value)` when given."""
+    _ABSENCE_VALUES[str(word)] = realise
+    if detect is not None:
+        _ABSENCE_DETECTORS[str(word)] = detect
+
+
+def absence_word(value) -> "str | None":
+    """The absence spelling `value` is (`None` for Python's `None`, a
+    defined spelling such as `Option::None`), or None for a value that
+    is not an absence."""
+    if value is None:
+        return "None"
+    for word, detect in _ABSENCE_DETECTORS.items():
+        try:
+            if detect(value):
+                return word
+        except Exception:
+            continue
+    return None
+
+
+def spelling_value(word: str):
+    """The value the member `word` is realised as.
+
+    Raises:
+        KeyError: no realiser is known for `word`.
+        ImportError: the library that holds the value is not installed.
+    """
+    return _SPELLING_VALUES[word]()
+
+
+def realise_sentinel(sentinel, members: tuple = (), absence: tuple = ()) -> list:
+    """Intent:
+        The concrete values a sentinel stands for, the ones a function
+        is called with: for absence one value per spelling in `absence`
+        (Python's `None` when none are given), for the class one value
+        per member of `members` (the scalar runtime's `nan` when none
+        were resolved), for a member the member's own value. A spelling
+        whose value cannot be built here (its library is not installed)
+        is left out.
+    """
+    if sentinel == ABSENT:
+        out = []
+        for word in tuple(absence) or ("None",):
+            realise = _ABSENCE_VALUES.get(word)
+            if realise is not None:
+                out.append(realise())
+        return out
+    words = (tuple(members) or ("nan",)) if sentinel.member is None \
+        else (sentinel.member,)
+    out = []
+    for word in words:
+        try:
+            out.append(spelling_value(word))
+        except (KeyError, ImportError):
+            continue
+    return out
+
+
+def _realised_members(values, members: tuple, absence: tuple = ()) -> list:
+    """Every value of a finite set, each sentinel replaced by the values
+    it stands for, the first occurrence of each kept."""
+    out: list = []
+    seen: set = set()
+    for v in values:
+        concrete = (realise_sentinel(v, members, absence)
+                    if isinstance(v, _Sentinel) else [v])
+        for c in concrete:
+            key = (type(c).__name__, repr(c))
+            if key not in seen:
+                seen.add(key)
+                out.append(c)
+    return out
+
+
+def finite_members(bound, limit: int, members: "tuple | None" = None,
+                   absence: tuple = ()):
     """Intent:
         Every value the domain `bound` admits, as a sorted tuple, when
         there are finitely many of them and no more than `limit`. `None`
         when the domain is infinite, is not enumerable, or is larger
-        than `limit`.
+        than `limit`. A finite set's sentinels are its members and come
+        back as the real values a function receives: `None` for
+        absence, and for the hole class one value per member of
+        `members` (else the domain's resolved members, else `nan`).
 
     Notes:
         Enumerable means one of two things: a discrete `frozenset` of
@@ -597,13 +1389,27 @@ def finite_members(bound, limit: int):
 
         A vector or matrix space (`dims` set) describes a nested value
         whose ELEMENT domain these pieces bound, not a scalar to sweep,
-        so it is declined. `excluded` is honoured, and `MISSING` in it
-        is ignored here because it is a policy for absent values rather
-        than a member of the value set.
+        so it is declined. A language domain is enumerable exactly when
+        every language in it answers `members(limit)` with a tuple.
+        `excluded` is honoured; a sentinel admitted beside an interval
+        or a language is not swept here, only a finite set's listed
+        sentinels are.
     """
     if isinstance(bound, frozenset):
-        members = sorted(bound, key=_member_sort_key)
-        return tuple(members) if len(members) <= limit else None
+        found = sorted(_realised_members(bound, members or (), absence),
+                       key=_member_sort_key)
+        return tuple(found) if len(found) <= limit else None
+    if isinstance(bound, Domain) and _is_enumerated(bound) \
+            and bound.base_type != "L" and not bound.dims \
+            and _set_sentinels(bound):
+        values = [v for p in bound.pieces for v in p]
+        found = [v for v in _realised_members(values, members or bound.members,
+                                              absence)
+                 if is_missing(v) or not _safe_in(v, numeric_excluded(bound))]
+        found = sorted(found, key=_member_sort_key)
+        return tuple(found) if found and len(found) <= limit else None
+    if isinstance(bound, Domain) and bound.base_type == "L":
+        return _language_members(bound, limit)
     if not isinstance(bound, Domain) or bound.dims:
         return None
     if not bound.pieces:
@@ -620,6 +1426,8 @@ def finite_members(bound, limit: int):
             return None
     out: set = set()
     for piece in bound.pieces:
+        if _sentinel_piece(piece):
+            continue
         if isinstance(piece, frozenset):
             out |= set(piece)
             continue
@@ -643,7 +1451,7 @@ def finite_members(bound, limit: int):
             return None
     if bound.base_type == "N":
         out = {v for v in out if isinstance(v, int) and v >= 0}
-    out -= {v for v in bound.excluded if not isinstance(v, _MissingType)}
+    out -= numeric_excluded(bound)
     if not out or len(out) > limit:
         # an empty region is not something to sweep: a clean pass over
         # no points is vacuous, and the convention for an empty region
@@ -701,7 +1509,10 @@ def bound_is_empty(bound) -> bool:
     else:
         if dom.dims or dom.base_type == "C" or not dom.pieces:
             return False
-        pieces, base_type, excluded = dom.pieces, dom.base_type, dom.excluded
+        pieces = tuple(p for p in dom.pieces if not _sentinel_piece(p))
+        base_type, excluded = dom.base_type, numeric_excluded(dom)
+        if not pieces:
+            return False
     for piece in pieces:
         if not (isinstance(piece, tuple) and not isinstance(piece, frozenset)
                 and len(piece) == 2):
@@ -728,25 +1539,55 @@ def bound_is_empty(bound) -> bool:
     return True
 
 
-def domain_contains(value, bound) -> bool:
+def domain_contains(value, bound, slot: bool = False) -> bool:
     """Is `value` a member of the domain `bound` describes, the single
     source of truth every consumer (`authoring.enforce_domain`, the
     derive route's concrete checks, domain-aware probing) calls through,
     rather than each re-deriving membership logic inline (which is
     exactly how `enforce_domain`'s own interval check went silently
     blind to `Interval.closed_lo`/`closed_hi`, checked identically to a
-    closed bound for years). Missingness is checked
-    first, before any bound/piece comparison at all: a missing value is
-    exempt (never evaluated against `pieces`/`base_type`) unless
-    `MISSING` is itself in `excluded`, included by default, the same
-    as `parse_binding()` resolves at parse time, unless the domain's
-    own text explicitly excluded it."""
+    closed bound for years).
+
+    A missing value is answered by the domain's missing-value policy
+    before any piece is compared: a top-level `None` is the absence of
+    the object, a member when the domain admits absence; with `slot`
+    set a `None` is instead the `null` hole of a slot. A hole (NaN,
+    `pd.NA`, `NaT`, a sentinel) is a member when the domain admits the
+    class (and, once the class is resolved, the hole is one of its
+    members) or admits that member by name. A kind the domain does not
+    state reads as admitted, the default of a parameter with no
+    annotation. A space domain (`dims` set) judges a container value by
+    its shape first, the rank and every fixed axis, then every element
+    against the element domain; a single number is judged as an
+    element."""
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
+    if isinstance(value, _Sentinel):
+        return admits(dom, value)
+    if value is None and not slot:
+        return admits(dom, ABSENT_NULL)
+    if dom.dims:
+        from ._shapes import contains_shaped
+        shaped = contains_shaped(value, dom)
+        if shaped is not None:
+            return shaped
     if is_missing(value):
-        return MISSING not in dom.excluded
-    if value in dom.excluded:
+        word = member_of(value)
+        return admits(dom, member(word)) if word else admits(dom, MISSING)
+    if _safe_in(value, dom.excluded):
         return False
+    if dom.base_type == "L":
+        # a language domain: the resolved language decides, a finite
+        # piece by membership, and a number is a member of neither
+        return any(_language_piece_contains(value, p) for p in dom.pieces)
+    if dom.base_type == "S":
+        # the type of strings: a string is a member, any other value is
+        # not; a finite piece lists the members
+        if not isinstance(value, str):
+            return False
+        members = [p for p in dom.pieces if isinstance(p, frozenset)
+                   and not _sentinel_piece(p)]
+        return not members or any(value in p for p in members)
     if dom.base_type == "C":
         # the complex plane: any number belongs (the reals embed);
         # discrete pieces and exclusions still apply below.
@@ -768,7 +1609,159 @@ def domain_contains(value, bound) -> bool:
         return False
     if not dom.pieces:
         return True   # unrestricted within base_type
-    return any(_piece_contains(value, p) for p in dom.pieces)
+    value_pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    if not value_pieces:
+        # a named space beside its sentinels (`R | {missing}`) is the
+        # whole space; a finite set of sentinels holds no number
+        return not _is_enumerated(dom)
+    return any(_piece_contains(value, p) for p in value_pieces)
+
+
+def plain_number(value):
+    """Intent:
+        A number of any numeric type as the plain Python number with
+        exactly its value, for judging membership: a numpy scalar, a
+        `Fraction` or a `Decimal` with an integer value becomes an
+        `int`; a binary float of any width becomes a `float`; a
+        non-integer `Fraction` or `Decimal` becomes an exact `Fraction`;
+        a complex number of any width becomes a `complex`. A bool, a
+        plain number and anything that is not a number come back
+        unchanged.
+    """
+    import decimal
+    import numbers
+    if isinstance(value, bool) or type(value) in (int, float, complex):
+        return value
+    if type(value).__name__ in ("bool_", "bool") \
+            and type(value).__module__ == "numpy":
+        return bool(value)
+    if not isinstance(value, numbers.Number):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            return float(value)
+        exact = fractions.Fraction(value)
+        return int(exact) if exact.denominator == 1 else exact
+    if isinstance(value, numbers.Rational):
+        exact = fractions.Fraction(value.numerator, value.denominator)
+        return int(exact) if exact.denominator == 1 else exact
+    if isinstance(value, numbers.Real):
+        as_ratio = getattr(value, "as_integer_ratio", None)
+        try:
+            exact = fractions.Fraction(*as_ratio()) if as_ratio else None
+        except (OverflowError, ValueError, TypeError):
+            exact = None
+        if exact is None:
+            return float(value)
+        widened = float(value)
+        return widened if fractions.Fraction(widened) == exact else exact
+    if isinstance(value, numbers.Complex):
+        return complex(value)
+    return value
+
+
+def _as_written(value):
+    """Intent:
+        A finite float endpoint or set member as the number its
+        shortest decimal spelling writes (`0.1` is 1/10), an exact
+        `Fraction`; anything else unchanged.
+    """
+    if isinstance(value, float) and math.isfinite(value):
+        exact = fractions.Fraction(repr(value))
+        return int(exact) if exact.denominator == 1 else exact
+    return value
+
+
+def _in_float_type(float_type):
+    """Intent:
+        A reader turning a finite float endpoint into the exact value of
+        its literal parsed in `float_type`, a numpy float type (`0.1` in
+        float32 is float32("0.1")); anything else unchanged.
+    """
+    import warnings
+
+    def read(value):
+        if isinstance(value, float) and math.isfinite(value):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed = float_type(repr(value))
+            if not math.isfinite(float(parsed)):
+                # beyond the type's range the literal parses to the
+                # signed infinity, above or below every finite value
+                return math.copysign(math.inf, value)
+            return fractions.Fraction(*parsed.as_integer_ratio())
+        return value
+    return read
+
+
+def _written_domain(bounds, read=None) -> "Domain":
+    """Intent:
+        `bounds` with every float endpoint, discrete member and excluded
+        value read as written (`_as_written`), for judging an exact
+        number, or through `read` when one is given.
+    """
+    import dataclasses
+    read = read or _as_written
+
+    def piece(p):
+        if isinstance(p, frozenset):
+            return frozenset(read(v) for v in p)
+        if isinstance(p, tuple) and len(p) == 2:
+            return Interval(read(p[0]), read(p[1]),
+                            getattr(p, "closed_lo", True),
+                            getattr(p, "closed_hi", True))
+        return p
+
+    dom = _as_domain(bounds)
+    return dataclasses.replace(
+        dom, pieces=tuple(piece(p) for p in dom.pieces),
+        excluded=frozenset(read(v) for v in dom.excluded))
+
+
+def number_member(value, bounds) -> "bool | None":
+    """Intent:
+        Membership of one number in a numeric domain, whatever the
+        number's type, or None when `value` is not a number (the
+        caller decides what a non-number means). A bool is a member of
+        no numeric domain; a value is judged by its exact value
+        (`plain_number`), so `np.float32(5.0)`, `Fraction(5)` and
+        `Decimal(5)` are each the number 5; an infinity is not a member
+        of a bare real, integer or natural set.
+
+        Each kind meets an endpoint written `0.1` in its own reading: a
+        binary float (a Python or numpy float) against the float the
+        literal parses to, an exact number (an int, a numpy integer, a
+        Fraction, a Decimal) against the number as written, 1/10. A
+        numpy float narrower or wider than float64 meets the literal
+        parsed in its own type (float32 against float32("0.1")); an
+        endpoint beyond that type's range reads as its signed infinity,
+        and an infinite argument still lies outside a finite endpoint.
+    """
+    import decimal
+    import numbers
+    exact = (isinstance(value, (numbers.Rational, decimal.Decimal))
+             and not isinstance(value, bool))
+    v = plain_number(value)
+    if isinstance(v, bool):
+        return False
+    if not isinstance(v, (int, float, complex, fractions.Fraction)):
+        return None
+    dom = _as_domain(bounds)
+    if (isinstance(v, float) and math.isinf(v) and not dom.pieces
+            and dom.base_type in ("R", "Z", "N")):
+        return False
+    if exact and isinstance(v, (int, fractions.Fraction)):
+        return domain_contains(v, _written_domain(bounds))
+    float_type = type(value)
+    if (float_type.__module__ == "numpy" and float_type.__name__ != "float64"
+            and hasattr(value, "as_integer_ratio")
+            and isinstance(v, (float, fractions.Fraction))
+            and not (isinstance(v, float) and math.isinf(v))):
+        return domain_contains(v, _written_domain(bounds,
+                                                  _in_float_type(float_type)))
+    return domain_contains(v, bounds)
 
 
 _TYPE_GLYPH = {"R": "ℝ", "Z": "ℤ", "N": "ℕ", "C": "ℂ"}
@@ -788,34 +1781,83 @@ def _as_int_if_whole(value):
 
 def _member_sort_key(v):
     """Discrete-set members in a stable, readable order: numbers by
-    value, then strings alphabetically, then the missing sentinel.
+    value, then strings alphabetically, then absence, then the hole
+    class, then hole members by name. A realised missing value sorts
+    with its sentinel (`None` with absence, NaN with the `nan` member).
     Ordering by `str` alone would put `{1, 10, 2}` in that order and
-    would interleave the sentinel with real values."""
-    if v is MISSING:
+    would interleave the sentinels with real values."""
+    if isinstance(v, _Sentinel):
+        if v.kind == "absent":
+            return (2, 0.0, v.member or "")
+        return (3, 0.0, "") if v.member is None else (4, 0.0, v.member)
+    if v is None:
         return (2, 0.0, "")
     if isinstance(v, str):
         return (1, 0.0, v)
-    return (0, float(v), "")
+    word = member_of(v)
+    if word is not None:
+        return (4, 0.0, word)
+    try:
+        return (0, float(v), "")
+    except (TypeError, ValueError):
+        # a member of a finite language that is neither (an enum
+        # member, say) sorts after every value with an order
+        return (5, 0.0, repr(v))
 
 
-def _render_set_member(v, *, ascii_mode: bool) -> str:
+def _states_by_type(dom, value_pieces, num_excl, always_show_type: bool) -> bool:
+    """Whether a rendering carries a type clause (`: float`, `⊂ ℝ`,
+    `: int`), which states exactly what the domain admits, so an
+    exclusion beside it would say nothing new."""
+    fully_unbounded = (
+        len(value_pieces) == 1 and not num_excl
+        and isinstance(value_pieces[0], tuple)
+        and value_pieces[0][0] == float("-inf") and value_pieces[0][1] == float("inf"))
+    bare = not value_pieces or fully_unbounded
+    return not bare and (always_show_type or dom.base_type != "R")
+
+
+def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> str:
+    """A sentinel as the grammar spells it: `absent` for absence, the
+    class as `missing` (`∅` in unicode), a member as its own word. With
+    `words`, as a language domain and a path binding spell them, the
+    class is the word `missing` in both modes."""
+    if s.kind == "absent":
+        if s.member is not None:
+            return s.member
+        return "absent"
+    if s.member is None:
+        return "missing" if (ascii_mode or words) else "∅"
+    return s.member
+
+
+def _ordered_sentinels(absent: bool, holes) -> list:
+    """Admitted sentinels in the fixed rendering order: absence, the
+    class, then members alphabetically."""
+    return ([ABSENT] if absent else []) + sorted(
+        set(holes), key=lambda h: (h.member is not None, h.member or ""))
+
+
+def _render_set_member(v, *, ascii_mode: bool, words: bool = False) -> str:
     """One discrete-set member in the spelling the input grammar reads
-    back: the sentinel as `∅` (`missing` in ascii), a string always
-    double-quoted, everything else as its own literal. `_set_value`
-    accepts either quote style on the way in and keeps neither, so one
-    spelling comes back out.
+    back: a sentinel as its word (the class as `∅` in unicode), a string
+    always double-quoted, everything else as its own literal.
+    `_set_value` accepts either quote style on the way in and keeps
+    neither, so one spelling comes back out.
 
     A member whose own text contains a double quote is outside what a
     set binding can express: rendered inside double quotes, such a value
     cannot be read back."""
-    if v is MISSING:
-        return "missing" if ascii_mode else "∅"
+    if isinstance(v, _Sentinel):
+        return _sentinel_word(v, ascii_mode=ascii_mode, words=words)
     if isinstance(v, str):
         return f'"{v}"'
     return str(v)
 
 
 def _render_piece(piece, *, ascii_mode: bool, as_int: bool = False) -> str:
+    if isinstance(piece, LanguageRef):
+        return repr(piece)
     if isinstance(piece, str):
         return piece if ascii_mode else _TYPE_GLYPH.get(piece, piece)
     if isinstance(piece, frozenset):
@@ -853,154 +1895,213 @@ def _render_dims(dims: tuple, ascii_mode: bool) -> str:
 
 
 def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None = None,
-                  always_show_type: bool = True) -> str:
+                  always_show_type: bool = True, words: bool = False,
+                  defaults: "MissingDefaults | None" = None) -> str:
     """A domain -> the canonical set-notation text a person would type
     for it, always in the same glyph vocabulary the input grammar
-    itself accepts, never a natural-language paraphrase of it, input
-    stays terse (nothing to type for the common case, no type ever
-    required), but a rendered domain never leaves a real,
-    differently-meaningful default unstated: a bounded interval always
-    states its resolved type (`R` by default, same as any explicit
-    `Z`/`N`), even when the input that produced it never mentioned one.
-    A domain with no real restriction at all (unbounded on both sides,
-    `(-inf, inf)`, whichever spelling produced it) collapses to just the
-    bare type name/glyph instead of an infinite-looking interval,
-    `R`/`ℝ`, not `(-oo, oo) subset R`/`(-oo, oo) ⊂ ℝ`. `always_show_type`
-    is this behavior's own off switch: `render_domain_bound()`'s own,
-    narrower surface (a hand-editable `let <name> be <bound>` line, not
-    a caller-facing claim rendering) passes `False`, keeping its
-    terse-when-unstated spelling.
+    itself accepts, never a natural-language paraphrase of it. Input
+    stays terse, but a rendered domain never leaves a real default
+    unstated: a bounded interval always states its resolved type (`R`
+    by default, same as any explicit `Z`/`N`), and a domain with no
+    real restriction collapses to the bare type (`R`/`ℝ`).
+    `always_show_type=False` is the terse-when-unstated spelling of
+    `render_domain_bound()`'s hand-editable surface.
 
-    `show_missing` defaults to `True`: a claim is the one place
-    mathematics and code meet, so a rendered domain never leaves the
-    resolved missing-value policy unstated by default, explicitly
-    opt out (`show_missing=False`) only for a surface that's never
-    meant to state it at all, like `render_domain_bound()`'s own
-    hand-editable spelling. Renders the *resolved* missing-value
-    policy explicitly, whether or not the caller's domain text ever
-    mentioned it. In unicode mode this is the
-    same trailing `∪ {∅}`/`\\ {∅}` clause input already uses; in ascii
-    mode it instead fuses directly onto the type annotation, Python
-    union-type style, `[0, 1000]:float|missing` when a missing value
-    is allowed, plain `[0, 1000]:float` (no suffix at all) when it
-    isn't; since the ascii type spelling is already its own compact,
-    Python-flavored annotation (see `_ASCII_TYPE_ANNOTATION` below),
-    matching that same style for the missing-value state is more
-    consistent than reusing the unicode set-builder clause verbatim.
+    The missing-value policy renders what the domain admits and never
+    what it excludes: the absence of the object as `None`, the hole
+    class as `missing` (`∅` in unicode), a member as its own word, in
+    the order `None`, `missing`, members alphabetically. ASCII fuses
+    them onto the type clause (`[0.0, 1.0] : float|None|missing`, a bare
+    `R|missing`); unicode writes a union after it (`[0.0, 1.0] ⊂ ℝ ∪
+    {None, ∅}`). A domain that does not state its policy renders the
+    default of a parameter with no annotation (absence and the class);
+    `complete()` resolves it from the annotation first. An enumerated
+    set lists its sentinels inside the braces (`{0.25, None}`,
+    `{missing}`). A vector or matrix space puts an admitted hole in
+    its element clause, in brackets before the power
+    (`([0.0, 1.0] | {missing})^n : float`, `(ℝ ∪ {∅})ⁿˣⁿ`), and the
+    absence of the whole value after the type (`... : float|None`). A
+    language domain spells the words in both modes, since `∅` is the
+    empty language to a reader of formal languages. `show_missing=False`
+    leaves the policy unstated (a hand-editable bound); `words` spells
+    the hole class as the word in unicode too, as a path into a
+    language's member does. `defaults` fills a kind the domain does not
+    state (`NO_ANNOTATION` when not given).
 
-    `ascii_mode` renders `R`/`Z`/`N` plain rather than as `ℝ`/`ℤ`/`ℕ`.
-    A bounded interval's own type clause additionally prefers a
-    Python-style annotation over the worded one in ascii mode,
-    `[1, 100]:float`/`[1, 100]:int` rather than `[1, 100] subset R`/
-    `[1, 100] subset Z` (`N` has no matching Python type name, so it
-    keeps the worded `subset N` form in ascii too); both spellings are
-    valid input either way (`parse_binding()` accepts both, see
-    `_SUBSET_ANYWHERE`). Left unstated (`None`, the default), `ascii_mode`
-    follows the global `get_unicode_output()` preference instead of
-    committing to one on its own, pass it explicitly to pin one
-    spelling regardless of that global setting. A `Z`/`N`-typed bound's
-    own interval endpoints render without a `.0` when they're whole
-    numbers (`[1, 100]:int`, not `[1.0, 100.0]:int`), a genuinely
-    fractional endpoint (`[0.5, 100]:int`, however that came to be
-    declared) still shows its fractional part, never silently
-    truncated."""
+    `ascii_mode` renders `R`/`Z`/`N` plain rather than as `ℝ`/`ℤ`/`ℕ`
+    and prefers a Python-style annotation for the type clause (`[1,
+    100] : float`, `[1, 100] : int`; `N` keeps the worded `subset N`).
+    Left unstated it follows the global `get_unicode_output()`
+    preference. A `Z`/`N`-typed bound's whole endpoints render without
+    a `.0`."""
     if ascii_mode is None:
         ascii_mode = not get_unicode_output()
     dom = _as_domain(bound)
-    real_pieces = [p for p in dom.pieces
-                  if not (isinstance(p, frozenset) and set(p) <= {MISSING})]
-    # an explicitly enumerated domain states its own members, so it
-    # carries no inferred element type: a set of strings is not a subset
-    # of the reals. The sentinel is never listed among the members;
-    # it rides the same trailing `∪ {∅}` union clause every other shape
-    # uses, so one spelling states the missing-value policy everywhere
-    enumerated = bool(real_pieces) and all(
-        isinstance(p, frozenset) for p in real_pieces)
-    enumerated_missing = enumerated and any(
-        MISSING in p for p in real_pieces)
-    if enumerated_missing:
-        real_pieces = [frozenset(p - {MISSING}) for p in real_pieces]
-        real_pieces = [p for p in real_pieces if p]
-    numeric_excluded = dom.excluded - {MISSING}
-    fully_unbounded = (
-        len(real_pieces) == 1 and not numeric_excluded
-        and not isinstance(real_pieces[0], (str, frozenset))
-        and real_pieces[0][0] == float("-inf") and real_pieces[0][1] == float("inf"))
-    missing_included = show_missing and MISSING not in dom.excluded
-    # an excluded missing value joins the one exclusion set whenever
-    # there is a set to join (`[0, 1] \ {3, ∅}`), and always in ascii
-    # (`[0, 1] \ {missing}:float`), since an annotation with no
-    # `|missing` still reads as missing allowed; the input reads a
-    # single exclusion clause only
-    missing_merged = (show_missing and not missing_included
-                      and (ascii_mode or bool(numeric_excluded)))
-    if missing_merged:
-        numeric_excluded = numeric_excluded | {MISSING}
-    exp = _render_dims(getattr(dom, "dims", ()), ascii_mode)
-    if not real_pieces or fully_unbounded:
-        text = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
-        text += exp
-        if numeric_excluded:
-            # a bare-type domain can still carry exclusions (N \ {3});
-            # dropping them here would render a wider set than the one
-            # actually declared
-            text += " \\ " + _render_piece(
-                frozenset(numeric_excluded), ascii_mode=ascii_mode,
-                as_int=dom.base_type in ("Z", "N"))
-        if show_missing and ascii_mode:
-            text += "|missing" if missing_included else ""
-    else:
-        as_int = dom.base_type in ("Z", "N")
-        text = " ∪ ".join(_render_piece(p, ascii_mode=ascii_mode, as_int=as_int)
-                          for p in real_pieces)
-        text += exp
-        if numeric_excluded:
-            text += " \\ " + _render_piece(frozenset(numeric_excluded), ascii_mode=ascii_mode,
-                                           as_int=as_int)
-        if (always_show_type or dom.base_type != "R") and not (
-                enumerated and not dom.explicit_type):
+    as_int = dom.base_type in ("Z", "N")
+    union_op = " | " if ascii_mode else " ∪ "
+    num_excl = numeric_excluded(dom)
+    language = dom.base_type == "L"
+
+    narrowed: list = []
+    if not language:
+        # a member of absence excluded is always stated: nothing else
+        # says which member is left
+        narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)
+                                and v.kind == "absent" and v.member is not None),
+                               key=_member_sort_key))
+
+    def excluded_text() -> str:
+        if not num_excl and not narrowed:
+            return ""
+        values = sorted(num_excl, key=_member_sort_key)
+        if as_int:
+            values = [_as_int_if_whole(v) for v in values]
+        return " \\ {" + ", ".join(
+            [_render_set_member(v, ascii_mode=ascii_mode or language)
+             for v in values]
+            + [_sentinel_word(v, ascii_mode=ascii_mode, words=words or language)
+               for v in narrowed]) + "}"
+
+    if _is_enumerated(dom) and not dom.dims:
+        values = sorted({v for p in dom.pieces for v in p}, key=_member_sort_key)
+        text = "{" + ", ".join(_render_set_member(v, ascii_mode=ascii_mode,
+                                                  words=language or words)
+                               for v in values) + "}"
+        text += excluded_text()
+        if dom.explicit_type and not language:
             text += _type_annotation_suffix(dom.base_type, ascii_mode)
-            if show_missing and ascii_mode and missing_included and not enumerated:
-                text += "|missing"
-    if enumerated:
-        if show_missing and enumerated_missing:
-            text += "|missing" if ascii_mode else " ∪ {∅}"
-    elif show_missing and not ascii_mode and not missing_merged:
-        text += " \\ {∅}" if not missing_included else " ∪ {∅}"
+        if dom.base_type == "S" and show_missing and admitted(dom, defaults)[0]:
+            text += "|absent"
+        return text
+    absent, holes = admitted(dom, defaults)
+    if dom.base_type == "S":
+        # the type of strings: `: str`, its absence fused after it in
+        # both modes, as a language domain spells its own
+        if not show_missing:
+            absent = False
+        return ": str" + ("|absent" if absent else "")
+    if not show_missing:
+        absent, holes = False, ()
+    ordered = _ordered_sentinels(absent, holes)
+    value_pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    policy = dom.policy or defaults or NO_ANNOTATION
+    if show_missing and language:
+        # a language states its exclusions as written, words in both
+        # modes
+        narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)),
+                               key=_member_sort_key))
+    elif show_missing and not _states_by_type(dom, value_pieces, num_excl,
+                                              always_show_type):
+        # an exclusion is stated where it narrows what the parameter's
+        # annotation would admit and no type clause states it already,
+        # so the text reads back to the same domain given the same
+        # function
+        if not absent and policy.absent:
+            narrowed.append(ABSENT)
+        if not holes and policy.members:
+            narrowed.append(MISSING)
+    if language:
+        text = union_op.join(_render_piece(p, ascii_mode=ascii_mode)
+                             for p in value_pieces)
+        text += excluded_text()
+        text += "".join("|" + _sentinel_word(s, ascii_mode=True, words=True)
+                        for s in ordered)
+        return text
+    fully_unbounded = (
+        len(value_pieces) == 1 and not num_excl
+        and isinstance(value_pieces[0], tuple)
+        and value_pieces[0][0] == float("-inf") and value_pieces[0][1] == float("inf"))
+    bare = not value_pieces or fully_unbounded
+    type_name = dom.base_type if ascii_mode else _TYPE_GLYPH.get(dom.base_type, dom.base_type)
+    if bare:
+        body = type_name
+    else:
+        body = union_op.join(_render_piece(p, ascii_mode=ascii_mode, as_int=as_int)
+                             for p in value_pieces)
+    show_type = not bare and (always_show_type or dom.base_type != "R")
+    if dom.dims:
+        # the element clause carries the holes of a slot, the tail the
+        # absence of the whole value
+        hole_words = [_sentinel_word(h, ascii_mode=ascii_mode, words=words)
+                      for h in ordered if h.kind == "missing"]
+        if hole_words:
+            body = f"({body}{union_op}{{{', '.join(hole_words)}}})"
+        text = body + _render_dims(dom.dims, ascii_mode) + excluded_text()
+        tail = [s for s in ordered if s.kind == "absent"]
+    else:
+        text = body + excluded_text()
+        tail = ordered
+    if show_type:
+        text += _type_annotation_suffix(dom.base_type, ascii_mode)
+    if tail:
+        if ascii_mode:
+            text += "".join("|" + _sentinel_word(s, ascii_mode=True, words=words)
+                            for s in tail)
+        else:
+            text += " ∪ {" + ", ".join(_sentinel_word(s, ascii_mode=False,
+                                                      words=words)
+                                       for s in tail) + "}"
     return text
 
 
 # every bounded domain's own resolved type is always stated in rendered
 # output (never left implicit, even for the common default "R" case),
-# matching this grammar's own terse-input/explicit-output split, input
+# matching this grammar's own terse-input/explicit-output split: input
 # never has to say "float"/"subset R" to mean an ordinary real interval,
 # but a rendered claim always does. ASCII prefers a Python-style type
-# annotation (`[1, 100]:float`/`[1, 100]:int`, no leading space) over the
-# `subset`-worded clause, matching the input spelling `parse_binding()`'s
-# own `_SUBSET_ANYWHERE` accepts for it; `N` has no matching Python
-# type name, so it keeps the worded `subset N` clause in ascii too.
-_ASCII_TYPE_ANNOTATION = {"R": ":float", "Z": ":int", "C": ":complex"}
+# annotation after a spaced colon (`[1, 100] : float`/`[1, 100] : int`)
+# over the `subset`-worded clause, matching the input spelling
+# `parse_binding()`'s own `_SUBSET_ANYWHERE` accepts for it; `N` has no
+# matching Python type name, so it keeps the worded `subset N` clause in
+# ascii too.
+_ASCII_TYPE_ANNOTATION = {"R": " : float", "Z": " : int", "C": " : complex"}
 
 
 def _type_annotation_suffix(base_type: str, ascii_mode: bool) -> str:
+    if base_type == "S":
+        # the type of strings has no blackboard letter: the annotation
+        # spelling in both modes
+        return " : str"
     if ascii_mode:
         return _ASCII_TYPE_ANNOTATION.get(base_type, f" subset {base_type}")
     return f" ⊂ {_TYPE_GLYPH.get(base_type, base_type)}"
 
 
-# the one JSON-safe stand-in for MISSING inside a stored `excluded`/`set`
-# list, any real string value in a discrete set is user-authored text
-# straight out of `_set_value()`, which never itself produces this exact
-# token, so there's no real collision to guard against.
+#: the stand-in an older record wrote for the hole class in a stored
+#: `excluded`/`set` list, read back as `missing`
 _MISSING_JSON_TOKEN = "__mathema_missing__"
 
 
 def _json_value(v):
-    return _MISSING_JSON_TOKEN if v is MISSING else v
+    """A set member or excluded value as stored: a sentinel as
+    `{"sentinel": <word>}` (a member of absence with `"kind":
+    "absent"`), anything else as itself."""
+    if isinstance(v, _Sentinel):
+        if v.kind == "absent" and v.member is not None:
+            return {"sentinel": v.word, "kind": "absent"}
+        return {"sentinel": v.word}
+    return v
 
 
 def _value_from_json(v):
-    return MISSING if v == _MISSING_JSON_TOKEN else v
+    """The inverse of `_json_value`: `{"sentinel": <word>}` back to its
+    sentinel, a stored `null` as absence, and the older
+    `__mathema_missing__` as the hole class. A member of absence carries
+    `"kind": "absent"`; a `null` without it is the hole member."""
+    if isinstance(v, dict) and "sentinel" in v:
+        if v.get("kind") == "absent":
+            word = str(v["sentinel"])
+            return ABSENT if word in _ABSENCE_TOKENS else _Sentinel("absent", word)
+        return _sentinel_of(str(v["sentinel"])) or member(str(v["sentinel"]))
+    if v is None:
+        return ABSENT
+    if v == _MISSING_JSON_TOKEN:
+        return MISSING
+    return v
+
+
+def _json_sort_key(v) -> str:
+    return f"~{v['sentinel']}" if isinstance(v, dict) else str(v)
 
 
 def domain_bound_to_json(b) -> str | dict:
@@ -1022,15 +2123,25 @@ def domain_bound_to_json(b) -> str | dict:
     if isinstance(b, Domain):
         out = {"base_type": b.base_type,
                "pieces": [domain_bound_to_json(p) for p in b.pieces],
-               "excluded": sorted((_json_value(v) for v in b.excluded), key=str),
+               "excluded": sorted((_json_value(v) for v in b.excluded),
+                                  key=_json_sort_key),
                "explicit_type": b.explicit_type}
         if b.dims:
             out["dims"] = list(b.dims)
+        if b.absent:
+            out["absent"] = True
+        if b.members:
+            out["members"] = list(b.members)
+        if b.clause:
+            out["clause"] = True
         return out
+    if isinstance(b, LanguageRef):
+        return {"language": b.name,
+                **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
-        return {"set": sorted((_json_value(v) for v in b), key=str)}
+        return {"set": [_json_value(v) for v in sorted(b, key=_member_sort_key)]}
     lo, hi = b
     return {"lo": _endpoint_to_json(lo), "hi": _endpoint_to_json(hi),
            "closed_lo": getattr(b, "closed_lo", True),
@@ -1047,7 +2158,7 @@ def _endpoint_to_json(v):
     return v
 
 
-def domain_bound_from_json(v):
+def domain_bound_from_json(v: Any) -> Any:
     """The inverse of `domain_bound_to_json`, tolerates the new dict
     shapes (including `Domain`'s own), the legacy plain `[lo, hi]` list
     (every domain bound ever written by mathema before this function
@@ -1058,12 +2169,19 @@ def domain_bound_from_json(v):
         return v
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
+    if "language" in v:
+        return LanguageRef(str(v["language"]), tuple(sorted(
+            (key, domain_bound_from_json(interval))
+            for key, interval in v.items() if key != "language")))
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
                       excluded=frozenset(_value_from_json(x) for x in v["excluded"]),
                       explicit_type=v.get("explicit_type", False),
-                      dims=tuple(str(d) for d in v.get("dims", ())))
+                      dims=tuple(str(d) for d in v.get("dims", ())),
+                      absent=bool(v.get("absent", False)),
+                      clause=bool(v.get("clause", False)),
+                      members=tuple(str(m) for m in v.get("members", ())))
     if "set" in v:
         return frozenset(_value_from_json(x) for x in v["set"])
     return Interval(_endpoint_from_json(v["lo"]), _endpoint_from_json(v["hi"]),
@@ -1094,22 +2212,21 @@ def render_domain_bound(b) -> str:
     return render_domain(b, show_missing=False, ascii_mode=True, always_show_type=False)
 
 
-def _parse_piece(text: str):
+def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False):
     """One union-piece's text (an interval, either spelling; a discrete
-    set; a bare named set; or a bare missing-value token) -> `Interval` |
+    set; a bare named set; or a bare sentinel word) -> `Interval` |
     `frozenset` | `"R"`/`"Z"`/`"N"` | `None` when it's none of those. No
     "name in" prefix here, a piece after the first `|`/`∪` in a
-    binding never repeats it. A bare `missing`/`∅`/`NA`/`nan`/`None`
-    (no braces) is shorthand for the same singleton `{∅}` the
-    brace-wrapped discrete-set spelling already produces, reusing the
-    existing `|`/`∪` union operator rather than inventing a second,
-    conflicting meaning for `|` (already this grammar's own ascii
-    spelling for `∪`), so `[0, 100]:float|missing` means exactly
-    `[0, 100]:float ∪ {missing}`, parsed the same way, not a new,
-    separate mechanism."""
+    binding never repeats it. A bare sentinel word (`None`, `missing`,
+    `nan`, ...) is shorthand for the singleton set the braced spelling
+    produces, so `[0, 100] | missing` means `[0, 100] | {missing}`.
+    Inside an element clause (`in_element`) a `None` is the `null`
+    hole; on a path that ends at a field (`on_field`) a `null` is the
+    absence member."""
     text = text.strip()
-    if text in _MISSING_TOKENS:
-        return frozenset({MISSING})
+    sentinel = _sentinel_of(text, in_element=in_element, on_field=on_field)
+    if sentinel is not None:
+        return frozenset({sentinel})
     m = _PIECE_RANGE.match(text) or _PIECE_INTERVAL.match(text)
     if m is not None:
         try:
@@ -1120,9 +2237,15 @@ def _parse_piece(text: str):
     m = _PIECE_SET.match(text)
     if m is not None:
         try:
-            return frozenset(_set_value(v) for v in _split_commas(m.group(1)) if v.strip())
+            return frozenset(_set_value(v, in_element=in_element, on_field=on_field)
+                             for v in _split_commas(m.group(1)) if v.strip())
         except ValueError:
             return None
+    m = _PIECE_LANGUAGE.match(text)
+    if m is not None:
+        refine = m.group("refine")
+        return LanguageRef(m.group("name"),
+                           _parse_refinements(refine, text) if refine else ())
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))
@@ -1200,111 +2323,249 @@ def parse_binding(part: str):
     return None if isinstance(result, str) else result
 
 
+_PEEL_CACHE: dict = {}
+
+
+def _peel_patterns() -> tuple:
+    """The fused and braced sentinel-clause patterns for the sentinel
+    words in force, compiled once per set of words."""
+    tokens = sentinel_tokens()
+    found = _PEEL_CACHE.get(tokens)
+    if found is None:
+        word = "(?:" + "|".join(re.escape(w) for w in
+                                sorted(tokens, key=len, reverse=True)) + ")"
+        found = (re.compile(rf"\s*\|\s*({word})\s*$"),
+                 re.compile(rf"\s*(?:\||∪)\s*\{{\s*({word}(?:\s*,\s*{word})*)"
+                            rf"\s*\}}\s*$"))
+        _PEEL_CACHE[tokens] = found
+    return found
+
+
+def _peel_trailing_sentinels(text: str) -> tuple:
+    """Intent:
+        `(text, words)`: `text` with every trailing sentinel clause
+        peeled off its end, and the words those clauses spelled, in
+        order. A clause is the ascii fused spelling (`|None`,
+        `|missing`, one word each) or a braced union (`| {nan}`,
+        `∪ {None, ∅}`) whose members are all sentinel words. A braced
+        set holding anything else is a piece of the domain, not a
+        clause, and stays.
+    """
+    fused, braced = _peel_patterns()
+    words: list = []
+    while True:
+        m = braced.search(text) or fused.search(text)
+        if m is None:
+            return text, words
+        head = text[:m.start()].rstrip()
+        if not head or _MEMBERSHIP_PREFIX.match(head + " ") and \
+                not _MEMBERSHIP_PREFIX.sub("", head + " ").strip():
+            return text, words
+        words = [w.strip() for w in m.group(1).split(",")] + words
+        text = head
+
+
+def _top_level_union(text: str) -> bool:
+    """Whether `text` holds a union operator outside every bracket."""
+    depth = 0
+    for ch in text:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch in "|∪":
+            return True
+    return False
+
+
+def _element_clause(base: str) -> "str | None":
+    """The inside of a bracketed element clause, `([0, 1] | {missing})`
+    before a power, or None when `base` is not one (an open interval
+    `(0, 1)` holds no union and is a piece)."""
+    b = base.strip()
+    if not (b.startswith("(") and b.endswith(")")):
+        return None
+    depth = 0
+    for i, ch in enumerate(b):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0 and i != len(b) - 1:
+                return None
+    inner = b[1:-1].strip()
+    return inner if _top_level_union(inner) else None
+
+
 def _parse_binding(part: str):
     """Intent:
         The one implementation behind `parse_binding()`: `(name, value)`
         on success, or a specific human-readable failure reason (a
         `str`) naming the first stage that didn't check out, so
         `split_quantifier()` can raise `InvalidDomain` with a clear,
-        actionable message from the very parse that failed, never a
-        separate re-walk that must be kept in lockstep by hand (the old
-        `_explain_binding_failure`, retired).
+        actionable message from the very parse that failed.
+
+    Notes:
+        Sentinels are ordinary union pieces. A trailing sentinel clause
+        (`: float|None|missing`, `⊂ ℝ ∪ {None, ∅}`, the older `| {∅}`)
+        is peeled first, then the type clause, then an exclusion, and
+        what is left is the set expression. At the top level `None` is
+        the absence of the object; the holes a vector's slots may hold
+        sit in the bracketed element clause before the power
+        (`([0, 1] | {missing})^n`), where a `None` is the `null` hole,
+        and a trailing hole word on a space (the older `[0, 1]^n |
+        {missing}`) is read as that clause. An enumerated set is
+        exactly its members, sentinels included.
     """
     text = _desuperscript(part.strip())
+    if ":=" in text.replace("=:=", "   "):
+        return (f"{part!r}: `:=` states a definition (a `defines:` row), "
+                f"which a binding never holds; state the type after a "
+                f"colon, `x in [0, 1] : float`")
     type_explicit = None
-
-    # the union-side missing clause first: it is a statement of the
-    # resolved default, not part of the set expression, and every other
-    # clause below would otherwise absorb it. Whether it was actually
-    # written is remembered: on an enumerated domain the sentinel is a
-    # member of the set, so the clause folds back into it below
-    stripped = _UNION_MISSING_SUFFIX.sub("", text).strip()
-    missing_declared = stripped != text
-    text = stripped
+    text, tail_words = _peel_trailing_sentinels(text)
 
     m = _SUBSET_ANYWHERE.search(text)
+    clause_stated = m is not None
     if m is not None:
         type_explicit = _SUBSET_ASCII.get(m.group("type"), m.group("type"))
         text = (text[:m.start()] + " " + text[m.end():]).strip()
-    # a `⊂ TYPE` clause can sit between the domain and the missing
-    # clause (`[0,1] ⊂ ℝ ∪ {∅}`), so look again once it is gone
-    stripped = _UNION_MISSING_SUFFIX.sub("", text).strip()
-    missing_declared = missing_declared or stripped != text
-    text = stripped
+    # a type clause can sit between the set expression and a sentinel
+    # clause, so look again once it is gone
+    text, more = _peel_trailing_sentinels(text)
+    tail_words = more + tail_words
 
     excluded_text = None
     m = _EXCLUDE_SUFFIX.search(text)
     if m is not None:
         excluded_text = m.group("set")
         text = text[:m.start()].rstrip()
+        text, more = _peel_trailing_sentinels(text)
+        tail_words = more + tail_words
 
-    m = _MEMBERSHIP_PREFIX.match(text)
+    # a type clause alone leaves nothing after the operator (`s in : str`)
+    m = _MEMBERSHIP_PREFIX.match(text) or _MEMBERSHIP_PREFIX.match(text + " ")
     if m is None:
         return (f"{part!r}: no recognized membership operator "
                 f"(in / ∈ / \\in / \\elem), expected 'name in domain'")
     name = m.group("name")
     rest = text[m.end():].strip()
-    if not rest:
+    if not rest and type_explicit is None:
         return f"{part!r}: {name!r} has no domain after the membership operator"
+    # where the binding sits decides what `None` and `null` are: at an
+    # element (`o.lines[*]`, a space's slots) a hole, at a parameter or a
+    # field (`x`, `o.note`) an absence
+    is_path = "." in name or "[" in name
+    element_path = is_path and name.rstrip().endswith("]")
+    on_field = not element_path
     # a VECTOR/MATRIX space power binds the whole element domain:
     # `[0,1]^n`, `R^(m*n)`, or the unicode superscript forms. The caret
     # is the one at bracket depth zero, so an endpoint like `10^6`
     # inside the interval is never mistaken for it.
     space_dims: tuple = ()
+    in_element = False
     split = _split_top_caret(rest)
     if split is not None:
         parsed_dims = _parse_dims(split[1])
         if parsed_dims is not None:
             rest, space_dims = split[0], parsed_dims
-    piece_texts = _UNION_SPLIT.split(rest)
+            inner = _element_clause(rest)
+            if inner is not None:
+                rest, in_element = inner, True
     pieces = []
-    for pt in piece_texts:
-        if not pt or _parse_piece(pt) is None:
+    for pt in (_UNION_SPLIT.split(rest) if rest else []):
+        # a type clause alone (`s in : str`) is the whole type
+        piece = (_parse_piece(pt, in_element=in_element or element_path,
+                              on_field=on_field) if pt else None)
+        if piece is None:
             return (f"{part!r}: {pt!r} isn't a recognized interval, discrete "
                     f"set, or named set (R/Z/N) for {name!r}")
-        piece = _parse_piece(pt)
         problem = _interval_problem(piece)
         if problem is not None:
             return f"{part!r}: {pt.strip()!r} {problem} for {name!r}"
         pieces.append(piece)
+
+    # the sentinels among the pieces, apart from the values
+    sentinels: list = []
+    value_pieces: list = []
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            found = [v for v in piece if isinstance(v, _Sentinel)]
+            values = frozenset(v for v in piece if not isinstance(v, _Sentinel))
+            sentinels.extend(found)
+            if values or not found:
+                value_pieces.append(values)
+        else:
+            value_pieces.append(piece)
+    for word in tail_words:
+        sentinel = _sentinel_of(word, in_element=element_path,
+                                on_field=on_field and not space_dims)
+        if space_dims and sentinel is not None and sentinel.kind == "missing":
+            # a hole word after a space is about its slots
+            sentinels.append(sentinel)
+        elif sentinel is not None:
+            sentinels.append(sentinel)
 
     # a single bare named-set piece ("x in Z", "x in R") sets the base
     # type directly, the same as an explicit ⊂ clause would; it isn't
     # really a "piece" (there's no interval/discrete-set to union
     # alongside), and stating it at all is just as deliberate a type
     # choice as ⊂ Z.
-    if len(pieces) == 1 and isinstance(pieces[0], str):
-        bare_type = pieces[0]
+    if len(value_pieces) == 1 and isinstance(value_pieces[0], str):
+        bare_type = value_pieces[0]
         if type_explicit is not None and type_explicit != bare_type:
             return (f"{part!r}: states two different types ({bare_type} and "
                     f"⊂ {type_explicit}) for {name!r}")
         type_explicit = bare_type
-        pieces = []
+        value_pieces = []
+        named_only = True
+    else:
+        named_only = False
+
+    # a language piece (`L[ascii]`) makes the whole binding a language
+    # domain: no numeric type clause, no dimension power (a length
+    # bound sits inside the piece, `L[ascii, len <= 80]`), and no interval or named set
+    # beside it in the union; a finite set of literal members is fine
+    if any(isinstance(p, LanguageRef) for p in value_pieces):
+        if type_explicit is not None:
+            return (f"{part!r}: a language domain (L[...]) carries no "
+                    f"numeric type, so the stated type {type_explicit} "
+                    f"contradicts it for {name!r}")
+        if space_dims:
+            return (f"{part!r}: a language domain has no dimension power; "
+                    f"bound a length inside the brackets, "
+                    f"'L[ascii, len <= 80]', for {name!r}")
+        if any(not isinstance(p, (LanguageRef, frozenset)) for p in value_pieces):
+            return (f"{part!r}: a language domain can be unioned with a "
+                    f"finite set of members, not with an interval or a "
+                    f"named number set, for {name!r}")
+        type_explicit = "L"
 
     excluded = set()
     if excluded_text is not None:
         try:
             for v in _split_commas(excluded_text):
                 if v.strip():
-                    excluded.add(_set_value(v))
+                    value = _set_value(v, in_element=element_path,
+                                       on_field=on_field and not space_dims)
+                    # a parameter's `null` is its absence, the whole class
+                    excluded.add(ABSENT if value == ABSENT_NULL and not is_path
+                                 else value)
         except ValueError:
             return (f"{part!r}: an excluded value in {{{excluded_text}}} isn't "
-                    f"a recognized number, string, boolean, or missing sentinel")
-
-    # missing is included by default, always, stating a type
-    # (⊂ Z/N/R, or the bare Z/N/R spelling above) never excludes it as a
-    # side effect. A domain excludes a missing value only when the
-    # binding's own text says so directly (the `\{...}` clause parsed
-    # above, into `excluded`); an unverified default has to be the
-    # wider, safer one: "missing excluded" is not something a claim's
-    # own domain text gets to assert true by stating it, only something
-    # a real proof against the function can earn.
+                    f"a recognized number, string, boolean, or sentinel")
+    if MISSING in sentinels and any(
+            isinstance(v, _Sentinel) and v.kind == "missing" and v.member
+            for v in excluded):
+        return (f"{part!r}: `missing` admits every member of the class, so "
+                f"one cannot be excluded from it; name the members you "
+                f"admit, `|nan` or `| {{null, nan}}`, for {name!r}")
 
     def _complex_cornered(piece):
         return (isinstance(piece, tuple) and not isinstance(piece, frozenset)
                 and any(isinstance(v, complex) for v in piece))
 
-    if any(_complex_cornered(p) for p in pieces):
+    if any(_complex_cornered(p) for p in value_pieces):
         # complex corner literals name a rectangle of the plane: the
         # type is C whether or not the binding spelled it, and a stated
         # real type contradicts the corners outright.
@@ -1314,28 +2575,56 @@ def _parse_binding(part: str):
         type_explicit = "C"
 
     base_type = type_explicit or "R"
+    unique: list = []
+    for sentinel in sentinels:
+        if sentinel not in unique:
+            unique.append(sentinel)
+    # a member of absence admitted by name is the class with the other
+    # member excluded, one representation for every spelling
+    absent_members = {s for s in unique if s.kind == "absent" and s.member}
+    if ABSENT_UNSET in absent_members and not is_path:
+        # kept as written, so the check can say why a parameter has no
+        # unset member
+        absent_members = set()
+    if absent_members:
+        unique = [s for s in unique if s not in absent_members]
+        if ABSENT not in unique:
+            unique.insert(0, ABSENT)
+            if is_path:
+                # a parameter is always there to hold None: only a path
+                # can be left unset
+                excluded |= {ABSENT_NULL, ABSENT_UNSET} - absent_members
 
-    # an enumerated domain carries the sentinel as a member of the set,
-    # so a written `∪ {∅}` clause folds back in here. That is what makes
-    # `{"a"} ∪ {∅}` and `{"a", missing}` one domain with one rendering,
-    # and what lets the rendered form parse back to what produced it.
-    if (missing_declared and pieces
-            and all(isinstance(pc, frozenset) for pc in pieces)):
-        pieces = [frozenset(pieces[0] | {MISSING})] + list(pieces[1:])
+    # an enumerated domain is exactly its members: the values it lists
+    # and the sentinels it lists, one set
+    enumerated = type_explicit not in ("L", "S") and not space_dims and not named_only and (
+        all(isinstance(p, frozenset) for p in value_pieces)
+        and (bool(value_pieces) or bool(unique)))
+    if enumerated:
+        members = frozenset().union(*value_pieces, unique)
+        if all(isinstance(v, _Sentinel) for v in members):
+            # a set of sentinels alone lists no value of any type
+            type_explicit = None
+        if type_explicit is None and not excluded:
+            return name, members
+        return name, Domain(base_type=base_type, pieces=(members,),
+                            excluded=frozenset(excluded),
+                            explicit_type=type_explicit is not None)
 
-    # collapse to the OLD raw shape only when the type was never stated
-    # at all and nothing else new was used either, a *stated* type
-    # always needs the richer Domain shape to carry its own missing-
-    # value policy, even with no pieces/exclusions beyond it. A space
-    # power (`^n`) always needs the Domain shape, to carry its dims.
-    if (type_explicit is None and not excluded and len(pieces) == 1
-            and not space_dims):
-        return name, pieces[0]
-
-    return name, Domain(base_type=base_type, pieces=tuple(pieces),
-                       excluded=frozenset(excluded),
-                       explicit_type=type_explicit is not None,
-                       dims=space_dims)
+    absent = ABSENT in unique
+    holes = [s for s in unique if s.kind == "missing"]
+    clause = clause_stated and type_explicit != "L"
+    # collapse to the OLD raw shape only when nothing but a plain piece
+    # was stated: a stated type, an exclusion, a sentinel or a space
+    # power needs the Domain shape to carry it
+    if (type_explicit is None and not excluded and len(value_pieces) == 1
+            and not space_dims and not unique and not clause_stated):
+        return name, value_pieces[0]
+    all_pieces = tuple(value_pieces) + ((frozenset(holes),) if holes else ())
+    return name, Domain(base_type=base_type, pieces=all_pieces,
+                        excluded=frozenset(excluded),
+                        explicit_type=type_explicit is not None,
+                        dims=space_dims, absent=absent, clause=clause)
 
 
 _NE_EXCLUSION = re.compile(r"^\s*([A-Za-z_]\w*)\s*!=\s*([^,]+?)\s*$")
@@ -1348,7 +2637,8 @@ def _exclude_point(bound, value: float):
     if isinstance(bound, Domain):
         return Domain(base_type=bound.base_type, pieces=bound.pieces,
                       excluded=bound.excluded | {value},
-                      explicit_type=bound.explicit_type)
+                      explicit_type=bound.explicit_type, dims=bound.dims,
+                      absent=bound.absent, clause=bound.clause)
     if isinstance(bound, tuple) and not isinstance(bound, frozenset):
         return Domain(base_type="R", pieces=(bound,),
                       excluded=frozenset({value}), explicit_type=False)
@@ -1434,6 +2724,12 @@ def split_quantifier(text: str) -> tuple[dict, str]:
     n_bindings = 0
     for seg in segments:
         if not is_binding(seg):
+            bad = _PATH_LIKE_BINDING.match(seg)
+            if bad is not None and not re.fullmatch(_PATH, bad.group("path")):
+                raise InvalidDomain(
+                    f"{seg.strip()!r}: {bad.group('path')!r} is not a path; a "
+                    f"path is fields and indices, `o.address.zip`, "
+                    f"`o.lines[0].sku`, `o.lines[*].qty`")
             break
         n_bindings += 1
     if n_bindings == 0:
@@ -1511,9 +2807,10 @@ def canonical_bound(bound) -> tuple:
     """
     if not (isinstance(bound, Domain) and bound.base_type in ("Z", "N")):
         return bound, None
-    if len(bound.pieces) != 1:
+    value_pieces = [p for p in bound.pieces if not _sentinel_piece(p)]
+    if len(value_pieces) != 1:
         return bound, None
-    piece = bound.pieces[0]
+    piece = value_pieces[0]
     if isinstance(piece, frozenset) or not isinstance(piece, tuple):
         return bound, None
     lo, hi = piece
@@ -1521,19 +2818,20 @@ def canonical_bound(bound) -> tuple:
             and hi == float("inf")):
         return bound, None
     declared = render_domain_bound(bound)
-    return Domain(base_type="N", pieces=(), excluded=bound.excluded,
-                  explicit_type=True), declared
+    return Domain(base_type="N",
+                  pieces=tuple(p for p in bound.pieces if _sentinel_piece(p)),
+                  excluded=bound.excluded, explicit_type=True,
+                  absent=bound.absent, members=bound.members,
+                  clause=bound.clause), declared
 
 
 def missing_included(bound) -> bool:
-    """Whether the declared bound admits a missing value (None/NaN/the
-    `MISSING` sentinel). Missing is included by default for every bound
-    shape; only an explicit `\\ {∅}`-style exclusion on a `Domain`
-    narrows it. This is the one place that policy is read from, the
-    prover states it in sketches, the renderer prints it, and neither
-    re-detects it from the pieces."""
+    """Whether the declared bound leaves a missing value in: it does
+    unless its own text excludes the hole class (`\\ {missing}`), the
+    reading `is_missing_safe` takes of a declared domain. `admitted()`
+    gives the two kinds a domain admits."""
     if isinstance(bound, Domain):
-        return not any(v is MISSING for v in bound.excluded)
+        return MISSING not in bound.excluded
     return True
 
 
@@ -1546,10 +2844,11 @@ def bound_pin(bound):
     a degenerate range that never pinned anything used to be a real,
     confusing adjudication gap."""
     if isinstance(bound, Domain):
-        if (len(bound.pieces) == 1 and isinstance(bound.pieces[0], tuple)
-                and not isinstance(bound.pieces[0], frozenset)
-                and not bound.excluded):
-            return bound_pin(bound.pieces[0])
+        pieces = [p for p in bound.pieces if not _sentinel_piece(p)]
+        if (len(pieces) == 1 and isinstance(pieces[0], tuple)
+                and not isinstance(pieces[0], frozenset)
+                and not numeric_excluded(bound)):
+            return bound_pin(pieces[0])
         return (False, None)
     if (isinstance(bound, tuple) and not isinstance(bound, frozenset)
             and len(bound) == 2
@@ -1585,9 +2884,10 @@ def split_bound_at(bound, cuts) -> list | None:
     """
     wrapper, piece = None, bound
     if isinstance(bound, Domain):
-        if len(bound.pieces) != 1 or isinstance(bound.pieces[0], frozenset):
+        value_pieces = [p for p in bound.pieces if not _sentinel_piece(p)]
+        if len(value_pieces) != 1 or isinstance(value_pieces[0], frozenset):
             return None
-        wrapper, piece = bound, bound.pieces[0]
+        wrapper, piece = bound, value_pieces[0]
     if (not isinstance(piece, tuple) or isinstance(piece, frozenset)
             or len(piece) != 2):
         return None
@@ -1655,8 +2955,13 @@ def bound_assumptions(bound) -> dict | None:
         # "Z"/"N" matched above; a bare "R" states only the default.
         _require_known_base_type(bound)
         return None
+    if isinstance(bound, LanguageRef):
+        return None
     if isinstance(bound, Domain):
         _require_known_base_type(bound.base_type)
+        if bound.base_type == "L":
+            # a string or structured value has no symbol-level reading
+            return None
         if bound.base_type == "C":
             # a complex symbol, never real; interval sign facts have no
             # complex reading, so the type is the whole statement.
@@ -1668,7 +2973,7 @@ def bound_assumptions(bound) -> dict | None:
         # the assumption-free union branch below
         pieces = tuple(p for p in bound.pieces
                        if not (isinstance(p, frozenset)
-                               and all(v is MISSING for v in p)))
+                               and all(isinstance(v, _Sentinel) for v in p)))
         if len(pieces) == 1 and isinstance(pieces[0], tuple) \
                 and not isinstance(pieces[0], frozenset):
             kwargs = _interval_sign_kwargs(pieces[0])
@@ -1711,6 +3016,49 @@ def _interval_sign_kwargs(piece) -> dict | None:
     return None
 
 
+def exact_number(v):
+    """Intent:
+        A domain value as the exact number it names, for the symbolic
+        side: a finite float is the shortest decimal that reads back as
+        it (`repr`), as a sympy Rational, so `0.3` is 3/10; an int is a
+        sympy Integer; an infinite float is sympy's infinity; anything
+        else passes through.
+    """
+    import math
+
+    import sympy
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return sympy.Integer(v)
+    if not isinstance(v, float):
+        return v
+    if math.isinf(v):
+        return sympy.oo if v > 0 else -sympy.oo
+    if v != v:
+        return v
+    return sympy.Rational(repr(v))
+
+
+def exact_membership(value, bound) -> "bool | None":
+    """Intent:
+        Whether an exact sympy number (a root, possibly irrational) lies
+        in the declared bound, decided in exact arithmetic against the
+        bound's exact endpoints: True, False, or None when sympy cannot
+        settle it.
+    """
+    import sympy
+    try:
+        verdict = bound_to_sympy_set(bound).contains(value)
+    except Exception:
+        return None
+    if verdict is sympy.true:
+        return True
+    if verdict is sympy.false:
+        return False
+    return None
+
+
 def bound_context(sym, bound):
     """The relational-predicate half of the projection: everything the
     declared bound states that no fixed symbol-assumption keyword can
@@ -1724,17 +3072,22 @@ def bound_context(sym, bound):
     import sympy
 
     def interval_predicate(piece):
-        lo, hi = piece
+        lo, hi = exact_number(piece[0]), exact_number(piece[1])
         lo_pred = (sympy.Q.gt(sym, lo) if not getattr(piece, "closed_lo", True)
                   else sympy.Q.ge(sym, lo))
         hi_pred = (sympy.Q.lt(sym, hi) if not getattr(piece, "closed_hi", True)
                   else sympy.Q.le(sym, hi))
         return sympy.And(lo_pred, hi_pred)
 
+    if isinstance(bound, LanguageRef) or (
+            isinstance(bound, Domain) and bound.base_type == "L"):
+        # a language domain states nothing a real symbol can carry
+        return None
     if isinstance(bound, Domain) and bound.base_type == "C":
         # ordering predicates have no complex reading; only exclusions
         # survive as facts.
-        ne_clauses = [sympy.Q.ne(sym, v) for v in bound.excluded if v is not MISSING]
+        ne_clauses = [sympy.Q.ne(sym, exact_number(v)) for v in bound.excluded
+                      if not isinstance(v, _Sentinel)]
         if not ne_clauses:
             return None
         return sympy.And(*ne_clauses) if len(ne_clauses) > 1 else ne_clauses[0]
@@ -1742,14 +3095,16 @@ def bound_context(sym, bound):
         piece_preds = []
         for piece in bound.pieces:
             if isinstance(piece, frozenset):
-                eqs = [sympy.Eq(sym, v) for v in piece if v is not MISSING]
+                eqs = [sympy.Eq(sym, exact_number(v)) for v in piece
+                       if not isinstance(v, _Sentinel)]
                 if eqs:
                     piece_preds.append(sympy.Or(*eqs) if len(eqs) > 1 else eqs[0])
             elif isinstance(piece, tuple):
                 piece_preds.append(interval_predicate(piece))
         clause = (sympy.Or(*piece_preds) if len(piece_preds) > 1
                  else (piece_preds[0] if piece_preds else None))
-        ne_clauses = [sympy.Q.ne(sym, v) for v in bound.excluded if v is not MISSING]
+        ne_clauses = [sympy.Q.ne(sym, exact_number(v)) for v in bound.excluded
+                      if not isinstance(v, _Sentinel)]
         parts = ([clause] if clause is not None else []) + ne_clauses
         if not parts:
             return None
@@ -1759,7 +3114,109 @@ def bound_context(sym, bound):
     return None
 
 
-def bound_to_sympy_set(bound):
+def _reach_piece(bound, lo_reach: float, hi_reach: float):
+    """Intent:
+        One interval with its infinite ends replaced by the reach
+        (`domain.ReachInterval`, closed at a reach end), or the bound
+        unchanged when it is not an interval with an infinite end.
+    """
+    if not (isinstance(bound, tuple) and not isinstance(bound, frozenset)
+            and len(bound) == 2) or isinstance(bound, ReachInterval):
+        return bound
+    try:
+        lo, hi = float(bound[0]), float(bound[1])
+    except (TypeError, ValueError):
+        return bound
+    lo_inf, hi_inf = lo == -math.inf, hi == math.inf
+    if not (lo_inf or hi_inf):
+        return bound
+    return ReachInterval(
+        lo_reach if lo_inf else bound[0], hi_reach if hi_inf else bound[1],
+        True if lo_inf else getattr(bound, "closed_lo", True),
+        True if hi_inf else getattr(bound, "closed_hi", True),
+        reach_lo=lo_inf, reach_hi=hi_inf)
+
+
+def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
+                        bare=()):
+    """Intent:
+        The computation's reading of a claim's domain: every infinite
+        interval end, including one inside a union of real pieces and the
+        whole line of a bare `R`, replaced by the reach (the resolved
+        pseudo-infinity, else the number representation's maximum), and
+        every name in `bare` (a real parameter no domain was declared for)
+        given the whole reach, marked as undeclared. Every finite end and
+        every other bound stays as declared. Returns the rewritten copy
+        and a rendering of each interval change.
+
+    Notes:
+        The probe stage's reading, and only the probe stage's: the
+        operational infinity bounds the computation, never the
+        mathematics (P1, P6), so a proof is over the declared domain
+        with infinity as infinity. A real domain contains no infinity:
+        the rewritten ends are finite, and the sampler draws an
+        unbounded direction log-uniformly over the decades up to the
+        reach (`_sampling._synth_scalar`). Integer and natural types
+        and vector spaces are not rewritten.
+    """
+    from dataclasses import replace as _replace
+    lo_reach, hi_reach = reach
+    rewritten: dict = {}
+    changes: list = []
+    for p, bound in cj_domain.items():
+        if isinstance(bound, Domain):
+            if bound.base_type != "R" or bound.dims:
+                rewritten[p] = bound
+            elif all(_sentinel_piece(piece) for piece in bound.pieces):
+                rewritten[p] = _replace(bound, pieces=(ReachInterval(
+                    lo_reach, hi_reach, reach_lo=True, reach_hi=True,
+                    bare=True),) + tuple(bound.pieces))
+            else:
+                rewritten[p] = _replace(bound, pieces=tuple(
+                    _reach_piece(piece, lo_reach, hi_reach)
+                    for piece in bound.pieces))
+            continue
+        rewritten[p] = _reach_piece(bound, lo_reach, hi_reach)
+        if rewritten[p] is not bound:
+            changes.append(f"{p} in {rewritten[p]!r}")
+    for p in bare:
+        if rewritten.get(p) is None:
+            rewritten[p] = ReachInterval(lo_reach, hi_reach, reach_lo=True,
+                                         reach_hi=True, bare=True)
+    return rewritten, changes
+
+
+def unbounded_directions(names, cj_domain: dict, *,
+                         unsure_unbounded: bool = False) -> list:
+    """Intent:
+        The names among `names` whose bound in `cj_domain` is unbounded
+        in some direction: no bound at all, or an infinite end. A bound
+        whose ends cannot be read counts as bounded, or as unbounded
+        when `unsure_unbounded` is set.
+    """
+    out = []
+    for n in names:
+        b = (cj_domain or {}).get(n)
+        if b is None:
+            out.append(n)
+            continue
+        try:
+            if isinstance(b, tuple) and not isinstance(b, frozenset):
+                lo, hi = float(b[0]), float(b[1])
+            else:
+                sset = bound_to_sympy_set(b)
+                lo, hi = float(sset.inf), float(sset.sup)
+        except Exception:
+            if unsure_unbounded:
+                out.append(n)
+            continue
+        if math.isinf(lo) or math.isinf(hi) \
+                or getattr(b, "reach_lo", False) or getattr(b, "reach_hi", False):
+            out.append(n)
+    return out
+
+
+def bound_to_sympy_set(bound: Any) -> sympy.Set:
     """The declared bound as a sympy `Set` over the reals, intervals
     with exact open/closed endpoints, discrete sets as `FiniteSet`,
     `"Z"`/`"N"` (and a `Domain`'s integer `base_type`) via intersection
@@ -1772,13 +3229,25 @@ def bound_to_sympy_set(bound):
     be silently read as real.
 
     Raises:
-        InvalidDomain: for a base type outside `KNOWN_BASE_TYPES`."""
+        InvalidDomain: for a base type outside `KNOWN_BASE_TYPES`, and
+            for a language domain, which has no real-set reading at
+            all (a caller settling a guard against `S.Reals` would be
+            reasoning about strings as numbers)."""
     import sympy
+
+    if bound == "L" or isinstance(bound, LanguageRef) or (
+            isinstance(bound, Domain) and bound.base_type == "L"):
+        raise InvalidDomain("a language domain (L[...]) has no real-set "
+                            "reading")
+    if bound == "S" or (isinstance(bound, Domain) and bound.base_type == "S"):
+        raise InvalidDomain("the type of strings (: str) has no real-set "
+                            "reading")
 
     def piece_set(piece):
         if isinstance(piece, frozenset):
-            return sympy.FiniteSet(*[v for v in piece if v is not MISSING])
-        lo, hi = piece
+            return sympy.FiniteSet(*[exact_number(v) for v in piece
+                                     if not isinstance(v, _Sentinel)])
+        lo, hi = exact_number(piece[0]), exact_number(piece[1])
         return sympy.Interval(lo, hi,
                               left_open=not getattr(piece, "closed_lo", True),
                               right_open=not getattr(piece, "closed_hi", True))
@@ -1795,7 +3264,8 @@ def bound_to_sympy_set(bound):
         _require_known_base_type(bound)
         return sympy.S.Reals   # a bare explicit "R"
     if isinstance(bound, frozenset):
-        return sympy.FiniteSet(*[v for v in bound if v is not MISSING])
+        return sympy.FiniteSet(*[exact_number(v) for v in bound
+                                 if not isinstance(v, _Sentinel)])
     if isinstance(bound, tuple) and len(bound) == 2:
         return piece_set(bound)
     if isinstance(bound, Domain):
@@ -1808,12 +3278,14 @@ def bound_to_sympy_set(bound):
             return sympy.S.Complexes
         base = {"R": sympy.S.Reals, "Z": sympy.S.Integers,
                 "N": sympy.S.Naturals0}[bound.base_type]
-        if bound.pieces:
-            covered = sympy.Union(*[piece_set(p) for p in bound.pieces])
+        value_pieces = [p for p in bound.pieces if not _sentinel_piece(p)]
+        if value_pieces:
+            covered = sympy.Union(*[piece_set(p) for p in value_pieces])
             result = sympy.Intersection(covered, base)
         else:
             result = base
-        real_excluded = [v for v in bound.excluded if v is not MISSING]
+        real_excluded = [exact_number(v) for v in bound.excluded
+                         if not isinstance(v, _Sentinel)]
         if real_excluded:
             result = sympy.Complement(result, sympy.FiniteSet(*real_excluded))
         return result

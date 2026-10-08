@@ -7,6 +7,7 @@ guards, per call) and rendered into the statement, never an opaque
 raise regions by construction and gains their negations as algebraic
 assumptions, probe rejects raising samples as outside the quantifier."""
 import math
+import re
 
 from mathema.conjecture import claim, check_conjectures
 from mathema.spec import render_claim_text
@@ -93,8 +94,8 @@ def test_conjunction_assumptions_thread_through_both_routes():
     def scaled(x, k, j):
         return x / (k * j)
 
-    law = ("assuming k != 0 and j > 0, for x in [1, 5], "
-           "f(x, k, j) * k * j == x")
+    law = ("assuming k != 0 and j > 0, for x in [1, 5], k in [-10, 10], "
+           "j in [-10, 10], f(x, k, j) * k * j == x")
     (p,) = check_conjectures(scaled, [claim(law, route="derive")])
     assert p.verdict == "proven"
     (p,) = check_conjectures(scaled, [claim(law, route="probe")])
@@ -217,10 +218,19 @@ def test_multi_conjunct_region_suggests_and_adjudicates_per_conjunct():
     assert rs[1].verdict == "falsified"
     assert "fresh region" in rs[1].sketch
 
+    # on the probe route the claim is adjudicated by execution: an
+    # indexed row is one conjunct of the region, so every sampled point
+    # outside it has no value, and inside it the other conjunct decides
     (p,) = check_conjectures(two_guards, [
         claim("y >= 0", name="is_defined[2]", route="probe")])
-    assert p.verdict == "skipped"
-    assert "region equivalence" in p.note
+    assert p.verdict == "holds", p.note
+    assert re.search(r"\d+ executed points outside the stated conjunct "
+                     r"returned no value and \d+ were sampled inside it",
+                     p.note)
+    (p,) = check_conjectures(two_guards, [
+        claim("y >= 1", name="is_defined[2]", route="probe")])
+    assert p.verdict == "falsified", p.note
+    assert "a value outside the stated region" in p.counterexample
 
 
 def _guarded(x):
@@ -249,11 +259,13 @@ def test_bare_is_defined_claims_totality_not_a_restriction():
     (p,) = check_conjectures(_total, [claim("f is defined", route="derive")])
     assert p.verdict == "proven"
 
-    # a function that raises is NOT total: falsified, naming where
+    # a function whose own guard raises is defined over its working
+    # domain (decision A): the guard's raise is deliberate, and the
+    # sketch names the guard by its condition
     (p,) = check_conjectures(_guarded, [claim("is_defined(f)",
                                               route="derive")])
-    assert p.verdict == "falsified", (p.verdict, p.sketch)
-    assert "x >= 0" in p.sketch          # the region it is actually defined on
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    assert "x < 0" in p.sketch
 
 
 def test_stated_region_still_reads_as_a_restriction():
@@ -267,3 +279,65 @@ def test_stated_region_still_reads_as_a_restriction():
     assert "no raise regions" in p.sketch
     # and the message says WHY the claim does not apply to a total function
     assert "restriction" in p.sketch
+
+
+def test_an_unindexed_restriction_must_name_the_whole_region():
+    # two_guards returns only on x > 0 and y >= 0: `y >= 0` alone,
+    # stated as THE region (no index), is not it, on either route
+    def two_guards(x, y):
+        if x <= 0:
+            raise ValueError("x must be positive")
+        return math.sqrt(y) / x
+
+    for route in ("derive", "best", "probe"):
+        (p,) = check_conjectures(two_guards, [
+            claim("y >= 0", name="is_defined", route=route)])
+        assert p.verdict == "falsified", (route, p.verdict, p.note)
+    # the same conjunct, indexed, is one conjunct of the region
+    (p,) = check_conjectures(two_guards, [
+        claim("y >= 0", name="is_defined[2]", route="derive")])
+    assert p.verdict == "proven", p.note
+
+
+def _two_sided(x):
+    if x < -1 or x > 1:
+        raise ValueError("outside [-1, 1]")
+    return math.asin(x)
+
+
+def _lower_only(x):
+    if x < -1:
+        raise ValueError("below -1")
+    return x + 1.0
+
+
+def test_a_chained_region_is_one_region_on_derive():
+    (p,) = check_conjectures(_two_sided, [
+        claim("-1 <= x <= 1", name="is_defined", route="derive")])
+    assert p.verdict == "proven", (p.verdict, p.note)
+
+
+def test_a_chained_region_is_one_region_on_the_probe_route():
+    (p,) = check_conjectures(_two_sided, [
+        claim("-1 <= x <= 1", name="is_defined", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "inside the stated region returned a finite value" in p.note
+
+
+def test_a_chained_region_wider_than_the_body_is_falsified_by_execution():
+    # the body returns for every x >= -1, so x = 2 has a value outside
+    # the stated region
+    for route in ("derive", "best", "probe"):
+        (p,) = check_conjectures(_lower_only, [
+            claim("-1 <= x <= 1", name="is_defined", route=route)])
+        assert p.verdict == "falsified", (route, p.verdict, p.note)
+        assert "a value outside the stated region" in p.counterexample
+        m = re.search(r"\bx = ([-+0-9.e]+)", p.counterexample)
+        assert m and float(m.group(1)) > 1
+        assert _lower_only(float(m.group(1))) is not None
+
+
+def test_a_chained_row_still_gives_both_hazard_boundaries():
+    from mathema.compendium import _is_defined_region_texts
+    entry = {"claims": [{"name": "is_defined", "statement": "-1 <= x <= 1"}]}
+    assert _is_defined_region_texts(entry) == [["-1 <= x", "x <= 1"]]

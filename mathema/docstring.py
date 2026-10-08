@@ -35,6 +35,7 @@ proof are required.
 """
 from __future__ import annotations
 
+from ._signatures import module_scope
 import ast
 import inspect
 import os
@@ -43,6 +44,7 @@ from dataclasses import dataclass, field
 
 from .analysis import _parse_notes, _read_block
 from .authoring import parse_docstring_claims
+from ._signatures import callable_signature
 
 _INTENT_HEADER = "intent:"
 _CLAIMS_HEADER = "claims:"
@@ -325,7 +327,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
                    if p not in ("self", "cls")]
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
         annotated_params = {n for n, p in sig.parameters.items()
                             if p.annotation is not inspect.Parameter.empty}
         return_annotated = sig.return_annotation is not inspect.Signature.empty
@@ -347,7 +349,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     # Where a domain is stated: the signature's bound markers, and the
     # bounds the docstring's own claims quantify over (a claim's
     # bound wins where both name a parameter).
-    merged_domain = {**domain_from_signature(fn), **_claim_stated_domain(parsed)}
+    merged_domain = {**domain_from_signature(fn, guards=False),
+                     **_claim_stated_domain(parsed)}
 
     # --- raises: claim-first (raises(f(x), ExcType)), prose fallback,
     # and a guard raise ENFORCING a declared domain counts too, the
@@ -408,7 +411,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     callees: list = []
     if facts is not None:
         seen_ids = {id(fn)}
-        g = getattr(fn, "__globals__", {})
+        g = module_scope(fn)
         for name in facts.global_funcs:
             obj = g.get(name)
             if obj is None or not inspect.isfunction(obj) \
@@ -458,7 +461,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     claims_in_sync = None
     if re.search(r"^\s*claims:\s*$", doc, re.I | re.M):
         from .sync import claim_conflicts, docstring_drift
-        conflicts = claim_conflicts(fn, file_entry)
+        conflicts = [c for c in claim_conflicts(fn, file_entry)
+                     if c.get("kind") != "release-move"]
         from .authoring import retrieve
         merged = retrieve(fn, root)
         drift = docstring_drift(fn, merged, verified_entry)

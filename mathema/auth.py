@@ -17,12 +17,9 @@ The secret lives at user level (`~/.config/mathema/auth.yaml`, mode
 0600), never inside a project tree, since an agent working in a
 repository reads project files freely. Records carry only the key id.
 
-Two methods share one prompt and one stamp:
-
-- ``pin``: a memorised 4-12 digit PIN, stored as a salted PBKDF2 hash.
-- ``totp``: RFC 6238 time-based codes from any authenticator app
-  (the 6-digit codes that change every 30 seconds). Implemented and
-  tested; not yet the promoted path.
+The method is ``pin``: a memorised 4-12 digit PIN, stored as a salted
+PBKDF2 hash. A stored credential of any other method fails closed: every
+gated write is refused until it is replaced with a PIN.
 
 The ``verified_by: {method, key}`` stamp is an open shape: a
 deployment verifying against its own security layer (SSO,
@@ -30,13 +27,11 @@ hardware keys) stamps the same two facts its own way.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import os
 import re
 import secrets
-import struct
 import time
 
 
@@ -46,8 +41,6 @@ class HumanVerificationError(Exception):
 
 
 _PBKDF2_ITERATIONS = 600_000
-_TOTP_STEP = 30
-_TOTP_DIGITS = 6
 _ATTEMPTS = 3
 
 
@@ -74,7 +67,7 @@ def configured() -> dict | None:
             data = yaml.safe_load(f) or {}
     except OSError:
         return None
-    return data if data.get("method") in ("pin", "totp") else None
+    return data if data.get("method") else None
 
 
 def _write_config(data: dict) -> None:
@@ -109,22 +102,6 @@ def set_pin(pin: str) -> dict:
     return {"key": data["key"], "method": "pin"}
 
 
-def set_totp() -> dict:
-    """Store a fresh TOTP secret. Returns `{key, method, secret, uri}`;
-    the secret and otpauth URI are shown ONCE for enrolment into an
-    authenticator app and are not printed again."""
-    raw = secrets.token_bytes(20)
-    secret = base64.b32encode(raw).decode().rstrip("=")
-    data = {"key": _key_id(raw), "method": "totp", "secret": secret,
-            "created": time.strftime("%Y-%m-%d")}
-    _write_config(data)
-    user = os.environ.get("USER", "user")
-    uri = (f"otpauth://totp/mathema:{user}?secret={secret}"
-           f"&issuer=mathema&digits={_TOTP_DIGITS}&period={_TOTP_STEP}")
-    return {"key": data["key"], "method": "totp",
-            "secret": secret, "uri": uri}
-
-
 def remove() -> bool:
     """Delete the credential. True if one existed."""
     try:
@@ -134,21 +111,10 @@ def remove() -> bool:
         return False
 
 
-def _totp_code(secret: str, counter: int) -> str:
-    pad = "=" * (-len(secret) % 8)
-    key = base64.b32decode(secret + pad, casefold=True)
-    msg = struct.pack(">Q", counter)
-    digest = hmac.new(key, msg, hashlib.sha1).digest()
-    offset = digest[-1] & 0x0F
-    code = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
-    return str(code % (10 ** _TOTP_DIGITS)).zfill(_TOTP_DIGITS)
-
-
 def verify_code(code: str, *, record: dict | None = None,
                 now: float | None = None) -> bool:
-    """Check one entered code against the stored credential. For TOTP
-    the current 30-second window and its two neighbours are accepted
-    (ordinary clock skew)."""
+    """Check one entered code against the stored PIN; a credential of
+    any other method never verifies."""
     record = record if record is not None else configured()
     if record is None:
         return False
@@ -158,10 +124,7 @@ def verify_code(code: str, *, record: dict | None = None,
                                      bytes.fromhex(record["salt"]),
                                      _PBKDF2_ITERATIONS)
         return hmac.compare_digest(digest.hex(), record["pin_hash"])
-    counter = int((now if now is not None else time.time()) // _TOTP_STEP)
-    return any(hmac.compare_digest(_totp_code(record["secret"], counter + d),
-                                   code)
-               for d in (-1, 0, 1))
+    return False
 
 
 def _tty_available() -> bool:
@@ -220,6 +183,12 @@ def require_human(action: str) -> dict | None:
     record = configured()
     if record is None:
         return None
+    if record.get("method") != "pin":
+        raise HumanVerificationError(
+            f"{action}: the stored credential uses {record.get('method')!r}, "
+            f"which this release does not support, so nothing is written; "
+            f"delete {config_path()} yourself, then to set a PIN, run: "
+            f"mathema pin set")
     for _ in range(_ATTEMPTS):
         code = _prompt_code(action)
         if verify_code(code, record=record):

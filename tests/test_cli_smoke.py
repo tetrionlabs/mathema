@@ -34,9 +34,19 @@ def _write_no_functions(path):
     path.write_text("x = 1\ny = 2\n")
 
 
-def _run(*argv, cwd):
-    script = ("import sys; from mathema.cli import main; "
-             f"sys.exit(main({list(argv)!r}))")
+#: run first in a child process to make it the process it is without
+#: mathema-language: the package's entry points are hidden before mathema
+#: imports and discovers them
+_HIDE_LANGUAGE_PACKAGE = (
+    "import importlib.metadata as md; _ep = md.entry_points; "
+    "md.entry_points = lambda **k: [e for e in _ep(**k) "
+    "if not e.value.startswith('mathema_language')]; ")
+
+
+def _run(*argv, cwd, without_language_package=False):
+    script = ((_HIDE_LANGUAGE_PACKAGE if without_language_package else "")
+              + "import sys; from mathema.cli import main; "
+              f"sys.exit(main({list(argv)!r}))")
     return subprocess.run([sys.executable, "-c", script], cwd=str(cwd),
                           capture_output=True, text=True)
 
@@ -142,25 +152,55 @@ def test_check_fails_on_a_declared_but_unenforced_exclusion(tmp_path):
 
 
 def test_check_strict_fails_on_unverifiable_claims(tmp_path):
-    # a function that raises unconditionally, regardless of input, is a
-    # robust way to force a real "no evaluable inputs" verdict on every
-    # probe-route claim (checked==0 on every trial, for any probe
-    # technique), a guarded-but-otherwise-trivial function isn't a
-    # reliable fixture for this any more, now that route="best" claims
-    # have a real probe:algorithmic/derive fallback for cases that used
-    # to have no evaluable path at all.
+    # a probe-route claim over a string parameter with no finite set or
+    # language to draw from has no input to evaluate at: it is skipped,
+    # which --strict refuses and the default mode lets through
+    mod = tmp_path / "lab.py"
+    mod.write_text(
+        "def label(name: str) -> str:\n"
+        '    """Upper case.\n'
+        "\n"
+        "    Claims:\n"
+        "        same_len [probe]: len(f(name)) == len(name)\n"
+        '    """\n'
+        "    return name.upper()\n"
+    )
+    lenient = _run("check", "lab.py:label", cwd=tmp_path,
+                   without_language_package=True)
+    assert lenient.returncode == 0, lenient.stdout
+    assert "0/1 checked" in lenient.stdout
+
+    strict = _run("check", "lab.py:label", "--strict", cwd=tmp_path,
+                  without_language_package=True)
+    assert strict.returncode == 1, strict.stdout
+    assert "same_len" in strict.stdout
+
+
+def test_a_claim_naming_a_language_no_package_serves_is_unknown(tmp_path):
+    # the claim is read, parses, and is unknown until mathema-language is
+    # installed; unknown is never let through
+    mod = tmp_path / "lab.py"
+    mod.write_text(
+        "def label(name: str) -> str:\n"
+        "    return name.upper()\n"
+    )
+    law = "for name in L[nosuch.grammar], len(f(name)) == len(name)"
+    r = _run("check", "lab.py:label", "--claim", law, cwd=tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "1 unknown" in r.stdout and "mathema-language" in r.stdout, r.stdout
+
+
+def test_a_battery_call_mathema_could_not_build_does_not_gate(tmp_path):
+    # mathema's own call to a function that raises for every input it
+    # builds is a check not run: no row, so nothing for --strict to refuse
     guarded = tmp_path / "guarded.py"
     guarded.write_text(
         "def always_raises(x: float) -> float:\n"
         "    raise ValueError('always fails')\n"
     )
-    lenient = _run("check", "guarded.py:always_raises", cwd=tmp_path)
-    assert lenient.returncode == 0, lenient.stdout
-    assert "1 skipped" in lenient.stdout
-
     strict = _run("check", "guarded.py:always_raises", "--strict", cwd=tmp_path)
-    assert strict.returncode == 1, strict.stdout
-    assert "1 skipped claim(s)" in strict.stdout
+    assert strict.returncode == 0, strict.stdout
+    assert "unknown" not in strict.stdout, strict.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +368,7 @@ def test_verify_root_argument_points_elsewhere(tmp_path):
     elsewhere.mkdir()
     r = _run("verify", "--root", str(project), cwd=elsewhere)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "2 fresh" in r.stdout
+    assert "2 unchanged since the last run" in r.stdout
 
 
 def test_verify_all_forces_reverification(tmp_path):
@@ -338,8 +378,8 @@ def test_verify_all_forces_reverification(tmp_path):
 
     r = _run("verify", "--root", str(tmp_path), "--all", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "0 fresh" in r.stdout
-    assert "2 adjudicated" in r.stdout
+    assert "0 unchanged since the last run" in r.stdout
+    assert "2 checked" in r.stdout
     assert "forced (--all)" in r.stdout
 
 
@@ -557,7 +597,7 @@ def test_check_help_documents_all_flags():
     assert r.returncode == 0
     for flag in ("--claim", "--domain", "--strict", "--lenient",
                 "--format", "--output",
-                "--trials-scale"):
+                "--trials-downscale"):
         assert flag in r.stdout, flag
     for choice in ("text", "json", "junit", "github", "md"):
         assert choice in r.stdout, choice
@@ -566,12 +606,12 @@ def test_check_help_documents_all_flags():
 def test_verify_help_documents_all_flags():
     r = _run_module_help("verify", "--help")
     assert r.returncode == 0
-    for flag in ("--root", "--all", "--lenient", "--trials-scale"):
+    for flag in ("--root", "--all", "--lenient", "--trials-downscale"):
         assert flag in r.stdout, flag
 
 
 # ---------------------------------------------------------------------------
-# check: --trials-scale
+# check: --trials-downscale
 # ---------------------------------------------------------------------------
 
 def _write_unliftable(path):
@@ -585,7 +625,7 @@ def _write_unliftable(path):
         "    return vals[0] + vals[1]\n")
 
 
-def test_trials_scale_shrinks_the_reported_n(tmp_path):
+def test_trials_downscale_shrinks_the_reported_n(tmp_path):
     # suggestions no longer populate the report: declare a probe claim
     # so the runs have a sampled n to compare
     _write_unliftable(tmp_path / "funcs.py")
@@ -593,33 +633,37 @@ def test_trials_scale_shrinks_the_reported_n(tmp_path):
     default = _run("check", "funcs.py:add", "--format", "json", *probe_claim,
                    cwd=tmp_path)
     scaled = _run("check", "funcs.py:add", "--format", "json", *probe_claim,
-                  "--trials-scale", "0.25", cwd=tmp_path)
+                  "--trials-downscale", "0.25", cwd=tmp_path)
     assert default.returncode == 0 and scaled.returncode == 0
+    # a policy row's n counts the calls at missing inputs, not draws
     default_ns = {c["n"] for f in json.loads(default.stdout)["functions"]
-                  for c in f["claims"] if c["n"]}
+                  for c in f["claims"]
+                  if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     scaled_ns = {c["n"] for f in json.loads(scaled.stdout)["functions"]
-                for c in f["claims"] if c["n"]}
+                for c in f["claims"]
+                if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     assert max(scaled_ns) < min(default_ns)
 
 
-def test_trials_scale_never_drops_below_the_floor(tmp_path):
+def test_trials_downscale_never_drops_below_the_floor(tmp_path):
     _write_unliftable(tmp_path / "funcs.py")
     r = _run("check", "funcs.py:add", "--format", "json",
             "--claim", "for a in [-5,5], b in [-5,5], f(a, b) == f(b, a)",
-            "--trials-scale", "0.001", cwd=tmp_path)
+            "--trials-downscale", "0.001", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     ns = {c["n"] for f in json.loads(r.stdout)["functions"]
-         for c in f["claims"] if c["n"]}
+         for c in f["claims"]
+         if c["n"] and "mathema.policy" not in (c.get("meta") or {})}
     assert min(ns) >= 16
 
 
-def test_trials_scale_above_one_is_harmless_not_an_error(tmp_path):
+def test_trials_downscale_above_one_is_harmless_not_an_error(tmp_path):
     # "harmless" means clamped, not amplified: the sampled budgets under
     # scale 4.0 match an unscaled run exactly
     import json as _json
     _write_funcs(tmp_path / "funcs.py")
     base = _run("check", "funcs.py", "--format", "json", cwd=tmp_path)
-    r = _run("check", "funcs.py", "--trials-scale", "4.0",
+    r = _run("check", "funcs.py", "--trials-downscale", "4.0",
              "--format", "json", cwd=tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -630,12 +674,12 @@ def test_trials_scale_above_one_is_harmless_not_an_error(tmp_path):
     assert _ns(r.stdout) == _ns(base.stdout)
 
 
-def test_trials_scale_zero_or_negative_is_a_clean_error(tmp_path):
+def test_trials_downscale_zero_or_negative_is_a_clean_error(tmp_path):
     _write_funcs(tmp_path / "funcs.py")
     for bad in ("0", "-0.5"):
-        r = _run("check", "funcs.py", "--trials-scale", bad, cwd=tmp_path)
+        r = _run("check", "funcs.py", "--trials-downscale", bad, cwd=tmp_path)
         assert r.returncode == 2, r.stdout + r.stderr
-        assert "--trials-scale" in (r.stdout + r.stderr)
+        assert "--trials-downscale" in (r.stdout + r.stderr)
 
 
 def test_verify_status_flag_is_documented():

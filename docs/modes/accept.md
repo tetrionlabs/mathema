@@ -144,9 +144,12 @@ balances.running_total:
       statement: "assuming nonneg_for_nonneg_steps is proven, for xs in [0, 1]^n, f(xs, 0) <= len(xs)"
 ```
 
-`shifts_with_start` is proven (and its `shifts_with_start[float]`
-companion holds). `nonneg_for_nonneg_steps` only holds: the probe
-agrees, but derive cannot settle the sign of the lifted sum.
+`shifts_with_start` is proven; its `shifts_with_start[float]`
+companion is falsified at a cancelling pair of magnitude 1e300, where
+the float sum drops `y0` (the note gives the condition number at the
+witness and the ways out: a narrower domain, or accepting the
+discovery). `nonneg_for_nonneg_steps` only holds: the probe agrees, but
+derive cannot settle the sign of the lifted sum.
 `never_overshoots_much` rests on it being proven, so it comes back
 `unknown` with the note `prerequisite nonneg_for_nonneg_steps is holds,
 not proven, nothing to rest this claim on`, and `verify` fails on it
@@ -155,8 +158,16 @@ not proven, nothing to rest this claim on`, and `verify` fails on it
 <!-- example: balance session -->
 ```
 $ mathema verify --root .
-FAIL balances.running_total: no baseline record; 2 proven, 2 holds, 0 falsified, 1 unknown  <- 1 unknown claim(s)
-0 fresh (form unchanged, skipped), 1 adjudicated, 1 problem(s)
+note balances.running_total: shifts_with_start[float] initially falsified: ill-conditioned here (κ ≈ 5e287): no float64 computation can deliver this result at inputs of magnitude 1e300:
+  (i) if inputs this large are out of scope, narrow the domain: for xs in [-1e21, 1e21]^n
+  (ii) if the loss is accepted, run: mathema accept balances.running_total shifts_with_start --as discovery
+FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
+       (i) change f
+       (ii) write: missing(f, xs, null) raises(TypeError)
+       to list them, run: mathema claims balances.running_total
+       1 falsified claim(s)
+       never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
+0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
@@ -185,7 +196,7 @@ resurrects.
 Re-authoring a claim that is already in the verified layer (the
 same name with a different statement, region, tolerance or route on
 any authoring surface) is a conflict verify flags, and the verified version keeps
-adjudicating until a human adopts the change:
+adjudicating until a person accepts the change as a supersession:
 
 ```
 mathema accept mypkg.mod.fn claim_name --as superseded
@@ -271,8 +282,8 @@ ledger.running_total:
 ```
 $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
-FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was adjudicated or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
-0 fresh (form unchanged, skipped), 0 adjudicated, 2 problem(s)
+FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was checked or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
+0 unchanged since the last run (not run again), 0 checked, 2 problem(s)
 grammars detected: (none); verified by this run: mathema
 ```
 
@@ -289,7 +300,7 @@ reconciling ledger.running_total from balances.running_total: a record rename, b
   - remove .mathema/verified/balances.running_total.yaml
   - re-stamp the integrity and re-anchor it to HEAD
 written: reconciled: balances.running_total renamed to ledger.running_total (by Charles Babbage)
-next: `mathema verify ledger.running_total` re-adjudicates it at its new location
+next, to check it at its new location, run: mathema verify ledger.running_total
 ```
 
 The record moves whole: every claim row with its acceptance and
@@ -321,7 +332,7 @@ store: a `.gitattributes` marking `.mathema/verified/**/*.yaml`
 drops out of the repository's language stats, while staying expandable
 when you do want to read it), and a `.mathema/.gitignore` that tracks the
 durable evidence and required artifacts (`verified/`, `meta/`,
-`compendium/`, `badges/`) while ignoring regenerated state (`declared/`,
+`badges/`) while ignoring regenerated state (`declared/`,
 `issues/`). It is additive and idempotent, so running it on an existing
 project only fills in what is missing.
 
@@ -352,13 +363,18 @@ acceptance.
 
 ## `--as trusted`
 
-A compendium row (curated knowledge about a library, materialised
-into the store at `declared` status when a premise first references
-it) accepted at the level its curator claims. The row's verdict
-becomes that level, the acceptance records the source
+A compendium row (a claim about a library's function, from a claims
+file that declares `compendium:`) that `mathema verify` could not
+settle against the installed library, recorded `unknown` or `skipped`,
+accepted at the level the row claims (its `meta:
+{mathema.compendium_claimed: ...}`, `holds` when it states none). The
+row's verdict becomes that level, the acceptance records the source
 (`compendium:numpy-2.5`), and every conclusion resting on the row
-caps there. The alternative needs no verb at all: `mathema verify`
-re-adjudicates the row against the installed library, and the local
-verdict replaces the testimony. See
+caps there. A row verify did settle needs no verb at all, since a
+premise resting on it already resolves at the local verdict. A later
+sweep replaces the trust only with a local verdict that contradicts it
+or is at least as strong; a weaker one that agrees (a `holds` under a
+trusted `proven`) leaves it standing, and the row's note reads
+`trusted as: proven, strongest evidence seen: holds`. See
 [Claims transfer](../claims-transfer.md).
 

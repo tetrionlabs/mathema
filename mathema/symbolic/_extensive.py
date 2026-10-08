@@ -36,7 +36,7 @@ from .._timeout import (EXTENSIVE_TIMEOUT_SECONDS,
 from ..domain import Interval, bound_context as domain_bound_context, bound_to_sympy_set
 from ._forms import rewrite_forms, substituted_problem, substitutions
 from ._proof_support import (
-    ProofResult, _decide_relation, _exact_endpoint, _humanize,
+    ProofResult, _decide_relation, _exact_endpoint, _exact_floats, _humanize,
     _interval_hull, _prove_relation,
 )
 
@@ -105,7 +105,10 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
         point is rational, so each sign is computed exactly; this
         rung never trusts floating point. Roots themselves evaluate to
         zero, which satisfies a non-strict ordering, so they need no
-        separate check there; for `!=` a root inside the domain is the
+        separate check there. For `!=`, `<` and `>` a root inside the
+        domain (a closed endpoint included) breaks the relation, so
+        those need a root-free domain before the sign of the regions
+        is considered, and a root inside the domain is the
         counterexample itself.
     """
     if relation in ("==", "~="):
@@ -132,7 +135,7 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
     rlo, rhi, widened = cover
     may_disprove = plain and not widened
     try:
-        exact = sympy.nsimplify(diff, rational=True)
+        exact = _exact_floats(diff)
         poly = sympy.Poly(exact, sym)
         dom = poly.get_domain()
         if not (dom.is_ZZ or dom.is_QQ) or poly.degree() < 1:
@@ -155,12 +158,7 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
 
     live = [(a, b) for (a, b), _mult in isolating if not root_excluded(a, b)]
 
-    if relation == "!=":
-        if not live:
-            return ProofResult("proven", sketch=f"{_humanize(diff)} has no real "
-                               f"root on the declared interval (exact root "
-                               "isolation), so it is never zero",
-                               meta={"mathema.derive_route": "sturm"})
+    if relation in ("!=", "<", ">") and live:
         if may_disprove:
             try:
                 roots = sympy.real_roots(poly)
@@ -176,6 +174,11 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
                                    counterexample=f"{pname} = {sympy.nsimplify(inside[0])}",
                                    witness={pname: inside[0]})
         return None
+    if relation == "!=":
+        return ProofResult("proven", sketch=f"{_humanize(diff)} has no real "
+                           f"root on the declared interval (exact root "
+                           "isolation), so it is never zero",
+                           meta={"mathema.derive_route": "sturm"})
 
     # every maximal sign region between consecutive roots needs one
     # exact rational sample whose polynomial value is nonzero. The
@@ -213,14 +216,18 @@ def _sturm_decide(diff, relation: str, domain: dict, params: dict) -> ProofResul
                 return None
             samples.append(pt)
 
-    want_nonneg = relation == ">="
+    want_nonneg = relation in (">=", ">")
     bad = [pt for pt in samples
            if (value_at(pt).is_negative if want_nonneg
                else value_at(pt).is_positive)]
     if not bad:
+        settled = ("it has no real root on the declared interval, and the "
+                   "interval has the required sign"
+                   if relation in ("<", ">") else
+                   "every root-free region of the declared interval has the "
+                   "required sign")
         return ProofResult("proven", sketch=f"sign of {_humanize(diff)} settled "
-                           "exactly by real-root isolation: every root-free "
-                           "region of the declared interval has the required sign",
+                           f"exactly by real-root isolation: {settled}",
                            meta={"mathema.derive_route": "sturm"})
     if may_disprove:
         witness = next((pt for pt in bad
@@ -650,9 +657,18 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
         mean before the ladder existed.
     """
     attempted: list = []
+    if opaque is not None and any(opaque.is_opaque_symbol(s)
+                                  for s in lhs.free_symbols | rhs.free_symbols):
+        # a condition on a non-numeric value (a string compared with a
+        # literal) is decided by the domain or not at all: no rung below
+        # reads it, and a rewrite of it would read it as a number
+        return ProofResult("undecided",
+                           sketch="a non-numeric value in the body is not "
+                                  "decided by the declared domain"), attempted
     diff = lhs - rhs
-    from ._proof_support import _has_equality_constraint
+    from ._proof_support import _has_equality_constraint, _has_premise_region
     assumed_surface = _has_equality_constraint(bound_context)
+    premise_region = _has_premise_region(bound_context)
 
     # the ladder's aggregate deadline: however many rungs there are,
     # the total wall time is bounded. Each per-rung cap still applies;
@@ -675,13 +691,24 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
             return None
         return result
 
+    def _sound_box(result):
+        # a rung that never reads the context at all (root isolation,
+        # cell refinement, a substitution) cannot disprove under any
+        # premise beyond the box either: its witness may lie outside
+        # the premise's region
+        result = _sound(result)
+        if (result is not None and result.status == "disproven"
+                and premise_region):
+            return None
+        return result
+
     attempted.append("exact real-root isolation")
-    result = _sound(_capped(lambda: _sturm_decide(diff, relation, domain, params)))
+    result = _sound_box(_capped(lambda: _sturm_decide(diff, relation, domain, params)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted
 
     attempted.append("interval refinement")
-    result = _sound(_capped(lambda: _refine_decide(diff, relation, domain, params)))
+    result = _sound_box(_capped(lambda: _refine_decide(diff, relation, domain, params)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted
 
@@ -716,12 +743,12 @@ def extensive_ladder(lhs, rhs, relation: str, domain: dict, bound_context,
     if _over_budget():
         attempted.append("stopped at the aggregate budget")
         return None, attempted
-    result = _sound(_substituted_attempts(diff, relation, domain, params,
+    result = _sound_box(_substituted_attempts(diff, relation, domain, params,
                                           attempted))
     if result is not None:
         return result, attempted
 
-    result = _sound(_capped(lambda: _joint_substituted_attempts(
+    result = _sound_box(_capped(lambda: _joint_substituted_attempts(
         diff, relation, domain, params, attempted)))
     if result is not None and result.status in ("proven", "disproven"):
         return result, attempted

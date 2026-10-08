@@ -17,9 +17,10 @@ authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # depends on sympy's own simplification and canonical ordering, so a
 # major release can change what proves without any change here.
 dependencies = ["sympy>=1.12,<2", "pyyaml>=6"]
-keywords = ["claims", "verification", "property-based-testing",
-            "symbolic-mathematics", "sympy", "proof",
-            "static-analysis", "specification", "testing"]
+keywords = ["claim-driven-development", "spec-driven-development",
+            "test-driven-development", "software-verification",
+            "property-based-testing", "design-by-contract",
+            "specification", "proof", "ai-assisted-development", "mcp"]
 classifiers = [
     # source-available under BUSL 1.1, converting to AGPL-3.0-or-later
     # four years after each release: deliberately NOT an OSI licence,
@@ -34,6 +35,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
@@ -53,7 +55,13 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25",
 # numpy is not a runtime dependency of mathema itself; installed, it
 # turns on the array fast paths (matrix structure checks, array-shaped
 # parameter synthesis) and is exercised unconditionally by the tests.
-numpy = ["numpy"]
+numpy = ["numpy>=2.0"]
+# pandas and polars are optional like numpy: installed, a parameter
+# annotated `pd.Series`, `pd.DataFrame`, `pl.Series` or `pl.DataFrame`
+# is sampled as one (its runtime type adapter); absent, that adapter is
+# inert.
+pandas = ["pandas>=2.2"]
+polars = ["polars>=1.0"]
 # Needed to run the test suite. pytest-xdist parallelises it, which
 # matters here because proof attempts are capped on the WALL clock:
 # oversubscribing the machine starves a proof of CPU and turns a
@@ -61,7 +69,7 @@ numpy = ["numpy"]
 # the verdict. Measured on 8 cores: `-n 4` runs the suite in 2:41 fully
 # green, `-n auto` in 3:10 with one drifted verdict, and one process in
 # 8:15. Leave the machine headroom rather than claiming every core.
-test = ["pytest>=7", "pytest-xdist>=3", "pytest-cov>=7", "mathema[numpy,coverage]",
+test = ["pytest>=7", "pytest-xdist>=3", "pytest-cov>=7", "mathema[numpy,pandas,polars,coverage,smt]",
         # tomllib is stdlib only from 3.11, and the packaging-metadata
         # test reads pyproject directly, so it needs the backport on
         # the declared floor
@@ -89,10 +97,13 @@ coverage = ["coverage>=7"]
 # A "symbology" capability provider (see docs/symbology.md),
 # optional: this project's own convention names for common
 # parameters, installed separately.
-symbology = ["mathema-symbology"]
+symbology = ["mathema-symbology>=0.3"]
+# String and structured-value domains, the `L[...]` languages a claim
+# names (see docs/language.md), installed separately.
+language = ["mathema-language>=0.1.0,<0.2"]
 # Every runtime CAPABILITY at once (not the docs/test dev tooling):
 # `pip install "mathema[all]"`. smt pulls z3-solver (~100 MB native).
-all = ["mathema[numpy,smt,mcp,coverage]"]
+all = ["mathema[numpy,smt,mcp,coverage,language]"]
 
 [project.scripts]
 mathema = "mathema.cli:main"
@@ -108,9 +119,10 @@ include = ["mathema*"]
 exclude = ["mathema._devtools*"]
 
 [tool.setuptools.package-data]
-# the bundled compendium (mathema/compendium/*.yaml) ships with the
-# package; the loader reads the files beside its own source
-"mathema.compendium" = ["*.yaml"]
+# the bundled compendium ships with the package, top-level files and
+# the per-library subdirectories alike (mathema/compendium/**/*.yaml);
+# the loader reads the files beside its own source
+"mathema.compendium" = ["*.yaml", "**/*.yaml"]
 # PEP 561: without this marker a type checker ignores the annotations
 # in the installed package and every imported name resolves to Any,
 # however carefully the source is typed

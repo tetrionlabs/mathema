@@ -11,7 +11,9 @@ mathema mcp serve [--root .]
 ```
 
 `serve` runs the server on stdio. Without the optional extra installed
-the command prints the install hint and exits 2.
+the command prints the install hint and exits 2. [Set up mathema for a
+coding agent](../agent-setup.md) has the configuration block for each
+client and the PIN and policy that go with it.
 
 ## Tools
 
@@ -26,7 +28,7 @@ the command prints the install hint and exits 2.
 | `reason_code` | selective code lookup: names, numeric ids (`2.18`), or whole groups (`loop`, `2`), singly or comma-separated; no argument returns the compact id/code/fixable index, never the full table, the machine twin of [Reason codes](../reason-codes.md) |
 | `claim_grammar` | the claim-language lexicon, exactly as the library states it |
 | `parse_claim` | parse and validate one claim statement without adjudicating, the authoring-loop linter: resolved name/statement/relation/route/domain rendered back explicitly, or the grammar's own error. Pass `target` and it also checks the statement against that function's real signature (arity, parameter names, quantified names) by inspection |
-| `suggest_claims` | candidate claims for one function, `[name, statement, route, declared, aspect]` rows, declares, never verifies, and a suggestion never gates until adopted; identical columns to `mathema claims --suggest --format json` |
+| `suggest_claims` | candidate claims for one function, `[name, statement, route, declared, aspect, section, reason]` rows, declares, never verifies, and a suggestion never gates until adopted; identical columns to `mathema claims --suggest --format json` |
 | `pending_decisions` | the human-decision queue, read-only: `[key, claim, kind, detail]` rows for pending supersessions, stale acceptances, stale intent acceptances, standing accepted risks, unaccepted unknowns and falsifications, locked functions whose body moved, and `moved` rows for a record whose key no longer resolves while an unrecorded function has its form hash (the detail carries the `mathema accept NEW --as reconciled --from OLD` command a human runs); acceptance and unlock themselves stay CLI-only |
 | `lock_target` | pin a function's form hash so `verify` fails if the body changes; the safe direction, so agents may do it. There is deliberately no unlock tool: a person runs `mathema unlock` |
 | `project_index` | the generated `.mathema/index.yaml` map: system/module/function intents with acceptance rungs, keys, a sed-ready `span` per function, verified-record paths, concepts; run `mathema audit --index` (or `mathema docsync`) first if it reports the index missing |
@@ -35,12 +37,10 @@ the command prints the install hint and exits 2.
 
 ## Which row set you get
 
-`adjudicate_target` defaults to `include="declared"`. That is the set a
-re-check after editing a claim is actually asking about, and it is
-much cheaper: on a real fixture, 3483 bytes of every-row output
-becomes 959 (and 3481 becomes 480), because the suggestion battery is
-not just serialized but fully *adjudicated*; skipping it is 5x-26x
-faster as well as ~75-85% smaller.
+`adjudicate_target` defaults to `include="declared"`, the set a re-check
+after editing a claim is asking about. `include="all"` adds the
+suggestion battery, which is adjudicated in full, not only listed, so
+the call is slower and its payload larger.
 
 A function with no declared claims returns no rows plus a `hint`
 naming `include="suggested"`, rather than silently handing back a
@@ -109,7 +109,7 @@ procedure delivered at the moment it chooses what to do.
 | `diagnose_falsification(target, claim)` | the code-wrong / claim-wrong fork, and why the judgement is handed back |
 
 Everything served is generated from what core already owns, so it
-cannot drift from the code it describes. The wall covers it: no
+cannot drift from the code it describes. The rule for tools covers it too: no
 resource or prompt takes a `verdict`/`accepted`/`stance`/`gates`/
 `pin`/`verified_by` parameter, none is named to suggest accepting,
 unlocking or PIN entry, and the material says plainly that acceptance,
@@ -120,17 +120,10 @@ only a person may unlock.
 
 ## Wire format
 
-Tool payloads go over the wire as compact JSON. The SDK pretty-prints
-a returned dict with a hardcoded `indent=2`, which roughly doubles the
-column-oriented payloads that exist precisely to stop repeating key
-names, so the server serializes compactly at the boundary instead:
-`audit_targets` 1468 -> 738 bytes, `reason_code` 4242 -> 2627. Prose-
-heavy payloads gain little (`claim_grammar`, 9%), which is expected;
-the saving is concentrated where the shape was already compact.
-
-The tools themselves still return dicts, so they stay directly
-callable and testable, and nothing is duplicated into a structured
-content block.
+Tool payloads go over the wire as compact JSON, serialised at the
+server boundary without indentation. The tools themselves return
+dicts, so they stay directly callable from Python, and nothing is
+duplicated into a structured content block.
 
 ## What is deliberately absent
 

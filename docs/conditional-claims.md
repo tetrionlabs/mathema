@@ -60,6 +60,24 @@ raise region at all, and falsifies when it has one, naming the region
 `f` actually returns on. mathema suggests the restriction form for a
 partial function and never for a total one.
 
+When there is no body to compute a region from (a builtin, a numpy
+ufunc), or the comparison does not decide (a library function whose
+region reads `det(a)` or `dim(a)`), the claim is adjudicated by
+execution: every sampled point inside the region must return a value
+and every point outside it must not, where a raise, a nan and an
+infinity for a finite input are all no value. Where the computation
+leaves float range is not a definedness fact but a computation one,
+stated by an `is_overflow_safe` row (see
+[claims transfer](claims-transfer.md#row-kinds-by-stratum)), and a
+library function's bare `is_defined` is adjudicated inside that
+region. A region over `det(a)`
+draws square matrices, singular ones on its boundary; one over
+`dim(a)` draws sequences, the empty one below it. An indexed row
+(`is_defined[2]`, one conjunct of a region with several) only asks
+for no value outside it, since inside it the other conjuncts decide.
+The verdict is `holds` at best, and the note says how many points were
+executed on each side.
+
 ## The definedness premise
 
 ```
@@ -167,8 +185,12 @@ def dot(x, y):
 dot([1, 2], [3])   # ValueError: dot: dim(x, 0)=2 violates the declared premise dim(x, 0) == dim(y, 0)=1
 ```
 
-`@enforce_domain` guards a parameter's VALUE domain; `@enforce_
-dimensions` guards the relations between argument SHAPES. Neither
+`@enforce_domain` guards a parameter's VALUE domain.
+`@enforce_dimensions` guards SHAPES: the rank and the fixed sizes a
+marker or a binding states, a dimension name shared across parameters,
+the relations a premise states between them, and the result against
+the return marker (see [shape
+markers](authoring.md#shape-markers-and-their-shorthand)). Neither
 makes a claim true by fiat: each makes the function reject inputs the
 claim was never about, so a premise and its runtime guard are one
 precondition stated once.
@@ -220,24 +242,32 @@ definedness premise excludes it. The `math` module's own partiality
 
 ## The compendium
 
-The registration generalises to curated files: mathema bundles a
-light compendium for `math` and `numpy` (raise and nan regions, known
-limitations, a few bound claims), and a project adds or overrides
-under `.mathema/compendium/*.yaml`. Raise regions register exactly as
-above; nan regions become sampling hazards for callers; and a
-compendium claim may be named as a premise, by bare name or by its
-qualified spelling (`assuming numpy.clip.clip_lower holds`).
+The registration generalises to claims files about libraries: a file
+that declares `compendium: numpy` (and a `versions:` range) holds
+claims whose keys are the library's functions, and mathema bundles such
+files for `math` and `numpy`. A project states its own in any claims
+file (`claims/numpy.claims.yaml`), shadowing the bundled entry per
+function. An `is_defined` row there states the region where the
+function returns a value, so a caller's claim is read against it the
+way it is read against an explicit raise guard, and a compendium claim
+may be named as a premise, by bare name or by its qualified spelling
+(`assuming numpy.clip.clip_lower holds`). The bundled files apply to
+every `check`, the Python API included, with nothing to install; a
+project's own compendium files apply wherever mathema reads the
+project. Outside an `is_defined` region the call has no value: a
+raise, a nan, and an infinity returned for a finite input all count
+the same, and each falsifies a value claim that reaches it.
 
-A compendium verdict never enters the evidence chain silently. On
-first reference the row materialises into the verified store at
-`declared` status, the resting claim stays `unknown`, and the note
-names both paths forward: `mathema accept <key> <claim> --as trusted`
-takes the row at the level its curator claims (the conclusion caps
-there, provenance named), while an ordinary `mathema verify`
-re-adjudicates the row against the installed library and the local
-verdict replaces the testimony. An entry whose `versions` range does
-not match the installed package contributes nothing. The wider story,
-including transfer between implementations, is
+A compendium verdict never enters the evidence chain silently: `mathema
+verify` adjudicates the library rows your project calls or rests on by
+executing them against the installed library, and the premise resolves
+at the verdict recorded there. Those rows gate the run like the
+project's own claims. A row verify cannot settle fails it and leaves
+the resting claim `unknown`, both naming `mathema accept <key> <claim>
+--as trusted`, which takes the row at the level it claims (the
+conclusion caps there, provenance named). A file whose `versions`
+range does not match the installed library contributes nothing. The
+wider story, including transfer between implementations, is
 [Claims transfer](claims-transfer.md).
 
 ## What the record carries

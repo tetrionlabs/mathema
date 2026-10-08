@@ -1,25 +1,25 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Machine carriers: what a mathematical set is represented AS.
+"""Number representations: what a mathematical set is represented AS.
 
-A claim quantifies over a mathematical set (`Z`, `R`); an
-implementation computes over a carrier (`bigint`, `f64`, an `i64`).
-The two agree on most points and part company exactly where
-implementation-level falsifications live: an overflow threshold, a
-denormal band, an integer that wraps. This module names carriers and
-the facts that differ between them, so evidence about the machine can
-say which machine.
+A claim quantifies over a mathematical set (`Z`, `R`); an implementation
+computes over a number representation (`bigint`, `f64`, an `i64`). The two
+agree on most points and part company exactly where implementation-level
+falsifications live: an overflow threshold, a denormal band, an integer
+that wraps. This module names number representations and the facts that
+differ between them, so evidence about the machine can say which machine.
 
-Two profiles exist today, Python's own. The vocabulary is the point:
-a hazard ladder is a property of a CARRIER (an IEEE-754 double is the
-same carrier in every language), not of a language, so a future
-target declares its carriers and inherits their hazards, and only the
-native-type-to-carrier mapping is per-language. The `let Z be i64`
-claim-level declaration and carrier-driven hazard generation build on
-this vocabulary; neither is wired yet.
+Two profiles exist today, Python's own. The vocabulary is the point: a
+hazard ladder is a property of a NUMBER REPRESENTATION (an IEEE-754 double
+is the same number representation in every language), not of a language,
+so a future target declares its number representations and inherits their
+hazards, and only the native-type-to-representation mapping is
+per-language. The `let Z be i64` claim-level declaration and
+representation-driven hazard generation build on this vocabulary; neither
+is wired yet.
 
-Overflow semantics vocabulary: `arbitrary` (the carrier grows,
-overflow cannot happen), `inf` (IEEE saturation to an infinity),
+Overflow semantics vocabulary: `arbitrary` (the number representation
+grows, overflow cannot happen), `inf` (IEEE saturation to an infinity),
 `wrap` (two's-complement wraparound, a WRONG VALUE and no failure at
 the call boundary), `trap` (a raise/panic at the point of overflow),
 `ub` (undefined behaviour: anything, including silence). A wrapped or
@@ -29,25 +29,31 @@ mathematical stratum alongside.
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 from .claim_families import _ACCIDENTAL_CRASHES
 from .hazards import _REPRESENTATION_LADDER
 
-__all__ = ["PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Representation",
+__all__ = ["PY_COMPLEX128", "PY_FLOAT64", "PY_INT", "PYTHON_PROFILES", "Representation",
            "machine_failure_types"]
 
 
 @dataclass(frozen=True)
 class Representation:
-    """One carrier: its tag, how it overflows, the hazard ladder worth
-    probing on it, and the exception types that signal the MACHINE
-    failing (as opposed to a value-level rejection like ValueError,
-    which is the mathematics or the contract talking)."""
+    """One number representation: its tag, how it overflows, the hazard
+    ladder worth probing on it, the exception types that signal the
+    MACHINE failing (as opposed to a value-level rejection like
+    ValueError, which is the mathematics or the contract talking), and
+    the largest finite magnitude it represents (None for a number
+    representation that grows without bound). The maximum is how far a
+    computation over the number representation can reach along an
+    unbounded direction."""
     tag: str
     overflow: str                       # arbitrary | inf | wrap | trap | ub
     ladder: tuple = ()
     machine_failures: tuple = field(default=())
+    max_magnitude: "float | None" = None
 
 
 #: Python's float: an IEEE-754 double. Overflow raises OverflowError
@@ -59,6 +65,18 @@ PY_FLOAT64 = Representation(
     overflow="inf",
     ladder=tuple(_REPRESENTATION_LADDER),
     machine_failures=(OverflowError, MemoryError, RecursionError),
+    max_magnitude=sys.float_info.max,
+)
+
+#: Python's complex (numpy's complex128): a pair of IEEE-754 doubles,
+#: the real and the imaginary part. Each part overflows as a float64
+#: does, so the largest finite magnitude is float64's, per component.
+PY_COMPLEX128 = Representation(
+    tag="c128",
+    overflow="inf",
+    ladder=tuple(_REPRESENTATION_LADDER),
+    machine_failures=(OverflowError, MemoryError, RecursionError),
+    max_magnitude=sys.float_info.max,
 )
 
 #: Python's int: arbitrary precision. Overflow cannot happen; the
@@ -67,12 +85,14 @@ PY_INT = Representation(
     tag="bigint",
     overflow="arbitrary",
     machine_failures=(MemoryError, RecursionError),
+    max_magnitude=None,
 )
 
 #: The profiles the Python runtime supplies, by the param kinds the
 #: analysis vocabulary uses.
 PYTHON_PROFILES: dict[str, Representation] = {
     "scalar": PY_FLOAT64,
+    "complex": PY_COMPLEX128,
     "int": PY_INT,
 }
 

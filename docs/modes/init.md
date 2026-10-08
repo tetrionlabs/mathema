@@ -18,7 +18,7 @@ mathema init [mypkg mypkg.sub ...] [--agents [TOOL]]
 | `target` | zero or more importable module or package name(s), same as `audit`; omit to scaffold only the git files |
 | `--root` | project root to write `.gitattributes`, `.mathema/.gitignore`, and `claims/` under (default: the nearest ancestor holding `.mathema/` within the enclosing git repository, else that repository, else `.`; never the home directory) |
 | `--agents [TOOL]` | also vendor the mathema-agents skills for TOOL (`claude`, `codex`, `gemini`, `cursor`, `copilot`, `windsurf`, `cline`); bare `--agents` auto-detects the one your project already uses |
-| `--agents-url` | git URL for the skills repo (default the mathema-agents repository, not yet public; also read from `MATHEMA_AGENTS_URL`) |
+| `--agents-url` | git URL for the skills repo (default the public mathema-agents repository; also read from `MATHEMA_AGENTS_URL`) |
 | `--agents-ref` | branch or tag of the skills repo to fetch (default: the branch matching your mathema minor line, such as `v0.6`, falling back to the repo's default branch); an explicit ref is never substituted |
 | `--force` | overwrite vendored agent files that already exist (default: leave them) |
 | `--ci [PROVIDER]` | also scaffold the verify-gate CI fragment (`github`, `gitlab`); bare `--ci` means github. Written only where absent, then it is yours to edit |
@@ -34,7 +34,7 @@ files a tracked store wants:
   expandable when you do want to read it. (`linguist-generated`, not
   `-diff`: the record stays reviewable.)
 - **`.mathema/.gitignore`** tracking the durable evidence and required
-  artifacts (`verified/`, `meta/`, `compendium/`, `badges/`) and ignoring
+  artifacts (`verified/`, `meta/`, `badges/`) and ignoring
   regenerated state (`declared/`, `issues/`).
 
 The evidence is meant to be committed: a verified record is the durable
@@ -124,21 +124,22 @@ mathema init: vendored mathema-agents skills for claude:
   .claude/skills/design-claims/SKILL.md
   .claude/skills/start-from-claims/SKILL.md
   .claude/skills/use-mathema-mcp/SKILL.md
-  from v0.6, matching mathema 0.6.0
+  from v0.6, matching mathema 0.6.1
 ```
 
 The last line names the skills branch fetched: the one matching your
 mathema minor line, or the repo's default branch when that line has
 none yet. Only the skills and your tool's adapter are copied, never the skills
-repo's own notes, license, or history. A file already present is left as
+repo's own notes or history; every copied file carries its Apache-2.0
+licence line. A file already present is left as
 it is (`--force` overwrites), so a re-run is safe and a local edit
 survives. Bare `--agents` with no tool detected (or several) vendors
 `skills/` neutrally and prints the table above so you finish by hand.
 
 **mathema reaches the network only when you ask it to.** Every other
 command is offline; `--agents` is the one that fetches, and it does so
-through your `git` (so a private repo works if your git can already read
-it). If the fetch cannot happen (no network, `git` missing, or you lack
+through your `git`, so a fork or mirror named with `--agents-url` works
+whenever your git can read it. If the fetch cannot happen (no network, `git` missing, or you lack
 access to the repo), init says so plainly, prints the manual steps, and
 still exits cleanly, its own scaffolding is already done.
 

@@ -1,0 +1,48 @@
+{#- The Tetrion Labs nav: the mark and the TETRION [LABS] wordmark
+    (linking to the Labs site), the product name (linking to the docs
+    home), then the bracketed site links, search and the scheme toggle.
+    Each bracket is a butt-capped border, drawn like the strokes of the
+    mark. -#}
+{% macro brk_link(href, label, extra="", current=false) -%}
+  <a href="{{ href }}" class="brkw mx-navlink {{ extra }}"{% if current %} aria-current="page"{% endif %}><span class="brk l"></span><span class="bin">{{ label }}</span><span class="brk r"></span></a>
+{%- endmacro %}
+<header class="md-header mx-nav" data-md-component="header">
+  <nav class="md-header__inner md-grid mx-navin" aria-label="{{ lang.t('header') }}">
+    <label class="md-header__button md-icon" for="__drawer">
+      {% set icon = config.theme.icon.menu or "material/menu" %}
+      {% include ".icons/" ~ icon ~ ".svg" %}
+    </label>
+    <a class="mx-home" href="https://tetrionlabs.com/" aria-label="Tetrion Labs">
+      <img src="{{ 'assets/tetrion-mark-light.svg' | url }}" width="22" height="22" alt="">
+      <span class="wm">TETRION<span class="wm-gap"> </span><span class="brkw labs"><span class="brk l"></span><span class="bin">LABS</span><span class="brk r"></span></span></span>
+    </a>
+    <a class="mx-product" href="{{ config.extra.homepage | d(nav.homepage.url, true) | url }}" title="{{ config.site_name | e }}">{{ config.site_name }}</a>
+    <span class="mx-navlinks">
+      {{ brk_link("https://tetrionlabs.com/#mathema", "mathema", "mx-hide-m") }}
+      {{ brk_link("https://mathema.tetrionlabs.com/", "docs", "mx-hide-m", true) }}
+      {{ brk_link("https://tetrionlabs.com/#partners", "enterprise", "mx-hide-m") }}
+      {{ brk_link("https://tetrionlabs.com/#contact", "contact", "mx-hide-s") }}
+      {% if config.repo_url %}
+        {{ brk_link(config.repo_url, "GitHub") }}
+      {% endif %}
+    </span>
+    {% if "material/search" in config.plugins %}
+      {% set search = config.plugins["material/search"] | attr("config") %}
+      {% if search.enabled %}
+        <label class="md-header__button md-icon" for="__search">
+          {% set icon = config.theme.icon.search or "material/magnify" %}
+          {% include ".icons/" ~ icon ~ ".svg" %}
+        </label>
+        {% include "partials/search.html" %}
+      {% endif %}
+    {% endif %}
+    {% if config.theme.palette %}
+      {% if not config.theme.palette is mapping %}
+        {% include "partials/palette.html" %}
+      {% endif %}
+    {% endif %}
+    {% if not config.theme.palette is mapping %}
+      {% include "partials/javascripts/palette.html" %}
+    {% endif %}
+  </nav>
+</header>

@@ -190,8 +190,8 @@ def test_a_two_parameter_premise_still_falsifies_from_inside_its_region():
     probe = _verdict(
         _sq_gap, "assuming a <= b, for a in [-10,10], b in [-10,10], f(a,b) >= 0")
     assert probe.verdict == "falsified"
-    numbers = [float(part) for part in
-               probe.counterexample.split(":")[0].strip("() ").split(",")]
+    numbers = [float(part.split("=")[1])
+               for part in probe.counterexample.split(":")[0].split(",")]
     assert numbers[0] <= numbers[1], probe.counterexample
 
 

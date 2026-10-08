@@ -4,8 +4,8 @@
 gamma/lgamma, both a function body calling math.sinh/etc. now lifts,
 and claim text can reference these names directly.
 
-factorial/gamma/sqrt/log/asin/acos also get a real is_builtin_safe[param]
-claim (the is_builtin_safe ClaimFamily, probing.py), suggested
+factorial/gamma/sqrt/log/asin/acos also get a real is_number_set_safe[param]
+claim (the is_number_set_safe ClaimFamily, probing.py), suggested
 automatically by suggest_claims() for any parameter fed into one of
 these: sympy's own symbolic generalization is often wider than the real
 math function's own accepted domain (math.factorial only accepts a
@@ -68,33 +68,33 @@ def test_tanh_is_sinh_over_cosh():
     assert results[0].verdict == "proven"
 
 
-# --- is_builtin_safe[param]: the family, directly ------------------------
+# --- is_number_set_safe[param]: the family, directly ------------------------
 
 def test_factorial_numeric_safe_proven_over_a_declared_N_domain():
     results = check_conjectures(
-        fact, [claim("is_builtin_safe(n)", name="is_builtin_safe[n]", route="derive"),
+        fact, [claim("is_number_set_safe(n)", name="is_number_set_safe[n]", route="derive"),
               claim("for n in N, f(n) == gamma(n + 1)", route="derive")],
         domain={"n": "N"})
     by_name = {r.name: r for r in results}
-    assert by_name["is_builtin_safe[n]"].verdict == "proven"
+    assert by_name["is_number_set_safe[n]"].verdict == "proven"
 
 
 def test_factorial_numeric_safe_falsified_over_a_plain_interval():
     # gamma(n+1) is sympy's own definition of factorial(n), true for
     # any real n, not just the non-negative integers math.factorial
     # itself accepts. The equality claim is correctly proven regardless
-    # (it's a fact about the continuous extension); is_builtin_safe[n]
+    # (it's a fact about the continuous extension); is_number_set_safe[n]
     # is the honest, separate signal that a real counterexample exists
     # in [0, 10] (e.g. 0.5) where math.factorial itself would raise.
     results = check_conjectures(
-        fact, [claim("is_builtin_safe(n)", name="is_builtin_safe[n]", route="derive")],
+        fact, [claim("is_number_set_safe(n)", name="is_number_set_safe[n]", route="derive")],
         domain={"n": (0, 10)})
     assert results[0].verdict == "falsified"
 
 
 def test_factorial_numeric_safe_falsified_over_an_entirely_negative_interval():
     results = check_conjectures(
-        fact, [claim("is_builtin_safe(n)", name="is_builtin_safe[n]", route="derive")],
+        fact, [claim("is_number_set_safe(n)", name="is_number_set_safe[n]", route="derive")],
         domain={"n": (-10, -1)})
     assert results[0].verdict == "falsified"
 
@@ -105,13 +105,13 @@ def test_factorial_numeric_safe_falsified_with_no_domain_at_all():
     # a real counterexample, so this is a real falsification, not
     # merely undecided.
     results = check_conjectures(
-        fact, [claim("is_builtin_safe(n)", name="is_builtin_safe[n]", route="derive")])
+        fact, [claim("is_number_set_safe(n)", name="is_number_set_safe[n]", route="derive")])
     assert results[0].verdict == "falsified"
 
 
 def test_sqrt_numeric_safe_proven_over_a_nonnegative_interval():
     results = check_conjectures(
-        sqrt_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        sqrt_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (0, 100)})
     assert results[0].verdict == "proven"
 
@@ -120,35 +120,35 @@ def test_sqrt_numeric_safe_falsified_over_a_straddling_interval():
     # not just "entirely negative", [-5, 5] contains a real
     # counterexample (-3) even though it isn't uniformly unsafe either.
     results = check_conjectures(
-        sqrt_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        sqrt_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (-5, 5)})
     assert results[0].verdict == "falsified"
 
 
 def test_log_numeric_safe_proven_over_a_strictly_positive_interval():
     results = check_conjectures(
-        log_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        log_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (0.1, 100)})
     assert results[0].verdict == "proven"
 
 
 def test_log_numeric_safe_falsified_when_domain_includes_zero():
     results = check_conjectures(
-        log_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        log_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (-5, 0)})
     assert results[0].verdict == "falsified"
 
 
 def test_asin_numeric_safe_proven_within_minus_one_to_one():
     results = check_conjectures(
-        asin_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        asin_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (-0.5, 0.5)})
     assert results[0].verdict == "proven"
 
 
 def test_asin_numeric_safe_falsified_entirely_outside_range():
     results = check_conjectures(
-        asin_fn, [claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+        asin_fn, [claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (2, 5)})
     assert results[0].verdict == "falsified"
 
@@ -184,7 +184,7 @@ def test_gamma_pole_safe_unsure_with_an_offset_argument():
     assert results[0].verdict == "unknown"
 
 
-def test_no_ordinary_derive_route_for_is_pole_safe_or_is_builtin_safe():
+def test_no_ordinary_derive_route_for_is_pole_safe_or_is_number_set_safe():
     # confirms these two never fall through to try_prove()'s own
     # lhs/rhs machinery when the family declines, straight to an
     # honest skip, same route="derive" invariant every other family
@@ -194,20 +194,20 @@ def test_no_ordinary_derive_route_for_is_pole_safe_or_is_builtin_safe():
 
     results = check_conjectures(
         plain, [claim("is_pole_safe(x)", name="is_pole_safe[x]", route="derive"),
-               claim("is_builtin_safe(x)", name="is_builtin_safe[x]", route="derive")],
+               claim("is_number_set_safe(x)", name="is_number_set_safe[x]", route="derive")],
         domain={"x": (0, 10)})
     assert all(r.verdict == "unknown" for r in results)
 
 
 # --- suggest_claims() wiring ---------------------------------------------
 
-def test_suggest_claims_includes_is_builtin_safe_for_a_factorial_call():
+def test_suggest_claims_includes_is_number_set_safe_for_a_factorial_call():
     facts = analyze_source(fact)
     claims = {c.name: c for c in suggest_claims(fact, facts=facts)}
-    assert "is_builtin_safe[n]" in claims
+    assert "is_number_set_safe[n]" in claims
     # route="best": the family registers a real empirical half (edge
     # trials), so the suggestion cascades derive -> probe
-    assert claims["is_builtin_safe[n]"].route == "examine"
+    assert claims["is_number_set_safe[n]"].route == "examine"
 
 
 def test_suggest_claims_includes_is_pole_safe_for_a_gamma_call():
@@ -225,4 +225,4 @@ def test_suggest_claims_omits_both_when_nothing_restricted_is_called():
 
     facts = analyze_source(plain)
     names = {c.name for c in suggest_claims(plain, facts=facts)}
-    assert not any(n.startswith(("is_builtin_safe", "is_pole_safe")) for n in names)
+    assert not any(n.startswith(("is_number_set_safe", "is_pole_safe")) for n in names)

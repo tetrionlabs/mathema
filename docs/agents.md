@@ -19,12 +19,12 @@ keyboard without handing it the definition of correct.
 | propose claims and check them against the real function | accept evidence as sufficient, or own a residual risk |
 | read verdicts, counterexamples and the human-decision queue | record that a falsification was a wrong claim rather than a bug |
 | lock a function it has finished | unlock a locked function |
-| edit claims in docstrings and claims files | adopt an edited claim over the one already verified |
+| edit claims in docstrings and claims files, and adopt suggested claims (`mathema claims KEY --adopt NAME`) | accept an edited claim over the one already verified |
 
 The last row is the one people ask about. When a claim that already has a
 verified record is edited, weakened or narrowed, the verified version keeps
 being checked and the sweep reports the claim as re-authored, until a person
-adopts the change with `mathema accept KEY CLAIM --as superseded`. A claim
+accepts the change with `mathema accept KEY CLAIM --as superseded`. A claim
 deleted from every authoring surface is restored from its verified record for
 the same reason. An agent can propose a weaker claim; it cannot make the
 record forget the stronger one.
@@ -71,6 +71,18 @@ None of this is a wall against an agent determined to subvert it, and it is
 not meant to be one: it is a tripwire. The normal loop cannot cross it, and
 every way around it leaves a trace in the record or the diff.
 
+## Claims an agent writes
+
+A claim can bind a function with `let` (`let g = json.dumps`). That is
+the same as importing the library and calling the function in your own
+code: the function runs. mathema refuses a binding that reaches the
+system (`os`, `sys`, `subprocess`, `builtins`, `shutil`, `socket`,
+`importlib` and others), and a binding into third-party code whose
+effects mathema cannot establish runs with a warning on the claim's
+line and in the record. Review a `let` in an agent's claim as you would
+an import in its code. [Security and execution](security.md) has the
+details.
+
 ## Giving an agent the tools
 
 Two pieces, both optional:
@@ -82,7 +94,7 @@ Two pieces, both optional:
   environment. [The MCP interface](modes/mcp.md) lists every tool.
 - **Agent skills.** `mathema init --agents` vendors skills and per-tool
   instructions from the
-  [mathema-agents](https://github.com/tetrionlabs/mathema-agents) repository
-  (not yet public), which teach an agent to run the claim loop properly rather
+  public [mathema-agents](https://github.com/tetrionlabs/mathema-agents)
+  repository, which teach an agent to run the claim loop properly rather
   than guess at it. It is the one command in mathema that fetches anything,
   and only when you run it. See [mathema init](modes/init.md).

@@ -28,20 +28,20 @@ DERIVE_ONLY_FORMS = frozenset({"d", "lim", "integrate", "Sum", "Prod",
 
 # Domain-safety predicates: every one is on both routes, a
 # structural/symbolic derive half AND a targeted empirical half
-# (is_pole_safe trials the admitted pole locations, is_builtin_safe
+# (is_pole_safe trials the admitted pole locations, is_number_set_safe
 # the restricted builtins' domain edges, is_missing_safe a literal
 # NaN). raises likewise: "every call in the domain raises" is a
 # universal fact however it was reached. This set is the ONE
 # statement of which relations are safety predicates, grammar,
 # records, spec, acceptance, and the adjudication loop all read it
 # from here.
-SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
-                               "is_missing_safe", "is_extremity_safe",
+SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_number_set_safe",
+                               "is_missing_safe", "is_absent_safe",
                                "is_representation_safe", "is_empty_safe",
-                               "is_arbitrary_input_safe",
-                               "is_compendium_safe",
+                               "is_language_defined",
+                               "is_library_safe",
                                "excluded_outside_domain",
-                               # function-wide implementation checks.
+                               # function-wide computation checks.
                                # They were registered claim families and
                                # adjudicated through the `stateless`
                                # keyword, but could not be WRITTEN as a
@@ -50,7 +50,17 @@ SAFETY_PREDICATES = frozenset({"is_pole_safe", "is_builtin_safe",
                                # parsed. A predicate asserts itself;
                                # there is no relation to spell.
                                "is_state_safe", "is_deterministic",
-                               "is_reproducible", "is_defined"})
+                               "is_reproducible", "is_defined",
+                               # the repeatability roll-up
+                               "is_repeatable",
+                               # the definedness tree's roll-ups and
+                               # views beyond the `is_*_safe` shape
+                               "is_numerically_defined",
+                               "is_language_defined",
+                               "is_finite_over_floats",
+                               # reserved for a later release
+                               "is_order_invariant",
+                               "is_representation_consistent"})
 
 # Matrix STRUCTURE predicates: facts about a matrix VALUE (a parameter
 # or an f(...) output), examined the same way safety predicates are but
@@ -92,10 +102,17 @@ def safety_predicates() -> frozenset:
     return SAFETY_PREDICATES | registered_predicates()
 
 
+def output_predicates() -> frozenset:
+    """The live output-contract vocabulary: `OUTPUT_PREDICATES` plus
+    the output predicates registered claim families own."""
+    from . import families
+    return OUTPUT_PREDICATES | families.registered_output_predicates()
+
+
 def examine_predicates() -> frozenset:
     """The live examine vocabulary: `EXAMINE_PREDICATES` plus
-    registered ones."""
-    return EXAMINE_PREDICATES | registered_predicates()
+    registered safety and output predicates."""
+    return EXAMINE_PREDICATES | registered_predicates() | output_predicates()
 
 
 ROUTE_CAPABILITIES: dict[str, frozenset] = {
@@ -104,7 +121,7 @@ ROUTE_CAPABILITIES: dict[str, frozenset] = {
     # probe cannot evaluate the symbolic-calculus forms; every safety
     # predicate and raises has a real sampling half
     "probe": _ALL_FORMS - DERIVE_ONLY_FORMS,
-    # examine is the implementation-check route: safety predicates
+    # examine is the computation-check route: safety predicates
     # are facts about the code itself, examined through whichever
     # mechanism (structural or trial) can establish them, akin to
     # tests in traditional testing. It owns exactly the safety
@@ -117,14 +134,14 @@ def route_capabilities(route: str) -> frozenset:
     """The live form vocabulary for `route`: the static table plus
     registered predicates (a family may offer any route for a
     predicate it owns)."""
-    return ROUTE_CAPABILITIES[route] | registered_predicates()
+    return ROUTE_CAPABILITIES[route] | registered_predicates() | output_predicates()
 
 
 # What a runtime provider can contribute; the vocabulary is defined
 # beside the adaptor contract in `interfaces.runtime`. `runtime` is
 # calling the function at concrete points, `frontend` is source-level
 # analysis (a Facts with body structure), `globals` is visibility of
-# ambient implementation state (module globals, argument mutation).
+# the code's ambient state (module globals, argument mutation).
 CAPABILITIES = frozenset({"runtime", "frontend", "globals"})
 
 # the strongest verdict each route can reach per outcome direction,
@@ -230,3 +247,12 @@ def unsupported_forms(route: str, cj) -> list[str]:
         return []
     capable = ROUTE_CAPABILITIES.get(route, frozenset())
     return sorted(required_forms(cj) - capable)
+
+
+def is_proof_route(route: "str | None") -> bool:
+    """Intent:
+        Whether a row's route names a proof: `derive` and its subroutes,
+        or `examine` (a proof from the function's structure), which
+        share the strongest rung of the evidence ladder.
+    """
+    return (route or "").split(":", 1)[0] in ("derive", "examine")

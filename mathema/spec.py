@@ -18,9 +18,10 @@ import os
 import re
 import unicodedata
 
+from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
-from .routes import examine_predicates
+from .routes import examine_predicates, is_proof_route
 
 # The CDD spec version this module's writer/reader conforms to: see the
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
@@ -79,7 +80,7 @@ def reasoning_chain(ex) -> list[dict]:
                           "basis": basis})
         elif classify_verdict(p.verdict) in ("skipped", "unknown"):
             chain.append({"step": "gap", "claim": p.statement,
-                          "basis": p.sketch or p.note or "could not be adjudicated"})
+                          "basis": p.sketch or p.note or "could not be checked"})
     if ex.concepts:
         chain.append({"step": "situating",
                       "claim": "instantiates: " + ", ".join(t.name for t in ex.concepts),
@@ -208,6 +209,13 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                     "CDD_spec_version": SPEC_VERSION,
                     "date": datetime.date.today().isoformat()},
     }
+    from .runtime_types import identity_entries
+    runtime = identity_entries(f)
+    if runtime:
+        # each parameter realised as something other than a list: the
+        # runtime type, the evidence it was read from, and the library
+        # version whose semantics the evidence holds under
+        spec["identity"]["runtime_types"] = runtime
     deps = list(getattr(ex, "dependencies", None) or [])
     if deps:
         # one-deep callee records (inventory.function_dependencies):
@@ -267,7 +275,8 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
             row["note"] = p.note
         if p.sketch:
             row["sketch"] = p.sketch
-        if p.condition and (p.route or "").split(":", 1)[0] == "derive":
+        if p.condition and (is_proof_route(p.route)
+                            or p.condition.startswith("let |inf| be ")):
             row["condition"] = p.condition
         row["route"] = p.route
         # where the claim came from: an object whose `surface` names the
@@ -288,15 +297,21 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
         # reads either shape identically
         row_meta = ({**(p.meta or {}), "mathema.stratum": p.stratum}
                     if getattr(p, "stratum", None) else (p.meta or None))
+        if row_meta and isinstance(row_meta.get("mathema.policy"), dict):
+            # a policy row's record states what it has, no empty fields
+            row_meta = {**row_meta, "mathema.policy": {
+                k: v for k, v in row_meta["mathema.policy"].items()
+                if v is not None and v != ""}}
         if row_meta:
             row["meta"] = row_meta
         source = (p.meta or {}).get("mathema.surface")
-        if not include_suggestions and (
+        if not include_suggestions and not (p.meta or {}).get("mathema.policy") and (
                 source == "mathema"
                 or str(p.note or "").startswith("conjectured by mathema")):
             # a suggestion mathema volunteered is an AUTHORING-surface
             # helper, not a record of fact: it never enters the
-            # verified layer at all. Adoption (mathema claims --adopt)
+            # verified layer at all (the missing-value policy rows are
+            # the exception: they are the function's recorded posture). Adoption (mathema claims --adopt)
             # writes it into the declared spec, where it becomes an
             # ordinary claim adjudicated and gated like any other.
             continue
@@ -458,7 +473,8 @@ def save_spec(ex, path: str) -> str:
 # Keys are dotted names (module.qualname) so many files share one namespace.
 # ---------------------------------------------------------------------------
 
-def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
+def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
+                       fn=None) -> str:
     """A stable hash of a declared claim set's portable identity. For
     each claim, its `fingerprint_text` (the canonical ascii rendering
     of the parsed claim, advisory `-->` regions stripped) beside the
@@ -482,7 +498,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
     as unchanged (or as changed).
 
     `mathema verify` uses this alongside the form hash: unchanged code
-    plus an unchanged claim set is what "fresh" actually means."""
+    plus an unchanged claim set is what "fresh" actually means. With
+    `fn`, each claim's bindings are completed from its annotations
+    first, so a claim and its record's canonical text hash alike."""
     import hashlib
 
     def sort_key(c):
@@ -493,7 +511,9 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema") -> str:
         cgrammar = c.get("grammar", grammar)
         statement = (c.get("statement") or c.get("law") or "").strip()
         if cgrammar == "mathema":
-            statement = fingerprint_text(_declared_conjecture(c, grammar))
+            from .sync import _completed
+            statement = fingerprint_text(_completed(
+                _declared_conjecture(c, grammar), fn))
         parts.append(f"{c.get('name', '')}|{statement}|{c.get('route', 'best')}"
                      f"|{cgrammar}|{c.get('tolerance')}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
@@ -528,6 +548,9 @@ def _declared_conjecture(c: dict, default_grammar: str = "mathema"):
                 tolerance=c.get("tolerance"),
                 pseudo_infinity=c.get("pseudo_infinity"),
                 meta=meta)
+    if c.get("trials") is not None:
+        from dataclasses import replace as _replace
+        cj = _replace(cj, trials=int(c["trials"]))
     for param, b in (c.get("domain") or {}).items():
         cj.domain.setdefault(param, domain_bound_from_json(b))
     # a call-site claim's in-hand callables (check() carries them under
@@ -738,8 +761,8 @@ def integrity_diagnosis(key: str, entry: dict, root: str = ".") -> str:
         cause = ("its contents changed since mathema last stamped it (a "
                  "merge, a rebase, a stash, or an edited declared claim)")
     return (f"WARN {key}: the verified record's checksum no longer matches "
-            f"its contents, {cause}. Re-run `mathema verify {key}` to "
-            f"re-adjudicate and re-stamp it.")
+            f"its contents, {cause}. To check it again and re-stamp it, "
+            f"run: mathema verify {key}")
 
 
 def _relative_file(path: str, root_abs: str) -> "str | None":
@@ -817,15 +840,25 @@ def authored_route(row: dict) -> str:
         The route a verified row's claim was authored with: its
         `authored.route` when the row records one, otherwise the base
         of its evidence route, which is how a row written before the
-        authored route was kept reads.
+        authored route was kept reads. A probe row whose meta records a
+        derive attempt (`mathema.derive_status`) reads as `best`: the
+        probe stood in for derive on a claim authored with the default
+        route, since a derive-route claim never falls to the probe.
     """
     stated = (row.get("authored") or {}).get("route") \
         if isinstance(row.get("authored"), dict) else None
-    return base_route(stated or row.get("route"))
+    if stated:
+        return base_route(stated)
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    if base_route(row.get("route")) == "probe" \
+            and "mathema.derive_status" in (meta or {}):
+        return "best"
+    return base_route(row.get("route"))
 
 
 def record(ex, key: str | None = None, root: str = ".",
-          claims: list | None = None, declared_intent: str | None = None) -> str:
+          claims: list | None = None, declared_intent: str | None = None,
+          grammar: str = "mathema", fn=None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -834,7 +867,9 @@ def record(ex, key: str | None = None, root: str = ".",
     edited even when the code itself hasn't changed. Pass the raw declared
     dicts (as loaded from YAML), not Conjecture objects, the fingerprint
     must stay comparable across implementations, and Conjecture is a
-    Python-only parse of that same declared shape.
+    Python-only parse of that same declared shape. `grammar` is the
+    declared entry's grammar (its own, else its file's), the grammar
+    of every claim that names none.
 
     `declared_intent` (an `intent:` field on the declared entry this
     record was checked against, when one exists) fills the record's
@@ -854,7 +889,8 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
-    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [])
+    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
+                                                                grammar, fn)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
         # the declared layer's intent is the skeleton when the
@@ -951,18 +987,60 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
 _REGRESSABLE = ("falsified", "unknown", "skipped")
 
 
-def _dependency_state(dep: dict, verified: dict) -> str | None:
+def _installed_outside(path: "str | None", root: str) -> bool:
+    """Whether a source file (absolute, or relative to `root` as a
+    record writes it) belongs to an installed library rather than the
+    project at `root`: outside the root, or inside an installed packages
+    directory under it (a project-local virtual environment)."""
+    if not path:
+        return False
+    real = os.path.realpath(os.path.join(root, path))
+    parts = real.split(os.sep)
+    if "site-packages" in parts or "dist-packages" in parts:
+        return True
+    return not real.startswith(os.path.realpath(root) + os.sep)
+
+
+def _dependency_file(dep: dict, root: str) -> "str | None":
+    """The source file of a dependency: the one its entry names when
+    that file exists (absolute, or relative to `root`), else the file of
+    the module the function its key resolves to belongs to; None when
+    neither is known."""
+    named = dep.get("file")
+    if named and os.path.isfile(os.path.join(root, named)):
+        return named
+    import inspect
+    import sys
+
+    from .conjecture import _resolve_func_ref
+    try:
+        obj = _resolve_func_ref(dep.get("key") or "")
+        module = sys.modules.get(getattr(obj, "__module__", None) or "")
+        return getattr(module, "__file__", None) or (
+            inspect.getsourcefile(obj) if obj is not None else None)
+    except Exception:
+        return None
+
+
+def _dependency_state(dep: dict, verified: dict,
+                      root: "str | None" = None) -> str | None:
     """One function-kind dependency's freshness against the verified
     store: `current` / `stale` / `invalidated` / `unverified`, or
     `None` for a dependency that carries no form (modules, classes,
     signature callables); those have no verification to be fresh
-    against."""
+    against. Given the project `root`, a callee installed outside it
+    (the standard library, a third-party package) with no record is
+    `None` too: the project's store records it only when a claims file
+    states claims about it, and then it is compared like any other."""
     form = dep.get("form")
     key = dep.get("key")
     if not form or not key:
         return None
     stored = verified.get(key)
     if stored is None:
+        if root is not None and _installed_outside(_dependency_file(dep, root),
+                                                   root):
+            return None
         return "unverified"
     entry = stored.get("entry") or {}
     if any(classify_verdict(c.get("verdict") or "") == "invalidated"
@@ -989,9 +1067,10 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
     from .records import Probe
 
     verified = load_verified(root)
-    states = [(dep, _dependency_state(dep, verified)) for dep in dependencies or []]
+    states = [(dep, _dependency_state(dep, verified, root))
+              for dep in dependencies or []]
     checked = [(dep, st) for dep, st in states if st is not None]
-    note = "generated by mathema verify; adjudicated against the verified store"
+    note = "generated by mathema verify; checked against the verified store"
     if not checked:
         return Probe("dependencies_current", "", "proven",
                      route="derive", note=note,
@@ -1009,7 +1088,9 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
     if unverified:
         names = ", ".join(dep["key"] for dep in unverified)
         return Probe("dependencies_current", "", "unknown",
-                     route="derive", note=note,
+                     route="derive",
+                     note=(f"no verified record yet for {names}; state "
+                           f"claims about it and run mathema verify"),
                      meta={"mathema.surface": "builtin"},
                      sketch=f"no verified record yet for: {names}")
     return Probe("dependencies_current", "", "proven",
@@ -1039,7 +1120,7 @@ def _annotate_dependency_freshness(spec: dict, root: str) -> None:
         return
     verified = load_verified(root)
     for dep in deps:
-        state = _dependency_state(dep, verified)
+        state = _dependency_state(dep, verified, root)
         if state is not None:
             dep["freshness"] = state
 
@@ -1212,6 +1293,49 @@ def _verified_files(root: str) -> list:
             if name.endswith(".yaml")]
 
 
+def _safe_loader():
+    """PyYAML's safe loader, its libyaml parser when PyYAML was built
+    with it: the same constructor and resolver over a faster parser."""
+    import yaml
+    return getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+_SAFE_LOADER = _safe_loader()
+
+#: parsed YAML files by path, each with the (modification time, size)
+#: it was read at, so a file read again unchanged is not parsed again
+_PARSED: dict = {}
+
+
+def _parsed_yaml(path: str, fh=None):
+    """Intent:
+        The YAML document at `path` (or read from the open `fh`), parsed
+        by `_SAFE_LOADER`; a file unchanged since it was last parsed
+        (same modification time and size) is not parsed again, and every
+        caller gets its own copy.
+
+    Raises:
+        OSError: the file cannot be read.
+        yaml.YAMLError: the file does not parse.
+    """
+    import copy
+
+    import yaml
+    st = os.stat(path)
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _PARSED.get(path)
+    if hit is not None and hit[0] == stamp:
+        return copy.deepcopy(hit[1])
+    if fh is None:
+        with open(path, encoding="utf-8") as own:
+            text = own.read()
+    else:
+        text = fh.read()
+    data = yaml.load(text, Loader=_SAFE_LOADER)
+    _PARSED[path] = (stamp, data)
+    return copy.deepcopy(data)
+
+
 def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
     """Intent:
         One verified record file as `(data, None)`, or `(None, reason)`
@@ -1219,16 +1343,26 @@ def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
         (a merge left conflict markers), it is empty, or its top level
         is not a mapping.
     """
+    import copy
+
     import yaml
     try:
+        st = os.stat(path)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except OSError as e:
         return None, f"cannot be read ({e.strerror or e})"
     if not text.strip():
         return None, "is empty"
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _PARSED.get(path)
     try:
-        data = yaml.safe_load(text)
+        if hit is not None and hit[0] == stamp:
+            data = copy.deepcopy(hit[1])
+        else:
+            data = yaml.load(text, Loader=_SAFE_LOADER)
+            _PARSED[path] = (stamp, data)
+            data = copy.deepcopy(data)
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None)
         where = f" at line {mark.line + 1}" if mark is not None else ""
@@ -1265,8 +1399,9 @@ class ClaimsFileError(ValueError):
 
 _CLAIM_FIELDS = ("name", "statement", "law", "route", "tolerance", "domain",
                  "grammar", "funcs", "pseudo_infinity", "meta", "authored",
-                 "source", "family", "note")
-_ENTRY_FIELDS = ("claims", "intent", "grammar", "meta", "references")
+                 "source", "family", "note", "versions", "trials")
+_ENTRY_FIELDS = ("claims", "defines", "intent", "grammar", "meta", "references",
+                 "pseudo_infinity", "runtime_types")
 
 
 _ENTRY_ANNOTATIONS = ("an entry's annotations go in `meta:` (structured "
@@ -1347,12 +1482,70 @@ def _auto_name_of(statement: str) -> "str | None":
         return None
 
 
+_FILE_FIELDS = ("grammar", "compendium", "versions", "aliases")
+
+
+def _library_fields_problem(data: dict) -> "tuple[str, str] | None":
+    """Intent:
+        Why a claims file's `compendium`, `versions` or `aliases` field
+        does not read, as `(field, problem)`, or None when each is
+        absent or well formed. `compendium` names the library the
+        file's claims are about; `versions` is the library version
+        range the claims apply to (`"*"`, `">=X"` or `">=X,<Y"`);
+        `aliases` lists the library's other names (a distribution name,
+        a key prefix), and no two keys may name one function through
+        them. Both need a `compendium` beside them.
+    """
+    from .compendium import valid_version_range
+    lib = data.get("compendium")
+    if "compendium" in data and (not isinstance(lib, str) or not lib.strip()
+                                 or any(ch.isspace() for ch in lib.strip())):
+        return ("compendium", f"must name the library the claims are "
+                              f"about (compendium: numpy), not {lib!r}")
+    if "versions" in data:
+        versions = data.get("versions")
+        if "compendium" not in data:
+            return ("versions", "a version range needs `compendium:` "
+                                "naming the library it ranges over")
+        if not isinstance(versions, str) \
+                or not valid_version_range(versions):
+            return ("versions", f"{versions!r} is not a version range "
+                                f"(use \"*\", \">=X\" or \">=X,<Y\")")
+        from .compendium import empty_version_range
+        if empty_version_range(versions):
+            return ("versions", f"{versions!r} admits no version: its upper "
+                                f"bound is at or below its lower bound")
+    if "aliases" in data:
+        aliases = data.get("aliases")
+        if "compendium" not in data:
+            return ("aliases", "aliases need `compendium:` naming the "
+                               "library they are other names for")
+        if not isinstance(aliases, list) or not all(
+                isinstance(a, str) and a.strip()
+                and not any(ch.isspace() for ch in a) for a in aliases):
+            return ("aliases", f"must be a list of the library's other "
+                               f"names (aliases: [PyYAML]), not {aliases!r}")
+        from .compendium import alias_key
+        seen: dict = {}
+        for key in data:
+            if key in _FILE_FIELDS:
+                continue
+            canonical = alias_key(key, str(lib), aliases)
+            if canonical in seen:
+                return (key, f"names the same function as "
+                             f"{seen[canonical]!r} ({canonical})")
+            seen[canonical] = key
+    return None
+
+
 def validate_claims_file(data, rel_path: str) -> None:
     """Intent:
         Check one parsed claims file's shape, and normalize a tolerance
         written as numeric text (YAML reads `1e-6` as a string) to its
-        number. The shape: a mapping of function keys (plus an optional
-        file-level `grammar`) to entries; an entry is a mapping whose
+        number. The shape: a mapping of function keys (plus the optional
+        file-level `grammar`, and `compendium` and `versions` on a file
+        of claims about a library's functions) to entries; an entry is
+        a mapping whose
         `claims` is a list of mappings; each claim states its law as
         text under `statement` (or `law`), names it at most once per
         key, and gives a readable `domain` and a non-negative
@@ -1373,8 +1566,11 @@ def validate_claims_file(data, rel_path: str) -> None:
         raise ClaimsFileError(
             f"{rel_path}: the top level is a {type(data).__name__}, not a "
             f"mapping of function keys to entries")
+    problem = _library_fields_problem(data)
+    if problem:
+        fail(*problem)
     for key, entry in data.items():
-        if key == "grammar":
+        if key in _FILE_FIELDS:
             continue
         if entry is None:
             continue
@@ -1390,11 +1586,25 @@ def validate_claims_file(data, rel_path: str) -> None:
                           f"{near!r}?)")
             fail(key, f"unknown field {field_name!r}; "
                       f"{_ENTRY_ANNOTATIONS}")
+        problem = _pseudo_infinity_problem(entry.get("pseudo_infinity"))
+        if problem:
+            fail(key, f"`pseudo_infinity`: {problem}")
+        problem = _runtime_types_problem(entry.get("runtime_types"))
+        if problem:
+            fail(key, f"`runtime_types`: {problem}")
+        problem = _defines_problem(key, entry.get("defines"))
+        if problem:
+            fail(key, f"`defines`: {problem}")
         claims = entry.get("claims")
         if claims is None:
             continue
         if not isinstance(claims, list):
             fail(key, f"`claims` is a {type(claims).__name__}, not a list")
+        from .policy import contradicting_policies
+        clash = contradicting_policies(
+            [c.get("statement") for c in claims if isinstance(c, dict)])
+        if clash:
+            fail(key, clash)
         seen: set = set()
         for i, c in enumerate(claims, 1):
             if not isinstance(c, dict):
@@ -1444,6 +1654,27 @@ def validate_claims_file(data, rel_path: str) -> None:
                               f"number, not {tol!r}")
                 if isinstance(tol, str):
                     c["tolerance"] = value
+            problem = _pseudo_infinity_problem(c.get("pseudo_infinity"))
+            if problem:
+                fail(key, f"{label}: `pseudo_infinity`: {problem}")
+            trials = c.get("trials")
+            if trials is not None and (isinstance(trials, bool)
+                                       or not isinstance(trials, int)
+                                       or trials < 1):
+                fail(key, f"{label}: `trials` must be a positive whole "
+                          f"number, not {trials!r}")
+            if "versions" in c:
+                from .compendium import valid_version_range
+                row_range = c.get("versions")
+                if "compendium" not in data:
+                    fail(key, f"{label}: `versions` ranges a library "
+                              f"row, and needs `compendium:` naming the "
+                              f"library")
+                if not isinstance(row_range, str) \
+                        or not valid_version_range(row_range):
+                    fail(key, f"{label}: `versions`: {row_range!r} is not "
+                              f"a version range (use \"*\", \">=X\" or "
+                              f"\">=X,<Y\")")
             domain = c.get("domain")
             if domain is not None:
                 if not isinstance(domain, dict):
@@ -1453,6 +1684,194 @@ def validate_claims_file(data, rel_path: str) -> None:
                     problem = _domain_problem(bound)
                     if problem:
                         fail(key, f"{label}: `domain` for {param}: {problem}")
+
+
+def _defines_problem(key: str, value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `defines:` is refused, in the words the
+        refusal prints, or None when it is absent or a list of
+        definition rows (`missing := {null, nan}`, or a record of one
+        under `definition:`) whose spellings the key's runtime type can
+        realise.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return (f"a {type(value).__name__}, not a list of definition rows "
+                f"(`- \"missing := {{null, nan}}\"`)")
+    from .grammar import InvalidDefinition, parse_definition
+    from .runtime_types import adapter, spellings
+    found = adapter(str(key))
+    holes: list = []
+    for row in value:
+        text = row.get("definition") if isinstance(row, dict) else row
+        if not isinstance(text, str):
+            return (f"{row!r} is not a definition row; write it as text, "
+                    f"`- \"missing := {{null, nan}}\"`")
+        try:
+            word, members, extends = parse_definition(text)
+        except InvalidDefinition as e:
+            return str(e)
+        if found is not None:
+            known = spellings(found)
+            for spelling in members:
+                if spelling not in known:
+                    return (f"{found.name} has no spelling {spelling!r}; its "
+                            f"spellings are {', '.join(sorted(known)) or 'none'}")
+            if word == "missing":
+                if extends:
+                    holes += [m for m in getattr(found, "MISSING_MEMBERS", ())
+                              if m not in holes]
+                holes += [m for m in members if m not in holes]
+    if found is not None:
+        # one value may be both the absence and a hole member (its
+        # position decides which it is), never two different hole members
+        clash = _same_value_twice(holes, spellings(found))
+        if clash is not None:
+            first, second, shown = clash
+            return (f"{found.name} names one value, {shown}, as two hole "
+                    f"members, {first} and {second}")
+    return None
+
+
+def _same_value_twice(words: list, known: dict) -> "tuple | None":
+    """Intent:
+        The first two of `words` whose realised values are the same value
+        (by identity, or both NaN, or equal), with that value's repr, or
+        None when every word realises a different value.
+    """
+    seen: list = []
+    for word in words:
+        realise = known.get(word, (None, None))[0]
+        if realise is None:
+            continue
+        try:
+            value = realise()
+        except Exception:
+            continue
+        for other, earlier in seen:
+            try:
+                same = (value is earlier
+                        or (isinstance(value, float) and isinstance(earlier, float)
+                            and value != value and earlier != earlier)
+                        or bool(value == earlier))
+            except Exception:
+                same = False
+            if same:
+                return other, word, repr(value)
+        seen.append((word, value))
+    return None
+
+
+def _runtime_types_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file entry's `runtime_types` value is refused, in
+        the words the refusal prints, or None when it is absent or a
+        mapping of parameter names to runtime type names mathema knows
+        (`{returns: pandas.Series}`).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return (f"a {type(value).__name__}, not a mapping of parameter "
+                f"names to runtime types (`{{returns: pandas.Series}}`)")
+    from .runtime_types import adapters
+    known = list(adapters())
+    for param, name in value.items():
+        if not isinstance(param, str) or not isinstance(name, str):
+            return (f"{param!r}: {name!r} is not a parameter name mapped "
+                    f"to a runtime type name")
+        if name not in known:
+            near = _misspelling(name, tuple(known))
+            return (f"{param}: unknown runtime type {name!r}"
+                    + (f" (did you mean {near!r}?)" if near else "")
+                    + f"; known: {', '.join(known)}")
+    return None
+
+
+def _pseudo_infinity_problem(value) -> "str | None":
+    """Intent:
+        Why a claims-file `pseudo_infinity` value is refused, in the
+        words a bad `let |inf| be` gets, or None when it is absent or
+        a finite positive magnitude.
+    """
+    if value is None:
+        return None
+    from .domain import InvalidDomain
+    from .records import _checked_magnitude
+    try:
+        _checked_magnitude(value)
+    except InvalidDomain as e:
+        return str(e)
+    return None
+
+
+def _bundled_compendium_dir() -> str:
+    """The directory of the compendium files mathema ships."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "compendium")
+
+
+def claims_file_paths(root: str = ".", *,
+                      exclude: "tuple[str, ...]" = ()) -> list:
+    """Intent:
+        Every claims file under `root` (`*.claims.yaml`,
+        `claims/*.yaml`, `claimspec.yaml`), shallow first and then by
+        path, skipping tool and environment directories and any
+        directory in `exclude` (compared by real path).
+    """
+    skip = {os.path.realpath(d) for d in exclude}
+    files: list[tuple[int, str]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS
+                       and os.path.realpath(os.path.join(dirpath, d))
+                       not in skip]
+        for name in sorted(filenames):
+            if _is_claim_file(dirpath, name):
+                rel = os.path.relpath(dirpath, root)
+                depth = 0 if rel == "." else len(rel.split(os.sep))
+                files.append((depth, os.path.join(dirpath, name)))
+    return [path for _, path in sorted(files)]
+
+
+def read_claims_file(path: str, rel_path: str) -> "dict | None":
+    """Intent:
+        One claims file parsed and shape-checked, or None when it is
+        empty.
+
+    Raises:
+        ClaimsFileError: malformed YAML or a shape problem, naming the
+            file.
+    """
+    import yaml
+    try:
+        data = _parsed_yaml(path)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        raise ClaimsFileError(f"{rel_path}: malformed YAML{where}") from None
+    if data is None:
+        return None
+    validate_claims_file(data, rel_path)
+    return data
+
+
+def stamp_library_rows(data: dict, tag: str) -> None:
+    """Intent:
+        Mark every claim row of a library claims file (one declaring
+        `compendium:`) as compendium testimony: its authoring surface
+        is `compendium` and its meta names the library and version it
+        was stated for (`mathema.compendium: compendium:numpy-2.2`).
+        A row that states either itself keeps its own.
+    """
+    for key, entry in data.items():
+        if key in _FILE_FIELDS or not isinstance(entry, dict):
+            continue
+        for c in entry.get("claims") or []:
+            c.setdefault("source", "compendium")
+            meta = dict(c.get("meta") or {})
+            meta.setdefault("mathema.compendium", tag)
+            c["meta"] = meta
 
 
 def load_declared(root: str = ".") -> dict:
@@ -1468,33 +1887,38 @@ def load_declared(root: str = ".") -> dict:
     materialized VIEW of the merged surfaces (docsync's output for
     people and agents), and reading it back in would make every claim
     exist in two authoritative places at once. The authoring surfaces
-    are the only input."""
-    import yaml
-    files: list[tuple[int, str]] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        for name in sorted(filenames):
-            if _is_claim_file(dirpath, name):
-                path = os.path.join(dirpath, name)
-                rel = os.path.relpath(dirpath, root)
-                depth = 0 if rel == "." else len(rel.split(os.sep))
-                files.append((depth, path))
+    are the only input.
 
+    A file declaring `compendium: <library>` holds claims about that
+    library's functions: its rows are stamped as compendium testimony
+    (`stamp_library_rows`), and the whole file is left out when the
+    library is not importable or its installed version is outside the
+    file's `versions` range, or when the library is the project's own
+    package (`compendium.names_own_package`), whose claims the project
+    states as its own. A library key's entry is the one the library
+    loader reads (`compendium.load_library_claims`: the bundled rows with
+    the project's merged over them by row name), with any row an
+    ordinary claims file states for it beside them. The bundled compendium directory is never read
+    as part of a project tree; `compendium.load_library_claims` reads
+    it."""
+    from .compendium import (applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
     merged: dict = {}
-    for _, path in sorted(files):          # shallow first, deep last → deep wins
+    library_keys: set = set()
+    # shallow first, deep last, so the deeper file wins
+    for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
         rel_path = os.path.relpath(path, root)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = yaml.safe_load(fh)
-        except yaml.YAMLError as e:
-            mark = getattr(e, "problem_mark", None)
-            where = f" at line {mark.line + 1}" if mark is not None else ""
-            raise ClaimsFileError(
-                f"{rel_path}: malformed YAML{where}") from None
+        data = read_claims_file(path, rel_path)
         if data is None:
             continue
-        validate_claims_file(data, rel_path)
         file_grammar = data.pop("grammar", None)
+        library, versions, aliases = pop_library_fields(data)
+        if library is not None:
+            tag = applicable_tag(library, versions, aliases)
+            if tag is None or names_own_package(library, root):
+                continue
+            stamp_library_rows(data, tag)
+            mark_row_versions(data, library, aliases)
         for key, entry in data.items():
             if entry is None:
                 continue
@@ -1505,7 +1929,84 @@ def load_declared(root: str = ".") -> dict:
             if prev is not None:
                 entry = merge_entries(prev["entry"], entry)
             merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+            if library is not None:
+                library_keys.add(key)
+    if library_keys:
+        # a library key reads as the library loader reads it: the
+        # bundled rows with the project's merged over them by name, and
+        # any row an ordinary claims file states for the key beside them
+        from .compendium import load_library_claims
+        library_claims = load_library_claims(root)
+        for key in library_keys:
+            info = library_claims.get(key)
+            if info is None:
+                continue
+            rows = list(info["entry"].get("claims") or [])
+            names = {r.get("name") for r in rows if isinstance(r, dict)}
+            rows += [r for r in merged[key]["entry"].get("claims") or []
+                     if isinstance(r, dict) and r.get("name") not in names]
+            merged[key] = {"entry": {**merged[key]["entry"],
+                                     **info["entry"], "claims": rows},
+                           "source": merged[key]["source"]}
     return merged
+
+
+def foreign_grammar_files(root: str = ".") -> list:
+    """Intent:
+        The claims files under `root` whose every claim is written in a
+        grammar this checker does not adjudicate, as
+        `(relative path, grammars, claim count)`, each claim's grammar
+        being its own, else its entry's, else its file's.
+
+    Notes:
+        A `mathema/<dialect>` grammar is adjudicated here; a file that
+        cannot be read, or holds no claims, is not listed.
+    """
+    from .conjecture import GRAMMAR
+
+    def adjudicated(grammar: str) -> bool:
+        return grammar == GRAMMAR or grammar.startswith(GRAMMAR + "/")
+
+    out = []
+    for path in claims_file_paths(root, exclude=(_bundled_compendium_dir(),)):
+        rel_path = os.path.relpath(path, root)
+        try:
+            data = read_claims_file(path, rel_path)
+        except Exception:
+            continue
+        if not data:
+            continue
+        file_grammar = data.get("grammar") or GRAMMAR
+        grammars: list = []
+        for key, entry in data.items():
+            if key in _FILE_FIELDS or not isinstance(entry, dict):
+                continue
+            entry_grammar = entry.get("grammar") or file_grammar
+            grammars += [str(c.get("grammar") or entry_grammar)
+                         for c in entry.get("claims") or []
+                         if isinstance(c, dict)]
+        if grammars and not any(adjudicated(g) for g in grammars):
+            out.append((rel_path, sorted(set(grammars)), len(grammars)))
+    return out
+
+
+def foreign_grammar_warnings(root: str = ".") -> list:
+    """Intent:
+        One warning line per claims file written wholly in a grammar
+        this checker does not adjudicate (`foreign_grammar_files`),
+        naming the file and the grammar and saying that mathema's claim
+        language is the default when `grammar:` is omitted.
+    """
+    lines = []
+    for rel_path, grammars, count in foreign_grammar_files(root):
+        named = ", ".join(repr(g) for g in grammars)
+        noun = "grammar" if len(grammars) == 1 else "grammars"
+        lines.append(
+            f"warning: all {count} claim(s) in {rel_path} use {noun} "
+            f"{named}, which mathema does not check; mathema's "
+            f"claim language is the default, so omit `grammar:` to have "
+            f"them checked here")
+    return lines
 
 
 def load_specs(root: str = ".") -> dict:
@@ -1548,7 +2049,9 @@ def load_claims(path: str) -> dict:
     data = yaml.safe_load(open(path)) or {}
     if not isinstance(data, dict):
         return {}
+    from .compendium import pop_library_fields
     file_grammar = data.pop("grammar", "mathema")
+    pop_library_fields(data)
     out: dict = {}
     for key, entry in data.items():
         out[key] = entry_claims(entry, default_grammar=file_grammar)
@@ -1618,8 +2121,9 @@ def _let_sections(cj) -> list:
     for name in sorted(cj.free_vars or ()):
         bound = (cj.domain or {}).get(name)
         if bound is not None:
-            from .domain import render_domain_bound
-            sections.append(f"let {name} be {render_domain_bound(bound)}")
+            sections.append(f"let {name} be {_render_constant(bound, False, True)}")
+    for name, value in sorted((getattr(cj, "param_pins", None) or {}).items()):
+        sections.append(f"let {name} be {value!r}")
     return sections
 
 def callable_ref(fn) -> "str | None":
@@ -1646,6 +2150,54 @@ def callable_ref(fn) -> "str | None":
     for part in qual.split("."):
         obj = getattr(obj, part, None) if obj is not None else None
     return f"{mod}.{qual}" if obj is fn else None
+
+
+def _claim_variable_names(cj) -> "set | None":
+    """Intent:
+        The variable names a claim's relation reads (every name outside
+        a call's function position, the math constants aside), or None
+        when some part of it does not read as an expression.
+    """
+    import ast as _ast
+
+    from ._math_vocab import MATH_CONSTANTS
+    from .grammar import normalize
+    # a raises claim's right side names an exception type
+    texts = [cj.lhs] if cj.relation == "raises" else [cj.lhs, cj.rhs]
+    for lhs, _rel, rhs in cj.links or ():
+        texts += [lhs, rhs]
+    names: set = set()
+    for text in texts:
+        if not text or not str(text).strip():
+            continue
+        try:
+            tree = _ast.parse(normalize(str(text)), mode="eval")
+        except (SyntaxError, ValueError):
+            return None
+        called = {id(node.func) for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Call)}
+        names |= {node.id for node in _ast.walk(tree)
+                  if isinstance(node, _ast.Name) and id(node) not in called}
+    return names - set(MATH_CONSTANTS) - {"eps", "epsilon", "ε"}
+
+
+def pseudo_infinity_bounds_something(cj) -> bool:
+    """Intent:
+        Whether a claim's authored `let |inf| be` can bound anything: some
+        name the relation reads is unbounded in its declared domain,
+        or has no declared domain at all. False only when the claim
+        has no binding, or every name it reads is provably bounded, so
+        an inert binding leaves the claim's text and identity (P8);
+        anything unreadable keeps the binding.
+    """
+    if getattr(cj, "pseudo_infinity", None) is None:
+        return False
+    names = _claim_variable_names(cj)
+    if names is None:
+        return True
+    from .domain import unbounded_directions
+    return bool(unbounded_directions(sorted(names), cj.domain or {},
+                                     unsure_unbounded=True))
 
 
 def declare(cj) -> dict:
@@ -1678,11 +2230,18 @@ def declare(cj) -> dict:
     # duplicate it and re-type it on reparse.
     statement = _chain_text(cj) if cj.links else statement_text(
         cj.relation, cj.lhs, cj.rhs)
+    from .grammar import display_norm_bars, norm_bars_written
+    with_bars = norm_bars_written(getattr(cj, "raw", ""))
+    if with_bars:
+        # a norm the author wrote with double bars is stored with them,
+        # so the claim read back keeps the spelling it was written in
+        statement = display_norm_bars(statement)
     if getattr(cj, "negated", False) and not statement.startswith("not "):
         statement = f"not {statement}"
     if getattr(cj, "outcome", ""):
         statement = f"{statement} => {cj.outcome}"
-    sections = ([cj.assuming] if cj.assuming else []) + _let_sections(cj)
+    premise = display_norm_bars(cj.assuming) if with_bars else cj.assuming
+    sections = ([premise] if premise else []) + _let_sections(cj)
     if sections:
         statement = ", ".join(sections + [statement])
     out = {"name": cj.name, "statement": statement, "route": cj.route,
@@ -1696,12 +2255,14 @@ def declare(cj) -> dict:
         out["domain"] = {p: domain_bound_to_json(b) for p, b in cj.domain.items()}
     if cj.tolerance is not None:
         out["tolerance"] = cj.tolerance
+    if getattr(cj, "trials", None) is not None:
+        out["trials"] = cj.trials
     if getattr(cj, "meta", None):
         out["meta"] = dict(cj.meta)
-    if getattr(cj, "pseudo_infinity", None) is not None:
-        # the operational infinity magnitude for the extreme-value
-        # checks, emitted only when the author set it (an ordinary
-        # bounded-domain claim never states it); applied symmetrically
+    if pseudo_infinity_bounds_something(cj):
+        # the operational infinity magnitude, emitted only when the
+        # author set it and it can bound an unbounded direction (P8);
+        # applied symmetrically
         _, hi = pseudo_infinity_range(cj.pseudo_infinity)
         out["pseudo_infinity"] = hi
     if cj.funcs:
@@ -1743,13 +2304,24 @@ def _ordered_real_param_names(cj, excluded: set) -> list:
     from ._scan import blank_strings
 
     seen: list = []
-    for text in (cj.lhs, cj.rhs):
+    # the right-hand side of `raises(...)` names an exception, and a
+    # membership's names a domain: neither holds a parameter
+    sides = (cj.lhs,) if (cj.relation == "raises"
+                          or getattr(cj, "rhs_bound", None) is not None) \
+        else (cj.lhs, cj.rhs)
+    for text in sides:
         if isinstance(text, str):
-            for name in _IDENTIFIER.findall(blank_strings(text)):
+            # a keyword in a call (`alpha=2`) names f's parameter, not
+            # a parameter of the claim
+            text = re.sub(r"\b[A-Za-z_]\w*\s*=(?!=)", " ", blank_strings(text))
+            for name in _IDENTIFIER.findall(text):
                 if name not in excluded and name not in seen:
                     seen.append(name)
     for name in cj.domain:
-        if name not in cj.free_vars and name not in excluded and name not in seen:
+        # a path binding (`o.lines[*].qty`) names a parameter's field,
+        # not a parameter, and keeps its own spelling
+        if name.isidentifier() and name not in cj.free_vars and name not in excluded \
+                and name not in seen:
             seen.append(name)
     return seen
 
@@ -1847,10 +2419,12 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     parameter or func alias, `f` itself), so neither mechanism ever
     reassigns a symbol something else in the same claim already uses.
 
-    `suppress_glyphs` handles a real parameter named exactly `pi`/`oo`
-    (`_math_vocab._MATH_ATTRS`' keys, minus `e`, which has no distinct
-    unicode glyph at all, `_print_Exp1` always prints `"e"`, so
-    there's nothing to suppress). Renaming was tried here first and
+    `suppress_glyphs` handles a real parameter named exactly `pi`, `oo`,
+    `inf` or `infinity` (`_math_vocab._MATH_ATTRS`' keys; the printer
+    then writes the parameter's own name), and any bound name `e` (a
+    parameter, a `let` name, a function or a rename target), for which
+    `_print_Exp1` writes Euler's number as `exp(1)` instead of `e`, so
+    the constant and the name read back apart. Renaming was tried here first and
     rejected: `grammar._node_to_sympy` has no concept of any one
     function's real parameter names, so it always resolves a bare
     `pi`/`oo` to the math constant regardless, by the time a claim
@@ -1875,8 +2449,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
 
     # `eps`/`epsilon`/`ε` are the claim's tolerance, not parameters to
     # rename
+    from .linalg import VOCABULARY
     excluded = (funcs | {"f", "eps", "epsilon", "ε"} | set(cj.free_vars)
-                | reserved_names())
+                | reserved_names() | VOCABULARY)
     real_params = _ordered_real_param_names(cj, excluded)
 
     param_renames: dict = {}
@@ -1889,7 +2464,9 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # explicit domain declaration is the actual, reliable signal that
     # "pi" was meant as a genuine varying quantity here.
     declared = {n for n in cj.domain if n not in cj.free_vars}
-    suppress_glyphs = frozenset({"pi", "oo"} & declared) if unicode else frozenset()
+    # in both modes: a parameter named for infinity prints under its
+    # own name, where the constant would print `inf` in ascii
+    suppress_glyphs = frozenset({"pi", "oo", "inf", "infinity"} & declared)
 
     # A "symbology" capability, if one is registered, gets first pick of a symbol
     # for every real parameter and function name, ahead of the Greek-
@@ -1955,6 +2532,13 @@ def _auto_renames(cj, funcs: frozenset, unicode: bool,
     # the positional pool shortens real parameters only
     pool_renames = auto_short_names(long_params, [], unicode=unicode, taken=taken)
     param_renames.update({n: pool_renames[n] for n in long_params})
+    # a name `e` the claim binds (a parameter, a `let` name, a function,
+    # or a display rename) prints as that name, so Euler's number prints
+    # as `exp(1)` beside it
+    bound = (declared | set(cj.free_vars) | set(cj.funcs)
+             | set(param_renames.values()) | set(func_renames.values()))
+    if "e" in bound:
+        suppress_glyphs = suppress_glyphs | {"e"}
     return param_renames, func_renames, suppress_glyphs
 
 
@@ -2009,7 +2593,8 @@ def fingerprint_text(cj) -> str:
 
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
-                      canonical: bool = False) -> str:
+                      canonical: bool = False,
+                      show_missing: bool = True) -> str:
     """The alternative to declare()'s structured-dict shape: one
     parseable string a person can copy straight back into `claim(...)`
     and get an equivalent Conjecture, domain/funcs/free_vars
@@ -2069,9 +2654,68 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     `pi` or `oo` suppresses that constant's usual unicode glyph
     (`π`/`∞`) for this render, printing the plain word instead; see
     `_auto_renames`'s own docstring for why suppressing beats renaming
-    here."""
-    from .grammar import get_unicode_output, render_domain, render_law_expr
-    from ._providers import get_provider
+    here.
+
+    Bars around a matrix read as its determinant, so the `abs` of a
+    matrix the claim's domain declares keeps its call spelling."""
+    if getattr(cj, "relation", None) == "policy":
+        from .policy import parse_policy, policy_text
+        body = f"{cj.lhs} {cj.rhs}".strip()
+        stated = parse_policy((f"{cj.assuming}, " if cj.assuming else "") + body)
+        return policy_text(stated) if stated is not None else body
+    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .linalg import declared_matrix_names
+    mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
+    with bars_over_matrices(mats):
+        return _render_claim_text(cj, unicode=unicode,
+                                  long_param_threshold=long_param_threshold,
+                                  canonical=canonical,
+                                  show_missing=show_missing)
+
+
+def _render_binding(name: str, bound, unicode: bool, show_missing: bool) -> str:
+    """Intent:
+        One `for` binding's domain as the claim text states it: a path
+        into a language's member (`o.lines[*].qty`) spells the hole
+        class as the word in both modes and admits neither kind unless
+        it says so.
+    """
+    from .domain import PATH_DEFAULTS, render_domain
+    path = not name.isidentifier()
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing,
+                         words=path, defaults=PATH_DEFAULTS if path else None)
+
+
+def _infinity_spelled(text: str, unicode: bool) -> str:
+    """A domain's text with an infinite bound spelled `∞` in unicode, so a
+    line spells infinity one way in its domain and its law."""
+    import re as _re
+    return _re.sub(r"\binf\b", "∞", text) if unicode else text
+
+
+def _domain_text(bound, unicode: bool, show_missing: bool) -> str:
+    """Intent:
+        One binding's domain as the claim displays it: the domain
+        renderer's text, with an infinite bound spelled `∞` in unicode
+        so a line spells infinity one way in its domain and its law.
+    """
+    import re as _re
+
+    from .grammar import render_domain
+    text = render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+    return _re.sub(r"\binf\b", "∞", text) if unicode else text
+
+
+def _render_claim_text(cj, *, unicode: bool | None,
+                       long_param_threshold: int,
+                       canonical: bool, show_missing: bool = True) -> str:
+    """Intent:
+        `render_claim_text`'s rendering, under whatever bar reading
+        `grammar.bars_over_matrices` has set.
+    """
+    from .grammar import (display_len, display_norm_bars, get_unicode_output,
+                          norm_bars_written, render_law_expr)
+    from ._providers import get_provider, report_provider_failure
     from ._scan import sub_outside_strings
 
     if unicode is None:
@@ -2081,32 +2725,24 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         cj, funcs, unicode, long_param_threshold,
         canonical=canonical)
 
-    # Same symbology capability as _auto_renames; here it may also
-    # restate the segment separator and whether an unbounded domain's
-    # missing side prints explicitly (default True, matching
-    # render_domain's own default). `None` from show_missing means "no
-    # opinion", so it defers to the True default rather than being
-    # treated as a False override.
-    #
-    # A separator is accepted only when it still *is* a comma once
-    # surrounding whitespace is removed, so `", "` and `",\n"` are both
-    # allowed and anything else falls back to the default. The claim
-    # grammar splits sections on the comma (`_split_commas`): a
-    # separator that is any other character renders a claim that cannot
-    # be read back, which is the same round-trip hazard
-    # `_is_safe_rename_symbol` guards the symbol path against.
+    # Same symbology capability as _auto_renames; here it may also say
+    # whether an unbounded domain's missing side prints explicitly
+    # (default True, matching render_domain's own default). `None` from
+    # show_missing means "no opinion", so it defers to the True default
+    # rather than being treated as a False override, and a provider that
+    # raises is reported once and treated the same way: a provider never
+    # crashes a render.
     provider = None if canonical else get_provider("symbology")
     sep = ", "
-    domain_show_missing = True
+    domain_show_missing = show_missing
     if provider is not None:
-        separator = getattr(provider, "separator", None)
-        if separator is not None:
-            candidate = separator()
-            if isinstance(candidate, str) and candidate.strip() == ",":
-                sep = candidate
-        show_missing = getattr(provider, "show_missing", None)
-        if show_missing is not None:
-            result = show_missing(cj)
+        provider_says = getattr(provider, "show_missing", None)
+        if provider_says is not None:
+            try:
+                result = provider_says(cj)
+            except Exception as exc:
+                report_provider_failure("symbology", exc)
+                result = None
             if result is not None:
                 domain_show_missing = result
     # render_law_expr's own `funcs` set gates which call-shaped names it
@@ -2148,24 +2784,39 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     safe_param_renames = {n: s for n, s in param_renames.items() if _is_safe_rename_symbol(s)}
     unsafe_param_renames = {n: s for n, s in param_renames.items() if not _is_safe_rename_symbol(s)}
 
+    # a name followed by a single `=` is a keyword in a call (`f(x,
+    # alpha=2)`), the function's own parameter name, never renamed
+    not_keyword = r"(?!\s*=(?!=))"
+
     def apply_safe_renames(text: str) -> str:
         for name, symbol in func_renames.items():
             text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
         for name, symbol in safe_param_renames.items():
-            text = sub_outside_strings(rf"\b{re.escape(name)}\b", symbol, text)
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b{not_keyword}", symbol, text)
         return text
 
     def apply_unsafe_backticks(text: str) -> str:
         for name, symbol in unsafe_param_renames.items():
-            text = sub_outside_strings(rf"\b{re.escape(name)}\b",
+            text = sub_outside_strings(rf"\b{re.escape(name)}\b{not_keyword}",
                                        f"`{symbol}`", text)
         return text
 
     _REL_GLYPH = {"==": "=", "<=": "≤" if unicode else "<=",
                   ">=": "≥" if unicode else ">=", "!=": "≠" if unicode else "!=",
                   "~=": "≈" if unicode else "~=", "<": "<", ">": ">",
-                  "=:=": "≡" if unicode else "=:="}
+                  "=:=": "≡" if unicode else "=:=",
+                  "in": "∈" if unicode else "in",
+                  "not in": "∉" if unicode else "not in"}
     lhs_text, rhs_text = apply_safe_renames(cj.lhs), apply_safe_renames(cj.rhs)
+    # the names that are matrices: the bars' reading, the claim's own
+    # R^(m,n) names, and those a caller holding the signature supplies,
+    # each under its displayed spelling
+    from .grammar import _BAR_MATRICES, _RENDER_MATRICES
+    from .linalg import declared_matrix_names
+    mats = frozenset(
+        safe_param_renames.get(m, m) for m in
+        declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
+        | _RENDER_MATRICES.get())
     if cj.links:
         # a chained comparison: render the full chain (first link's lhs,
         # then each link's relation and rhs), which reparses compactly
@@ -2173,7 +2824,8 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # first link cj.lhs/cj.rhs happen to hold
         def _term(t):
             return apply_unsafe_backticks(render_law_expr(
-                apply_safe_renames(t), renamed_funcs, unicode, suppress_glyphs))
+                apply_safe_renames(t), renamed_funcs, unicode, suppress_glyphs,
+                mats))
         pieces = [_term(cj.links[0][0])]
         for link_lhs, link_rel, link_rhs in cj.links:
             pieces.append(_REL_GLYPH[link_rel])
@@ -2183,7 +2835,8 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # no ast.parse round trip on cj.rhs (the exception name) at
         # all, and lhs here is render_law_expr's own safe output,
         # backtick substitution applies post-render either way.
-        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
         statement = f"raises({lhs}, {cj.rhs})" if cj.rhs else f"raises({lhs})"
     elif cj.relation in examine_predicates():
         # never reaches render_law_expr/ast.parse at all, a plain
@@ -2200,14 +2853,35 @@ def render_claim_text(cj, *, unicode: bool | None = None,
             statement = f"{lhs_display} {cj.relation.replace('_', ' ')}"
         else:
             statement = f"{cj.relation}({lhs_display})"
+    elif getattr(cj, "rhs_bound", None) is not None:
+        # a membership in a domain: the rhs is domain text, rendered
+        # as written, never through the expression renderer
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
+        statement = f"{lhs} {_REL_GLYPH[cj.relation]} {_membership_rhs(cj, unicode)}"
     else:
-        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs))
-        rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs))
+        lhs = apply_unsafe_backticks(render_law_expr(lhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
+        rhs = apply_unsafe_backticks(render_law_expr(rhs_text, renamed_funcs, unicode, suppress_glyphs,
+                mats))
         statement = f"{lhs} {_REL_GLYPH[cj.relation]} {rhs}"
     if getattr(cj, "negated", False):
         # the negation is part of the claim, whatever shape the
         # statement took above
         statement = f"not {statement}"
+    # the length of a value reads as `len(...)`; `len` is sugar for
+    # `dim(..., 0)`, so the text reparses to the same canonical form
+    language_len = True
+    statement = display_len(statement)
+    # a norm the author wrote with double bars is displayed with them,
+    # the order a subscript (`||x||_2`, `‖x‖₂`); `norm(...)` written as
+    # the call stays the call. The canonical text keeps the call in
+    # every case, so the two spellings are one claim with one
+    # fingerprint, and the bars are stored beside the claim (`declare`)
+    # for the display. `display_norm_bars` is the inverse of the bar
+    # fold, so the displayed text reparses to the same canonical form
+    if not canonical and norm_bars_written(getattr(cj, "raw", "")):
+        statement = display_norm_bars(statement, unicode)
 
     # let/for's own displayed symbol never reaches ast.parse individually
     # (both are plain f-string text, joined into the final claim string
@@ -2235,8 +2909,10 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     # display symbol for it is introduced as an alias of that name
     # (`let g = numpy.exp, let E = g`), which the reparse resolves back
     # to the same function under the same name, so the claim is the same
+    under_test: frozenset = getattr(cj, "under_test", frozenset())
     let_segments = [f"let {name} = {ref}"
                     for name, ref in func_refs.items()
+                    if name not in under_test
                     # a parse-time placeholder (a bare call name awaiting
                     # scope resolution, value == its own name) and a
                     # scope-bound name have no binding to state
@@ -2247,19 +2923,23 @@ def render_claim_text(cj, *, unicode: bool | None = None,
                      for name, symbol in sorted(param_renames.items())]
     let_segments += [
         f"let {name} be "
-        f"{render_domain(cj.domain[name], ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"{_infinity_spelled(_render_constant(cj.domain[name], unicode, domain_show_missing), unicode)}"
         for name in sorted(cj.free_vars) if name in cj.domain]
-    if getattr(cj, "pseudo_infinity", None) is not None:
+    let_segments += [f"let {name} be {value!r}" for name, value in
+                     sorted((getattr(cj, "param_pins", None) or {}).items())]
+    if pseudo_infinity_bounds_something(cj):
         # the operational infinity magnitude, in the one claim-text
-        # spelling (the bars mean magnitude, applied symmetrically)
+        # spelling (the bars mean magnitude, applied symmetrically),
+        # stated only where it can bound an unbounded direction (P8)
         _, pinf_hi = pseudo_infinity_range(cj.pseudo_infinity)
         let_segments.append(
-            f"let |{'∞' if unicode else 'inf'}| be {pinf_hi:g}")
+            f"let |{'∞' if unicode else 'inf'}| be "
+            f"{exact_float_text(pinf_hi, f'{pinf_hi:g}')}")
     membership = "∈" if unicode else "in"
     for_segments = [
         f"{_display_symbol(param_renames[name]) if name in param_renames else name} "
         f"{membership} "
-        f"{render_domain(bound, ascii_mode=not unicode, show_missing=domain_show_missing)}"
+        f"{_infinity_spelled(_render_binding(name, bound, unicode, domain_show_missing), unicode)}"
         for name, bound in cj.domain.items() if name not in cj.free_vars]
 
     parts = []
@@ -2271,7 +2951,15 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         # predicate statements themselves.
         # already canonical (grammar._canonical_assuming spells the
         # definedness premise `f is defined`), so nothing to rewrite
-        assuming_text = cj.assuming
+        assuming_text = display_len(cj.assuming) if language_len else cj.assuming
+        # the premise is canonical text (`norm(x) > 0`, `abs(x) > 0`); it
+        # is displayed the way the statement is, with the author's norm
+        # bars and a single-term absolute value as bars
+        if not canonical:
+            from .grammar import _abs_calls_to_bars
+            if norm_bars_written(getattr(cj, "raw", "")):
+                assuming_text = display_norm_bars(assuming_text, unicode)
+            assuming_text = _abs_calls_to_bars(assuming_text)
         if unicode:
             for joined in sorted(examine_predicates()):
                 assuming_text = assuming_text.replace(
@@ -2295,3 +2983,37 @@ def render_claim_text(cj, *, unicode: bool | None = None,
     if not parts:
         return statement
     return sep.join(parts) + sep + statement
+
+
+def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
+    """A claim constant's bound (`let c be [-5.0, 5.0]`): its interval
+    alone when it admits nothing missing, as a constant's bound does
+    unless the claim writes otherwise, else the whole domain."""
+    from .domain import MissingDefaults, _as_domain, admitted, render_domain
+    dom = _as_domain(bound)
+    absent, holes = admitted(dom, dom.policy or MissingDefaults(False, (), "constant",
+                                                                 annotated=False))
+    if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
+        return render_domain(bound, ascii_mode=not unicode, show_missing=False,
+                             always_show_type=False)
+    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+
+
+def _membership_rhs(cj, unicode: bool) -> str:
+    """A membership's right-hand side as written, except a set of missing
+    words (`{missing}`, `{None}`), which renders in the words of the
+    mode: `{∅}` in unicode, `{absent}` for absence."""
+    from .domain import _as_domain, is_sentinel, render_domain
+    bound = cj.rhs_bound
+    members = bound if isinstance(bound, frozenset) else None
+    if members is None:
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            return cj.rhs
+        if len(dom.pieces) != 1 or not isinstance(dom.pieces[0], frozenset):
+            return cj.rhs
+        members = dom.pieces[0]
+    if not members or not all(is_sentinel(v) for v in members):
+        return cj.rhs
+    return render_domain(bound, ascii_mode=not unicode)

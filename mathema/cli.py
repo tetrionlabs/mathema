@@ -38,10 +38,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
+from ._signatures import callable_signature
 
 
 def _bad_argument(message: str) -> NoReturn:
@@ -105,7 +107,29 @@ def _validate_trials_scale(scale: float) -> None:
     # a factor above 1 is clamped to 1 downstream; NaN compares false
     # both ways, so it is refused here along with zero and below
     if not scale > 0:
-        _bad_argument(f"mathema: --trials-scale must be > 0, got {scale!r}")
+        _bad_argument(f"mathema: --trials-downscale must be > 0, got {scale!r}")
+
+
+class _DeprecatedTrialsScale(argparse.Action):
+    """`--trials-scale`, the old spelling of `--trials-downscale`: the
+    same value, with a deprecation note on stderr."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print("mathema: --trials-scale is deprecated and will be removed in "
+              "0.7; use --trials-downscale", file=sys.stderr)
+        setattr(namespace, self.dest, values)
+
+
+def _add_trials_downscale(sub) -> None:
+    sub.add_argument("--trials-downscale", dest="trials_scale", type=float,
+                     default=1.0, metavar="FACTOR",
+                     help="shrink the probe-route trial budget by this factor "
+                          "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
+                          "iteration; a value above 1 is clamped to 1, so it "
+                          "never scales upward, and never below a floor that "
+                          "still guarantees real evidence")
+    sub.add_argument("--trials-scale", dest="trials_scale", type=float,
+                     action=_DeprecatedTrialsScale, help=argparse.SUPPRESS)
 
 
 def _check_rows(args) -> list[dict]:
@@ -124,11 +148,10 @@ def _check_rows(args) -> list[dict]:
         raise TargetError(f"no functions found in {args.target}")
     domain = _parse_domain(args.domain)
     if domain:
-        import inspect
         params: set = set()
         for fn in target.functions.values():
             try:
-                params |= set(inspect.signature(fn).parameters)
+                params |= set(callable_signature(fn).parameters)
             except (TypeError, ValueError):
                 continue
         unknown = sorted(set(domain) - params)
@@ -138,11 +161,15 @@ def _check_rows(args) -> list[dict]:
                           f"{args.target}")
     verified_store = load_verified(root)
     declared_store = load_declared(root)
+    from .compendium import external_premises, install
+    install(root)
+    premises = external_premises(root, verified=verified_store)
     for name, fn in sorted(target.functions.items()):
         rec = check(fn, claims=list(args.claim) if args.claim else None,
                     domain=domain or None,
-                    trials_scale=args.trials_scale,
-                    declared=retrieve(fn, root, store=declared_store))
+                    trials_downscale=args.trials_scale,
+                    declared=retrieve(fn, root, store=declared_store),
+                    known_premises=premises)
         # the one gate (verify.gate): provenance population, so a
         # falsified suggestion surfaces in the printed detail (real
         # knowledge, and a reason not to adopt) but never gates;
@@ -152,13 +179,24 @@ def _check_rows(args) -> list[dict]:
         accepted = _accepted_risk((verified_store.get(name) or {}).get("entry"))
         report = gate(rec.probes, strict=args.strict,
                       accepted_risk=accepted,
-                      unresolved=rec.facts.unresolved)
+                      unresolved=rec.facts.unresolved, key=name)
         proven, holds = report.proven, report.holds
         total = (proven + holds + report.refuted + report.skipped
                  + report.unknown + report.owned)
         verified = proven + holds + report.refuted   # refutation is knowledge
         problems = report.problems
+        # the runtime type to annotate, for each parameter the body
+        # uses as a vector while the signature names none: always when
+        # a list cannot serve that use, else when a claim was skipped
+        # as misspecified over it
+        hints = [h["text"] for h in (rec.facts.runtime_hints or {}).values()
+                 if h.get("strong") or any(h["text"] in (p.note or "")
+                                           for p in rec.probes)]
+        warnings = list(dict.fromkeys(
+            said for p in rec.probes
+            for said in (p.meta or {}).get("mathema.let_warning") or ()))
         rows.append({"name": name, "tier": rec.facts.tier,
+                     "effects": (rec.meta or {}).get("mathema.effects"),
                      "identity": {"form": rec.facts.form, "sig": rec.facts.sigh},
                      "proven": proven, "holds": holds, "refuted": report.refuted,
                      "falsified": report.falsified,
@@ -172,7 +210,10 @@ def _check_rows(args) -> list[dict]:
                      "claims": rec.to_spec()["claims"],
                      "claim_rows": [claim_row(p, accepted_risk=accepted)
                                     for p in rec.probes],
-                     "problems": problems})
+                     "problems": problems,
+                     "policy": list(report.unaccounted),
+                     **({"hints": hints} if hints else {}),
+                     **({"warnings": warnings} if warnings else {})})
     return rows
 
 
@@ -195,7 +236,8 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                   "verified": sum(r["verified"] for r in rows),
                   "total": sum(r["total"] for r in rows),
                   "failed": sum(1 for r in rows if r["problems"])}
-        slim = [{k: v for k, v in r.items() if k != "claim_rows"}
+        slim = [{k: v for k, v in r.items()
+                 if k not in ("claim_rows", "effects")}
                 for r in rows]
         return json.dumps({"tool": "mathema", "version": __version__,
                            "CDD_spec_version": SPEC_VERSION,
@@ -209,7 +251,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                 msg = sx.escape("; ".join(r["problems"]))
                 body = f'<failure message="{msg}"/>'
             cases.append(f'<testcase classname="mathema.claims" '
-                         f'name="{sx.escape(r["name"])} [{r["coverage"]} adjudicated]">'
+                         f'name="{sx.escape(r["name"])} [{r["coverage"]} checked]">'
                          f'{body}</testcase>')
         fails = sum(1 for r in rows if r["problems"])
         return ('<?xml version="1.0" encoding="utf-8"?>\n'
@@ -223,34 +265,67 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                              + "; ".join(r["problems"]))
             else:
                 lines.append(f'::notice title=mathema claim check::{r["name"]}: '
-                             f'{r["coverage"]} claims adjudicated')
+                             f'{r["coverage"]} claims checked')
         lines.append(_format_check(rows, "text"))
         return "\n".join(lines)
     if fmt == "md":
-        out = ["| function | tier | claims adjudicated | proven | holds "
-               "| falsified | invalidated | unknown | skipped | accepted risk "
+        out = ["| function | tier | claims checked | proven | holds "
+               "| falsified | invalidated | unknown | accepted risk "
                "| status |",
-               "|---|---|---|---|---|---|---|---|---|---|---|"]
+               "|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             status = "FAIL: " + "; ".join(r["problems"]) if r["problems"] else "ok"
             out.append(f'| `{r["name"]}` | {r["tier"]} | {r["coverage"]} '
                        f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
-                       f'| {r["invalidated"]} | {r["unknown"]} '
-                       f'| {r["skipped"]} | {r["accepted_risk"]} | {status} |')
-        out.append(f"\ncdd spec v{SPEC_VERSION}. a falsified claim counts as "
-                   "knowledge, never as failure.")
+                       f'| {r["invalidated"]} | {r["unknown"] + r["skipped"]} '
+                       f'| {r["accepted_risk"]} | {status} |')
+        footer = ("" if all(not r["problems"] for r in rows) else
+                  " A falsified claim is knowledge about the code; verify "
+                  "still fails on it.")
+        out.append(f"\ncdd spec v{SPEC_VERSION}.{footer}")
         return "\n".join(out)
     # text
     lines = []
     for r in rows:
         state = "FAIL" if r["problems"] else "ok"
-        line = (f'{state:4} {r["name"]}: {tier_word(r["tier"])}; '
+        line = (f'{state:4} {r["name"]}: '
+                f'{tier_word(r["tier"], r.get("claim_rows") or (), r.get("effects"))}; '
                 f'claims {r["coverage"]} '
-                f'adjudicated ({summary_counts(r)})')
+                f'checked ({summary_counts(r)})')
         if r["problems"]:
-            line += "  <- " + "; ".join(r["problems"])
+            from .verify import problems_text
+            line += "  <- " + problems_text(r["problems"])
         lines.append(line)
+        lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
+        lines.extend(f"     warning: {w}" for w in r.get("warnings", ()))
     return "\n".join(lines)
+
+
+def _warn_small_pseudo_infinity() -> None:
+    """Intent:
+        One loud stderr line when the project-level pseudo-infinity
+        (`MATHEMA_PSEUDO_INFINITY`) is below 1e100: values beyond it
+        are not checked for computation, and an explicit domain for the
+        variables states the same bound where a reader sees it. A value `let
+        |inf| be` would refuse is left to the adjudication's own
+        refusal.
+    """
+    import os
+
+    from .domain import InvalidDomain
+    from .records import (PSEUDO_INFINITY_ENV, PSEUDO_INFINITY_WARN_BELOW,
+                          environment_pseudo_infinity)
+    try:
+        value = environment_pseudo_infinity()
+    except InvalidDomain:
+        return
+    if value is not None and value < PSEUDO_INFINITY_WARN_BELOW:
+        raw = os.environ.get(PSEUDO_INFINITY_ENV, "").strip()
+        print(f"warning: {PSEUDO_INFINITY_ENV}={raw} is below 1e100: "
+              f"values beyond {raw} are not checked for computation; a "
+              f"better approach might be to set an explicit domain for "
+              f"the variables (for x in [lo, hi], ...)",
+              file=sys.stderr)
 
 
 def cmd_check(args) -> int:
@@ -261,6 +336,10 @@ def cmd_check(args) -> int:
     claim in any mode; skipped claims and unenforced domains under
     `--strict`), 0 otherwise, suitable for a pre-commit check on a
     single target."""
+    _warn_small_pseudo_infinity()
+    from .spec import foreign_grammar_warnings
+    for line in foreign_grammar_warnings(getattr(args, "root", ".")):
+        print(line, file=sys.stderr)
     rows = _check_rows(args)
     out = _format_check(rows, args.format)
     if args.output:
@@ -305,6 +384,7 @@ def cmd_verify(args) -> int:
     from .verify import verify_project
 
     _validate_trials_scale(args.trials_scale)
+    _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -325,17 +405,26 @@ def cmd_verify(args) -> int:
             return 0
         print(text)
         return 0
+    from .verify import resolve_claims_file
+    keys, files = [], []
+    for target in args.target or []:
+        path = resolve_claims_file(target, args.root)
+        if path is None:
+            keys.append(target)
+        else:
+            files.append(path)
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
-                            trials_scale=args.trials_scale,
-                            only=args.target or None)
+                            trials_downscale=args.trials_scale,
+                            only=keys or None,
+                            files=files or None)
     as_json = getattr(args, "format", "text") == "json"
     if result.nothing_declared:
         if as_json:
             _emit_json({"passed": True, "nothing_declared": True,
                         "keys": [], "problems": [],
                         "totals": {"fresh": 0, "adjudicated": 0,
-                                   "problems": 0}},
+                                   "problems": 0, "skip_reasons": {}}},
                        getattr(args, "output", None))
             return 0
         if args.target:
@@ -345,22 +434,32 @@ def cmd_verify(args) -> int:
         print("mathema: nothing declared yet (no .mathema/verified or claim "
               f"files under {args.root})")
         return 0
+    definitions = _project_definitions()
     if as_json:
         _emit_json({
             "passed": not result.problems,
             "nothing_declared": False,
             "keys": result.keys,
+            "definitions": definitions,
             "problems": result.problems,
             "grammars_seen": sorted(result.grammars_seen),
             "grammar_verified_here": GRAMMAR,
             "totals": {"fresh": result.fresh,
                        "adjudicated": result.adjudicated,
-                       "problems": len(result.problems)},
+                       "problems": len(result.problems),
+                       "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
     lines = list(result.lines)
-    lines.append(f"{result.fresh} fresh (form unchanged, skipped), "
-                 f"{result.adjudicated} adjudicated, "
+    if definitions:
+        # definitions are axioms, taken at face value: listed apart
+        # from the verdicts and outside their counts
+        lines.append("definitions (axioms, taken as stated):")
+        lines.extend(f"  {d['key']}: {d['definition']} ({d['source']}; "
+                     f"members: {', '.join(d['members']) or 'none'})"
+                     for d in definitions)
+    lines.append(f"{result.fresh} unchanged since the last run (not run again), "
+                 f"{result.adjudicated} checked, "
                  f"{len(result.problems)} problem(s)")
     other_grammars = sorted(result.grammars_seen - {GRAMMAR})
     lines.append(
@@ -371,6 +470,31 @@ def cmd_verify(args) -> int:
            f"{', '.join(other_grammars)}" if other_grammars else ""))
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _project_definitions() -> list:
+    """The records of the definition rows a project's own files state
+    (its compendium and claims files), in the order they apply."""
+    from .compendium import definition_records
+    from .runtime_types import definitions
+    return definition_records(definitions(("compendium", "claims")))
+
+
+def _skip_reasons(keys: list) -> dict:
+    """Intent:
+        How many claims the sweep skipped, per reason: each skipped
+        row counted under its `reason` code (`foreign-grammar`, ...),
+        or its `blocked_by` code when it has no reason.
+    """
+    counts: dict = {}
+    for entry in keys:
+        for row in entry.get("claims") or []:
+            if not str(row.get("verdict") or "").startswith("skipped"):
+                continue
+            reason = str(row.get("reason") or row.get("blocked_by")
+                         or "skipped")
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _verify_exit(args, result) -> int:
@@ -628,7 +752,7 @@ def _fmt_rollup(label: str, stats: dict) -> str:
     if stats["derivable"] is not None:
         parts.append(f"{stats['derivable']}/{n} functions derivable")
     if stats.get("unconditional") is not None:
-        parts.append(f"{stats['unconditional']}/{n} lift unconditionally")
+        parts.append(f"{stats['unconditional']}/{n} derive reads with nothing supplied")
     if stats["typed"] is not None:
         parts.append(f"{stats['typed']}/{n} functions fully typed")
     if stats["tested"] is not None:
@@ -670,7 +794,7 @@ def _report_no_functions(targets, skipped: list) -> None:
     print("  1. the target is an importable dotted name (`mypkg` or "
           "`mypkg.submodule`), not a path. `mathema check` is the one that "
           "takes `file.py:function`.")
-    print("  2. audit counts functions DEFINED in the target, not names "
+    print("  2. audit counts functions defined in the target, not names "
           "imported or re-exported into it (those are attributed to the "
           "module that defines them, so audit that module or the whole "
           "package instead).")
@@ -948,7 +1072,7 @@ def cmd_audit(args) -> int:
         summary.append(f"{sum(1 for r in rows if r['derivable'])}/{n} "
                        "derivable")
         summary.append(f"{sum(1 for r in rows if r['unconditional'])}/{n} "
-                       "lift unconditionally")
+                       "derive reads with nothing supplied")
     if "typing" not in exclude:
         summary.append(f"{sum(1 for r in rows if _typed_status(r['typing']) == 'yes')}"
                        f"/{n} fully typed")
@@ -994,12 +1118,12 @@ def cmd_audit(args) -> int:
     if "derivable" not in exclude:
         lines.append("`derives` is what the derive route can do here, given the "
                      "domain the signature, docstring and claims declare. The "
-                     "reason/code cells describe the UNCONDITIONAL lift, the "
-                     "body with nothing supplied, so a branch:needs-domain row "
+                     "reason/code cells describe what derive reads with nothing "
+                     "supplied, so a branch:needs-domain row "
                      "reads blocked there and derives all the same, once a claim "
                      "declares the domain that prunes the branch. Neither is a "
                      "ceiling: a probe claim can still be written and "
-                     "adjudicated for every function here.")
+                     "checked for every function here.")
 
     blocked_rows = [r for r in rows if r["blocked_report"] is not None]
     if blocked_rows and "derivable" not in exclude and args.deriv_report:
@@ -1161,8 +1285,8 @@ _GITATTRIBUTES_BLOCK = (
 )
 _MATHEMA_GITIGNORE = (
     "# Regenerated from the code or local-only, so not committed. The\n"
-    "# verified records, meta (locks/policy), compendium and badges are the\n"
-    "# evidence and config, and ARE committed.\n"
+    "# verified records, meta (locks/policy) and badges are the evidence\n"
+    "# and config, and are committed.\n"
     "/declared/\n"
     "/issues/\n"
 )
@@ -1204,9 +1328,9 @@ def _scaffold_git_files(root: str) -> list:
 _CI_FILES = {
     "github": (".github/workflows/mathema-verify.yml", """\
 # mathema verify is the CI gate over the committed .mathema/ store: it
-# re-adjudicates whatever changed and gates the result. verify is
-# STRICT by default, which fails a falsified claim, an open unknown
-# one, AND a claim that could not be checked at all (an unreachable
+# checks again whatever changed and gates the result. verify is
+# strict by default, which fails a falsified claim, an open unknown
+# one, and also a claim that could not be checked at all (an unreachable
 # surface, an unsupported shape). Most stores have some of the last
 # kind at first, so expect the first run to be red and to tell you
 # exactly which claims it means. Add --lenient to report those
@@ -1238,7 +1362,7 @@ jobs:
 """),
     "gitlab": (".gitlab-ci.mathema.yml", """\
 # mathema verify is the CI gate over the committed .mathema/ store.
-# verify is STRICT by default: it fails a falsified claim, an open
+# verify is strict by default: it fails a falsified claim, an open
 # unknown one, and a claim that could not be checked at all, so expect
 # the first run to be red and to name them. Add --lenient to stop the
 # unverifiable ones failing the gate once each is understood.
@@ -1535,7 +1659,9 @@ def _print_describe_detail(key: str, fn, args) -> int:
     """`describe_detail()`'s result, printed as `mathema describe`'s
     single-function view: signature + identity hashes, inferred
     domains (each tagged with its source), claims (statement + LaTeX +
-    verified verdict when one exists), then the tier ladder; one
+    verified verdict when one exists), the careful lines (known edges
+    just outside a declared domain, information only), then the tier
+    ladder; one
     section per tier, in ladder order, `--tier` narrowing to just one
     (accepted either by name or by its 1-5 ladder position, translated
     to the real tier name here so `describe_detail()` itself only ever
@@ -1566,6 +1692,10 @@ def _print_describe_detail(key: str, fn, args) -> int:
     else:
         print("  (none declared)")
     print()
+    if detail.get("careful"):
+        for line in detail["careful"]:
+            print(line)
+        print()
     if detail.get("concepts"):
         print("Concepts: " + ", ".join(detail["concepts"]))
     if detail.get("references"):
@@ -1609,7 +1739,7 @@ def cmd_docsync(args) -> int:
                   f"verified")
             print(f"  verified: {c['verified']}")
             print(f"  authored: {c['authored']}")
-            print("  the verified version keeps adjudicating; to adopt "
+            print("  the verified version is the one checked; to adopt "
                   "the authored version run:")
             print(f"    mathema accept {c['key']} {c['claim']} "
                   f"--as superseded")
@@ -1816,6 +1946,227 @@ def _exclusive_group(claim_name: str) -> str | None:
     return None
 
 
+def _suggested_policies(fn, declared_rows: list) -> list:
+    """The policy rows mathema writes for a function that its declared
+    claims do not state: each parameter's default, derived or observed
+    behaviour at a value that is not there, and each raise no claim
+    accounts for, decided on the declared claims' own calls."""
+    import mathema
+
+    from .spec import entry_claims
+    claims = entry_claims({"claims": declared_rows}) if declared_rows else []
+    rec = mathema.check(fn, claims=claims)
+    return [p for p in rec.probes
+            if (p.meta or {}).get("mathema.policy")
+            and (p.meta or {}).get("mathema.surface") == "mathema"]
+
+
+def _policy_state(p) -> str:
+    """`confirmed` (holds or proven, written by --write), `contradicted`
+    (a row with a word the code does not follow), or `unaccounted` (a
+    raise or a mixed case with no word to write)."""
+    if p.verdict in ("holds", "proven"):
+        return "confirmed"
+    if (p.meta or {}).get("mathema.policy", {}).get("sentence"):
+        return "unaccounted"
+    return "contradicted"
+
+
+def _policy_line(p) -> str:
+    """One policy row as the record prints it, indented for a listing."""
+    pol = p.meta["mathema.policy"]
+    mark = {"holds": "holds    ", "proven": "proven   ",
+            "falsified": "falsified"}.get(p.verdict, p.verdict)
+    if pol.get("sentence"):
+        line = f"    {mark} {p.name}: {pol['sentence']}"
+    else:
+        line = f"    {mark} {p.name}: {p.statement}   [{pol.get('reason')}]"
+    for extra in (pol.get("said"), pol.get("next")):
+        if extra and p.verdict not in ("holds", "proven"):
+            line += "\n             " + str(extra).replace("\n", "\n             ")
+    return line
+
+
+def _policy_note(p) -> str:
+    """The note a written policy row carries: that mathema wrote it and
+    where the word came from, and, when the code contradicts it, the
+    contradiction and the date; never the evidence of one run."""
+    import datetime
+    pol = p.meta["mathema.policy"]
+    reason = pol.get("reason") or ""
+    source = reason.split("; ", 1)[0].split(". ", 1)[0]
+    if source.startswith("default"):
+        source = "mathema's " + source
+    elif source.startswith("from ") and ", which f calls" not in source \
+            and "policy row" in source:
+        source += ", which f calls"
+    note = f"written by mathema claims --write: {source}"
+    if p.verdict == "falsified":
+        contradiction = reason.split(" instead: ", 1)
+        did = contradiction[0].rsplit("f ", 1)[-1] if len(contradiction) == 2 else ""
+        what = contradiction[1] if len(contradiction) == 2 else ""
+        note += (f"; contradicted by the code on {datetime.date.today().isoformat()}: "
+                 f"f {did}, {what}")
+    return note
+
+
+def _contradiction_words(p) -> str:
+    """`f drops, nan in, 1.0 out` from a contradicted row's reason."""
+    reason = p.meta["mathema.policy"].get("reason") or ""
+    parts = reason.split(" instead: ", 1)
+    if len(parts) != 2:
+        return reason
+    return f"f {parts[0].rsplit('f ', 1)[-1]}, {parts[1]}"
+
+
+def _write_policies(args, declared_rows: list, policies: list) -> int:
+    """Write every policy row mathema writes for a function into the
+    declared claims file, each under the name the record prints and with
+    a note saying where it came from, the contradicted ones too with the
+    contradiction; a raise or a case no claim accounts for has no word
+    to write, and the write line says what to state instead."""
+    import yaml
+
+    from ._missing_words import options, remedy_statements
+    path = os.path.join(args.root or ".", "claims", "policies.claims.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc: dict = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    have = {c.get("statement") for c in declared_rows}
+    rows = doc.setdefault(args.key, {}).setdefault("claims", [])
+    have |= {c.get("statement") for c in rows}
+    names = {c.get("name") for c in declared_rows} | {c.get("name") for c in rows}
+    written: list = []
+    contradicted: list = []
+    for p in policies:
+        if _policy_state(p) == "unaccounted" or p.statement in have or p.name in names:
+            continue
+        rows.append({"name": p.name, "statement": p.statement, "note": _policy_note(p)})
+        written.append(p.name)
+        if _policy_state(p) == "contradicted":
+            contradicted.append(p)
+    if not rows:
+        doc.pop(args.key, None)
+    rel = os.path.relpath(path, args.root or ".")
+    if written:
+        with open(path, "w") as fh:
+            yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+    line = (f"{args.key}: wrote {len(written)} policy row"
+            f"{'' if len(written) == 1 else 's'} to {rel}"
+            + (f": {', '.join(written)}" if written else ""))
+    for p in contradicted:
+        corrected = _corrected_text(p)
+        line += (f".\nThe code contradicts {p.name} ({_contradiction_words(p)}):\n"
+                 + options(["change the word in the file or change f",
+                            f"to accept it as a discovery, run: mathema accept "
+                            f"{args.key} {p.name} --as discovery"
+                            + (f" --corrected \"{corrected}\"" if corrected else "")]))
+    for p in policies:
+        if _policy_state(p) != "unaccounted":
+            continue
+        pol = p.meta["mathema.policy"]
+        sentence = pol.get("sentence") or ""
+        stated = remedy_statements(pol.get("next") or "")
+        if sentence.startswith("f has no single policy"):
+            line += (f".\nNot written: {p.name}, {sentence}:\n"
+                     + options(["change f", f"to see the {len(stated)} rows to state, "
+                                f"run: mathema claims {args.key}"]))
+        elif "does not declare it" in sentence:
+            line += (f".\nNot written: {p.name}, f returns None from present inputs and "
+                     f"its return type does not declare it:\n"
+                     + options(["make f return a value", "declare: -> Optional[...]"]))
+        else:
+            line += (f".\nNot written: {p.name}, {_unwritten_words(sentence)}"
+                     + (":\n" + options([_alternative(pol),
+                                         f"state yourself: {stated[0]}"])
+                        if stated else ""))
+    print(line)
+    return 0
+
+
+def _corrected_text(p) -> "str | None":
+    """The corrected row a contradicted row's own remedy names."""
+    found = re.search(r'--corrected "([^"]+)"', p.meta["mathema.policy"].get("next") or "")
+    return found.group(1) if found else None
+
+
+def _unwritten_words(sentence: str) -> str:
+    """`f raises TypeError at x = None and no claim says it may` from the
+    sentence row `f raised TypeError at x = None, and no claim says it
+    may`."""
+    text = sentence.replace("f raised ", "f raises ", 1)
+    return text.replace(", and no claim says it may", " and no claim says it may")
+
+
+def _alternative(pol: dict) -> str:
+    """What else the author can do about a row with no word to write."""
+    if pol.get("kind") == "absent" and pol.get("parameter"):
+        return "handle None in f"
+    return "change f"
+
+
+def _list_policies(key: str, policies: list) -> None:
+    """The policy rows of one function, grouped by state."""
+    params = list(dict.fromkeys(
+        (p.meta["mathema.policy"].get("parameter") or "the result") for p in policies))
+    n = len(policies)
+    print(f"{key}: {n} policy row{'' if n == 1 else 's'} about {', '.join(params)}")
+    groups = (("confirmed", f"confirmed by the code (to write these, run: mathema "
+                            f"claims {key} --write):"),
+              ("contradicted", "contradicted by the code (change the word, the code, "
+                               "or accept it as a discovery; --write writes these "
+                               "with the contradiction in the note):"),
+              ("unaccounted", "not covered by any claim yet (the line beneath says what "
+                              "to write, or what to change; --write leaves these out):"))
+    for state, title in groups:
+        rows = [p for p in policies if _policy_state(p) == state]
+        if rows:
+            print(f"  {title}")
+            for p in rows:
+                print(_policy_line(p))
+
+
+def _write_split(args) -> int:
+    """Write a split into the declared claims file: the claim narrowed
+    by `--at` (`assuming len(r) >= k`) under the claim's own name, in
+    place of a declared row of that name, and the region row
+    `is_defined` stating the same lengths on f."""
+    import yaml
+
+    from .conjecture import InvalidConjecture, claim as _claim
+    from .spec import atomic_write_text
+    at = (args.at or "").strip()
+    if not re.fullmatch(r"len\(\s*[A-Za-z_]\w*\s*\)\s*>=\s*\d+", at):
+        print("mathema claims --split: --at must be a length premise, "
+              "`len(r) >= k`")
+        return 2
+    try:
+        name = _claim(args.split).name
+        narrowed = f"assuming {at}, {args.split}"
+        _claim(narrowed)
+    except InvalidConjecture as e:
+        print(f"mathema claims --split: {e}")
+        return 2
+    root = args.root or "."
+    path = os.path.join(root, "claims", "adopted.claims.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    doc: dict = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    rows = doc.setdefault(args.key, {}).setdefault("claims", [])
+    rows[:] = [c for c in rows if c.get("name") not in (name, "is_defined")]
+    rows += [{"name": name, "statement": narrowed},
+             {"name": "is_defined", "statement": at}]
+    atomic_write_text(path, yaml.safe_dump(doc, sort_keys=False,
+                                           allow_unicode=True))
+    print(f"{args.key}: wrote {name} ({narrowed}) and is_defined ({at}) "
+          f"to {os.path.relpath(path, root)}")
+    return 0
+
+
 def cmd_claims(args) -> int:
     """The claim-authoring surface for one function: bare lists what
     the declared layer already states; `--suggest` renders mathema's
@@ -1824,12 +2175,14 @@ def cmd_claims(args) -> int:
     `--adopt NAME` writes one chosen suggestion into the declared
     claims file, where it becomes an ordinary gated claim. Suggestions
     never live in any layer; they are inferred fresh from the
-    function each time; adoption is the explicit human step."""
+    function each time; adoption writes the chosen one."""
     import yaml
 
     from .spec import load_declared
     from .suggest import suggest_claims as _suggest
 
+    if getattr(args, "split", None):
+        return _write_split(args)
     _key, fn = resolve_function(args.key, args.root)
     declared = load_declared(args.root)
     entry = (declared.get(args.key) or {}).get("entry") or {}
@@ -1837,28 +2190,35 @@ def cmd_claims(args) -> int:
     declared_names = {c.get("name") for c in declared_rows if c.get("name")}
 
     if not args.suggest and not args.adopt:
+        policies = _suggested_policies(fn, declared_rows)
+        if getattr(args, "write", False):
+            return _write_policies(args, declared_rows, policies)
         if not declared_rows:
             print(f"{args.key}: no declared claims "
-                  "(mathema claims --suggest lists candidates)")
-            return 0
-        print(f"{args.key}: {len(declared_rows)} declared claim(s)")
-        for c in declared_rows:
-            print(f"  - {c.get('name')}: {c.get('statement') or c.get('law')}"
-                  + (f"  [route {c['route']}]" if c.get("route") else ""))
+                  f"(to list candidates, run: mathema claims {args.key} --suggest)")
+        else:
+            print(f"{args.key}: {len(declared_rows)} declared claim(s)")
+            for c in declared_rows:
+                print(f"  - {c.get('name')}: {c.get('statement') or c.get('law')}"
+                      + (f"  [route {c['route']}]" if c.get("route") else ""))
+        if policies:
+            _list_policies(args.key, policies)
         return 0
 
-    suggestions = _suggest(fn, key=args.key, root=args.root)
+    from .suggest import gate_suggestions
+    suggestions = _suggest(fn, key=args.key, root=args.root) + gate_suggestions(fn)
     if args.suggest and getattr(args, "format", "text") == "json":
         from .records import claim_statement
         from .families import aspect_label
-        from .suggest import bound_annotation_hint
+        from .suggest import bound_annotation_hint, suggestion_sections
+        sections = suggestion_sections(fn, suggestions)
         rows = [[cj.name, claim_statement(cj).strip(),
                  cj.route, cj.name in declared_names,
-                 aspect_label(cj.name)]
-                for cj in suggestions]
+                 aspect_label(cj.name), section, reason]
+                for cj, (section, reason) in zip(suggestions, sections)]
         payload = {"key": args.key,
                    "cols": ["name", "statement", "route", "declared",
-                            "aspect"],
+                            "aspect", "section", "reason"],
                    "rows": rows}
         hint = bound_annotation_hint(fn)
         if hint:
@@ -1866,16 +2226,50 @@ def cmd_claims(args) -> int:
         _emit_json(payload, getattr(args, "output", None))
         return 0
     if args.suggest:
+        from .families import aspect_label
+        from .records import claim_statement
+        from .suggest import suggestion_sections
         print(f"{args.key}: {len(suggestions)} suggested claim(s) "
               "(adopt with: mathema claims KEY --adopt NAME)")
-        for cj in suggestions:
+        from ._examine import effects_line
+        effects = effects_line(fn)
+        if effects is not None:
+            # what the function does beyond returning a value, always
+            # stated beside its suggestions
+            print(f"  effects: {effects['line']}")
+        sections = suggestion_sections(fn, suggestions)
+
+        def line(cj) -> str:
             marker = " [already declared]" if cj.name in declared_names else ""
-            from .families import aspect_label
-            label = aspect_label(cj.name)
-            aspect_note = (f"  [aspect: {label}]" if label else "")
-            from .records import claim_statement
-            print(f"  - {cj.name}: {claim_statement(cj)}"
-                  f"  [route {cj.route}]{marker}{aspect_note}")
+            return (f"  - {cj.name}: {claim_statement(cj)}"
+                    f"  [route {cj.route}]{marker}")
+        alone = [(cj, why) for cj, (sec, why) in zip(suggestions, sections)
+                 if sec == "individual"]
+        asked = [cj for cj, (sec, _r) in zip(suggestions, sections)
+                 if sec == "question"]
+        doubtful = [(cj, why) for cj, (sec, why) in zip(suggestions, sections)
+                    if sec == "unknowable"]
+        if alone:
+            print(" individual claims:")
+            for cj, why in alone:
+                print(line(cj))
+                if why:
+                    print(f"      {why}")
+        if asked:
+            print(" questions with candidate answers (adopt every answer "
+                  "that holds):")
+            questions: dict = {}
+            for cj in asked:
+                questions.setdefault(aspect_label(cj.name), []).append(cj)
+            for question, members in questions.items():
+                print(f"  {question}:")
+                for cj in members:
+                    print("  " + line(cj))
+        if doubtful:
+            print(" likely to be unknowable (adopted only when named):")
+            for cj, why in doubtful:
+                print(line(cj))
+                print(f"      {why}")
         from .suggest import bound_annotation_hint
         hint = bound_annotation_hint(fn)
         if hint:
@@ -2160,18 +2554,10 @@ def cmd_pin(args) -> int:
               "without human verification")
         return 0
     # set / rotate
-    if args.totp:
-        info = auth.set_totp()
-        print("TOTP credential set (experimental). Enrol it ONCE into "
-              "any authenticator app;\nthis secret is not shown again:")
-        print(f"  secret: {info['secret']}")
-        print(f"  {info['uri']}")
-        print(f"key {info['key']}")
-    else:
-        pin = auth.prompt_new_pin()
-        info = auth.set_pin(pin)
-        print(f"PIN set (key {info['key']}). Acceptance and unlock now "
-              f"prompt for it.")
+    pin = auth.prompt_new_pin()
+    info = auth.set_pin(pin)
+    print(f"PIN set (key {info['key']}). Acceptance and unlock now "
+          f"prompt for it.")
     return 0
 
 
@@ -2250,8 +2636,8 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
         print(f"cannot accept: {e}")
         return 1
     print(f"written: {summary}")
-    print(f"next: `mathema verify {args.key}` re-adjudicates it at its new "
-          f"location")
+    print(f"next, to check it at its new location, run: mathema verify "
+          f"{args.key}")
     return 0
 
 
@@ -2296,8 +2682,8 @@ def cmd_accept(args) -> int:
         print(f"reconciled {len(done)} record(s): {', '.join(done)}")
         return 0
     if not args.key:
-        print("cannot accept: a key is required "
-              "(or `--as reconciled --all` to clear a whole merge)")
+        print("cannot accept: a key is required (or, to clear a whole "
+              "merge: --as reconciled --all)")
         return 2
     # guide a newcomer who omits --as with a claim: infer the natural kind
     # from the claim's verdict and say why. The confirmation below still
@@ -2466,8 +2852,8 @@ def cmd_coverage(args) -> int:
     if method == "hash":
         print("test report freshness: by content hash (coverage.sources.json)")
     elif method == "mtime":
-        print("test report freshness: by file modification time (run "
-              "`mathema coverage --stamp` after the tests to judge by content)")
+        print("test report freshness: by file modification time (to judge "
+              "by content, after the tests run: mathema coverage --stamp)")
     return 0
 
 
@@ -2510,28 +2896,60 @@ def cmd_badges(args) -> int:
 
 
 def cmd_compendium(args) -> int:
-    """`mathema compendium export <library>`: write a partial compendium
-    SKELETON for <library> from this project's verified claims, verified
-    bound claims become `claims`, verified `raises(...)` become
-    `raises_when`, and AST-detected nan/inf returns become `nan_when`;
-    `limitations` are stubbed as TODOs. The result is declared until a
-    consumer verifies or trusts it, so review and complete it before
-    shipping (curate limitations, confirm the AST-guessed nan regions)."""
+    """`mathema compendium status [<library>]`: where the project stands
+    with each third-party library its functions call (the claims files
+    about it, the called functions with no claims, and how many rows of
+    the rest are verified locally, trusted, falsified or unsettled),
+    writing nothing. `mathema compendium export <library>`: for a
+    library author, write the proven and held claims this project's
+    verified store holds about <library>'s functions as a compendium
+    claims file (`compendium: <library>`, `versions: ">=<installed
+    major.minor>"`), by default to `claims/<library>.claims.yaml` under
+    the root, for downstream projects to use. Each row carries the
+    verdict it reached as its claimed level; a consumer verifies or
+    accepts it before resting a claim on it. `mathema compendium
+    update [--dry-run]`: pin the non-default literal arguments the
+    project's calls pass into rows of its own compendium files, and
+    widen a used row's own `versions:` range once verify has recorded
+    it holding on the installed version, printing every change."""
     import os
-
-    from .compendium.export import write_compendium
-    from .spec import load_verified
 
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    if args.action == "update":
+        from .compendium.update import run_update
+        for line in run_update(root, dry_run=args.dry_run):
+            print(line)
+        return 0
+    if args.action == "status":
+        from .compendium.status import compendium_status, render_status
+        data = compendium_status(root, args.library)
+        if args.json:
+            import json
+            print(json.dumps(data, indent=2))
+        else:
+            print(render_status(data))
+        return 0
+    from .compendium.export import write_compendium
+    from .spec import load_verified
+
+    if not args.library:
+        raise TargetError("compendium export needs the library to export, for "
+                          "example: mathema compendium export mylib")
     if not any(k.split(".")[0] == args.library for k in load_verified(root)):
         raise TargetError(f"no verified records for library "
                           f"{args.library!r} under {root}; nothing to export")
-    path = write_compendium(args.library, root=root, out_dir=args.out)
-    print(f"wrote compendium skeleton for {args.library!r} to {path}")
-    print("(a partial skeleton: complete the TODOs, confirm nan_when, and "
-          "verify or trust it downstream, it is declared until then)")
+    notes: list = []
+    path = write_compendium(args.library, root=root, out=args.out,
+                            notes=notes)
+    for line in notes:
+        print(f"note {line}")
+    if path is None:
+        print(f"nothing written: no verified row of {args.library!r} is "
+              f"left to export")
+        return 1
+    print(f"wrote the {args.library!r} compendium claims file to {path}")
     return 0
 
 
@@ -2594,9 +3012,13 @@ def main(argv: list[str] | None = None) -> int:
                                  description="Claim-Driven Development: turn "
                                              "software intent into verifiable "
                                              "evidence.")
+    from . import __version__
+    ap.add_argument("--version", action="version",
+                    version=f"mathema {__version__}",
+                    help="print the installed mathema version and exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    pc = sub.add_parser("check", help="interactive: adjudicate one file, "
+    pc = sub.add_parser("check", help="interactive: check one file, "
                                       "one function, or one ad-hoc claim")
     pc.add_argument("target",
                     help="what to check: a dotted name (pkg.mod, "
@@ -2608,16 +3030,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="project root to import dotted targets "
                          "relative to (default .)")
     pc.add_argument("--claim", action="append", metavar="LAW",
-                    help='ad-hoc claim to adjudicate, e.g. "f(-x) == -f(x)" '
+                    help='ad-hoc claim to check, e.g. "f(-x) == -f(x)" '
                          "(repeatable)")
     pc.add_argument("--domain", action="append", metavar="name=lo:hi",
                     help="declared parameter range (repeatable)")
-    pc.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
-                    help="shrink the probe-route trial budget by this factor "
-                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
-                         "iteration; a value above 1 is clamped to 1, so it "
-                         "never scales upward, and never below a floor that "
-                         "still guarantees real evidence")
+    _add_trials_downscale(pc)
     pc.add_argument("--format", default="text",
                     choices=["text", "json", "junit", "github", "md",
                              "compact"],
@@ -2630,30 +3047,30 @@ def main(argv: list[str] | None = None) -> int:
     _add_gate_flags(pc, default_strict=False)
     pc.set_defaults(fn=cmd_check)
 
-    pv = sub.add_parser("verify", help="test runner: re-adjudicate every "
+    pv = sub.add_parser("verify", help="test runner: check again every "
                                        "recorded function whose form hash "
                                        "changed (strict by default)")
     pv.add_argument("target", nargs="*",
                     help="dotted key(s) to re-verify and re-stamp on their "
-                         "own (e.g. after a merge); omit to sweep the whole "
-                         "project")
+                         "own (e.g. after a merge), or claims file path(s) "
+                         "whose every entry is checked up front (a "
+                         "library's compendium file included, "
+                         "mathema/compendium/... naming a bundled one); "
+                         "omit to sweep the whole project, where library "
+                         "claims are checked only for the library "
+                         "functions the project calls")
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
     pv.add_argument("--all", action="store_true",
-                    help="re-adjudicate everything, ignoring form-hash freshness")
+                    help="check everything again, ignoring form-hash freshness")
     pv.add_argument("--status", nargs="?", const=True, default=None,
                     metavar="TARGET",
                     help="report fresh/stale per @track_claims-tagged "
-                         "function and adjudicate nothing (always exit "
+                         "function and check nothing (always exit "
                          "0); an optional TARGET (dotted name or file "
                          "path) is imported first so its tagged "
                          "functions register")
-    pv.add_argument("--trials-scale", type=float, default=1.0, metavar="FACTOR",
-                    help="shrink the probe-route trial budget by this factor "
-                         "(FACTOR > 0, e.g. 0.25) for faster dev-loop "
-                         "iteration; a value above 1 is clamped to 1, so it "
-                         "never scales upward, and never below a floor that "
-                         "still guarantees real evidence")
+    _add_trials_downscale(pv)
     pv.add_argument("--format", default="text", choices=["text", "json"],
                     help="report format: json emits the sweep as data "
                          "(per-key rows in the same claim vocabulary "
@@ -2700,17 +3117,45 @@ def main(argv: list[str] | None = None) -> int:
                          "--root, or pass an explicit DIR")
     pb.set_defaults(fn=cmd_badges)
 
-    pcomp = sub.add_parser("compendium", help="export a partial compendium "
-                           "skeleton for a library from this project's "
-                           "verified claims")
-    pcomp.add_argument("action", choices=["export"],
-                       help="export: write a compendium skeleton")
-    pcomp.add_argument("library", help="the importable package name to export "
-                       "verified claims for (e.g. mylib)")
+    pcomp = sub.add_parser("compendium", help="the claims about the "
+                           "libraries a project calls: status reports "
+                           "where the project stands with each; update "
+                           "brings the project's compendium files in "
+                           "line with its calls; export publishes a "
+                           "library author's own verified claims as a "
+                           "compendium claims file")
+    pcomp.add_argument("action", choices=["status", "update", "export"],
+                       help="status: for each third-party library the "
+                            "project's functions call, its claims files, "
+                            "the called functions with no claims, and how "
+                            "many rows are verified locally, trusted, "
+                            "falsified or unsettled (writes nothing); "
+                            "update: for each call passing a non-default "
+                            "literal argument no row pins, add pinned "
+                            "copies of the function's rows to the "
+                            "project's compendium file, each only when it "
+                            "holds against the installed library, and widen a used row's own "
+                            "versions range once verify recorded it "
+                            "holding on the installed version; "
+                            "export: for a library author, write the "
+                            "library's proven and held claims from the "
+                            "verified store as a claims file with "
+                            "compendium: and versions:, for downstream "
+                            "projects to use")
+    pcomp.add_argument("library", nargs="?", default=None,
+                       help="status: one library to report on (default: "
+                            "every third-party library called); export: "
+                            "the importable package name to export "
+                            "verified claims for (e.g. mylib)")
     pcomp.add_argument("--root", default=None,
                        help="project root holding .mathema/verified")
-    pcomp.add_argument("--out", default=None, metavar="DIR",
-                       help="output directory (default compendium/<library>/)")
+    pcomp.add_argument("--out", default=None, metavar="PATH",
+                       help="export: output file (default "
+                            "claims/<library>.claims.yaml under --root)")
+    pcomp.add_argument("--json", action="store_true",
+                       help="status: the same report as JSON")
+    pcomp.add_argument("--dry-run", action="store_true",
+                       help="update: print the changes, write nothing")
     pcomp.set_defaults(fn=cmd_compendium)
 
     pa = sub.add_parser("audit", help="population report: every function "
@@ -2762,9 +3207,9 @@ def main(argv: list[str] | None = None) -> int:
                          "N/A), claimed/unclaimed, derivable/underivable, "
                          "underclaimed (fewer claims than the function's "
                          "own floor), or col~text / ~text column matches; "
-                         "comma-separated or repeatable. Same-dimension "
-                         "terms OR together (actionable,limitation = "
-                         "either), dimensions AND across")
+                         "comma-separated or repeatable. Terms in the same "
+                         "dimension combine with or (actionable,limitation = "
+                         "either), terms in different dimensions with and")
     pa.add_argument("--cols", action="append", metavar="COL",
                     help="columns for --compact (implies it), "
                          "comma-separated or repeatable, e.g. "
@@ -2835,7 +3280,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="project root holding claims/ and .mathema/")
     ps.add_argument("--write-docstrings", action="store_true",
                     help="append verified-but-unlisted claim names to "
-                         "EXISTING Claims: blocks in source docstrings, "
+                         "existing Claims: blocks in source docstrings, "
                          "the explicit authoring edit, never implicit")
     ps.add_argument("--yes", action="store_true",
                     help="resolve every conflict as the docstring version "
@@ -2884,8 +3329,8 @@ def main(argv: list[str] | None = None) -> int:
     pcl = sub.add_parser("claims", help="claim authoring surface: list a "
                          "function's declared claims, render mathema's "
                          "suggested standard claims, or adopt one into the "
-                         "declared layer (the explicit human step; "
-                         "suggestions never live in any record)")
+                         "declared layer (suggestions never live in any "
+                         "record)")
     pcl.add_argument("key", help="module-qualified function key (funcs.ema)")
     pcl.add_argument("--suggest", action="store_true",
                      help="render the suggested standard claims with laws "
@@ -2893,6 +3338,18 @@ def main(argv: list[str] | None = None) -> int:
     pcl.add_argument("--adopt", default=None, metavar="NAME",
                      help="write the named suggestion into the declared "
                           "claims file (claims/adopted.claims.yaml)")
+    pcl.add_argument("--write", action="store_true",
+                     help="write the suggested policy claims (what each "
+                          "parameter does at a value that is not there) into "
+                          "claims/policies.claims.yaml")
+    pcl.add_argument("--split", default=None, metavar="CLAIM",
+                     help="write CLAIM narrowed to the lengths where it "
+                          "holds (with --at) and the region row is_defined "
+                          "for those lengths into the declared claims file "
+                          "(claims/adopted.claims.yaml)")
+    pcl.add_argument("--at", default=None, metavar="PREMISE",
+                     help="the length premise a --split narrows to, "
+                          "`len(r) >= k`")
     pcl.add_argument("--root", default=None, help="project root")
     pcl.add_argument("--format", default="text", choices=["text", "json"],
                      help="report format: json emits --suggest's rows "
@@ -2902,7 +3359,7 @@ def main(argv: list[str] | None = None) -> int:
     pcl.set_defaults(fn=cmd_claims)
 
     pac = sub.add_parser("accept", help="human decision layer: accept one "
-                         "adjudicated claim's evidence, own its risk, or "
+                         "checked claim's evidence, own its risk, or "
                          "diagnose its falsification as a discovery (prompted; "
                          "prints the exact write first)")
     pac.add_argument("key", nargs="?", default=None,
@@ -2916,7 +3373,7 @@ def main(argv: list[str] | None = None) -> int:
                           "whose checksum no longer matches, in one act "
                           "(the whole post-merge state at once)")
     pac.add_argument("--intent", action="store_true",
-                     help="accept the function's STATED INTENT as "
+                     help="accept the function's stated intent as "
                           "documented, the human rung; binds to the "
                           "signature, the raised-exception surface, and "
                           "the intent text (a body-only refactor keeps "
@@ -2931,7 +3388,7 @@ def main(argv: list[str] | None = None) -> int:
     pac.add_argument("--corrected", default=None, metavar="LAW",
                      help="with --as discovery: the corrected claim to "
                           "declare in place of the falsified one, "
-                          "adjudicated against the live function before "
+                          "checked against the live function before "
                           "anything is written (a correction that itself "
                           "falsifies is refused); without it a sound, "
                           "holding mechanical inverse may be offered")
@@ -2965,7 +3422,7 @@ def main(argv: list[str] | None = None) -> int:
                           "by a human; never wire this into agent tooling)")
     pac.add_argument("--root", default=None, help="project root")
     pac.add_argument("--format", default="text", choices=["text", "json"],
-                     help="report format: json emits the acceptance PLAN "
+                     help="report format: json emits the acceptance plan "
                           "and writes nothing unless --yes is also given "
                           "(so a client can preview, then commit); JSON "
                           "mode never prompts")
@@ -2980,9 +3437,6 @@ def main(argv: list[str] | None = None) -> int:
                       help="set a credential, rotate it (verifies the "
                            "current one first), remove it (also verifies), "
                            "or show method and key id")
-    ppin.add_argument("--totp", action="store_true",
-                      help="experimental: use authenticator-app codes "
-                           "(RFC 6238) instead of a static PIN")
     ppin.set_defaults(fn=cmd_pin)
 
     plk = sub.add_parser("lock", help="pin a function's form hash: verify "

@@ -22,6 +22,8 @@ def _write_funcs(path, add_body="    return a + b"):
     path.write_text(
         "def add(a: float, b: float) -> float:\n" + add_body + "\n\n\n"
         "def clamp01(x: float) -> float:\n"
+        "    if x != x:\n"
+        "        return x\n"
         "    return min(1.0, max(0.0, x))\n\n\n"
         "def gated_sqrt(x: float) -> float:\n"
         "    if x < 0:\n"
@@ -72,8 +74,8 @@ def test_all_fresh_immediately_after_seeding(tmp_path):
 
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "3 fresh" in r.stdout
-    assert "0 adjudicated" in r.stdout
+    assert "3 unchanged since the last run" in r.stdout
+    assert "0 checked" in r.stdout
 
 
 def test_declared_claim_file_is_adjudicated_and_derive_route_dispatches(tmp_path):
@@ -97,7 +99,7 @@ def test_declared_claim_file_is_adjudicated_and_derive_route_dispatches(tmp_path
     assert "funcs.add" in r.stdout
 
 
-def test_unbounded_claim_over_a_raising_guard_falsifies_and_fails_verify(tmp_path):
+def test_a_stated_domain_over_a_raising_guard_falsifies_and_fails_verify(tmp_path):
     funcs_path = tmp_path / "funcs.py"
     _write_funcs(funcs_path)
     (tmp_path / "claims").mkdir()
@@ -105,15 +107,15 @@ def test_unbounded_claim_over_a_raising_guard_falsifies_and_fails_verify(tmp_pat
         "funcs.gated_sqrt:\n"
         "  claims:\n"
         "    - name: unliftable\n"
-        '      statement: "f(x) >= 0"\n'
+        '      statement: "for x in [-1, 1], f(x) >= 0"\n'
         "      route: derive\n"
     )
     _seed_run(tmp_path, funcs_path)
 
-    # with no domain the claim covers x < 0, where gated_sqrt raises:
-    # pedantically falsified, and a falsified claim fails verify in
-    # EVERY mode (lenient only relaxes unverifiable claims, never
-    # wrong ones)
+    # the stated domain covers x < 0, where gated_sqrt raises, and a
+    # stated domain is never narrowed: pedantically falsified, and a
+    # falsified claim fails verify in EVERY mode (lenient only relaxes
+    # unverifiable claims, never wrong ones)
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
     assert "falsified" in r.stdout
@@ -184,7 +186,7 @@ def test_foreign_grammar_claim_does_not_mask_a_genuine_failure(tmp_path):
 
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
-    assert "1 skipped" in r.stdout
+    assert "1 unknown" in r.stdout
     assert "1 not this grammar (mathema-data)" in r.stdout
 
 
@@ -207,8 +209,8 @@ def test_declared_claims_never_mask_verified_identity(tmp_path):
     first = _run(tmp_path)
     assert first.returncode == 0, first.stdout
     second = _run(tmp_path)
-    assert "3 fresh" in second.stdout, second.stdout   # funcs.add now fresh too
-    assert "0 adjudicated" in second.stdout, second.stdout
+    assert "3 unchanged since the last run" in second.stdout, second.stdout   # funcs.add now fresh too
+    assert "0 checked" in second.stdout, second.stdout
 
 
 def test_form_change_triggers_reverification_then_refreshes_baseline(tmp_path):
@@ -217,16 +219,16 @@ def test_form_change_triggers_reverification_then_refreshes_baseline(tmp_path):
     _seed_run(tmp_path, funcs_path)
 
     r1 = _run(tmp_path)
-    assert "3 fresh" in r1.stdout
+    assert "3 unchanged since the last run" in r1.stdout
 
     _write_funcs(funcs_path, add_body="    result = a + b\n    return result")
     r2 = _run(tmp_path)
     assert "funcs.add" in r2.stdout and "form changed" in r2.stdout
-    assert "2 fresh" in r2.stdout        # clamp01, gated_sqrt untouched
+    assert "2 unchanged since the last run" in r2.stdout        # clamp01, gated_sqrt untouched
 
     r3 = _run(tmp_path)                  # baseline should have refreshed
-    assert "3 fresh" in r3.stdout, r3.stdout
-    assert "0 adjudicated" in r3.stdout, r3.stdout
+    assert "3 unchanged since the last run" in r3.stdout, r3.stdout
+    assert "0 checked" in r3.stdout, r3.stdout
 
 
 def test_all_flag_forces_reverification_when_fresh(tmp_path):
@@ -235,8 +237,8 @@ def test_all_flag_forces_reverification_when_fresh(tmp_path):
     _seed_run(tmp_path, funcs_path)
 
     r = _run(tmp_path, "--all")
-    assert "0 fresh" in r.stdout
-    assert "3 adjudicated" in r.stdout
+    assert "0 unchanged since the last run" in r.stdout
+    assert "3 checked" in r.stdout
     assert "forced (--all)" in r.stdout
 
 
@@ -308,10 +310,10 @@ def test_decorator_declared_claim_is_picked_up_by_verify(tmp_path):
 
     r1 = _run(tmp_path)
     assert r1.returncode == 0, r1.stdout
-    assert "1 fresh" in r1.stdout and "0 adjudicated" in r1.stdout
+    assert "1 unchanged since the last run" in r1.stdout and "0 checked" in r1.stdout
 
     r2 = _run(tmp_path)
-    assert "1 fresh" in r2.stdout and "0 adjudicated" in r2.stdout
+    assert "1 unchanged since the last run" in r2.stdout and "0 checked" in r2.stdout
 
 
 def _seed_run_single(root, funcs_path, name):
@@ -374,3 +376,215 @@ def test_verify_format_json_keeps_the_exit_code_and_the_text_path(tmp_path):
     text, js = _run(root), _run(root, "--format", "json")
     assert text.returncode == js.returncode
     assert "fresh" in text.stdout and not text.stdout.startswith("{")
+
+
+def _foreign_then_native(tmp_path, with_grammar: bool):
+    body = ("grammar: other\n" if with_grammar else "") + (
+        "funcs.add:\n"
+        "  claims:\n"
+        "    - name: commutative\n"
+        '      statement: "f(a, b) == f(b, a)"\n'
+        "    - name: above_clamp\n"
+        '      statement: "let g = funcs.clamp01, for a in [0, 1], '
+        'b in [0, 1], f(a, b) >= g(a)"\n')
+    (tmp_path / "claims").mkdir(exist_ok=True)
+    (tmp_path / "claims" / "add.claims.yaml").write_text(body)
+
+
+def test_removing_a_foreign_grammar_adjudicates_the_claims_it_skipped(
+        tmp_path):
+    """A claim skipped as another grammar's is stored as the claim it
+    is, `let` sections included, so once the grammar line goes the
+    unchanged claims adjudicate under mathema's grammar: never read as
+    re-authored, never pinned to the old grammar."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r = _run(tmp_path)
+    assert "2 not this grammar (other)" in r.stdout, r.stdout + r.stderr
+    stored = (tmp_path / ".mathema" / "verified" / "funcs.add.yaml")
+    assert "let g = " in stored.read_text(), stored.read_text()
+
+    _foreign_then_native(tmp_path, with_grammar=False)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-authored" not in r.stdout + r.stderr, r.stdout
+    assert "not this grammar" not in r.stdout, r.stdout
+    text = stored.read_text()
+    assert "let g = " in text, text
+    assert "grammar: other" not in text, text
+    assert "foreign_grammar" not in text, text
+
+    r = _run(tmp_path, "--all")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-authored" not in r.stdout + r.stderr, r.stdout
+
+
+def test_toggling_a_file_grammar_makes_every_entry_in_it_stale(tmp_path):
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    body = ("funcs.add:\n"
+            "  claims:\n"
+            "    - name: commutative\n"
+            '      statement: "f(a, b) == f(b, a)"\n'
+            "funcs.clamp01:\n"
+            "  claims:\n"
+            "    - name: at_most_one\n"
+            '      statement: "f(x) <= 1"\n')
+    (tmp_path / "claims").mkdir()
+    path = tmp_path / "claims" / "funcs.claims.yaml"
+    path.write_text(body)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = _run(tmp_path)
+    assert "2 checked" not in r.stdout, r.stdout
+    for text in ("grammar: other\n" + body, body):
+        path.write_text(text)
+        r = _run(tmp_path)
+        assert "2 checked" in r.stdout, (text, r.stdout)
+        assert r.stdout.count("claims changed") >= 2, r.stdout
+
+
+def test_a_row_skipped_as_another_grammars_claim_never_supersedes():
+    """A record written before skipped rows kept their `let` sections
+    holds the bare relation; it established no verdict, so the authored
+    claim is not reported as re-authored against it."""
+    from mathema.sync import claim_conflicts
+
+    def add(a: float, b: float) -> float:
+        return a + b
+
+    declared = {"claims": [{
+        "name": "above_clamp",
+        "statement": "let g = funcs.clamp01, for a in [0, 1], "
+                     "b in [0, 1], f(a, b) >= g(a)"}]}
+    verified = {"grammar": "mathema", "claims": [{
+        "name": "above_clamp", "statement": "f(a, b) >= g(a)",
+        "verdict": "skipped", "grammar": "other",
+        "meta": {"mathema.foreign_grammar": "other"}}]}
+    assert claim_conflicts(add, declared, verified) == []
+    verified["claims"][0]["verdict"] = "holds"
+    verified["claims"][0]["meta"] = {}
+    assert [c["kind"] for c in claim_conflicts(add, declared, verified)] \
+        == ["supersession"]
+
+
+def _write_lib(tmp_path, step):
+    (tmp_path / "lib.py").write_text(
+        f"def g(x: float) -> float:\n    return x + {step}\n")
+
+
+def test_a_wrapper_reverifies_when_the_library_function_it_calls_changes(
+        tmp_path):
+    """A wrapper calling `lib.g(x)` and one calling `g(x)` after
+    `from lib import g` both depend on g's form. The record keeps the
+    form each callee had when the wrapper was adjudicated, so a change
+    to g re-adjudicates both, whether or not g has a record of its
+    own."""
+    _write_lib(tmp_path, 1)
+    (tmp_path / "wrap.py").write_text(
+        "import lib\n"
+        "from lib import g\n\n\n"
+        "def through_module(x: float) -> float:\n"
+        "    return lib.g(x)\n\n\n"
+        "def through_name(x: float) -> float:\n"
+        "    return g(x)\n")
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "wrap.claims.yaml").write_text(
+        "wrap.through_module:\n"
+        "  claims:\n"
+        "    - name: above\n"
+        '      statement: "for x in [0, 1], f(x) >= x"\n'
+        "wrap.through_name:\n"
+        "  claims:\n"
+        "    - name: above\n"
+        '      statement: "for x in [0, 1], f(x) >= x"\n')
+    r = _run(tmp_path)
+    assert "2 checked" in r.stdout, r.stdout + r.stderr
+    stored = (tmp_path / ".mathema" / "verified"
+              / "wrap.through_module.yaml").read_text()
+    assert "lib.g" in stored and "form:" in stored, stored
+    r = _run(tmp_path)
+    assert "2 unchanged since the last run" in r.stdout, r.stdout
+    _write_lib(tmp_path, 2)
+    r = _run(tmp_path)
+    assert "0 unchanged since the last run" in r.stdout, r.stdout
+    assert r.stdout.count("dependency changed") >= 2, r.stdout
+
+
+def _check(root, *extra):
+    script = ("import sys; from mathema.cli import main; "
+              f"sys.exit(main(['check', 'funcs.py', '--root', {str(root)!r}"
+              + "".join(f", {a!r}" for a in extra) + "]))")
+    return subprocess.run([sys.executable, "-c", script], cwd=str(root),
+                          capture_output=True, text=True,
+                          env=_env_with_repo_on_path())
+
+
+def test_a_claims_file_wholly_in_another_grammar_is_warned_about_once(
+        tmp_path):
+    """Every claim of a file in a grammar this checker does not
+    adjudicate is most often a `grammar:` line copied from somewhere:
+    verify and check say so once, naming the file and the grammar."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "funcs.claims.yaml").write_text(
+        "grammar: python-expression\n"
+        "funcs.add:\n"
+        "  claims:\n"
+        "    - name: commutative\n"
+        '      statement: "f(a, b) == f(b, a)"\n'
+        "funcs.clamp01:\n"
+        "  claims:\n"
+        "    - name: at_most_one\n"
+        '      statement: "f(x) <= 1"\n')
+    (tmp_path / "claims" / "mixed.claims.yaml").write_text(
+        "funcs.gated_sqrt:\n"
+        "  claims:\n"
+        "    - name: nonneg\n"
+        '      statement: "for x in [0, 4], f(x) >= 0"\n'
+        "    - name: other_tool\n"
+        '      statement: "f(x) >= 0"\n'
+        "      grammar: python-expression\n")
+    for r in (_run(tmp_path), _check(tmp_path)):
+        text = r.stdout + r.stderr
+        warned = [ln for ln in text.splitlines()
+                  if "which mathema does not check" in ln]
+        assert len(warned) == 1, text
+        assert "funcs.claims.yaml" in warned[0], warned
+        assert "'python-expression'" in warned[0], warned
+        assert "omit `grammar:`" in warned[0], warned
+        assert "mixed.claims.yaml" not in warned[0], warned
+
+
+def test_a_verified_claim_moved_to_another_grammar_warns_without_blocking(
+        tmp_path):
+    """A claim with a real verdict recorded under mathema that now
+    declares another grammar is no longer adjudicated here: verify says
+    so once on the key's line, the run does not fail on it, and the
+    JSON row names the change."""
+    funcs_path = tmp_path / "funcs.py"
+    _write_funcs(funcs_path)
+    _seed_run(tmp_path, funcs_path)
+    _foreign_then_native(tmp_path, with_grammar=False)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r, doc = _json_run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = {row["claim"]: row for entry in doc["keys"]
+            if entry["key"] == "funcs.add" for row in entry["claims"]}
+    assert rows["commutative"]["grammar_changed"] == {"from": "mathema",
+                                                      "to": "other"}
+    _foreign_then_native(tmp_path, with_grammar=False)
+    _run(tmp_path)
+    _foreign_then_native(tmp_path, with_grammar=True)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    warning = ("warning: claim commutative of funcs.add was verified under "
+               "mathema; its grammar is now 'other', so mathema no longer "
+               "checks it")
+    assert (r.stdout + r.stderr).count(warning) == 1, r.stdout + r.stderr

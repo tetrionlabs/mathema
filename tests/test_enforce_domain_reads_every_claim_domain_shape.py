@@ -40,18 +40,20 @@ def test_an_out_of_range_value_is_rejected(build, text):
 
 
 @pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
-def test_excluding_missing_rejects_a_missing_value(build):
+def test_excluding_missing_rejects_a_hole(build):
     f = build(NO_MISSING)
-    with pytest.raises(ValueError, match="x=None"):
-        f(None)
+    with pytest.raises(ValueError, match="x=nan"):
+        f(float("nan"))
     with pytest.raises(ValueError, match="element 1"):
         f([1, None])
+    assert f(None) is None   # absence is a different kind, left at its default
 
 
 @pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
-@pytest.mark.parametrize("text", [PLAIN, INTEGERS])
-def test_missing_is_allowed_unless_excluded(build, text):
-    assert build(text)(None) is None
+def test_an_unstated_domain_admits_missing_and_a_stated_type_does_not(build):
+    assert build(PLAIN)(None) is None
+    with pytest.raises(ValueError, match="x=None"):
+        build(INTEGERS)(None)
 
 
 @pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
@@ -64,3 +66,37 @@ def test_the_integer_type_rejects_a_fraction(build):
 def test_the_guard_read_off_the_claim_is_the_claims_own_domain():
     f = _guarded_from_claim(NO_MISSING)
     assert f.__mathema_enforced_domain__ == {"x": claim(NO_MISSING).domain["x"]}
+
+
+LANGUAGE = "for x in L[letters], f(x) == f(x)"
+LANGUAGE_NO_MISSING = "for x in L[letters] \\ {∅}, f(x) == f(x)"
+
+
+@pytest.fixture
+def letters():
+    from mathema.languages import StringLanguage, register_language, unregister_language
+    register_language("letters", StringLanguage("letters", char_ok=str.isalpha,
+                                                pool="abcXYZ\u00e9"))
+    try:
+        yield
+    finally:
+        unregister_language("letters")
+
+
+@pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
+def test_a_language_domain_rejects_a_value_outside_the_language(build, letters):
+    f = build(LANGUAGE)
+    assert f("abc") == "abc"
+    with pytest.raises(ValueError, match=r"outside its declared domain L\[letters\]"):
+        f("ab1")
+    with pytest.raises(ValueError, match="outside its declared domain"):
+        f(3)
+
+
+@pytest.mark.parametrize("build", [_guarded_from_claim, _guarded_explicitly])
+def test_a_language_domain_follows_the_missing_policy(build, letters):
+    assert build("for x in L[letters]|None, f(x) == f(x)")(None) is None
+    with pytest.raises(ValueError, match="x=None"):
+        build(LANGUAGE)(None)
+    with pytest.raises(ValueError, match="x=None"):
+        build(LANGUAGE_NO_MISSING)(None)

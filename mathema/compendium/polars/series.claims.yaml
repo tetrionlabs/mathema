@@ -1,0 +1,87 @@
+# Definition rows for polars.Series methods, stated over Series with
+# nothing missing; the receiver of `returns.std()` is `a`. polars skips
+# a null in these reductions but carries a NaN through as a float (the
+# mean of a Series holding NaN is NaN), and count counts the NaN; to
+# mathema both are missing. std and var default to ddof=1, as pandas
+# does. The derive route reads a caller's `returns.std()` through these
+# rows, and mathema's own test suite verifies each against the
+# installed polars.
+compendium: polars
+versions: ">=1,<3"
+
+# The members a hole in a Series stands for: null, and nan, which
+# polars carries as a float and mathema reads as a hole.
+polars.Series:
+  defines:
+    - "missing := {null, nan}"
+
+polars.Series.mean:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == mean(a)"
+    - name: nan_propagates
+      statement: "missing(f, a, nan) propagates"
+      note: "polars carries nan through as a float."
+    - name: null_skipped
+      statement: "assuming count(a) >= 1, missing(f, a, null) drops"
+      note: "A null is left out while a value remains."
+    - name: all_null_is_none
+      statement: "assuming count(a) == 0, missing(f, a, null) converts"
+      note: "A Series of nulls has mean None: the missing slots come back as an absent value."
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
+
+polars.Series.std:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == std(a, ddof=1)"
+      note: "The sample standard deviation: ddof defaults to 1; one element gives null."
+    - name: definition@ddof=0
+      statement: "for a in R^n, f(a, ddof=0) == std(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
+
+polars.Series.var:
+  claims:
+    - name: definition
+      statement: "for a in R^n, assuming dim(a) >= 2, f(a) == var(a, ddof=1)"
+      note: "The sample variance: ddof defaults to 1; one element gives null."
+    - name: definition@ddof=0
+      statement: "for a in R^n, f(a, ddof=0) == var(a, ddof=0)"
+    - name: empty_is_missing
+      statement: "f([]) in {missing}"
+      note: "The empty input has no value: null, returned as None."
+
+polars.Series.sum:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == sum(a)"
+
+polars.Series.product:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == prod(a)"
+
+polars.Series.cum_sum:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cumsum(a)"
+
+polars.Series.cum_prod:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == cumprod(a)"
+
+polars.Series.count:
+  claims:
+    - name: definition
+      statement: "for a in (R | {null})^n, f(a) == count(a)"
+      note: "The number of elements that are not null; a NaN counts, so the row admits null holes only."
+
+polars.Series.len:
+  claims:
+    - name: definition
+      statement: "for a in R^n, f(a) == len(a)"
+      note: "The number of elements, nulls included."

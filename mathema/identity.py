@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import inspect
+
+from ._signatures import callable_signature
 
 
 def local_names(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
@@ -153,7 +154,7 @@ def signature_string(fn) -> str:
     (`"(x: float, y: float = 0.0) -> float"`). `"(?)"` if the signature
     can't be introspected at all (some builtins/C extensions)."""
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return "(?)"
     return str(sig)

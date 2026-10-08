@@ -19,10 +19,13 @@ with the executed raise as the witness. A complex result under a real
 claim counts as a raise (unless that side is annotated `complex`). A
 point where both sides raise the same exception type is agreement (the
 two behave the same there); different exception types at the same point
-falsify, with the executed pair as the witness. A drawn point where
-either side returns a non-finite float or something non-numeric is not
-adjudicated, and every such point is counted in the record's sampling
-meta rather than dropped silently.
+falsify, with the executed pair as the witness. A value is read per
+P4: two sides at the same infinity agree; a NaN from non-missing inputs
+agrees with nothing, and an infinity disagrees with a value or the
+opposite infinity. A drawn point with a missing input, or where either
+side returns something non-numeric, is not adjudicated, and every such
+point is counted in the record's sampling meta rather than dropped
+silently.
 """
 from __future__ import annotations
 
@@ -95,9 +98,8 @@ def _draw_in_domain(value, bound) -> bool:
     """Intent:
         Whether a synthesized draw is actually inside the claim's
         domain before either function is called: the sampler can
-        return an excluded value after its retry budget, and draws an
-        infinite declared endpoint deliberately, both fine as value-
-        claim stressors and both wrong as shared equivalence points.
+        return an excluded value after its retry budget, fine as a
+        value-claim stressor and wrong as a shared equivalence point.
         A sequence draw checks each element; a non-numeric draw (a
         string kind) passes, membership is a numeric question here.
     """
@@ -225,7 +227,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         First slice: `f` on the left, one funcs=-bound name on the
         right, same arity (positional alignment).
     """
-    from .conjecture import _effective_facts, _resolve_func_ref
+    from .conjecture import _effective_facts, _resolve_bound_ref
     from .inventory import structural_complexity
 
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
@@ -238,7 +240,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
                           f"f =:= g with g bound via funcs= (got "
                           f"{cj.lhs!r} =:= {cj.rhs!r})")
     try:
-        bound = {name: (v if callable(v) else _resolve_func_ref(v))
+        bound = {name: (v if callable(v) else _resolve_bound_ref(v))
                  for name, v in cj.funcs.items()}
     except AttributeError:
         bound = {}
@@ -317,7 +319,7 @@ def _rung_form(case: _Case, state: _LadderState) -> Probe | None:
     if case.facts.form and case.facts.form == case.gfacts.form:
         return _stamp(Probe(
             case.cj.name, case.statement, "proven", route="derive",
-            sketch=f"f and {case.rhs_name} lift to the identical "
+            sketch=f"f and {case.rhs_name} reduce to the same "
                    f"canonical form (form hash {case.facts.form})",
             note=case.note, meta=dict(case.annotations)), "form")
     return None
@@ -338,8 +340,8 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
     if proof is not None and proof.status == "proven":
         return _stamp(Probe(
             case.cj.name, case.statement, "proven", route="derive",
-            sketch=f"the symbolic difference of the two lifted bodies "
-                   f"vanishes: {proof.sketch}",
+            sketch=f"the difference of the two functions, read "
+                   f"symbolically, is zero: {proof.sketch}",
             condition=proof.quantifier, note=case.note,
             meta=dict(case.annotations)), "symbolic")
     if proof is not None and proof.status == "disproven" \
@@ -381,9 +383,10 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             v = _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
         args.append(v)
-    fv, f_exc = _run_side(case.fn, args,
+    from .runtime_types import calling
+    fv, f_exc = _run_side(calling(case.fn, case.facts), args,
                           complex_is_a_raise(case.fn, case.cj_domain))
-    gv, g_exc = _run_side(case.gfn, args,
+    gv, g_exc = _run_side(calling(case.gfn, case.gfacts), args,
                           complex_is_a_raise(case.gfn, case.cj_domain))
     cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, case.rhs_name)
     what = "one side raises where the other returns a value"
@@ -612,7 +615,9 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 
 def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     from .conjecture import DEFAULT_TOLERANCE
-    from .probing import _fmt, _fmt_value, _synth, complex_is_a_raise
+    from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
+                          classified, missing_class,
+                          same_infinity)
 
     cj = case.cj
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
@@ -622,6 +627,10 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     rel_slack = 0.0 if cj.tolerance is not None else EQUIV_REL_SLACK
     f_complex = complex_is_a_raise(case.fn, case.cj_domain)
     g_complex = complex_is_a_raise(case.gfn, case.cj_domain)
+    # each side's drawn values realised as its parameters' runtime types
+    from .runtime_types import calling
+    f_call = calling(case.fn, case.facts)
+    g_call = calling(case.gfn, case.gfacts)
     checked, cx, both_raised = 0, None, 0
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
@@ -631,9 +640,14 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                    for p, a in zip(kinds, args)):
             discarded["out_of_domain"] += 1
             continue
-        fv, f_exc = _run_side(case.fn, args, f_complex)
-        gv, g_exc = _run_side(case.gfn, args, g_complex)
+        fv, f_exc = _run_side(f_call, args, f_complex)
+        gv, g_exc = _run_side(g_call, args, g_complex)
         state.executed += 1
+        if classified(args, [v for v in (fv, gv) if v is not _RAISED],
+                      fv is _RAISED or gv is _RAISED):
+            # a raise or a missing output at a missing input is
+            # classified, not judged
+            continue
         one_sided = _one_sided_raise(args, kinds, fv, f_exc, gv, g_exc,
                                      case.rhs_name)
         if one_sided is not None:
@@ -648,12 +662,31 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                 break
             both_raised += 1
             continue
+        if "absent" in (missing_class(fv), missing_class(gv)):
+            # a None from present inputs, or a value against a None at a
+            # missing input, is no value on that side
+            checked += 1
+            if not (fv is None and gv is None):
+                cx = (_fmt(tuple(args), names=tuple(kinds))
+                      + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
+                break
+            continue
         if not (_numberlike(fv) and _numberlike(gv)):
             discarded["non_numeric"] += 1
             continue
         if not (_finite(fv) and _finite(gv)):
-            discarded["not_compared"] += 1
-            continue
+            # the two functions are the same where both have no value
+            # of one kind: two NaNs agree, whatever object carries them,
+            # and two sides at the same infinity are one extended-real
+            # point; a no-value side against a value, a NaN against an
+            # infinity, and opposite infinities disagree
+            checked += 1
+            if same_infinity(fv, gv) or (missing_class(fv) == "hole"
+                                         and missing_class(gv) == "hole"):
+                continue
+            cx = (_fmt(tuple(args), names=tuple(kinds))
+                  + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
+            break
         checked += 1
         scale = max(abs(fv), abs(gv), 1.0)
         if abs(fv - gv) > tol + rel_slack * scale:
@@ -684,8 +717,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             n=checked, counterexample=cx,
             note=f"{case.note}; the two implementations disagree at an "
                  f"executed shared point, a raise on one side against a "
-                 f"value on the other, or different exceptions, counting "
-                 f"as a disagreement{aside}",
+                 f"value on the other, different exceptions, or no value "
+                 f"(a NaN, or an infinity other than the other side's), "
+                 f"counting as a disagreement{aside}",
             meta=meta), "sampled")
     if state.proof is not None and state.proof.status == "disproven":
         # the symbolic rung claimed inequivalence but no executed point
@@ -693,10 +727,9 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
         return _stamp(Probe(
             cj.name, case.statement, "unknown", route="derive",
             sketch=state.proof.sketch,
-            note=f"{case.note}; uncorroborated disproof: the symbolic "
-                 f"difference was reported nonzero but {checked} "
-                 f"executed shared points all agree, a probable "
-                 f"engine bug worth reporting",
+            note=f"{case.note}; derive found the two functions "
+                 f"different, but {checked} points run on both agree, "
+                 f"which is probably a mathema bug worth reporting",
             meta={**meta, "mathema.corroboration": "uncorroborated"}),
             "symbolic")
     if checked >= EQUIV_MIN_AGREEMENTS:
@@ -822,6 +855,6 @@ def _closed_forms_identical(fn, facts, gfn, gfacts, cj_domain) -> str | None:
         return None
     if residual == 0:
         return ("the two closed forms are identical under the declared "
-                "domain: both sides lift to expressions whose difference "
+                "domain: both sides read as expressions whose difference "
                 "simplifies to zero")
     return None

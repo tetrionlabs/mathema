@@ -5,11 +5,14 @@ one that has it, and entails the weaker properties it implies. Checks
 are numpy-fast when numpy is present and degrade honestly without it,
 element-wise/structural checks in pure Python, spectral ones declining
 (None) rather than guessing."""
-import random
 
 import pytest
 
-from mathema.matrices import PROPERTIES, entailed
+pytest.importorskip("numpy")
+
+import random  # noqa: E402
+
+from mathema.matrices import PROPERTIES, entailed  # noqa: E402
 
 
 @pytest.mark.parametrize("name", sorted(PROPERTIES))

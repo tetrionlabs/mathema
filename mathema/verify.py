@@ -20,6 +20,7 @@ in `gates.py`; this module gates adjudication OUTCOMES, not evidence.)
 """
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field
 
@@ -36,6 +37,13 @@ def _claim_fields(c) -> tuple[str, str, dict, str]:
         return (c.get("name") or "", c.get("verdict") or "",
                 c.get("meta") or {}, str(c.get("note") or ""))
     return (c.name or "", c.verdict or "", c.meta or {}, str(c.note or ""))
+
+
+def _claim_statement(c) -> str:
+    """A claim's statement, from a live Probe or a stored claim dict."""
+    if isinstance(c, dict):
+        return str(c.get("statement") or "")
+    return str(getattr(c, "statement", "") or "")
 
 
 def _volunteered(meta: dict, note: str) -> bool:
@@ -60,6 +68,15 @@ class GateReport:
     owned: int = 0
     skipped: int = 0
     foreign: list = field(default_factory=list)
+    # of the proven, the built-in ones mathema adds (dependencies_current)
+    builtin_proven: int = 0
+    # the unknown claims by name, each with its one-line reason
+    unknown_reasons: list = field(default_factory=list)
+    skipped_reasons: list = field(default_factory=list)
+    # the clauses of the policy rows mathema wrote that do not hold
+    unaccounted: list = field(default_factory=list)
+    # the clauses of the declared policy rows that are falsified
+    policy_problems: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
@@ -67,6 +84,85 @@ class GateReport:
         `invalidated` together: the `refuted` stance of the claim-row
         vocabulary."""
         return self.falsified + self.invalidated
+
+
+#: whether the missing-value policy rows mathema writes are gated and
+#: counted as claims: a contradicted default or a raise no claim accounts
+#: for is then falsified, and fails as any falsified claim does; off, they
+#: are reported beside the counts and the function passes
+POLICY_ROWS_GATE = True
+
+
+def _unaccounted_text(report) -> str:
+    """One clause per policy row mathema wrote that does not hold:
+    `; missing[x]: f drops a missing x (nan in, 1.0 out), the row says
+    propagates; change the word or the code`, `; absent[x]: f raised
+    TypeError at x = None, and no claim says it may (state
+    `absent(f, x) raises(TypeError)`)`, or an empty string."""
+    found = getattr(report, "unaccounted", None) or []
+    return "".join(f"; {text}" for text in found)
+
+
+def _policy_clause(name: str, statement: str, pol: dict) -> "str | None":
+    """The clause a verify or check line carries for one policy row that
+    does not hold, from the row's own meta: the row, what f does, whose
+    word it contradicts, and the one next step."""
+    import re as _re
+    from ._missing_words import options, remedy_statements
+    nxt = pol.get("next") or ""
+    named = remedy_statements(nxt)
+    to_write = named[0] if named else None
+    if pol.get("sentence"):
+        sentence = pol["sentence"]
+        if sentence.startswith("f has no single policy"):
+            rows = len(named)
+            return (f"{name}: {sentence}" + (f", {rows} rows to state" if rows > 1
+                                              else ""))
+        if "does not declare it" in sentence:
+            return (f"{name}: {sentence}; declare the return type Optional, or return a "
+                    f"value")
+        tail = ("\n" + options(["handle None in f", f"state: {to_write}"])
+                if pol.get("kind") == "absent" and to_write else
+                "\n" + options(["change f", f"state: {to_write}"]) if to_write else "")
+        return f"{name}: {sentence}{tail}"
+    reason = pol.get("reason") or ""
+    m = _re.search(r"f (\w+) instead: (.+)$", reason)
+    lib = _re.match(r"from (\S+)'s own policy row, which f calls; f (.+?) instead at (.+)$",
+                    reason)
+    if lib:
+        return (f"{name}, {lib.group(1)}'s row says {pol.get('behaviour')} "
+                f"{_when_words(pol.get('premise') or '')} and f {lib.group(2)} at "
+                f"{lib.group(3)}".replace("  ", " ")
+                + ("\n" + options(["change f", f"state: {to_write}"]) if to_write
+                   else ""))
+    if not m:
+        return None
+    did, entry = m.group(1), m.group(2)
+    kind = pol.get("kind") or "missing"
+    param = pol.get("parameter") or "input"
+    word = statement.split(") ", 1)[-1] if ") " in statement else pol.get("behaviour")
+    whose = ("mathema's default says" if pol.get("source") == "default"
+             else "the row says")
+    if did == "raises":
+        exc = entry.rsplit(", ", 1)[-1].replace("raised ", "")
+        slot = _re.match(r"a (\S+) slot in", entry)
+        where = (f"at a {slot.group(1)} slot of {param}" if slot
+                 else f"at {param} = None" if kind == "absent" else f"at a missing {param}")
+        what = f"f raises {exc} {where}"
+    else:
+        what = (f"f {did} {param} = None ({entry})" if kind == "absent"
+                else f"f {did} a missing {param} ({entry})")
+    remedy = ("\n" + options(["change f", f"write: {to_write}"]) if to_write
+              else "; change the word or the code")
+    return f"{name}, {what} where {whose} {word}{remedy}"
+
+
+def _when_words(premise: str) -> str:
+    if premise.endswith(">= 1"):
+        return "when values remain"
+    if premise.endswith("== 0"):
+        return "when every slot is missing"
+    return ""
 
 
 def summary_counts(counts) -> str:
@@ -79,13 +175,21 @@ def summary_counts(counts) -> str:
     get = ((lambda k: counts.get(k, 0)) if isinstance(counts, dict)
            else (lambda k: getattr(counts, "owned" if k == "accepted_risk"
                                    else k)))
-    parts = [f"{get('proven')} proven", f"{get('holds')} holds",
-             f"{get('falsified')} falsified"]
+    builtin = (counts.get("builtin_proven", 0) if isinstance(counts, dict)
+               else getattr(counts, "builtin_proven", 0))
+    proven = f"{get('proven')} proven"
+    if builtin and get("proven") > builtin:
+        mine = get("proven") - builtin
+        proven += (f" ({mine} claim{'s' if mine != 1 else ''}, {builtin} "
+                   f"built-in)")
+    parts = [proven, f"{get('holds')} holds", f"{get('falsified')} falsified"]
+    # a claim mathema could not run reads as unknown, with its reason
+    # in the problems; the count keeps the two together
     for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
-                      ("skipped", "skipped"),
                       ("accepted_risk", "accepted risk")):
-        if get(key):
-            parts.append(f"{get(key)} {word}")
+        n = get(key) + (get("skipped") if key == "unknown" else 0)
+        if n:
+            parts.append(f"{n} {word}")
     return ", ".join(parts)
 
 
@@ -116,8 +220,11 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         under that name rather than as the fresh `falsified`.
 
     Notes:
-        Only a stored `invalidated` is carried over; every other
-        verdict is already the probe's own.
+        A stored `invalidated` is carried over, and so is the accepted
+        level of a trusted row the sweep could not settle
+        (`mathema.trusted_unsettled`) or settled only more weakly
+        (`mathema.strongest_evidence`, with the row's note), with that
+        marker; every other verdict is already the probe's own.
     """
     import yaml
 
@@ -128,14 +235,31 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         return
     stored = {c.get("name"): c.get("verdict")
               for c in entry.get("claims") or []}
+    trusted = {c.get("name"): c for c in entry.get("claims") or []
+               if {"mathema.trusted_unsettled", "mathema.strongest_evidence"}
+               & set(c.get("meta") or {})}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
+        elif p.name in trusted:
+            row = trusted[p.name]
+            p.verdict = stored[p.name]
+            p.meta = {**(p.meta or {}), **{
+                k: v for k, v in (row.get("meta") or {}).items()
+                if k in ("mathema.trusted_unsettled",
+                         "mathema.strongest_evidence")}}
+            if "mathema.strongest_evidence" in (row.get("meta") or {}):
+                p.note = row.get("note") or p.note
+
+
+#: the short name a summary line gives a falsified gate claim
+_GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
+                "is_empty_safe": "empty"}
 
 
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
-         unresolved=()) -> GateReport:
+         unresolved=(), key: "str | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
@@ -148,12 +272,41 @@ def gate(claims, *, strict: bool,
     surface).
     """
     r = GateReport()
+    gate_fails: list = []
+    claims = list(claims)
+    # a line under a claim mathema suggested is part of the suggestion
+    suggested = {_claim_fields(c)[0] for c in claims
+                 if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
-        if _volunteered(meta, note):
+        statement = _claim_statement(c)
+        label = next((lab for rel, lab in _GATE_LABELS.items()
+                      if statement.startswith(rel + "(")), None)
+        parent = meta.get("mathema.companion_of")
+        if parent is not None and parent in suggested:
+            continue
+        if label and classify_verdict(verdict) == "falsified":
+            reason = ((meta.get("mathema.gate") or {}).get("reason")
+                      or (c.get("counterexample") if isinstance(c, dict)
+                          else getattr(c, "counterexample", None)) or "")
+            under = f" under {parent}" if parent else ""
+            line = (f"{label} ({statement}{under}) falsified: {reason}"
+                    + (f"; mathema claims {key} prints the rows to state"
+                       if key and label == "gate" else ""))
+            if line not in gate_fails:
+                gate_fails.append(line)
+        pol = meta.get("mathema.policy")
+        if pol and classify_verdict(verdict) == "falsified":
+            clause = _policy_clause(name, _claim_statement(c), pol)
+            if clause and _volunteered(meta, note) and not POLICY_ROWS_GATE:
+                if clause not in r.unaccounted:
+                    r.unaccounted.append(clause)
+            elif clause:
+                r.policy_problems.append(clause)
+        if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
         if verdict == "skipped:unknown_but_accepted":
@@ -162,6 +315,8 @@ def gate(claims, *, strict: bool,
             continue
         if kind == "proven":
             r.proven += 1
+            if meta.get("mathema.surface") == "builtin":
+                r.builtin_proven += 1
         elif kind == "holds":
             r.holds += 1
         elif kind == "falsified":
@@ -173,30 +328,77 @@ def gate(claims, *, strict: bool,
                 r.owned += 1
             else:
                 r.unknown += 1
+                r.unknown_reasons.append((name, _first_sentence(note)))
         elif kind == "skipped":
             r.skipped += 1
+            r.skipped_reasons.append((name, _first_sentence(note)))
     # a falsified or invalidated claim is a failing check, in every
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
     if r.falsified:
-        r.problems.append(f"{r.falsified} falsified claim(s)")
+        # a falsified gate names itself and its reason, and the policy
+        # rows under it are the same fact; else the policy rows name
+        # themselves and the one-word edit; any other falsified claim is
+        # counted
+        r.problems.extend(gate_fails)
+        if r.policy_problems and not gate_fails:
+            n = len(r.policy_problems)
+            r.problems.append(f"{n} policy row{'s' if n != 1 else ''} to settle: "
+                              + "\n".join(r.policy_problems)
+                              + (f"\nto list them, run: mathema claims {key}" if key
+                                 else ""))
+        others = r.falsified - len(r.policy_problems) - len(gate_fails)
+        if others > 0:
+            r.problems.append(f"{others} falsified claim(s)")
     if r.invalidated:
         r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
         # (mathema accept --as risk)
-        r.problems.append(f"{r.unknown} unknown claim(s)")
+        named = [f"{n} unknown: {why}" if why else f"{n} unknown"
+                 for n, why in r.unknown_reasons]
+        r.problems.append("; ".join(named) if named else
+                          f"{r.unknown} unknown claim(s)")
     if strict and (r.skipped or r.owned):
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
         if r.skipped:
-            r.problems.append(f"{r.skipped} skipped claim(s)")
+            # a claim mathema could not run is unknown, with its reason
+            named = [f"{n} unknown: {why}" if why else f"{n} unknown"
+                     for n, why in r.skipped_reasons]
+            r.problems.append("; ".join(named) if named else
+                              f"{r.skipped} unknown claim(s)")
         if r.owned:
             r.problems.append(f"{r.owned} accepted-risk claim(s)")
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r
+
+
+def _entry_at(path: str, key: str) -> dict:
+    """Intent:
+        The record entry stored under `key` in the YAML file at `path`,
+        or an empty mapping when the file cannot be read.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return (yaml.safe_load(fh) or {}).get(key) or {}
+    except OSError:
+        return {}
+
+
+def _first_sentence(note) -> str:
+    """A note's first clause, short enough for a summary line: `x = nan
+    gives nan, nothing to compare`."""
+    text = (note or "").strip()
+    head = text.split(". ", 1)[0].split("; ", 1)[0]
+    head = head.replace("the only listed point, ", "")
+    head = head.replace(", gives", " gives").replace(", raises", " raises")
+    head = head.replace(" back, so there is no value to compare with",
+                        ", nothing to compare with")
+    return head[:120]
 
 
 def _accepted_risk(entry: dict | None) -> frozenset:
@@ -211,6 +413,30 @@ def _accepted_risk(entry: dict | None) -> frozenset:
         c.get("name") for c in entry.get("claims") or []
         if (c.get("accepted") or {}).get("as") == "risk"
         and not (c.get("accepted") or {}).get("stale"))
+
+
+def _split_unparseable(claims: list, grammar: str, fn,
+                       authored: set) -> tuple:
+    """Intent:
+        `(readable, unreadable)`: the claims kept for adjudication, and
+        `(name, error)` for each claim an authoring surface states
+        (its name in `authored`) whose mathema-grammar statement does
+        not parse, so that claim is reported on its own while the
+        others are adjudicated. A claim only the verified record holds
+        is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import claims_fingerprint
+    readable, unreadable = [], []
+    for c in claims:
+        if c.get("name") in authored:
+            try:
+                claims_fingerprint([c], grammar, fn)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    return readable, unreadable
 
 
 @dataclass
@@ -377,7 +603,7 @@ def _drop_retired_declared(key: str, current_claims: list,
         stmt = row.get("statement") or row.get("law") or ""
         # a statement-less retired row (an older record's shape) cannot
         # be law-compared and retires its name outright
-        matchers.append((row["name"], _same_law_as(stmt) if stmt else None))
+        matchers.append((row["name"], _same_law_as(stmt, key) if stmt else None))
     if not matchers:
         return current_claims, []
     kept: list = []
@@ -391,14 +617,21 @@ def _drop_retired_declared(key: str, current_claims: list,
             notes.append(
                 f"note {key}: claim {name!r} is still declared {where} "
                 "but retired as a discovery; remove it or restate it "
-                "(not adjudicated)")
+                "(not checked)")
         else:
             kept.append(c)
     return kept, notes
 
 
-def _born_falsified_hint(key: str, probes: list,
-                         verified_entry: dict) -> list:
+def _indented(text: str) -> str:
+    """`text` with each line indented two spaces, under the note it
+    belongs to."""
+    return "\n".join(f"  {line}" for line in text.splitlines())
+
+
+def _initially_falsified_hint(key: str, probes: list,
+                         verified_entry: dict,
+                         library_source: "str | None" = None) -> list:
     """Intent:
         The one-time teaching line for a claim that falsified on its
         FIRST adjudication: a failed authoring experiment, which the
@@ -406,8 +639,12 @@ def _born_falsified_hint(key: str, probes: list,
         silently shrinks. Names the exits and the cheap path that
         writes nothing. A claim the record already knew is
         re-falsifying, which is a regression, not an experiment, and
-        gets no line.
+        gets no line. A library key's row (`library_source` names the
+        claims file stating it) is wrong about the installed library:
+        its line names the row, recording it as a discovery, and
+        correcting it in that file.
     """
+    from ._missing_words import options
     from .records import classify_verdict
     known = {c.get("name") for c in (verified_entry.get("claims") or [])
              if c.get("name")}
@@ -415,16 +652,68 @@ def _born_falsified_hint(key: str, probes: list,
               if d.get("name")}
     fresh = [p for p in probes
              if classify_verdict(getattr(p, "verdict", "")) == "falsified"
-             and getattr(p, "name", None) not in known]
+             and getattr(p, "name", None) not in known
+             and (getattr(p, "meta", None) or {}).get("mathema.surface") != "mathema"]
     if not fresh:
         return []
+    lines = []
+    for p in list(fresh):
+        gate_meta = (getattr(p, "meta", None) or {}).get("mathema.gate") or {}
+        if gate_meta.get("reason"):
+            lines.append(f"note {key}: gate ({p.statement}) initially "
+                         f"falsified: {gate_meta['reason']}. The claim is kept "
+                         f"until one of these is done:\n"
+                         + _indented(options([f"to see the rows to state, run: "
+                                              f"mathema claims {key}", "change f"])))
+            fresh.remove(p)
+            continue
+        pol = (getattr(p, "meta", None) or {}).get("mathema.policy") or {}
+        clause = _policy_clause(p.name, p.statement, pol) if pol else None
+        if clause:
+            lines.append(f"note {key}: {p.name} initially falsified; "
+                         + clause[len(str(p.name)):].lstrip(":,").strip().replace(
+                             "; change the word or the code",
+                             ". Change the word in the claims file, or change f."))
+            fresh.remove(p)
+            continue
+        found = (getattr(p, "meta", None) or {}).get("mathema.conditioning")
+        if found:
+            # a computation line that missed the mathematics: what the
+            # conditioning at the witness says, and the ways out
+            claim_name = str(p.name).split("[", 1)[0]
+            fixes = []
+            if found.get("narrow"):
+                fixes.append("if inputs this large are out of scope, narrow "
+                             f"the domain: {found['narrow']}")
+            fixes.append(f"if the loss is accepted, run: mathema accept {key} "
+                         f"{claim_name} --as discovery")
+            lines.append(f"note {key}: {p.name} initially falsified: "
+                         f"{found['words']}:\n" + _indented(options(fixes)))
+            fresh.remove(p)
+    if not fresh:
+        return lines
     names = ", ".join(sorted(str(p.name) for p in fresh))
-    return [f"note {key}: {names} falsified on first adjudication. A "
-            f"declared claim is kept until a human decides it (fix the "
-            f"code, `mathema accept {key} <claim> --as discovery`, or "
-            f"supersede it). To try a spelling first, "
-            f"`mathema check {key} --claim \"...\"` adjudicates it and "
-            f"writes nothing."]
+    if library_source is not None:
+        accepts = [f"to record the falsification as a discovery, run: mathema "
+                   f"accept {key} {p.name} --as discovery"
+                   for p in sorted(fresh, key=lambda p: str(p.name))]
+        return lines + [
+            f"note {key}: {names} initially falsified: the "
+            f"installed library does not do what the row states:\n"
+            + _indented(options(accepts + [
+                f"correct the row in {library_source}, then run: mathema "
+                f"accept {key} {p.name} --as superseded"
+                for p in sorted(fresh, key=lambda p: str(p.name))]))]
+    return lines + [f"note {key}: {names} initially falsified. A "
+            f"declared claim is kept until a human decides it:\n"
+            + _indented(options([
+                "fix the code",
+                f"to record it as a discovery, run: mathema accept {key} <claim> "
+                f"--as discovery",
+                f"to replace it with a corrected claim, edit it, then run: "
+                f"mathema accept {key} <claim> --as superseded",
+                f"to try a spelling first (it writes nothing), run: mathema "
+                f"check {key} --claim \"...\""]))]
 
 
 def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
@@ -455,15 +744,17 @@ def _strip_retired_probes(key: str, probes: list, verified_entry: dict,
         stmt = getattr(p, "statement", "") or ""
         if any(n == name and (same is None or same(stmt))
                for n, same in matchers):
-            if (getattr(p, "meta", None) or {}).get("mathema.companion_of"):
-                # a retired float companion is respawned by every proof
-                # of its parent; retirement is the standing disposition
+            if (getattr(p, "meta", None) or {}).get("mathema.companion_of") \
+                    or (getattr(p, "meta", None) or {}).get("mathema.surface") == "mathema":
+                # a retired float companion is respawned by every proof of
+                # its parent, and a retired policy row by every check;
+                # retirement is the standing disposition
                 continue
             if name not in already_noted:
                 notes.append(
                     f"note {key}: claim {name!r} is still declared on its "
                     "authoring surface but retired as a discovery; remove "
-                    "it or restate it (not adjudicated)")
+                    "it or restate it (not checked)")
                 already_noted.add(name)
         else:
             kept.append(p)
@@ -553,15 +844,20 @@ def _union_verified_membership(current_claims: list,
 
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
-                   trials_scale: float = 1.0,
-                   only: "list | None" = None) -> VerifyResult:
+                   trials_downscale: float | None = None,
+                   only: "list | None" = None,
+                   files: "list | None" = None,
+                   trials_scale: float | None = None) -> VerifyResult:
     """The test-runner sweep as a library call: for every key the
     declared/verified stores know, re-adjudicate if the function's form
     hash, claims fingerprint, or a dependency changed (`all=True`
     forces everything), rewrite the record, and gate each key's
     adjudicated claims through `gate`. `only` restricts the sweep to the
     given dotted keys (the single-key re-verify the reconcile workflow
-    points at); None sweeps the whole population.
+    points at); None sweeps the whole population. `files` names claims
+    files whose every entry is adjudicated up front, whether or not the
+    project calls it (`claims_file_entries`); with `files` the sweep is
+    restricted to their entries plus any `only` keys.
 
     Notes:
         `dependencies_current` claims are settled AFTER the whole sweep
@@ -569,6 +865,8 @@ def verify_project(root: str = ".", *, all: bool = False,
         callee in the same run still reads the callee's fresh record;
         the sweep's outcome does not depend on key order.
     """
+    from .probing import resolve_trials_downscale
+    trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
     import warnings
 
     from .analysis import StateDependenceWarning
@@ -582,13 +880,439 @@ def verify_project(root: str = ".", *, all: bool = False,
         # silenced, every other warning still surfaces.
         warnings.simplefilter("ignore", StateDependenceWarning)
         return _verify_sweep(root, all=all, strict=strict,
-                             trials_scale=trials_scale, only=only)
+                             trials_scale=trials_scale, only=only,
+                             files=files)
+
+
+def resolve_claims_file(target: str, root: str = ".") -> "str | None":
+    """Intent:
+        The claims file a `mathema verify` target names, or None when
+        the target is not a path to one (a dotted key). A path is read
+        as given, then under `root`; `mathema/compendium/...`, the
+        spelling a record gives a bundled file, names the file mathema
+        ships.
+    """
+    import os
+    if not target.endswith((".yaml", ".yml")):
+        return None
+    from .compendium import _bundled_dir
+    candidates = [target, os.path.join(root, target)]
+    prefix = os.path.join("mathema", "compendium") + os.sep
+    if target.replace("/", os.sep).startswith(prefix):
+        candidates.append(os.path.join(
+            _bundled_dir(), target.replace("/", os.sep)[len(prefix):]))
+    for path in candidates:
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return None
+
+
+def _defines_only(entry) -> bool:
+    """Whether a claims-file entry only states its runtime's definitions
+    (`defines:`) and no claim: a key with nothing to adjudicate."""
+    return (isinstance(entry, dict) and bool(entry.get("defines"))
+            and not entry.get("claims"))
+
+
+def claims_file_entries(path: str, root: str,
+                        library_claims: dict) -> "tuple[dict, bool, list]":
+    """Intent:
+        The entries of one claims file as the sweep adjudicates them:
+        `(entries, is_library, lines)`, `entries` mapping each key to
+        `{"entry", "source"}`, `is_library` whether the file declares
+        `compendium:`, and `lines` the one-line notes the sweep prints.
+        A compendium file's key takes the entry that applies to it
+        (`load_library_claims`, where a project file's rows merge with
+        the bundled ones by name), else the file's own, stamped as
+        compendium testimony.
+
+    Notes:
+        A compendium file whose library is not importable, or is
+        installed outside the file's `versions` range, contributes no
+        entries and one line saying which; so does one naming the
+        project's own package.
+    """
+    from .compendium import (_display_path, _installed_version,
+                             applicable_tag, mark_row_versions,
+                             names_own_package, pop_library_fields)
+    from .spec import read_claims_file, stamp_library_rows
+    where = _display_path(path, root)
+    data = read_claims_file(path, where) or {}
+    file_grammar = data.pop("grammar", None)
+    library, versions, aliases = pop_library_fields(data)
+    entries: dict = {}
+    if library is None:
+        for key, entry in data.items():
+            if isinstance(entry, dict) and not _defines_only(entry):
+                entry = dict(entry)
+                if file_grammar:
+                    entry.setdefault("grammar", file_grammar)
+                entries[key] = {"entry": entry, "source": where}
+        return entries, False, []
+    if names_own_package(library, root) and not where.startswith(
+            os.path.join("mathema", "compendium")):
+        return {}, True, [
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package; nothing in it was checked"]
+    tag = applicable_tag(library, versions, aliases)
+    lines: list = []
+    if tag is None:
+        installed = _installed_version(library, aliases)
+        if installed is None:
+            return {}, True, [f"note {where}: {library} is not importable "
+                              f"here; nothing in it was checked"]
+        # installed outside the file's range: every row is adjudicated
+        # against the installed version and marked outside its range,
+        # so it is recorded and never used as a fact
+        tag = f"compendium:{library}-{'.'.join(installed.split('.')[:2])}"
+        for entry in data.values():
+            for row in (entry.get("claims") or []
+                        if isinstance(entry, dict) else []):
+                if isinstance(row, dict):
+                    row.setdefault("versions", versions)
+        lines.append(
+            f"note {where}: {library} {installed} is outside the file's "
+            f"range {versions}; its rows are checked against "
+            f"{library} {installed} and never used as facts here (`mathema "
+            f"compendium export {library}` writes the rows that hold into "
+            f"a project compendium for this version)")
+    stamp_library_rows(data, tag)
+    mark_row_versions(data, library, aliases)
+    if lines:
+        # the file's functions are library functions here too, so each
+        # row reads as it does in range (defaults held, the corner rule
+        # on definition rows, no empty-input line); only no row of the
+        # file is registered as a fact
+        from .compendium import know_keys
+        know_keys(key for key, entry in data.items()
+                  if isinstance(entry, dict) and not _defines_only(entry))
+    for key, entry in data.items():
+        if not isinstance(entry, dict) or _defines_only(entry):
+            continue
+        info = library_claims.get(key)
+        if info and lines:
+            # the key's applicable rows stay; this file's rows join them
+            names = {r.get("name") for r in info["entry"].get("claims") or []}
+            merged = dict(info["entry"])
+            merged["claims"] = list(info["entry"].get("claims") or []) + [
+                r for r in entry.get("claims") or []
+                if r.get("name") not in names]
+            entries[key] = {"entry": merged, "source": info["source"]}
+            continue
+        entries[key] = ({"entry": info["entry"], "source": info["source"]}
+                        if info else {"entry": entry, "source": where})
+    return entries, True, lines
+
+
+def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
+    """Intent:
+        Whether a library function's calls would now pass a different
+        value than the record states (`mathema.defaults` on each row,
+        per function the claim calls): a default the installed library
+        changed, a parameter added or removed. Such a record is stale even though the claims and the
+        form are not.
+    """
+    from .conjecture import claim_defaults
+    from .spec import entry_claims
+    try:
+        current = entry_claims(merged_entry or {})
+    except Exception:
+        return False
+    now: dict = {}
+    for cj in current:
+        resolved = claim_defaults(fn, cj)
+        if resolved:
+            now[cj.name] = resolved
+    names = {cj.name for cj in current}
+    recorded = {c.get("name"): (c.get("meta") or {}).get("mathema.defaults")
+                for c in (verified_entry or {}).get("claims") or []
+                if c.get("name") in names
+                and (c.get("meta") or {}).get("mathema.defaults")}
+    return now != recorded
+
+
+def _library_version_moved(merged_entry: dict,
+                           verified_entry: dict) -> "tuple | None":
+    """Intent:
+        `(recorded, installed)` when a library key's record was
+        adjudicated against another release of the library than the one
+        installed now: a row applying here carries a `mathema.compendium`
+        tag (`compendium:pandas-3.0`) other than the one its namesake in
+        the record carries (`compendium:pandas-2.2`). Each is shown
+        without its `compendium:` prefix. None when every such pair
+        agrees.
+    """
+    def tags(rows) -> dict:
+        return {c.get("name"): str((c.get("meta") or {})
+                                   .get("mathema.compendium"))
+                for c in rows or [] if isinstance(c, dict) and c.get("name")
+                and (c.get("meta") or {}).get("mathema.compendium")}
+    now = tags((merged_entry or {}).get("claims"))
+    was = tags((verified_entry or {}).get("claims"))
+    for name in sorted(now):
+        if name in was and was[name] != now[name]:
+            return (was[name].split(":", 1)[-1], now[name].split(":", 1)[-1])
+    return None
+
+
+def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
+                           verified_entry: dict) -> bool:
+    """Intent:
+        Whether the operational infinity a claim's computation runs to
+        would now differ from what the record states
+        (`mathema.pseudo_infinity` on the claim's rows): a changed or
+        removed `MATHEMA_PSEUDO_INFINITY`, entry field or `let |inf|
+        be`, compared only where it bounds an unbounded direction (P8).
+        Such a record is stale, its claims unchanged (P7).
+    """
+    from dataclasses import replace
+
+    from .conjecture import pseudo_infinity_stamp
+    from .records import resolve_pseudo_infinity
+    from .spec import entry_claims
+    from .types import domain_from_signature
+    try:
+        current = entry_claims(merged_entry or {})
+        parent = domain_from_signature(fn)
+    except Exception:
+        return False
+    function_level = (merged_entry or {}).get("pseudo_infinity")
+    now: dict = {}
+    for cj in current:
+        resolved = replace(cj, resolved_pseudo_infinity=resolve_pseudo_infinity(
+            cj.pseudo_infinity, function_level))
+        stamp = pseudo_infinity_stamp(resolved, facts, parent)
+        if stamp is not None:
+            now[cj.name] = stamp
+    names = {cj.name for cj in current}
+    recorded: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        meta = c.get("meta") or {}
+        # a companion row belongs to the claim it was spawned from
+        base = meta.get("mathema.companion_of") or c.get("name") or ""
+        stamp = meta.get("mathema.pseudo_infinity")
+        if base in names and stamp:
+            recorded[base] = stamp
+    return now != recorded
+
+
+def _unsettled_library_hints(key: str, claims: list) -> list:
+    """Intent:
+        For each library row this sweep left unsettled (declared,
+        unknown or skipped), the line naming both ways to settle it:
+        accept it as trusted, or let verify adjudicate it against the
+        installed library.
+    """
+    from .compendium import _compendium_hint
+    out: list = []
+    for c in claims:
+        name, verdict, meta, _note = _claim_fields(c)
+        if meta.get("mathema.surface") != "compendium":
+            continue
+        if classify_verdict(verdict) not in ("declared", "unknown",
+                                             "skipped"):
+            continue
+        out.append(_compendium_hint(
+            meta.get("mathema.compendium") or "a compendium", name, key,
+            verdict))
+    return out
+
+
+def _import_failure(key: str, root: str) -> "str | None":
+    """Intent:
+        Why the module a dotted key lives in does not import, as
+        `importing <module> raises <Error>: <message>`, trying the
+        longest module prefix of the key first; None when a prefix
+        imports or none could be tried.
+    """
+    import importlib
+    import sys
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    parts = key.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        module = ".".join(parts[:end])
+        try:
+            importlib.import_module(module)
+            return None
+        except ModuleNotFoundError as e:
+            if e.name and module.startswith(e.name):
+                continue
+            return f"importing {module} raises ModuleNotFoundError: {e}"
+        except Exception as e:
+            return f"importing {module} raises {type(e).__name__}: {e}"
+    return None
+
+
+def _unparseable_claim_name(entry: dict) -> "str | None":
+    """The name of the first claim of a declared entry that does not
+    parse as a claim, or None when each one does (or has no name)."""
+    from .conjecture import claim
+    for row in entry.get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        text = row.get("statement") or row.get("law")
+        if not text:
+            continue
+        try:
+            claim(str(text), name=row["name"])
+        except Exception:
+            return str(row["name"])
+    return None
+
+
+def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
+    """Intent:
+        The line for a recorded library key no applicable claims file
+        states rows for: the library and installed version, each claims
+        file about the library with its range, and that the record is
+        kept as it is.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    from .spec import read_claims_file
+    library = key.split(".")[0]
+    files = _library_files(root).get(library, [])
+    aliases: list = []
+    for f in files:
+        aliases += list(f.get("aliases") or ())
+    installed = _installed_version(library, aliases)
+    have = (f"{library} {installed}" if installed
+            else f"{library}, which is not installed here")
+
+    def states_key(f: dict) -> bool:
+        path = f["source"]
+        if path.startswith(os.path.join("mathema", "compendium") + os.sep):
+            from .compendium import _bundled_dir
+            path = os.path.join(_bundled_dir(),
+                                os.path.relpath(path, os.path.join(
+                                    "mathema", "compendium")))
+        else:
+            path = os.path.join(root, path)
+        try:
+            return key in (read_claims_file(path, f["source"]) or {})
+        except Exception:
+            return False
+    ranges = "; ".join(f"{f['source']} states it for {f['versions']}"
+                       for f in files if states_key(f))
+    return (f"note {key}: no claims file about {key} applies to {have}"
+            + (f" ({ranges})" if ranges else "")
+            + "; its record is kept as it is and not checked again")
+
+
+def _out_of_range_notes(root: str, heads: set) -> list:
+    """Intent:
+        One line for each library in `heads` (the top-level modules the
+        swept functions call) that is installed outside the range of
+        every claims file about it: its version, each file with its
+        range, and the command that shows more.
+    """
+    from .compendium import _installed_version
+    from .compendium.status import _library_files
+    files = _library_files(root)
+    out: list = []
+    for library in sorted(heads):
+        about = files.get(library) or []
+        if not about or any(f["in_range"] for f in about):
+            continue
+        aliases: list = []
+        for f in about:
+            aliases += list(f.get("aliases") or ())
+        installed = _installed_version(library, aliases)
+        if installed in (None, "*"):
+            continue
+        groups: dict = {}
+        for f in about:
+            groups.setdefault((f["origin"], f["versions"]), []).append(
+                f["source"])
+        ranges = "; ".join(
+            f"{paths[0]} ({versions})" if len(paths) == 1 else
+            f"{len(paths)} {origin} files under "
+            f"{os.path.dirname(os.path.commonprefix(paths)) or '.'}"
+            f" ({versions})"
+            for (origin, versions), paths in groups.items())
+        out.append(f"note {library} {installed} is outside the range of "
+                   f"every claims file about it, so none of their rows is "
+                   f"used here: {ranges}. `mathema compendium status "
+                   f"{library}` shows the calls; verifying a file by path "
+                   f"checks its rows against {library} {installed}")
+    return out
+
+
+def _library_population(root: str, verified: dict, declared: dict,
+                        library_claims: dict,
+                        heads: "set | None" = None) -> dict:
+    """Intent:
+        The library claim keys this sweep adjudicates, mapped to the
+        claims file each one's rows come from: every key a swept
+        function calls (through its import aliases, `np.sqrt` is
+        `numpy.sqrt`), every key a swept claim names as a premise
+        (`assuming numpy.clip.clip_lower holds`, or the bare row name),
+        and every key already in the verified store. A project that
+        never calls a library adjudicates none of its keys.
+    """
+    from . import analyze
+    from .compendium import _referenced_names, library_keys_called
+    from .conjecture import _resolve_func_ref
+
+    if not library_claims:
+        return {}
+    by_row: dict = {}
+    for lkey, info in library_claims.items():
+        for c in info["entry"].get("claims") or []:
+            if c.get("name"):
+                by_row.setdefault(c["name"], set()).add(lkey)
+    wanted: set = {k for k in verified if k in library_claims}
+    for key in set(verified) | set(declared):
+        if key in library_claims:
+            continue
+        rows = list(((declared.get(key) or {}).get("entry") or {})
+                    .get("claims") or [])
+        rows += list(((verified.get(key) or {}).get("entry") or {})
+                     .get("claims") or [])
+        fn = _resolve_func_ref(key, root=root)
+        if fn is not None:
+            try:
+                facts = analyze(fn)
+                wanted |= library_keys_called(fn, facts,
+                                              library_claims=library_claims)
+                from .definitions import called_keys
+                reached = called_keys(fn, facts)
+                wanted |= reached & set(library_claims)
+                if heads is not None:
+                    heads.update(k.split(".")[0] for k in reached)
+                from .authoring import resolve_declared
+                rows += list(resolve_declared(fn, file_entry={})
+                             .get("claims") or [])
+            except Exception:
+                pass
+        for name in _referenced_names(rows):
+            head, _, row = name.rpartition(".")
+            if head in library_claims:
+                wanted.add(head)
+            wanted |= by_row.get(name, set())
+    return {k: library_claims[k]["source"] for k in sorted(wanted)}
+
+
+def problems_text(problems: list) -> str:
+    """Intent:
+        A record's problems as the sweep line prints them after `<-`:
+        joined by `; `, unless one runs over several lines (its options,
+        a command), when each problem and each of its lines starts its
+        own line, indented, so a command is always the last thing on its
+        line.
+    """
+    if not any("\n" in p for p in problems):
+        return "; ".join(problems)
+    first, *rest = "\n".join(problems).splitlines()
+    return "\n".join([first, *(f"       {line}" for line in rest)])
 
 
 def _verify_sweep(root: str = ".", *, all: bool = False,
                   strict: bool = True,
                   trials_scale: float = 1.0,
-                  only: "list | None" = None) -> VerifyResult:
+                  only: "list | None" = None,
+                  files: "list | None" = None) -> VerifyResult:
     """Intent:
         The sweep body of `verify_project`, which shields it from the
         per-key state-dependence warning chatter.
@@ -596,9 +1320,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     from . import analyze, check
     from .compendium import external_premises as _external_premises
     from .compendium import install as _install_compendium
-    from .compendium import materialize_referenced_entries
-    _install_compendium(root)
-    stub_premises = _external_premises(root)
+    from .compendium import load_library_claims
+    from . import compendium as _compendium
+    _compendium._QUIET["on"] = True
+    try:
+        _install_compendium(root)
+    finally:
+        _compendium._QUIET["on"] = False
+    library_claims = load_library_claims(root)
+    stub_premises = _external_premises(root, library_claims=library_claims)
     from .authoring import resolve_declared
     from .conjecture import (GRAMMAR, InvalidConjecture,
                              _resolve_func_ref)
@@ -609,16 +1339,97 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        write_yaml)
 
     out = VerifyResult()
+    for lkey, row, where, reason in _compendium.unregistered_project_rows():
+        if not reason.startswith("the statement does not parse"):
+            # a row that does not parse is named by its key's failure
+            out.lines.append(f"note {lkey}: row {row!r} of {where} "
+                             f"registers no region, so it guards no "
+                             f"call: {reason}")
+    # claims whose record differs from what is written only because the
+    # canonical text moved in one release, reported once for the run
+    release_moved: list = []
+    from .spec import foreign_grammar_warnings
+    out.lines.extend(foreign_grammar_warnings(root))
+    from .compendium import own_package_compendium_files
+    for where, library in own_package_compendium_files(root):
+        out.lines.append(
+            f"note {where}: `compendium: {library}` names this project's "
+            f"own package, so the file is ignored; its claims are the "
+            f"project's own, stated in its ordinary claims files")
     integrity_warned: set = set()
     from .auth import acceptance_policy_problems, load_policy
     from .locks import load_locks, lock_state
     policy = load_policy(root)
     locks = load_locks(root)
     verified = load_verified(root)
-    declared = load_declared(root)
+    declared = {key: info for key, info in load_declared(root).items()
+                if not _defines_only((info or {}).get("entry"))}
     from .spec import unreadable_verified
     broken = unreadable_verified(root)
-    keys = sorted(set(verified) | set(declared) | set(broken))
+    # the library functions this project calls or rests a premise on
+    # join the population with their library claims, so each is
+    # adjudicated against the installed library; project-declared keys
+    # keep their own entry
+    heads: set = set()
+    library = _library_population(root, verified, declared, library_claims,
+                                  heads)
+    out.lines.extend(_out_of_range_notes(root, heads))
+    # a project's own compendium file is adjudicated in full: each of
+    # its keys is a library key
+    for lkey in declared:
+        info = library_claims.get(lkey)
+        if info is not None and not info.get("bundled"):
+            library.setdefault(lkey, info["source"])
+    for lkey in sorted(library):
+        info = library_claims.get(lkey) or {}
+        by_file: dict = {}
+        for gone in info.get("replaced") or []:
+            by_file.setdefault(gone["source"], []).extend(gone["rows"])
+        for where, rows in by_file.items():
+            out.lines.append(
+                f"note {lkey}: the project replaces the bundled "
+                f"row{'s' if len(rows) != 1 else ''} {', '.join(rows)} of "
+                f"{where}; the other bundled rows still apply")
+    for lkey in library:
+        if lkey not in declared:
+            info = library_claims[lkey]
+            declared[lkey] = {"entry": copy.deepcopy(info["entry"]),
+                              "source": info["source"]}
+    # a claims file named up front: every entry in it is adjudicated,
+    # a library's whether or not the project calls it
+    eager: set = set()
+    for path in files or []:
+        entries, is_library, notes = claims_file_entries(
+            path, root, library_claims)
+        out.lines.extend(notes)
+        for fkey, info in entries.items():
+            eager.add(fkey)
+            if is_library:
+                library.setdefault(fkey, info["source"])
+            if fkey not in declared:
+                declared[fkey] = {"entry": copy.deepcopy(info["entry"]),
+                                  "source": info["source"]}
+    if files is not None:
+        only = list(only or []) + sorted(eager)
+        if not only:
+            return out
+    # a library key recorded here whose rows no claims file states for
+    # the installed library any more (its file left its range, or is
+    # gone): the record is kept as it is, never re-adjudicated as if the
+    # library function were the project's own
+    from .compendium import is_library_record
+    kept_records = False
+    for key in sorted(set(verified) - set(declared) - set(broken)):
+        entry = (verified[key] or {}).get("entry") or {}
+        if key in library_claims or not is_library_record(entry):
+            continue
+        verified = {k: v for k, v in verified.items() if k != key}
+        out.lines.append(_no_applicable_file_note(key, entry, root))
+        kept_records = True
+    # library keys first, so a premise resting on one sees the verdict
+    # this run records for it
+    keys = sorted(set(verified) | set(declared) | set(broken),
+                  key=lambda k: (k not in library, k))
     # a function can be locked before it has any record or claims; its
     # lock is still checked
     lock_only = sorted(set(locks) - set(keys))
@@ -627,7 +1438,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         keys = [k for k in keys if k in want]
         lock_only = [k for k in lock_only if k in want]
     if not keys and not lock_only:
-        out.nothing_declared = True
+        out.nothing_declared = not kept_records
         return out
 
     # phase 1: freshness + adjudication + record writes. Gating waits
@@ -654,6 +1465,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          "integrity_mismatch": False, "counts": {},
                          "claims": []})
     key_problems: dict = {}   # key -> failure lines raised outside the gate
+    # key -> claim name -> the pending re-authored text, for the rows
+    supersessions: dict = {}
+    # key -> {claim name: new grammar} for a claim verified under
+    # mathema that now declares another grammar
+    grammar_changes: dict = {}
     # an orphan record (its key no longer resolves) whose form hash
     # matches a function with no record: old key -> new keys, and the
     # reverse, so both sides of a likely move name the rename remedy
@@ -680,7 +1496,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # with a fresh record. The key fails and names the repair.
             src, reason = broken[key]["source"], broken[key]["reason"]
             _fail(key, f"{key}: the verified record {src} {reason}; "
-                       f"nothing was adjudicated or written for this key. "
+                       f"nothing was checked or written for this key. "
                        f"Repair it (after a merge, keep every discoveries, "
                        f"historical and superseded row from both sides), "
                        f"or restore it with `git restore {src}`, and "
@@ -705,31 +1521,35 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _fail(key, f"{key}: the {section} row {name!r} carries no "
                        f"acceptance, and only `mathema accept` retires a "
                        f"claim, so it retires nothing; remove the row, or "
-                       f"accept the claim with `mathema accept {key} "
-                       f"{name} --as ...`")
+                       f"accept the claim: mathema accept {key} "
+                       f"{name} --as ...")
         recorded_form = (verified_entry.get("identity") or {}).get("form")
         declared_info = declared.get(key)
         source = (declared_info or verified_info)["source"]
         fn = _resolve_func_ref(key, root=root)
+        if fn is None and key in eager and key in library:
+            out.lines.append(f"note {key}: not importable from the "
+                             f"installed library; nothing checked")
+            continue
         if fn is None:
-            rows = verified_entry.get("claims") or []
-            # `all` is this function's own --all flag here, so the
-            # builtin is spelled via any()
-            if rows and not any((r.get("meta") or {}).get(
-                    "mathema.surface") != "compendium" for r in rows):
-                # a compendium key whose package is not importable
-                # here: testimony pending acceptance, never a sweep
-                # failure. Its rows still resolve premises once
-                # accepted; reverification needs the library.
+            from .compendium import is_library_record
+            if is_library_record(verified_entry):
+                # a compendium key whose library is not importable
+                # here: testimony, never a sweep failure. Its rows
+                # still resolve premises at their recorded verdicts;
+                # adjudicating them again needs the library.
                 out.lines.append(
-                    f"note {key}: stub testimony only, library not "
-                    f"importable here; accept rows --as trusted, or "
-                    f"install the package for the sweep to reverify")
+                    f"note {key}: library claims only, the library is "
+                    f"not importable here; accept rows --as trusted, or "
+                    f"install the library for verify to check them")
                 continue
             msg = f"{key}: cannot resolve to a live function"
             out.problems.append(msg)
             line = (f"FAIL {key}: cannot resolve to a live function "
                     f"(declared in {source})")
+            failure = _import_failure(key, root)
+            if failure:
+                line += f"; {failure}"
             row = {"key": key, "why": "unresolvable", "passed": False,
                    "problems": ["cannot resolve to a live function"],
                    "counts": {}, "claims": []}
@@ -754,7 +1574,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             remedies = [rename_command(key, o) for o in moved_here[key]]
             _fail(key, f"{key}: no record yet, and its form hash matches "
                        f"the orphan record {', '.join(moved_here[key])}; "
-                       f"nothing was adjudicated or written for this key. "
+                       f"nothing was checked or written for this key. "
                        f"If it moved, a human keeps its history with: "
                        + " (or) ".join(remedies)
                        + "; if it is a different function, remove the "
@@ -794,17 +1614,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             from .sync import apply_verified_wins, claim_conflicts
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
+                if conflict.get("kind") == "release-move":
+                    release_moved.append((key, conflict["claim"]))
+                    continue
                 if conflict.get("kind") == "supersession":
+                    supersessions.setdefault(key, {})[conflict["claim"]] = \
+                        conflict["authored"]
                     msg = (f"{key}: claim {conflict['claim']!r} was "
                            f"re-authored but is already verified, the "
-                           f"verified version keeps adjudicating; adopt the "
-                           f"change with `mathema accept {key} "
-                           f"{conflict['claim']} --as superseded`")
+                           f"verified version is the one checked; to adopt the "
+                           f"change, run: mathema accept {key} "
+                           f"{conflict['claim']} --as superseded")
                 else:
                     msg = (f"{key}: claim {conflict['claim']!r} differs "
-                           f"between the docstring and the declared file, "
-                           f"run `mathema docsync` to resolve (neither "
-                           f"version is adjudicated until then)")
+                           f"between the docstring and the declared file, and "
+                           f"neither version is checked until it is "
+                           f"resolved; to resolve it, run: mathema docsync")
                 _fail(key, msg)
             # a claim whose two surfaces disagree has no single meaning
             # to record, so neither version is adjudicated or written
@@ -833,12 +1658,25 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 (declared_info or {}).get("source"))
             out.lines.extend(retired_notes)
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
+            entry_grammar = merged_entry.get("grammar", GRAMMAR)
+            authored = {c.get("name") for c in merged_entry.get("claims")
+                        or []}
+            current_claims, unreadable = _split_unparseable(
+                current_claims, entry_grammar, fn, authored)
+            where = ((declared_info or {}).get("source")
+                     or "its docstring or claims file")
+            for claim_name, error in unreadable:
+                msg = (f"{key}: claim {claim_name!r} declared in {where} "
+                       f"does not parse ({error}); correct it there and "
+                       f"re-run verify")
+                out.authoring_errors.append(msg)
+                out.problems.append(msg)
+                out.lines.append(f"FAIL {msg}")
             merged_entry = dict(merged_entry)
             merged_entry["claims"] = current_claims
-            entry_grammar = merged_entry.get("grammar", GRAMMAR)
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims)
+            current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "
@@ -848,7 +1686,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             else:
                 where = ((declared_info or {}).get("source")
                          or "its docstring or claims file")
-                msg = (f"{key}: a claim declared in {where} does not "
+                bad = _unparseable_claim_name(
+                    (declared_info or {}).get("entry") or {})
+                which = f"the claim {bad!r}" if bad else "a claim"
+                msg = (f"{key}: {which} declared in {where} does not "
                        f"parse ({e}); correct it there and re-run verify")
                 out.authoring_errors.append(msg)
             out.problems.append(msg)
@@ -910,14 +1751,43 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         premise_now = _premise_state(current_claims, stub_premises)
         recorded_premises = (verified_entry.get("meta") or {}).get(
             "mathema.premise_state")
+        defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
+        from .definitions import definition_state
+        try:
+            definitions_now = definition_state(fn, facts_now, root)
+        except TimeoutError:
+            raise
+        except Exception:
+            definitions_now = {}
+        definitions_moved = definitions_now != ((verified_entry.get("meta")
+                                                 or {}).get(
+            "mathema.definition_rows") or {})
+        pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
+                                            verified_entry)
+        version_moved = (_library_version_moved(merged_entry, verified_entry)
+                         if key in library else None)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
-                    and recorded_fp == current_fp
+                    and recorded_fp == current_fp and not defaults_moved
+                    and version_moved is None
+                    and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
         dependency_changed = is_fresh and any(
             _dependency_state(d, verified) in ("stale", "invalidated")
             for d in deps_now or [])
+        if is_fresh and not dependency_changed:
+            # a callee's form stored when this record was adjudicated
+            # against the callee's live form: a change re-adjudicates
+            # whether or not the callee has a record of its own
+            stored_forms = {d.get("key"): d.get("form") for d in
+                            verified_entry.get("dependencies") or []
+                            if d.get("kind") == "function"
+                            and d.get("key") and d.get("form")}
+            dependency_changed = any(
+                d.get("key") in stored_forms and d.get("form")
+                and d.get("form") != stored_forms[d.get("key")]
+                for d in deps_now or [] if d.get("kind") == "function")
         if is_fresh and not dependency_changed:
             # a module-level constant is compared by VALUE against this
             # record's own stored dependency entry, the form hash
@@ -971,25 +1841,38 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # (an empty declared set means no claims, not "go conjecture")
         from .spec import attach_recorded_pins
         attach_recorded_pins(claims, verified_entry or None)
-        if materialize_referenced_entries(root, claims, stub_premises):
-            # a referenced compendium row just entered the verified store at
-            # declared status; re-resolve so this key's notes and any
-            # later key's premises see it
-            stub_premises = _external_premises(root)
         rec = check(fn, claims=claims if claims else [],
-                    trials_scale=trials_scale,
-                    known_premises=stub_premises)
+                    trials_downscale=trials_scale,
+                    known_premises=stub_premises,
+                    pseudo_infinity=merged_entry.get("pseudo_infinity"),
+                    runtime_types=merged_entry.get("runtime_types"))
         rec.probes = [p for p in rec.probes
                       if getattr(p, "name", None) not in withheld]
         rec.probes, late_notes = _strip_retired_probes(
             key, rec.probes, verified_entry or {}, retired_noted)
         out.lines.extend(late_notes)
-        out.lines.extend(_born_falsified_hint(key, rec.probes,
-                                              verified_entry or {}))
+        out.lines.extend(_initially_falsified_hint(key, rec.probes,
+                                              verified_entry or {},
+                                              library.get(key)))
         _apply_declared_extras(rec, merged_entry)
+        moved = _grammar_changes(rec.probes, verified_entry or {})
+        if moved:
+            grammar_changes[key] = moved
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
         why = ("dependency changed" if dependency_changed
+               else (f"library version changed ({version_moved[0]} to "
+                     f"{version_moved[1]})") if version_moved is not None
+               and recorded_form
+               else "defaults changed" if defaults_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else "pseudo-infinity changed" if pinf_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else "definition rows changed" if definitions_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -997,11 +1880,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
+        if definitions_now:
+            rec.meta["mathema.definition_rows"] = definitions_now
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
-                               declared_intent=merged_entry.get("intent"))
+                               declared_intent=merged_entry.get("intent"),
+                               grammar=entry_grammar, fn=fn)
         _carry_recorded_verdicts(rec.probes, written, key)
+        # the record just written carries each acceptance forward or
+        # marks it stale (a changed form), so the gate reads the
+        # accepted risk from it, never from the record it replaced
+        accepted = _accepted_risk(_entry_at(written, key))
         out.adjudicated += 1
+        if key in library:
+            # this key's rows now resolve premises at their local verdict
+            stub_premises = _external_premises(
+                root, library_claims=library_claims)
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                         accepted, rec.facts.unresolved, verified_info))
 
@@ -1025,6 +1919,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             continue
         if isinstance(stored_dc, dict):
             stored_dc["verdict"] = dc_now.verdict
+            stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
             entry = vinfo["entry"] if vinfo else None
@@ -1040,6 +1935,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   f"{recorded_form}")
         else:
             stored_dc.verdict = dc_now.verdict
+            stored_dc.note = dc_now.note
             stored_dc.sketch = dc_now.sketch
             stored_dc.counterexample = dc_now.counterexample
             entry = settled.get(key)
@@ -1047,6 +1943,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 for c in entry["entry"].get("claims") or []:
                     if c.get("name") == "dependencies_current":
                         c["verdict"] = dc_now.verdict
+                        c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")
@@ -1059,8 +1956,35 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
 
     # phase 3: gate every key through the one policy and render lines
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
+        is_library = key in library
+        if is_library:
+            # a library's missing-value posture is its compendium's own
+            # policy rows; the rows mathema writes for a user function
+            # are not asked of it
+            claims_for_gate = [c for c in claims_for_gate
+                               if not (_claim_fields(c)[2].get("mathema.policy")
+                                       and _claim_fields(c)[2].get("mathema.surface")
+                                       == "mathema")]
+        # a library key gates like the project's own claims: a row
+        # neither verified here nor accepted (`--as trusted`) fails.
+        # The unresolved-global-name check is the one rule it skips:
+        # that check reads the analysed body of the project's own
+        # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
-                      accepted_risk=accepted, unresolved=unres)
+                      accepted_risk=accepted,
+                      unresolved=() if is_library else unres, key=key)
+        hints = (_unsettled_library_hints(key, claims_for_gate)
+                 if is_library and report.problems else [])
+        standing = [
+            f"{name} stays trusted at its accepted level ({verdict}): the "
+            f"sweep could not settle it ({meta['mathema.trusted_unsettled']})"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.trusted_unsettled")]
+        standing += [
+            f"{name} trusted as: {verdict}, strongest evidence seen: "
+            f"{meta['mathema.strongest_evidence']}"
+            for name, verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            if meta.get("mathema.strongest_evidence")]
         state = "FAIL" if report.problems or key_problems.get(key) else "ok"
         if key in lock_messages:
             # the record is left as it was, so its counts describe code
@@ -1070,20 +1994,43 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 line += "; " + "; ".join(report.problems)
         elif why == "fresh":
             line = f"{state:4} {key}: fresh"
+            if is_library:
+                line += f"; library claims from {library[key]}"
+            line += _unaccounted_text(report)
             if report.problems:
-                line += "; " + "; ".join(report.problems)
+                line += "; " + "; ".join(report.problems + hints)
         else:
-            line = f"{state:4} {key}: {why}; {summary_counts(report)}"
+            line = (f"{state:4} {key}: "
+                    + (f"library claims from {library[key]}; "
+                       if is_library else "")
+                    + f"{why}; {summary_counts(report)}"
+                    + _unaccounted_text(report))
             if report.foreign:
                 grammars = sorted({_claim_fields(p)[2]
                                    ["mathema.foreign_grammar"]
                                    for p in report.foreign})
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
+            if standing:
+                line += "; " + "; ".join(standing)
             if report.problems:
-                line += "  <- " + "; ".join(report.problems)
+                # a problem's options sit on their own lines, under it
+                line += "  <- " + problems_text(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         out.lines.append(line)
+        # a definition row's corner finding: the library's computation
+        # gave no value at a magnitude corner, and the row stands
+        out.lines.extend(
+            f"     note {name}: {meta[found]}"
+            for name, _verdict, meta, _n in map(_claim_fields, claims_for_gate)
+            for found in ("mathema.computation_finding",
+                          "mathema.conditioning_finding")
+            if meta.get(found))
+        out.lines.extend(
+            f"     warning: claim {name} of {key} was verified under "
+            f"mathema; its grammar is now {grammar!r}, so mathema no "
+            f"longer checks it"
+            for name, grammar in grammar_changes.get(key, {}).items())
         out.keys.append({
             "key": key,
             "why": why,
@@ -1093,6 +2040,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          else []) + key_problems.get(key, [])
                         + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
+            **({"library_claims": library[key]} if is_library else {}),
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,
                        "falsified": report.falsified,
@@ -1103,7 +2051,69 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        "foreign_grammar": len(report.foreign)},
             # claim_row reads a live Probe or a stored claim dict alike,
             # so fresh and re-adjudicated keys serialize identically
-            "claims": [claim_row(c, accepted_risk=accepted)
+            "claims": [_with_grammar_change(_with_supersession(
+                           claim_row(c, accepted_risk=accepted), key,
+                           supersessions.get(key, {})),
+                           grammar_changes.get(key, {}))
                        for c in claims_for_gate],
         })
+    if release_moved:
+        from .sync import IDENTITY_RELEASE
+        out.lines.append(
+            f"note: fingerprints move once in {IDENTITY_RELEASE}: the rendered "
+            f"domain now states what it admits, so {len(release_moved)} "
+            f"claim{'s' if len(release_moved) != 1 else ''} recorded by an "
+            f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
+            f"re-recorded under the new text; nothing the author wrote "
+            f"changed")
     return out
+
+
+def _grammar_changes(probes, verified_entry: dict) -> dict:
+    """Intent:
+        The claims skipped this run as another grammar's that carry a
+        real verdict (proven, holds, falsified) recorded under
+        mathema's own grammar, `{claim name: the grammar it declares
+        now}`.
+    """
+    recorded = {c.get("name"): c for c in (verified_entry.get("claims")
+                                          or []) if isinstance(c, dict)}
+    out: dict = {}
+    for p in probes:
+        grammar = (getattr(p, "meta", None) or {}).get(
+            "mathema.foreign_grammar")
+        prior = recorded.get(getattr(p, "name", None))
+        if grammar is None or prior is None:
+            continue
+        if prior.get("verdict") in ("proven", "holds", "falsified") and \
+                prior.get("grammar") in (None, "mathema") and \
+                "mathema.foreign_grammar" not in (prior.get("meta") or {}):
+            out[p.name] = grammar
+    return out
+
+
+def _with_grammar_change(row: dict, changes: dict) -> dict:
+    """Intent:
+        A claim row with `grammar_changed: {from: "mathema", to: ...}`
+        when the claim was verified under mathema and now declares
+        another grammar.
+    """
+    moved = changes.get(row.get("claim"))
+    if moved is not None:
+        row["grammar_changed"] = {"from": "mathema", "to": moved}
+    return row
+
+
+def _with_supersession(row: dict, key: str, pending: dict) -> dict:
+    """Intent:
+        A claim row with its pending supersession, when the claim was
+        re-authored after it was verified: `supersession` holds the
+        re-authored text and the command that adopts it, while the
+        verified version keeps adjudicating.
+    """
+    authored = pending.get(row.get("claim"))
+    if authored is not None:
+        row["supersession"] = {
+            "authored": authored,
+            "adopt": f"mathema accept {key} {row['claim']} --as superseded"}
+    return row

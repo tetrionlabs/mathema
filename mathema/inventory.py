@@ -19,14 +19,19 @@ surfaces functions with *zero* claims, which the declared/verified
 store alone can never show."""
 from __future__ import annotations
 
+from typing import Any, Callable
+
+from ._signatures import module_scope
 import ast
 import inspect
 import os
 import re
 from dataclasses import dataclass, field
 
-from .analysis import quiet_facts
+from .analysis import Facts, quiet_facts
 from .intent import _sections
+from .runtime_types import SEQUENCE_KINDS
+from ._signatures import callable_signature
 
 
 def _self_use_blocks(tree, self_name: str) -> bool:
@@ -109,7 +114,7 @@ def typing_info(fn) -> dict:
     from .analysis import finite_annotation_domains
 
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return {"params_typed": 0, "params_total": 0, "return_typed": None,
                 "finite_domains": {}}
@@ -150,7 +155,7 @@ def wrapped_target(fn) -> str | None:
     if not isinstance(call, ast.Call):
         return None
 
-    g = getattr(fn, "__globals__", {})
+    g = module_scope(fn)
 
     def resolved_name(obj, fallback: str) -> str:
         mod = getattr(obj, "__module__", None)
@@ -479,7 +484,7 @@ def purity_reason(fn) -> str | None:
         return f"recursive ({n} call site{'s' if n != 1 else ''})"
     if not facts.params:
         return "no parameters"
-    non_scalar = [p for p, k in facts.param_kinds.items() if k == "sequence"]
+    non_scalar = [p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS]
     if non_scalar:
         if lift_dot(fn, facts) is not None:
             return None
@@ -580,7 +585,7 @@ def derivability_report(fn) -> dict | None:
                "line": first_call.lineno}
     if not facts.params:
         return {"liftable": False, "blocker": "no-parameters", "line": facts.tree.lineno}
-    non_scalar = [p for p, k in facts.param_kinds.items() if k == "sequence"]
+    non_scalar = [p for p, k in facts.param_kinds.items() if k in SEQUENCE_KINDS]
     if non_scalar:
         if lift_dot(fn, facts) is not None:
             return {"liftable": True}
@@ -602,7 +607,7 @@ def derivability_report(fn) -> dict | None:
     # this never contradicts is_pure_enough()/purity_reason().
     from .symbolic._base import _method_ctx_fields
     _sp, _sc = _method_ctx_fields(fn, facts)
-    ctx = _LiftCtx(globals_ns=getattr(fn, "__globals__", {}), depth=3,
+    ctx = _LiftCtx(globals_ns=module_scope(fn), depth=3,
                    seen=frozenset({id(fn)}), domain={},
                    unmodified=frozenset(_unmodified_params(facts.tree, set(facts.params))),
                    self_param=_sp, self_class=_sc)
@@ -871,7 +876,66 @@ def is_test_covered(fn, coverage_data: dict[str, set[int]] | None) -> bool | Non
 
 
 
-def function_dependencies(fn, facts=None) -> list[dict]:
+def _module_attribute_callees(fn, name: str, module) -> list[dict]:
+    """Intent:
+        The functions `fn` reaches through a module it references by
+        `name`: every `name.attr` (or `name.sub.attr`) read in the body
+        that resolves to a plain function, recorded like a directly
+        named callee, with its dotted key, source location and form.
+
+    Notes:
+        Empty when the body cannot be read. An attribute that resolves
+        to anything but a function (a constant, a class, a submodule
+        not called through) is not a callee and is left out.
+    """
+    from .analysis import get_tree
+    try:
+        _src, fdef = get_tree(fn)
+    except Exception:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for node in ast.walk(fdef):
+        if not isinstance(node, ast.Attribute):
+            continue
+        path: list[str] = []
+        cur: ast.expr = node
+        while isinstance(cur, ast.Attribute):
+            path.append(cur.attr)
+            cur = cur.value
+        if not (isinstance(cur, ast.Name) and cur.id == name):
+            continue
+        obj = module
+        for attr in reversed(path):
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is None or not inspect.isfunction(obj):
+            continue
+        dotted = ".".join([name, *reversed(path)])
+        if dotted in seen:
+            continue
+        seen.add(dotted)
+        dep: dict = {"name": dotted, "kind": "function",
+                     "key": f"{obj.__module__}.{obj.__qualname__}"}
+        try:
+            src = inspect.getsourcefile(obj)
+            if src:
+                dep["file"] = src
+        except TypeError:
+            pass
+        line = getattr(getattr(obj, "__code__", None), "co_firstlineno",
+                       None)
+        if line is not None:
+            dep["line"] = line
+        callee_facts = quiet_facts(obj)
+        if callee_facts is not None:
+            dep["form"] = callee_facts.form
+        out.append(dep)
+    return out
+
+
+def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
     `Facts.global_funcs`' names resolved against the function's own
@@ -879,13 +943,16 @@ def function_dependencies(fn, facts=None) -> list[dict]:
     each with its dotted key, source file and line (so an agent goes
     straight there, never grepping), and, for a plain function; its
     current `form` hash, which is what freshness checks compare against
-    the callee's own verified record. One level deep is enough by
+    the callee's own verified record and against the form stored when
+    this function was adjudicated. A function reached through a
+    referenced module (`lib.g(x)`) is recorded as its own callee beside
+    the module. One level deep is enough by
     design: freshness composes, an unchanged callee form means that
     callee's own claims still stand."""
     facts = facts if facts is not None else quiet_facts(fn)
     if facts is None:
         return []
-    g = getattr(fn, "__globals__", {}) or {}
+    g = module_scope(fn)
     out: list[dict] = []
     # a module-level numeric constant the lift may inline is a real
     # dependency: its exact value rides the record, and the freshness
@@ -933,8 +1000,10 @@ def function_dependencies(fn, facts=None) -> list[dict]:
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
         out.append(dep)
+        if kind == "module":
+            out.extend(_module_attribute_callees(fn, name, obj))
     try:
-        sig = inspect.signature(fn)
+        sig = callable_signature(fn)
     except (TypeError, ValueError):
         return out
     import collections.abc
@@ -961,7 +1030,7 @@ _BLOCKER_HELP = {
                 "beyond field reads and sibling calls)",
     "loop": "the loop doesn't match a recognized fold/sum/dot shape",
     "branch": "a branch couldn't be resolved from the declared domain",
-    "recursion": "recursive calls can't be lifted",
+    "recursion": "derive cannot read recursive calls, so claims on it are decided by running the code",
     "no-parameters": "the function takes no parameters, so there's nothing to quantify over",
     "non-scalar-parameters": "a parameter isn't a scalar (or recognized sequence) of reals",
     "internal-error": "the lifter itself hit an internal error",

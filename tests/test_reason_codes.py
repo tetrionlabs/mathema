@@ -80,6 +80,9 @@ def test_build_issue_record_omitted_claims_uses_suggest_claims():
                      "even", "odd", "idempotent", "is_deterministic",
                      "is_state_safe", "is_numerically_stable",
                      "is_representation_safe[x]"}
+    # 2x + 1 overflowing at x = 1e308 is overflow, not an accuracy
+    # failure: is_numerically_stable reads accuracy only, and every
+    # finite result agrees with the exact value
     assert set(record["meta"]["mathema.issue"]["failing_claims"]) == \
         {"monotonic_decreasing[x]", "even", "odd", "idempotent"}
 

@@ -1,0 +1,36 @@
+# Claims about numpy functions with a known, always finite output range.
+# They are bound claims a caller can rest a premise on, and being covered
+# means is_library_safe(numpy) sees that a caller uses numpy.
+compendium: numpy
+versions: ">=1.24,<3"
+
+numpy.tanh:
+  claims:
+    - name: tanh_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.sin:
+  claims:
+    - name: sin_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.cos:
+  claims:
+    - name: cos_bounded
+      statement: "for x in [-1e6, 1e6], -1 <= f(x) <= 1"
+
+numpy.abs:
+  claims:
+    - name: abs_nonneg
+      statement: "for x in [-1e6, 1e6], f(x) >= 0"
+
+numpy.clip:
+  claims:
+    - name: clip_lower
+      statement: "assuming a_min <= a_max, for a in R, a_min in R, a_max in R, a_min <= f(a, a_min, a_max)"
+      note: "Limits a to [a_min, a_max]; reversed bounds (a_min > a_max) are not checked, and the result is a_max."
+    - name: clip_upper
+      statement: "assuming a_min <= a_max, for a in R, a_min in R, a_max in R, f(a, a_min, a_max) <= a_max"
+    - name: definition
+      statement: "for a in R^n, a_min in R, a_max in R, f(a, a_min, a_max) == ((a + a_min + abs(a - a_min)) / 2 + a_max - abs((a + a_min + abs(a - a_min)) / 2 - a_max)) / 2"
+      note: "A vector clipped element by element: the larger of each element and a_min, then the smaller of that and a_max, each written as a midpoint and half a gap. Reversed bounds give a_max everywhere, as the expression does."

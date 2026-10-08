@@ -25,11 +25,12 @@ _SYMPY_FUNCS = {
     # same as the lowercase spelling
     "Abs": sympy.Abs, "Min": sympy.Min, "Max": sympy.Max,
     # np.minimum/np.maximum are numpy's elementwise two-argument min/max,
-    # a different function from np.min/np.max (which reduce over an array,
-    # like bare min(xs)/max(xs), and aren't lifted at all), same
-    # _call_name() module-qualified resolution as sin/sqrt/etc. routes
-    # "minimum"/"maximum" here regardless of whether the call was spelled
-    # np.minimum(...) or numpy.minimum(...). Mapped to the same sympy.Min/
+    # a different function from np.min/np.max, which reduce over an
+    # array and take the axis as their second argument (so _call_name()
+    # declines those with more than one argument; with one, a scalar's
+    # max is the scalar). The module-qualified resolution routes
+    # "minimum"/"maximum" here whether the call was spelled
+    # np.minimum(...) or numpy.minimum(...), mapped to the same sympy.Min/
     # Max as bare min/max, so _resolve_clamps() (symbolic.py) treats an
     # np.minimum/np.maximum clamp identically to a hand-written one.
     "minimum": sympy.Min, "maximum": sympy.Max,
@@ -103,19 +104,22 @@ _SYMPY_FUNCS = {
     # code instead; both bounds must be real expressions here.
     "clip": lambda x, lo, hi: sympy.Min(sympy.Max(x, lo), hi),
 }
-_MATH_ATTRS = {"pi": sympy.pi, "e": sympy.E, "oo": sympy.oo, "infinity": sympy.oo}
+_MATH_ATTRS = {"pi": sympy.pi, "e": sympy.E, "oo": sympy.oo, "inf": sympy.oo,
+               "infinity": sympy.oo}
 
 # The probe route's float mirror of the derive route's _MATH_ATTRS
 # constants: a bare `pi`/`e` (one that is NOT a real parameter, a
 # parameter of that name always wins, on both routes) evaluates to its
 # real value, so probe agrees with derive instead of sampling it as a
 # random free variable (a live soundness bug: it falsified true claims).
-# oo/infinity stay out; a float inf in a probe COMPARISON is a
-# separate question, and they appear only in limit/domain positions the
-# derive route owns.
+# Every spelling of infinity (`oo`, `inf`, `infinity`; the unicode `∞`
+# is `oo` by the time a law is read) is the float infinity for the same
+# reason: `f(x) < oo` is a claim that a value is finite, and `-oo` is
+# its negation through the ordinary unary minus.
 import math as _math   # noqa: E402
 
-MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e}
+MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e, "oo": _math.inf,
+                  "inf": _math.inf, "infinity": _math.inf, "nan": _math.nan}
 # "infinity" is a second, independent spelling of "oo" (both map to the
 # identical sympy.oo object) rather than something "oo" gets normalized
 # to first, unlike tau below, "infinity" isn't a plausible ordinary
@@ -126,6 +130,8 @@ MATH_CONSTANTS = {"pi": _math.pi, "e": _math.e}
 # an ordinary free variable instead (never taking a limit), and could
 # return a confidently wrong `falsified` with a sampled counterexample
 # rather than even a `skipped`.
+# `nan` is the float nan: a claim writes it to state what a function
+# does with a missing element (`f(c(xs, [nan])) ~= f(xs)`).
 # `tau` is deliberately not here: unlike `pi`, it isn't universally a
 # fixed constant in the way this table's other entries are (a common
 # ordinary variable name too, a time-constant in engineering/physics
@@ -165,7 +171,11 @@ def _call_name(node: ast.Call) -> str | None:
     `sin(x)` and module-qualified `math.sin(x)`/`np.sin(x)`/`numpy.sin(x)`
     all resolve to `'sin'`; numpy's scalar elementwise functions are the
     same operations `math`'s are, over the same scalar-parameter scope
-    lift() already requires, so they get the same treatment. Uses
+    lift() already requires, so they get the same treatment. Only a
+    `module.name` call resolves, so `np.linalg.norm(v)` is None, never
+    `norm`; and numpy's reductions `min`/`max`/`amin`/`amax` with more
+    than one argument are None, since numpy's second argument is the
+    axis, not a second operand. Uses
     analysis.py's own _MATH_MODULES rather than a second, separately
     maintained list, analyze_source()'s "known name" classification and
     lift()'s "known call" classification must agree, or a function can be
@@ -176,6 +186,10 @@ def _call_name(node: ast.Call) -> str | None:
     f = node.func
     if isinstance(f, ast.Name):
         return f.id
-    if isinstance(f, ast.Attribute) and _root_name(f.value) in _MATH_MODULES:
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) \
+            and f.value.id in _MATH_MODULES:
+        if f.value.id in ("np", "numpy") and len(node.args) > 1 \
+                and f.attr in ("min", "max", "amin", "amax"):
+            return None
         return f.attr
     return None
