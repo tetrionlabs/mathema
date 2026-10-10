@@ -40,7 +40,7 @@ import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
-from . import _shapes, families, routes
+from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import analyze_source
 from .grammar import (Domain, InvalidDomain, NoRelation,
@@ -6308,7 +6308,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if inputs_missing(args) and cj.relation not in ("in", "not in"):
             # a raise at a missing input is classified, not judged
             return None
-        return (f"{_fmt(tuple(args), *labels)}: raised {type(e).__name__}, narrow "
+        return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
@@ -9306,7 +9306,7 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
 
     def _recording(*a, **kw):
         try:
-            return fn(*a, **kw)
+            return _exits.call(fn, *a, **kw)
         except Exception as exc:
             raised.append(exc)
             raise
@@ -10186,7 +10186,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 except TypeError:
                     raise   # the law called it wrong: untagged
             try:
-                value = callee(*a, **k)
+                value = _exits.call(callee, *a, **k)
             except Exception:
                 call_raised[0] = label
                 raise
@@ -10622,7 +10622,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
                     cx = (f"{_point_text(args)}: raised "
-                          f"{type(e).__name__}, claimed {cj.rhs}")
+                          f"{_exits.exception_name(e)}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
@@ -10698,7 +10698,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if decided is None:
                     if undecided_at is None:
                         undecided_at = (f"{_point_text(args)}: the claim's own "
-                                        f"side raised {type(e).__name__} "
+                                        f"side raised {_exits.exception_name(e)} "
                                         f"({e})")
                     undecided += 1
                     continue
@@ -10764,7 +10764,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_point_text(args)}: raised {type(e).__name__} at a "
+                cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
@@ -10823,7 +10823,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     return Probe(
                         cj.name, statement, "skipped:misspecified",
                         route=None,
-                        note=f"{note}; f raised {type(e).__name__} at "
+                        note=f"{note}; f raised {_exits.exception_name(e)} at "
                              f"{_point_text(args)}, sampled as a list: "
                              + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
@@ -10835,7 +10835,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_point_text(args)}: raised {type(e).__name__}, narrow "
+            cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _point_text(args))

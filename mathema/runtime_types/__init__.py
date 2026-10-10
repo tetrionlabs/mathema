@@ -466,26 +466,29 @@ class _Realising:
 
 def calling(fn, facts):
     """Intent:
-        `fn` itself when no parameter has a runtime type other than a
-        list; otherwise a callable with `fn`'s signature that realises
-        each such parameter's drawn value through its adapter before
-        calling `fn`, and observes the result into a plain value.
+        A callable with `fn`'s signature and attributes that calls
+        `fn`, with a `SystemExit` it raises arriving as the raise
+        `_exits.ExitRaised`. When a parameter has a runtime type other
+        than a list, the call first realises each such parameter's
+        drawn value through its adapter, and observes the result into
+        a plain value.
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
-        so `fn` raises its own TypeError. A callable already realising
-        is returned as it is.
+        so `fn` raises its own TypeError. A callable this already
+        returned is returned as it is.
     """
-    if isinstance(fn, _Realising):
-        return fn
+    from .._exits import _ExitsAsRaise, exiting_as_raise
+    if isinstance(fn, (_Realising, _ExitsAsRaise)):
+        return exiting_as_raise(fn)
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
     if not bindings and not enums:
-        return fn
+        return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
-        return fn
-    return _Realising(fn, bindings, sig, enums)
+        return exiting_as_raise(fn)
+    return exiting_as_raise(_Realising(fn, bindings, sig, enums))
 
 
 def enum_parameters(fn) -> dict:
