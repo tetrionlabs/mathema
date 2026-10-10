@@ -59,7 +59,8 @@ evidence first:
    (`pd.Series | pd.DataFrame` is sampled as a Series);
 3. the annotation's source text, when the hints do not resolve (a name
    imported only under `TYPE_CHECKING`, say), read through the
-   module's own aliases and the usual `np`, `pd` and `pl`;
+   module's own aliases and the usual `np`, `pd` and `pl` (and any
+   alias a registered adapter states);
 4. for code that cannot be annotated, a claims-file entry's
    `runtime_types:` field, used only for a parameter the signature
    says nothing about:
@@ -98,8 +99,8 @@ When the body uses a parameter as a vector, a matrix or a table (a
 method such as `.mean()` or `.std()`, `np.mean(x)`, `.T`, `@`,
 indexing, a column read by name) but the signature names no runtime
 type, the parameter is still sampled as a list, and in a module that
-imports numpy, pandas or polars the record names the runtime type to
-annotate:
+imports numpy, pandas, polars or a library with a registered adapter
+the record names the runtime type to annotate:
 
 <!-- illustration -->
 ```text
@@ -434,5 +435,10 @@ source text as a string) and returns a `Detection` or None;
 `realise(abstract, options)`, which builds the object passed to the
 function from an `AbstractVec`, `AbstractMat` or `AbstractTable`; and
 `observe(obj)`, which turns a returned object into an abstract value or
-a plain number, or returns `NotMine`. A built-in adapter wins a name
-clash, and an adapter that fails to load is skipped with a warning.
+a plain number, or returns `NotMine`. An adapter may also state
+`ALIASES`, the module aliases its library is usually imported under
+(`{"pd": "pandas"}` for the pandas adapters): an annotation's source
+text is read through them, and the hint for an undeclared parameter
+names the adapter's runtime type in a module that imports its library.
+A built-in adapter wins a name clash, and an adapter that fails to
+load is skipped with a warning.

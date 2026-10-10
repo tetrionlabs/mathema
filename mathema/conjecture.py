@@ -6622,10 +6622,12 @@ def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
                               structures)
 
 
-#: attributes of a DataFrame that are not columns
+#: attributes of a table object (pandas, polars or Spark DataFrame) that
+#: are not columns
 _TABLE_ATTRIBUTES = frozenset({"T", "shape", "columns", "index", "values",
                                "iloc", "loc", "dtypes", "empty", "size",
-                               "ndim", "schema", "height", "width"})
+                               "ndim", "schema", "height", "width", "rdd",
+                               "na", "write", "sparkSession"})
 
 
 def _table_columns(param: str, cj, facts) -> list:

@@ -44,6 +44,9 @@ class RuntimeTypeAdapter(Protocol):
     passed to the function from an abstract value. `observe(obj)`
     turns a returned object into an abstract value or a plain number,
     or returns `NotMine` for an object that is not its runtime type.
+    An adapter may also state `ALIASES`, the module aliases its
+    library is usually imported under (`{"pd": "pandas"}`), through
+    which an annotation's source text is read.
     """
     name: str
     kinds: frozenset
@@ -225,6 +228,7 @@ class NumpyAdapter:
     name = "numpy.ndarray"
     kinds = frozenset({"vec", "mat"})
     requires = ("numpy",)
+    ALIASES = {"np": "numpy", "npt": "numpy.typing"}
     SPELLINGS = {"nan": (lambda: math.nan, _is_nan)}
     MISSING_MEMBERS = ("nan",)
     ABSENCE = ("None",)
@@ -295,6 +299,7 @@ class PandasSeriesAdapter:
     name = "pandas.Series"
     kinds = frozenset({"vec"})
     requires = ("pandas",)
+    ALIASES = {"pd": "pandas"}
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
@@ -323,6 +328,7 @@ class PandasDataFrameAdapter:
     name = "pandas.DataFrame"
     kinds = frozenset({"table"})
     requires = ("pandas",)
+    ALIASES = {"pd": "pandas"}
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
@@ -399,6 +405,7 @@ class PolarsSeriesAdapter:
     name = "polars.Series"
     kinds = frozenset({"vec"})
     requires = ("polars",)
+    ALIASES = {"pl": "polars"}
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
@@ -430,6 +437,7 @@ class PolarsDataFrameAdapter:
     name = "polars.DataFrame"
     kinds = frozenset({"table"})
     requires = ("polars",)
+    ALIASES = {"pl": "polars"}
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
