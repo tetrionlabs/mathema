@@ -10,14 +10,14 @@ Proofs and counterexamples for Python functions, kept as records bound to the ex
 
 ![A discount factor checked by mathema: falsified at the pole rate = 1 over the full range, proven over rates up to 0.99](docs/assets/readme-hero.svg)
 
-mathema checks Python functions against claims, short mathematical statements of what a function is meant to do, and keeps each result as a record bound to the code. It proves a claim over its whole domain where the body reads as mathematics, and elsewhere runs the real function on inputs chosen to break it, keeping evidence and proof apart. The name is Greek, μάθημα, that which is learned.
+mathema checks Python functions against claims, short mathematical statements of what a function is meant to do, and keeps each result as a record bound to the code. It proves the mathematics of a claim over its whole domain where the body reads as mathematics, and checks the computation by running the real function on inputs chosen to break it, keeping proof and evidence apart. The name is Greek, μάθημα, that which is learned.
 
 ## Highlights
 
-- Proofs over a whole domain, not a sample of it: the function body is lifted to a symbolic expression and the claim decided in exact real arithmetic, with an opt-in z3 step for nonlinear inequalities.
+- Proofs of the mathematics over a whole domain, not a sample of it: the function body is lifted to a symbolic expression and the claim decided in exact real arithmetic, with an opt-in z3 step for nonlinear inequalities.
 - Inputs that break code are searched for directly (poles, domain corners, the largest double, empty and degenerate containers), and every falsification carries a counterexample that was executed against the real function.
-- A bare `mathema.check(fn)` runs a battery of built-in claims, so a first audit needs no claim written at all.
-- Each claim is judged twice, once over the reals and once in float64, and when the computation misses, the record names the condition number and says whether the inputs or the code lost the precision.
+- A bare `mathema.check(fn)` runs [built-in claims](https://mathema.tetrionlabs.com/first-look/#step-1-the-built-in-claims-before-you-write-one) of both kinds with no claim written: mathematical ones about the formula (where it is defined, its poles, monotonicity, convexity, symmetry) and computational ones about the code as it runs (side effects, determinism, overflow, numerical stability).
+- Each claim is judged twice: its mathematics exactly over the reals, and its computation as the code runs in float64. When the computation misses, the record names the condition number and says whether the inputs or the code lost the precision.
 - Functions that call [numpy](https://mathema.tetrionlabs.com/runtime-types/#proofs-on-pandas-and-numpy-code), [pandas](https://mathema.tetrionlabs.com/pandas-function/) or [polars](https://mathema.tetrionlabs.com/runtime-types/#the-built-in-runtime-types) are checked through [bundled claims about those libraries](https://mathema.tetrionlabs.com/library-claims/), and parameters annotated as a `Series` or `DataFrame` are run on real ones.
 - Records are bound to the code by a hash of its form, so `mathema verify` re-checks a function when it or anything it calls changes, and a claim that held before and fails now is reported as `invalidated`.
 - CI gets distinct exit codes, GitHub Actions and JUnit output, a claim-level diff of a pull request (`mathema review`) and a population report over a package (`mathema audit`).
@@ -130,7 +130,7 @@ mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
 ```
 
-These are two of fourteen rows. Uniform sampling over the reals lands on `x = 1` with probability zero, so mathema solves the lifted expression for where the denominator vanishes and makes sure that point is tried. [See what mathema finds](https://mathema.tetrionlabs.com/findings/) has more.
+These are two of fourteen rows. `is_defined` is a mathematical claim, proven from the formula itself; `is_pole_safe` is a computational one, falsified by running the code at the point the formula says is dangerous. Uniform sampling over the reals lands on `x = 1` with probability zero, so mathema solves the lifted expression for where the denominator vanishes and makes sure that point is tried. [See what mathema finds](https://mathema.tetrionlabs.com/findings/) has more.
 
 ### The mathematics and the computation
 
