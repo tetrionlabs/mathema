@@ -73,131 +73,118 @@ machinery's. Test and derive lines still count.
 
 ## How clarity is scored
 
-Clarity asks a single question: **of everything knowable about this
-function's behaviour, how much have your verified claims actually pinned
-down?** It is an information measure, not a pass-rate. Formally it is the
-fraction of the function's behavioural uncertainty that the evidence has
-removed (`1 - remaining / total`); informally, how sharply the function
-is characterised.
+Clarity is an entropy measure. Before any evidence, a function carries an
+a-priori uncertainty about its behaviour: which map it computes, which
+inputs it takes, what its output looks like, how safely it runs and where
+it can fail. mathema splits that uncertainty into sources, gives each
+source an entropy in bits, and asks how much of the total your verified
+claims have removed:
 
-The uncertainty is split into five dimensions, each a different kind of
-thing you can know:
+```
+H0     = sum over sources s of  h(s)
+H_rem  = sum over sources s of  h(s) * (1 - r(s))
 
-| dimension | the question it answers | a claim that settles it |
-|-----------|-------------------------|--------------------------|
-| **what it computes** | which function is this, exactly? | `f(x) == 2*x`, an equivalence, a closed form |
-| **what it accepts** | which inputs are in and out of bounds? | a domain, a marker, a `raises` on bad input |
-| **its bounds & shape** | what is the output's range and form? | a bound, monotonicity, symmetry (a proof of *what it computes* settles these too) |
-| **how safely it runs** | does it run cleanly and deterministically? | the safety families (state, determinism, numerical stability, ...) |
-| **where it can go wrong** | how and where does it fail? | a `raises` contract; for each call, the callee's own `is_defined` or `raises` row |
+clarity = 1 - H_rem / H0
+```
 
-A few consequences worth knowing:
+Here `h(s)` is the a-priori entropy of source `s` and `r(s)`, between 0
+and 1, is the fraction of it the strongest evidence bearing on that
+source has eliminated. Clarity is 0 when nothing is known and 100 when
+every source is settled by proof. It is a measure of how sharply the
+function is characterised, not a pass rate: whether the claims hold is
+reported separately.
 
-- **A dimension that cannot apply is already fully known.** A pure,
-  total function with nothing that can fail has no *where it can go
-  wrong* to characterise, so that dimension is satisfied for free rather
-  than counted against it.
-- **Stronger evidence counts for more.** A proof settles a dimension in
-  full; a `holds` counts for less, and a `holds` from a structured probe
-  (critical-point or exhaustive sampling) counts for more than one from
-  plain random sampling, because it leaves less of the input surface
-  unexplored. A witnessed falsification still counts as knowledge (you
-  now know where it fails); correctness is reported separately.
-- **A `[float]` companion that holds counts as numerical stability.** A
-  claim the derive route proves spawns a
-  [`<name>[float]` companion](../evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation),
-  the relation executed against the code in float, in the
-  `is_numerically_stable` family. A companion that holds or is proven
-  credits that family for its function, as a verified
-  `is_numerically_stable` claim with the same verdict and route would. A
-  falsified companion credits nothing: it records one relation the float
-  code breaks, not the function's stability.
-- **The computation-safety hierarchy credits existing sources.** Every
-  safety family maps to one source of uncertainty in the *how safely it
-  runs* dimension: `is_overflow_safe` credits the representation source
-  beside `is_pole_safe`, `is_recursion_safe` credits the accidental-crash
-  source beside `is_language_defined`,
-  and `is_empty_safe` the missing-value source beside `is_missing_safe`.
-  `is_computation_safe` and `is_repeatable` credit nothing themselves,
-  since their children do. The reserved families (`is_precision_safe`,
-  `is_order_invariant`, `is_concurrency_safe`,
-  `is_representation_consistent`) are not adjudicated in this release and
-  credit nothing either. No weight moves.
-- **A call is only as clear as its callee's own record.** Every
-  function a function calls, one of your own or a library's, is a
-  source of uncertainty in *where it can go wrong*, charged in full
-  (two bits a call) until the callee's own record says where it has a
-  value. mathema looks one level down, at the callee's settled
-  definedness rows (an `is_defined` row, bare or with a region, or a
-  `raises` row): proven there, the call's charge is gone; holds reduces
-  it the way a holds reduces anything else; a row accepted with
-  `--as trusted` counts as a holds, never as proven. A callee with no
-  record, or only unsettled rows, keeps the whole charge, which caps
-  the caller below 100. For a library function the record is the one
-  `mathema verify` writes when it adjudicates the function's
-  [compendium](../claims-transfer.md) rows against the installed
-  library; a claims file nobody has verified is testimony and moves
-  nothing. It never looks further: what the callee itself calls is the
-  callee's own clarity, not the caller's. Built-in and standard-library
-  calls with no claims file stay out of the count.
-- **What it accepts is charged by what is known about the inputs.** Each
-  parameter costs the uncertainty its completed domain leaves, read from
-  the same reading every check uses: a parameter with no annotation 1.5
-  bits; a type alone (`float`, `str`, or a language admitting every
-  string) 1.0; a narrower language by its level, an alphabet 0.8, a
-  predicate 0.6, a refined language (`L[ascii, len <= 80]`) 0.4; a
-  bounded range 0.4; a finite set of k values (a `Literal`, a str
-  `Enum`, a guard to a set) `log2(k) / 10`, at most 0.3, and a proof by
-  visiting every member clears it entirely. A verified claim binding a
-  narrower domain for a parameter lowers that parameter's share. An
-  `Optional` parameter adds half a bit for its absence, cleared by its
-  `absent` row or a stated absence policy. A guarded parameter is
-  charged for its boundary as before.
-- **No claims is a low floor, not always zero.** A function nobody has
-  verified is scored only on what its code visibly shows: a plainly pure,
-  total, hazard-free helper reads low but not zero (it is nearly
-  transparent), while a branchy, impure, or call-heavy function floors
-  much closer to zero. Declaring and verifying claims is what
-  raises the score.
+### Sources and their entropy
 
-The scoring algorithm is versioned (`entropy-dimensions@1.3`) and recorded
-beside the scores, so a number is only ever compared against one computed
-the same way; a change to the algorithm reads as an algorithm change, not
-a regression.
+The sources fall into five dimensions, each a different kind of thing you
+can know:
 
-`@1.3` changed how *what it accepts* is charged. Under `@1.2` every
-unguarded parameter cost the same 0.3 bits, so a bare `str` read as
-certain as a `Literal["buy", "sell"]`. Under `@1.3` each parameter costs
-what its completed domain leaves unknown, on the scale above, and an
-`Optional` parameter carries an absence source of its own. Scores move
-down for a function with unannotated or type-only parameters nobody has
-bound, and up for one whose parameters are finite sets, bounded ranges or
-narrower languages, or whose absence rows are verified. After this
-one-time move, a function's clarity changes only when its own record or
-a callee's record changes.
+| dimension | the question it answers | sources and their entropy | a claim that removes it |
+|-----------|-------------------------|---------------------------|--------------------------|
+| **what it computes** | which function is this, exactly? | the map, 1 bit, plus 0.4 bits per branch region | `f(x) == 2*x`, an equivalence, a closed form |
+| **its bounds & shape** | what is the output's range and form? | the output envelope by return kind (a bool 0.5, a scalar 1, a sequence or mapping 1.5, a matrix 2) and its relational form (0.4 flat, 1 branched) | a bound, monotonicity, symmetry; a proof of *what it computes* settles these too |
+| **what it accepts** | which inputs are in and out of bounds? | each parameter's domain (below), and 0.5 bits for the absence an `Optional` admits | a domain, a binding to a narrower set, an `absent` row or policy |
+| **how safely it runs** | does it run cleanly and deterministically? | one source per safety family that can apply: state and determinism (0.15 bits each on a visibly pure function, 0.8 otherwise), numerical stability and representation (0.2 bits, plus 0.4 per loop), missing values for a sequence input (0.4), text for each string input (1) | the safety families (`is_state_safe`, `is_numerically_stable`, ...) |
+| **where it can go wrong** | how and where does it fail? | 0.5 bits per raise site, 2 bits per call into another function | a `raises` contract; for a call, the callee's own `is_defined` or `raises` row |
 
-`@1.2` changed how a call is charged. Under `@1.1` a call into a library
-some compendium file covered cost half a bit, cleared by a verified
-`is_library_safe` claim (then spelled `is_compendium_safe`) on the
-caller, and any other call outside the
-standard library cost two bits nothing could clear; your own helpers
-counted as the second kind. Under `@1.2` every call costs two bits,
-cleared only by the callee's own recorded definedness evidence, as
-described above, and `is_library_safe` no longer reduces anything (it
-is still a claim you can state and check). Scores move down for a
-function calling a covered library function whose rows are not verified
-in your store, including a standard-library function like `math.exp`,
-which `@1.1` left out; they move up for a function whose callees, your
-own helpers included, have settled definedness evidence. After this
-one-time move, a function's clarity changes only when its own record or
-a callee's record changes.
+A dimension that cannot apply has no sources, so it carries no entropy: a
+pure, total function with nothing that can fail has nothing in *where it
+can go wrong* to count against it.
 
-`@1.1` made two changes, and both raise clarity and overall
-against `@1`. It added the `[float]` companion credit above. It also reads
-the relation of a verified claim the way the claim grammar does, so a
-stored identity (the store writes `f(x) = 2*x`, with a single `=`), or an
-approximate one (`~=`), now counts toward *what it computes*. Under `@1`
-it counted only toward *bounds & shape*.
+### What a parameter accepts
+
+Each parameter's entropy is what its completed domain leaves unknown, read
+from the same domain every check uses:
+
+| what is known about the parameter | bits |
+|-----------------------------------|------|
+| nothing (no annotation, no binding) | 1.5 |
+| a type alone (`float`, `str`, a language admitting every string) | 1.0 |
+| a language narrowed to an alphabet | 0.8 |
+| a language narrowed by a predicate | 0.6 |
+| a refined language (`L[ascii, len <= 80]`) or a bounded range | 0.4 |
+| a finite set of `k` values (a `Literal`, a str `Enum`, a guard to a set) | `min(0.3, log2(k) / 10)` |
+| a guard in the body (its boundary is the unknown) | 1.0 |
+
+A finite set of `k` values is a choice carrying `log2(k)` bits, scaled by
+a tenth because a closed set is already most of the way to known, and a
+proof that visits every member removes it entirely. A verified claim that
+binds a narrower domain lowers the parameter's entropy to the narrower
+domain's.
+
+### How much a verdict removes
+
+`r(s)` is set by the strongest verdict bearing on the source, and for a
+`holds` by the mechanism that produced it, since a structured search leaves
+less of the input space unexplored than random sampling:
+
+| verdict | fraction removed |
+|---------|------------------|
+| `proven` | 1.0 |
+| `holds` from derive or examination | 0.90 |
+| `holds` from a semi-analytical probe (critical points, poles) | 0.85 |
+| a witnessed `falsified` | 0.85 |
+| `holds` from an algorithmic probe | 0.80 |
+| `holds` from a minimal-example probe | 0.78 |
+| `holds` from random sampling | 0.60 |
+| `unknown` | 0 |
+
+A witnessed falsification removes entropy because it is knowledge: you now
+know an input where the function fails. A `[float]` companion that holds
+or is proven credits numerical stability for its function, as a verified
+`is_numerically_stable` claim would; a falsified companion credits nothing,
+since it records one relation the float code breaks, not the function's
+stability. A safety family that only rolls others up (`is_computation_safe`,
+`is_repeatable`) credits nothing itself, since its children do.
+
+### Calls
+
+Every call into another function, one of your own or a library's, is a
+two-bit source in *where it can go wrong*, and only the callee's own
+record reduces it. mathema looks one level down, at the callee's settled
+definedness rows (`is_defined`, bare or with a region, or a `raises`
+row): proven, the call's entropy is gone; holds removes the fraction the
+table gives; a row accepted with `--as trusted` counts as a holds. A
+callee with no record keeps its two bits, which caps the caller below 100.
+For a library function the record is the one `mathema verify` writes when
+it adjudicates the function's [compendium](../claims-transfer.md) rows
+against the installed library; a claims file nobody has verified is
+testimony and moves nothing. What the callee itself calls is the callee's
+own clarity, not the caller's. Built-in and standard-library calls with no
+claims file are not sources.
+
+### A function nobody has claimed
+
+With no verified claims, a function is scored only on what its code
+visibly shows. Visible purity, an unguarded signature and the absence of
+hazards are facts examination establishes without a claim, and each
+removes part of its source, weaker than a verified claim would. A plainly
+pure, total helper therefore reads low but not zero, while a branchy,
+impure or call-heavy function floors much closer to zero.
+
+The constants above are those of `entropy-dimensions@1.3`, which is
+recorded beside every score, so a number is only ever compared with one
+computed the same way.
 
 ## The triangle
 
