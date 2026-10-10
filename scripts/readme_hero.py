@@ -3,7 +3,7 @@
 # Copyright 2026 Tetrion Ltd
 """Render the README's hero image from a real run.
 
-Writes `midpoint.py` into a temporary directory, runs a short
+Writes `rates.py` into a temporary directory, runs a short
 interactive session against it in a fresh interpreter, and draws the
 captured transcript as a terminal window in
 `docs/assets/readme-hero.svg`. Every line of output in the image is
@@ -29,16 +29,17 @@ import textwrap
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 SOURCE = '''\
-def midpoint(a: float, b: float) -> float:
-    """The point halfway between a and b."""
-    return (a + b) / 2
+def discount_factor(rate: float) -> float:
+    """A discount factor that divides by one minus the rate."""
+    return 1 / (1 - rate)
 '''
 
 SESSION = [
     "import mathema",
-    "from midpoint import midpoint",
-    'between = mathema.claim("min(a, b) <= f(a, b) <= max(a, b)", name="between")',
-    "mathema.check(midpoint, claims=[between])",
+    "from rates import discount_factor",
+    'full_range = mathema.claim("for rate in [0, 1], f(rate) >= 1", name="full_range")',
+    'safe_range = mathema.claim("for rate in [0, 0.99], f(rate) >= 1", name="safe_range")',
+    "mathema.check(discount_factor, claims=[full_range, safe_range])",
 ]
 
 # Runs inside the child interpreter: each statement is compiled in
@@ -83,7 +84,7 @@ COLOURS = {
 def capture(workdir: str) -> list[str]:
     """Intent:
         Run SESSION in a child interpreter whose working directory holds
-        midpoint.py, and return what each statement printed.
+        rates.py, and return what each statement printed.
 
     Raises:
         RuntimeError: the child interpreter failed.
@@ -108,7 +109,7 @@ def transcript(outputs: list[str]) -> list[str]:
         The terminal lines: the file listed, then each prompt followed by
         what it printed.
     """
-    lines = ["$ cat midpoint.py", *SOURCE.splitlines(), "", "$ python -q"]
+    lines = ["$ cat rates.py", *SOURCE.splitlines(), "", "$ python -q"]
     for stmt, printed in zip(SESSION, outputs):
         lines.append(f">>> {stmt}")
         lines += printed.rstrip("\n").splitlines() if printed.strip() else []
@@ -183,7 +184,10 @@ def render(lines: list[str]) -> str:
         if not ln:
             continue
         y = PAD_TOP + LINE_H * i + FONT_SIZE
-        rows.append(f'    <text x="{PAD_X}" y="{y}" xml:space="preserve">'
+        # a fixed advance per character, so the window fits whichever
+        # monospace font the viewer has
+        rows.append(f'    <text x="{PAD_X}" y="{y}" xml:space="preserve" '
+                    f'textLength="{len(ln) * CHAR_W:.1f}" lengthAdjust="spacingAndGlyphs">'
                     f"{spans(ln)}</text>")
     dots = "".join(
         f'<circle cx="{22 + 20 * k}" cy="18" r="6" fill="{c}"/>'
@@ -191,8 +195,8 @@ def render(lines: list[str]) -> str:
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
         f'viewBox="0 0 {w} {h}" role="img" '
-        f'aria-label="mathema checking a midpoint function: the mathematics is '
-        f'proven and the float64 computation is falsified at the largest double">\n'
+        f'aria-label="mathema checking a discount factor: falsified at the pole '
+        f'rate = 1 over the full range, proven over rates up to 0.99">\n'
         f'  <rect width="{w}" height="{h}" rx="10" fill="{COLOURS["bg"]}"/>\n'
         f'  <path d="M0 10 a10 10 0 0 1 10 -10 h{w - 20} a10 10 0 0 1 10 10 v26 '
         f'h-{w} z" fill="{COLOURS["bar"]}"/>\n'
@@ -209,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=str(ROOT / "docs" / "assets" / "readme-hero.svg"))
     args = ap.parse_args(argv)
     with tempfile.TemporaryDirectory() as workdir:
-        pathlib.Path(workdir, "midpoint.py").write_text(SOURCE)
+        pathlib.Path(workdir, "rates.py").write_text(SOURCE)
         lines = reflow(transcript(capture(workdir)))
     pathlib.Path(args.out).write_text(render(lines), encoding="utf-8")
     print("\n".join(lines))

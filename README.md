@@ -8,9 +8,9 @@ Proofs and counterexamples for Python functions, kept as records bound to the ex
 [![licence](https://img.shields.io/static/v1?label=licence&message=BUSL-1.1&color=blue)](https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md)
 [![docs](https://img.shields.io/static/v1?label=docs&message=mathema.tetrionlabs.com&color=blue)](https://mathema.tetrionlabs.com/)
 
-![A midpoint function checked by mathema: the claim is proven over the reals and falsified in float64 at the largest double](docs/assets/readme-hero.svg)
+![A discount factor checked by mathema: falsified at the pole rate = 1 over the full range, proven over rates up to 0.99](docs/assets/readme-hero.svg)
 
-mathema checks Python functions against claims, short mathematical statements of what a function is meant to do, and keeps each result as a record bound to the code. It proves a claim over its whole domain where the body reads as mathematics, and elsewhere runs the real function on inputs chosen to break it, keeping evidence and proof apart. The name is Greek, μάθημα, a thing known.
+mathema checks Python functions against claims, short mathematical statements of what a function is meant to do, and keeps each result as a record bound to the code. It proves a claim over its whole domain where the body reads as mathematics, and elsewhere runs the real function on inputs chosen to break it, keeping evidence and proof apart. The name is Greek, μάθημα, that which is learned.
 
 ## Highlights
 
@@ -18,7 +18,7 @@ mathema checks Python functions against claims, short mathematical statements of
 - Inputs that break code are searched for directly (poles, domain corners, the largest double, empty and degenerate containers), and every falsification carries a counterexample that was executed against the real function.
 - A bare `mathema.check(fn)` runs a battery of built-in claims, so a first audit needs no claim written at all.
 - Each claim is judged twice, once over the reals and once in float64, and when the computation misses, the record names the condition number and says whether the inputs or the code lost the precision.
-- Functions that call numpy, pandas or polars are checked through bundled claims about those libraries, and parameters annotated as a `Series` or `DataFrame` are run on real ones.
+- Functions that call [numpy](https://mathema.tetrionlabs.com/runtime-types/#proofs-on-pandas-and-numpy-code), [pandas](https://mathema.tetrionlabs.com/pandas-function/) or [polars](https://mathema.tetrionlabs.com/runtime-types/#the-built-in-runtime-types) are checked through [bundled claims about those libraries](https://mathema.tetrionlabs.com/library-claims/), and parameters annotated as a `Series` or `DataFrame` are run on real ones.
 - Records are bound to the code by a hash of its form, so `mathema verify` re-checks a function when it or anything it calls changes, and a claim that held before and fails now is reported as `invalidated`.
 - CI gets distinct exit codes, GitHub Actions and JUnit output, a claim-level diff of a pull request (`mathema review`) and a population report over a package (`mathema audit`).
 - Coding agents connect through an MCP server and agent skills, and can propose and check claims while accepting a verdict stays with a person.
@@ -263,7 +263,7 @@ mathema audit src                  # every function: claimed, pure, liftable, te
 
 ### Coding agents
 
-`mathema mcp serve` exposes the same machinery as MCP tools over stdio, including adjudication, the CI sweep, a claim linter (`parse_claim`) and the queue of decisions waiting on a person. An agent can lock a function but not unlock one, and nothing it does accepts a verdict. `mathema init --agents` vendors skills for Claude Code, Codex, Gemini, Cursor, Copilot and other coding agents, and is the one command that fetches anything. See [working with coding agents](https://mathema.tetrionlabs.com/agents/) and [set up mathema for an agent](https://mathema.tetrionlabs.com/agent-setup/).
+`mathema mcp serve` exposes the same machinery as MCP tools over stdio, including adjudication, the CI sweep, a claim linter (`parse_claim`) and the queue of decisions waiting on a person. An agent can lock a function but not unlock one, and nothing it does accepts a verdict. `mathema init --agents` vendors skills for [Claude Code](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Codex](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Gemini](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Cursor](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Copilot](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills) and other coding agents, and is the one command that fetches anything. See [working with coding agents](https://mathema.tetrionlabs.com/agents/) and [set up mathema for an agent](https://mathema.tetrionlabs.com/agent-setup/).
 
 ### Text and records
 

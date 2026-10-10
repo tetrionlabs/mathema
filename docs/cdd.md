@@ -35,7 +35,7 @@ the YAML record schema, lives in a sibling repository:
 [claim-driven-development](https://github.com/aaronbyrnephd/claim-driven-development)
 on GitHub. mathema is one implementation of it, in Python.
 
-The name mathema is Greek: μάθημα, a thing learned. A function is
+The name mathema is Greek: μάθημα, that which is learned. A function is
 trusted exactly to the extent of its verified claims.
 
 ## What Claim-Driven Development is
