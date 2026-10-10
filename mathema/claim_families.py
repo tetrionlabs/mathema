@@ -1220,9 +1220,13 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     language_bound = getattr(bounds, "base_type", None) == "L"
     if language_bound:
         # a language's own near non-members, each named for the language
-        # it lies outside; a language admitting every value of its kind
-        # has no outside to draw, which is a skip with the reason
+        # it lies outside, then each value the domain removes with `\`;
+        # a language admitting every value of its kind, with nothing
+        # removed, has no outside to draw, which is a skip with the reason
         names, candidates = _outside_language(bounds, rng)
+        removed = _removed_values(bounds)
+        candidates += [v for v in removed
+                       if not any(v == seen for seen in candidates)]
         if not candidates:
             return ("skipped", 0,
                     f"L[{names}] has no outside this route can draw: "
@@ -1265,8 +1269,14 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         elif language_bound:
             bad = candidates[slot]
             value = bad
-            spelled = (f"{target} = {_witness_value(bad)} "
-                       f"(outside L[{names}]{_why_outside(bad, bounds)})")
+            if any(bad == v for v in removed):
+                from .domain import render_domain
+                where = render_domain(bounds, show_missing=False, ascii_mode=True)
+                spelled = (f"{target} = {_witness_value(bad)} "
+                           f"(removed from the domain, {where})")
+            else:
+                spelled = (f"{target} = {_witness_value(bad)} "
+                           f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry,
@@ -1341,6 +1351,18 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
             if not any(value == seen for seen in out):
                 out.append(value)
     return " | ".join(name for name, _ in pieces), out
+
+
+def _removed_values(bounds) -> list:
+    """Intent:
+        The values a domain removes with `\\` (`""` for
+        `L[unicode] \\ {""}`), each lying outside it, in a fixed order;
+        missing values are `is_missing_safe`'s hazard and are left out.
+    """
+    from .domain import domain_contains, is_missing
+    return sorted((v for v in getattr(bounds, "excluded", ()) or ()
+                   if not is_missing(v) and not domain_contains(v, bounds)),
+                  key=repr)
 
 
 def _witness_value(value) -> str:
