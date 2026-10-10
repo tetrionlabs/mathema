@@ -109,7 +109,7 @@ mathema lifted the body to an expression in which both Gaussian terms cancel and
 
 ### Falsifying
 
-With no claim written, only the built-in claims apply:
+Before any claim is written, mathema already asks the questions that apply to every function: does it have a value for every input it accepts, does it divide by zero anywhere, does it touch anything outside itself? Here is what that finds:
 
 <!-- example: pole run -->
 ```python
@@ -134,7 +134,7 @@ These are two of fourteen rows. Uniform sampling over the reals lands on `x = 1`
 
 ### The mathematics and the computation
 
-A proof is about real numbers, and whether float64 keeps up is a separate question with its own verdict:
+The function below is correct on paper, since `(x + 1) - x` is 1 for every real `x`. mathema proves that, then runs it in float64, where it is not true:
 
 <!-- example: step run -->
 ```python
@@ -196,7 +196,7 @@ link 1: min(returns) <= f(returns): taking pandas.Series.mean as mean(a) (axiom,
     of at least one (min(returns) is at most mean(returns))
 ```
 
-The proof goes through the bundled definition row for `pandas.Series.mean`, and the probe hands the function a real `Series`. `mathema compendium status` lists which library calls in a project have rows and which are a black box, as [library claims](https://mathema.tetrionlabs.com/library-claims/) shows.
+The proof covers a series of every length, not the handful a test would build. It reads `Series.mean` through a claim about pandas that ships with mathema, then confirms the result by running the function on real `Series`. `mathema compendium status` lists which library calls in a project have rows and which are a black box, as [library claims](https://mathema.tetrionlabs.com/library-claims/) shows.
 
 ### Knowledge that goes stale
 
@@ -228,7 +228,7 @@ mathema.write_spec(rates.rate_for)
 mathema.write_spec(pricing.discounted)
 ```
 
-`write_spec` writes each record under `.mathema/verified/` with hashes of the code's form and signature and of what it calls. Then someone changes the helper and nothing else:
+A result is only worth keeping while the code still matches it. `write_spec` records each result against a hash of the function and of everything it calls, so a later change anywhere in that chain is noticed. Here the helper changes:
 
 <!-- example: stale file=rates.py -->
 ```python
@@ -259,15 +259,15 @@ mathema review origin/develop      # what the change did to what is known
 mathema audit src                  # every function: claimed, pure, liftable, tested
 ```
 
-`review` reads the verified store as claims rather than YAML, so a flip from `holds` to `falsified` is one line, and `--format json` gives a pipeline something to post. Accepting a verdict (`mathema accept`), locking a function's form and the integrity checksum are covered in [governance](https://mathema.tetrionlabs.com/governance/), and [gate a pipeline](https://mathema.tetrionlabs.com/gate-a-pipeline/) walks through a first red run.
+A reviewer sees what a pull request did to what is known about the code, not only to the code itself. `review` lists each claim whose verdict moved, and `--format json` gives a pipeline the same list. Accepting a verdict (`mathema accept`), locking a function's form and the integrity checksum are covered in [governance](https://mathema.tetrionlabs.com/governance/), and [gate a pipeline](https://mathema.tetrionlabs.com/gate-a-pipeline/) walks through a first red run.
 
 ### Coding agents
 
-`mathema mcp serve` exposes the same machinery as MCP tools over stdio, including adjudication, the CI sweep, a claim linter (`parse_claim`) and the queue of decisions waiting on a person. An agent can lock a function but not unlock one, and nothing it does accepts a verdict. `mathema init --agents` vendors skills for [Claude Code](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Codex](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Gemini](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Cursor](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Copilot](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills) and other coding agents, and is the one command that fetches anything. See [working with coding agents](https://mathema.tetrionlabs.com/agents/) and [set up mathema for an agent](https://mathema.tetrionlabs.com/agent-setup/).
+An agent that writes code can also be asked to state what the code should do, and mathema will check it. The MCP server (`mathema mcp serve`) gives the agent the same tools a person has, except the ones that settle a disagreement: accepting a verdict and unlocking a function stay with a person. `mathema init --agents` vendors skills for [Claude Code](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Codex](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Gemini](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Cursor](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills), [Copilot](https://mathema.tetrionlabs.com/agent-setup/#3-vendor-the-skills) and other coding agents, and is the one command that fetches anything. See [working with coding agents](https://mathema.tetrionlabs.com/agents/) and [set up mathema for an agent](https://mathema.tetrionlabs.com/agent-setup/).
 
 ### Text and records
 
-With mathema-language installed, a domain can be a language of strings or a schema of records, and the probe visits each language's hazards (the empty string, control characters, a byte-order mark, a lone surrogate) before drawing at random:
+With mathema-language installed, a claim can range over strings or structured records as well as numbers. The inputs that break text-handling code are tried first: the empty string, control characters, a byte-order mark, a lone surrogate. Random strings come after:
 
 ```
 for s in L[unicode], f(f(s)) == f(s)
