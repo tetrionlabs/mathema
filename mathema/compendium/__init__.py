@@ -1416,12 +1416,14 @@ def know_keys(keys) -> None:
 
 def _engine_unwrapped(fn):
     """`fn` without the wrappers mathema calls a function through: a
-    runtime type realiser (`runtime_types._Realising`) and a premise
-    guard (`_premises._Guarded`), at any depth. A wrapper anyone else
+    runtime type realiser (`runtime_types._Realising`), a premise
+    guard (`_premises._Guarded`) and the exit converter
+    (`_exits._ExitsAsRaise`), at any depth. A wrapper anyone else
     wrote is left in place."""
+    from .._exits import _ExitsAsRaise
     from .._premises import _Guarded
     from ..runtime_types import _Realising
-    while isinstance(fn, (_Realising, _Guarded)):
+    while isinstance(fn, (_Realising, _Guarded, _ExitsAsRaise)):
         fn = (fn.__dict__["_fn"] if isinstance(fn, _Realising)
               else fn.__wrapped__)
     return fn
