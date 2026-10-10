@@ -61,8 +61,8 @@ mathema.Record(discounted) · source, no side effects · form d2ab6eef1b84
     falsified  computation  for rate in [0.0, 1.0] : float, f(price, rate) <= price
         counterexample price = -1, rate = 1
                             [mathematics unsound, blame claim]
-  at_most_price_when_positive  for price in [0.0, 1000000.0] : float|missing, rate in [0.0,
-      1.0] : float|missing, f(price, rate) <= price   holds
+  at_most_price_when_positive  for price in [0.0, 1000000.0] : float|missing, rate in
+      [0.0, 1.0] : float|missing, f(price, rate) <= price   holds
     proven     mathematics  for price in [0.0, 1000000.0] ⊂ ℝ, rate in [0.0, 1.0] ⊂ ℝ,
         f(price, rate) <= price
     holds      computation  for price in [0.0, 1000000.0] : float, rate in [0.0, 1.0] :
