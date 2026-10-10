@@ -47,21 +47,21 @@ def discounted(price: float, rate: float) -> float:
 
 print(mathema.check(discounted, claims=[
     mathema.claim("for rate in [0, 1], f(price, rate) <= price",
-                  name="never_raises"),
+                  name="at_most_price"),
     mathema.claim("for price in [0, 1e6], rate in [0, 1], f(price, rate) <= price",
-                  name="never_raises_on_prices"),
+                  name="at_most_price_when_positive"),
 ]))
 ```
 
 <!-- example: quick output match=subset wrap=88 -->
 ```text
 mathema.Record(discounted) · source, no side effects · form d2ab6eef1b84
-  never_raises  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
+  at_most_price  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
       falsified at price = -1, rate = 1
     falsified  computation  for rate in [0.0, 1.0] : float, f(price, rate) <= price
         counterexample price = -1, rate = 1
                             [mathematics unsound, blame claim]
-  never_raises_on_prices  for price in [0.0, 1000000.0] : float|missing, rate in [0.0,
+  at_most_price_when_positive  for price in [0.0, 1000000.0] : float|missing, rate in [0.0,
       1.0] : float|missing, f(price, rate) <= price   holds
     proven     mathematics  for price in [0.0, 1000000.0] ⊂ ℝ, rate in [0.0, 1.0] ⊂ ℝ,
         f(price, rate) <= price
