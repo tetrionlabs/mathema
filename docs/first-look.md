@@ -1,6 +1,6 @@
 # A first look
 
-*One function, walked through built-in laws, a domain, both evidence routes
+*One function, walked through built-in claims, a domain, both evidence routes
 and the stored record.*
 
 <!-- example: ema run -->
@@ -19,7 +19,7 @@ def ema(x: list[float], alpha: float) -> float:
 [The derive route](derive-route.md)), but not yet: the simplest way to
 use mathema needs nothing special about the function at all.
 
-## Step 1: the built-in laws, no claims stated
+## Step 1: the built-in claims, before you write one
 
 <!-- example: ema run -->
 ```python
@@ -30,11 +30,11 @@ The `domain=` states a plausible range for the data and the smoothing
 factor. Without one, every claim ranges over all of the reals, out to the
 largest double, and the computation in float64 overflows long before it
 gets there (see [operational infinity](grammar.md#operational-infinity-let-inf-be)).
-With no `claims=` argument, mathema still runs the probes every
-function gets (`is_deterministic`, `is_state_safe`,
+With no `claims=` argument, mathema still runs the computational
+claims every function gets (`is_deterministic`, `is_state_safe`,
 `is_numerically_stable`, `is_representation_safe`, `is_dimension_safe`),
 plus whichever
-built-in algebraic laws apply to `ema`'s actual shape. Here that means
+mathematical claims apply to `ema`'s actual shape. Here that means
 one sequence parameter feeding a numeric result, so the bounds,
 `permutation_invariant`, `scale_equivariant` and
 `translation_equivariant` all run too, alongside shape claims over the
