@@ -128,7 +128,7 @@
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] docs/verdicts.md:reading                     file run output
 [-] docs/verdicts.md:72
-[x] README.md:quick                              run output
+[x] README.md:quick                              run output  (requires)
 [x] README.md:parity                             file run output
 [x] README.md:pole                               run output
 [x] README.md:step                               run output
