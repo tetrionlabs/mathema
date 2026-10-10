@@ -2369,7 +2369,9 @@ def _out_of_domain_candidates(bounds) -> list:
     explicit type refinement), not only a bare interval. A `Domain`
     that explicitly excludes `MISSING` also contributes a NaN
     candidate; that's a real, declared fact worth testing the real
-    function against now, not just a numeric range."""
+    function against now, not just a numeric range. Each value the
+    domain removes with `\\` lies outside it and is a candidate too
+    (`0` for `R \\ {0}`)."""
     if isinstance(bounds, tuple):
         lo, hi = bounds
         span = (hi - lo) or 1.0
@@ -2385,6 +2387,7 @@ def _out_of_domain_candidates(bounds) -> list:
                 lo, hi = piece
                 span = (hi - lo) or 1.0
                 candidates += [lo - 0.5 * span, hi + 0.5 * span]
+        candidates += sorted(numeric_excluded(bounds), key=repr)
         if MISSING in bounds.excluded:
             candidates.append(float("nan"))
         return [c for c in candidates if not domain_contains(c, bounds)]
