@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="809" height="454" viewBox="0 0 809 454" role="img" aria-label="mathema checking a midpoint function: the mathematics is proven and the float64 computation is falsified at the largest double">
+  <rect width="809" height="454" rx="10" fill="#0f1419"/>
+  <path d="M0 10 a10 10 0 0 1 10 -10 h789 a10 10 0 0 1 10 10 v26 h-809 z" fill="#1b2129"/>
+  <circle cx="22" cy="18" r="6" fill="#ff5f57"/><circle cx="42" cy="18" r="6" fill="#febc2e"/><circle cx="62" cy="18" r="6" fill="#28c840"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#d6dde6">
+    <text x="26" y="66" xml:space="preserve"><tspan fill="#7fb4ff">$ </tspan>cat midpoint.py</text>
+    <text x="26" y="86" xml:space="preserve">def midpoint(a: float, b: float) -&gt; float:</text>
+    <text x="26" y="106" xml:space="preserve">    &quot;&quot;&quot;The point halfway between a and b.&quot;&quot;&quot;</text>
+    <text x="26" y="126" xml:space="preserve">    return (a + b) / 2</text>
+    <text x="26" y="166" xml:space="preserve"><tspan fill="#7fb4ff">$ </tspan>python -q</text>
+    <text x="26" y="186" xml:space="preserve"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>import mathema</text>
+    <text x="26" y="206" xml:space="preserve"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>from midpoint import midpoint</text>
+    <text x="26" y="226" xml:space="preserve"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>between = mathema.claim(&quot;min(a, b) &lt;= f(a, b) &lt;= max(a, b)&quot;, name=&quot;between&quot;)</text>
+    <text x="26" y="246" xml:space="preserve"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>mathema.check(midpoint, claims=[between])</text>
+    <text x="26" y="266" xml:space="preserve">mathema.Record(midpoint) · source, no side effects · form 8e11239f3b50</text>
+    <text x="26" y="286" xml:space="preserve">  between  min(a, b) &lt;= f(a, b) &lt;= max(a, b)   <tspan fill="#ff7b72">falsified</tspan> at link 1</text>
+    <text x="26" y="306" xml:space="preserve">    <tspan fill="#7ad48a">proven</tspan>     mathematics  min(a, b) &lt;= f(a, b) &lt;= max(a, b)</text>
+    <text x="26" y="326" xml:space="preserve">    <tspan fill="#ff7b72">falsified</tspan>  computation  min(a, b) &lt;= f(a, b) &lt;= max(a, b)</text>
+    <text x="26" y="346" xml:space="preserve">                            <tspan fill="#ff7b72" font-weight="bold">counterexample</tspan> link 1: min(a, b) &lt;= f(a, b):</text>
+    <text x="26" y="366" xml:space="preserve">                            a = -1.7976931348623157e+308, b = -1.7976931348623157e+308</text>
+    <text x="26" y="386" xml:space="preserve">                            [mathematics sound, implementation:numerical-instability]</text>
+    <text x="26" y="406" xml:space="preserve">    <tspan fill="#e6c06b">holds</tspan>      policy       f(a=nan)   no missing policy stated; assumed propagates</text>
+    <text x="26" y="426" xml:space="preserve">    <tspan fill="#e6c06b">holds</tspan>      policy       f(b=nan)   no missing policy stated; assumed propagates</text>
+  </g>
+</svg>
