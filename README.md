@@ -37,7 +37,7 @@ The first adds numpy, z3, the MCP server, the coverage reader and mathema-langua
 
 ## Quick start
 
-<!-- example: quick run -->
+<!-- example: quick run requires=z3 -->
 ```python
 import mathema
 
