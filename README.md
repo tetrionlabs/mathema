@@ -91,7 +91,7 @@ def put_call_parity_gap(s: float, k: float, r: float, t: float,
     return call - put
 ```
 
-Put-call parity says a Black-Scholes call minus the matching put is `S - K*exp(-r*T)` whatever the volatility. In a claim everything before the last comma is the domain and everything after it is the law:
+The code prices a call and a put through logarithms, square roots and the normal distribution, yet their difference should always be `s - k*exp(-r*t)`, with volatility dropping out entirely. That is put-call parity, and the claim states it over realistic ranges:
 
 <!-- example: parity run -->
 ```bash
