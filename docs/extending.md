@@ -176,6 +176,16 @@ which is richer than the documentation-only fallback a source-less
 callable would otherwise get. Form hashes are compared only within a
 namespace, never across.
 
+Every part of mathema that reads a callable's facts reads the injected
+ones when they are present: checking and proving its claims, a
+`funcs=`-bound function in another function's claim, suggestions,
+docstring scoring, `describe`, `audit` and `status`. None of them
+analyses the proxy's own Python source in their place. A derive route
+that needs a body to lift finds `tree=None` and declines, saying so.
+`docsync --write-docstrings` refuses such a callable with an error,
+since the proxy's source file is not where the function it stands for
+is written.
+
 ## The extension surface
 
 Everything a provider may import lives in
