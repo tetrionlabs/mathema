@@ -8,7 +8,9 @@ write that callable. `analyze_source` asks the entries before the
 Python frontend, ordered by distribution name and then entry name; the
 first document the engine takes is the body the claims are proved from.
 An entry that fails to load, raises, or returns a document the engine
-declines is skipped with a warning, and the next is asked.
+declines is skipped with a warning, and the next is asked; so is an
+entry named `python`, the name the Python frontend's body hash is kept
+under.
 
 `registered_facts(frontend, body, python)` is the `Facts` a registered frontend's
 document gives: the body fields (tree, structure, guards, form) from
@@ -72,11 +74,17 @@ def frontends() -> tuple:
     """Intent:
         Every registered frontend that loads, in the order they are
         asked. One whose load fails is skipped with a warning and tried
-        again on the next call.
+        again on the next call; one registered under `python`, the
+        Python frontend's own name, is skipped with a warning.
     """
     out = []
     for ep in _entry_points():
         key = (ep.name, ep.value)
+        if ep.name == PYTHON:
+            warnings.warn(f"mathema: frontend {ep.value!r} is registered under "
+                          f"{PYTHON!r}, the Python frontend's own name; skipping it",
+                          stacklevel=3)
+            continue
         if key not in _LOADED:
             try:
                 _LOADED[key] = ep.load()

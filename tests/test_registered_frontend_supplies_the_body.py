@@ -197,3 +197,13 @@ def test_a_python_body_that_moves_under_the_same_registered_body_makes_the_recor
     assert sweep()["sample_targets.growth"]["why"] == "fresh"
     (tmp_path / "sample_targets.py").write_text(TARGETS.replace("g = 1 + r", "g = r + 1"))
     assert sweep()["sample_targets.growth"]["why"] == "body changed"
+
+
+def test_an_entry_named_python_is_refused_so_it_never_stands_for_the_python_frontend(
+        tmp_path, monkeypatch):
+    _install(tmp_path, monkeypatch, "python = sample_frontend:write\n")
+    growth = _targets().growth
+    with pytest.warns(UserWarning, match="python"):
+        facts = analyze_source(growth)
+    assert facts.koine is None and facts.body_hashes == {}
+    assert facts.form_is_computed()
