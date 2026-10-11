@@ -115,6 +115,13 @@ is `skipped:misspecified` with the same hint, never `falsified`: the
 list was the wrong object to hand the function. With a runtime type
 declared, a raise falsifies as always.
 
+A parameter annotated with any other type (`dict`, `Mapping[str,
+int]`, `list[float]`, a class of its own) has no hint: its annotation
+decides how it is drawn, whatever attributes the body reads off it.
+`order: dict` is drawn as a dict even when the body calls
+`order.values()` in a module that imports numpy. Only an annotation of
+`Any` or `object` leaves the reading to the body.
+
 ## The built-in runtime types
 
 | runtime type | carries | a missing position | notes |
