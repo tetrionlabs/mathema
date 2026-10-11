@@ -2296,6 +2296,11 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             # or a few generic ones, each value a free scalar
             return ("Dict(keys the body reads, else 1 to 4 generic keys; "
                     "values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3])")
+        if k == "bool" and _classify_bound(bounds) not in (
+                "domain", "frozenset", "Z", "N", "C", "language"):
+            # `_synth` draws a bool parameter as False or True unless a
+            # set-like bound draws it
+            return "U{False, True}"
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not numeric_excluded(bounds)):
