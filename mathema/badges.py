@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 # calibration change (the constants below) bumps the minor (@1.1); a
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
-CLARITY_ALGO = "entropy-dimensions@1.3"
+CLARITY_ALGO = "entropy-dimensions@1.4"
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
