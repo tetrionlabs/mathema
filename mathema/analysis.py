@@ -100,7 +100,10 @@ class Facts:
     `mathema._doc_only_facts` is the shipping precedent, including its
     NAMESPACED form hash (`"doc:<sha>"`), the shape a foreign
     frontend's `"cpp:<sha>"`/`"ts:<sha>"` follows: form hashes are
-    compared only within a namespace, never across."""
+    compared only within a namespace, never across. Only a form
+    `analyze_source` computed from the Python body is a canonical form
+    of that body (`form_is_computed`); any other form is an identity
+    label and proves nothing about what the body computes."""
     name: str
     signature: str
     params: list[str]
@@ -153,6 +156,19 @@ class Facts:
     runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
+    _computed_form: str | None = field(default=None, repr=False)  # the form hash
+                                      # analyze_source computed from the Python body; `form`
+                                      # is a canonical form of the body only while it equals
+                                      # this, so a form supplied any other way never does
+
+    def form_is_computed(self) -> bool:
+        """Intent:
+            Whether `form` is the canonical form hash `analyze_source`
+            computed from this function's Python body, rather than a
+            form string supplied with facts built or edited elsewhere.
+        """
+        return self._computed_form is not None \
+            and self.form == self._computed_form
 
 
 def _root_name(node: ast.AST) -> str | None:
@@ -1119,6 +1135,7 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
                                      "the body uses it as a numpy array"),)
             hints.pop(p)
     apply_runtime_kinds(param_kinds, detected)
+    form = identity.form_hash(fdef)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
@@ -1140,7 +1157,8 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
         call_groups=groups,
         max_loop_depth=_max_depth(fdef),
         lines=len(src.strip().splitlines()),
-        form=identity.form_hash(fdef),
+        form=form,
+        _computed_form=form,
         sigh=identity.sig_hash(fn),
         tree=fdef,
         guards=_guards(fdef, params),
