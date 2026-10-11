@@ -10,6 +10,17 @@ mathema badges [targets] --out .mathema/badges/   # also write artifacts
 Omit targets for the rootwide analogue of `verify` (every function the
 store knows under `--root`).
 
+A run reads the stores, the claims files and the library claims once,
+so its cost grows with the number of functions it scores. On a terminal
+it reports progress to stderr every 50 functions, with the count and the
+time elapsed, and prints nothing extra when stderr is not a terminal, so
+a CI log or an `--out` directory stays as it was. Each function's three
+steps stop at the extensive wall-clock cap (15 seconds unless
+`MATHEMA_EXTENSIVE_TIMEOUT` sets another), and a function whose step
+stopped is named on stderr: its implementation then counts only the
+lines a fresh test report covers, and its intent or clarity is left out
+of that score's roll-up.
+
 ## The three badges
 
 - **implementation** (code layer): the raw line ratio from `mathema
