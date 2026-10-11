@@ -48,7 +48,8 @@ def test_a_claim_over_a_mapping_in_a_numpy_module_holds(fn):
 def test_the_sampling_note_describes_a_dict_draw():
     p = _check(orders_numpy.total_qty)
     sampling = p.meta.get("mathema.sampling") or ""
-    assert "numpy" not in sampling and "U(" not in sampling, sampling
+    assert sampling.startswith("order~Dict("), sampling
+    assert "numpy" not in sampling, sampling
 
 
 def test_a_mapping_in_a_pandas_module_is_not_a_series():
@@ -67,6 +68,15 @@ def test_an_annotated_class_with_a_shape_is_not_an_array():
     facts = analyze_source(orders_numpy.box_volume)
     assert "b" not in facts.runtime_types, facts.runtime_types
     assert "b" not in facts.runtime_hints, facts.runtime_hints
+
+
+def test_an_annotated_list_calling_index_is_drawn_as_a_list():
+    facts = analyze_source(orders_numpy.first_position)
+    assert facts.runtime_types["xs"][0].adapter == "list"
+    (p,) = check_conjectures(orders_numpy.first_position,
+                             [claim("f(xs) == 0")])
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.counterexample,
+                                              p.note)
 
 
 def test_an_unannotated_values_read_in_a_numpy_module_is_an_array():

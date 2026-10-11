@@ -658,16 +658,37 @@ def _usages(fdef, params: list, numpy_aliases: set) -> dict:
     return found
 
 
+#: annotations that say nothing about a parameter's type
+_UNDECLARING = frozenset({"any", "typing.any", "object"})
+
+
+def _annotated(fdef) -> set:
+    """The parameters of `fdef` whose annotation names a type, so that
+    the signature, not the body's use, decides how each is drawn:
+    every annotated parameter except one annotated `Any` or `object`."""
+    out: set = set()
+    for a in [*fdef.args.posonlyargs, *fdef.args.args,
+              *fdef.args.kwonlyargs]:
+        if a.annotation is None:
+            continue
+        text = ast.unparse(a.annotation).strip("\"' ").lower()
+        if text not in _UNDECLARING:
+            out.add(a.arg)
+    return out
+
+
 def usage_hints(fn, fdef, params: list, param_kinds: dict,
                 detected: dict) -> dict:
     """Intent:
         For each parameter the body uses as a vector, matrix or table
-        while the signature names no runtime type for it, in a module
-        importing a library with a runtime type adapter, the hint that
-        names the likely runtime type: `{param: {"usage", "strong",
-        "type", "text"}}`. Empty when the module imports no library
-        with a runtime type adapter (numpy, pandas, polars, or one a
-        package registers).
+        while the signature names no type for it, in a module importing
+        a library with a runtime type adapter, the hint that names the
+        likely runtime type: `{param: {"usage", "strong", "type",
+        "text"}}`. A parameter annotated with any type other than `Any`
+        or `object` (`dict`, `Mapping[str, int]`, a class of its own)
+        has no hint, whatever attributes the body reads off it. Empty
+        when the module imports no library with a runtime type adapter
+        (numpy, pandas, polars, or one a package registers).
     """
     scope = module_scope(fn)
     imported = module_imports(scope)
@@ -678,9 +699,10 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
         n for n, v in scope.items()
         if inspect.ismodule(v) and v.__name__ == "numpy"}
     out: dict = {}
+    annotated = _annotated(fdef)
     for p, (usage, strong) in _usages(fdef, params, numpy_aliases).items():
-        if p in detected or param_kinds.get(p) in ("int", "bool", "string",
-                                                    "complex"):
+        if p in detected or p in annotated \
+                or param_kinds.get(p) in ("int", "bool", "string", "complex"):
             continue
         choice = next(((lib, cls) for lib, cls in _suggestions(usage)
                        if lib in imported), None)

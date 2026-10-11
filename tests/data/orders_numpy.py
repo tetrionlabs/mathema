@@ -24,6 +24,10 @@ def item_count(order: dict) -> int:
     return len(order.copy())
 
 
+def first_position(xs: list[float]) -> int:
+    return xs.index(xs[0])
+
+
 def unannotated_values(x):
     return x.values
 
