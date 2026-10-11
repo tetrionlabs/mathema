@@ -140,15 +140,20 @@ def test_with_a_computation_line_the_corner_is_its_witness_either_way(
         assert held.counterexample is None
         assert fast_line.verdict == slow_line.verdict == "falsified", \
             (name, fast_line.note, slow_line.note)
-        for line in (fast_line, slow_line):
-            # the witness is a float-limit corner: alpha at a magnitude
-            # where alpha * v overflows, or x the same-sign pair of
-            # largest doubles, where scaling it overflows
+        for machine, line in (("fast", fast_line), ("slow", slow_line)):
             alpha = float(re.search(r"alpha = (\S+?)[,:]", line.counterexample).group(1))
-            x = [float(v) for v in re.search(
-                r"x = \[([^\]]*)\]", line.counterexample).group(1).split(", ")]
-            at_largest = len(set(x)) == 1 and abs(x[0]) == sys.float_info.max
-            assert abs(alpha) > 1e100 or at_largest, (name, line.counterexample)
+            if (name, machine) == ("scale_equivariant", "slow"):
+                # the same-sign pair of largest doubles, where scaling
+                # x by c overflows
+                x = [float(v) for v in re.search(
+                    r"x = \[([^\]]*)\]", line.counterexample).group(1).split(", ")]
+                assert x == [sys.float_info.max] * 2, (name, line.counterexample)
+                assert alpha == 0.5, (name, line.counterexample)
+                assert line.counterexample.endswith("g returned inf"), \
+                    (name, line.counterexample)
+            else:
+                # alpha at a magnitude where alpha * v overflows
+                assert abs(alpha) > 1e100, (name, machine, line.counterexample)
             assert "exact arithmetic" in line.note or \
                 line.stratum["cause"].endswith("numerical-instability"), \
                 (name, line.note, line.stratum)
