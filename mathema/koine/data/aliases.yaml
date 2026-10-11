@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# Short names for KOINE paths: what the Python rendering of a KOINE body
+# calls where Python has no exact spelling of its own. One name per path.
+# Renaming here renames it everywhere; the paths themselves never change.
+div_trunc: operator::binary::division::truncation
+div_floor: operator::binary::division::floor
+div_euclid: operator::binary::division::euclidean
+rem_trunc: operator::binary::remainder::truncation
+rem_floor: operator::binary::remainder::floor
+rem_euclid: operator::binary::remainder::euclidean
+trunc: function::rounding::truncation
+round_ties_even: function::rounding::ties_even
+round_ties_away: function::rounding::ties_away
+round_ties_up: function::rounding::ties_up
+sign: function::magnitude::sign
+hypot: function::magnitude::hypotenuse
+cbrt: function::root::cube
+expm1: function::exponential::natural_minus_one
+log1p: function::logarithm::natural_one_plus
+clip: function::order::clamp
+re: function::complex::real_part
+im: function::complex::imaginary_part
+conjugate: function::complex::conjugate
+arg: function::complex::argument
