@@ -202,3 +202,81 @@ derive verdict, on the route `derive:<mechanism>` named by the result's
 and a disproof it claims is read as undecided, since only an executed
 witness falsifies. mathema-language's recursive row languages prove
 fold claims this way, on `derive:induction`.
+
+## Refusal and a defined answer
+
+Two built-in claims ask how a function treats its language.
+`excluded_outside_domain(s)` asks that every value outside the domain is
+refused, and by default any raise refuses. `is_language_defined(s)` asks
+that every member gets an answer, and by default an answer is anything
+but an unguarded crash (a `TypeError`, an `IndexError` and the like). A
+command-line program says both things differently: it refuses a bad
+argument list by exiting with code 2, and it answers with exit code 0
+or 1. A language can declare both, and the two claims then read the
+declaration instead of the default:
+
+- `refusal`, a `Refusal`: a raise of the exception classes it names,
+  optionally narrowed by a test on the exception, or a return its
+  `returns` test accepts. `Refusal.exit(2)` is `SystemExit` with exit
+  code 2.
+- `defined_answer`, a `DefinedAnswer`: a return (every return, or those
+  its `returns` test accepts), or a raise of the exception classes it
+  names. `DefinedAnswer.exit(0, 1)` is a return, or `SystemExit` with
+  exit code 0 or 1.
+
+An outside draw then has to be refused the declared way, and a member
+has to get the declared answer; the witness names the declaration and
+what the call did instead. A language that declares neither is read as
+before. `StringLanguage` takes both as keywords, a refined language
+keeps its base's, and a language object of your own sets them as
+attributes:
+
+<!-- example: refusal run -->
+```python
+import sys
+
+import mathema
+from mathema.languages import DefinedAnswer, Refusal, StringLanguage, register_language
+
+register_language("count", StringLanguage(
+    "count", char_ok=lambda c: c in "0123456789", pool="0123456789",
+    outside_pool="x-", refusal=Refusal.exit(2),
+    defined_answer=DefinedAnswer.exit(0, 1)))
+
+
+def parity(s: str) -> None:
+    """Exit 0 for an even count, 1 for an odd one."""
+    if not s.isdigit():
+        sys.exit(2)
+    sys.exit(int(s) % 2)
+
+
+def parity_by_hand(s: str) -> None:
+    """Exit 0 for a count divisible by three, else the remainder."""
+    sys.exit(int(s) % 3)
+
+
+for fn in (parity, parity_by_hand):
+    for p in mathema.check_conjectures(fn, [
+            'for s in L[count] \\ {""}, excluded_outside_domain(s)',
+            'for s in L[count] \\ {""}, is_language_defined(s)']):
+        print(fn.__name__, p.name, p.verdict)
+        if p.counterexample:
+            print("   ", p.counterexample)
+```
+
+<!-- example: refusal output -->
+```text
+parity excluded_outside_domain[s] holds
+parity is_language_defined[s] holds
+parity_by_hand excluded_outside_domain[s] falsified
+    s = 'á' (outside L[count] at [0]: count alphabet) is outside the declared domain and was not refused the way the language declares (SystemExit (exit code 2)): the call raised ValueError
+parity_by_hand is_language_defined[s] falsified
+    s = '77' (inside L[count] \ {""}) raised SystemExit (exit code 2), not the defined answer the language declares (a return, or SystemExit (exit code 0 or 1))
+```
+
+`parity` refuses anything that is not a count with exit code 2 and
+answers every count with 0 or 1, so both claims hold. `parity_by_hand` lets `int` raise a
+`ValueError` on a value outside the language, which is a crash rather
+than the refusal the language declares, and exits 2 on `"77"`, a
+member, which is not an answer.

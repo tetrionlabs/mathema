@@ -93,6 +93,30 @@ vocabulary and the group to register under. An output-contract
 predicate registered under a name shaped `output_<slug>` or
 `is_<slug>_output` joins the grammar the way `is_<slug>_safe` does.
 
+A language may also declare how a function over it refuses a value
+outside it and what counts as answering a member, as two optional
+attributes: `refusal`, a `Refusal`, and `defined_answer`, a
+`DefinedAnswer`. `excluded_outside_domain` then holds an outside draw
+to the declared refusal instead of any raise, and `is_language_defined`
+holds a member to the declared answer instead of no unguarded crash.
+Each names the exception classes that count (optionally narrowed by a
+`when` test on the exception) and a `returns` test on a returned value,
+and its `text` is how a witness names it. `Refusal.exit(2)` and
+`DefinedAnswer.exit(0, 1)` are a command-line program's: `SystemExit`
+with exit code 2, and a return or `SystemExit` with exit code 0 or 1.
+
+```python
+from mathema.interfaces.extension import DefinedAnswer, Refusal
+
+class ArgvLanguage:
+    ...
+    refusal = Refusal.exit(2)
+    defined_answer = DefinedAnswer.exit(0, 1)
+```
+
+Either may be absent or `None`, which keeps the claims' default reading,
+and `language_problems` reports one of the wrong type.
+
 ## What a family probe returns
 
 A family's empirical half is the callable it registers under
@@ -196,7 +220,7 @@ Everything a provider may import lives in
 | `store` | `load_declared`, `load_verified`, `save_verified_entry` |
 | `index` | `build_index` |
 | `evidence` | `evidence_rank`, `SUPPORTED_VERDICTS` |
-| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors`, `RefinedLanguage`, `register_refinement`, `unregister_refinement`, `refinement_keys`, `UnknownRefinement`, `REFINEMENT_GROUP` |
+| `languages` | `Language`, `LanguageRef`, `StringLanguage`, `Problem`, `HazardValue`, `KINDS`, `LEVELS`, `HAZARD_KINDS`, `STRING_HAZARDS`, `language_problems`, `register_language`, `unregister_language`, `resolve_language`, `describe_language`, `language_vocabulary`, `UnknownLanguage`, `language_adaptors`, `RefinedLanguage`, `register_refinement`, `unregister_refinement`, `refinement_keys`, `UnknownRefinement`, `REFINEMENT_GROUP`, `Refusal`, `DefinedAnswer` |
 | `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
