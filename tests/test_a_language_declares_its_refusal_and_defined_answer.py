@@ -220,3 +220,31 @@ def test_a_draw_from_the_test_language_is_a_member():
     rng = random.Random(0)
     assert all(CLI.contains(CLI.sample(rng)) for _ in range(20))
     assert not any(CLI.contains(CLI.outside(rng)) for _ in range(20))
+
+
+def _language_entry(p):
+    (entry,) = p.meta["mathema.language"]["argv"]
+    return entry
+
+
+def test_a_holding_row_records_the_refusal_it_was_held_to():
+    p = _one(parse, "for argv in L[cli_argv], excluded_outside_domain(argv)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    entry = _language_entry(p)
+    assert entry["refusal"] == "SystemExit (exit code 2)", entry
+    assert entry["defined answer"] == "a return, or SystemExit (exit code 0 or 1)", entry
+
+
+def test_a_holding_row_records_the_defined_answer_it_was_held_to():
+    p = _one(run, "for argv in L[cli_argv], is_language_defined(argv)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    entry = _language_entry(p)
+    assert entry["defined answer"] == "a return, or SystemExit (exit code 0 or 1)", entry
+    assert entry["refusal"] == "SystemExit (exit code 2)", entry
+
+
+def test_a_language_declaring_nothing_writes_the_entry_unchanged():
+    p = _one(parse_by_hand, "for argv in L[plain_argv], excluded_outside_domain(argv)")
+    assert _language_entry(p) == {
+        "name": "plain_argv", "source": "registered", "level": "predicate",
+        "kind": "sequence", "schema": {"type": "array", "items": {"type": "string"}}}

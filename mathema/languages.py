@@ -920,11 +920,20 @@ def resolve_language(ref: LanguageRef | str) -> Language:
 
 def describe_language(ref: LanguageRef | str) -> dict:
     """The record's statement of a resolved language: its name, where
-    it came from, its level and kind, and its persisted form."""
+    it came from, its level and kind, and its persisted form, then the
+    text of its `refusal` and of its `defined answer` when it declares
+    them."""
     language, source = resolve(ref)
-    return {"name": ref.text if isinstance(ref, LanguageRef) else str(ref),
-            "source": source, "level": language.level,
-            "kind": language.kind, "schema": language.to_json()}
+    out = {"name": ref.text if isinstance(ref, LanguageRef) else str(ref),
+           "source": source, "level": language.level,
+           "kind": language.kind, "schema": language.to_json()}
+    refusal = getattr(language, "refusal", None)
+    if refusal is not None:
+        out["refusal"] = refusal.text
+    answer = getattr(language, "defined_answer", None)
+    if answer is not None:
+        out["defined answer"] = answer.text
+    return out
 
 
 def derive_strategy(language) -> "tuple | None":

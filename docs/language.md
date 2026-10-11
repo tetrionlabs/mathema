@@ -226,8 +226,11 @@ declaration instead of the default:
 
 An outside draw then has to be refused the declared way, and a member
 has to get the declared answer; the witness names the declaration and
-what the call did instead. A language that declares neither is read as
-before. `StringLanguage` takes both as keywords, a refined language
+what the call did instead. The record's `meta["mathema.language"]`
+entry for the parameter states the declarations under `refusal` and
+`defined answer`, in the same words, so a `holds` says what it held to.
+A language that declares neither is read as before, and its entry is
+unchanged. `StringLanguage` takes both as keywords, a refined language
 keeps its base's, and a language object of your own sets them as
 attributes:
 
