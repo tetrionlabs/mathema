@@ -4222,13 +4222,17 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     bound = cj_domain.get(p)
     if getattr(bound, "base_type", None) == "L":
         # the parameter is quantified over a language: its members are
-        # the instances, and a claim-level field bound narrows them by
-        # a bounded rejection
-        from .domain import path_bindings_hold
+        # the instances. A field the claim binds directly is redrawn
+        # inside its bound, every other field keeps the language's
+        # draw, and the instance is kept once it is still a member and
+        # every path binding holds, within a bounded rejection
+        from .domain import domain_contains, path_bindings_hold
         inst = None
         for _ in range(20):
-            inst = _synth("object", rng, bound)
-            if path_bindings_hold(inst, p, cj_domain):
+            inst = _with_bound_fields(_synth("object", rng, bound), cls,
+                                      fields, p, cj_domain, rng, specials)
+            if path_bindings_hold(inst, p, cj_domain) \
+                    and _still_member(inst, bound, domain_contains):
                 break
         return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
@@ -4239,6 +4243,65 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     for f, v in values.items():
         setattr(inst, f, v)
     return inst
+
+
+def _field_kind(cls, field: str) -> str:
+    """Intent:
+        The draw kind of a field of `cls`: `"int"` for a dataclass field
+        annotated `int`, `"float"` otherwise.
+    """
+    import dataclasses as _dc
+    if not (isinstance(cls, type) and _dc.is_dataclass(cls)):
+        return "float"
+    for f in _dc.fields(cls):
+        if f.name == field:
+            t = f.type
+            spelled = t.strip().lower() if isinstance(t, str) else None
+            return "int" if t is int or spelled == "int" else "float"
+    return "float"
+
+
+def _with_bound_fields(inst, cls, fields, p: str, cj_domain: dict, rng,
+                       specials):
+    """Intent:
+        `inst` with every field the claim binds directly (`p.field`)
+        drawn again inside its bound, as its own type draws it; the
+        fields the claim leaves unbound keep their values. A dataclass
+        is rebuilt with `dataclasses.replace`, any other instance is
+        copied and the fields set on the copy. `inst` itself when the
+        claim binds none of its fields or it is not an instance of
+        `cls`.
+    """
+    import copy
+    import dataclasses as _dc
+
+    from .probing import _synth
+    bound_fields = {f: cj_domain[f"{p}.{f}"] for f in fields or ()
+                    if f"{p}.{f}" in cj_domain}
+    if not bound_fields or not (isinstance(cls, type) and isinstance(inst, cls)):
+        return inst
+    values = {f: _synth(_field_kind(cls, f), rng, b, specials=specials)
+              for f, b in bound_fields.items()}
+    if _dc.is_dataclass(inst):
+        try:
+            return _dc.replace(inst, **values)
+        except Exception:
+            return inst
+    out = copy.copy(inst)
+    for f, v in values.items():
+        setattr(out, f, v)
+    return out
+
+
+def _still_member(inst, bound, domain_contains) -> bool:
+    """Intent:
+        Whether `inst` is a member of the language domain `bound`; a
+        membership test that raises counts as not a member.
+    """
+    try:
+        return bool(domain_contains(inst, bound))
+    except Exception:
+        return False
 
 
 def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
@@ -10498,8 +10561,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     args.append(v)
                     continue
                 if p in bundles:
-                    v = _synth_instance(bundles[p], p, cj_domain, rng,
-                                        specials)
+                    v = narrowed(p, lambda p=p: _synth_instance(
+                        bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
                     args.append(v)
                     continue
