@@ -309,6 +309,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     executed.refill_at = _refill_caller(fn_call)
     executed.fills = {p: fill for p in kinds
                       if (fill := _fill_value(cj_domain.get(p))) is not None}
+    from ._missing_policy import Presence
+    executed.presence = Presence(dict(kinds), {p: cj_domain.get(p) for p in kinds})
     base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
