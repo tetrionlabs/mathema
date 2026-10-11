@@ -757,11 +757,12 @@ class Presence:
 
 @dataclass
 class Blame:
-    """Whose a raise at missing inputs is. `owners`, the missing
+    """Whose a raise at missing (or hazard) inputs is. `owners`, the
     parameters it is blamed on; `present`, `(point, output, raised)` of
-    the call that shows it, the owners present and every other argument
-    as it was; `moved`, a draw of the other arguments where f ran with
-    every missing input present, when the call as made could not tell;
+    the call that shows it, the owners present (at an ordinary value)
+    and every other argument as it was; `moved`, a draw of the other
+    arguments where f ran with every suspect present, when the call as
+    made could not tell;
     `others`, the arguments the raise stayed with when nothing told it
     apart (no owner, no move)."""
     owners: tuple
@@ -823,22 +824,51 @@ def blame(call_at, point: dict, raised: "str | None", fills: dict,
     for q, k, m in keys:
         if k == MISSING:
             holes.setdefault(q, []).append(m)
-    alone = {q: _present_at(point, [q], holes, fills, presence, 0) for q in missing}
+
+    def present_at(at: dict, params, attempt: int) -> "dict | None":
+        return _present_at(at, params, holes, fills, presence, attempt)
+    return separate(call_at, point, missing, present_at, presence)
+
+
+def separate(call_at, point: dict, suspects: tuple, cleared,
+             presence: "Presence | None" = None) -> Blame:
+    """Intent:
+        Whose a raise at `point` is, among the `suspects` (parameters
+        holding a value the raise may be blamed on), read by making the
+        same call with each suspect at an ordinary value and every other
+        argument held. A suspect the raise goes away for owns it, and
+        the call that shows so is kept. Where no suspect alone stops it
+        but all of them together do, the raise is the combination's,
+        owned by each. Where it stays with every suspect ordinary, other
+        draws of the other arguments (and of the ordinary values) are
+        tried, and the first where f runs with every suspect ordinary is
+        `moved`; where none does, nothing owns it and `others` names the
+        arguments it stayed with. A suspect that cannot be made ordinary
+        leaves the raise with every suspect, as it was made.
+
+    Notes:
+        `call_at(point)` calls f at the arguments by name and returns
+        `(output, raised)`. `cleared(point, params, attempt)` is `point`
+        with each of `params` at its `attempt`-th ordinary value, or None
+        where some parameter has none.
+    """
+    alone = {q: cleared(point, [q], 0) for q in suspects}
     if any(at is None for at in alone.values()):
-        return Blame(missing)
+        return Blame(suspects)
     answers = {q: call_at(at) for q, at in alone.items()}
-    owners = tuple(q for q in missing if answers[q][1] is None)
+    owners = tuple(q for q in suspects if answers[q][1] is None)
     if owners:
         return Blame(owners, (alone[owners[0]], *answers[owners[0]]))
-    if len(missing) > 1:
-        together = _present_at(point, missing, holes, fills, presence, 0)
-        answer = call_at(together)
-        if answer[1] is None:
-            return Blame(missing, (together, *answer))
-    others = tuple(q for q in point if q not in missing)
+    if len(suspects) > 1:
+        together = cleared(point, suspects, 0)
+        if together is not None:
+            answer = call_at(together)
+            if answer[1] is None:
+                return Blame(suspects, (together, *answer))
+    others = tuple(q for q in point if q not in suspects)
     for attempt in range(1, (presence.tries if presence is not None else 0) + 1):
-        moved = presence.redrawn(point, missing, attempt)
-        at = _present_at(moved, missing, holes, fills, presence, attempt)
+        moved = presence.redrawn(point, suspects, attempt)
+        at = cleared(moved, suspects, attempt)
         if at is None:
             continue
         answer = call_at(at)
