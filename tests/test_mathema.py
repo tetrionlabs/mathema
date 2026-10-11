@@ -5,6 +5,7 @@ import math
 import pytest
 
 import mathema
+from pathlib import Path
 from mathema.analysis import analyze_source, get_tree
 from mathema.identity import form_hash
 
@@ -548,7 +549,8 @@ def test_status_reports_fresh_and_stale(tmp_path):
     assert "fresh" in mathema.status(root)
 
     # simulate the code changing after the spec was recorded
-    p = tmp_path / ".mathema" / "verified" / f"{key}.yaml"
+    from mathema.spec import find_record
+    p = Path(find_record(str(tmp_path / ".mathema" / "verified"), key))
     p.write_text(p.read_text().replace(mathema.analyze(tracked).form, "deadbeef0000"))
     assert "stale (code changed since spec)" in mathema.status(root)
 

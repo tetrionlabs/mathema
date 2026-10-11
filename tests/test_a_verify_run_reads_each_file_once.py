@@ -96,9 +96,14 @@ def test_the_claims_file_scan_walks_the_tree_once_and_skips_venv(
     entered: list = []
     real_walk = os.walk
 
+    store = os.path.realpath(project / ".mathema")
+
     def walk(top, *args, **kwargs):
         for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
-            entered.append(dirpath)
+            # the record store's own listing walks .mathema/verified;
+            # the claims-file scan is every other walk
+            if not os.path.realpath(str(top)).startswith(store):
+                entered.append(dirpath)
             yield dirpath, dirnames, filenames
     monkeypatch.setattr(os, "walk", walk)
     verify_project(str(project))

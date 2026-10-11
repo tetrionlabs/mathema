@@ -16,6 +16,7 @@ with its type and the hole class (`let rho be [0.01, 0.99]:float|missing`),
 which today reads as a constant admitting a hole: a misspecified claim
 that the author never wrote, checked in place of the one they did."""
 import os
+import importlib.util
 import re
 import subprocess
 import sys
@@ -278,6 +279,9 @@ def _docs_let_verdicts():
 def test_every_docs_let_claim_reads_back_from_the_store(example, index, tmp_path,
                                                         monkeypatch):
     from test_docs_outputs import _Driver
+    req = example["options"].get("requires")
+    if req and importlib.util.find_spec(req) is None:
+        pytest.skip(f"needs {req}")
     for name in ("XDG_CONFIG_HOME", "MATHEMA_FAST_TIMEOUT",
                  "MATHEMA_EXTENSIVE_TIMEOUT"):
         monkeypatch.delenv(name, raising=False)
