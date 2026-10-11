@@ -122,6 +122,14 @@ decides how it is drawn, whatever attributes the body reads off it.
 `order.values()` in a module that imports numpy. Only an annotation of
 `Any` or `object` leaves the reading to the body.
 
+A class mathema has no way to draw (one of your own that is not a
+dataclass, with no runtime type adapter and no language adaptor for it)
+is never drawn as something else: a claim that would draw it is
+`skipped` with no evaluable inputs, and the note names the class and
+the two ways to supply one, a runtime type adapter or a binding in the
+claim (`for b in L[...]`). A claim that passes an instance itself
+(`f(Box((2, 3))) == 6`) draws nothing for it and is checked as usual.
+
 ## The built-in runtime types
 
 | runtime type | carries | a missing position | notes |
