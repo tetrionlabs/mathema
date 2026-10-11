@@ -193,12 +193,14 @@ class _ParamDomain:
     """What is known about one parameter's inputs: its name, the bits
     its completed domain leaves (`domain_bits`), whether a guard in the
     body bounds it, whether an Optional annotation admits its absence,
-    and whether its domain is a finite set."""
+    whether its domain is a finite set, and how many members that set
+    has (0 when it is not finite)."""
     name: str
     bits: float
     guarded: bool = False
     optional: bool = False
     finite: bool = False
+    points: int = 0
 
 
 def _whole_type_language(language) -> bool:
@@ -223,7 +225,17 @@ def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
         a predicate, regular or schema language 0.6, a refined one 0.4;
         a bounded number range 0.4; a finite set of k values
         min(0.3, log2(k) / 10). `finite` says the domain is a finite
-        set, which an exhaustive proof clears entirely.
+        set, which an exhaustive proof over the function's own domain
+        clears entirely.
+    """
+    bits, finite, _points = _domain_reading(bound, annotated)
+    return bits, finite
+
+
+def _domain_reading(bound, annotated: bool) -> "tuple[float, bool, int]":
+    """Intent:
+        `(bits, finite, points)`: `domain_bits` plus the number of
+        members a finite domain has, 0 for one that is not finite.
     """
     import math
 
@@ -231,38 +243,38 @@ def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
     C = _BITS
 
     def finite_bits(k: int):
-        return (min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1 else 0.0), True
+        return (min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1 else 0.0), True, k
 
     if bound is None:
-        return (C["domain_type"] if annotated else C["domain_unannotated"]), False
+        return (C["domain_type"] if annotated else C["domain_unannotated"]), False, 0
     if isinstance(bound, frozenset):
         return finite_bits(len([v for v in bound if not is_sentinel(v)]))
     if isinstance(bound, str):
-        return C["domain_type"], False
+        return C["domain_type"], False, 0
     if isinstance(bound, Domain):
         if bound.base_type == "L":
             refs = [p for p in bound.pieces if isinstance(p, LanguageRef)]
             if any(ref.refinements for ref in refs):
-                return C["domain_refined"], False
+                return C["domain_refined"], False, 0
             from .languages import resolve
             levels = set()
             for ref in refs:
                 try:
                     language, _source = resolve(ref)
                 except Exception:
-                    return C["domain_type"], False
+                    return C["domain_type"], False, 0
                 if getattr(language, "level", "") == "finite":
                     members = language.members(1024)
                     if members is not None:
                         return finite_bits(len(members))
                 if _whole_type_language(language):
-                    return C["domain_type"], False
+                    return C["domain_type"], False, 0
                 levels.add(getattr(language, "level", "predicate"))
             if not levels:
-                return C["domain_type"], False
+                return C["domain_type"], False, 0
             if levels == {"alphabet"}:
-                return C["domain_alphabet"], False
-            return C["domain_predicate"], False
+                return C["domain_alphabet"], False, 0
+            return C["domain_predicate"], False, 0
         if _is_enumerated(bound) and not bound.dims:
             return finite_bits(len({v for p in bound.pieces for v in p
                                     if not is_sentinel(v)}))
@@ -271,16 +283,16 @@ def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
         if pieces and all(isinstance(p, tuple) and not isinstance(p, frozenset)
                           and all(math.isfinite(float(v)) for v in p[:2])
                           for p in pieces):
-            return C["domain_bounded"], False
-        return C["domain_type"], False
+            return C["domain_bounded"], False, 0
+        return C["domain_type"], False, 0
     if isinstance(bound, tuple):
         try:
             if all(math.isfinite(float(v)) for v in bound[:2]):
-                return C["domain_bounded"], False
+                return C["domain_bounded"], False, 0
         except (TypeError, ValueError):
             pass
-        return C["domain_type"], False
-    return C["domain_type"], False
+        return C["domain_type"], False, 0
+    return C["domain_type"], False, 0
 
 
 @dataclass(frozen=True)
@@ -466,11 +478,12 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
     out = []
     for p in params:
         bound = completed.get(p)
-        bits, finite = domain_bits(bound, p in annotated or bound is not None)
+        bits, finite, points = _domain_reading(
+            bound, p in annotated or bound is not None)
         sig = policy.get(p)
         optional = bool(sig is not None and sig.annotated and sig.absent)
         out.append(_ParamDomain(p, bits, guards.get(p) not in (None, "none"),
-                                optional, finite))
+                                optional, finite, points))
     return tuple(out)
 
 
@@ -509,13 +522,58 @@ def _clarity_sources(p: _Profile) -> list:
     return s
 
 
+def _claim_bindings(statement: str) -> dict:
+    """The domains a claim's own quantifier binds, by parameter, or `{}`
+    when it binds none or does not parse."""
+    from .conjecture import claim as _claim
+    try:
+        return dict(_claim(statement).domain or {})
+    except Exception:
+        return {}
+
+
+def _finite_share(bound, d: "_ParamDomain") -> "float | None":
+    """Intent:
+        The share of parameter `d`'s domain that a claim's binding
+        `bound` on it covers, when that binding is a finite set: its
+        members over the members of `d`'s own finite domain, capped at
+        1, and 0 when `d`'s domain is infinite (k points of an infinite
+        type are a vanishing share of it). None when the binding is not
+        a finite set.
+    """
+    _bits, finite, k = _domain_reading(bound, True)
+    if not finite:
+        return None
+    if not d.finite or d.points <= 0:
+        return 0.0
+    return min(1.0, k / d.points)
+
+
+def _scope_share(bindings: dict, d: "_ParamDomain") -> float:
+    """The share of `d`'s domain a claim with these bindings speaks
+    about: all of it unless the claim binds `d` to a finite set, in
+    which case that set's share (`_finite_share`)."""
+    bound = bindings.get(d.name)
+    if bound is None:
+        return 1.0
+    share = _finite_share(bound, d)
+    return 1.0 if share is None else share
+
+
 def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
     """What the verified claims say about each unguarded parameter's
-    inputs beyond its completed domain: a claim binding a narrower domain
-    for it lowers its bits to that domain's (the reduction is the share
-    removed), and a proof by visiting every point of a finite set clears
-    it entirely."""
-    from .conjecture import claim as _claim
+    inputs beyond its completed domain.
+
+    Notes:
+        A proof by visiting every point of a finite set clears a
+        parameter whose own domain is that finite set. A claim binding a
+        finite set settles those points only: it removes their share of
+        the parameter's own finite domain, and nothing of an infinite
+        one, since the function still accepts every other value of its
+        type. A claim binding a narrower range or language lowers the
+        parameter's bits to that domain's (the reduction is the share of
+        bits removed).
+    """
     by_name = {d.name: d for d in profile.domains}
     for row in verified_claims:
         statement = row.get("statement") or row.get("law") or ""
@@ -527,17 +585,19 @@ def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
         strength = _strength(verdict, route)
         if strength <= 0:
             continue
+        bound_domains = _claim_bindings(statement)
         if route == "derive:brute_force" and verdict == "proven":
             for d in profile.domains:
                 if d.finite:
-                    bump(f"domain_soft:{d.name}", 1.0)
-        try:
-            bound_domains = _claim(statement).domain or {}
-        except Exception:
-            continue
+                    bump(f"domain_soft:{d.name}", _scope_share(bound_domains, d))
         for p, bound in bound_domains.items():
             d = by_name.get(p)
             if d is None or d.bits <= 0:
+                continue
+            share = _finite_share(bound, d)
+            if share is not None:
+                if share > 0:
+                    bump(f"domain_soft:{p}", strength * share)
                 continue
             narrower, _finite = domain_bits(bound, True)
             if narrower < d.bits:
@@ -593,6 +653,8 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         if val > r.get(key, 0.0):
             r[key] = val
 
+    # (statement, strength) of each claim settling the map or a boundary
+    settling: list = []
     for claim in verified_claims:
         name = claim.get("name") or ""
         statement = claim.get("statement") or claim.get("law") or ""
@@ -630,26 +692,34 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         kind = _claim_kind(name, statement)
         if kind in _IDENTITY_KINDS:
             bump("identity", st)
+            settling.append((statement, st))
         elif kind == "bound":
             bump("extent", st)
         elif kind == "partiality":
             bump("raises", st)
             bump("domain", st)                       # a raising guard IS a boundary
+            settling.append((statement, st))
         elif kind == "definedness":
             bump("domain", st)
+            settling.append((statement, st))
         else:                                        # the shape / relation group
             bump("shape", st)
     # entailment: knowing the exact map settles the output envelope, the
-    # relational shape, and an unguarded parameter's domain
+    # relational shape, and an unguarded parameter's domain, over the
+    # part of that domain the claim ranges over
     r["extent"] = max(r["extent"], r["identity"])
     r["shape"] = max(r["shape"], r["identity"])
     r["domain_soft"] = max(r["domain_soft"], r["domain"], r["identity"])
     if profile is not None:
         _binding_reductions(verified_claims, profile, bump)
         _absence_reductions(verified_claims, profile, bump)
+        scoped = [(_claim_bindings(statement), st) for statement, st in settling]
         for d in profile.domains:
             key = f"domain_soft:{d.name}"
-            r[key] = max(r.get(key, 0.0), r["domain_soft"])
+            entailed = max([C["base_domain_soft"]]
+                           + [st * _scope_share(bindings, d)
+                              for bindings, st in scoped])
+            r[key] = max(r.get(key, 0.0), entailed)
     return r
 
 
