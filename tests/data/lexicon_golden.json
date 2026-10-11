@@ -346,8 +346,8 @@
  },
  "matrix_transpose_sugar": {
   "input": "let A be R^(n,n), A^T == A",
-  "unicode": "let A be (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, A.T = A",
-  "ascii": "let A be (R | {missing})^(n,n)|absent, A.T = A"
+  "unicode": "let A be ℝⁿˣⁿ, A.T = A",
+  "ascii": "let A be R^(n,n), A.T = A"
  },
  "matrix_determinant_sugar": {
   "input": "for A in R^(n,n), |A| >= 0",
@@ -576,8 +576,8 @@
  },
  "matrix_solve": {
   "input": "let b be R^n, assuming det(A) != 0, for A in R^(n,n), A @ solve(A, b) ~= b",
-  "unicode": "assuming det(A) != 0, let b be (ℝ ∪ {∅})ⁿ ∪ {absent}, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, A @ solve(A, b) ≈ b",
-  "ascii": "assuming det(A) != 0, let b be (R | {missing})^n|absent, for A in (R | {missing})^(n,n)|absent, A @ solve(A, b) ~= b"
+  "unicode": "assuming det(A) != 0, let b be ℝⁿ, ∀ A ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, A @ solve(A, b) ≈ b",
+  "ascii": "assuming det(A) != 0, let b be R^n, for A in (R | {missing})^(n,n)|absent, A @ solve(A, b) ~= b"
  },
  "matrix_pinv": {
   "input": "for A in R^(m,n), A @ pinv(A) @ A ~= A",

@@ -3109,18 +3109,47 @@ def _render_claim_text(cj, *, unicode: bool | None,
     return sep.join(parts) + sep + statement
 
 
+def _single_value(dom) -> "float | None":
+    """Intent:
+        The one value a domain holds when it is a single closed point
+        (`[1.0, 1.0]`, or the point `let axis be 1` reads as), with no
+        value excluded and no dimensions; None otherwise.
+    """
+    from .domain import is_sentinel
+    if len(dom.pieces) != 1 or dom.dims \
+            or any(not is_sentinel(v) for v in dom.excluded):
+        return None
+    piece = dom.pieces[0]
+    if not isinstance(piece, tuple) or isinstance(piece, frozenset) or len(piece) != 2:
+        return None
+    if not (getattr(piece, "closed_lo", True) and getattr(piece, "closed_hi", True)):
+        return None
+    lo, hi = piece
+    if isinstance(lo, bool) or not isinstance(lo, (int, float)) or lo != hi:
+        return None
+    return float(lo)
+
+
 def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
     """A claim constant's bound (`let c be [-5.0, 5.0]`): its interval
     alone when it admits nothing missing, as a constant's bound does
-    unless the claim writes otherwise, else the whole domain."""
-    from .domain import MissingDefaults, _as_domain, admitted, render_domain
+    unless the claim writes otherwise, else the whole domain, completed
+    as a constant's (no hole and no absence beyond what it writes). A
+    real constant that holds one value is that value (`let axis be 1`)."""
+    import math
+
+    from .domain import MissingDefaults, _as_domain, admitted, complete, render_domain
     dom = _as_domain(bound)
-    absent, holes = admitted(dom, dom.policy or MissingDefaults(False, (), "constant",
-                                                                 annotated=False))
+    if dom.policy is None:
+        dom = complete(dom, MissingDefaults(False, (), "constant", annotated=False))
+    absent, holes = admitted(dom)
     if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
-        return render_domain(bound, ascii_mode=not unicode, show_missing=False,
+        point = _single_value(dom)
+        if point is not None and math.isfinite(point):
+            return exact_float_text(point, f"{point:g}")
+        return render_domain(dom, ascii_mode=not unicode, show_missing=False,
                              always_show_type=False)
-    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+    return render_domain(dom, ascii_mode=not unicode, show_missing=show_missing)
 
 
 def _membership_rhs(cj, unicode: bool) -> str:
