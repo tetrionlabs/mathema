@@ -156,7 +156,7 @@ def test_a_step_stopped_by_the_cap_is_named_and_left_out(importable,
     assert f1["implementation"] == 0 and f1["intent"] is not None
 
 
-def test_the_cap_is_the_extensive_wall_clock_cap(monkeypatch):
+def test_the_cap_is_the_badges_step_cap(monkeypatch):
     seen = []
 
     def fake(step, seconds):
@@ -164,7 +164,36 @@ def test_the_cap_is_the_extensive_wall_clock_cap(monkeypatch):
         return step()
     monkeypatch.setattr(_timeout, "_with_timeout", fake)
     assert badges_mod._capped(lambda: 7) == 7
-    assert seen == [_timeout.EXTENSIVE_TIMEOUT_SECONDS]
+    assert seen == [_timeout.BADGES_STEP_TIMEOUT_SECONDS]
+
+
+def test_the_badges_step_cap_is_sixty_seconds_unless_the_env_sets_it(
+        monkeypatch):
+    import importlib
+    monkeypatch.delenv("MATHEMA_BADGES_STEP_TIMEOUT", raising=False)
+    try:
+        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 60
+        monkeypatch.setenv("MATHEMA_BADGES_STEP_TIMEOUT", "90")
+        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 90
+        monkeypatch.setenv("MATHEMA_BADGES_STEP_TIMEOUT", "not a number")
+        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 60
+    finally:
+        monkeypatch.undo()
+        importlib.reload(_timeout)
+
+
+def test_the_snapshot_lists_capped_functions_only_when_there_are_some():
+    from mathema.badges import BadgeScores, ci_snapshot
+    plain = BadgeScores(implementation=50, intent=40, clarity=30, overall=7,
+                        per_function={"m.f": {"implementation": 50,
+                                              "intent": 40, "clarity": 30}})
+    assert "capped" not in ci_snapshot(plain)
+    capped = BadgeScores(implementation=50, intent=40, clarity=30, overall=7,
+                         per_function=plain.per_function,
+                         capped={"m.g": ("implementation", "clarity"),
+                                 "m.f": ("intent",)})
+    assert ci_snapshot(capped)["capped"] == [
+        ["m.f", ["intent"]], ["m.g", ["implementation", "clarity"]]]
 
 
 def test_progress_is_reported_after_every_function(importable):

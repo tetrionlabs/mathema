@@ -863,15 +863,16 @@ class _Capped(Exception):
 
 def _capped(step):
     """Intent:
-        `step()` under the extensive wall-clock cap
-        (`_timeout.EXTENSIVE_TIMEOUT_SECONDS`).
+        `step()` under the badges step cap
+        (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`).
 
     Raises:
         _Capped: the cap fired before `step` returned.
     """
     from . import _timeout
     try:
-        return _timeout._with_timeout(step, _timeout.EXTENSIVE_TIMEOUT_SECONDS)
+        return _timeout._with_timeout(
+            step, _timeout.BADGES_STEP_TIMEOUT_SECONDS)
     except TimeoutError:
         raise _Capped() from None
 
@@ -931,7 +932,8 @@ def repo_badges(targets=None, root: str = ".",
         None (source unavailable) drops out of the clarity roll-up.
         The run shares its reads (`_run_scope.run_scope`): the stores,
         the claims files and the library claims are read once. Each
-        function's three steps run under the extensive wall-clock cap;
+        function's three steps run under the badges step cap
+        (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`);
         a step the cap stops is named in `capped`, its function's
         implementation counts the fresh test lines alone, and its intent
         or clarity is None and drops out of that roll-up. A
@@ -1255,13 +1257,19 @@ def ci_snapshot(scores: BadgeScores) -> dict:
     per-function rows, so a job can compute and comment the area delta
     between two commits. `clarity_algo` records the clarity algorithm
     version, so a diff across a version bump reads as an algorithm change,
-    not a regression."""
-    return {"implementation": scores.implementation,
-            "intent": scores.intent,
-            "clarity": scores.clarity,
-            "overall": scores.overall,
-            "clarity_algo": scores.algo,
-            "per_function": scores.per_function}
+    not a regression. `capped`, present only when a step stopped at the
+    badges step cap, lists `[key, steps]` for each such function, sorted
+    by key."""
+    out = {"implementation": scores.implementation,
+           "intent": scores.intent,
+           "clarity": scores.clarity,
+           "overall": scores.overall,
+           "clarity_algo": scores.algo,
+           "per_function": scores.per_function}
+    if scores.capped:
+        out["capped"] = [[key, list(steps)]
+                         for key, steps in sorted(scores.capped.items())]
+    return out
 
 
 # The standard, documented home for the written badge artifacts, under

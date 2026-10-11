@@ -15,11 +15,11 @@ so its cost grows with the number of functions it scores. On a terminal
 it reports progress to stderr every 50 functions, with the count and the
 time elapsed, and prints nothing extra when stderr is not a terminal, so
 a CI log or an `--out` directory stays as it was. Each function's three
-steps stop at the extensive wall-clock cap (15 seconds unless
-`MATHEMA_EXTENSIVE_TIMEOUT` sets another), and a function whose step
-stopped is named on stderr: its implementation then counts only the
-lines a fresh test report covers, and its intent or clarity is left out
-of that score's roll-up.
+steps stop at the badges step cap (60 seconds unless
+`MATHEMA_BADGES_STEP_TIMEOUT` sets another), and a function whose step
+stopped is named on stderr and in the snapshot's `capped` list: its
+implementation then counts only the lines a fresh test report covers,
+and its intent or clarity is left out of that score's roll-up.
 
 ## The three badges
 
@@ -270,4 +270,7 @@ score means.
   no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and
-  comment the area delta between commits.
+  comment the area delta between commits. When a step stopped at the
+  badges step cap it also holds `capped`, a `[key, steps]` pair for each
+  such function; with nothing capped the key is absent, so a snapshot
+  reads as it always has.

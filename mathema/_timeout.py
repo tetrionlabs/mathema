@@ -40,6 +40,11 @@ def _seconds_from_env(name: str, default: int) -> int:
 # finite.
 FAST_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_FAST_TIMEOUT", 3)
 EXTENSIVE_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_EXTENSIVE_TIMEOUT", 15)
+# The cap on each per-function step of a `mathema badges` run (its
+# coverage pass, its docsync, its clarity), whole seconds;
+# MATHEMA_BADGES_STEP_TIMEOUT overrides it for a whole process.
+BADGES_STEP_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_BADGES_STEP_TIMEOUT",
+                                                60)
 
 _LOWERING_CAP: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_lowering_cap", default=None)
