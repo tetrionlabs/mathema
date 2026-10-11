@@ -842,6 +842,54 @@ def _union_verified_membership(current_claims: list,
     return out
 
 
+def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
+               conflicts: list, source: "str | None") -> dict:
+    """Intent:
+        The claim set a sweep adjudicates for one function, from its
+        authoring surfaces (`file_entry` merged over the live
+        function's own claims) and its verified record, with the
+        fingerprint the record's freshness is compared on. Returns a
+        dict: `entry` (the merged entry carrying those claims),
+        `claims`, `grammar`, `fingerprint`, `retired_notes` (one note
+        per declared claim already retired as a discovery) and
+        `unreadable` (`(name, error)` per authored claim that does not
+        parse).
+
+    Raises:
+        InvalidConjecture: a claim the fingerprint cannot read.
+
+    Notes:
+        A claim named in an authoring `conflicts` entry is left out.
+        A pending supersession keeps the verified version. The verified
+        layer is append-only in membership: a claim removed from every
+        authoring surface is rebuilt from its verified row, so the set
+        never silently shrinks; its exits are a discovery and a
+        historical acceptance, never deletion.
+    """
+    from .authoring import resolve_declared
+    from .conjecture import GRAMMAR
+    from .spec import claims_fingerprint
+    from .sync import apply_verified_wins
+    withheld = {c["claim"] for c in conflicts
+                if c.get("kind") == "authoring"}
+    merged = resolve_declared(fn, file_entry=file_entry)
+    claims = [c for c in merged.get("claims") or []
+              if c.get("name") not in withheld]
+    if verified_entry:
+        claims = apply_verified_wins(claims, conflicts, verified_entry)
+    claims = _union_verified_membership(claims, verified_entry)
+    claims, retired_notes = _drop_retired_declared(key, claims,
+                                                   verified_entry, source)
+    grammar = merged.get("grammar", GRAMMAR)
+    authored = {c.get("name") for c in merged.get("claims") or []}
+    claims, unreadable = _split_unparseable(claims, grammar, fn, authored)
+    entry = dict(merged)
+    entry["claims"] = claims
+    return {"entry": entry, "claims": claims, "grammar": grammar,
+            "fingerprint": claims_fingerprint(claims, grammar, fn),
+            "retired_notes": retired_notes, "unreadable": unreadable}
+
+
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
                    trials_downscale: float | None = None,
@@ -1329,14 +1377,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
-    from .authoring import resolve_declared
-    from .conjecture import (GRAMMAR, InvalidConjecture,
-                             _resolve_func_ref)
+    from .conjecture import InvalidConjecture, _resolve_func_ref
     from .inventory import function_dependencies
-    from .spec import (_dependency_state, claims_fingerprint,
-                       dependencies_current_probe, entry_claims,
-                       load_declared, load_verified, record as write_record,
-                       write_yaml)
+    from .spec import (_dependency_state, dependencies_current_probe,
+                       entry_claims, load_declared, load_verified,
+                       record as write_record, write_yaml)
 
     out = VerifyResult()
     for lkey, row, where, reason in _compendium.unregistered_project_rows():
@@ -1611,7 +1656,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # is committed evidence, and every other key still deserves
         # its verdict
         try:
-            from .sync import apply_verified_wins, claim_conflicts
+            from .sync import claim_conflicts
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "release-move":
@@ -1635,48 +1680,26 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # to record, so neither version is adjudicated or written
             withheld = {c["claim"] for c in _conflicts
                         if c.get("kind") == "authoring"}
-            merged_entry = resolve_declared(fn, file_entry=file_entry)
-            current_claims = [c for c in merged_entry.get("claims") or []
-                              if c.get("name") not in withheld]
-            if verified_entry:
-                # the record never gets silently rewritten by a
-                # re-authored claim: pending supersessions adjudicate the
-                # VERIFIED version until accepted
-                current_claims = apply_verified_wins(
-                    current_claims, _conflicts, verified_entry)
-            # the verified layer is append-only in MEMBERSHIP: a claim
-            # removed from every authoring surface is repopulated from
-            # its verified row (statement/route reconstruct it), so the
-            # adjudication set never silently shrinks and acceptance/
-            # verdict history are never dropped. The exits are
-            # supersession (discoveries) and human acceptance
-            # (historical), never deletion.
-            current_claims = _union_verified_membership(
-                current_claims, verified_entry)
-            current_claims, retired_notes = _drop_retired_declared(
-                key, current_claims, verified_entry,
-                (declared_info or {}).get("source"))
+            now = claims_now(key, fn, file_entry, verified_entry,
+                             _conflicts, (declared_info or {}).get("source"))
+            retired_notes = now["retired_notes"]
             out.lines.extend(retired_notes)
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
-            entry_grammar = merged_entry.get("grammar", GRAMMAR)
-            authored = {c.get("name") for c in merged_entry.get("claims")
-                        or []}
-            current_claims, unreadable = _split_unparseable(
-                current_claims, entry_grammar, fn, authored)
+            entry_grammar = now["grammar"]
+            current_claims = now["claims"]
             where = ((declared_info or {}).get("source")
                      or "its docstring or claims file")
-            for claim_name, error in unreadable:
+            for claim_name, error in now["unreadable"]:
                 msg = (f"{key}: claim {claim_name!r} declared in {where} "
                        f"does not parse ({error}); correct it there and "
                        f"re-run verify")
                 out.authoring_errors.append(msg)
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")
-            merged_entry = dict(merged_entry)
-            merged_entry["claims"] = current_claims
+            merged_entry = now["entry"]
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
+            current_fp = now["fingerprint"]
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
                 msg = (f"{key}: a claim in this function's verified "

@@ -364,6 +364,107 @@ def _restamp_integrity(entry: dict) -> None:
     entry.setdefault("identity", {})["pin"] = pin_summary(entry)
     entry["identity"]["integrity"] = integrity_checksum(entry)
 
+
+def _claims_fingerprint_now(root: str, key: str,
+                            verified_entry: dict) -> "str | None":
+    """Intent:
+        The claims fingerprint `mathema verify` would compute for `key`
+        right now, from the claims files on disk, the live function and
+        `verified_entry`, or None when it cannot be computed (the
+        function does not resolve, a claim does not parse).
+    """
+    import copy
+
+    from .conjecture import _resolve_func_ref
+    from .spec import load_declared
+    from .sync import claim_conflicts
+    from .verify import _defines_only, claims_now
+    try:
+        fn = _resolve_func_ref(key, root=root)
+        if fn is None:
+            return None
+        info = load_declared(root).get(key)
+        if info is None or _defines_only(info.get("entry")):
+            from .compendium import load_library_claims
+            info = load_library_claims(root).get(key) or {}
+        file_entry = copy.deepcopy(info.get("entry") or {})
+        record = copy.deepcopy(verified_entry)
+        conflicts = claim_conflicts(fn, file_entry, record or None)
+        return claims_now(key, fn, file_entry, record, conflicts,
+                          info.get("source"))["fingerprint"]
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+
+
+def _refresh_claims_fingerprint(root: str, key: str, entry: dict) -> None:
+    """Intent:
+        Set the record's claims fingerprint to the one `mathema verify`
+        computes from the claims as the acceptance leaves them, so the
+        next sweep finds the function unchanged. A fingerprint that
+        cannot be computed leaves the recorded one, and the next sweep
+        checks the function.
+    """
+    fp = _claims_fingerprint_now(root, key, entry)
+    if fp is not None:
+        entry.setdefault("identity", {})["claims_fingerprint"] = fp
+
+
+def _another_claim_holds(claims: list, target: dict) -> bool:
+    """Intent:
+        Whether a live claim other than `target`, one a person or a
+        claims file stated, is proven or holds. Built-in, suggested and
+        float-companion rows are mathema's own and do not count.
+    """
+    for c in claims:
+        if c is target:
+            continue
+        meta = c.get("meta") or {}
+        if meta.get("mathema.surface") in ("builtin", "mathema", "types") \
+                or meta.get("mathema.companion_of"):
+            continue
+        if classify_verdict(c.get("verdict") or "") in ("proven", "holds"):
+            return True
+    return False
+
+
+def plan_acceptances(root: str, key: str, requests: list,
+                     by: str | None = None, note: str | None = None,
+                     corrected: str | None = None) -> list:
+    """Intent:
+        One plan per `(claim_name, as_)` request on `key`, all sharing
+        one loaded record, so `apply_acceptances` writes them in one
+        act. A claim named twice is planned once, as first requested.
+
+    Raises:
+        AcceptanceError: as `plan_acceptance`, for the first request it
+        refuses; nothing is planned for the others then.
+    """
+    record = _load_record(root, key)
+    kinds = dict(reversed(list(requests)))
+    names = list(dict.fromkeys(name for name, _ in requests))
+    return [plan_acceptance(root, key, name, kinds[name], by=by, note=note,
+                            corrected=corrected, record=record)
+            for name in names]
+
+
+def apply_acceptances(plans: list) -> list:
+    """Intent:
+        Execute several plans from `plan_acceptances` under one human
+        gate: a configured PIN is asked for once, and each plan is then
+        written in order. Returns each plan's summary.
+    """
+    if not plans:
+        return []
+    from . import auth
+    attestation = auth.require_human(
+        f"accept --as {plans[0]['as']}"
+        + (f" ({len(plans)} claims)" if len(plans) > 1 else ""))
+    auth.enforce_policy(attestation, plans[0].get("root", "."))
+    return [_apply_attested(plan, attestation) for plan in plans]
+
+
 def _event(as_: str, by: str | None, verdict: str, note: str | None) -> dict:
     event = {"at": datetime.date.today().isoformat(), "as": as_,
              "verdict": verdict}
@@ -538,13 +639,16 @@ def _apply_rename(plan: dict, attestation: "dict | None") -> str:
 
 def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                     by: str | None = None, note: str | None = None,
-                    corrected: str | None = None) -> dict:
+                    corrected: str | None = None,
+                    record: "tuple | None" = None) -> dict:
     """Intent:
         Resolve one acceptance request against the verified record and
         return everything the write WOULD do, the annotation, any
         verdict change, any generated discovery claim, without
         writing. The CLI prints this and asks; `apply_acceptance`
         executes it. Split so the prompt can never drift from the act.
+        `record` is a `(path, doc)` pair already loaded, so several
+        plans on one key share one record document.
 
     Raises:
         AcceptanceError: for every vocabulary violation, with the rule
@@ -554,7 +658,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
     """
     if as_ not in ACCEPT_AS:
         raise AcceptanceError(f"--as must be one of {', '.join(ACCEPT_AS)}")
-    path, doc = _load_record(root, key)
+    path, doc = record if record is not None else _load_record(root, key)
     entry = doc[key]
     if as_ == "reconciled":
         # a record-level vow: the human confirms the current contents are
@@ -579,6 +683,9 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
     plan = {"path": path, "doc": doc, "key": key, "claim": target,
             "root": root,
             "as": as_, "by": by, "note": note, "verdict": verdict,
+            "claim_name": claim_name, "n": target.get("n"),
+            "witness": target.get("counterexample"),
+            "others_hold": _another_claim_holds(claims, target),
             "actions": []}
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
@@ -727,6 +834,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             accepted["note"] = note
         plan["accepted"] = accepted
         parent = (target.get("meta") or {}).get("mathema.companion_of")
+        plan["companion_of"] = parent
         if parent:
             # a float companion is no authored law: nothing declares it
             # and no corrected statement replaces it; retiring it records
@@ -830,8 +938,6 @@ def apply_acceptance(plan: dict) -> str:
         the record document and write it back, appending the acceptance-history event so
         every classification change stays tracked.
     """
-    doc, key, target = plan["doc"], plan["key"], plan["claim"]
-    entry = doc[plan.get("from") or key]
     # the human gate: when a PIN is configured, nothing below runs
     # without a person at a terminal, and the record says which
     # credential authorised it. Every acceptance path funnels through
@@ -842,6 +948,16 @@ def apply_acceptance(plan: dict) -> str:
     from . import auth
     attestation = auth.require_human(f"accept --as {plan['as']}")
     auth.enforce_policy(attestation, plan.get("root", "."))
+    return _apply_attested(plan, attestation)
+
+
+def _apply_attested(plan: dict, attestation) -> str:
+    """Intent:
+        Write one plan once the human gate has passed, `attestation`
+        being what the gate returned (None without a PIN).
+    """
+    doc, key, target = plan["doc"], plan["key"], plan["claim"]
+    entry = doc[plan.get("from") or key]
     if plan["as"] == "reconciled" and plan.get("from"):
         return _apply_rename(plan, attestation)
     if plan["as"] == "reconciled":
@@ -883,6 +999,9 @@ def apply_acceptance(plan: dict) -> str:
                           f"{target.get('name')}")
         return (f"superseded: {target.get('name')}, the authored "
                 f"version is checked on the next verify")
+    root = plan.get("root", ".")
+    fresh_before = _claims_fingerprint_now(root, key, entry) == \
+        (entry.get("identity") or {}).get("claims_fingerprint")
     if plan["as"] == "historical":
         entry = doc[plan["key"]]
         claims = entry.get("claims") or []
@@ -890,6 +1009,8 @@ def apply_acceptance(plan: dict) -> str:
         target.setdefault("acceptance_history", []).append(event)
         claims.remove(target)
         entry.setdefault("historical", []).append(target)
+        if fresh_before:
+            _refresh_claims_fingerprint(root, key, entry)
         _restamp_integrity(doc[plan["key"]])
         write_yaml(plan["path"], doc,
                    header=f"machine record; historical acceptance of "
@@ -935,16 +1056,115 @@ def apply_acceptance(plan: dict) -> str:
                 new_claim["n"] = plan["corrected_n"]
             claims.append(new_claim)
         entry["claims"] = claims
-    _restamp_integrity(entry)
-    write_yaml(plan["path"], doc,
-               header=f"machine record; binds to form "
-                      f"{(entry.get('identity') or {}).get('form')}")
     if plan.get("declared_edits"):
         stub = corrected_stub(plan)
         for rel in plan["declared_edits"]:
             _apply_declared_edit(plan["root"], rel, plan["key"],
                                  target["name"], stub)
+    if fresh_before:
+        _refresh_claims_fingerprint(root, key, entry)
+    _restamp_integrity(entry)
+    write_yaml(plan["path"], doc,
+               header=f"machine record; binds to form "
+                      f"{(entry.get('identity') or {}).get('form')}")
     return "; ".join(plan["actions"])
+
+
+_KIND_PHRASE = {"evidence": "evidence", "risk": "a risk",
+                "discovery": "a discovery", "historical": "historical",
+                "superseded": "superseded", "trusted": "trusted"}
+
+
+def _verdict_line(plan: dict) -> "str | None":
+    """The verdict being accepted, with its witness when it was
+    falsified and its trial count when it holds."""
+    verdict = plan.get("verdict") or ""
+    base = classify_verdict(verdict)
+    if base in ("falsified", "invalidated") and plan.get("witness"):
+        return f"{base} at {plan['witness']}"
+    if base == "holds" and plan.get("n"):
+        return f"holds over {plan['n']} trials"
+    return f"verdict {verdict}" if verdict else None
+
+
+def _discovery_lines(plan: dict) -> list:
+    """The move a discovery makes, then its correction when one
+    applies."""
+    moved = ("the claim moves to discoveries with that witness"
+             if plan.get("witness") else "the claim moves to discoveries")
+    parent = plan.get("companion_of")
+    if parent:
+        return [f"{moved}; as the float companion of {parent}, it stays "
+                f"retired while {parent} stands"]
+    edits = plan.get("declared_edits") or []
+    if edits:
+        moved += ", out of " + " and ".join(edits)
+    else:
+        moved += ("; a docstring or decorator declares it, and verify "
+                  "notes it as retired until that source changes")
+    lines = [moved]
+    if plan.get("corrected_statement"):
+        checked = plan.get("corrected_verdict") or "declared"
+        if plan.get("corrected_n"):
+            checked += f" over {plan['corrected_n']} trials"
+        stub = corrected_stub(plan) or {}
+        lines.append(f"the corrected claim takes its place: "
+                     f"{stub.get('name')} [{stub.get('route')}]: "
+                     f"{stub.get('statement')}, checked now: {checked}")
+    elif not plan.get("others_hold"):
+        lines.append('no corrected claim; pass --corrected "<law>" to state '
+                     "what is true")
+    return lines
+
+
+def describe_acceptance(plan: dict) -> list:
+    """Intent:
+        The text a person confirms before an acceptance is written: a
+        header naming the key, the claim, the kind of acceptance and
+        who decides, then the verdict line (with the witness of a
+        falsification) and one line per change the write makes.
+        Detail lines are indented two spaces under the header.
+    """
+    key, as_ = plan["key"], plan["as"]
+    who = f", by {plan['by']}" if plan.get("by") else ""
+    if as_ == "reconciled" and plan.get("from"):
+        return ([f"accept {key} as reconciled from {plan['from']}{who}"]
+                + [f"  {a}" for a in plan.get("actions") or []])
+    if as_ == "reconciled":
+        return [f"accept {key} as reconciled{who}",
+                "  its integrity is re-stamped over its current contents "
+                "and anchored to HEAD"]
+    name = plan.get("claim_name") or (plan.get("claim") or {}).get("name")
+    lines = []
+    verdict = _verdict_line(plan)
+    if verdict:
+        lines.append(verdict)
+    accepted = plan.get("accepted") or {}
+    if as_ == "evidence":
+        lines.append(f"the claim is accepted as evidence at n={plan.get('n')}"
+                     f", bound to form {accepted.get('form')}")
+    elif as_ == "risk":
+        if plan.get("new_verdict"):
+            lines.append(f"its verdict becomes {plan['new_verdict']}; strict "
+                         "mode still refuses it, lenient mode proceeds")
+        else:
+            lines.append("the claim is recorded as an accepted risk")
+    elif as_ == "historical":
+        lines.append("the claim moves to historical, last supported at "
+                     f"commit {accepted.get('commit') or 'unknown'}")
+    elif as_ == "superseded":
+        lines.append("the verified claim moves to superseded; the authored "
+                     "version is checked on the next verify")
+    elif as_ == "trusted":
+        lines.append(f"the claim is trusted at its claimed level, "
+                     f"{accepted.get('level')}, on the word of "
+                     f"{accepted.get('source') or 'its compendium entry'}; a "
+                     "local verdict replaces it when verify checks this key "
+                     "again")
+    elif as_ == "discovery":
+        lines.extend(_discovery_lines(plan))
+    return ([f"accept {key} :: {name} as {_KIND_PHRASE.get(as_, as_)}{who}"]
+            + [f"  {ln}" for ln in lines])
 
 
 def corrected_stub(plan: dict) -> dict | None:
