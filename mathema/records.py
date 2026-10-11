@@ -217,7 +217,9 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
     never be misread the way null or "" can. `gates` says whether the
     row is in the gated population at all (suggestions and foreign-
     grammar claims are not); an accepted-risk unknown stays in the
-    population, its verdict itself saying why it passes."""
+    population, its verdict itself saying why it passes. An invalidated
+    row's `reason` is its note, else its derivation sketch, and its
+    `evidence` adds the sketch, `previous_verdict` and `regressed_to`."""
     if isinstance(c, dict):
         name, verdict = c.get("name") or "", c.get("verdict") or ""
         meta, note = c.get("meta") or {}, str(c.get("note") or "")
@@ -261,6 +263,16 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
         row["accepted"] = "risk"
     if meta.get("mathema.let_warning"):
         row["warnings"] = list(meta["mathema.let_warning"])
+    if classify_verdict(verdict) == "invalidated":
+        # a regression says why through what the record holds: its note
+        # or derivation, and the verdict it fell from and to
+        sketch = c.get("sketch") if isinstance(c, dict) else c.sketch
+        row["reason"] = note or sketch or row["reason"]
+        if sketch:
+            row["evidence"]["sketch"] = sketch
+        for k in ("previous_verdict", "regressed_to"):
+            if meta.get(f"mathema.{k}"):
+                row["evidence"][k] = meta[f"mathema.{k}"]
     if st == "refuted":
         row["counterexample"] = counterexample
         if stratum:

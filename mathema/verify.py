@@ -220,7 +220,8 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         under that name rather than as the fresh `falsified`.
 
     Notes:
-        A stored `invalidated` is carried over, and so is the accepted
+        A stored `invalidated` is carried over with the verdict it fell
+        from and the one it fell to, and so is the accepted
         level of a trusted row the sweep could not settle
         (`mathema.trusted_unsettled`) or settled only more weakly
         (`mathema.strongest_evidence`, with the row's note), with that
@@ -238,9 +239,13 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     trusted = {c.get("name"): c for c in entry.get("claims") or []
                if {"mathema.trusted_unsettled", "mathema.strongest_evidence"}
                & set(c.get("meta") or {})}
+    rows = {c.get("name"): c for c in entry.get("claims") or []}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
+            p.meta = {**(p.meta or {}), **{
+                k: v for k, v in (rows[p.name].get("meta") or {}).items()
+                if k in ("mathema.previous_verdict", "mathema.regressed_to")}}
         elif p.name in trusted:
             row = trusted[p.name]
             p.verdict = stored[p.name]
