@@ -100,3 +100,13 @@ class Document:
     @property
     def language(self) -> str | None:
         return self._named("lifter", "language")
+
+    @property
+    def lifter(self) -> dict:
+        """The document's `lifter` line as a mapping: its `language`,
+        `name` and `version`, each present only when stated."""
+        t = self.first("lifter")
+        if t is None:
+            return {}
+        return {k: getattr(v, "value", None) for k, v in t.named
+                if k in ("language", "name", "version")}

@@ -313,3 +313,22 @@ def rendered_scope(facts) -> dict:
         scope = {}
     facts._koine_scope = (doc, scope)  # type: ignore[attr-defined]
     return scope
+
+
+def provenance(facts) -> dict | None:
+    """Intent:
+        Where the body `facts` are read by came from, as the record
+        states it: `facts.provenance` as supplied, with `koine_hash` set
+        to the hash of the document carried and `frontend` taken from
+        the document's `lifter` line when not supplied. None when
+        `facts` carries no document and no provenance, as for a Python
+        function read from its source.
+    """
+    doc = getattr(facts, "koine", None)
+    stated = getattr(facts, "provenance", None)
+    if not isinstance(doc, Document):
+        return dict(stated) if stated else None
+    out = dict(stated or {})
+    out.setdefault("frontend", doc.lifter)
+    out["koine_hash"] = koine_hash(doc)
+    return out

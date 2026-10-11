@@ -1116,6 +1116,28 @@ def _library_version_moved(merged_entry: dict,
     return None
 
 
+def _provenance_moved(facts, verified_entry: dict) -> "str | None":
+    """Intent:
+        What moved in the provenance of the body `facts` are read by
+        since the record was written (`meta["mathema.provenance"]`):
+        `"body"` when its `koine_hash` differs, `"frontend"` when the
+        frontend that wrote it (its name or version) differs, None when
+        neither did or neither side has a provenance. A proof from a
+        body rests on both, so either change makes the record stale, and
+        every claim it proved by derive with it.
+    """
+    from .koine.facts import provenance
+    now = provenance(facts) or {}
+    was = (verified_entry.get("meta") or {}).get("mathema.provenance") or {}
+    if not now and not was:
+        return None
+    if now.get("koine_hash") != was.get("koine_hash"):
+        return "body"
+    if now.get("frontend") != was.get("frontend"):
+        return "frontend"
+    return None
+
+
 def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
                            verified_entry: dict) -> bool:
     """Intent:
@@ -1804,9 +1826,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                             verified_entry)
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
+        body_moved = _provenance_moved(facts_now, verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
-                    and version_moved is None
+                    and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -1909,6 +1932,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
                else "definition rows changed" if definitions_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else f"{body_moved} changed" if body_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh

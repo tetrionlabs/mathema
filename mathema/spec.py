@@ -243,6 +243,12 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
         # "declared" until a person accepts it. record() upgrades the
         # tag when a live (non-stale) intent acceptance stands.
         meta["mathema.intent_provenance"] = "declared"
+    from .koine.facts import provenance
+    body = provenance(f)
+    if body:
+        # where a body that arrived as KOINE came from: its frontend
+        # and its koine_hash, which freshness watches
+        meta["mathema.provenance"] = body
     if meta:
         spec["meta"] = meta
     if ex.lifted:

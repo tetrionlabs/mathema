@@ -112,7 +112,11 @@ class Facts:
     representation of it. A `Facts` carrying `koine` and no `tree` is
     read with the tree rendered from the document and the structural
     fields (loops, branches, recursion, guards, call groups) taken from
-    its body, wherever `effective_facts` resolves it."""
+    its body, wherever `effective_facts` resolves it. `provenance` says
+    where a body that arrived as KOINE came from: the frontend that wrote
+    it (`frontend`, the document's `lifter` line unless stated), its
+    `koine_hash`, and any evidence, supplied with the body, that the body
+    agrees with the function (`agreement`)."""
     name: str
     signature: str
     params: list[str]
@@ -166,6 +170,8 @@ class Facts:
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
     koine: "Document | None" = field(default=None, repr=False)  # the body as KOINE
+    provenance: dict | None = None    # where a KOINE body came from: "frontend",
+                                      # "koine_hash", "agreement" (free-form)
     _computed_form: str | None = field(default=None, repr=False)  # the form hash
                                       # analyze_source computed from the Python body; `form`
                                       # is a canonical form of the body only while it equals
