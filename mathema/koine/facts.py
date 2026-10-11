@@ -336,3 +336,24 @@ def provenance(facts) -> dict | None:
     if len(hashes) > 1:
         out["body_hashes"] = dict(hashes)
     return out
+
+
+def provenance_change(now: dict | None, was: dict | None) -> str | None:
+    """Intent:
+        What moved between two body provenances (`provenance(facts)`
+        now, and as a record states it): `"body"` when the
+        `koine_hash`, or the hash of the body any frontend that could
+        write it wrote (`body_hashes`), differs; `"frontend"` when the
+        frontend that wrote it (its name or version) differs; None when
+        neither did, or neither side has a provenance.
+    """
+    now = now or {}
+    was = was or {}
+    if not now and not was:
+        return None
+    if now.get("koine_hash") != was.get("koine_hash") \
+            or now.get("body_hashes") != was.get("body_hashes"):
+        return "body"
+    if now.get("frontend") != was.get("frontend"):
+        return "frontend"
+    return None

@@ -1039,7 +1039,10 @@ def _dependency_state(dep: dict, verified: dict,
     against. Given the project `root`, a callee installed outside it
     (the standard library, a third-party package) with no record is
     `None` too: the project's store records it only when a claims file
-    states claims about it, and then it is compared like any other."""
+    states claims about it, and then it is compared like any other.
+    A callee whose body arrived as KOINE is also `stale` when its body
+    provenance (`provenance`, its `koine_hash` and frontend) differs
+    from its record's, even under the same form."""
     form = dep.get("form")
     key = dep.get("key")
     if not form or not key:
@@ -1055,7 +1058,12 @@ def _dependency_state(dep: dict, verified: dict,
            for c in entry.get("claims") or []):
         return "invalidated"
     stored_form = (entry.get("identity") or {}).get("form")
-    return "current" if stored_form == form else "stale"
+    if stored_form != form:
+        return "stale"
+    from .koine.facts import provenance_change
+    moved = provenance_change(dep.get("provenance"),
+                              (entry.get("meta") or {}).get("mathema.provenance"))
+    return "current" if moved is None else "stale"
 
 
 def dependencies_current_probe(dependencies: list, root: str = "."):

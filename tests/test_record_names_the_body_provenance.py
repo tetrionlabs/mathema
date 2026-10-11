@@ -135,3 +135,74 @@ def test_a_changed_frontend_version_makes_the_record_stale(tmp_path, monkeypatch
     (tmp_path / "growth.koi").write_text(newer)
     assert _sweep(tmp_path, monkeypatch)["bodymod.growth"]["why"] == "frontend changed"
     assert _stored(tmp_path)["meta"]["mathema.provenance"]["frontend"]["version"] == "1"
+
+
+# --- a callee whose body moved under a stable form ---------------------------
+
+def _callee(koine_hash_: str, version: str = "0") -> tuple:
+    """A dependency entry and the callee's stored record, both under the
+    form label `label:g`, the record proved from body `a`."""
+    dep = {"name": "g", "kind": "function", "key": "calleemod.g", "form": "label:g",
+           "provenance": {"frontend": {"name": "mathema", "version": version},
+                          "koine_hash": koine_hash_}}
+    verified = {"calleemod.g": {"entry": {
+        "identity": {"form": "label:g"}, "claims": [],
+        "meta": {"mathema.provenance": {"frontend": {"name": "mathema", "version": "0"},
+                                        "koine_hash": "a"}}}}}
+    return dep, verified
+
+
+def test_a_callee_whose_body_moved_under_the_same_form_is_stale():
+    from mathema.spec import _dependency_state
+    assert _dependency_state(*_callee("a")) == "current"
+    assert _dependency_state(*_callee("b")) == "stale"
+    assert _dependency_state(*_callee("a", version="1")) == "stale"
+
+
+def test_a_python_callee_carries_no_provenance_and_stays_current():
+    from mathema.spec import _dependency_state
+    dep = {"name": "g", "kind": "function", "key": "calleemod.g", "form": "abc"}
+    verified = {"calleemod.g": {"entry": {"identity": {"form": "abc"}, "claims": []}}}
+    assert _dependency_state(dep, verified) == "current"
+
+
+def test_a_dependency_entry_names_the_provenance_of_a_koine_callee(tmp_path, monkeypatch):
+    import importlib
+    from mathema.inventory import function_dependencies
+    _project(tmp_path, monkeypatch, golden_text("growth_py"))
+    (tmp_path / "callermod.py").write_text(
+        "from bodymod import growth\n\n\n"
+        "def caller(x, r):\n    return growth(x, r) + 1\n\n\n"
+        "def plain(x):\n    return x\n\n\n"
+        "def plain_caller(x):\n    return plain(x) + 1\n")
+    monkeypatch.delitem(sys.modules, "bodymod", raising=False)
+    monkeypatch.delitem(sys.modules, "callermod", raising=False)
+    mod = importlib.import_module("callermod")
+    deps = {d["name"]: d for d in function_dependencies(mod.caller)}
+    assert deps["growth"]["provenance"]["koine_hash"] == \
+        koine_hash(Document.parse(golden_text("growth_py")))
+    assert all("provenance" not in d for d in function_dependencies(mod.plain_caller))
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_caller_of_a_callee_whose_body_moved_is_not_fresh(tmp_path, monkeypatch):
+    text = golden_text("growth_py")
+    _project(tmp_path, monkeypatch, text)
+    (tmp_path / "callermod.py").write_text(
+        "from bodymod import growth\n\n\n"
+        "def caller(x: float, r: float) -> float:\n    return growth(x, r) + 1\n")
+    (tmp_path / "claims" / "callermod.claims.yaml").write_text(textwrap.dedent("""
+        callermod.caller:
+          claims:
+            - name: shifted
+              statement: 'for r in [-1, 5], for x in [-10, 10], f(x, r) == x * (1 + r) + 1'
+    """))
+
+    def sweep():
+        monkeypatch.delitem(sys.modules, "callermod", raising=False)
+        return _sweep(tmp_path, monkeypatch)
+
+    sweep()
+    assert sweep()["callermod.caller"]["why"] == "fresh"
+    (tmp_path / "growth.koi").write_text(text.replace(*EQUAL_BODY))
+    assert sweep()["callermod.caller"]["why"] == "dependency changed"
