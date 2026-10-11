@@ -5791,10 +5791,11 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         setup. A named-reference `assuming` inside a chain is the one
         unsupported combination (the referenced sibling isn't in the
         per-link batch), rare enough to leave to a future pass. Returns
-        the chain's verdict and, when `float_companions` is set and the
-        chain is proven with every link's float companion spawned, the
-        chain's own companion, `<name>[float]`, folded from theirs by
-        the same conjunction rule.
+        the chain's verdict and, when `float_companions` is set, the
+        chain's own companion, `<name>[float]`, folded from the links'
+        by the same conjunction rule: when the chain is proven with
+        every link's float companion spawned, or when it holds and a
+        link's companion falsifies.
     """
     from dataclasses import replace as _replace
 
@@ -5834,10 +5835,19 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     combined.meta = {**(combined.meta or {}),
                      "mathema.chain_lines": list(empty.values())} if empty \
         else combined.meta
-    companions = [p for p in probes if p.name not in link_names
-                  and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    # each link's float companion, with that link's label
+    paired = [(p, label) for c, label in zip(link_cjs, labels)
+              for p in probes if p.name.startswith(f"{c.name}[")
+              and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    companions = [p for p, _label in paired]
     empty_broken = next((p for p in empty.values() if p.verdict == "falsified"), None)
-    if combined.verdict != "proven" or len(companions) != len(links):
+    # a proven chain folds every link's companion; a chain that holds on
+    # the probe standing in for derive keeps a link's companion only
+    # where it falsifies, as a single claim's computation line does
+    kept = (combined.verdict == "proven" and len(companions) == len(links)) or (
+        combined.verdict == "holds"
+        and any(p.verdict == "falsified" for p in companions))
+    if not kept:
         if empty_broken is not None and combined.verdict != "falsified":
             combined = _falsified_by_empty_input(combined, empty_broken)
         return combined, None
@@ -5846,7 +5856,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         companion_representation(cj.domain, facts)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
-        labels, what="float companion")
+        [label for _p, label in paired], what="float companion")
     companion.note = (f"the {representation_word} computation of {cj.name} ran "
                       f"link by link, and every link holds"
                       if companion.verdict == "holds" else

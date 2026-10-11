@@ -1841,11 +1841,14 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         `bounds` (None the whole line, an unbounded end at the number
         representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
-        range's own limit, and the range's opposite ends `[lo, hi]`;
+        range's own limit, the range's opposite ends `[lo, hi]`, and
+        the same-sign pair `[e, e]` at each end `e` past half the
+        representation's reach, where the sum of the pair overflows;
         every entry inside the range. With `n`, each pair is repeated
         to length `n`, and none is given below 2. Empty when the
         elements are not one real interval.
     """
+    from ._sampling import representation_reach
     span = _element_range(bounds)
     if span is None or (n is not None and n < 2):
         return []
@@ -1855,6 +1858,10 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
     if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
         pairs.append([lo, hi])
+    half = representation_reach() / 2
+    for end in (hi, lo):
+        if abs(end) > half and [end, end] not in pairs:
+            pairs.append([end, end])
     if n is None:
         return pairs
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
