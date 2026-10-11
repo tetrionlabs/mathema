@@ -5,7 +5,7 @@ that parameter at an ordinary value and every other argument held, does
 not raise. When it raises there too, other draws of the other arguments
 are tried; where none lets f run with the ordinary value, the row is
 unknown, naming the other argument, never falsified. A falsified row
-shows the call with the ordinary value returning. A function with one
+shows the raising call and the call with the ordinary value returning. A function with one
 parameter has nothing else to blame, and is read as before."""
 import importlib.util
 import math
@@ -87,8 +87,9 @@ def test_a_raise_the_hazard_causes_is_falsified_with_the_ordinary_call_shown(law
     row = _row(ascii_bytes, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert "raised UnicodeEncodeError" in row.counterexample, row.counterexample
-    assert ", and at name = " in row.counterexample, row.counterexample
-    assert " f returned b'" in row.counterexample, row.counterexample
+    assert "; f(language=" in row.counterexample, row.counterexample
+    assert ") raises UnicodeEncodeError; with name=" in row.counterexample
+    assert " it returns b'" in row.counterexample, row.counterexample
 
 
 @pytest.mark.parametrize("fn, law, raised", [
@@ -102,7 +103,8 @@ def test_a_one_parameter_function_is_read_as_before(fn, law, raised):
     row = _row(fn, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert f"raised {raised}" in row.counterexample, row.counterexample
-    assert ", and at " not in row.counterexample, row.counterexample
+    assert "; f(" not in row.counterexample, row.counterexample
+    assert "; with " not in row.counterexample, row.counterexample
 
 
 @pytest.mark.parametrize("fn, law", [
@@ -124,5 +126,6 @@ def test_a_raise_the_numeric_hazard_causes_is_falsified(fn, law, raised):
     row = _row(fn, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert raised in row.counterexample, row.counterexample
-    assert ", and at " in row.counterexample, row.counterexample
-    assert " f returned " in row.counterexample, row.counterexample
+    assert "; f(language=" in row.counterexample, row.counterexample
+    assert f") raises {raised}; with " in row.counterexample, row.counterexample
+    assert " it returns " in row.counterexample, row.counterexample

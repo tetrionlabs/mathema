@@ -76,7 +76,8 @@ def test_a_raise_at_two_members_together_is_recorded():
     rows = _rows(refuses_two_kinds, "for xs in [0, 1]^n, f(xs) >= 0",
                  "missing(f, xs) drops", "is_missing_safe(f)")
     assert rows["missing_f_xs_drops"].verdict == "falsified"
-    assert rows["missing_f_xs_drops"].counterexample.endswith("f raised ValueError")
+    assert rows["missing_f_xs_drops"].counterexample == (
+        "f([null, nan]) raises ValueError; f([0.5, 0.5]) returns 1.0")
     assert rows["is_missing_safe[f]"].verdict == "falsified"
 
 
@@ -488,4 +489,5 @@ def test_the_float_line_runs_numbers_and_the_policy_lines_run_the_holes():
                                      f"{companion.n} points: every corner"), companion.note
     assert rows["missing[x]"].verdict == "proven", rows["missing[x]"].note
     assert rows["absent[x]"].verdict == "falsified"
-    assert rows["absent[x]"].counterexample == "x = None: f raised TypeError"
+    assert rows["absent[x]"].counterexample == (
+        "f(None) raises TypeError; f(3.16) returns 1.78")

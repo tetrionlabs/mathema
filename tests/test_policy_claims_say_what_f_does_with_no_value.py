@@ -143,7 +143,7 @@ def test_a_member_narrows_the_policy():
     assert rows["missing(f, xs, nan) propagates"].verdict == "holds"
     whole = rows["missing(f, xs) propagates"]
     assert whole.verdict == "falsified"
-    assert whole.counterexample.startswith("xs = [") and "TypeError" in whole.counterexample
+    assert whole.counterexample == "f([null]) raises TypeError; f([0.5]) returns 0.5"
 
 
 def test_a_premise_decides_on_the_calls_that_meet_it():

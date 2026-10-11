@@ -309,7 +309,7 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
                               (i) if dropping nan is intended, run: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
                               (ii) exclude nan
                               (iii) handle nan at entry
-    falsified  policy       f(None)   no absent policy stated; raises TypeError
+    falsified  policy       f(None)   no absent policy stated; f(None) raises TypeError; f(0.959) returns "high"
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept pricing.risk_label absent[score] --as discovery --corrected "absent(f, score) raises(TypeError)"
                               (ii) exclude None
@@ -429,10 +429,10 @@ print(mathema.check(average_return, claims=[mathema.claim(
 <!-- example: containers output -->
 ```text
 mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
-  nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at positions = [null]
+  nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at f([null])
     proven     mathematics  for positions in ([0.0, 1.0])^n ⊂ ℝ, total_exposure(positions) >= 0
     holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   208 entries across 44 draws, sizes (1, 1) to (8, 1)
-    falsified  policy       f([..., null, ...])   no missing policy stated; raises TypeError
+    falsified  policy       f([..., null, ...])   no missing policy stated; f([null]) raises TypeError; f([0.5]) returns 0.5
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
                               (ii) exclude null
@@ -480,9 +480,9 @@ print(mathema.check(greeting, claims=[mathema.claim(
 <!-- example: strings output match=subset -->
 ```text
 mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
-  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at nickname = None
+  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at f(None)
     holds      computation  for nickname in L[unicode], len(greeting(nickname)) >= 3   223 draws
-    falsified  policy       f(None)   no absent policy stated; raises AttributeError
+    falsified  policy       f(None)   no absent policy stated; f(None) raises AttributeError; f("a😀😀😀😀😀😀") returns "Hi a😀😀😀😀😀😀"
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept names.greeting absent[nickname] --as discovery --corrected "absent(f, nickname) raises(AttributeError)"
                               (ii) exclude None
@@ -708,7 +708,7 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
                               (i) if dropping nan is intended, run: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
                               (ii) exclude nan
                               (iii) handle nan at entry
-    falsified  policy       f(None)   no absent policy stated; raises TypeError
+    falsified  policy       f(None)   no absent policy stated; f(None) raises TypeError; f(0.959) returns "high"
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept pricing.risk_label absent[score] --as discovery --corrected "absent(f, score) raises(TypeError)"
                               (ii) exclude None
@@ -717,7 +717,7 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
            score (float): nan drops, confirmed by calling f at score = nan; no claim states it yet
   falsified is_absent_safe[f]: is_absent_safe(f)
            score (float): None raises TypeError, and no claim says it may
-           counterexample score = None: f raised TypeError
+           counterexample f(None) raises TypeError; f(0.959) returns "high"
            score is Optional[float], so f promised to take None.
            (i) if the raise is intended, state: absent(f, score) raises(TypeError)
            (ii) if not, handle None in f, or annotate score as float

@@ -126,7 +126,10 @@ def _call(params: list, kinds: dict, param: str, word: str) -> str:
 
 
 def _did(counterexample: str) -> str:
-    """`raises TypeError` from `x = None: f raised TypeError`."""
+    """`returns 1.0` from `x = nan: f returned 1.0`; a witness written as
+    calls (`f(None) raises TypeError; f(1.0) returns 1.0`) as it is."""
+    if (counterexample or "").startswith("f("):
+        return counterexample
     said = (counterexample or "").split(": ", 1)[-1]
     said = re.sub(r"^f raised ", "raises ", said)
     return re.sub(r"^f returned ", "returns ", said)
@@ -370,7 +373,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 falsified.append(r.counterexample)
                 lines += [" " * 28 + part for part in _fixes(r, key, word, path).splitlines()]
             used.add(id(r))
-        if falsified:
+        if falsified and (falsified[0] or "").startswith("f("):
+            # a witness written as calls is named by its first call
+            head = f"falsified at {falsified[0].split(' raises ', 1)[0]}"
+        elif falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
             head = head.split(": ", 1)[0] if ": " in head else head
         else:

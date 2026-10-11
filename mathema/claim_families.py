@@ -219,7 +219,8 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         an ordinary value and every other argument held, then at other
         draws of the other arguments (`_missing_policy.separate`).
         `("falsified", text)` when the raise is the target's, the text
-        showing the ordinary call returning; `("holds", "")` when a draw
+        showing the raising call and the ordinary call returning (`f(a=1,
+        name='é') raises E; with name='a' it returns b'a'`); `("holds", "")` when a draw
         of the other arguments lets f run at the target's input;
         `("unknown", why)` when no draw tells the two apart. A
         counterexample that names no logged raise, or a function of one
@@ -260,12 +261,12 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
             found = type(found)((), others=found.others)
     if found.present is not None and (found.owners or found.moved is not None):
         at, output, _ = found.present
-        held = _held_text(facts, target, [at[p] for p in facts.params])
-        ordinary_call = (f"at {target} = {_short_value(at[target])} f returned "
-                         f"{_short_value(output, argument=False)}")
+        both = (f"{_call_text(facts, {**at, target: point[target]})} raises {raised}; "
+                f"with {target}={_short_value(at[target])} it returns "
+                f"{_short_value(output, argument=False)}")
         if cx.endswith("."):
-            return "falsified", f"{cx} With {held}, {ordinary_call}."
-        return "falsified", f"{cx} (with {held}), and {ordinary_call}"
+            return "falsified", f"{cx} {both}."
+        return "falsified", f"{cx}; {both}"
     from .policy import _and
     others = list(found.others)
     return "unknown", (
@@ -273,6 +274,14 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         f"at {target} = {_short_value(ordinary[0])}, on every draw of {_and(others)} "
         f"tried, so the raise is not {target}'s and nothing says what f does at "
         f"that {target}")
+
+
+def _call_text(facts: Facts, at: dict) -> str:
+    """The call at `at` in Python spelling, by name: `f(language=0.5,
+    name='a')`, a large container by its shape and a first row."""
+    from ._shapes import witness_text
+    return "f(" + ", ".join(f"{p}={witness_text(at[p]) or _short_value(at[p])}"
+                            for p in facts.params) + ")"
 
 
 def _ordinary_values(facts: Facts, target: str, hazard: Any, bound) -> list:

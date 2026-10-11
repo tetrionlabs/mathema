@@ -99,7 +99,8 @@ def test_g5_an_admitted_absence_is_drawn():
     assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
     assert "at s = None f raised AttributeError" in (value.note or "")
     assert row.verdict == "falsified"
-    assert row.counterexample == "s = None: f raised AttributeError"
+    assert row.counterexample == ('f(None) raises AttributeError; '
+                                 'f("a😀😀😀😀😀😀") returns "A😀😀😀😀😀😀"')
 
 
 @needs_language
@@ -109,7 +110,8 @@ def test_g6b_an_admitted_absence_is_drawn_for_a_document():
                              "doc")
     assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
     assert row.verdict == "falsified"
-    assert row.counterexample == "doc = None: f raised AttributeError"
+    assert row.counterexample == ('f(None) raises AttributeError; '
+                                 'f("a😀😀😀😀😀😀") returns "a😀😀😀😀😀😀"')
 
 
 @needs_language

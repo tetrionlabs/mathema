@@ -88,7 +88,7 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
     assert ("    proven     policy       f(nan)   propagates, from math.sqrt's own "
             "policy row, which f calls") in lines
     at = lines.index("    falsified  policy       f(None)   no absent policy stated; "
-                     "raises TypeError")
+                     "f(None) raises TypeError; f(3.16) returns 1.78")
     assert lines[at + 1:at + 5] == [
         "                            possible fixes:",
         "                              (i) if the raise is intended, run: mathema accept "
