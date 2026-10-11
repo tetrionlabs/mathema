@@ -457,8 +457,28 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         namesake, every other row stays. Each row names its file
         (`stamp_row_sources`).
 
+        Inside a run scope (`_run_scope.run_scope`) the files are read
+        once for the run, and each call gets its own copy.
+
     Raises:
         spec.ClaimsFileError: a claims file that does not read.
+    """
+    import copy
+
+    from .. import _run_scope
+    kept = _run_scope.kept("library_claims")
+    if kept is None:
+        return _read_library_claims(root)
+    where = ("load", None if root is None else os.path.abspath(root))
+    if where not in kept:
+        kept[where] = _read_library_claims(root)
+    return copy.deepcopy(kept[where])
+
+
+def _read_library_claims(root: "str | None") -> dict:
+    """Intent:
+        `load_library_claims(root)` read from the claims files, with no
+        run-scope sharing.
     """
     from ..spec import (claims_file_paths, read_claims_file,
                         stamp_library_rows)

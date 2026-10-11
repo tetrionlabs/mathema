@@ -137,14 +137,14 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-ok   funcs.midpoint: fresh
 FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
-`midpoint` is skipped as `fresh`: its form hash has not moved, so there
-is nothing to re-adjudicate. `settle` changed, so it is swept again,
+`midpoint` is the one unchanged function: its form hash has not moved,
+so there is nothing to re-adjudicate, and only `--verbose` lists it (as
+`fresh`). `settle` changed, so it is swept again,
 and the record now keeps the arc (trimmed):
 
 ```yaml
@@ -200,9 +200,10 @@ echo y | mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 
 <!-- example: loop output -->
 ```text
-accepting funcs.settle :: nonneg (verdict holds) as evidence, by Ada Lovelace
-  - annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
-write this acceptance? [y/N] written: annotate nonneg as accepted evidence at n=129 (bound to form 3eb01e1d9919...)
+accept funcs.settle :: nonneg as evidence, by Ada Lovelace
+  holds over 129 trials
+  the claim is accepted as evidence at n=129, bound to form 3eb01e1d9919
+write this acceptance? [y/N] written.
 ```
 
 `accept` prints exactly what it will write and waits for a yes, here
@@ -243,15 +244,11 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 
 <!-- example: loop output -->
 ```text
-accepting funcs.settle :: negative_exposure_negative (verdict invalidated) as discovery, by Ada Lovelace
-  - move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness
-  - declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', checked now: holds over 127 trials
-  - rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-write this acceptance? [y/N] written: move negative_exposure_negative to the record's discoveries section (superseded_by: negative_exposure_negative_corrected), keeping its counterexample as the witness; declare the inverted corrected claim 'negative_exposure_negative_corrected': 'for x in [-5.0, -1.0] : float|missing, f(x) > 0', checked now: holds over 127 trials; rewrite claims/demo.claims.yaml: replace declared claim 'negative_exposure_negative' with 'negative_exposure_negative_corrected'
-declared layer: claims/demo.claims.yaml now declares negative_exposure_negative_corrected in place of negative_exposure_negative (the superseded claim stays in the record's discoveries section):
-  - name: negative_exposure_negative_corrected
-    statement: "for x in [-5.0, -1.0] : float|missing, f(x) > 0"
-    route: probe
+accept funcs.settle :: negative_exposure_negative as a discovery, by Ada Lovelace
+  invalidated at x = -5: 5.0 vs 0
+  the claim moves to discoveries with that witness, out of claims/demo.claims.yaml
+  the corrected claim takes its place: negative_exposure_negative_corrected [probe]: for x in [-5.0, -1.0] : float|missing, f(x) > 0, checked now: holds over 127 trials
+write this acceptance? [y/N] written.
 ```
 
 The old claim is not erased. It moves to the record's `discoveries`
@@ -277,11 +274,12 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-ok   funcs.midpoint: fresh
-ok   funcs.settle: claims changed; 1 proven, 4 holds, 0 falsified
-1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
+2 unchanged since the last run (not run again), 0 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
+
+`funcs.settle` is not checked again: each acceptance wrote its record
+along with the claims file, so the sweep finds nothing changed.
 
 ## 6. Owning what nothing can settle
 

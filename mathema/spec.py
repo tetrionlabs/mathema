@@ -18,6 +18,7 @@ import os
 import re
 import unicodedata
 
+from . import _run_scope
 from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
@@ -428,6 +429,7 @@ def atomic_write_text(path: str, text: str) -> str:
         except OSError:
             pass
         raise
+    _run_scope.wrote(path)
     return path
 
 
@@ -462,7 +464,8 @@ def save_spec(ex, path: str) -> str:
 #                      per claim), a file-level `grammar` field sets that
 #                      file's default dialect. Never carries `identity`.
 #   load_verified() , .mathema/verified/<key>.yaml, one machine-written file
-#                       per function (what `record()` produces). This, and
+#                       per function (what `record()` produces), the file
+#                       named by `record_file_name(key)`. This, and
 #                       only this, is the freshness baseline.
 #   load_specs()    ; a read-only, display-only merge of the two, for
 #                       `mathema status` and human introspection. Anything
@@ -878,7 +881,7 @@ def record(ex, key: str | None = None, root: str = ".",
     starts on the `declared` rung; `documented` is the human act of
     accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
+    path = record_path(verified_dir(root), key)
     if os.path.exists(path):
         _data, reason = read_verified_file(path)
         if reason is not None:
@@ -978,8 +981,7 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
     """
     entry.setdefault("identity", {})["integrity"] = integrity_checksum(entry)
     form = (entry.get("identity") or {}).get("form", "")
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = record_path(verified_dir(root), key)
     return write_yaml(path, {key: entry},
                       header=f"machine record; binds to form {form}")
 
@@ -1066,7 +1068,7 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
     can't be established either way until the callee is verified."""
     from .records import Probe
 
-    verified = load_verified(root)
+    verified = _verified_view(root)
     states = [(dep, _dependency_state(dep, verified, root))
               for dep in dependencies or []]
     checked = [(dep, st) for dep, st in states if st is not None]
@@ -1118,7 +1120,7 @@ def _annotate_dependency_freshness(spec: dict, root: str) -> None:
     deps = spec.get("dependencies") or []
     if not any(d.get("form") for d in deps):
         return
-    verified = load_verified(root)
+    verified = _verified_view(root)
     for dep in deps:
         state = _dependency_state(dep, verified, root)
         if state is not None:
@@ -1193,7 +1195,10 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
         c["meta"] = meta
 
 
-_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mathema"}
+#: directories a claims-file scan never enters: tool, environment, build
+#: and installed-package directories, and mathema's own store
+_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mathema",
+              ".tox", "build", "dist", "site-packages"}
 
 
 def _is_claim_file(dirpath: str, name: str) -> bool:
@@ -1260,6 +1265,126 @@ def verified_dir(root: str = ".") -> str:
     return os.path.join(root, ".mathema", "verified")
 
 
+def declared_dir(root: str = ".") -> str:
+    """The materialized declared layer's directory: `.mathema/declared/`."""
+    return os.path.join(root, ".mathema", "declared")
+
+
+_RECORD_SUFFIX = ".yaml"
+
+
+def record_file_name(key: str) -> str:
+    """Intent:
+        The file name of `key`'s record in a store directory (the
+        verified or the declared layer): the key with every character
+        outside ASCII letters, digits and `_.-~` percent-encoded, then
+        `.yaml`. A dotted key keeps its spelling
+        (`pkg.mod.fn.yaml`); a tagged key becomes one file directly in
+        the store (`lang:src/ema.src#ema` is
+        `lang%3Asrc%2Fema.src%23ema.yaml`).
+        `record_key` reverses it.
+    """
+    from urllib.parse import quote
+    return quote(key, safe="") + _RECORD_SUFFIX
+
+
+def record_key(rel_path: str) -> str:
+    """Intent:
+        The key of the record file at `rel_path`, relative to its store
+        directory: the decoded name of a file `record_file_name` named,
+        else the path itself without `.yaml` (the older naming, where
+        the key was the file path as it stood and a `/` in it made a
+        subdirectory).
+
+    Notes:
+        A name is read as encoded when decoding and encoding it again
+        gives it back. An older name holding a literal `%` followed by
+        two hex digits reads as encoded.
+    """
+    from urllib.parse import quote, unquote
+    stem = rel_path.replace(os.sep, "/")
+    if stem.endswith(_RECORD_SUFFIX):
+        stem = stem[:-len(_RECORD_SUFFIX)]
+    if "/" in stem:
+        return stem
+    decoded = unquote(stem)
+    return decoded if quote(decoded, safe="") == stem else stem
+
+
+def _record_files(store_dir: str) -> list:
+    """Every `.yaml` file under `store_dir`, at any depth, sorted by its
+    path relative to the store."""
+    if not os.path.isdir(store_dir):
+        return []
+    found = []
+    for dirpath, _dirnames, filenames in os.walk(store_dir):
+        for name in filenames:
+            if name.endswith(_RECORD_SUFFIX):
+                found.append(os.path.join(dirpath, name))
+    return sorted(found, key=lambda p: os.path.relpath(p, store_dir))
+
+
+def _is_current_name(path: str, store_dir: str) -> bool:
+    rel = os.path.relpath(path, store_dir)
+    return rel == record_file_name(record_key(rel))
+
+
+def migrate_record_names(store_dir: str) -> list:
+    """Intent:
+        Rename every record file in `store_dir` still under the older
+        naming to `record_file_name` of its key, and remove the
+        subdirectories that leaves empty. A file whose new name is
+        already taken stays where it is. Returns the `(old, new)` paths
+        renamed.
+    """
+    moved = []
+    for path in _record_files(store_dir):
+        if _is_current_name(path, store_dir):
+            continue
+        key = record_key(os.path.relpath(path, store_dir))
+        target = os.path.join(store_dir, record_file_name(key))
+        if os.path.exists(target):
+            continue
+        os.replace(path, target)
+        moved.append((path, target))
+    for dirpath, _dirnames, _filenames in os.walk(store_dir,
+                                                  topdown=False):
+        if dirpath != store_dir and not os.listdir(dirpath):
+            os.rmdir(dirpath)
+    return moved
+
+
+#: the store directories (real paths) already migrated in this process
+_MIGRATED_STORES: set = set()
+
+
+def record_path(store_dir: str, key: str) -> str:
+    """Intent:
+        The path to write `key`'s record to in `store_dir`, after
+        renaming the store's older names (`migrate_record_names`, once
+        per store per process), so a key's record written before under
+        the older naming is the file this path names.
+    """
+    real = os.path.realpath(store_dir)
+    if real not in _MIGRATED_STORES:
+        migrate_record_names(store_dir)
+        _MIGRATED_STORES.add(real)
+    return os.path.join(store_dir, record_file_name(key))
+
+
+def find_record(store_dir: str, key: str) -> "str | None":
+    """Intent:
+        The existing record file for `key` in `store_dir`, without
+        changing the store: the file `record_file_name` names, else the
+        file the older naming gives, else None.
+    """
+    for path in (os.path.join(store_dir, record_file_name(key)),
+                 os.path.join(store_dir, f"{key}{_RECORD_SUFFIX}")):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def load_verified(root: str = ".") -> dict:
     """The verified layer only: machine-written records
     (verified-schema.md) under .mathema/verified/, one file per
@@ -1270,13 +1395,76 @@ def load_verified(root: str = ".") -> dict:
 
     A record file that does not read as a mapping (a merge left
     conflict markers, the file is empty) is left out here and listed
-    by `unreadable_verified`."""
+    by `unreadable_verified`.
+
+    Inside a `_run_scope.run_scope()` each record file is read once for
+    the run, and every call returns its own copy of what was read."""
+    import copy
+    shared = _run_scope.kept("verified_file") is not None
     merged: dict = {}
-    for path in _verified_files(root):
-        data, _reason = read_verified_file(path)
+    current: set = set()
+    store = verified_dir(root)
+    for path, data, _reason in _verified_reads(root):
+        named = _is_current_name(path, store)
         for key, entry in (data or {}).items():
-            merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+            if key in current and not named:
+                continue
+            merged[key] = {"entry": copy.deepcopy(entry) if shared else entry,
+                           "source": os.path.relpath(path, root)}
+            if named:
+                current.add(key)
     return merged
+
+
+def _verified_reads(root: str) -> list:
+    """Intent:
+        Every verified record file under `root` as `(path, data,
+        reason)`, `data` and `reason` as `read_verified_file` gives
+        them. Inside a run scope each file is read once and the same
+        `data` is returned to every caller, so a caller copies it
+        before changing it.
+    """
+    files_kept = _run_scope.kept("verified_file")
+    if files_kept is None:
+        return [(path, *read_verified_file(path))
+                for path in _verified_files(root)]
+    listing = _run_scope.kept("verified_listing")
+    if listing is None:
+        listing = {}
+    where = os.path.abspath(root)
+    if where not in listing:
+        real_dir = os.path.realpath(verified_dir(root))
+        listing[where] = [(path, os.path.join(real_dir,
+                                              os.path.basename(path)))
+                          for path in _verified_files(root)]
+    out = []
+    for path, real in listing[where]:
+        hit = files_kept.get(real)
+        if hit is None:
+            hit = files_kept[real] = read_verified_file(path)
+        out.append((path, hit[0], hit[1]))
+    return out
+
+
+def _verified_view(root: str = ".") -> dict:
+    """Intent:
+        The verified store as `load_verified` gives it, for a caller
+        that only reads it. Inside a run scope it is built once (again
+        after a record is written) and shared, so it must not be
+        changed; outside one it is `load_verified(root)`.
+    """
+    views = _run_scope.kept("verified_view")
+    if views is None:
+        return load_verified(root)
+    where = os.path.abspath(root)
+    if where not in views:
+        merged: dict = {}
+        for path, data, _reason in _verified_reads(root):
+            for key, entry in (data or {}).items():
+                merged[key] = {"entry": entry,
+                               "source": os.path.relpath(path, root)}
+        views[where] = merged
+    return views[where]
 
 
 class UnreadableRecord(ValueError):
@@ -1285,12 +1473,8 @@ class UnreadableRecord(ValueError):
 
 
 def _verified_files(root: str) -> list:
-    machine_dir = verified_dir(root)
-    if not os.path.isdir(machine_dir):
-        return []
-    return [os.path.join(machine_dir, name)
-            for name in sorted(os.listdir(machine_dir))
-            if name.endswith(".yaml")]
+    """Every record file in the verified layer, under either naming."""
+    return _record_files(verified_dir(root))
 
 
 def _safe_loader():
@@ -1380,13 +1564,13 @@ def unreadable_verified(root: str = ".") -> dict:
     """Intent:
         Every verified record file that does not read as a record, as
         `{key: {"source": relpath, "reason": text}}`, the key being the
-        file's name without `.yaml` (the name `record()` gives it).
+        one the file's name encodes (`record_key`).
     """
     out: dict = {}
-    for path in _verified_files(root):
-        data, reason = read_verified_file(path)
+    store = verified_dir(root)
+    for path, _data, reason in _verified_reads(root):
         if reason is not None:
-            key = os.path.basename(path)[:-len(".yaml")]
+            key = record_key(os.path.relpath(path, store))
             out[key] = {"source": os.path.relpath(path, root),
                         "reason": reason}
     return out
@@ -1817,21 +2001,44 @@ def claims_file_paths(root: str = ".", *,
     """Intent:
         Every claims file under `root` (`*.claims.yaml`,
         `claims/*.yaml`, `claimspec.yaml`), shallow first and then by
-        path, skipping tool and environment directories and any
+        path, skipping the directories in `_SKIP_DIRS` and any
         directory in `exclude` (compared by real path).
+
+    Notes:
+        Inside a run scope the tree is walked once per `root` and
+        `exclude` for the run.
     """
-    skip = {os.path.realpath(d) for d in exclude}
+    skip = frozenset(os.path.realpath(d) for d in exclude)
+    kept = _run_scope.kept("claims_paths")
+    if kept is not None:
+        hit = kept.get((os.path.abspath(root), skip))
+        if hit is not None:
+            return list(hit)
     files: list[tuple[int, str]] = []
+    # the walk does not descend into a symbolic link, so the real path of
+    # a directory it enters is its parent's real path joined with its name
+    real_of = {root: os.path.realpath(root)}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS
-                       and os.path.realpath(os.path.join(dirpath, d))
-                       not in skip]
+        real = real_of.pop(dirpath, None) or os.path.realpath(dirpath)
+        keep = []
+        for d in dirnames:
+            if d in _SKIP_DIRS:
+                continue
+            sub = os.path.join(real, d)
+            if sub in skip:
+                continue
+            keep.append(d)
+            real_of[os.path.join(dirpath, d)] = sub
+        dirnames[:] = keep
         for name in sorted(filenames):
             if _is_claim_file(dirpath, name):
                 rel = os.path.relpath(dirpath, root)
                 depth = 0 if rel == "." else len(rel.split(os.sep))
                 files.append((depth, os.path.join(dirpath, name)))
-    return [path for _, path in sorted(files)]
+    found = [path for _, path in sorted(files)]
+    if kept is not None:
+        kept[(os.path.abspath(root), skip)] = tuple(found)
+    return found
 
 
 def read_claims_file(path: str, rel_path: str) -> "dict | None":
@@ -1842,8 +2049,26 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     Raises:
         ClaimsFileError: malformed YAML or a shape problem, naming the
             file.
+
+    Notes:
+        Inside a run scope a file that read and checked cleanly, and is
+        unchanged since (same modification time and size), is not
+        checked again; each call gets its own copy.
     """
+    import copy
+
     import yaml
+    kept = _run_scope.kept("claims_valid")
+    stamp = None
+    if kept is not None:
+        try:
+            st = os.stat(path)
+        except OSError:
+            st = None
+        if st is not None:
+            stamp = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+            if stamp in kept:
+                return copy.deepcopy(kept[stamp])
     try:
         data = _parsed_yaml(path)
     except yaml.YAMLError as e:
@@ -1851,8 +2076,12 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
         where = f" at line {mark.line + 1}" if mark is not None else ""
         raise ClaimsFileError(f"{rel_path}: malformed YAML{where}") from None
     if data is None:
+        if stamp is not None:
+            kept[stamp] = None
         return None
     validate_claims_file(data, rel_path)
+    if stamp is not None:
+        kept[stamp] = copy.deepcopy(data)
     return data
 
 
@@ -2985,18 +3214,47 @@ def _render_claim_text(cj, *, unicode: bool | None,
     return sep.join(parts) + sep + statement
 
 
+def _single_value(dom) -> "float | None":
+    """Intent:
+        The one value a domain holds when it is a single closed point
+        (`[1.0, 1.0]`, or the point `let axis be 1` reads as), with no
+        value excluded and no dimensions; None otherwise.
+    """
+    from .domain import is_sentinel
+    if len(dom.pieces) != 1 or dom.dims \
+            or any(not is_sentinel(v) for v in dom.excluded):
+        return None
+    piece = dom.pieces[0]
+    if not isinstance(piece, tuple) or isinstance(piece, frozenset) or len(piece) != 2:
+        return None
+    if not (getattr(piece, "closed_lo", True) and getattr(piece, "closed_hi", True)):
+        return None
+    lo, hi = piece
+    if isinstance(lo, bool) or not isinstance(lo, (int, float)) or lo != hi:
+        return None
+    return float(lo)
+
+
 def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
     """A claim constant's bound (`let c be [-5.0, 5.0]`): its interval
     alone when it admits nothing missing, as a constant's bound does
-    unless the claim writes otherwise, else the whole domain."""
-    from .domain import MissingDefaults, _as_domain, admitted, render_domain
+    unless the claim writes otherwise, else the whole domain, completed
+    as a constant's (no hole and no absence beyond what it writes). A
+    real constant that holds one value is that value (`let axis be 1`)."""
+    import math
+
+    from .domain import MissingDefaults, _as_domain, admitted, complete, render_domain
     dom = _as_domain(bound)
-    absent, holes = admitted(dom, dom.policy or MissingDefaults(False, (), "constant",
-                                                                 annotated=False))
+    if dom.policy is None:
+        dom = complete(dom, MissingDefaults(False, (), "constant", annotated=False))
+    absent, holes = admitted(dom)
     if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
-        return render_domain(bound, ascii_mode=not unicode, show_missing=False,
+        point = _single_value(dom)
+        if point is not None and math.isfinite(point):
+            return exact_float_text(point, f"{point:g}")
+        return render_domain(dom, ascii_mode=not unicode, show_missing=False,
                              always_show_type=False)
-    return render_domain(bound, ascii_mode=not unicode, show_missing=show_missing)
+    return render_domain(dom, ascii_mode=not unicode, show_missing=show_missing)
 
 
 def _membership_rhs(cj, unicode: bool) -> str:

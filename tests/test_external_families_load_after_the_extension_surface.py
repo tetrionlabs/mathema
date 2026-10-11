@@ -160,3 +160,66 @@ def test_a_failed_load_warns_once_and_is_tried_again(flaky):
         second = families.families()
     assert "is_flaky_safe" in second
     assert flaky.loads == 2
+
+
+_PACKAGE_INIT = '''
+    from mathema.interfaces.extension import (EXTENSION_API_VERSION,
+                                              ProofResult, SafetyFamily)
+
+
+    def _derive(fn, facts, lhs_src, rhs_src, relation, domain=None,
+                tolerance=None):
+        return ProofResult("proven", sketch="the package family proves it")
+
+
+    FAMILY = SafetyFamily("is_package_safe", derive=_derive)
+'''
+
+
+@pytest.fixture
+def package_site(tmp_path):
+    """A distribution registering a family that lives in a package whose
+    `__init__` imports the extension surface by name."""
+    root = tmp_path / "package_site"
+    _write(root / "package_family" / "__init__.py", _PACKAGE_INIT)
+    _write(root / "package_family-1.0.dist-info" / "METADATA",
+           "Metadata-Version: 2.1\nName: package_family\nVersion: 1.0\n")
+    _write(root / "package_family-1.0.dist-info" / "entry_points.txt",
+           "[mathema.claim_families]\n"
+           "is_package_safe = package_family:FAMILY\n")
+    return root
+
+
+@pytest.mark.parametrize("first", [
+    "",
+    "import mathema",
+    "import mathema.families",
+])
+def test_importing_the_surface_discovers_no_family(package_site, first):
+    """Importing the surface, alone or after `mathema`, neither lists nor
+    loads a registered family, and the family whose package imports the
+    surface is listed by `families()` afterwards, with no warning."""
+    out = _run(package_site, f"""
+        import sys
+        import warnings
+        warnings.simplefilter("error")
+        {first}
+        reached = []
+
+        def profile(frame, event, arg):
+            code = frame.f_code
+            if event == "call" and code.co_filename.endswith("families.py") \\
+                    and code.co_name in ("_discovered_external", "families",
+                                         "_entry_points"):
+                reached.append(code.co_name)
+        sys.setprofile(profile)
+        from mathema.interfaces.extension import Facts
+        sys.setprofile(None)
+        assert reached == [], reached
+        assert "package_family" not in sys.modules
+        from mathema import families
+        assert "is_package_safe" in families.families()
+        print("ok")
+    """)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["ok"], out.stdout

@@ -1,12 +1,12 @@
 # `mathema accept`
 
-The human decision verb: annotate one adjudicated claim with an
-explicit acceptance. Prompted; the exact write is printed first and
-nothing happens without a yes. Deliberately CLI-only: acceptance is a
+The human decision verb: annotate adjudicated claims of one function
+with an explicit acceptance. Prompted; the exact write is printed first
+and nothing happens without a yes. Deliberately CLI-only: acceptance is a
 human act, never exposed to agent tooling or any MCP surface.
 
 ```bash
-mathema accept KEY CLAIM --as evidence|risk|discovery [--by NAME] [--note TEXT]
+mathema accept KEY CLAIM [CLAIM ...] --as evidence|risk|discovery [--by NAME] [--note TEXT]
 mathema accept KEY --as reconciled [--from OLD_KEY]
 ```
 
@@ -22,7 +22,7 @@ and `--concepts` accept the function's stated intent and concept tags.
 | Flag | Meaning |
 |---|---|
 | `key` | function key (the record under `.mathema/verified/`) |
-| `claim` | claim name inside that record (omit for `--as reconciled`, which acts on the whole record) |
+| `claim` | one or more claim names inside that record, accepted together under one prompt (omit for `--as reconciled`, which acts on the whole record). `--corrected` and `--format json` take one claim |
 | `--as` | `evidence`, `risk`, `discovery`, `historical`, `superseded`, `trusted`, or `reconciled` (see below). In text mode you can omit it and mathema reads the claim's verdict and proposes the natural kind; `--format json` never guesses, and without `--as` it exits 2 |
 | `--all` | with `--as reconciled` and no key: reconcile every record whose checksum no longer matches, in one act |
 | `--from OLD_KEY` | with `--as reconciled`: rename `OLD_KEY`'s record to `KEY`, for a function that moved (see [moved functions](#moved-functions-as-reconciled-from)) |
@@ -69,6 +69,18 @@ and `--concepts` accept the function's stated intent and concept tags.
   acceptance, so `verify` skips the retired law there with a non-fatal
   note naming the remedy until the source changes; a DIFFERENT law
   under the same name is new authorship and adjudicates normally.
+
+The claims file and the function's verified record are written in the
+same act, so a `mathema verify` straight after an acceptance finds the
+function unchanged and does not check it again. A claim added or edited
+before the acceptance is still checked by that verify. The exception is
+`--as superseded`, whose authored version is checked on the next verify
+by design.
+
+Several claims of one function can be accepted together,
+`mathema accept KEY claim_a claim_b --as discovery`: each is listed in
+the same shape, and one prompt (`write these 2 acceptances? [y/N]`)
+covers them all.
 
 **What is acceptance?** Verification says what the machine established;
 acceptance is where a *person* takes accountability for what to do about
@@ -177,9 +189,10 @@ write and asks `write this acceptance? [y/N]`; `--yes` answers it here:
 <!-- example: balance session -->
 ```
 $ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
-accepting balances.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
-  - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
-written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
+accept balances.running_total :: never_overshoots_much as a risk, by Charles Babbage
+  verdict unknown
+  its verdict becomes skipped:unknown_but_accepted; strict mode still refuses it, lenient mode proceeds
+written.
 ```
 
 ## `--as historical`
@@ -290,16 +303,16 @@ grammars detected: (none); verified by this run: mathema
 The new key gets no fresh record in the meantime, because a fresh
 record would start its history over. The rename is a human act, since
 only a person can say the two are the same function (again with
-`--yes` standing in for the prompt, `write this rename? [y/N]`):
+`--yes` standing in for the prompt, `write this acceptance? [y/N]`):
 
 <!-- example: balance session -->
 ```
 $ mathema accept ledger.running_total --as reconciled --from balances.running_total --by "Charles Babbage" --yes
-reconciling ledger.running_total from balances.running_total: a record rename, by Charles Babbage
-  - rename the record balances.running_total to ledger.running_total, carrying its claims, acceptance history, lineage and sign-offs
-  - remove .mathema/verified/balances.running_total.yaml
-  - re-stamp the integrity and re-anchor it to HEAD
-written: reconciled: balances.running_total renamed to ledger.running_total (by Charles Babbage)
+accept ledger.running_total as reconciled from balances.running_total, by Charles Babbage
+  rename the record balances.running_total to ledger.running_total, carrying its claims, acceptance history, lineage and sign-offs
+  remove .mathema/verified/balances.running_total.yaml
+  re-stamp the integrity and re-anchor it to HEAD
+written.
 next, to check it at its new location, run: mathema verify ledger.running_total
 ```
 

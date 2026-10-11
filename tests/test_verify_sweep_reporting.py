@@ -9,6 +9,7 @@ function was re-adjudicated.
 
 Each run is a real subprocess, as in test_cli_verify, so an edited
 fixture is re-read from disk rather than from a cached module."""
+import re
 import subprocess
 import sys
 
@@ -130,9 +131,9 @@ def test_a_discovery_reports_the_claims_file_it_rewrote(tmp_path):
     assert "name: negative_exposure_negative\n" not in rewritten
     assert "REPLACE" not in r.stdout
     assert "claims/demo.claims.yaml" in r.stdout
-    printed = [ln.strip() for ln in r.stdout.splitlines()
-               if ln.strip().startswith("route:")]
-    written = [ln.strip() for ln in rewritten.splitlines()
+    printed = re.findall(r"takes its place: \S+ \[(\w+)\]", r.stdout)
+    written = [ln.strip().split(":", 1)[1].strip()
+               for ln in rewritten.splitlines()
                if ln.strip().startswith("route:")]
     assert printed == written
 

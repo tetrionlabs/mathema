@@ -526,8 +526,10 @@ def _plan_update(root: str) -> dict:
             recorded = ""
             if verdict == "falsified":
                 falsified.setdefault(site.key, (current, []))[1].append(row)
+                from ..spec import record_file_name
                 recorded = (f"; recorded falsified in "
-                            f".mathema/verified/{site.key}.yaml")
+                            f".mathema/verified/"
+                            f"{record_file_name(site.key)}")
             lines.append(f"{site.key}: {row['name']} ({row['statement']}) "
                          f"not added for the call in {site.caller} (line "
                          f"{site.line}): {verdict} against the installed "

@@ -48,7 +48,7 @@ def _env_with_repo_on_path():
 
 def _run(root, *extra_args):
     script = ("import sys; from mathema.cli import main; "
-             f"sys.exit(main(['verify', '--root', {str(root)!r}"
+             f"sys.exit(main(['verify', '--root', {str(root)!r}, '--verbose'"
              + "".join(f", {a!r}" for a in extra_args) + "]))")
     return subprocess.run([sys.executable, "-c", script], cwd=str(root),
                           capture_output=True, text=True, env=_env_with_repo_on_path())
@@ -376,6 +376,43 @@ def test_verify_format_json_keeps_the_exit_code_and_the_text_path(tmp_path):
     text, js = _run(root), _run(root, "--format", "json")
     assert text.returncode == js.returncode
     assert "fresh" in text.stdout and not text.stdout.startswith("{")
+
+
+def _run_default(root, *extra_args):
+    script = ("import sys; from mathema.cli import main; "
+              f"sys.exit(main(['verify', '--root', {str(root)!r}"
+              + "".join(f", {a!r}" for a in extra_args) + "]))")
+    return subprocess.run([sys.executable, "-c", script], cwd=str(root),
+                          capture_output=True, text=True,
+                          env=_env_with_repo_on_path())
+
+
+def test_by_default_only_functions_checked_again_or_failing_are_listed(
+        tmp_path):
+    # funcs.add changes, so it is checked again; the other two are fresh
+    # and pass, so only --verbose lists them; the summary always counts
+    # all three
+    root = _seeded(tmp_path)
+    _write_funcs(root / "funcs.py", add_body="    return b + a")
+    quiet = _run_default(root)
+    rows = [ln for ln in quiet.stdout.splitlines() if ln[:4] in ("ok  ", "FAIL")]
+    assert [r.split(":")[0].split()[-1] for r in rows] == ["funcs.add"], \
+        quiet.stdout
+    assert "form changed" in rows[0], quiet.stdout
+    assert "2 unchanged since the last run (not run again), 1 checked" \
+        in quiet.stdout
+    verbose = _run_default(root, "--verbose")
+    assert "ok   funcs.clamp01: fresh" in verbose.stdout
+    assert "ok   funcs.gated_sqrt: fresh" in verbose.stdout
+    assert quiet.returncode == verbose.returncode == 0
+
+
+def test_verbose_leaves_the_json_report_unchanged(tmp_path):
+    root = _seeded(tmp_path)
+    plain = _run_default(root, "--format", "json")
+    verbose = _run_default(root, "--format", "json", "--verbose")
+    assert plain.stdout == verbose.stdout and plain.stdout.startswith("{")
+    assert plain.returncode == verbose.returncode
 
 
 def _foreign_then_native(tmp_path, with_grammar: bool):

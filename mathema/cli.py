@@ -380,9 +380,6 @@ def cmd_verify(args) -> int:
     the sweep can discover, the stores enumerate the population."""
     import os
 
-    from .conjecture import GRAMMAR
-    from .verify import verify_project
-
     _validate_trials_scale(args.trials_scale)
     _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
@@ -413,6 +410,18 @@ def cmd_verify(args) -> int:
             keys.append(target)
         else:
             files.append(path)
+    from ._run_scope import run_scope
+    with run_scope():
+        return _verify_and_print(args, keys, files)
+
+
+def _verify_and_print(args, keys: list, files: list) -> int:
+    """Intent:
+        `cmd_verify`'s sweep over the resolved `keys` and claims
+        `files`, rendered as text or JSON; returns the exit code.
+    """
+    from .conjecture import GRAMMAR
+    from .verify import verify_project
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
                             trials_downscale=args.trials_scale,
@@ -450,7 +459,8 @@ def cmd_verify(args) -> int:
                        "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
-    lines = list(result.lines)
+    lines = [line for i, line in enumerate(result.lines)
+             if getattr(args, "verbose", False) or i not in result.quiet]
     if definitions:
         # definitions are axioms, taken at face value: listed apart
         # from the verdicts and outside their counts
@@ -2386,17 +2396,17 @@ def _accept_context(args, by: str | None) -> int:
                                     applied=False)
             return _accept_json(args, kind=kind, plan=plan, applied=True,
                                 written=applier(plan))
-        if is_scope:
-            print(f"accepting the stated intent of {args.key} as "
-                  f"documented (scope level; binds to the text)")
-        for action in plan["actions"]:
-            print(f"  - {action}")
-        if not args.yes:
-            if input("write this acceptance? [y/N] ").strip().lower() \
-                    not in ("y", "yes"):
-                print("nothing written")
-                return 1
-        print(f"written: {applier(plan)}")
+        print(f"accept the stated intent of {args.key} as documented"
+              + (f", by {by}" if by else ""))
+        print("  it binds to the text alone (scope level)" if is_scope
+              else "  it binds to the signature, the raised exceptions and "
+                   "the text; a body-only refactor keeps it, an interface "
+                   "or wording change re-opens it")
+        if not args.yes and not _confirmed(1):
+            print("nothing written")
+            return 1
+        applier(plan)
+        print("written.")
         if is_scope:
             return 0
     if args.concepts or args.dismiss_concepts:
@@ -2432,13 +2442,12 @@ def _record_lock_stamp(root: str, key: str, entry_lock: "dict | None",
     set or drop the `locked` stamp, append the event to the record's
     lock history, restamp integrity, write back. Missing record: fine,
     the next sweep stamps it from the meta file."""
-    import os
-
     import yaml
 
-    from .spec import integrity_checksum, verified_dir, write_yaml
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    if not os.path.exists(path):
+    from .spec import (find_record, integrity_checksum, verified_dir,
+                       write_yaml)
+    path = find_record(verified_dir(root), key)
+    if path is None:
         return
     doc = yaml.safe_load(open(path)) or {}
     entry = doc.get(key)
@@ -2571,7 +2580,8 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
         acceptance.
     """
     from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
-                             apply_acceptance, plan_rename)
+                             apply_acceptance, describe_acceptance,
+                             plan_rename)
     if args.as_ != "reconciled":
         _bad_argument("mathema accept: --from only accompanies --as "
                       "reconciled (a record rename)")
@@ -2607,10 +2617,8 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
             return _accept_json(args, kind="rename", error=str(e))
         return _accept_json(args, kind="rename", plan=plan, applied=True,
                             written=summary, extra=extra)
-    print(f"reconciling {args.key} from {args.from_key}: a record rename"
-          + (f", by {by}" if by else ""))
-    for action in plan["actions"]:
-        print(f"  - {action}")
+    for line in describe_acceptance(plan):
+        print(line)
     if not plan["form_matches"] and not args.accept_form_change and args.yes:
         print(f"cannot accept: the form hashes differ "
               f"({plan['recorded_form']} recorded, {plan['live_form']} "
@@ -2619,8 +2627,7 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
               f"confirm at the prompt. Nothing written")
         return 1
     if not args.yes:
-        answer = input("write this rename? [y/N] ").strip().lower()
-        if answer not in ("y", "yes"):
+        if not _confirmed(1):
             print("nothing written")
             return 1
         if not plan["form_matches"] and not args.accept_form_change:
@@ -2631,28 +2638,32 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
                 return 1
             plan["confirm_form_change"] = True
     try:
-        summary = apply_acceptance(plan)
+        apply_acceptance(plan)
     except AcceptanceError as e:
         print(f"cannot accept: {e}")
         return 1
-    print(f"written: {summary}")
+    print("written.")
     print(f"next, to check it at its new location, run: mathema verify "
           f"{args.key}")
     return 0
 
 
 def cmd_accept(args) -> int:
-    """The human decision verb: annotate one adjudicated claim with an
-    acceptance (`--as evidence | risk | discovery`). Prompted, the
-    exact write is printed first and nothing happens without a yes.
+    """The human decision verb: annotate adjudicated claims of one
+    function with an acceptance (`--as evidence | risk | discovery`).
+    Prompted once, the exact write is printed first and nothing happens
+    without a yes.
     Deliberately CLI-only: acceptance is a human act, never exposed to
     agent tooling or any MCP surface."""
     from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
-                             apply_acceptance, corrected_stub,
-                             default_identity, plan_acceptance,
-                             suggest_acceptance)
+                             apply_acceptance, apply_acceptances,
+                             corrected_stub, default_identity,
+                             describe_acceptance, plan_acceptance,
+                             plan_acceptances, suggest_acceptance)
 
     by = args.by or default_identity()
+    args.claims = list(getattr(args, "claims", None) or [])
+    args.claim = args.claims[0] if args.claims else None
     if args.intent or args.concepts or args.dismiss_concepts:
         return _accept_context(args, by)
     as_json = getattr(args, "format", "text") == "json"
@@ -2668,37 +2679,47 @@ def cmd_accept(args) -> int:
         if not keys:
             print("nothing to reconcile: every record's checksum matches")
             return 0
-        print(f"reconciling {len(keys)} record(s) whose checksum no longer "
-              f"matches their contents:")
+        print(f"accept {len(keys)} record{'s' if len(keys) != 1 else ''} "
+              f"as reconciled" + (f", by {by}" if by else ""))
         for k in keys:
-            print(f"  - {k}")
-        if not args.yes:
-            answer = input("re-stamp all of these over their current "
-                           "contents? [y/N] ").strip().lower()
-            if answer not in ("y", "yes"):
-                print("nothing written")
-                return 1
-        done = reconcile_all(args.root, keys, by=by, note=args.note)
-        print(f"reconciled {len(done)} record(s): {', '.join(done)}")
+            print(f"  {k}: its integrity is re-stamped over its current "
+                  f"contents and anchored to HEAD")
+        if not args.yes and not _confirmed(len(keys)):
+            print("nothing written")
+            return 1
+        reconcile_all(args.root, keys, by=by, note=args.note)
+        print("written.")
         return 0
     if not args.key:
         print("cannot accept: a key is required (or, to clear a whole "
               "merge: --as reconciled --all)")
         return 2
+    claim_names = list(dict.fromkeys(args.claims or []))
+    if len(claim_names) > 1 and as_json:
+        return _accept_json(args, kind="claim", code=2,
+                            error="JSON mode accepts one claim per run; "
+                                  "name one claim")
+    if len(claim_names) > 1 and getattr(args, "corrected", None):
+        print("cannot accept: --corrected states the correction of one "
+              "claim; name one claim with it")
+        return 2
     # guide a newcomer who omits --as with a claim: infer the natural kind
     # from the claim's verdict and say why. The confirmation below still
     # makes it a deliberate act; the JSON path stays explicit.
-    if not args.as_ and args.claim and not as_json:
-        try:
-            kind, verdict, reason = suggest_acceptance(args.root, args.key,
-                                                       args.claim)
-        except AcceptanceError as e:
-            print(f"cannot accept: {e}")
-            return 2 if isinstance(e, UnknownAcceptanceTarget) else 1
-        print(f"no --as given: {args.claim} is {verdict}, so accepting as "
-              f"{kind} ({reason})")
-        args.as_ = kind
-    if not args.as_ or (not args.claim and args.as_ != "reconciled"):
+    kinds: dict = {}
+    if not args.as_ and claim_names and not as_json:
+        for name in claim_names:
+            try:
+                kind, verdict, reason = suggest_acceptance(args.root,
+                                                           args.key, name)
+            except AcceptanceError as e:
+                print(f"cannot accept: {e}")
+                return 2 if isinstance(e, UnknownAcceptanceTarget) else 1
+            print(f"no --as given: {name} is {verdict}, so accepting as "
+                  f"{kind} ({reason})")
+            kinds[name] = kind
+        args.as_ = kinds[claim_names[0]]
+    if not args.as_ or (not claim_names and args.as_ != "reconciled"):
         msg = ("an acceptance needs --as, and a claim name for every kind "
                "but `--as reconciled` (which re-stamps the whole record); "
                "or use --intent / --concepts")
@@ -2711,9 +2732,15 @@ def cmd_accept(args) -> int:
         print("cannot accept: --corrected only accompanies --as discovery")
         return 2
     try:
-        plan = plan_acceptance(args.root, args.key, args.claim, args.as_,
-                               by=by, note=args.note,
-                               corrected=getattr(args, "corrected", None))
+        if args.as_ == "reconciled":
+            plans = [plan_acceptance(args.root, args.key, None, "reconciled",
+                                     by=by, note=args.note)]
+        else:
+            plans = plan_acceptances(
+                args.root, args.key,
+                [(name, kinds.get(name, args.as_)) for name in claim_names],
+                by=by, note=args.note,
+                corrected=getattr(args, "corrected", None))
     except AcceptanceError as e:
         code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
         if as_json:
@@ -2724,43 +2751,42 @@ def cmd_accept(args) -> int:
         # plan-only unless --yes: a client previews the change, shows
         # it to a human, then re-runs with --yes. JSON mode never
         # prompts, so a non-interactive caller can't hang on stdin.
+        plan = plans[0]
         if not args.yes:
             return _accept_json(args, kind="claim", plan=plan,
                                 applied=False)
         summary = apply_acceptance(plan)
         return _accept_json(args, kind="claim", plan=plan, applied=True,
                             written=summary)
-    if args.as_ == "reconciled":
-        print(f"reconciling {args.key}: re-stamp its integrity over the "
-              f"current contents" + (f", by {by}" if by else ""))
-    else:
-        print(f"accepting {args.key} :: {args.claim} "
-              f"(verdict {plan['verdict']}) as {args.as_}"
-              + (f", by {by}" if by else ""))
-    for action in plan["actions"]:
-        print(f"  - {action}")
-    if not args.yes:
-        answer = input("write this acceptance? [y/N] ").strip().lower()
-        if answer not in ("y", "yes"):
-            print("nothing written")
-            return 1
-    summary = apply_acceptance(plan)
-    print(f"written: {summary}")
-    stub = corrected_stub(plan)
-    if stub is not None:
-        if plan.get("declared_edits"):
-            print(f"declared layer: {', '.join(plan['declared_edits'])} now "
-                  f"declares {stub['name']} in place of {args.claim} (the "
-                  "superseded claim stays in the record's discoveries "
-                  "section):")
-        else:
+    for plan in plans:
+        for line in describe_acceptance(plan):
+            print(line)
+    if not args.yes and not _confirmed(len(plans)):
+        print("nothing written")
+        return 1
+    apply_acceptances(plans)
+    print("written.")
+    for plan in plans:
+        stub = corrected_stub(plan)
+        if stub is not None and not plan.get("declared_edits"):
             print("declared-layer stanza: add this to the claims file that "
-                  f"declares {args.claim}, in its place (the superseded "
-                  "claim stays in the record's discoveries section):")
-        print(f"  - name: {stub['name']}")
-        print(f"    statement: \"{stub['statement']}\"")
-        print(f"    route: {stub['route']}")
+                  f"declares {plan['claim_name']}, in its place (the "
+                  "retired claim stays in the record's discoveries "
+                  "section):")
+            print(f"  - name: {stub['name']}")
+            print(f"    statement: \"{stub['statement']}\"")
+            print(f"    route: {stub['route']}")
     return 0
+
+
+def _confirmed(count: int) -> bool:
+    """Intent:
+        Ask the one confirmation an acceptance takes, naming how many
+        acceptances it covers when there are several. True on a yes.
+    """
+    question = ("write this acceptance? [y/N] " if count == 1
+                else f"write these {count} acceptances? [y/N] ")
+    return input(question).strip().lower() in ("y", "yes")
 
 
 def _add_gate_flags(parser, *, default_strict: bool) -> None:
@@ -3077,6 +3103,11 @@ def main(argv: list[str] | None = None) -> int:
                          "`check --format compact` and the MCP tools use)")
     pv.add_argument("--output", metavar="FILE",
                     help="write the report to a file instead of stdout")
+    pv.add_argument("--verbose", action="store_true",
+                    help="list every function, the fresh ones that passed "
+                         "too; by default the text report lists only the "
+                         "functions checked again or with a problem, then "
+                         "the summary")
     _add_gate_flags(pv, default_strict=True)
     pv.set_defaults(fn=cmd_verify)
 
@@ -3365,8 +3396,9 @@ def main(argv: list[str] | None = None) -> int:
     pac.add_argument("key", nargs="?", default=None,
                      help="function key (the record under .mathema/verified/); "
                           "omit only with `--as reconciled --all`")
-    pac.add_argument("claim", nargs="?", default=None,
-                     help="claim name inside that record (omit for "
+    pac.add_argument("claims", nargs="*", default=[], metavar="CLAIM",
+                     help="claim names inside that record, accepted "
+                          "together under one prompt (omit for "
                           "--intent / --concepts / --as reconciled)")
     pac.add_argument("--all", dest="all_records", action="store_true",
                      help="with `--as reconciled`: reconcile every record "

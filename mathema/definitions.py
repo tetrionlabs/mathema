@@ -214,9 +214,9 @@ def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
     project at `root`, or None."""
     if root is None:
         return None
-    from .spec import read_verified_file, verified_dir
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    if not os.path.exists(path):
+    from .spec import find_record, read_verified_file, verified_dir
+    path = find_record(verified_dir(root), key)
+    if path is None:
         return None
     data, _ = read_verified_file(path)
     entry = (data or {}).get(key) or {}
@@ -586,9 +586,14 @@ _LIBRARY_CACHE: dict = {}
 
 def _library_claims(root: "str | None", load) -> dict:
     """`load(root)`, read again only when a claims file under `root`
-    (or a bundled one) has changed since the last read."""
+    (or a bundled one) has changed since the last read. Inside a run
+    scope it is read once for the run."""
+    from . import _run_scope
     from .compendium import _bundled_dir
     from .spec import claims_file_paths
+    kept = _run_scope.kept("library_claims")
+    if kept is not None and ("rowbook", root) in kept:
+        return kept[("rowbook", root)]
     paths = claims_file_paths(_bundled_dir())
     if root is not None:
         paths += claims_file_paths(root, exclude=(_bundled_dir(),))
@@ -600,9 +605,12 @@ def _library_claims(root: "str | None", load) -> dict:
             continue
     cached = _LIBRARY_CACHE.get(root)
     if cached is not None and cached[0] == stamp:
-        return cached[1]
-    loaded = load(root)
-    _LIBRARY_CACHE[root] = (stamp, loaded)
+        loaded = cached[1]
+    else:
+        loaded = load(root)
+        _LIBRARY_CACHE[root] = (stamp, loaded)
+    if kept is not None:
+        kept[("rowbook", root)] = loaded
     return loaded
 
 

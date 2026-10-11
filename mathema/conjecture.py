@@ -1493,7 +1493,96 @@ def claim(law: str, name: str | None = None, source: str = "user",
     `for ... in ...` in one claim, though, raises `ConflictingDomainBinding`
     immediately; two different bounds for one name has no principled
     default to pick silently. `trials` is the claim's own trial
-    budget, a positive whole number, which may exceed the usual limit."""
+    budget, a positive whole number, which may exceed the usual limit.
+
+    Inside a run scope (`_run_scope.run_scope`) a claim stated again with
+    the same text and arguments is parsed once for the run; each call
+    gets its own copy of the parse."""
+    from . import _run_scope
+    kept = _run_scope.kept("claims")
+    if kept is not None:
+        key = _claim_cache_key(law, name, source, route, grammar, funcs,
+                               tolerance, pseudo_infinity, meta,
+                               matrix_names, trials)
+        if key is not None:
+            hit = kept.get(key)
+            if hit is None:
+                hit = kept[key] = _claim_parse(
+                    law, name, source, route, grammar, funcs, tolerance,
+                    pseudo_infinity, meta, matrix_names, trials)
+            return _claim_copy(hit)
+    return _claim_parse(law, name, source, route, grammar, funcs, tolerance,
+                        pseudo_infinity, meta, matrix_names, trials)
+
+
+def _claim_copy(cj: Conjecture) -> Conjecture:
+    """Intent:
+        A copy of a parsed claim that its holder may change without
+        touching `cj`: every dict and list field is a new container
+        (holding the same members, which nothing changes in place), and
+        `meta` is copied all the way down.
+    """
+    import copy
+    from dataclasses import fields
+    out = copy.copy(cj)
+    for f in fields(cj):
+        value = getattr(cj, f.name)
+        if isinstance(value, dict):
+            setattr(out, f.name, dict(value))
+        elif isinstance(value, list):
+            setattr(out, f.name, list(value))
+    out.meta = copy.deepcopy(cj.meta)
+    return out
+
+
+def _plain(value) -> bool:
+    """Whether `value` is built only of strings, numbers, booleans,
+    None, and lists, tuples and dicts of those."""
+    if value is None or isinstance(value, (str, int, float)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain(v) for v in value)
+    if isinstance(value, dict):
+        return all(_plain(k) and _plain(v) for k, v in value.items())
+    return False
+
+
+def _claim_cache_key(*args) -> "str | None":
+    """Intent:
+        The run-scope key of one `claim()` call: its arguments' `repr`
+        (which tells 1 from 1.0 and True, a list from a tuple, and keeps
+        a dict's order), or None when an argument is not plain data
+        (`_plain`) or a reading context is set that changes how claim
+        text parses (a matrix or constant reading, an exception scope).
+    """
+    from . import grammar as _grammar
+    from .policy import _SCOPE as _policy_scope
+    if (_grammar._BAR_MATRICES.get() or _grammar._ORDERED_MATRICES.get()
+            or _grammar._SHADOWED_CONSTANTS.get()
+            or _grammar._RENDER_MATRICES.get()
+            or _policy_scope.get() is not None):
+        return None
+    law, *rest = args
+    if not isinstance(law, str):
+        return None
+    matrix_names = rest[-2]
+    rest[-2] = sorted(matrix_names) if isinstance(
+        matrix_names, frozenset) and all(isinstance(m, str)
+                                         for m in matrix_names) else object()
+    if not all(_plain(a) for a in rest):
+        return None
+    return repr((law, *rest))
+
+
+def _claim_parse(law: str, name: str | None, source: str, route: str,
+                 grammar: str, funcs: dict | None, tolerance: float | None,
+                 pseudo_infinity: float | None, meta: dict | None,
+                 matrix_names: frozenset,
+                 trials: "int | None") -> Conjecture:
+    """Intent:
+        `claim`'s reading of one law text with its arguments, with no
+        run-scope sharing.
+    """
     if trials is not None:
         if isinstance(trials, bool) or not isinstance(trials, int) or trials < 1:
             raise InvalidConjecture(
@@ -5449,6 +5538,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_examined(ctx, fn, facts),
                              _cap=verdict_cap))
             continue
+        grounded = (None if call_pins or ctx.family is not None
+                    or ctx.assumption else _ground_proof_of(ctx, fn, facts))
+        if grounded is not None and (grounded.status == "disproven"
+                                     or cj.route == "probe"):
+            # a ground claim is decided at its own call: a failure there
+            # is the falsification, its call the witness
+            out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                             _cap=verdict_cap))
+            continue
         from .probing import LanguageDrawFailed
         try:
             if call_pins:
@@ -5470,6 +5568,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 derived = _adjudicate_derive(
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
+                if grounded is not None and (derived is None
+                                             or derived.verdict != "proven"):
+                    # a ground claim that holds at its own call and no
+                    # symbolic proof covers: the call decides it
+                    ctx.companion = None
+                    out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                                     _cap=verdict_cap))
+                    continue
                 if derived is not None:
                     derived, lines = _with_empty_input_lines(
                         derived, ctx, fn, facts, float_companions,
@@ -9339,6 +9445,63 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                        "mathema.recursion_depth": dict(info)})
 
 
+def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
+    """Intent:
+        `_brute_force.ground_proof` for this claim under the extensive
+        wall-clock cap: the claim evaluated once at its own literal
+        calls, or None when it is not ground, cannot be decided there,
+        or outruns the cap.
+    """
+    from ._brute_force import ground_proof
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(
+            lambda: ground_proof(ctx.cj, fn, facts, _bound_funcs_of(ctx.cj)),
+            EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+
+
+def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
+    """Intent:
+        The record of a ground claim decided at its own call. On the
+        probe route: `falsified` with the call as the witness, else
+        `holds`. On a derive route the mechanism is the one-point sweep,
+        `derive:brute_force`: `falsified` with the call as an executed
+        witness, `proven` when the function is shown pure, else `holds`.
+    """
+    cj, note = ctx.cj, ctx.note
+    said = "evaluated once, at the claim's own call"
+    note = f"{note}; {said}".lstrip("; ")
+    meta = {k: v for k, v in _provenance_meta(proof).items()
+            if route != "probe" or k != "mathema.derive_route"}
+    if proof.status == "disproven":
+        if route != "probe":
+            meta["mathema.corroboration"] = "reproduced"
+        return Probe(cj.name, ctx.statement, "falsified",
+                     route="probe" if route == "probe" else "derive:brute_force",
+                     sketch=None if route == "probe" else proof.sketch,
+                     counterexample=proof.counterexample, note=note,
+                     meta=meta)
+    verdict = ("proven" if proof.status == "proven" and route != "probe"
+               else "holds")
+    note = f"{note}; {proof.sketch}"
+    fallen = ctx.derive_undecided
+    if fallen is not None and route != "probe":
+        # the symbolic attempt that did not decide it, in the trail
+        trail = _derive_attempt_label(fallen)
+        note = f"{note}; symbolic {trail}"
+        meta["mathema.routes_attempted"] = (
+            f"routes attempted, {trail}; derive:brute_force: {verdict}")
+        meta.update({k: v for k, v in (fallen.meta or {}).items()
+                     if k.startswith("mathema.derive_") or k == "mathema.timeout"})
+        meta["mathema.derive_route"] = "brute_force"
+    return Probe(cj.name, ctx.statement, verdict,
+                 route="probe" if route == "probe" else "derive:brute_force",
+                 sketch=None if route == "probe" else proof.sketch,
+                 note=note, meta=meta)
+
+
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
     """The `f =:= g` ladder, in its own module; see equivalence.py."""
     from .equivalence import adjudicate
@@ -10238,6 +10401,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         p: fill for p in kinds
         if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
                                 )) is not None}
+    from ._missing_policy import Presence
+    executed_record.presence = Presence(
+        {p: k for p, k in sampled_kinds.items() if p not in literal_args},
+        {p: (ctx.record_domain or {}).get(p) or cj_domain.get(p) for p in kinds})
     from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")

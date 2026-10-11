@@ -253,9 +253,9 @@ def accept_concepts(root: str, key: str, accepted: list,
     auth.enforce_policy(auth.require_human("accept --concepts"), root)
     wrote = []
     if accepted:
-        from .spec import verified_dir, write_yaml
-        path = os.path.join(verified_dir(root), f"{key}.yaml")
-        if os.path.exists(path):
+        from .spec import find_record, verified_dir, write_yaml
+        path = find_record(verified_dir(root), key)
+        if path is not None:
             doc = yaml.safe_load(open(path)) or {}
             entry = doc.get(key) or {}
             have = list(entry.get("concepts_accepted") or [])
