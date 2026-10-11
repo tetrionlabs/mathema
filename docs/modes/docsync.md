@@ -43,6 +43,17 @@ mathema docsync [mypkg ...] [--root .] [--yes] [--write-docstrings] [--report] [
 - **Curation** (`.mathema/meta/`): the small human-decision files,
   `concepts.yaml` (dismissed suggestions, per key) and `intent.yaml`
   (module- and project-scope intent acceptances).
+- **Record file names**: `<key>` in both layers is the function key
+  with every character other than a letter, a digit or one of `_.-~`
+  percent-encoded. A dotted key keeps its spelling
+  (`.mathema/verified/pricing.discounted.yaml`), and a key holding
+  `/`, `:` or `#` is one file directly in the layer: the key
+  `lang:src/ema.src#ema` is
+  `.mathema/verified/lang%3Asrc%2Fema.src%23ema.yaml`. The key itself
+  is also the top-level field of the record, which is where a reader
+  takes it from. A record still under its earlier file name (the key
+  used as the path as it stood) is read, and renamed the next time
+  that layer is written.
 - **Index** (`.mathema/index.yaml`): generated, system intent (top
   README), module intents (module docstrings/READMEs), function
   intents, keys, a sed-ready `span` per function, verified-record

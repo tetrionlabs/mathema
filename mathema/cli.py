@@ -2432,13 +2432,12 @@ def _record_lock_stamp(root: str, key: str, entry_lock: "dict | None",
     set or drop the `locked` stamp, append the event to the record's
     lock history, restamp integrity, write back. Missing record: fine,
     the next sweep stamps it from the meta file."""
-    import os
-
     import yaml
 
-    from .spec import integrity_checksum, verified_dir, write_yaml
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    if not os.path.exists(path):
+    from .spec import (find_record, integrity_checksum, verified_dir,
+                       write_yaml)
+    path = find_record(verified_dir(root), key)
+    if path is None:
         return
     doc = yaml.safe_load(open(path)) or {}
     entry = doc.get(key)

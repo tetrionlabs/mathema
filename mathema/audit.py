@@ -33,6 +33,14 @@ from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
 
 
+def _declared_record(root: str, key: str) -> str | None:
+    """The materialized declared record for `key`, relative to `root`,
+    or None when there is none."""
+    from .spec import declared_dir, find_record
+    path = find_record(declared_dir(root), key)
+    return os.path.relpath(path, root) if path else None
+
+
 def _source_span(fn) -> str | None:
     """Intent:
         The function's own line range in its source file, in the
@@ -1369,13 +1377,9 @@ def build_index(targets: list[str], root: str = ".") -> dict:
             "file": entry["file"],
             "span": _source_span(fn),
             "verified": key in verified,
-            "spec": (os.path.join(".mathema", "verified", f"{key}.yaml")
+            "spec": ((verified.get(key) or {}).get("source")
                      if key in verified else None),
-            "declared": (os.path.join(".mathema", "declared",
-                                      f"{key}.yaml")
-                         if os.path.exists(os.path.join(
-                             root_abs, ".mathema", "declared",
-                             f"{key}.yaml")) else None),
+            "declared": _declared_record(root_abs, key),
             "concepts": (list((ventry.get("meta") or {}).get("concepts")
                               or [])
                          or _row_concepts(key, fn, {}, verified)),

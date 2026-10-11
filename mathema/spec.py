@@ -462,7 +462,8 @@ def save_spec(ex, path: str) -> str:
 #                      per claim), a file-level `grammar` field sets that
 #                      file's default dialect. Never carries `identity`.
 #   load_verified() , .mathema/verified/<key>.yaml, one machine-written file
-#                       per function (what `record()` produces). This, and
+#                       per function (what `record()` produces), the file
+#                       named by `record_file_name(key)`. This, and
 #                       only this, is the freshness baseline.
 #   load_specs()    ; a read-only, display-only merge of the two, for
 #                       `mathema status` and human introspection. Anything
@@ -878,7 +879,7 @@ def record(ex, key: str | None = None, root: str = ".",
     starts on the `declared` rung; `documented` is the human act of
     accepting it (`mathema accept --intent`)."""
     key = key or getattr(ex.facts, "name", "unknown")
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
+    path = record_path(verified_dir(root), key)
     if os.path.exists(path):
         _data, reason = read_verified_file(path)
         if reason is not None:
@@ -978,8 +979,7 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
     """
     entry.setdefault("identity", {})["integrity"] = integrity_checksum(entry)
     form = (entry.get("identity") or {}).get("form", "")
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = record_path(verified_dir(root), key)
     return write_yaml(path, {key: entry},
                       header=f"machine record; binds to form {form}")
 
@@ -1260,6 +1260,126 @@ def verified_dir(root: str = ".") -> str:
     return os.path.join(root, ".mathema", "verified")
 
 
+def declared_dir(root: str = ".") -> str:
+    """The materialized declared layer's directory: `.mathema/declared/`."""
+    return os.path.join(root, ".mathema", "declared")
+
+
+_RECORD_SUFFIX = ".yaml"
+
+
+def record_file_name(key: str) -> str:
+    """Intent:
+        The file name of `key`'s record in a store directory (the
+        verified or the declared layer): the key with every character
+        outside ASCII letters, digits and `_.-~` percent-encoded, then
+        `.yaml`. A dotted key keeps its spelling
+        (`pkg.mod.fn.yaml`); a tagged key becomes one file directly in
+        the store (`lang:src/ema.src#ema` is
+        `lang%3Asrc%2Fema.src%23ema.yaml`).
+        `record_key` reverses it.
+    """
+    from urllib.parse import quote
+    return quote(key, safe="") + _RECORD_SUFFIX
+
+
+def record_key(rel_path: str) -> str:
+    """Intent:
+        The key of the record file at `rel_path`, relative to its store
+        directory: the decoded name of a file `record_file_name` named,
+        else the path itself without `.yaml` (the older naming, where
+        the key was the file path as it stood and a `/` in it made a
+        subdirectory).
+
+    Notes:
+        A name is read as encoded when decoding and encoding it again
+        gives it back. An older name holding a literal `%` followed by
+        two hex digits reads as encoded.
+    """
+    from urllib.parse import quote, unquote
+    stem = rel_path.replace(os.sep, "/")
+    if stem.endswith(_RECORD_SUFFIX):
+        stem = stem[:-len(_RECORD_SUFFIX)]
+    if "/" in stem:
+        return stem
+    decoded = unquote(stem)
+    return decoded if quote(decoded, safe="") == stem else stem
+
+
+def _record_files(store_dir: str) -> list:
+    """Every `.yaml` file under `store_dir`, at any depth, sorted by its
+    path relative to the store."""
+    if not os.path.isdir(store_dir):
+        return []
+    found = []
+    for dirpath, _dirnames, filenames in os.walk(store_dir):
+        for name in filenames:
+            if name.endswith(_RECORD_SUFFIX):
+                found.append(os.path.join(dirpath, name))
+    return sorted(found, key=lambda p: os.path.relpath(p, store_dir))
+
+
+def _is_current_name(path: str, store_dir: str) -> bool:
+    rel = os.path.relpath(path, store_dir)
+    return rel == record_file_name(record_key(rel))
+
+
+def migrate_record_names(store_dir: str) -> list:
+    """Intent:
+        Rename every record file in `store_dir` still under the older
+        naming to `record_file_name` of its key, and remove the
+        subdirectories that leaves empty. A file whose new name is
+        already taken stays where it is. Returns the `(old, new)` paths
+        renamed.
+    """
+    moved = []
+    for path in _record_files(store_dir):
+        if _is_current_name(path, store_dir):
+            continue
+        key = record_key(os.path.relpath(path, store_dir))
+        target = os.path.join(store_dir, record_file_name(key))
+        if os.path.exists(target):
+            continue
+        os.replace(path, target)
+        moved.append((path, target))
+    for dirpath, _dirnames, _filenames in os.walk(store_dir,
+                                                  topdown=False):
+        if dirpath != store_dir and not os.listdir(dirpath):
+            os.rmdir(dirpath)
+    return moved
+
+
+#: the store directories (real paths) already migrated in this process
+_MIGRATED_STORES: set = set()
+
+
+def record_path(store_dir: str, key: str) -> str:
+    """Intent:
+        The path to write `key`'s record to in `store_dir`, after
+        renaming the store's older names (`migrate_record_names`, once
+        per store per process), so a key's record written before under
+        the older naming is the file this path names.
+    """
+    real = os.path.realpath(store_dir)
+    if real not in _MIGRATED_STORES:
+        migrate_record_names(store_dir)
+        _MIGRATED_STORES.add(real)
+    return os.path.join(store_dir, record_file_name(key))
+
+
+def find_record(store_dir: str, key: str) -> "str | None":
+    """Intent:
+        The existing record file for `key` in `store_dir`, without
+        changing the store: the file `record_file_name` names, else the
+        file the older naming gives, else None.
+    """
+    for path in (os.path.join(store_dir, record_file_name(key)),
+                 os.path.join(store_dir, f"{key}{_RECORD_SUFFIX}")):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def load_verified(root: str = ".") -> dict:
     """The verified layer only: machine-written records
     (verified-schema.md) under .mathema/verified/, one file per
@@ -1272,10 +1392,17 @@ def load_verified(root: str = ".") -> dict:
     conflict markers, the file is empty) is left out here and listed
     by `unreadable_verified`."""
     merged: dict = {}
+    current: set = set()
+    store = verified_dir(root)
     for path in _verified_files(root):
         data, _reason = read_verified_file(path)
+        named = _is_current_name(path, store)
         for key, entry in (data or {}).items():
+            if key in current and not named:
+                continue
             merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+            if named:
+                current.add(key)
     return merged
 
 
@@ -1285,12 +1412,8 @@ class UnreadableRecord(ValueError):
 
 
 def _verified_files(root: str) -> list:
-    machine_dir = verified_dir(root)
-    if not os.path.isdir(machine_dir):
-        return []
-    return [os.path.join(machine_dir, name)
-            for name in sorted(os.listdir(machine_dir))
-            if name.endswith(".yaml")]
+    """Every record file in the verified layer, under either naming."""
+    return _record_files(verified_dir(root))
 
 
 def _safe_loader():
@@ -1380,13 +1503,14 @@ def unreadable_verified(root: str = ".") -> dict:
     """Intent:
         Every verified record file that does not read as a record, as
         `{key: {"source": relpath, "reason": text}}`, the key being the
-        file's name without `.yaml` (the name `record()` gives it).
+        one the file's name encodes (`record_key`).
     """
     out: dict = {}
+    store = verified_dir(root)
     for path in _verified_files(root):
         data, reason = read_verified_file(path)
         if reason is not None:
-            key = os.path.basename(path)[:-len(".yaml")]
+            key = record_key(os.path.relpath(path, store))
             out[key] = {"source": os.path.relpath(path, root),
                         "reason": reason}
     return out

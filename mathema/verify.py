@@ -1679,10 +1679,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
+                from .spec import record_file_name
                 msg = (f"{key}: a claim in this function's verified "
                        f"record does not parse under the current "
                        f"grammar ({e}); rebuild the record: delete "
-                       f".mathema/verified/{key}.yaml and re-run verify")
+                       f".mathema/verified/{record_file_name(key)} and "
+                       f"re-run verify")
             else:
                 where = ((declared_info or {}).get("source")
                          or "its docstring or claims file")

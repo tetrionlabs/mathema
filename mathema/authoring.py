@@ -292,12 +292,10 @@ def materialize_declared(fn, key: str, root: str = ".") -> str:
     which read the live function directly, regenerate this file as often
     as convenient, and never hand-edit it.
     """
-    import os
-
-    from .spec import write_yaml
+    from .spec import declared_dir, record_path, write_yaml
 
     entry = {"claims": declared_from_function(fn)}
-    path = os.path.join(root, ".mathema", "declared", f"{key}.yaml")
+    path = record_path(declared_dir(root), key)
     return write_yaml(path, {key: entry},
                       header=f"machine-generated from decorator/docstring claims "
                              f"on {key}; regenerated on every "
