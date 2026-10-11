@@ -10238,6 +10238,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         p: fill for p in kinds
         if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
                                 )) is not None}
+    from ._missing_policy import Presence
+    executed_record.presence = Presence(
+        {p: k for p, k in sampled_kinds.items() if p not in literal_args},
+        {p: (ctx.record_domain or {}).get(p) or cj_domain.get(p) for p in kinds})
     from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")
