@@ -53,7 +53,7 @@ def _domain_bits(fn) -> dict:
 
 
 def test_the_algorithm_version_moved_with_the_scale():
-    assert CLARITY_ALGO == "entropy-dimensions@1.3"
+    assert CLARITY_ALGO == "entropy-dimensions@1.4"
 
 
 def test_less_is_known_about_an_unannotated_parameter(tmp_path):

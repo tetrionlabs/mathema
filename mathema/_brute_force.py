@@ -137,23 +137,63 @@ def _membership_words(rhs: str, wanted: bool) -> str:
     return f"is {'' if wanted else 'not '}in {text}"
 
 
-def _holds_at(total: int, judged: list) -> str:
+class _Scope:
+    """Where a sweep's finite points came from, in words: the claim's
+    own binding (`the claim ranges over 3 points`), the function's
+    domain (`the function's domain has 3 points`: its annotation, a
+    guard to a set, or a domain the check was given), or the two
+    together for a claim binding some parameters and not others."""
+
+    def __init__(self, cj, names: list):
+        bound = set(getattr(cj, "domain", None) or {})
+        claimed = [n for n in names if n in bound]
+        if len(claimed) == len(names):
+            self.kind = "claim"
+        elif not claimed:
+            self.kind = "function"
+        else:
+            self.kind = "both"
+
+    def has(self, n: int) -> str:
+        """How many points the sweep covers, named by their source:
+        `the claim ranges over 3 points`, `the function's domain has 3
+        points`."""
+        if self.kind == "claim":
+            return f"the claim ranges over {_points(n)}"
+        if self.kind == "function":
+            return f"the function's domain has {_points(n)}"
+        return (f"the claim's binding with the function's domain gives "
+                f"{_points(n)}")
+
+    def holds(self) -> str:
+        """The subject a holding claim is then named by."""
+        return "it" if self.kind == "claim" else "the claim"
+
+    def quantifier(self, names: list, n: int) -> str:
+        """The `∀` line of a proof over the swept points."""
+        where = {"claim": "the claim's finite scope",
+                 "function": "the function's finite domain",
+                 "both": "the claim's binding with the function's finite "
+                         "domain"}[self.kind]
+        return f"∀ {', '.join(names)} in {where} ({_points(n)})"
+
+
+def _holds_at(total: int, judged: list, scope: _Scope) -> str:
     """The proof sketch of a claim checked at every point of a finite
-    domain, counting the points where the function gave no value to
+    set, counting the points where the function gave no value to
     compare apart from the ones the claim was compared at."""
     others = total - len(judged)
     if others == 0:
         if total == 1:
-            return (f"the declared domain has one point, {_point_words(judged[0])}, "
-                    f"and the claim holds there")
-        return f"the declared domain has {total} points, and the claim holds at every one"
+            return (f"{scope.has(1)}, {_point_words(judged[0])}, "
+                    f"and {scope.holds()} holds there")
+        return f"{scope.has(total)}, and {scope.holds()} holds at every one"
     where = (_point_words(judged[0]) if len(judged) == 1
              else f"the {len(judged)} points where f returns a value")
     rest = ("the other point gives no value, so it is recorded, not compared"
             if others == 1 else
             f"the other {others} give no value, so they are recorded, not compared")
-    return (f"the declared domain has {total} points; the claim holds at {where}, "
-            f"and {rest}")
+    return f"{scope.has(total)}; {scope.holds()} holds at {where}, and {rest}"
 
 
 def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
@@ -244,10 +284,9 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         "proven",
         sketch=(f"at the only point, {_point_words(last)}, f({names[0]}) {is_in}"
                 if checked == 1 and len(names) == 1 else
-                f"the declared domain has {_points(checked)}, and at every one "
+                f"{_Scope(cj, names).has(checked)}, and at every one "
                 f"the value {is_in}"),
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(checked)})",
+        quantifier=_Scope(cj, names).quantifier(names, checked),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -330,10 +369,9 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         "proven",
         sketch=(f"the only point, {_point_words(last)}, raises"
                 if checked == 1 else
-                f"the declared domain has {_points(checked)}, and the call "
+                f"{_Scope(cj, names).has(checked)}, and the call "
                 f"raises at every one"),
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(checked)})",
+        quantifier=_Scope(cj, names).quantifier(names, checked),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -477,7 +515,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     if unexamined is not None:
         return ProofResult(
             "undecided",
-            sketch=(f"{_holds_at(total, judged)}{outside}; every point "
+            sketch=(f"{_holds_at(total, judged, _Scope(cj, names))}{outside}; every point "
                     f"executed; proven needs the function to be shown "
                     f"pure: {unexamined}"),
             meta=with_executed({"mathema.derive_route": "brute_force",
@@ -486,9 +524,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                                executed_missing(deps)))
     return ProofResult(
         "proven",
-        sketch=_holds_at(total, judged) + outside,
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(total)})",
+        sketch=_holds_at(total, judged, _Scope(cj, names)) + outside,
+        quantifier=_Scope(cj, names).quantifier(names, total),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid),
                             **counted},
                            executed_missing(deps)))
