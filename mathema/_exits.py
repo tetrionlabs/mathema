@@ -13,6 +13,8 @@ the wall-clock alarm) passes through unchanged.
 """
 from __future__ import annotations
 
+import functools
+
 
 class ExitRaised(SystemExit, Exception):
     """A `SystemExit` the function under test raised, carrying its exit
@@ -67,10 +69,12 @@ def exception_name(exc: BaseException) -> str:
 
 class _ExitsAsRaise:
     """A callable that runs its function through `call`; attributes and
-    the signature are the function's own."""
+    the signature are the function's own, its `__module__`,
+    `__qualname__`, `__name__` and `__doc__` included, so it reads as
+    the function wherever a caller compares the two."""
 
     def __init__(self, fn):
-        self.__wrapped__ = fn
+        functools.update_wrapper(self, fn, updated=())
 
     def __call__(self, *args, **kwargs):
         return call(self.__wrapped__, *args, **kwargs)
