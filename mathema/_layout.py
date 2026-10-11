@@ -57,6 +57,21 @@ def _ran(route) -> bool:
     return str(route or "").startswith("probe")
 
 
+def _aspect(p) -> str:
+    """Intent:
+        The line a claim's own verdict is shown on: `computation` when
+        it was reached by running the code, except a derive disproof
+        the code reproduced, which indicts the mathematics (stratum
+        `mathematics unsound`, corroboration `reproduced`) and stays on
+        the `mathematics` line whichever route reproduced it.
+    """
+    stratum = getattr(p, "stratum", None) or {}
+    if _verdict(p) == "falsified" and stratum.get("mathematics") == "unsound" \
+            and (p.meta or {}).get("mathema.corroboration") == "reproduced":
+        return "mathematics"
+    return "computation" if _ran(p.route) else "mathematics"
+
+
 def _shown(statement: str, aspect: str) -> str:
     """The claim as the line of `aspect` restates it."""
     return over_the_reals(statement) if aspect == "mathematics" \
@@ -287,7 +302,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             aspect = "computation" if _ran(found.get("route")) else "mathematics"
             lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
         else:
-            aspect = "computation" if _ran(main.route) else "mathematics"
+            aspect = _aspect(main)
             lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
                               _detail(main, count_words)))
             if _verdict(main) == "falsified":

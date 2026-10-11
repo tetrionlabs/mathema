@@ -5449,6 +5449,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_examined(ctx, fn, facts),
                              _cap=verdict_cap))
             continue
+        grounded = (None if call_pins or ctx.family is not None
+                    or ctx.assumption else _ground_proof_of(ctx, fn, facts))
+        if grounded is not None and (grounded.status == "disproven"
+                                     or cj.route == "probe"):
+            # a ground claim is decided at its own call: a failure there
+            # is the falsification, its call the witness
+            out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                             _cap=verdict_cap))
+            continue
         from .probing import LanguageDrawFailed
         try:
             if call_pins:
@@ -5470,6 +5479,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 derived = _adjudicate_derive(
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
+                if grounded is not None and (derived is None
+                                             or derived.verdict != "proven"):
+                    # a ground claim that holds at its own call and no
+                    # symbolic proof covers: the call decides it
+                    ctx.companion = None
+                    out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                                     _cap=verdict_cap))
+                    continue
                 if derived is not None:
                     derived, lines = _with_empty_input_lines(
                         derived, ctx, fn, facts, float_companions,
@@ -9337,6 +9354,63 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                  stratum=_machine_failure_stratum(raised[-1], where),
                  meta={"mathema.corroboration": "reproduced",
                        "mathema.recursion_depth": dict(info)})
+
+
+def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
+    """Intent:
+        `_brute_force.ground_proof` for this claim under the extensive
+        wall-clock cap: the claim evaluated once at its own literal
+        calls, or None when it is not ground, cannot be decided there,
+        or outruns the cap.
+    """
+    from ._brute_force import ground_proof
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(
+            lambda: ground_proof(ctx.cj, fn, facts, _bound_funcs_of(ctx.cj)),
+            EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+
+
+def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
+    """Intent:
+        The record of a ground claim decided at its own call. On the
+        probe route: `falsified` with the call as the witness, else
+        `holds`. On a derive route the mechanism is the one-point sweep,
+        `derive:brute_force`: `falsified` with the call as an executed
+        witness, `proven` when the function is shown pure, else `holds`.
+    """
+    cj, note = ctx.cj, ctx.note
+    said = "evaluated once, at the claim's own call"
+    note = f"{note}; {said}".lstrip("; ")
+    meta = {k: v for k, v in _provenance_meta(proof).items()
+            if route != "probe" or k != "mathema.derive_route"}
+    if proof.status == "disproven":
+        if route != "probe":
+            meta["mathema.corroboration"] = "reproduced"
+        return Probe(cj.name, ctx.statement, "falsified",
+                     route="probe" if route == "probe" else "derive:brute_force",
+                     sketch=None if route == "probe" else proof.sketch,
+                     counterexample=proof.counterexample, note=note,
+                     meta=meta)
+    verdict = ("proven" if proof.status == "proven" and route != "probe"
+               else "holds")
+    note = f"{note}; {proof.sketch}"
+    fallen = ctx.derive_undecided
+    if fallen is not None and route != "probe":
+        # the symbolic attempt that did not decide it, in the trail
+        trail = _derive_attempt_label(fallen)
+        note = f"{note}; symbolic {trail}"
+        meta["mathema.routes_attempted"] = (
+            f"routes attempted, {trail}; derive:brute_force: {verdict}")
+        meta.update({k: v for k, v in (fallen.meta or {}).items()
+                     if k.startswith("mathema.derive_") or k == "mathema.timeout"})
+        meta["mathema.derive_route"] = "brute_force"
+    return Probe(cj.name, ctx.statement, verdict,
+                 route="probe" if route == "probe" else "derive:brute_force",
+                 sketch=None if route == "probe" else proof.sketch,
+                 note=note, meta=meta)
 
 
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
