@@ -7,6 +7,7 @@ are tried; where none lets f run with the ordinary value, the row is
 unknown, naming the other argument, never falsified. A falsified row
 shows the call with the ordinary value returning. A function with one
 parameter has nothing else to blame, and is read as before."""
+import importlib.util
 import math
 from typing import Any
 
@@ -50,13 +51,26 @@ def first(language: Any, xs: list) -> float:
     return xs[0]
 
 
+# is_encoding_safe and is_length_safe come from the mathema-language package
+_PACKAGE = pytest.mark.skipif(importlib.util.find_spec("mathema_language") is None,
+                              reason="needs mathema-language")
+
+
+def _gate(*args):
+    """A parametrize entry, skipped without the package when its law names
+    one of the package's gates."""
+    law = next(a for a in args if isinstance(a, str) and "(" in a)
+    marks = [_PACKAGE] if law.startswith(("is_encoding_safe", "is_length_safe")) else []
+    return pytest.param(*args, marks=marks)
+
+
 def _row(fn, law):
     (p,) = check_conjectures(fn, [claim(law)])
     return p
 
 
-TEXT_GATES = ["is_encoding_safe(name)", "is_length_safe(name)",
-              "is_language_defined(name)"]
+TEXT_GATES = [_gate("is_encoding_safe(name)"), _gate("is_length_safe(name)"),
+              _gate("is_language_defined(name)")]
 
 
 @pytest.mark.parametrize("law", TEXT_GATES)
@@ -67,7 +81,8 @@ def test_a_raise_another_argument_causes_leaves_a_text_gate_unknown(law):
     assert "the raise is not name's" in row.note, row.note
 
 
-@pytest.mark.parametrize("law", ["is_encoding_safe(name)", "is_language_defined(name)"])
+@pytest.mark.parametrize("law", [_gate("is_encoding_safe(name)"),
+                                 _gate("is_language_defined(name)")])
 def test_a_raise_the_hazard_causes_is_falsified_with_the_ordinary_call_shown(law):
     row = _row(ascii_bytes, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
@@ -77,11 +92,11 @@ def test_a_raise_the_hazard_causes_is_falsified_with_the_ordinary_call_shown(law
 
 
 @pytest.mark.parametrize("fn, law, raised", [
-    (only_ascii_bytes, "is_encoding_safe(name)", "UnicodeEncodeError"),
-    (only_ascii_bytes, "is_language_defined(name)", "UnicodeEncodeError"),
-    (only_kind, "is_encoding_safe(name)", "AttributeError"),
-    (only_kind, "is_length_safe(name)", "AttributeError"),
-    (only_kind, "is_language_defined(name)", "AttributeError"),
+    _gate(only_ascii_bytes, "is_encoding_safe(name)", "UnicodeEncodeError"),
+    _gate(only_ascii_bytes, "is_language_defined(name)", "UnicodeEncodeError"),
+    _gate(only_kind, "is_encoding_safe(name)", "AttributeError"),
+    _gate(only_kind, "is_length_safe(name)", "AttributeError"),
+    _gate(only_kind, "is_language_defined(name)", "AttributeError"),
 ])
 def test_a_one_parameter_function_is_read_as_before(fn, law, raised):
     row = _row(fn, law)
