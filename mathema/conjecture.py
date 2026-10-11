@@ -4282,7 +4282,7 @@ def _with_bound_fields(inst, cls, fields, p: str, cj_domain: dict, rng,
         return inst
     values = {f: _synth(_field_kind(cls, f), rng, b, specials=specials)
               for f, b in bound_fields.items()}
-    if _dc.is_dataclass(inst):
+    if _dc.is_dataclass(inst) and not isinstance(inst, type):
         try:
             return _dc.replace(inst, **values)
         except Exception:
