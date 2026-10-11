@@ -123,14 +123,28 @@ from the same domain every check uses:
 | a language narrowed to an alphabet | 0.8 |
 | a language narrowed by a predicate | 0.6 |
 | a refined language (`L[ascii, len <= 80]`) or a bounded range | 0.4 |
-| a finite set of `k` values (a `Literal`, a str `Enum`, a guard to a set) | `min(0.3, log2(k) / 10)` |
+| a finite set of `k` values (a `Literal`, a str `Enum`) | `min(0.3, log2(k) / 10)` |
 | a guard in the body (its boundary is the unknown) | 1.0 |
 
 A finite set of `k` values is a choice carrying `log2(k)` bits, scaled by
-a tenth because a closed set is already most of the way to known, and a
-proof that visits every member removes it entirely. A verified claim that
-binds a narrower domain lowers the parameter's entropy to the narrower
-domain's.
+a tenth because a closed set is already most of the way to known.
+
+What a proof that visits every member of a finite set clears depends on
+whose set it is. When the set is the function's own domain (a `Literal`
+annotation or a str `Enum`), the proof covers every input the function
+accepts, and it clears the parameter entirely. When the set comes only
+from a claim's binding, the function still accepts every other value of
+its type. For example,
+`for name in {"Alice", " alice ", "ALICE"}, f(name) == "alice"` on
+`username_key(name: str)` settles three strings, and `name` stays charged
+for the rest of `str`. A claim binding part of the function's own finite
+set clears that part's share: two of three `Literal` values leave a third
+of the charge. A parameter guarded to a set in the body is charged as a
+guard, for its boundary, which a verified claim about what the guard
+refuses clears.
+
+A verified claim that binds a narrower range or language lowers the
+parameter's entropy to the narrower domain's.
 
 ### How much a verdict removes
 
@@ -182,9 +196,9 @@ removes part of its source, weaker than a verified claim would. A plainly
 pure, total helper therefore reads low but not zero, while a branchy,
 impure or call-heavy function floors much closer to zero.
 
-The constants above are those of `entropy-dimensions@1.3`, which is
-recorded beside every score, so a number is only ever compared with one
-computed the same way.
+The scoring algorithm is versioned, and its version is recorded beside
+every score, so a number is only ever compared with one computed the same
+way.
 
 ## The triangle
 
