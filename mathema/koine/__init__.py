@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""KOINE: the Kernel Of Interoperable Numerical Expressions.
+
+The engine's internal representation of a function body. `.koi` files
+hold its text (`syntax`), a `Document` its parsed form; `vocabulary` is
+the closed set of terms, and `validate` checks a document
+against it.
+"""
+from __future__ import annotations
+
+from .document import Document
+from .syntax import KoineSyntaxError, format_document, parse
+from .validate import validate
+from .vocabulary import KOINE_VERSION
+
+FILE_EXTENSION = ".koi"
+
+__all__ = ["FILE_EXTENSION", "KOINE_VERSION", "Document", "KoineSyntaxError",
+           "format_document", "parse", "validate"]

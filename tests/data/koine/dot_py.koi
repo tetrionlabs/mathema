@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# KOINE golden corpus: the body of tests/fixtures/koine_py.py#dot.
+# FROZEN: see golden.yaml.
+koine("0.0.1")
+lifter(language: "py", name: "mathema", version: "0")
+source(
+  file: "tests/fixtures/koine_py.py",
+  line: 42,
+  sha256: "5d2d8adc429c50a287172e68fb03993f5ba329f63488b33bf3e5bb07cabe914d",
+)
+function(name: "dot", key: "py:tests/fixtures/koine_py.py#dot")
+parameter(a, kind::sequence, representation::f64, element: representation::f64)
+parameter(b, kind::sequence, representation::f64, element: representation::f64)
+returns(kind::scalar, representation::f64)
+manifest(nonvalue::mathematical::singular, as::raise("ZeroDivisionError"))
+manifest(
+  nonvalue::mathematical::singular,
+  as::raise("ValueError"),
+  operation: operator::binary::remainder::truncation,
+)
+manifest(nonvalue::mathematical::domain, as::raise("ValueError"))
+manifest(
+  nonvalue::mathematical::domain,
+  as::complex,
+  operation: operator::binary::power,
+)
+manifest(nonvalue::machine::overflow, as::raise("OverflowError"))
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::addition,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::subtraction,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::multiplication,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::division::real,
+)
+structure(loops: 1, branches: 0, recursion: false)
+body(
+  statement::bind(total, 0.0, at: span(43, 43, "total = 0.0")),
+  statement::loop::range(
+    i,
+    0,
+    value::length(a),
+    1,
+    [
+      statement::update(
+        total,
+        operator::binary::addition,
+        operator::binary::multiplication(value::index(a, i), value::index(b, i)),
+        at: span(45, 45, "total += a[i] * b[i]"),
+      ),
+    ],
+    at: span(44, 45, "for i in range(len(a)):"),
+  ),
+  statement::return(total, at: span(46, 46, "return total")),
+)

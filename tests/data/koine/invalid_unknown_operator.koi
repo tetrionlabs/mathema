@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# KOINE golden corpus: invalid, with the problems it must report.
+# FROZEN: see golden.yaml.
+koine("0.0.1")
+lifter(language: "py", name: "hand", version: "0")
+source(file: "src/f.py", line: 1, sha256: "0000000000000000000000000000000000000000000000000000000000000000")
+function(name: "f", key: "py:src/f.py#f")
+parameter(x, kind::scalar, representation::f64)
+parameter(xs, kind::sequence, representation::f64, element: representation::f64)
+body(statement::return(operator::binary::division::banker(x, 2), at: span(2, 2, "")))
