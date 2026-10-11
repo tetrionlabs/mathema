@@ -49,6 +49,7 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
 from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
 from .runtime_types import SEQUENCE_KINDS
+from ._exits import exception_name
 from ._signatures import callable_signature
 
 # --- probe:algorithmic families: monotonicity, affine-ness, convexity ------
@@ -445,7 +446,7 @@ def _executed_family_witness(fn, facts, target: str, value, domain: dict,
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
-            return f"raised {type(exc).__name__}", executed
+            return f"raised {exception_name(exc)}", executed
         what = failure(out) if failure is not None else None
         if what is not None:
             return what, executed
@@ -1003,7 +1004,7 @@ def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 # the function's own guard rejects the call: the point is
                 # outside its working domain, no trial (decision A)
                 return None
-            return describe(value, f"raised {type(exc).__name__}")
+            return describe(value, f"raised {exception_name(exc)}")
         try:
             as_float = float(out)
         except (TypeError, ValueError):
@@ -1220,9 +1221,13 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     language_bound = getattr(bounds, "base_type", None) == "L"
     if language_bound:
         # a language's own near non-members, each named for the language
-        # it lies outside; a language admitting every value of its kind
-        # has no outside to draw, which is a skip with the reason
+        # it lies outside, then each value the domain removes with `\`;
+        # a language admitting every value of its kind, with nothing
+        # removed, has no outside to draw, which is a skip with the reason
         names, candidates = _outside_language(bounds, rng)
+        removed = _removed_values(bounds)
+        candidates += [v for v in removed
+                       if not any(v == seen for seen in candidates)]
         if not candidates:
             return ("skipped", 0,
                     f"L[{names}] has no outside this route can draw: "
@@ -1265,8 +1270,14 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
         elif language_bound:
             bad = candidates[slot]
             value = bad
-            spelled = (f"{target} = {_witness_value(bad)} "
-                       f"(outside L[{names}]{_why_outside(bad, bounds)})")
+            if any(bad == v for v in removed):
+                from .domain import render_domain
+                where = render_domain(bounds, show_missing=False, ascii_mode=True)
+                spelled = (f"{target} = {_witness_value(bad)} "
+                           f"(removed from the domain, {where})")
+            else:
+                spelled = (f"{target} = {_witness_value(bad)} "
+                           f"(outside L[{names}]{_why_outside(bad, bounds)})")
         elif sequence_target:
             # a sequence parameter is violated one ELEMENT at a time:
             # a fresh in-domain sequence with one out-of-domain entry,
@@ -1341,6 +1352,18 @@ def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
             if not any(value == seen for seen in out):
                 out.append(value)
     return " | ".join(name for name, _ in pieces), out
+
+
+def _removed_values(bounds) -> list:
+    """Intent:
+        The values a domain removes with `\\` (`""` for
+        `L[unicode] \\ {""}`), each lying outside it, in a fixed order;
+        missing values are `is_missing_safe`'s hazard and are left out.
+    """
+    from .domain import domain_contains, is_missing
+    return sorted((v for v in getattr(bounds, "excluded", ()) or ()
+                   if not is_missing(v) and not domain_contains(v, bounds)),
+                  key=repr)
 
 
 def _witness_value(value) -> str:
@@ -1576,7 +1599,7 @@ def _is_empty_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
         line = _emptiness_guard_line(facts, param)
         return ProofResult(
             "proven",
-            sketch=f"{shown}: f raised {type(exc).__name__} behind the guard"
+            sketch=f"{shown}: f raised {exception_name(exc)} behind the guard"
                    + (f" on line {line}" if line else ""),
             meta={"mathema.witness_executed": True})
     return None
@@ -3741,7 +3764,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 cut += 1
                 continue
             out, raised = None, exc
-            what = f"raised {type(exc).__name__}"
+            what = f"raised {exception_name(exc)}"
         else:
             raised = None
             what = f"returned {_fmt_value(out)}"
@@ -4012,7 +4035,7 @@ def _matrix_output_probe(prop):
                     checked += 1
                     return ("falsified", checked,
                             f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
-                            f"{type(raised[0]).__name__}, no value", None)
+                            f"{exception_name(raised[0])}, no value", None)
                 continue
             got = prop.check(value)
             if got is None:
@@ -4163,7 +4186,7 @@ def _output_predicate_probe(check):
                     # a raise at a missing input is classified, not judged
                     return None
                 return (f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
-                        f"{type(exc).__name__}, no output")
+                        f"{exception_name(exc)}, no output")
             got = check(out)
             if got is None:
                 return None

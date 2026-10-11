@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import itertools
 
+from ._exits import call, exception_name
 from .domain import _as_domain, _set_sentinels, finite_members
 from .probing import ExecutedMissing, LastCall, executed_missing, with_executed
 from .symbolic import ProofResult
@@ -168,7 +169,7 @@ def _raised_at(fn, facts, point: dict) -> "str | None":
     if any(p not in point for p in facts.params):
         return None
     try:
-        fn(*[point[p] for p in facts.params])
+        call(fn, *[point[p] for p in facts.params])
     except Exception as e:
         return type(e).__name__
     return None
@@ -288,7 +289,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
 
         def tagged(*args, **kwargs):
             try:
-                return fn(*args, **kwargs)
+                return call(fn, *args, **kwargs)
             except Exception as e:
                 raised.append(e)
                 raise
@@ -306,9 +307,9 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                 return ProofResult(
                     "disproven",
                     sketch=f"at {where} the call raised "
-                           f"{type(raised[0]).__name__}, not {cj.rhs}",
+                           f"{exception_name(raised[0])}, not {cj.rhs}",
                     counterexample=f"{where}: raised "
-                                   f"{type(raised[0]).__name__}, claimed {cj.rhs}",
+                                   f"{exception_name(raised[0])}, claimed {cj.rhs}",
                     witness=dict(point),
                     meta=with_executed({"mathema.derive_route": "brute_force",
                                         **_tried(grid)}, executed))

@@ -140,29 +140,55 @@ def _signature(fn) -> "inspect.Signature | None":
 
 # --- detection -------------------------------------------------------
 
-#: module aliases an annotation's source text is read through when the
-#: function's own globals do not bind the name
-_KNOWN_ALIASES = {"np": "numpy", "npt": "numpy.typing", "pd": "pandas",
-                  "pl": "polars"}
+def _libraries() -> tuple:
+    """Intent:
+        The root module of every runtime type adapter other than the
+        list adapter, distinct, in detection order: `("pandas",
+        "polars", "numpy")` for the built-ins, then each registered
+        adapter's.
+    """
+    seen: list = []
+    for found in adapters().values():
+        if found.name == ListAdapter.name:
+            continue
+        root = found.name.split(".", 1)[0]
+        if root not in seen:
+            seen.append(root)
+    return tuple(seen)
+
+
+def _known_aliases() -> dict:
+    """Intent:
+        The module aliases an annotation's source text is read through
+        when the function's own globals do not bind the name: every
+        adapter's `ALIASES` (`np`, `npt`, `pd`, `pl` for the built-ins),
+        the first adapter to state an alias keeping it.
+    """
+    out: dict = {}
+    for found in adapters().values():
+        for alias, module in (getattr(found, "ALIASES", None) or {}).items():
+            out.setdefault(alias, module)
+    return out
 
 
 def _canonical_text(text: str, scope: dict) -> str:
     """An annotation's source text with its leading module alias
     replaced by the module's real name (`pd.Series` to
     `pandas.Series`), read from `scope` (the function's globals) and
-    else the usual aliases."""
+    else the aliases the adapters state; a bare class name bound to a
+    class of an adapter's library becomes its dotted name."""
     text = text.strip()
     head, dot, rest = text.partition(".")
     if not dot:
         bound = scope.get(head)
-        if isinstance(bound, type) and bound.__module__.split(".")[0] in (
-                "numpy", "pandas", "polars"):
+        if isinstance(bound, type) and bound.__module__.split(".")[0] in \
+                _libraries():
             return f"{bound.__module__.split('.')[0]}.{bound.__qualname__}"\
                 + text[len(head):]
         return text
     bound = scope.get(head)
     module = getattr(bound, "__name__", None) if inspect.ismodule(bound) \
-        else _KNOWN_ALIASES.get(head)
+        else _known_aliases().get(head)
     return f"{module}.{rest}" if module else text
 
 
@@ -466,26 +492,29 @@ class _Realising:
 
 def calling(fn, facts):
     """Intent:
-        `fn` itself when no parameter has a runtime type other than a
-        list; otherwise a callable with `fn`'s signature that realises
-        each such parameter's drawn value through its adapter before
-        calling `fn`, and observes the result into a plain value.
+        A callable with `fn`'s signature and attributes that calls
+        `fn`, with a `SystemExit` it raises arriving as the raise
+        `_exits.ExitRaised`. When a parameter has a runtime type other
+        than a list, the call first realises each such parameter's
+        drawn value through its adapter, and observes the result into
+        a plain value.
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
-        so `fn` raises its own TypeError. A callable already realising
-        is returned as it is.
+        so `fn` raises its own TypeError. A callable this already
+        returned is returned as it is.
     """
-    if isinstance(fn, _Realising):
-        return fn
+    from .._exits import _ExitsAsRaise, exiting_as_raise
+    if isinstance(fn, (_Realising, _ExitsAsRaise)):
+        return exiting_as_raise(fn)
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
     if not bindings and not enums:
-        return fn
+        return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
-        return fn
-    return _Realising(fn, bindings, sig, enums)
+        return exiting_as_raise(fn)
+    return exiting_as_raise(_Realising(fn, bindings, sig, enums))
 
 
 def enum_parameters(fn) -> dict:
@@ -545,26 +574,40 @@ _NUMPY_REDUCTIONS = frozenset({
     "nanmin", "nanmax", "average", "ptp", "percentile", "quantile",
     "diff", "sort", "argmax", "argmin", "dot", "linalg"})
 
-#: the runtime type a hint suggests for each usage, most likely first
-_SUGGESTIONS = {
-    "vector": (("pandas", "Series"), ("polars", "Series"),
-               ("numpy", "ndarray")),
-    "matrix": (("numpy", "ndarray"), ("pandas", "DataFrame"),
-               ("polars", "DataFrame")),
-    "table": (("pandas", "DataFrame"), ("polars", "DataFrame")),
-}
+def _suggestions(usage: str) -> list:
+    """Intent:
+        The runtime types a hint can suggest for one usage, most likely
+        first, as `(library, rest of the name)` pairs read from the
+        adapters in detection order: a vector use names an adapter
+        carrying `vec`, a table use one carrying `table`, and a matrix
+        use one carrying `mat` and then one carrying `table`. For the
+        built-ins, a vector is a pandas Series, a polars Series or a
+        numpy ndarray; a matrix a numpy ndarray, a pandas DataFrame or a
+        polars DataFrame; a table a pandas or polars DataFrame.
+    """
+    wanted = {"vector": ("vec",), "table": ("table",),
+              "matrix": ("mat", "table")}[usage]
+    out: list = []
+    for kind in wanted:
+        for found in adapters().values():
+            if found.name == ListAdapter.name or kind not in found.kinds:
+                continue
+            lib, _dot, rest = found.name.partition(".")
+            if rest and (lib, rest) not in out:
+                out.append((lib, rest))
+    return out
 
 
 def module_imports(scope: dict) -> dict:
-    """The libraries with a built-in runtime type adapter that a
-    function's module imports, `{library: alias}` (`{"pandas": "pd"}`),
-    read from the module's globals."""
+    """The libraries with a runtime type adapter that a function's
+    module imports, `{library: alias}` (`{"pandas": "pd"}`), read from
+    the module's globals."""
+    libraries = _libraries()
     out: dict = {}
     for name, value in (scope or {}).items():
         if inspect.ismodule(value):
             root = value.__name__.split(".")[0]
-            if root in ("numpy", "pandas", "polars") \
-                    and value.__name__ == root:
+            if root in libraries and value.__name__ == root:
                 out.setdefault(root, name)
     return out
 
@@ -618,15 +661,37 @@ def _usages(fdef, params: list, numpy_aliases: set) -> dict:
     return found
 
 
+#: annotations that say nothing about a parameter's type
+_UNDECLARING = frozenset({"any", "typing.any", "object"})
+
+
+def _annotated(fdef) -> set:
+    """The parameters of `fdef` whose annotation names a type, so that
+    the signature, not the body's use, decides how each is drawn:
+    every annotated parameter except one annotated `Any` or `object`."""
+    out: set = set()
+    for a in [*fdef.args.posonlyargs, *fdef.args.args,
+              *fdef.args.kwonlyargs]:
+        if a.annotation is None:
+            continue
+        text = ast.unparse(a.annotation).strip("\"' ").lower()
+        if text not in _UNDECLARING:
+            out.add(a.arg)
+    return out
+
+
 def usage_hints(fn, fdef, params: list, param_kinds: dict,
                 detected: dict) -> dict:
     """Intent:
         For each parameter the body uses as a vector, matrix or table
-        while the signature names no runtime type for it, in a module
-        importing a library with a runtime type adapter, the hint that
-        names the likely runtime type: `{param: {"usage", "strong",
-        "type", "text"}}`. Empty when the module imports none of
-        numpy, pandas or polars.
+        while the signature names no type for it, in a module importing
+        a library with a runtime type adapter, the hint that names the
+        likely runtime type: `{param: {"usage", "strong", "type",
+        "text"}}`. A parameter annotated with any type other than `Any`
+        or `object` (`dict`, `Mapping[str, int]`, a class of its own)
+        has no hint, whatever attributes the body reads off it. Empty
+        when the module imports no library with a runtime type adapter
+        (numpy, pandas, polars, or one a package registers).
     """
     scope = module_scope(fn)
     imported = module_imports(scope)
@@ -637,11 +702,12 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
         n for n, v in scope.items()
         if inspect.ismodule(v) and v.__name__ == "numpy"}
     out: dict = {}
+    annotated = _annotated(fdef)
     for p, (usage, strong) in _usages(fdef, params, numpy_aliases).items():
-        if p in detected or param_kinds.get(p) in ("int", "bool", "string",
-                                                    "complex"):
+        if p in detected or p in annotated \
+                or param_kinds.get(p) in ("int", "bool", "string", "complex"):
             continue
-        choice = next(((lib, cls) for lib, cls in _SUGGESTIONS[usage]
+        choice = next(((lib, cls) for lib, cls in _suggestions(usage)
                        if lib in imported), None)
         if choice is None:
             continue

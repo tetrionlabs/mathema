@@ -2291,6 +2291,11 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         if k == "table":
             return (f"Table(equal-length columns, {size_text(p, 'len∈[1,8]')}, "
                     f"each drawn as a free Seq)")
+        if k == "dict" and bounds is None:
+            # a mapping drawn by `_synth_dict`: the keys the body reads,
+            # or a few generic ones, each value a free scalar
+            return ("Dict(keys the body reads, else 1 to 4 generic keys; "
+                    "values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3])")
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not numeric_excluded(bounds)):
@@ -2369,7 +2374,9 @@ def _out_of_domain_candidates(bounds) -> list:
     explicit type refinement), not only a bare interval. A `Domain`
     that explicitly excludes `MISSING` also contributes a NaN
     candidate; that's a real, declared fact worth testing the real
-    function against now, not just a numeric range."""
+    function against now, not just a numeric range. Each value the
+    domain removes with `\\` lies outside it and is a candidate too
+    (`0` for `R \\ {0}`)."""
     if isinstance(bounds, tuple):
         lo, hi = bounds
         span = (hi - lo) or 1.0
@@ -2385,6 +2392,7 @@ def _out_of_domain_candidates(bounds) -> list:
                 lo, hi = piece
                 span = (hi - lo) or 1.0
                 candidates += [lo - 0.5 * span, hi + 0.5 * span]
+        candidates += sorted(numeric_excluded(bounds), key=repr)
         if MISSING in bounds.excluded:
             candidates.append(float("nan"))
         return [c for c in candidates if not domain_contains(c, bounds)]

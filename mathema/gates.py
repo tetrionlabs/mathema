@@ -16,7 +16,7 @@ module at load, this module reaches back only when a gate actually
 runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
-from . import _shapes
+from . import _exits, _shapes
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -216,7 +216,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
         def _wrapped(*a, **kw):
             try:
-                out = callee(*a, **kw)
+                out = _exits.call(callee, *a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
                 if under_test:
