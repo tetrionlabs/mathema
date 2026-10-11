@@ -222,6 +222,7 @@ def test_sum_like_suggestions_are_gated_and_useful(tmp_path):
                  "sum_like"} & decay)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_well_known_series_suggests_its_closed_form(tmp_path):
     """The sum of the first n integers suggests, and PROVES,
     `f(n) == n*(n + 1)/2`; a function whose loop is not a pure sum

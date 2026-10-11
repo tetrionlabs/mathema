@@ -27,6 +27,7 @@ def _probe(law, **kw):
     return probe
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("route", ["derive", "best"])
 def test_the_clip_is_at_most_one_by_interval_evaluation(no_smt, route):
     probe = _probe("for x in [-5, 5], f(x) <= 1", route=route)
@@ -36,6 +37,7 @@ def test_the_clip_is_at_most_one_by_interval_evaluation(no_smt, route):
     assert "nlsat" not in probe.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("route", ["derive", "best"])
 def test_the_clip_is_nonnegative_without_smt(no_smt, route):
     probe = _probe("for x in [-5, 5], f(x) >= 0", route=route)
@@ -94,6 +96,7 @@ def _decide(fn, law, route="derive"):
     return probe
 
 
+@pytest.mark.needs_full_proof_budget
 @pytest.mark.parametrize("fn, law", [
     # Max(x, lo) >= lo: the second argument alone is >= lo
     (at_least, "for x in [-5, 5], lo in [-1, 0], f(x, lo) >= lo"),

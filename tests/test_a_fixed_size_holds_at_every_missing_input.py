@@ -41,12 +41,14 @@ def _shapes(fn, text, *more):
     return rows, shapes
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_fixed_length_is_kept_at_every_missing_input():
     rows, shapes = _shapes(total, "for xs in [0, 1]^30, f(xs) >= 0")
     assert any(p.name == "c[float]" for p in rows), [p.name for p in rows]
     assert shapes == {(30, 1)}, sorted(shapes)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_fixed_matrix_shape_is_kept_at_every_missing_input():
     rows, shapes = _shapes(gram, "for A in [-1, 1]^(30,15), f(A) >= 0")
     assert any(p.name.startswith("c[") for p in rows), [p.name for p in rows]
