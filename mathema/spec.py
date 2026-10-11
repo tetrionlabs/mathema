@@ -18,6 +18,7 @@ import os
 import re
 import unicodedata
 
+from . import _run_scope
 from ._float_text import exact_float_text
 from .records import (SUPPORTED_VERDICTS, classify_verdict,
                       pseudo_infinity_range, statement_text)
@@ -428,6 +429,7 @@ def atomic_write_text(path: str, text: str) -> str:
         except OSError:
             pass
         raise
+    _run_scope.wrote(path)
     return path
 
 
@@ -1066,7 +1068,7 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
     can't be established either way until the callee is verified."""
     from .records import Probe
 
-    verified = load_verified(root)
+    verified = _verified_view(root)
     states = [(dep, _dependency_state(dep, verified, root))
               for dep in dependencies or []]
     checked = [(dep, st) for dep, st in states if st is not None]
@@ -1118,7 +1120,7 @@ def _annotate_dependency_freshness(spec: dict, root: str) -> None:
     deps = spec.get("dependencies") or []
     if not any(d.get("form") for d in deps):
         return
-    verified = load_verified(root)
+    verified = _verified_view(root)
     for dep in deps:
         state = _dependency_state(dep, verified, root)
         if state is not None:
@@ -1193,7 +1195,10 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
         c["meta"] = meta
 
 
-_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mathema"}
+#: directories a claims-file scan never enters: tool, environment, build
+#: and installed-package directories, and mathema's own store
+_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mathema",
+              ".tox", "build", "dist", "site-packages"}
 
 
 def _is_claim_file(dirpath: str, name: str) -> bool:
@@ -1390,20 +1395,76 @@ def load_verified(root: str = ".") -> dict:
 
     A record file that does not read as a mapping (a merge left
     conflict markers, the file is empty) is left out here and listed
-    by `unreadable_verified`."""
+    by `unreadable_verified`.
+
+    Inside a `_run_scope.run_scope()` each record file is read once for
+    the run, and every call returns its own copy of what was read."""
+    import copy
+    shared = _run_scope.kept("verified_file") is not None
     merged: dict = {}
     current: set = set()
     store = verified_dir(root)
-    for path in _verified_files(root):
-        data, _reason = read_verified_file(path)
+    for path, data, _reason in _verified_reads(root):
         named = _is_current_name(path, store)
         for key, entry in (data or {}).items():
             if key in current and not named:
                 continue
-            merged[key] = {"entry": entry, "source": os.path.relpath(path, root)}
+            merged[key] = {"entry": copy.deepcopy(entry) if shared else entry,
+                           "source": os.path.relpath(path, root)}
             if named:
                 current.add(key)
     return merged
+
+
+def _verified_reads(root: str) -> list:
+    """Intent:
+        Every verified record file under `root` as `(path, data,
+        reason)`, `data` and `reason` as `read_verified_file` gives
+        them. Inside a run scope each file is read once and the same
+        `data` is returned to every caller, so a caller copies it
+        before changing it.
+    """
+    files_kept = _run_scope.kept("verified_file")
+    if files_kept is None:
+        return [(path, *read_verified_file(path))
+                for path in _verified_files(root)]
+    listing = _run_scope.kept("verified_listing")
+    if listing is None:
+        listing = {}
+    where = os.path.abspath(root)
+    if where not in listing:
+        real_dir = os.path.realpath(verified_dir(root))
+        listing[where] = [(path, os.path.join(real_dir,
+                                              os.path.basename(path)))
+                          for path in _verified_files(root)]
+    out = []
+    for path, real in listing[where]:
+        hit = files_kept.get(real)
+        if hit is None:
+            hit = files_kept[real] = read_verified_file(path)
+        out.append((path, hit[0], hit[1]))
+    return out
+
+
+def _verified_view(root: str = ".") -> dict:
+    """Intent:
+        The verified store as `load_verified` gives it, for a caller
+        that only reads it. Inside a run scope it is built once (again
+        after a record is written) and shared, so it must not be
+        changed; outside one it is `load_verified(root)`.
+    """
+    views = _run_scope.kept("verified_view")
+    if views is None:
+        return load_verified(root)
+    where = os.path.abspath(root)
+    if where not in views:
+        merged: dict = {}
+        for path, data, _reason in _verified_reads(root):
+            for key, entry in (data or {}).items():
+                merged[key] = {"entry": entry,
+                               "source": os.path.relpath(path, root)}
+        views[where] = merged
+    return views[where]
 
 
 class UnreadableRecord(ValueError):
@@ -1507,8 +1568,7 @@ def unreadable_verified(root: str = ".") -> dict:
     """
     out: dict = {}
     store = verified_dir(root)
-    for path in _verified_files(root):
-        data, reason = read_verified_file(path)
+    for path, _data, reason in _verified_reads(root):
         if reason is not None:
             key = record_key(os.path.relpath(path, store))
             out[key] = {"source": os.path.relpath(path, root),
@@ -1941,21 +2001,44 @@ def claims_file_paths(root: str = ".", *,
     """Intent:
         Every claims file under `root` (`*.claims.yaml`,
         `claims/*.yaml`, `claimspec.yaml`), shallow first and then by
-        path, skipping tool and environment directories and any
+        path, skipping the directories in `_SKIP_DIRS` and any
         directory in `exclude` (compared by real path).
+
+    Notes:
+        Inside a run scope the tree is walked once per `root` and
+        `exclude` for the run.
     """
-    skip = {os.path.realpath(d) for d in exclude}
+    skip = frozenset(os.path.realpath(d) for d in exclude)
+    kept = _run_scope.kept("claims_paths")
+    if kept is not None:
+        hit = kept.get((os.path.abspath(root), skip))
+        if hit is not None:
+            return list(hit)
     files: list[tuple[int, str]] = []
+    # the walk does not descend into a symbolic link, so the real path of
+    # a directory it enters is its parent's real path joined with its name
+    real_of = {root: os.path.realpath(root)}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS
-                       and os.path.realpath(os.path.join(dirpath, d))
-                       not in skip]
+        real = real_of.pop(dirpath, None) or os.path.realpath(dirpath)
+        keep = []
+        for d in dirnames:
+            if d in _SKIP_DIRS:
+                continue
+            sub = os.path.join(real, d)
+            if sub in skip:
+                continue
+            keep.append(d)
+            real_of[os.path.join(dirpath, d)] = sub
+        dirnames[:] = keep
         for name in sorted(filenames):
             if _is_claim_file(dirpath, name):
                 rel = os.path.relpath(dirpath, root)
                 depth = 0 if rel == "." else len(rel.split(os.sep))
                 files.append((depth, os.path.join(dirpath, name)))
-    return [path for _, path in sorted(files)]
+    found = [path for _, path in sorted(files)]
+    if kept is not None:
+        kept[(os.path.abspath(root), skip)] = tuple(found)
+    return found
 
 
 def read_claims_file(path: str, rel_path: str) -> "dict | None":
@@ -1966,8 +2049,26 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     Raises:
         ClaimsFileError: malformed YAML or a shape problem, naming the
             file.
+
+    Notes:
+        Inside a run scope a file that read and checked cleanly, and is
+        unchanged since (same modification time and size), is not
+        checked again; each call gets its own copy.
     """
+    import copy
+
     import yaml
+    kept = _run_scope.kept("claims_valid")
+    stamp = None
+    if kept is not None:
+        try:
+            st = os.stat(path)
+        except OSError:
+            st = None
+        if st is not None:
+            stamp = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+            if stamp in kept:
+                return copy.deepcopy(kept[stamp])
     try:
         data = _parsed_yaml(path)
     except yaml.YAMLError as e:
@@ -1975,8 +2076,12 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
         where = f" at line {mark.line + 1}" if mark is not None else ""
         raise ClaimsFileError(f"{rel_path}: malformed YAML{where}") from None
     if data is None:
+        if stamp is not None:
+            kept[stamp] = None
         return None
     validate_claims_file(data, rel_path)
+    if stamp is not None:
+        kept[stamp] = copy.deepcopy(data)
     return data
 
 

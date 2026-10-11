@@ -190,9 +190,7 @@ accept math.log :: log_monotone as trusted, by Grace Hopper
       compendium:math; a local verdict replaces it when verify checks this key
       again
 written.
-ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL fees.discounted: fresh; 1 falsified claim(s)
-ok   fees.late_fee: fresh
 3 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 1
@@ -229,9 +227,7 @@ mathema verify --root .; echo "exit code $?"
 
 <!-- example: gate output -->
 ```text
-ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   fees.discounted: form changed; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
-ok   fees.late_fee: fresh
 2 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 0

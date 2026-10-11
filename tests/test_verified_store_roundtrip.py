@@ -253,7 +253,7 @@ def test_root_is_found_upward_instead_of_scattering_a_second_store(tmp_path):
     r = subprocess.run(
         [sys.executable, "-c",
          "import sys; from mathema.cli import main; "
-         "sys.exit(main(['verify', '--lenient']))"],
+         "sys.exit(main(['verify', '--lenient', '--verbose']))"],
         cwd=str(sub), capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     assert not (sub / ".mathema").exists(), "scattered a second store"

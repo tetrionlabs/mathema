@@ -138,7 +138,6 @@ mathema review HEAD
 
 <!-- example: delta output -->
 ```text
-ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL functions.softmax: form changed; 1 proven, 5 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema

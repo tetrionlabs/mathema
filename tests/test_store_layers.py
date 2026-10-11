@@ -33,7 +33,8 @@ def _verify(tmp_path, env):
     return subprocess.run(
         [sys.executable, "-c",
          "import sys; from mathema.cli import main; "
-         f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
+         f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}, "
+         f"'--verbose']))"],
         cwd=str(tmp_path), capture_output=True, text=True, env=env)
 
 

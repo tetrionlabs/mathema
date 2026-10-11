@@ -380,9 +380,6 @@ def cmd_verify(args) -> int:
     the sweep can discover, the stores enumerate the population."""
     import os
 
-    from .conjecture import GRAMMAR
-    from .verify import verify_project
-
     _validate_trials_scale(args.trials_scale)
     _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
@@ -413,6 +410,18 @@ def cmd_verify(args) -> int:
             keys.append(target)
         else:
             files.append(path)
+    from ._run_scope import run_scope
+    with run_scope():
+        return _verify_and_print(args, keys, files)
+
+
+def _verify_and_print(args, keys: list, files: list) -> int:
+    """Intent:
+        `cmd_verify`'s sweep over the resolved `keys` and claims
+        `files`, rendered as text or JSON; returns the exit code.
+    """
+    from .conjecture import GRAMMAR
+    from .verify import verify_project
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
                             trials_downscale=args.trials_scale,
@@ -450,7 +459,8 @@ def cmd_verify(args) -> int:
                        "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
-    lines = list(result.lines)
+    lines = [line for i, line in enumerate(result.lines)
+             if getattr(args, "verbose", False) or i not in result.quiet]
     if definitions:
         # definitions are axioms, taken at face value: listed apart
         # from the verdicts and outside their counts
@@ -3093,6 +3103,11 @@ def main(argv: list[str] | None = None) -> int:
                          "`check --format compact` and the MCP tools use)")
     pv.add_argument("--output", metavar="FILE",
                     help="write the report to a file instead of stdout")
+    pv.add_argument("--verbose", action="store_true",
+                    help="list every function, the fresh ones that passed "
+                         "too; by default the text report lists only the "
+                         "functions checked again or with a problem, then "
+                         "the summary")
     _add_gate_flags(pv, default_strict=True)
     pv.set_defaults(fn=cmd_verify)
 

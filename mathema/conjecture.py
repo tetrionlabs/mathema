@@ -1493,7 +1493,96 @@ def claim(law: str, name: str | None = None, source: str = "user",
     `for ... in ...` in one claim, though, raises `ConflictingDomainBinding`
     immediately; two different bounds for one name has no principled
     default to pick silently. `trials` is the claim's own trial
-    budget, a positive whole number, which may exceed the usual limit."""
+    budget, a positive whole number, which may exceed the usual limit.
+
+    Inside a run scope (`_run_scope.run_scope`) a claim stated again with
+    the same text and arguments is parsed once for the run; each call
+    gets its own copy of the parse."""
+    from . import _run_scope
+    kept = _run_scope.kept("claims")
+    if kept is not None:
+        key = _claim_cache_key(law, name, source, route, grammar, funcs,
+                               tolerance, pseudo_infinity, meta,
+                               matrix_names, trials)
+        if key is not None:
+            hit = kept.get(key)
+            if hit is None:
+                hit = kept[key] = _claim_parse(
+                    law, name, source, route, grammar, funcs, tolerance,
+                    pseudo_infinity, meta, matrix_names, trials)
+            return _claim_copy(hit)
+    return _claim_parse(law, name, source, route, grammar, funcs, tolerance,
+                        pseudo_infinity, meta, matrix_names, trials)
+
+
+def _claim_copy(cj: Conjecture) -> Conjecture:
+    """Intent:
+        A copy of a parsed claim that its holder may change without
+        touching `cj`: every dict and list field is a new container
+        (holding the same members, which nothing changes in place), and
+        `meta` is copied all the way down.
+    """
+    import copy
+    from dataclasses import fields
+    out = copy.copy(cj)
+    for f in fields(cj):
+        value = getattr(cj, f.name)
+        if isinstance(value, dict):
+            setattr(out, f.name, dict(value))
+        elif isinstance(value, list):
+            setattr(out, f.name, list(value))
+    out.meta = copy.deepcopy(cj.meta)
+    return out
+
+
+def _plain(value) -> bool:
+    """Whether `value` is built only of strings, numbers, booleans,
+    None, and lists, tuples and dicts of those."""
+    if value is None or isinstance(value, (str, int, float)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain(v) for v in value)
+    if isinstance(value, dict):
+        return all(_plain(k) and _plain(v) for k, v in value.items())
+    return False
+
+
+def _claim_cache_key(*args) -> "str | None":
+    """Intent:
+        The run-scope key of one `claim()` call: its arguments' `repr`
+        (which tells 1 from 1.0 and True, a list from a tuple, and keeps
+        a dict's order), or None when an argument is not plain data
+        (`_plain`) or a reading context is set that changes how claim
+        text parses (a matrix or constant reading, an exception scope).
+    """
+    from . import grammar as _grammar
+    from .policy import _SCOPE as _policy_scope
+    if (_grammar._BAR_MATRICES.get() or _grammar._ORDERED_MATRICES.get()
+            or _grammar._SHADOWED_CONSTANTS.get()
+            or _grammar._RENDER_MATRICES.get()
+            or _policy_scope.get() is not None):
+        return None
+    law, *rest = args
+    if not isinstance(law, str):
+        return None
+    matrix_names = rest[-2]
+    rest[-2] = sorted(matrix_names) if isinstance(
+        matrix_names, frozenset) and all(isinstance(m, str)
+                                         for m in matrix_names) else object()
+    if not all(_plain(a) for a in rest):
+        return None
+    return repr((law, *rest))
+
+
+def _claim_parse(law: str, name: str | None, source: str, route: str,
+                 grammar: str, funcs: dict | None, tolerance: float | None,
+                 pseudo_infinity: float | None, meta: dict | None,
+                 matrix_names: frozenset,
+                 trials: "int | None") -> Conjecture:
+    """Intent:
+        `claim`'s reading of one law text with its arguments, with no
+        run-scope sharing.
+    """
     if trials is not None:
         if isinstance(trials, bool) or not isinstance(trials, int) or trials < 1:
             raise InvalidConjecture(
