@@ -9,6 +9,7 @@ mathematics: between a fast machine and a slow one the headline moves
 from proven to holds, and no further."""
 import importlib.util
 import re
+import sys
 import textwrap
 
 import pytest
@@ -140,9 +141,14 @@ def test_with_a_computation_line_the_corner_is_its_witness_either_way(
         assert fast_line.verdict == slow_line.verdict == "falsified", \
             (name, fast_line.note, slow_line.note)
         for line in (fast_line, slow_line):
-            # the witness: alpha at a magnitude where alpha * v overflows
+            # the witness is a float-limit corner: alpha at a magnitude
+            # where alpha * v overflows, or x the same-sign pair of
+            # largest doubles, where scaling it overflows
             alpha = float(re.search(r"alpha = (\S+?)[,:]", line.counterexample).group(1))
-            assert abs(alpha) > 1e100, (name, line.counterexample)
+            x = [float(v) for v in re.search(
+                r"x = \[([^\]]*)\]", line.counterexample).group(1).split(", ")]
+            at_largest = len(set(x)) == 1 and abs(x[0]) == sys.float_info.max
+            assert abs(alpha) > 1e100 or at_largest, (name, line.counterexample)
             assert "exact arithmetic" in line.note or \
                 line.stratum["cause"].endswith("numerical-instability"), \
                 (name, line.note, line.stratum)

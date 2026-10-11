@@ -32,17 +32,21 @@ def series_mean(xs: pd.Series):
 
 <!-- example: rt-mean verdicts fn=mean_of route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 <!-- example: rt-mean verdicts fn=series_mean route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 Sampled as a list, as it was before runtime types, `mean_of` raises
 `AttributeError` (a list has no `.mean()`) and the claim is falsified;
 sampled as the array its signature names, it holds.
+Over all of `R^n` the mean overflows: at two of the largest doubles the
+float64 sum is `inf`, so the computation is falsified there while the
+mathematics is still proven (see [the computation
+line](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
 
 ## Detection, from the signature only
 

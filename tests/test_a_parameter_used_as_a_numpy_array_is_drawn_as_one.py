@@ -27,5 +27,16 @@ def test_the_parameter_is_realised_as_an_array():
 
 def test_the_claim_holds_on_arrays():
     (p,) = check_conjectures(numpy_body.scaled_mean, [claim(
-        "for a in R^n, f(a) ~= sum(a)", route="probe")])
+        "for a in [-1e6, 1e6]^n, f(a) ~= sum(a)", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample, p.note)
+
+
+def test_over_all_of_r_n_the_array_overflows_at_the_largest_doubles():
+    # np.mean of two largest doubles sums to inf, so the array
+    # computation gives no value there
+    (p,) = check_conjectures(numpy_body.scaled_mean, [claim(
+        "for a in R^n, f(a) ~= sum(a)", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.counterexample, p.note)
+    assert p.counterexample == (
+        "a = [1.7976931348623157e+308, 1.7976931348623157e+308]: f returned "
+        "inf, and an infinity for a finite input is no value"), p.counterexample
