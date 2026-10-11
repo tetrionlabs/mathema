@@ -380,9 +380,6 @@ def cmd_verify(args) -> int:
     the sweep can discover, the stores enumerate the population."""
     import os
 
-    from .conjecture import GRAMMAR
-    from .verify import verify_project
-
     _validate_trials_scale(args.trials_scale)
     _warn_small_pseudo_infinity()
     root = os.path.abspath(args.root)
@@ -413,6 +410,18 @@ def cmd_verify(args) -> int:
             keys.append(target)
         else:
             files.append(path)
+    from ._run_scope import run_scope
+    with run_scope():
+        return _verify_and_print(args, keys, files)
+
+
+def _verify_and_print(args, keys: list, files: list) -> int:
+    """Intent:
+        `cmd_verify`'s sweep over the resolved `keys` and claims
+        `files`, rendered as text or JSON; returns the exit code.
+    """
+    from .conjecture import GRAMMAR
+    from .verify import verify_project
     result = verify_project(args.root, all=args.all,
                             strict=args.strict,
                             trials_downscale=args.trials_scale,

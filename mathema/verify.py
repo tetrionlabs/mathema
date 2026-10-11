@@ -879,9 +879,11 @@ def verify_project(root: str = ".", *, all: bool = False,
         # inventory's own analyze shields; only this category is
         # silenced, every other warning still surfaces.
         warnings.simplefilter("ignore", StateDependenceWarning)
-        return _verify_sweep(root, all=all, strict=strict,
-                             trials_scale=trials_scale, only=only,
-                             files=files)
+        from ._run_scope import run_scope
+        with run_scope():
+            return _verify_sweep(root, all=all, strict=strict,
+                                 trials_scale=trials_scale, only=only,
+                                 files=files)
 
 
 def resolve_claims_file(target: str, root: str = ".") -> "str | None":
