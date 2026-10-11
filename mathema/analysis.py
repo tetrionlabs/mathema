@@ -457,7 +457,7 @@ def annotation_kind(text: str) -> "str | None":
     return None
 
 
-def signature_kinds(fn, params: list) -> dict:
+def signature_kinds(fn, params: list) -> "tuple[dict, dict, dict]":
     """Intent:
         `{param: kind}` read from `fn`'s signature alone, for a function
         whose source is not available: each annotation's own kind
