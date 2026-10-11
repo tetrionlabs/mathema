@@ -316,7 +316,17 @@ def _family_verdict(case: _Case) -> Probe | None:
 
 
 def _rung_form(case: _Case, state: _LadderState) -> Probe | None:
-    if case.facts.form and case.facts.form == case.gfacts.form:
+    """Intent:
+        Prove the pair equal when both sides carry the same canonical
+        form hash, computed by `analyze_source` from each Python body.
+        A form supplied with facts built or edited elsewhere is an
+        identity label rather than a canonical form of the body, so a
+        pair with one falls through to the symbolic and sampled steps.
+    """
+    if not (case.facts.form_is_computed()
+            and case.gfacts.form_is_computed()):
+        return None
+    if case.facts.form == case.gfacts.form:
         return _stamp(Probe(
             case.cj.name, case.statement, "proven", route="derive",
             sketch=f"f and {case.rhs_name} reduce to the same "

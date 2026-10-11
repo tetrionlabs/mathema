@@ -230,6 +230,21 @@ _MUTATING_METHODS = frozenset({
     "setLevel", "addHandler", "removeHandler", "addFilter", "removeFilter",
     "setFormatter", "seed", "set_state", "setstate", "write", "writelines",
     "close", "flush", "send", "drop_duplicates_inplace", "scatter", "set",
+    "__iadd__", "__isub__", "__imul__", "__imatmul__", "__itruediv__",
+    "__ifloordiv__", "__imod__", "__ipow__", "__iand__", "__ior__",
+    "__ixor__", "__ilshift__", "__irshift__",
+})
+#: methods of an array, a frame or a series that return a new object and
+#: leave the receiver as it was: the arithmetic and comparison methods,
+#: their reflected forms, and the conversions
+_ARRAY_RETURNING_METHODS = frozenset({
+    "add", "sub", "subtract", "mul", "multiply", "div", "divide",
+    "truediv", "floordiv", "mod", "pow", "divmod",
+    "radd", "rsub", "rmul", "rdiv", "rtruediv", "rfloordiv", "rmod",
+    "rpow", "rdivmod",
+    "eq", "ne", "lt", "le", "gt", "ge", "combine", "combine_first",
+    "copy", "astype", "abs", "round", "clip", "convert_dtypes",
+    "infer_objects", "to_frame",
 })
 #: method names that read and do not change the object, on any type the
 #: claim's domain admits (numbers, strings, containers, arrays, frames)
@@ -1811,6 +1826,9 @@ class _Examiner:
             return
         changed = self._outside(owner)
         if changed is None:
+            return
+        if method in _ARRAY_RETURNING_METHODS and \
+                self._kind_of(owner) == "array":
             return
         if method in _MUTATING_METHODS:
             self._note_module_write(owner)

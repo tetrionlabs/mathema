@@ -337,9 +337,10 @@ def _apply_declared_edit(root: str, rel: str, key: str, claim_name: str,
 
 
 def _load_record(root: str, key: str):
-    from .spec import verified_dir
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    if not os.path.exists(path):
+    from .spec import find_record, record_file_name, verified_dir
+    path = find_record(verified_dir(root), key)
+    if path is None:
+        path = os.path.join(verified_dir(root), record_file_name(key))
         raise UnknownAcceptanceTarget(f"no verified record for {key!r} at {path}, "
                               "run `mathema verify` (or `check`) first; "
                               "acceptance annotates the evidence verify recorded")
@@ -435,7 +436,7 @@ def plan_rename(root: str, new_key: str, old_key: str,
     from . import analyze
     from .conjecture import _resolve_func_ref
     from .locks import load_locks
-    from .spec import verified_dir
+    from .spec import find_record, record_file_name, verified_dir
     if new_key == old_key:
         raise AcceptanceError("--from names the same key; a rename needs "
                               "two different keys")
@@ -450,8 +451,10 @@ def plan_rename(root: str, new_key: str, old_key: str,
             f"{old_key} still resolves to a live function, so it has not "
             f"moved; a rename would leave that function without its "
             f"record")
-    new_path = os.path.join(verified_dir(root), f"{new_key}.yaml")
-    if os.path.exists(new_path):
+    existing = find_record(verified_dir(root), new_key)
+    new_path = existing or os.path.join(verified_dir(root),
+                                        record_file_name(new_key))
+    if existing is not None:
         raise AcceptanceError(
             f"{new_key} already has a record ({os.path.relpath(new_path, root)}); "
             f"a rename never writes over one. Remove it first if the "

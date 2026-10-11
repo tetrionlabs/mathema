@@ -214,9 +214,9 @@ def _local_row(root: "str | None", key: str, name: str) -> "dict | None":
     project at `root`, or None."""
     if root is None:
         return None
-    from .spec import read_verified_file, verified_dir
-    path = os.path.join(verified_dir(root), f"{key}.yaml")
-    if not os.path.exists(path):
+    from .spec import find_record, read_verified_file, verified_dir
+    path = find_record(verified_dir(root), key)
+    if path is None:
         return None
     data, _ = read_verified_file(path)
     entry = (data or {}).get(key) or {}
