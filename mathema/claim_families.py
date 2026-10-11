@@ -1184,6 +1184,8 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
     """
     from .symbolic import ProofResult
     param = lhs_src
+    if _declared((domain or {}).get(param), "refusal"):
+        return None
     enforced = getattr(fn, "__mathema_enforced_domain__", None)
     if enforced is not None and param in enforced:
         return ProofResult(
@@ -1209,7 +1211,11 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     each boundary, every domain shape supported); every such call
     must raise. A clean return falsifies with the accepted value as
     witness; the exclusion is asserted, not enforced. All raise ->
-    holds (the outside is a continuum, so trials never establish)."""
+    holds (the outside is a continuum, so trials never establish).
+    When the domain's language declares a `Refusal`, every such call
+    must be refused that way instead: any other raise, or a return the
+    refusal does not cover, falsifies, and the witness names the
+    refusal and what the call did."""
     from .domain import is_missing
     from .probing import _out_of_domain_candidates
     target = cj.lhs
@@ -1219,6 +1225,7 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if bounds is None:
         return None   # an unstated domain admits everything: no outside
     language_bound = getattr(bounds, "base_type", None) == "L"
+    refusals = _declared(bounds, "refusal")
     if language_bound:
         # a language's own near non-members, each named for the language
         # it lies outside, then each value the domain removes with `\`;
@@ -1301,8 +1308,19 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
             spelled = f"{target} = {bad!r}"
         try:
             out = _call_with_target(call, facts, target, args, value)
-        except Exception:
+        except Exception as exc:
+            outcome = ("raised", exc)
+        else:
+            outcome = ("returned", out)
+        if outcome[0] == "raised" and not refusals:
             return True   # rejected, as the claim demands
+        if refusals:
+            if _matches(refusals, outcome):
+                return True
+            return (f"{spelled} is outside the declared domain and was not "
+                    f"refused the way the language declares "
+                    f"({_declared_text(refusals)}): the call "
+                    f"{_outcome_text(outcome)}")
         if spelled.endswith(_shapes.space_text(bounds)):
             # the shape round's sentence already says where the value lies
             from .probing import _fmt_value
@@ -1329,6 +1347,46 @@ def _language_pieces(bounds) -> list:
 
 def _language_names(bounds) -> str:
     return " | ".join(name for name, _ in _language_pieces(bounds))
+
+
+def _declared(bounds, member: str) -> list:
+    """Intent:
+        The distinct `refusal` or `defined_answer` declarations (as
+        `member` names) made by the language pieces of a bound, in
+        piece order; empty when the bound is not a language or no piece
+        declares one.
+    """
+    if getattr(bounds, "base_type", None) != "L":
+        return []
+    out: list = []
+    for _, language in _language_pieces(bounds):
+        declared = getattr(language, member, None)
+        if declared is not None and declared not in out:
+            out.append(declared)
+    return out
+
+
+def _outcome_text(outcome) -> str:
+    """What a call did, as a witness says it: `raised <name>` or
+    `returned <value>`."""
+    kind, what = outcome
+    if kind == "raised":
+        return f"raised {exception_name(what)}"
+    from .probing import _fmt_value
+    return f"returned {_fmt_value(what)}"
+
+
+def _matches(declarations: list, outcome) -> bool:
+    """Whether a call's `("raised", exc)` or `("returned", value)`
+    outcome is one of `declarations`."""
+    kind, what = outcome
+    if kind == "raised":
+        return any(d.matches_raise(what) for d in declarations)
+    return any(d.matches_return(what) for d in declarations)
+
+
+def _declared_text(declarations: list) -> str:
+    return " or ".join(d.text for d in declarations)
 
 
 def _outside_language(bounds, rng: random.Random) -> "tuple[str, list]":
@@ -1847,7 +1905,10 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
     found by shrinking and returned as the witness. A raise the function
     GUARDS (a validating `if ...: raise`/`assert`), or any other
     exception type (a deliberate ValueError), is accepted; a normal
-    return is fine."""
+    return is fine. When the domain's language declares a
+    `DefinedAnswer`, a member must get that answer instead: any other
+    raise, or a return the answer does not cover, falsifies with the
+    shrunk member, the answer declared and what the call did."""
     from ._sampling import _STRING_SPECIALS, _synth_string
     from ._shrink import shrink
     from .analysis import _guards
@@ -1869,6 +1930,23 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except Exception:
             return None       # a deliberate/other exception is not a crash
         return None
+
+    answers = _declared(bound, "defined_answer") if language_bound else []
+    if answers:
+        from ._exits import exiting_as_raise
+        answering = exiting_as_raise(fn)
+
+    def unanswered(args, value):
+        """None when the call gets an answer the language declares,
+        else what the call did."""
+        try:
+            with _pinned_float_env():
+                out = _call_with_target(answering, facts, target, args, value)
+        except Exception as exc:
+            outcome = ("raised", exc)
+        else:
+            outcome = ("returned", out)
+        return None if _matches(answers, outcome) else _outcome_text(outcome)
 
     from .conjecture import _text_set_members
     members = _text_set_members(bound)
@@ -1896,6 +1974,15 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return True
         value, side = corpus[state["i"]]
         state["i"] += 1
+        if answers and side == "inside":
+            if unanswered(args, value) is None:
+                return True
+            minimal = _shrink_in_language(
+                value, lambda s: (unanswered(args, s) is not None
+                                  and bool(domain_contains(s, bound))), bound)
+            return (f"{target} = {_witness_value(minimal)} (inside {names}) "
+                    f"{unanswered(args, minimal)}, not the defined answer the "
+                    f"language declares ({_declared_text(answers)})")
         exc = crash_on(args, value)
         if exc is None:
             return True

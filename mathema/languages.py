@@ -95,6 +95,104 @@ class HazardValue:
     note: str = ""
 
 
+def _codes_text(codes: tuple) -> str:
+    """`2`, `0 or 1`, `0, 1 or 2`: exit codes as a sentence lists them."""
+    shown = [str(c) for c in codes]
+    if len(shown) == 1:
+        return shown[0]
+    return ", ".join(shown[:-1]) + " or " + shown[-1]
+
+
+def _exits_with(codes: tuple) -> "Callable[[BaseException], bool]":
+    """A test on a raised `SystemExit`: whether its exit status is one
+    of `codes`."""
+    from ._exits import exit_code
+    wanted = frozenset(codes)
+    return lambda exc: isinstance(exc, SystemExit) and exit_code(exc) in wanted
+
+
+def _raise_matches(raises, when, exc: BaseException) -> bool:
+    """Whether `exc` is an instance of `raises` (a class or a tuple of
+    classes) that `when` accepts, every instance when `when` is None."""
+    if not raises or not isinstance(exc, raises):
+        return False
+    if when is None:
+        return True
+    try:
+        return bool(when(exc))
+    except Exception:
+        return False
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """How a function refuses a value outside a language, when the
+    language declares it: a raise of `raises` (an exception class or a
+    tuple of them) that `when` accepts (any such raise when `when` is
+    None), or a return `returns` accepts (no return is a refusal when
+    `returns` is None). `text` names the refusal in a witness.
+    `Refusal.exit(2)` is a command-line parser's refusal, `SystemExit`
+    with exit code 2."""
+    text: str
+    raises: "type | tuple" = ()
+    when: "Callable[[BaseException], bool] | None" = None
+    returns: "Callable[[object], bool] | None" = None
+
+    def matches_raise(self, exc: BaseException) -> bool:
+        """Whether raising `exc` is this refusal."""
+        return _raise_matches(self.raises, self.when, exc)
+
+    def matches_return(self, value) -> bool:
+        """Whether returning `value` is this refusal."""
+        if self.returns is None:
+            return False
+        try:
+            return bool(self.returns(value))
+        except Exception:
+            return False
+
+    @classmethod
+    def exit(cls, *codes: int) -> "Refusal":
+        """The refusal `SystemExit` with one of the exit `codes`."""
+        return cls(f"SystemExit (exit code {_codes_text(codes)})",
+                   raises=SystemExit, when=_exits_with(codes))
+
+
+@dataclass(frozen=True)
+class DefinedAnswer:
+    """What counts as a function answering a member of a language, when
+    the language declares it: a return `returns` accepts (any return
+    when `returns` is None), or a raise of `raises` (an exception class
+    or a tuple of them) that `when` accepts (no raise is an answer when
+    `raises` is empty). `text` names the answer in a witness.
+    `DefinedAnswer.exit(0, 1)` is a command-line program's answer: a
+    return, or `SystemExit` with exit code 0 or 1."""
+    text: str
+    raises: "type | tuple" = ()
+    when: "Callable[[BaseException], bool] | None" = None
+    returns: "Callable[[object], bool] | None" = None
+
+    def matches_raise(self, exc: BaseException) -> bool:
+        """Whether raising `exc` is this answer."""
+        return _raise_matches(self.raises, self.when, exc)
+
+    def matches_return(self, value) -> bool:
+        """Whether returning `value` is this answer."""
+        if self.returns is None:
+            return True
+        try:
+            return bool(self.returns(value))
+        except Exception:
+            return False
+
+    @classmethod
+    def exit(cls, *codes: int) -> "DefinedAnswer":
+        """The answer a return, or `SystemExit` with one of the exit
+        `codes`."""
+        return cls(f"a return, or SystemExit (exit code {_codes_text(codes)})",
+                   raises=SystemExit, when=_exits_with(codes))
+
+
 @runtime_checkable
 class Language(Protocol):
     """One language: a named set of values a claim can quantify over.
@@ -109,7 +207,14 @@ class Language(Protocol):
     smaller members reached from a failing one, `fields` the one-deep
     field domains of a schema language (else `None`), `render` the
     domain text, and `to_json` the persisted form (JSON Schema where
-    the language can be written as one)."""
+    the language can be written as one).
+
+    Two members are optional. `refusal`, a `Refusal`, is how a function
+    over the language refuses a value outside it, which
+    `excluded_outside_domain` checks for in place of any raise.
+    `defined_answer`, a `DefinedAnswer`, is what counts as answering a
+    member, which `is_language_defined` checks for in place of no
+    unguarded crash. Either may be absent or None."""
 
     name: str
     kind: str
@@ -162,6 +267,10 @@ def language_problems(obj: object) -> list[str]:
             problems.append(f"language: missing {member!r}")
         elif not callable(target):
             problems.append(f"language: {member!r} is not callable")
+    for member, kit in (("refusal", Refusal), ("defined_answer", DefinedAnswer)):
+        declared = getattr(obj, member, None)
+        if declared is not None and not isinstance(declared, kit):
+            problems.append(f"language: {member!r} must be a {kit.__name__} or None")
     return problems
 
 
@@ -231,7 +340,9 @@ class StringLanguage:
     optional generator for a predicate language whose members are
     not reachable by drawing characters (a JSON document), and
     `outside_pool` characters known to lie outside the language, for
-    a near non-member. `schema` is merged into the persisted form."""
+    a near non-member. `schema` is merged into the persisted form.
+    `refusal` and `defined_answer` are the optional declarations the
+    `Language` protocol describes."""
     name: str
     level: str = "alphabet"
     char_ok: "Callable[[str], bool] | None" = None
@@ -242,6 +353,8 @@ class StringLanguage:
     schema: dict = field(default_factory=dict)
 
     kind: str = "string"
+    refusal: "Refusal | None" = None
+    defined_answer: "DefinedAnswer | None" = None
 
     def contains(self, value) -> bool:
         if not isinstance(value, str):
@@ -470,7 +583,8 @@ class RefinedLanguage:
     exactly, the nearest within a few steps inside (or past) it stands
     in. `schema` is merged into the persisted
     form (`{"maxLength": 80}`). A value the measure cannot be taken of
-    is not a member."""
+    is not a member. The base's `refusal` and `defined_answer` carry
+    over."""
 
     def __init__(self, base, key: str, interval, *, measure, plain=None, build=None,
                  schema: "dict | None" = None, hazard_kind: str = "shape") -> None:
@@ -488,6 +602,8 @@ class RefinedLanguage:
         self.name = f"{base.name}, {self.bound_text}"
         self.kind = base.kind
         self.level = base.level
+        self.refusal = getattr(base, "refusal", None)
+        self.defined_answer = getattr(base, "defined_answer", None)
 
     def _measured(self, value):
         try:
@@ -839,7 +955,7 @@ def derive_strategy(language) -> "tuple | None":
 
 
 __all__ = [
-    "ADAPTOR_GROUP", "HAZARD_KINDS", "HazardValue",
+    "ADAPTOR_GROUP", "DefinedAnswer", "HAZARD_KINDS", "HazardValue", "Refusal",
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
     "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
