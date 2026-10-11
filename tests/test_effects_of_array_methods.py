@@ -7,11 +7,12 @@ write to that argument. A method that changes its receiver in place
 still is: `inplace=True`, an in-place operator or its method form
 (`__iadd__`), an assignment through `.loc`, `update` on a series, and
 `append`/`update`/`add` on a list, a dict or a set."""
-import numpy as np
-import pandas as pd
 import pytest
 
 from mathema._examine import examine
+
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
 
 def _texts(effects) -> list:
