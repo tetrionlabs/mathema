@@ -58,7 +58,7 @@ print(mathema.check(discounted, claims=[
 mathema.Record(discounted) · source, no side effects · form d2ab6eef1b84
   at_most_price  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
       falsified at price = -1, rate = 1
-    falsified  computation  for rate in [0.0, 1.0] : float, f(price, rate) <= price
+    falsified  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(price, rate) <= price
         counterexample price = -1, rate = 1
                             [mathematics unsound, blame claim]
   at_most_price_when_positive  for price in [0.0, 1000000.0] : float|missing, rate in
