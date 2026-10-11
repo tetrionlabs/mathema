@@ -33,7 +33,7 @@ from .domain import _as_domain, _set_sentinels, finite_members
 from .probing import ExecutedMissing, LastCall, executed_missing, with_executed
 from .symbolic import ProofResult
 
-__all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
+__all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof", "ground_proof"]
 
 #: the most points one claim's sweep will visit. A domain larger than
 #: this declines rather than being truncated: the budget bounds the work
@@ -495,6 +495,136 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
 
 
 _STATEFUL = object()
+
+#: the relations a ground claim is evaluated for: a value relation the
+#: point evaluator decides
+_GROUND_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
+
+
+def _calls_f(cj) -> bool:
+    """Whether either side of the claim calls f."""
+    import ast
+    for side in (cj.lhs, cj.rhs):
+        try:
+            tree = ast.parse(side or "0", mode="eval")
+        except SyntaxError:
+            return False
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "f" for n in ast.walk(tree)):
+            return True
+    return False
+
+
+def _call_text(fn, facts, args: tuple, kwargs: dict) -> str:
+    """One call's arguments as a point, `x = nan, k = 2`, each named by
+    the parameter it binds; the arguments as written, `f(nan, 2)`, when
+    they do not bind by name."""
+    from .gates import _fmt_point
+    params = list(facts.params)
+    if len(args) <= len(params) and all(k in params for k in kwargs):
+        point = {**dict(zip(params, args)), **kwargs}
+        return _fmt_point(point, [p for p in params if p in point])
+    return _written_call(args, kwargs)
+
+
+def _written_call(args: tuple, kwargs: dict) -> str:
+    """A call as written, `f(1, k=2)`."""
+    from .probing import _fmt_coordinate, _fmt_value
+
+    def shown(v):
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    parts = [shown(a) for a in args] + [
+        f"{k}={shown(v)}" for k, v in kwargs.items()]
+    return f"f({', '.join(parts)})"
+
+
+def _ground_witness(fn, facts, calls: list) -> str:
+    """Intent:
+        The calls a ground claim's evaluation made, as its witness: the
+        raising call when one raised, else the one call made (`xs =
+        []`), else every distinct call as written (`f(1), f(2)`).
+    """
+    raised = [c for c in calls if c[0] == "raised"]
+    shown = raised[-1:] if raised else calls
+    distinct: list = []
+    for _kind, _out, args, kwargs in shown:
+        key = (repr(args), repr(sorted(kwargs.items())))
+        if key not in [k for k, _a, _kw in distinct]:
+            distinct.append((key, args, kwargs))
+    if len(distinct) == 1:
+        _key, args, kwargs = distinct[0]
+        return _call_text(fn, facts, args, kwargs)
+    return ", ".join(_written_call(args, kwargs)
+                     for _key, args, kwargs in distinct)
+
+
+def ground_proof(cj, fn, facts, bound_funcs):
+    """Intent:
+        A `ProofResult` for a ground claim, one that names no variable
+        and calls f only at literal arguments (`f(nan) == 0`, `f([]) ==
+        0`): the claim evaluated once, at its own calls. `disproven`
+        when it fails there, the calls as the witness (`x = nan: raised
+        ValueError`, `xs = []: 0.0 vs 1`); `proven` when it holds and
+        the function is shown pure; `undecided` with
+        `mathema.sweep_holds` when it holds but purity is not shown.
+        None when the claim is not ground or the evaluation cannot
+        decide it.
+
+    Notes:
+        The relation is decided by the corroboration gate's point
+        evaluator (`gates._point_evaluator`) at the empty point, so the
+        computation allowance, the raise rule and the no-value rule are
+        the ones every executed witness is judged by. A parameter the
+        claim never reads is no coordinate of that point: each call
+        binds what the claim passes it, and nothing is drawn.
+    """
+    if cj.relation not in _GROUND_RELATIONS or cj.links or cj.free_vars \
+            or cj.domain or cj.assuming or not _calls_f(cj):
+        return None
+    from .gates import _point_evaluator
+    deps = _point_evaluator(cj, fn, facts, {}, bound_funcs, sequences=True)
+    if deps is None or deps["names"]:
+        return None
+    evaluate = deps["evaluate"]
+    verdict = evaluate({})
+    calls = evaluate.calls()
+    if verdict is None or not calls:
+        return None
+    witness = _ground_witness(fn, facts, calls)
+    if verdict is False:
+        raised = [c for c in calls if c[0] == "raised"]
+        sides = evaluate.sides()
+        if raised:
+            detail = f"raised {raised[-1][1]}"
+        elif sides is not None:
+            from .probing import holds_nan
+            detail = f"{sides[0]!r} vs {sides[1]!r}" + (
+                ", and a nan is no value" if any(holds_nan(v) for v in sides)
+                else "")
+        else:
+            found = deps["probe_finite"]({})
+            detail = found if isinstance(found, str) else "the claim fails"
+        return ProofResult(
+            "disproven",
+            sketch=f"the claim fails at its own call, {witness}",
+            counterexample=f"{witness}: {detail}",
+            witness={},
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.witness_executed": True},
+                               executed_missing(deps)))
+    sketch = f"the claim holds at its own call, {witness}"
+    if facts.is_pure is not True or _examination_obstacle(fn) is not None:
+        return ProofResult(
+            "undecided",
+            sketch=(f"{sketch}; proven needs the function to be shown "
+                    f"pure, and one call says nothing about the next"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.sweep_holds": True},
+                               executed_missing(deps)))
+    return ProofResult(
+        "proven", sketch=sketch,
+        meta=with_executed({"mathema.derive_route": "brute_force"},
+                           executed_missing(deps)))
 
 
 def _examination_obstacle(fn):
