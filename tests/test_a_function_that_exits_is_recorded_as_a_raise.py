@@ -128,3 +128,25 @@ def test_the_cli_exits_with_its_own_code_not_the_function_s(tmp_path):
                        env=_env_with_repo_on_path())
     assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
     assert "SystemExit (exit code 7)" in r.stdout, r.stdout
+
+
+def total(xs: list) -> float:
+    """The sum of every entry."""
+    return sum(xs)
+
+
+def test_the_callable_mathema_runs_reads_as_the_function_itself():
+    from types import SimpleNamespace
+
+    from mathema.runtime_types import calling
+    call = calling(total, SimpleNamespace(runtime_types={}))
+    assert (call.__module__, call.__qualname__, call.__name__, call.__doc__) == (
+        total.__module__, total.__qualname__, total.__name__, total.__doc__)
+
+
+def test_a_claim_calling_the_function_by_name_keeps_its_missing_policy_row():
+    record = mathema.check(total, claims=[mathema.claim(
+        "for xs in [0, 1]^n, total(xs) >= 0", name="nonneg")])
+    rows = [p for p in record.probes if p.verdict == "falsified"]
+    assert rows, record
+    assert "raises TypeError" in str(record), record
