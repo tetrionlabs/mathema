@@ -306,7 +306,7 @@ def analyze(fn) -> Facts:
         # honestly state (a namespaced form hash, real param kinds,
         # tree=None); they are richer than the doc-only fallback the
         # source-less path below would produce, so they win outright
-        return injected
+        return effective_facts(fn)
     try:
         facts = effective_facts(fn)
     except SourceUnavailable:

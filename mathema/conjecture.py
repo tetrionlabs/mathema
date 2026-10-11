@@ -42,7 +42,7 @@ from dataclasses import replace as _dc_replace
 
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import effective_facts
+from .analysis import effective_facts, hydrated
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -4572,9 +4572,10 @@ def _effective_facts(fn, facts=None):
         The facts to adjudicate `fn` under: the caller's when given,
         else `analysis.effective_facts(fn)` (the callable's injected
         `__mathema_facts__` when it carries them, else analysis of its
-        source).
+        source). Facts carrying a KOINE document and no syntax tree are
+        read through the document either way.
     """
-    return facts if facts is not None else effective_facts(fn)
+    return hydrated(facts) if facts is not None else effective_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):

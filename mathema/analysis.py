@@ -7,7 +7,7 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ._signatures import module_scope
 import ast
@@ -19,6 +19,9 @@ from . import identity
 from . import types as _types
 from .intent import parse_doc
 from ._signatures import callable_signature
+
+if TYPE_CHECKING:
+    from .koine.document import Document
 
 _IO_FUNCS = {"print", "input", "open", "exec", "eval", "__import__"}
 _IO_MODULES = {"os", "sys", "subprocess", "socket", "requests", "urllib",
@@ -103,7 +106,13 @@ class Facts:
     compared only within a namespace, never across. Only a form
     `analyze_source` computed from the Python body is a canonical form
     of that body (`form_is_computed`); any other form is an identity
-    label and proves nothing about what the body computes."""
+    label and proves nothing about what the body computes.
+
+    `koine` is the body as a KOINE document, the engine's internal
+    representation of it. A `Facts` carrying `koine` and no `tree` is
+    read with the tree rendered from the document and the structural
+    fields (loops, branches, recursion, guards, call groups) taken from
+    its body, wherever `effective_facts` resolves it."""
     name: str
     signature: str
     params: list[str]
@@ -156,6 +165,7 @@ class Facts:
     runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
+    koine: "Document | None" = field(default=None, repr=False)  # the body as KOINE
     _computed_form: str | None = field(default=None, repr=False)  # the form hash
                                       # analyze_source computed from the Python body; `form`
                                       # is a canonical form of the body only while it equals
@@ -1183,20 +1193,34 @@ def effective_facts(fn: Callable[..., Any]) -> Facts:
         Python body of its own states about the function it stands
         for), else `analyze_source(fn)`. Every entry that analyses a
         callable resolves its facts here, so injected facts hold at
-        each of them.
+        each of them. Injected facts carrying a KOINE document and no
+        syntax tree are read through the document (`hydrated`).
 
     Raises:
         SourceUnavailable: no injected facts and no retrievable source.
 
     Notes:
-        Injected facts are returned as they are, not copied, and may
-        have `tree=None`: a reader that needs a body to lift finds none
-        and declines.
+        Injected facts are returned as they are, not copied, unless they
+        are hydrated; they may have `tree=None`, and then a reader that
+        needs a body to lift finds none and declines.
     """
     injected = getattr(fn, "__mathema_facts__", None)
     if isinstance(injected, Facts):
-        return injected
+        return hydrated(injected)
     return analyze_source(fn)
+
+
+def hydrated(facts: Facts) -> Facts:
+    """Intent:
+        `facts` with its syntax tree rendered from its KOINE document and
+        its structural fields taken from the document's body, when it
+        carries a document and no tree (`koine.facts.hydrated`); `facts`
+        itself otherwise.
+    """
+    if facts.koine is None or facts.tree is not None:
+        return facts
+    from .koine.facts import hydrated as _from_koine
+    return _from_koine(facts)
 
 
 def has_injected_facts(fn) -> bool:
