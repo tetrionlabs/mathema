@@ -449,6 +449,9 @@ class VerifyResult:
     on an authoring surface (a declared claim that does not parse),
     which the CLI exits 2 on rather than 1.
 
+    `quiet` holds the indices in `lines` of each fresh, passing key's
+    rows, the ones `mathema verify` prints only with `--verbose`.
+
     `keys` is the same sweep as structured data rather than prose;
     one entry per key with `why` it was looked at, its gate counts,
     and its claim rows in `records.claim_row()`'s vocabulary. `lines`
@@ -463,6 +466,9 @@ class VerifyResult:
     nothing_declared: bool = False
     keys: list = field(default_factory=list)
     authoring_errors: list = field(default_factory=list)
+    # the indices in `lines` of the rows of keys that were fresh and
+    # passed, which the text report leaves out unless asked for them
+    quiet: set = field(default_factory=set)
 
 
 def _declared_reference_triples(refs) -> list:
@@ -2019,6 +2025,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 # a problem's options sit on their own lines, under it
                 line += "  <- " + problems_text(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
+        first_line = len(out.lines)
         out.lines.append(line)
         # a definition row's corner finding: the library's computation
         # gave no value at a magnitude corner, and the row stands
@@ -2033,6 +2040,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"mathema; its grammar is now {grammar!r}, so mathema no "
             f"longer checks it"
             for name, grammar in grammar_changes.get(key, {}).items())
+        if why == "fresh" and state == "ok" and key not in lock_messages:
+            out.quiet.update(range(first_line, len(out.lines)))
         out.keys.append({
             "key": key,
             "why": why,

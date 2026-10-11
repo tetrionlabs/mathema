@@ -31,6 +31,7 @@ names no record fails as a clear per-key problem line, exit 2.
 | `--status [TARGET]` | report fresh/stale per `@track_claims`-tagged function, adjudicate nothing, exit 0; an optional TARGET (dotted name or file path) is imported first so its tagged functions register |
 | `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted, `supersession` iff the claim was re-authored after it was verified: the new text and the `mathema accept` command that adopts it); `totals.skip_reasons` counts the skipped claims per reason. Exit codes are identical either way |
 | `--output FILE` | write the report to a file instead of stdout |
+| `--verbose` | list every function in the text report; by default it lists only the functions checked again or with a problem, then the summary, which counts the unchanged ones. JSON always carries every function |
 
 Store keys are canonical dotted `module.qualname` names, resolved by
 importing from `--root`; the target must be importable there, and a
@@ -108,7 +109,6 @@ mathema.write_spec(softmax)
 ```
 $ mathema verify --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
-ok   functions.softmax: fresh
 1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -147,7 +147,6 @@ and re-run:
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
-ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
@@ -181,7 +180,6 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
-ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   functions.softmax: form changed; 1 proven, 4 holds, 0 falsified
 1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
@@ -284,14 +282,12 @@ $ mathema verify --root .
 note balances.running_total: shifts_with_start[float] initially falsified: ill-conditioned here (κ ≈ 5e287): no float64 computation can deliver this result at inputs of magnitude 1e300:
   (i) if inputs this large are out of scope, narrow the domain: for xs in [-1e21, 1e21]^n
   (ii) if the loss is accepted, run: mathema accept balances.running_total shifts_with_start --as discovery
-ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
 FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
        1 falsified claim(s)
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
-ok   functions.softmax: fresh
 2 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
@@ -374,8 +370,6 @@ history over:
 $ mathema verify --root .
 FAIL balances.running_total: cannot resolve to a live function (declared in .mathema/verified/balances.running_total.yaml); its form hash matches ledger.running_total, which has no record. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total
 FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was checked or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
-ok   math.exp: fresh; library claims from mathema/compendium/math.claims.yaml
-ok   functions.softmax: fresh
 2 unchanged since the last run (not run again), 0 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```

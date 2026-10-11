@@ -137,14 +137,14 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-ok   funcs.midpoint: fresh
 FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 ```
 
-`midpoint` is skipped as `fresh`: its form hash has not moved, so there
-is nothing to re-adjudicate. `settle` changed, so it is swept again,
+`midpoint` is the one unchanged function: its form hash has not moved,
+so there is nothing to re-adjudicate, and only `--verbose` lists it (as
+`fresh`). `settle` changed, so it is swept again,
 and the record now keeps the arc (trimmed):
 
 ```yaml
@@ -277,7 +277,6 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-ok   funcs.midpoint: fresh
 ok   funcs.settle: claims changed; 1 proven, 4 holds, 0 falsified
 1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema

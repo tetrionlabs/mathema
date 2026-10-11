@@ -459,7 +459,8 @@ def _verify_and_print(args, keys: list, files: list) -> int:
                        "skip_reasons": _skip_reasons(result.keys)},
         }, getattr(args, "output", None))
         return _verify_exit(args, result)
-    lines = list(result.lines)
+    lines = [line for i, line in enumerate(result.lines)
+             if getattr(args, "verbose", False) or i not in result.quiet]
     if definitions:
         # definitions are axioms, taken at face value: listed apart
         # from the verdicts and outside their counts
@@ -3086,6 +3087,11 @@ def main(argv: list[str] | None = None) -> int:
                          "`check --format compact` and the MCP tools use)")
     pv.add_argument("--output", metavar="FILE",
                     help="write the report to a file instead of stdout")
+    pv.add_argument("--verbose", action="store_true",
+                    help="list every function, the fresh ones that passed "
+                         "too; by default the text report lists only the "
+                         "functions checked again or with a problem, then "
+                         "the summary")
     _add_gate_flags(pv, default_strict=True)
     pv.set_defaults(fn=cmd_verify)
 

@@ -240,7 +240,8 @@ def test_docstring_claims_reach_the_verified_layer_and_concept_edits_heal(tmp_pa
         return subprocess.run(
             [sys.executable, "-c",
              "import sys; from mathema.cli import main; "
-             f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
+             f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}, "
+             f"'--verbose']))"],
             cwd=str(tmp_path), capture_output=True, text=True, env=env)
 
     (tmp_path / "claims").mkdir()
