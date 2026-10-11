@@ -18,7 +18,7 @@ import dataclasses
 import os
 
 from . import families as _families
-from .analysis import analyze_source
+from .analysis import effective_facts
 from .conjecture import claim
 from .records import _EXC_TYPES
 from .spec import declare, merge_entries, write_yaml
@@ -96,7 +96,7 @@ def bound_annotation_hint(fn, facts=None) -> str | None:
     a direction to annotate, never a claim mathema invents."""
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             return None
     if facts.tree is None:
@@ -606,14 +606,14 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     """
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             return []
     if facts.tree is None:
         # a doc-only Facts (no real source available, e.g. a C builtin
         # like math.atan) has nothing raises(...)-guard detection or a
         # lift attempt could read, caller-supplied facts skip the
-        # analyze_source() call above entirely, so this can't rely on
+        # effective_facts() call above entirely, so this can't rely on
         # that try/except alone.
         return []
     scalar_params = [p for p in facts.params if facts.param_kinds.get(p) == "scalar"]
@@ -1347,7 +1347,7 @@ def suggestion_sections(fn, suggestions: list, facts=None) -> list:
     from .families import aspect_label
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             facts = None
     effects: dict = {}

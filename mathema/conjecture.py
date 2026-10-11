@@ -42,7 +42,7 @@ from dataclasses import replace as _dc_replace
 
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import analyze_source
+from .analysis import effective_facts
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -992,7 +992,7 @@ def parameter_domains(fn, facts=None) -> dict:
     from .types import missing_policy_from_signature
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             return {}
     policy = missing_policy_from_signature(fn)
@@ -4570,23 +4570,11 @@ def _resolve_matrix_sugar(cj: "Conjecture", fn_matrix_names: frozenset) -> "Conj
 def _effective_facts(fn, facts=None):
     """Intent:
         The facts to adjudicate `fn` under: the caller's when given,
-        else the callable's own injected `__mathema_facts__` (how a
-        foreign proxy states its real parameters and kinds without a
-        Python body to read), else analysis of its source. Every
-        entry that meets a callable, including a `funcs=`-bound one,
-        resolves facts through here so the injection seam holds at
-        each of them.
-
-    Notes:
-        The injected value is recognized by type name rather than
-        isinstance so this stays import-cycle-free with analysis.
+        else `analysis.effective_facts(fn)` (the callable's injected
+        `__mathema_facts__` when it carries them, else analysis of its
+        source).
     """
-    if facts is not None:
-        return facts
-    injected = getattr(fn, "__mathema_facts__", None)
-    if type(injected).__name__ == "Facts":
-        return injected
-    return analyze_source(fn)
+    return facts if facts is not None else effective_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):

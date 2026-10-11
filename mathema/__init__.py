@@ -52,7 +52,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
+from .analysis import Facts, SourceUnavailable, _parse_notes, effective_facts
+from .analysis import analyze_source as analyze_source
 # aliased on import: the bare name `claims` is already the conjecture-module
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
@@ -307,7 +308,7 @@ def analyze(fn) -> Facts:
         # source-less path below would produce, so they win outright
         return injected
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
     except SourceUnavailable:
         return _doc_only_facts(fn)
     facts.tier = 3 if not facts.is_pure else 2
@@ -995,7 +996,7 @@ def status(root: str = ".") -> str:
     lines = []
     for key, fn in sorted(tagged().items()):
         try:
-            current = analyze_source(fn).form
+            current = effective_facts(fn).form
         except SourceUnavailable:
             current = None
         rec = verified.get(key) or verified.get(fn.__name__)

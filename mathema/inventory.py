@@ -80,7 +80,7 @@ def is_pure_enough(fn) -> bool | None:
     from .symbolic import lift, lift_dot, lift_fold, lift_sum
 
     facts = quiet_facts(fn)
-    if facts is None:
+    if facts is None or facts.tree is None:
         return None
     if facts.params and facts.params[0] in ("self", "cls") \
             and _self_use_blocks(facts.tree, facts.params[0]):

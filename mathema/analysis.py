@@ -1176,6 +1176,38 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
     )
 
 
+def effective_facts(fn: Callable[..., Any]) -> Facts:
+    """Intent:
+        The facts mathema reads `fn` by: the `Facts` it carries as
+        `__mathema_facts__` when present (what a callable with no
+        Python body of its own states about the function it stands
+        for), else `analyze_source(fn)`. Every entry that analyses a
+        callable resolves its facts here, so injected facts hold at
+        each of them.
+
+    Raises:
+        SourceUnavailable: no injected facts and no retrievable source.
+
+    Notes:
+        Injected facts are returned as they are, not copied, and may
+        have `tree=None`: a reader that needs a body to lift finds none
+        and declines.
+    """
+    injected = getattr(fn, "__mathema_facts__", None)
+    if isinstance(injected, Facts):
+        return injected
+    return analyze_source(fn)
+
+
+def has_injected_facts(fn) -> bool:
+    """Intent:
+        True when `fn` carries `Facts` as `__mathema_facts__`, so its
+        Python source (if any) is a wrapper's and not the function the
+        facts describe.
+    """
+    return isinstance(getattr(fn, "__mathema_facts__", None), Facts)
+
+
 def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
     """Intent:
         Set, in place, the kind of each parameter whose first runtime
@@ -1211,7 +1243,7 @@ def with_declared_runtime_types(facts, fn, declared: "dict | None"):
 
 
 def quiet_facts(fn) -> "Facts | None":
-    """`analyze_source(fn)` in population-sweep posture: analysis
+    """`effective_facts(fn)` in population-sweep posture: analysis
     warnings suppressed (a sweep over every function in a package would
     otherwise print one global-scope/unresolved-name warning per
     affected function, drowning the report itself; the same signal is
@@ -1223,6 +1255,6 @@ def quiet_facts(fn) -> "Facts | None":
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            return analyze_source(fn)
+            return effective_facts(fn)
         except SourceUnavailable:
             return None

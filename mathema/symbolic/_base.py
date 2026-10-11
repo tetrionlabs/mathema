@@ -283,11 +283,11 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
     if callee is None or not inspect.isfunction(callee) or id(callee) in ctx.seen:
         return None
 
-    from ..analysis import SourceUnavailable, analyze_source
+    from ..analysis import SourceUnavailable, effective_facts
     from ._conditioned import lift_conditioned
 
     try:
-        callee_facts = analyze_source(callee)
+        callee_facts = effective_facts(callee)
     except SourceUnavailable:
         return None
     callee_unmodified = (frozenset(_unmodified_params(callee_facts.tree, set(callee_facts.params)))

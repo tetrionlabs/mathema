@@ -393,10 +393,10 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         return None
     try:
         if facts is None:
-            from .analysis import analyze_source
+            from .analysis import effective_facts
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                facts = analyze_source(fn)
+                facts = effective_facts(fn)
     except Exception:
         return None
     tree = getattr(facts, "tree", None)

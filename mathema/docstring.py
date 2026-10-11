@@ -139,12 +139,12 @@ def parse_mathema_docstring(fn) -> MathemaDocstring:
     an unparseable docstring just scores low and lists why in `errors`."""
     import warnings
 
-    from .analysis import SourceUnavailable, analyze_source
+    from .analysis import SourceUnavailable, effective_facts
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except SourceUnavailable:
             facts = None
 
@@ -306,7 +306,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     once per function."""
     import warnings
 
-    from .analysis import SourceUnavailable, analyze_source
+    from .analysis import SourceUnavailable, effective_facts
     from .authoring import _fn_key
     from .grammar import parse_raises
     from .inventory import _raised_exception_names, docstring_quality
@@ -318,7 +318,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except SourceUnavailable:
             facts = None
 

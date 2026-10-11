@@ -827,13 +827,13 @@ def build_issue_record(fn, claims=None, *, include_source: bool = False,
     sibling-function/global names, all gated together since they're
     the same privacy class as the source text itself)."""
     import mathema
-    from .analysis import SourceUnavailable, analyze_source
+    from .analysis import SourceUnavailable, effective_facts
     from .diagnostics import diagnostic_report
     from .inventory import derivability_report, scope_dependencies
     from .spec import to_spec
 
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
     except SourceUnavailable:
         return None
     if facts.tree is None:
