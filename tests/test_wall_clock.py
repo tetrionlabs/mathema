@@ -203,3 +203,34 @@ def test_unraisable_hook_is_scoped_to_the_guard():
     before = sys.unraisablehook
     assert _with_timeout(lambda: 1, seconds=1) == 1
     assert sys.unraisablehook is before
+
+
+def test_an_alarm_landing_as_the_guard_disarms_is_still_a_timeout(monkeypatch):
+    # a cap that expires just as the guarded call finishes is delivered
+    # at the end of the call that disarms the timer: it still reaches
+    # the caller as the public TimeoutError, never as the alarm's own
+    # in-flight exception
+    import signal
+    import types
+
+    import pytest
+
+    from mathema import _timeout
+
+    fired = []
+
+    def setitimer(which, seconds, *rest):
+        result = signal.setitimer(which, seconds, *rest)
+        if seconds == 0 and not fired:
+            fired.append(True)
+            raise _timeout._WallClockExpired("exceeded the wall-clock cap")
+        return result
+
+    fake = types.SimpleNamespace(**{name: getattr(signal, name)
+                                    for name in dir(signal)
+                                    if not name.startswith("__")})
+    fake.setitimer = setitimer
+    monkeypatch.setattr(_timeout, "signal", fake)
+    with pytest.raises(TimeoutError):
+        _timeout._with_timeout(lambda: 1, seconds=5)
+    assert fired
