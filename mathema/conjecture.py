@@ -5115,6 +5115,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
+        undrawn = _undrawable_drawn(cj, fn, facts, domain)
+        if undrawn is not None:
+            out.append(_stamped(Probe(
+                cj.name, _chain_statement(cj) if cj.links else
+                statement_text(cj.relation, cj.lhs, cj.rhs),
+                "skipped", route="probe", note=undrawn,
+                meta={"mathema.probe_gap": "input-synthesis"}), cj))
+            continue
         gate_premise = _gate_premise_refusal(cj)
         if cj.links and gate_premise is not None:
             # a gate written as a premise is refused once for the claim,
@@ -5772,6 +5780,37 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 
 #: the clause a probe's note gives a pass within the tolerance, with its gap
 _WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
+
+
+def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
+    """Intent:
+        The reason a claim has no evaluable inputs when it would draw a
+        parameter annotated with a class mathema has no way to draw
+        (`Facts.undrawable`), else None. A parameter the claim binds to a
+        language, or one a runtime type now names, is drawn; one the
+        claim never names while it calls f (`f(Box((2, 3)))`) is not
+        drawn.
+    """
+    from .runtime_types import realised_parameters
+    undrawable = getattr(facts, "undrawable", None) or {}
+    if not undrawable:
+        return None
+    srcs = [cj.lhs, cj.rhs, *(part for link in cj.links or ()
+                              for part in (link[0], link[2]))]
+    text = " ".join(str(s) for s in srcs if s)
+    calls_f = re.search(r"(?<![\w.])f\s*\(", text) is not None
+    bounds = {**(domain or {}), **(cj.domain or {})}
+    realised = realised_parameters(facts)
+    for p, cls in undrawable.items():
+        if p in realised or getattr(bounds.get(p), "base_type", None) == "L":
+            continue
+        if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
+            continue
+        return (f"no evaluable inputs: {p} is annotated {cls}, a class "
+                f"mathema has no way to draw; supply {cls} through a "
+                f"runtime type adapter, or bind {p} in the claim "
+                f"(for {p} in L[...])")
+    return None
 
 
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,

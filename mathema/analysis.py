@@ -153,6 +153,9 @@ class Facts:
     runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
+    undrawable: dict = field(default_factory=dict)            # param -> class name: an
+                                      # annotation naming a class mathema has no way to draw
+                                      # (runtime_types.undrawable_parameters)
 
 
 def _root_name(node: ast.AST) -> str | None:
@@ -1104,10 +1107,19 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
             continue
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
-    from .runtime_types import detect_parameters, usage_hints
+    from .runtime_types import (detect_parameters, undrawable_parameters,
+                                usage_hints)
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
-    hints = usage_hints(fn, fdef, params, param_kinds, detected)
+    undrawable = undrawable_parameters(fn, detected)
+    for p in undrawable:
+        # the annotation names the class, so the body's use of it does
+        # not decide its kind
+        if p in param_kinds:
+            param_kinds[p] = "unknown"
+    hints = {p: h for p, h in usage_hints(fn, fdef, params, param_kinds,
+                                          detected).items()
+             if p not in undrawable}
     # a parameter the body uses as a numpy array, which a list does not
     # support, is drawn as one: the hint becomes the runtime type
     from .runtime_types import Detection
@@ -1126,6 +1138,7 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
         param_kinds=param_kinds,
         runtime_types=detected,
         runtime_hints=hints,
+        undrawable=undrawable,
         finite_domains=finite_annotation_domains(fn),
         doc_concepts=doc_concepts,
         returns_kind=_returns_kind(fdef),
@@ -1188,8 +1201,10 @@ def with_declared_runtime_types(facts, fn, declared: "dict | None"):
     apply_runtime_kinds(kinds, detected)
     hints = {p: h for p, h in (facts.runtime_hints or {}).items()
              if p not in detected}
+    undrawable = {p: c for p, c in (facts.undrawable or {}).items()
+                  if p not in detected}
     return replace(facts, param_kinds=kinds, runtime_types=detected,
-                   runtime_hints=hints)
+                   runtime_hints=hints, undrawable=undrawable)
 
 
 def quiet_facts(fn) -> "Facts | None":
