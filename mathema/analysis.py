@@ -172,6 +172,10 @@ class Facts:
     koine: "Document | None" = field(default=None, repr=False)  # the body as KOINE
     provenance: dict | None = None    # where a KOINE body came from: "frontend",
                                       # "koine_hash", "agreement" (free-form)
+    body_hashes: dict = field(default_factory=dict)  # frontend name -> the hash of the
+                                      # body it wrote, when a registered frontend wrote the
+                                      # body: its koine_hash, and the Python frontend's form
+                                      # hash under "python" when it can read the callable too
     _computed_form: str | None = field(default=None, repr=False)  # the form hash
                                       # analyze_source computed from the Python body; `form`
                                       # is a canonical form of the body only while it equals
@@ -1086,9 +1090,30 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
     the single entry point everything downstream (the derive-route
     lifter, the probe route, `mathema audit`'s population analyses)
     depends on. Raises `SourceUnavailable` if `fn`'s source can't be
-    retrieved."""
+    retrieved and no registered frontend writes its body.
+
+    A frontend registered under `mathema.frontends` is asked first
+    (`koine.frontends`): when one writes a body for `fn`, that KOINE
+    document is the body, and the Python frontend's facts, when it can
+    read `fn` too, supply everything else."""
+    from .koine.frontends import registered_body, registered_facts
+    found = registered_body(fn)
+    if found is None:
+        return _python_facts(fn)
+    try:
+        python = _python_facts(fn)
+    except SourceUnavailable:
+        python = None
+    return registered_facts(found[0], found[1], python)
 
 
+def _python_facts(fn: Callable[..., Any]) -> Facts:
+    """Intent:
+        The facts the Python frontend reads off `fn`'s source.
+
+    Raises:
+        SourceUnavailable: `fn`'s source cannot be retrieved.
+    """
     src, fdef = get_tree(fn)
     params = [a.arg for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]]
     # a library method read as a function of its receiver takes its

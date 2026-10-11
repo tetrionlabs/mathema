@@ -1120,7 +1120,8 @@ def _provenance_moved(facts, verified_entry: dict) -> "str | None":
     """Intent:
         What moved in the provenance of the body `facts` are read by
         since the record was written (`meta["mathema.provenance"]`):
-        `"body"` when its `koine_hash` differs, `"frontend"` when the
+        `"body"` when its `koine_hash` (or the hash of the body any
+        frontend that could write it wrote) differs, `"frontend"` when the
         frontend that wrote it (its name or version) differs, None when
         neither did or neither side has a provenance. A proof from a
         body rests on both, so either change makes the record stale, and
@@ -1131,7 +1132,8 @@ def _provenance_moved(facts, verified_entry: dict) -> "str | None":
     was = (verified_entry.get("meta") or {}).get("mathema.provenance") or {}
     if not now and not was:
         return None
-    if now.get("koine_hash") != was.get("koine_hash"):
+    if now.get("koine_hash") != was.get("koine_hash") \
+            or now.get("body_hashes") != was.get("body_hashes"):
         return "body"
     if now.get("frontend") != was.get("frontend"):
         return "frontend"

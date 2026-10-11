@@ -319,8 +319,9 @@ def provenance(facts) -> dict | None:
     """Intent:
         Where the body `facts` are read by came from, as the record
         states it: `facts.provenance` as supplied, with `koine_hash` set
-        to the hash of the document carried and `frontend` taken from
-        the document's `lifter` line when not supplied. None when
+        to the hash of the document carried, `frontend` taken from the
+        document's `lifter` line when not supplied, and `body_hashes`
+        when more than one frontend wrote the body. None when
         `facts` carries no document and no provenance, as for a Python
         function read from its source.
     """
@@ -331,4 +332,7 @@ def provenance(facts) -> dict | None:
     out = dict(stated or {})
     out.setdefault("frontend", doc.lifter)
     out["koine_hash"] = koine_hash(doc)
+    hashes = getattr(facts, "body_hashes", None) or {}
+    if len(hashes) > 1:
+        out["body_hashes"] = dict(hashes)
     return out
