@@ -116,28 +116,15 @@ mathema accept numpy.ptp at_most_the_largest --as discovery --corrected "for a i
 
 <!-- example: ptp output match=subset wrap=80 -->
 ```text
-accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by
-    Ada Lovelace
-  - move at_most_the_largest to the record's discoveries section (superseded_by:
-      at_most_the_largest_corrected), keeping its counterexample as the witness
-  - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a
-      in [-100, 100]^n, f(a) == max(a) - min(a)', checked now: holds over 131
-      trials
-  - rewrite claims/numpy.claims.yaml: replace declared claim
-      'at_most_the_largest' with 'at_most_the_largest_corrected'
-written: move at_most_the_largest to the record's discoveries section
-    (superseded_by: at_most_the_largest_corrected), keeping its counterexample
-    as the witness; declare the stated corrected claim
-    'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) -
-    min(a)', checked now: holds over 131 trials; rewrite
-    claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with
-    'at_most_the_largest_corrected'
-declared layer: claims/numpy.claims.yaml now declares
-    at_most_the_largest_corrected in place of at_most_the_largest (the
-    superseded claim stays in the record's discoveries section):
-  - name: at_most_the_largest_corrected
-    statement: "for a in [-100, 100]^n, f(a) == max(a) - min(a)"
-    route: probe
+accept numpy.ptp :: at_most_the_largest as a discovery, by Ada Lovelace
+  falsified at a = [-15.864774136188714], axis = None, out = None, keepdims =
+      <no value>: 0.0 vs -15.864774136188714
+  the claim moves to discoveries with that witness, out of
+      claims/numpy.claims.yaml
+  the corrected claim takes its place: at_most_the_largest_corrected [probe]:
+      for a in [-100, 100]^n, f(a) == max(a) - min(a), checked now: holds over
+      131 trials
+written.
 ```
 
 `holds over 160 trials`, on the probe route: the corrected claim is the

@@ -309,9 +309,10 @@ re-checks it, so the row counts the accepted claim:
 <!-- example: sweep session -->
 ```
 $ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
-accepting balances.running_total :: never_overshoots_much (verdict unknown) as risk, by Charles Babbage
-  - reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
-written: reclassify never_overshoots_much: unknown -> skipped:unknown_but_accepted (strict mode still refuses it; lenient proceeds)
+accept balances.running_total :: never_overshoots_much as a risk, by Charles Babbage
+  verdict unknown
+  its verdict becomes skipped:unknown_but_accepted; strict mode still refuses it, lenient mode proceeds
+written.
 $ mathema verify balances.running_total --root . --lenient
 FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
