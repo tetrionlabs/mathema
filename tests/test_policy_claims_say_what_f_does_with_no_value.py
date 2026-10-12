@@ -117,7 +117,7 @@ def test_a_policy_alone_runs_its_own_floor():
 def test_a_contradicted_policy_carries_the_executed_witness_and_the_claim_to_write():
     row = _rows(clamp01, "missing(f, x) propagates")["missing(f, x) propagates"]
     assert row.verdict == "falsified"
-    assert row.counterexample == "x = nan: f returned 1.0"
+    assert row.counterexample == "f(nan) returns 1.0"
     assert row.note == ("stated; f drops instead: nan in, 1.0 out\n"
                         "(i) if that is intended, state: missing(f, x) drops\n"
                         "(ii) if not, change f")
@@ -285,7 +285,8 @@ def test_the_record_prints_a_policy_row_with_its_reason_and_next_step():
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c0")])
     text = repr(rec)
-    assert ("    falsified  policy       f(nan)   no missing policy stated; returns 1.0\n"
+    assert ("    falsified  policy       f(nan)   f(nan) returns 1.0\n"
+            "                            no missing policy stated\n"
             "                            possible fixes:\n"
             "                              (i) if dropping nan is intended, run: mathema "
             "accept test_policy_claims_say_what_f_does_with_no_value.clamp01 missing[x] "

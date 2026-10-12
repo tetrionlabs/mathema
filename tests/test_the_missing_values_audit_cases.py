@@ -95,7 +95,7 @@ def test_a_stated_row_is_tried_with_the_other_parameter_at_its_corners():
         claim("missing(f, x) propagates"), claim("is_missing_safe(f)")], domain=space)}
     assert rows["missing_f_x_propagates"].verdict == "falsified"
     assert rows["missing_f_x_propagates"].counterexample == \
-        "x = nan, y = 1.0: f returned 0.0"
+        "f(x=nan, y=1.0) returns 0.0"
     assert rows["is_missing_safe[f]"].verdict != "proven"
 
 

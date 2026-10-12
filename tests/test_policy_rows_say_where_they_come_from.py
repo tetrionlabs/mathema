@@ -87,8 +87,10 @@ def test_an_unaccounted_raise_is_a_named_sentence_row():
             "43 draws") in lines
     assert ("    proven     policy       f(nan)   propagates, from math.sqrt's own "
             "policy row, which f calls") in lines
-    at = lines.index("    falsified  policy       f(None)   no absent policy stated; "
-                     "f(None) raises TypeError; f(3.16) returns 1.78")
+    at = lines.index("    falsified  policy       f(None)   f(None) raises TypeError; "
+                     "f(3.16) returns 1.78")
+    assert lines[at + 1] == "                            no absent policy stated"
+    at += 1
     assert lines[at + 1:at + 5] == [
         "                            possible fixes:",
         "                              (i) if the raise is intended, run: mathema accept "
@@ -105,8 +107,9 @@ def test_a_silent_drop_keeps_its_remedy_on_the_row_only():
                                                        name="c")])
     lines = _lines(rec)
     assert "    holds      computation  for x in R, 0 <= f(x) <= 1   43 draws" in lines
-    at = lines.index("    falsified  policy       f(nan)   no missing policy stated; "
-                     "returns 1.0")
+    at = lines.index("    falsified  policy       f(nan)   f(nan) returns 1.0")
+    assert lines[at + 1] == "                            no missing policy stated"
+    at += 1
     assert lines[at + 1:at + 5] == [
         "                            possible fixes:",
         "                              (i) if dropping nan is intended, run: mathema accept "

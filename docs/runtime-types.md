@@ -321,10 +321,11 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  f_s_returns_c_approx_f_returns  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)   falsified at returns = [nan, -0.009, 0.000606]
+  f_s_returns_c_approx_f_returns  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)   falsified at f([nan, -0.009, 0.000606])
     proven     mathematics  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n ⊂ ℝ, f(s(returns, c)) ~= f(returns)
     holds      computation  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n : float, f(s(returns, c)) ~= f(returns)   210 entries across 36 draws, sizes (2, 1) to (8, 1)
-    falsified  policy       f([..., missing, ...])   no missing policy stated; returns -9.81
+    falsified  policy       f([..., missing, ...])   f([nan, -0.009, 0.000606]) returns -9.81
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping missing is intended, run: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
                               (ii) exclude missing

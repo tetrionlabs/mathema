@@ -113,9 +113,12 @@ def test_a_silent_drop_is_said_once_as_a_fact():
     import mathema
     rec = mathema.check(clamp01, claims=[mathema.claim("for x in R, 0 <= f(x) <= 1",
                                                        name="c")])
-    said = [ln for ln in repr(rec).splitlines() if "f(nan)" in ln]
-    assert said == ["    falsified  policy       f(nan)   no missing policy stated; "
-                    "returns 1.0"], said
+    lines = repr(rec).splitlines()
+    said = [ln for ln in lines if "f(nan)" in ln]
+    assert said == ["  c  for x in R|missing, 0 <= f(x) <= 1   falsified at f(nan)",
+                    "    falsified  policy       f(nan)   f(nan) returns 1.0"], said
+    assert lines[lines.index(said[1]) + 1] == (
+        "                            no missing policy stated")
 
 
 def test_a_propagated_hole_is_stated_on_the_proven_row():

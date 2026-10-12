@@ -54,13 +54,13 @@ def _function_for(key):
 #: each falsified row with what the record names as the witness: a trap
 #: shown, not only a verdict
 WITNESSES = {
-    "missing_trap_silent_drop": "rate = nan: f returned 1.0",
+    "missing_trap_silent_drop": "f(nan) returns 1.0",
     "missing_class_row_contradicted": 'f([null]) raises TypeError; f([1.0]) returns 1.0',
     "is_missing_safe_gate_falsified": 'f([null]) raises TypeError; f([1.0]) returns 1.0',
     "is_absent_safe_gate_falsified": 'f(None) raises TypeError; f(5.79) returns "high"',
     "is_empty_safe_hole": "returns = [] (an empty numpy.ndarray): f returned nan for "
                           "the empty input; raise, or return a value",
-    "is_absent_safe_field": "trade.memo = null (absent): f raised TypeError",
+    "is_absent_safe_field": "f(trade) with trade.memo = null raises TypeError",
 }
 
 

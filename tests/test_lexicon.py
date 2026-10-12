@@ -165,7 +165,7 @@ PINNED: dict = {
     # member and premise forms, the traps and the gates
     "missing_propagates": "holds",
     "missing_drops": "holds",
-    "missing_trap_silent_drop": ("falsified", "rate = nan: f returned 1.0"),
+    "missing_trap_silent_drop": ("falsified", "f(nan) returns 1.0"),
     "missing_raises": "proven",
     "missing_converts": "holds",
     "missing_introduces": "holds",
@@ -191,7 +191,7 @@ PINNED: dict = {
     "is_empty_safe_hole": ("falsified", "returns = [] (an empty numpy.ndarray)"),
     "is_empty_safe_identity": "proven",
     "absent_field_raises": "holds",
-    "is_absent_safe_field": ("falsified", "trade.memo = null (absent): f raised TypeError"),
+    "is_absent_safe_field": ("falsified", "f(trade) with trade.memo = null raises TypeError"),
     "absent_key_left_out": "holds",
     # the norm written with double bars, each against its function in
     # mathema/_lexicon_numpy.py

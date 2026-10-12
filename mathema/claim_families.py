@@ -219,8 +219,9 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         an ordinary value and every other argument held, then at other
         draws of the other arguments (`_missing_policy.separate`).
         `("falsified", text)` when the raise is the target's, the text
-        showing the raising call and the ordinary call returning (`f(a=1,
-        name='é') raises E; with name='a' it returns b'a'`); `("holds", "")` when a draw
+        the raising call and the ordinary call returning on its first
+        line (`f(a=1, name='é') raises E; with name='a' it returns
+        b'a'`), `cx` on the next; `("holds", "")` when a draw
         of the other arguments lets f run at the target's input;
         `("unknown", why)` when no draw tells the two apart. A
         counterexample that names no logged raise, or a function of one
@@ -264,9 +265,7 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         both = (f"{_call_text(facts, {**at, target: point[target]})} raises {raised}; "
                 f"with {target}={_short_value(at[target])} it returns "
                 f"{_short_value(output, argument=False)}")
-        if cx.endswith("."):
-            return "falsified", f"{cx} {both}."
-        return "falsified", f"{cx}; {both}"
+        return "falsified", f"{both}\n{cx}"
     from .policy import _and
     others = list(found.others)
     return "unknown", (

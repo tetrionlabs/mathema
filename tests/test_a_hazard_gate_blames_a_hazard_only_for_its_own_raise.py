@@ -5,7 +5,8 @@ that parameter at an ordinary value and every other argument held, does
 not raise. When it raises there too, other draws of the other arguments
 are tried; where none lets f run with the ordinary value, the row is
 unknown, naming the other argument, never falsified. A falsified row
-shows the raising call and the call with the ordinary value returning. A function with one
+shows the raising call and the call with the ordinary value returning on its
+first line, the gate's own words on the next. A function with one
 parameter has nothing else to blame, and is read as before."""
 import importlib.util
 import math
@@ -87,9 +88,11 @@ def test_a_raise_the_hazard_causes_is_falsified_with_the_ordinary_call_shown(law
     row = _row(ascii_bytes, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert "raised UnicodeEncodeError" in row.counterexample, row.counterexample
-    assert "; f(language=" in row.counterexample, row.counterexample
-    assert ") raises UnicodeEncodeError; with name=" in row.counterexample
-    assert " it returns b'" in row.counterexample, row.counterexample
+    calls, said = row.counterexample.split("\n")
+    assert calls.startswith("f(language="), calls
+    assert ") raises UnicodeEncodeError; with name=" in calls, calls
+    assert " it returns b'" in calls, calls
+    assert "raised UnicodeEncodeError" in said, said
 
 
 @pytest.mark.parametrize("fn, law, raised", [
@@ -126,6 +129,8 @@ def test_a_raise_the_numeric_hazard_causes_is_falsified(fn, law, raised):
     row = _row(fn, law)
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert raised in row.counterexample, row.counterexample
-    assert "; f(language=" in row.counterexample, row.counterexample
-    assert f") raises {raised}; with " in row.counterexample, row.counterexample
-    assert " it returns " in row.counterexample, row.counterexample
+    calls, said = row.counterexample.split("\n")
+    assert calls.startswith("f(language="), calls
+    assert f") raises {raised}; with " in calls, calls
+    assert " it returns " in calls, calls
+    assert raised in said, said

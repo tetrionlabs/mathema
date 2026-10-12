@@ -150,10 +150,11 @@ def test_an_unannotated_parameter_admits_none_and_a_raise_there_falsifies():
     (probe,) = check_conjectures(unannotated_mean, [cj])
     assert probe.verdict == "falsified"
     assert probe.counterexample == (
+        "f(x=None, y=3.6372060900598457) raises TypeError; with x=7.8939915967329 it "
+        "returns 5.7656\n"
         "f raised TypeError at x = None, and the claim admits None for x (the "
         "parameter is unannotated). Annotate x as float to exclude None, or state "
-        "`absent(f, x) raises(TypeError)`. f(x=None, y=3.6372060900598457) raises "
-        "TypeError; with x=7.8939915967329 it returns 5.7656.")
+        "`absent(f, x) raises(TypeError)`.")
 
 
 def test_function_wide_spelling_is_the_gate_over_every_parameter():

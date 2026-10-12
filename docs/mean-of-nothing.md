@@ -48,7 +48,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry
@@ -96,7 +96,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry
@@ -134,7 +134,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry
