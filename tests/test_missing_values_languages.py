@@ -159,10 +159,10 @@ def test_o1_a_raise_at_an_absent_optional_field_is_its_row_not_the_claims():
     rows = {p.name: p for p in rec.probes}
     row = rows["absent[o.note]"]
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample == "o.note = null (absent): f raised TypeError"
+    assert row.counterexample == "f(o) with o.note = null raises TypeError"
     assert rows["c"].verdict in PROVEN_OR_HOLDS, (rows["c"].verdict, rows["c"].note)
     head, block = _block(rec, "c")
-    assert "falsified at o.note = null (absent)" in head, str(rec)
+    assert "falsified at f(o) with o.note = null" in head, str(rec)
     assert "falsified  policy       f(o) at o.note = null (absent)" in block, str(rec)
     assert "exclude null at o.note" in block, str(rec)
     assert "\n  falsified absent[o.note]" not in str(rec), str(rec)
@@ -176,7 +176,7 @@ def test_a_path_bound_admitting_absence_carries_the_absence_row():
     rec = mathema.check(note_len, claims=[mathema.claim(
         f"for o in {ORDER}, o.note in L[unicode] | {{absent}}, f(o) >= 0", name="c")])
     head, block = _block(rec, "c")
-    assert "falsified at o.note = null (absent)" in head, str(rec)
+    assert "falsified at f(o) with o.note = null" in head, str(rec)
     assert "falsified  policy       f(o) at o.note = null (absent)" in block, str(rec)
 
 
@@ -193,7 +193,7 @@ def test_a_path_bound_excluding_absence_does_not_carry_the_absence_row():
     head, block = _block(rec, "bound")
     assert "falsified" not in head and "policy" not in block, str(rec)
     head, block = _block(rec, "open")
-    assert "falsified at o.note = null (absent)" in head, str(rec)
+    assert "falsified at f(o) with o.note = null" in head, str(rec)
 
 
 @needs_language
@@ -222,7 +222,7 @@ def test_o5_an_absent_optional_field_is_not_absent_safe():
     """A field's absence is the absence gate's business (R7): the gate
     reaches into o's fields."""
     probe, _ = assert_row(note_len, "is_absent_safe(f)", FALSIFIED)
-    assert witness(probe) == "o.note = null (absent): f raised TypeError"
+    assert witness(probe) == "f(o) with o.note = null raises TypeError"
 
 
 @needs_language
@@ -243,7 +243,7 @@ def test_o6_an_admitted_absent_field_raising_is_its_row_not_the_claims():
     assert value.verdict in PROVEN_OR_HOLDS, (value.verdict, value.note)
     assert "at o.note = null (absent) f raised TypeError" in (value.note or "")
     assert row.verdict == "falsified"
-    assert row.counterexample == "o.note = null (absent): f raised TypeError"
+    assert row.counterexample == "f(o) with o.note = null raises TypeError"
 
 
 @needs_language

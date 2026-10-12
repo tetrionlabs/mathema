@@ -117,8 +117,8 @@ mathema accept numpy.ptp at_most_the_largest --as discovery --corrected "for a i
 <!-- example: ptp output match=subset wrap=80 -->
 ```text
 accept numpy.ptp :: at_most_the_largest as a discovery, by Ada Lovelace
-  falsified at a = [-15.864774136188714], axis = None, out = None, keepdims =
-      <no value>: 0.0 vs -15.864774136188714
+  falsified at a = [-100, -100], axis = None, out = None, keepdims = <no value>:
+      0.0 vs -100.0
   the claim moves to discoveries with that witness, out of
       claims/numpy.claims.yaml
   the corrected claim takes its place: at_most_the_largest_corrected [probe]:
