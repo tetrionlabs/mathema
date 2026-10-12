@@ -120,11 +120,14 @@ _NO_SOURCE = frozenset({
     "is_representation_consistent"})
 
 
-def _strength(verdict: str, route: str) -> float:
+def _strength(verdict: str, route: str, n: "int | None" = None) -> float:
     """How much of a source's entropy this verdict, reached by this
     mechanism, eliminates. See the @1 constants above. A holds reached
     by a subroute with no grade of its own (`derive:extensive`,
-    `probe:counterfactual`) is graded as the route it refines."""
+    `probe:counterfactual`) is graded as the route it refines. A holds
+    from random sampling over `n` failure-free draws is scaled by
+    `1 - 3/n`: at 95% confidence, n draws without a failure leave up to
+    3/n of what they sample possibly failing (the rule of three)."""
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
@@ -132,10 +135,14 @@ def _strength(verdict: str, route: str) -> float:
     if v == "falsified":
         return _FALSIFIED_STRENGTH
     if v == "holds":
+        sampled = (route or "probe") == "probe"
         route = route or "probe"
         while route not in _HOLDS_STRENGTH and ":" in route:
             route = route.rsplit(":", 1)[0]
-        return _HOLDS_STRENGTH.get(route, _HOLDS_DEFAULT)
+        strength = _HOLDS_STRENGTH.get(route, _HOLDS_DEFAULT)
+        if sampled and isinstance(n, int) and n > 0:
+            strength *= max(0.0, 1.0 - 3.0 / n)
+        return strength
     return 0.0
 
 
@@ -359,7 +366,7 @@ def _callee_evidence(entry: dict) -> float:
             strength = _HOLDS_DEFAULT if verdict in ("proven", "holds") \
                 else 0.0
         elif verdict in ("proven", "holds"):
-            strength = _strength(verdict, row.get("route") or "")
+            strength = _strength(verdict, row.get("route") or "", row.get("n"))
         else:
             strength = 0.0
         best = max(best, strength)
@@ -728,7 +735,8 @@ def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
         name = row.get("name") or ""
         meta = row.get("meta") or {}
         policy = meta.get("mathema.policy") or {}
-        strength = _strength(row.get("verdict") or "", row.get("route") or "")
+        strength = _strength(row.get("verdict") or "", row.get("route") or "",
+                             row.get("n"))
         if strength <= 0:
             continue
         base = claim_base_name(name) if name else ""
@@ -788,7 +796,7 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             continue
         verdict = claim.get("verdict") or ""
         route = claim.get("route") or ""
-        st = _strength(verdict, route)
+        st = _strength(verdict, route, claim.get("n"))
         meta = claim.get("meta") or {}
         if meta.get("mathema.companion_of"):
             # a float companion executes its parent's relation against the
