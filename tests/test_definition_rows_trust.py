@@ -91,6 +91,7 @@ def _verify(root, *files):
         compendium.uninstall()
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_project_row_feeds_derive_only_after_verify_records_it(project):
     rows = project / "claims" / "pandas.claims.yaml"
     rows.write_text(_SEM_ROW)
@@ -157,6 +158,7 @@ def test_a_bundled_row_verify_falsified_here_is_not_used(project):
     assert p.verdict != "proven", (p.verdict, p.sketch)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_trusted_acceptance_lets_a_project_row_feed_derive(project):
     rows = project / "claims" / "pandas.claims.yaml"
     rows.write_text(_SEM_ROW)
@@ -200,6 +202,7 @@ def test_a_trusted_row_written_with_approximate_equality_is_not_a_rewrite(
             "written with ~=, so it is not used as one") in p.note, p.note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_record_is_stale_when_its_definition_rows_change(project,
                                                           monkeypatch):
     package = project / "qpkg"

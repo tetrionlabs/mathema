@@ -6,6 +6,8 @@ a discontinuity of the claim, then a seeded sample, and the record
 says how much of the domain it executed."""
 import math
 
+import pytest
+
 import mathema
 
 _LAW = ("for periods in [1, 260] subset Z, active in [0, 260] subset Z, "
@@ -25,6 +27,14 @@ def slow_exact(active: int, periods: int) -> float:
     return -((-100 * len(days)) // periods) / 100
 
 
+def _too_slow_to_sweep(monkeypatch):
+    """The domain is too slow to sweep whole on either line: the derive
+    brute force has half a second, the computation line none."""
+    from mathema import _brute_force, gates
+    monkeypatch.setattr(_brute_force, "_SWEEP_SECONDS", 0.5)
+    monkeypatch.setattr(gates, "_SWEEP_SECONDS", 0.0)
+
+
 def _main(fn):
     rec = mathema.check(fn, claims=[_LAW])
     (row,) = [p for p in rec.probes if p.name.startswith("f_active")
@@ -32,9 +42,9 @@ def _main(fn):
     return row
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_slow_function_is_falsified_at_a_discontinuity(monkeypatch):
-    from mathema import _brute_force
-    monkeypatch.setattr(_brute_force, "_SWEEP_SECONDS", 0.5)
+    _too_slow_to_sweep(monkeypatch)
     row = _main(slow_exposure)
     assert row.verdict == "falsified", (row.verdict, row.note)
     head = row.counterexample.split(":")[0]
@@ -43,9 +53,9 @@ def test_a_slow_function_is_falsified_at_a_discontinuity(monkeypatch):
     assert round(slow_exposure(a, p) * 100) != -((-100 * a) // p)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_slow_function_that_holds_says_the_sweep_was_skipped(monkeypatch):
-    from mathema import _brute_force
-    monkeypatch.setattr(_brute_force, "_SWEEP_SECONDS", 0.5)
+    _too_slow_to_sweep(monkeypatch)
     row = _main(slow_exact)
     assert row.verdict in ("holds", "unknown"), (row.verdict, row.note)
     assert " at discontinuities of ceil(100*active/periods)" in row.note, row.note

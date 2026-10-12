@@ -36,6 +36,7 @@ def _one(fn, law, extensive=False):
     return p
 
 
+@pytest.mark.needs_full_proof_budget
 def test_refinement_proves_what_a_single_hull_straddles():
     # x*sin(x) on [-1, 1]: one box straddles zero (the dependency
     # problem), two half-boxes certify. Fast path stays honest.
@@ -48,6 +49,7 @@ def test_refinement_proves_what_a_single_hull_straddles():
     assert "interval refinement" in p.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_refinement_falsifies_with_a_witness_region():
     # f(0) = 0 < 0.5: refinement must find a cell wholly below zero and
     # name a point of it, even while other cells genuinely straddle.
@@ -56,6 +58,7 @@ def test_refinement_falsifies_with_a_witness_region():
     assert p.counterexample is not None
 
 
+@pytest.mark.needs_full_proof_budget
 def test_root_isolation_settles_a_quartic_exactly():
     # min of x^4 - 2x^2 + 1.5 is 0.5 at x = +-1: >= 0 proven, >= 1
     # falsified with an exact witness, != 0 proven, all by exact
@@ -69,6 +72,7 @@ def test_root_isolation_settles_a_quartic_exactly():
                 extensive=True).verdict == "proven"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_ladder_closes_a_logarithmic_polynomial():
     fast = _one(logpoly, "for x in [0.1, 100], f(x) >= 0")
     assert fast.verdict == "holds"   # fast derive declines; probed instead
@@ -133,6 +137,7 @@ def test_refinement_disproves_a_real_oscillation_dip():
     assert sympy.sin(1 / witness).evalf() < 0
 
 
+@pytest.mark.needs_full_proof_budget
 def test_undecided_extensive_run_names_what_it_tried():
     # a true claim over the whole line (x*sin(x) >= -x**2, equality
     # hit infinitely often) that no rung settles: the record must say

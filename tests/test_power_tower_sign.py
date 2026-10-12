@@ -7,6 +7,7 @@ expression rather than a plain symbol, sympy's own powdenest/simplify
 stalls on exactly this shape. Covers both the sympy-level
 mechanism directly and real derive-route claims that were previously
 undecided because of it."""
+import pytest
 import sympy
 
 from mathema.conjecture import claim, check_conjectures
@@ -97,6 +98,7 @@ def monopoly_profit_isoelastic(q: float, A: float, e: float, c: float) -> float:
     return A * q ** (1 - 1 / e) - c * q
 
 
+@pytest.mark.needs_full_proof_budget
 def test_isoelastic_monopoly_foc_now_proves():
     results = check_conjectures(monopoly_profit_isoelastic, [claim(
         "for A in [1,100], e in [1.5,5], c in [0.1,5], "

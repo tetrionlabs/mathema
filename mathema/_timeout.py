@@ -132,11 +132,16 @@ def _with_timeout(func, seconds: int = 5):
     sys.unraisablehook = _rearm_swallowed_alarm
     signal.setitimer(signal.ITIMER_REAL, effective)
     try:
-        return func()
+        try:
+            return func()
+        finally:
+            # an alarm already pending as the timer is disarmed is
+            # delivered here, inside the boundary, so it too becomes
+            # the TimeoutError below
+            signal.setitimer(signal.ITIMER_REAL, 0)
     except _WallClockExpired as e:
         raise TimeoutError(str(e)) from None
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
         sys.unraisablehook = prior_hook
         signal.signal(signal.SIGALRM, previous)
         if outer_remaining > 0:

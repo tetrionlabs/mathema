@@ -223,8 +223,7 @@ def pytest_collection_modifyitems(config, items):
 # Two things routinely slow it enough to matter, and neither is a bug
 # in the code under test:
 #
-#   * coverage line tracing, which `--testmon-forceselect` turns on for
-#     every test; measured at roughly 4x on sympy-heavy work, so a
+#   * coverage line tracing, in any traced run; measured at roughly 4x on sympy-heavy work, so a
 #     0.9s proof becomes 3.5s and blows the 3s fast cap;
 #   * ordinary machine load, including a second test run in another
 #     terminal.
@@ -235,20 +234,11 @@ def pytest_collection_modifyitems(config, items):
 # mathematics.
 #
 # Patching is not a one-liner: several engine modules bind the caps at
-# IMPORT time (`from .._timeout import FAST_TIMEOUT_SECONDS` at module
-# level in _proof_support, _extensive, _strategies, _recurrence,
-# _coupled, _smt), so setting the attribute on `mathema._timeout`
-# alone leaves those holding the original value. The fixture patches
-# every module that captured a copy, which also means a new module
-# doing the same import is covered without editing this file.
-
-_GENEROUS_FAST = 60
-_GENEROUS_EXTENSIVE = 120
-# the time a finite domain's whole sweep may take, by a timed estimate
-# of one call (`gates._SWEEP_SECONDS` for the computation line,
-# `_brute_force._SWEEP_SECONDS` for a derive brute-force proof): under
-# load the estimate grows and the sweep falls back to part of the domain
-_GENEROUS_SWEEP = 600
+# IMPORT time, and a finite domain's sweep has budgets of its own
+# (`_SWEEP_SECONDS` in `gates` and `_brute_force`) set against a timed
+# estimate of a few calls. `tests/_proof_budget.py` names every budget
+# and raises each copy; the caps also go into the environment, so a
+# `mathema` subprocess the test starts runs under them too.
 
 
 @pytest.fixture(autouse=True)
@@ -259,14 +249,7 @@ def full_proof_budget(request, monkeypatch):
     caps keep being exercised at their real values."""
     if request.node.get_closest_marker("needs_full_proof_budget") is None:
         return
-    import sys
-
-    from mathema import _timeout
-    targets = [_timeout] + [m for name, m in list(sys.modules.items())
-                            if name.startswith("mathema.") and m is not None]
-    for mod in targets:
-        for attr, value in (("FAST_TIMEOUT_SECONDS", _GENEROUS_FAST),
-                            ("EXTENSIVE_TIMEOUT_SECONDS", _GENEROUS_EXTENSIVE),
-                            ("_SWEEP_SECONDS", _GENEROUS_SWEEP)):
-            if hasattr(mod, attr):
-                monkeypatch.setattr(mod, attr, value, raising=False)
+    from tests._proof_budget import ENVIRONMENT, raise_budget
+    raise_budget(lambda mod, attr, value: monkeypatch.setattr(mod, attr, value))
+    for name, value in ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
