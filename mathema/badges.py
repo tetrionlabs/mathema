@@ -354,6 +354,44 @@ def _callee_evidence(entry: dict) -> float:
     return best
 
 
+def _decorator_only_calls(fn, facts) -> frozenset:
+    """Intent:
+        The dotted keys of the calls `fn`'s source makes only in its
+        decorators (`@enforce_domain({...})`), resolved through `fn`'s
+        import aliases. A decorator runs when the function is defined,
+        so it is not a call the body makes.
+    """
+    import ast
+
+    from .compendium import _alias_origins
+
+    def names(nodes) -> set:
+        found = set()
+        for root in nodes:
+            for node in ast.walk(root):
+                if isinstance(node, ast.Call):
+                    try:
+                        found.add(ast.unparse(node.func))
+                    except Exception:
+                        continue
+        return found
+
+    tree = getattr(facts, "tree", None)
+    fdef = next((n for n in ast.walk(tree) if isinstance(
+        n, (ast.FunctionDef, ast.AsyncFunctionDef))), None) if tree else None
+    if fdef is None or not fdef.decorator_list:
+        return frozenset()
+    only = names(fdef.decorator_list) - names(fdef.body)
+    origin = _alias_origins(fn, facts)
+    out = set()
+    for name in only:
+        head, dot, rest = name.partition(".")
+        base = origin.get(head)
+        if base is not None:
+            out.add(f"{base}.{rest}" if dot else base)
+    return frozenset(out)
+
+
 def _callees(fn, facts, root: str, store: dict,
              library_keys: "frozenset | None" = None) -> tuple:
     """Intent:
@@ -370,10 +408,13 @@ def _callees(fn, facts, root: str, store: dict,
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if library_keys is None:
         library_keys = frozenset(load_library_claims(root))
+    decorators = _decorator_only_calls(fn, facts)
     out = []
     for key in resolved_calls(fn, facts):
         head = key.split(".")[0]
         if key not in library_keys and (head in stdlib or head == "builtins"):
+            continue
+        if key in decorators:
             continue
         entry = (store.get(key) or {}).get("entry") or {}
         out.append((key, _callee_evidence(entry)))
