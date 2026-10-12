@@ -55,6 +55,20 @@ def call(fn, *args, **kwargs):
         raise as_raise(exc) from exc
 
 
+def exit_code(exc: SystemExit) -> int:
+    """Intent:
+        The exit status a process ending with `exc` reports: 0 for a
+        code of None, the code itself for an int, and 1 for anything
+        else (a message string), the way the interpreter reads it.
+    """
+    code = exc.code
+    if code is None:
+        return 0
+    if isinstance(code, int) and not isinstance(code, bool):
+        return code
+    return 1
+
+
 def exception_name(exc: BaseException) -> str:
     """Intent:
         The name a record shows for a raise: the exception's class
