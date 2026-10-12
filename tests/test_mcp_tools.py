@@ -603,5 +603,6 @@ def test_badges_tool_reports_three_scores_and_the_triangle(tmp_path):
     assert any(r[0] == "btpkg.mod.add" for r in out["rows"])
     assert "IMPL" in out["ascii"]
     # no verified store: clarity sits at the structural floor (nothing
-    # verified, only what the code visibly shows), a low number not a 0
-    assert out["clarity"] < 25
+    # verified, only what the code visibly shows, its type annotations
+    # included), a low number not a 0
+    assert out["clarity"] < 35

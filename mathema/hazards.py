@@ -1013,12 +1013,24 @@ def finite_guard_sets(facts) -> dict:
         same way. The set is the working domain the guard leaves
         (decision A).
     """
+    out: dict = {}
+    for param, values, _node in finite_guards(facts):
+        if param not in out:
+            out[param] = values
+    return out
+
+
+def finite_guards(facts) -> list:
+    """Intent:
+        `[(param, frozenset, node), ...]`, each guard `finite_guard_sets`
+        reads, with the `if` statement that states it, in walk order.
+    """
     import ast
     tree = getattr(facts, "tree", None)
     if tree is None:
-        return {}
+        return []
     params = set(getattr(facts, "params", ()) or ())
-    out: dict = {}
+    out: list = []
 
     def listed(node):
         if not isinstance(node, (ast.Set, ast.Tuple, ast.List)) or not node.elts:
@@ -1050,6 +1062,6 @@ def finite_guard_sets(facts) -> dict:
                 and any(isinstance(s, ast.Raise) for s in node.body)):
             continue
         found = refused_outside(node.test)
-        if found is not None and found[0] not in out:
-            out[found[0]] = found[1]
+        if found is not None:
+            out.append((found[0], found[1], node))
     return out

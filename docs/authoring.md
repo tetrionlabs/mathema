@@ -468,6 +468,18 @@ declared `excluded_outside_domain(p)` claim, stated explicitly,
 opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` (the decorator that makes it true).
 
+An explicit domain passed to `@enforce_domain({...})` takes four
+spellings. A tuple or list of exactly two numbers is the closed interval
+between them, so `{"x": (0, 1)}` and `{"x": [0, 1]}` both mean `[0, 1]`.
+A string is read in the domain grammar, which is how to write an open,
+half-open or union domain: `{"x": "(0, 1]"}` or
+`{"x": "[-1, -0.5] ∪ [0.5, 3]"}`, with a bare `"Z"`, `"N"` or `"R"` the
+named type. Every other set, list or tuple is the finite set of its
+members, whatever they are, so `{"side": {"buy", "sell"}}`,
+`{"n": [1, 3, 6, 12]}` and `{"v": [0, "a", None]}` admit exactly the
+values listed. A string the grammar cannot read is refused when the
+decorator is applied, naming these forms.
+
 `@enforce_domain` also reads the function's policy claims, what it
 does with a value that is not there. It is opt-in, like every
 enforcement. A `raises` row rejects the input at entry: under

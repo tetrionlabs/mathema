@@ -142,7 +142,7 @@ def test_a_stored_proven_identity_scores_as_an_identity(tmp_path,
     mathema.write_spec(mod.double, root=str(tmp_path))
     stored = clarity_score(mod.double, root=str(tmp_path))
     by_hand = clarity_score(mod.double, verified_claims=[
-        {"name": "doubles", "statement": "f(x) == 2*x",
+        {"name": "doubles", "statement": "for x in [0, 10], f(x) == 2*x",
          "verdict": "proven", "route": "derive"},
         {"name": "doubles[float]", "statement": "f(x) == 2*x",
          "verdict": "holds", "route": "probe",
@@ -241,8 +241,9 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     assert 0 <= scores.overall <= 100
     assert set(scores.per_function) == {"rbpkg.mod.core", "rbpkg.mod.wrap"}
     # no verified store here, so clarity sits at the structural floor
-    # (nothing verified, only what the code visibly shows), a low number
-    assert scores.clarity < 25
+    # (nothing verified, only what the code visibly shows, its type
+    # annotations included), a low number
+    assert scores.clarity < 30
     assert scores.algo == "entropy-dimensions@1.4"
 
 

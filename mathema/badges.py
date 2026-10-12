@@ -42,10 +42,11 @@ _BITS: dict[str, float] = {
     "graph": 1.0, "region": 0.4,
     # form: the relational shape (the output envelope is _EXTENT_BITS)
     "shape_branched": 1.0, "shape_flat": 0.4,
-    # domain: what each parameter accepts. A guarded parameter has a
-    # real, implementation-specific boundary; an unguarded one costs
-    # what is left unknown about the inputs it takes, read from the
-    # domain the checks complete for it (conjecture.parameter_domains):
+    # domain: what each parameter accepts. A parameter guarded other
+    # than to a set has a real, implementation-specific boundary; any
+    # other costs what is left unknown about the inputs it takes, read
+    # from the domain the checks complete for it, a guard to a set and
+    # an enforce_domain() guard included (conjecture.parameter_domains):
     # nothing stated, a type alone (a language naming the whole type
     # adds nothing), a narrower language by its level, a bounded range
     # or a refined language, a finite set of k values (log2(k)/10, capped,
@@ -81,6 +82,10 @@ _HOLDS_STRENGTH: dict[str, float] = {
     "examine": 0.90, "derive": 0.90, "probe:semi_analytical": 0.85,
     "probe:algorithmic": 0.80, "probe:minimal_example": 0.78, "probe": 0.60}
 _HOLDS_DEFAULT = 0.60
+# the share of its whole-domain credit a claim earns over the part of the
+# domain it does not cover, so every claim earns something: a claim
+# covering a share s earns s + _CLAIM_FLOOR * (1 - s)
+_CLAIM_FLOOR = 0.1
 
 _IDENTITY_KINDS = frozenset({"value_identity", "equivalence", "closed_form",
                              "roundtrip"})
@@ -119,9 +124,14 @@ _NO_SOURCE = frozenset({
     "is_representation_consistent"})
 
 
-def _strength(verdict: str, route: str) -> float:
+def _strength(verdict: str, route: str, n: "int | None" = None) -> float:
     """How much of a source's entropy this verdict, reached by this
-    mechanism, eliminates. See the @1 constants above."""
+    mechanism, eliminates. See the @1 constants above. A holds reached
+    by a subroute with no grade of its own (`derive:extensive`,
+    `probe:counterfactual`) is graded as the route it refines. A holds
+    from random sampling over `n` failure-free draws is scaled by
+    `1 - 3/n`: at 95% confidence, n draws without a failure leave up to
+    3/n of what they sample possibly failing (the rule of three)."""
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
@@ -129,7 +139,14 @@ def _strength(verdict: str, route: str) -> float:
     if v == "falsified":
         return _FALSIFIED_STRENGTH
     if v == "holds":
-        return _HOLDS_STRENGTH.get(route or "probe", _HOLDS_DEFAULT)
+        sampled = (route or "probe") == "probe"
+        route = route or "probe"
+        while route not in _HOLDS_STRENGTH and ":" in route:
+            route = route.rsplit(":", 1)[0]
+        strength = _HOLDS_STRENGTH.get(route, _HOLDS_DEFAULT)
+        if sampled and isinstance(n, int) and n > 0:
+            strength *= max(0.0, 1.0 - 3.0 / n)
+        return strength
     return 0.0
 
 
@@ -194,14 +211,17 @@ class _ParamDomain:
     """What is known about one parameter's inputs: its name, the bits
     its completed domain leaves (`domain_bits`), whether a guard in the
     body bounds it, whether an Optional annotation admits its absence,
-    whether its domain is a finite set, and how many members that set
-    has (0 when it is not finite)."""
+    whether its domain is a finite set, how many members that set
+    has (0 when it is not finite), and the `_clarity_reach.Universe` a
+    claim's share of it is counted in."""
     name: str
     bits: float
     guarded: bool = False
     optional: bool = False
     finite: bool = False
     points: int = 0
+    # what the domain holds, for counting the share a claim covers
+    universe: "object" = field(default=None, compare=False)
 
 
 def _whole_type_language(language) -> bool:
@@ -233,67 +253,69 @@ def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
     return bits, finite
 
 
-def _domain_reading(bound, annotated: bool) -> "tuple[float, bool, int]":
+def _domain_reading(bound, annotated: bool) -> "tuple[float, bool, frozenset]":
     """Intent:
-        `(bits, finite, points)`: `domain_bits` plus the number of
-        members a finite domain has, 0 for one that is not finite.
+        `(bits, finite, members)`: `domain_bits` plus the members of
+        a finite domain, empty for one that is not finite.
     """
     import math
 
     from .domain import Domain, LanguageRef, _is_enumerated, is_sentinel
     C = _BITS
 
-    def finite_bits(k: int):
-        return (min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1 else 0.0), True, k
+    def finite_bits(members) -> tuple:
+        k = len(members)
+        return ((min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1
+                 else 0.0), True, frozenset(members))
 
     if bound is None:
-        return (C["domain_type"] if annotated else C["domain_unannotated"]), False, 0
+        return (C["domain_type"] if annotated else C["domain_unannotated"]), False, frozenset()
     if isinstance(bound, frozenset):
-        return finite_bits(len([v for v in bound if not is_sentinel(v)]))
+        return finite_bits({v for v in bound if not is_sentinel(v)})
     if isinstance(bound, str):
-        return C["domain_type"], False, 0
+        return C["domain_type"], False, frozenset()
     if isinstance(bound, Domain):
         if bound.base_type == "L":
             refs = [p for p in bound.pieces if isinstance(p, LanguageRef)]
             if any(ref.refinements for ref in refs):
-                return C["domain_refined"], False, 0
+                return C["domain_refined"], False, frozenset()
             from .languages import resolve
             levels = set()
             for ref in refs:
                 try:
                     language, _source = resolve(ref)
                 except Exception:
-                    return C["domain_type"], False, 0
+                    return C["domain_type"], False, frozenset()
                 if getattr(language, "level", "") == "finite":
                     members = language.members(1024)
                     if members is not None:
-                        return finite_bits(len(members))
+                        return finite_bits(set(members))
                 if _whole_type_language(language):
-                    return C["domain_type"], False, 0
+                    return C["domain_type"], False, frozenset()
                 levels.add(getattr(language, "level", "predicate"))
             if not levels:
-                return C["domain_type"], False, 0
+                return C["domain_type"], False, frozenset()
             if levels == {"alphabet"}:
-                return C["domain_alphabet"], False, 0
-            return C["domain_predicate"], False, 0
+                return C["domain_alphabet"], False, frozenset()
+            return C["domain_predicate"], False, frozenset()
         if _is_enumerated(bound) and not bound.dims:
-            return finite_bits(len({v for p in bound.pieces for v in p
-                                    if not is_sentinel(v)}))
+            return finite_bits({v for p in bound.pieces for v in p
+                                if not is_sentinel(v)})
         pieces = [p for p in bound.pieces
                   if not (isinstance(p, frozenset) and all(is_sentinel(v) for v in p))]
         if pieces and all(isinstance(p, tuple) and not isinstance(p, frozenset)
                           and all(math.isfinite(float(v)) for v in p[:2])
                           for p in pieces):
-            return C["domain_bounded"], False, 0
-        return C["domain_type"], False, 0
+            return C["domain_bounded"], False, frozenset()
+        return C["domain_type"], False, frozenset()
     if isinstance(bound, tuple):
         try:
             if all(math.isfinite(float(v)) for v in bound[:2]):
-                return C["domain_bounded"], False, 0
+                return C["domain_bounded"], False, frozenset()
         except (TypeError, ValueError):
             pass
-        return C["domain_type"], False, 0
-    return C["domain_type"], False, 0
+        return C["domain_type"], False, frozenset()
+    return C["domain_type"], False, frozenset()
 
 
 @dataclass(frozen=True)
@@ -320,7 +342,8 @@ def _callee_evidence(entry: dict) -> float:
     """Intent:
         The share of a call's hazard the callee's own record removes:
         the strongest settled definedness row it holds (an `is_defined`
-        row, bare or a restriction, or a `raises` row). Proven removes
+        row, bare or a restriction, or a `raises` row), or an identity
+        over its whole domain, which gives a value at every input. Proven removes
         it all; a holds removes what a holds removes of any source, by
         mechanism; a row accepted as trusted counts as a holds, never as
         proven. Anything else (no record, a bound, an unsettled or
@@ -338,7 +361,8 @@ def _callee_evidence(entry: dict) -> float:
             continue
         statement = str(row.get("statement") or row.get("law") or "")
         if region_row_kind(row.get("name")) != "is_defined" and not (
-                statement.startswith("raises(") or " raises(" in statement):
+                statement.startswith("raises(") or " raises(" in statement) \
+                and not _whole_domain_identity(row.get("name") or "", statement):
             continue
         accepted = row.get("accepted") or {}
         verdict = classify_verdict(row.get("verdict") or "")
@@ -346,11 +370,57 @@ def _callee_evidence(entry: dict) -> float:
             strength = _HOLDS_DEFAULT if verdict in ("proven", "holds") \
                 else 0.0
         elif verdict in ("proven", "holds"):
-            strength = _strength(verdict, row.get("route") or "")
+            strength = _strength(verdict, row.get("route") or "", row.get("n"))
         else:
             strength = 0.0
         best = max(best, strength)
     return best
+
+
+def _whole_domain_identity(name: str, statement: str) -> bool:
+    """Whether a row states what a function computes (an identity, an
+    equivalence, a closed form) over every input, binding no parameter
+    to a narrower set."""
+    return _claim_kind(name, statement) in _IDENTITY_KINDS and \
+        not _claim_bindings(statement)
+
+
+def _decorator_only_calls(fn, facts) -> frozenset:
+    """Intent:
+        The dotted keys of the calls `fn`'s source makes only in its
+        decorators (`@enforce_domain({...})`), resolved through `fn`'s
+        import aliases. A decorator runs when the function is defined,
+        so it is not a call the body makes.
+    """
+    import ast
+
+    from .compendium import _alias_origins
+
+    def names(nodes) -> set:
+        found = set()
+        for root in nodes:
+            for node in ast.walk(root):
+                if isinstance(node, ast.Call):
+                    try:
+                        found.add(ast.unparse(node.func))
+                    except Exception:
+                        continue
+        return found
+
+    tree = getattr(facts, "tree", None)
+    fdef = next((n for n in ast.walk(tree) if isinstance(
+        n, (ast.FunctionDef, ast.AsyncFunctionDef))), None) if tree else None
+    if fdef is None or not fdef.decorator_list:
+        return frozenset()
+    only = names(fdef.decorator_list) - names(fdef.body)
+    origin = _alias_origins(fn, facts)
+    out = set()
+    for name in only:
+        head, dot, rest = name.partition(".")
+        base = origin.get(head)
+        if base is not None:
+            out.add(f"{base}.{rest}" if dot else base)
+    return frozenset(out)
 
 
 def _callees(fn, facts, root: str, store: dict,
@@ -369,10 +439,13 @@ def _callees(fn, facts, root: str, store: dict,
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if library_keys is None:
         library_keys = frozenset(load_library_claims(root))
+    decorators = _decorator_only_calls(fn, facts)
     out = []
     for key in resolved_calls(fn, facts):
         head = key.split(".")[0]
         if key not in library_keys and (head in stdlib or head == "builtins"):
+            continue
+        if key in decorators:
             continue
         entry = (store.get(key) or {}).get("entry") or {}
         out.append((key, _callee_evidence(entry)))
@@ -405,7 +478,10 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         return None
     cx = n_raises = 0
     numeric = False
+    stating = _domain_stating_guards(facts)
     for node in ast.walk(tree):
+        if id(node) in stating:
+            continue
         if isinstance(node, ast.Raise):
             n_raises += 1
         elif isinstance(node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor,
@@ -434,8 +510,11 @@ def _clarity_profile(fn, facts=None, root: str = ".",
                                                             "table")
                         else kinds.get(p, "scalar")
                         for p in params)
-    guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
     domains = _param_domains(fn, facts, params, guards)
+    guarded = sum(1 for d in domains if d.guarded)
+    # a string parameter whose domain is a finite set admits no
+    # arbitrary text, so it carries no arbitrary-input source
+    finite = {d.name for d in domains if d.finite}
     if store is None:
         from .spec import load_verified
         store = load_verified(root)
@@ -448,19 +527,46 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         output=getattr(facts, "returns_kind", "scalar") or "none",
         numeric=numeric, loops=len(getattr(facts, "loops", []) or []),
         pure=bool(getattr(facts, "is_pure", True)),
-        str_params=len(str_params), n_raises=n_raises,
+        str_params=len(str_params - finite), n_raises=n_raises,
         callees=callees)
+
+
+def _domain_stating_guards(facts) -> set:
+    """Intent:
+        The ids of the AST nodes of each guard that states a parameter's
+        domain (`if side not in {"buy", "sell"}: raise ValueError(side)`,
+        whose body only raises): the `if` and its raise. Such a guard is
+        the parameter's domain, charged as that domain, not as a branch
+        and a raise site of its own.
+    """
+    import ast
+
+    from .hazards import finite_guards
+    out: set = set()
+    try:
+        guards = finite_guards(facts)
+    except Exception:
+        return out
+    for _param, _values, node in guards:
+        if node.orelse or not all(isinstance(s, ast.Raise) for s in node.body):
+            continue
+        out.add(id(node))
+        out.update(id(s) for s in node.body)
+    return out
 
 
 def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
     """One `_ParamDomain` per parameter: the bits of the domain the
     checks complete for it (`conjecture.parameter_domains`, the one
     reading), whether a guard bounds it, whether its annotation admits
-    absence, whether it is a finite set."""
+    absence, whether it is a finite set. A guard to a set and an
+    `enforce_domain()` guard state the parameter's domain, so the
+    parameter is charged by that domain rather than as a guard
+    boundary."""
     import warnings
 
     from .conjecture import parameter_domains
-    from .hazards import _annotated_params
+    from .hazards import _annotated_params, finite_guard_sets
     from .types import missing_policy_from_signature
     try:
         with warnings.catch_warnings():
@@ -476,15 +582,24 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
         policy = missing_policy_from_signature(fn)
     except Exception:
         policy = {}
+    try:
+        stated = set(finite_guard_sets(facts))
+    except Exception:
+        stated = set()
+    stated |= set(getattr(fn, "__mathema_enforced_domain__", None) or ())
+    from ._clarity_reach import universe
+    kinds = getattr(facts, "param_kinds", {}) or {}
     out = []
     for p in params:
         bound = completed.get(p)
-        bits, finite, points = _domain_reading(
+        bits, finite, members = _domain_reading(
             bound, p in annotated or bound is not None)
         sig = policy.get(p)
         optional = bool(sig is not None and sig.annotated and sig.absent)
-        out.append(_ParamDomain(p, bits, guards.get(p) not in (None, "none"),
-                                optional, finite, points))
+        guarded = p not in stated and guards.get(p) not in (None, "none")
+        out.append(_ParamDomain(p, bits, guarded, optional, finite,
+                                len(members),
+                                universe(bound, kinds.get(p, "unknown"), members)))
     return tuple(out)
 
 
@@ -493,12 +608,22 @@ def _clarity_sources(p: _Profile) -> list:
     `reducer` names which claim group (or structural baseline) clears
     it; a call's reducer is `callee:<key>`, cleared only by that
     callee's own recorded evidence; an unguarded parameter's reducer is
-    `domain_soft:<name>`, its absence `absence:<name>`. See `_BITS`."""
+    `domain_soft:<name>`, its absence `absence:<name>`. Every parameter
+    starts at the bits of nothing known about it; what the function
+    states (its annotation, a guard, `enforce_domain`) is the
+    `stated:<name>` share, always cleared, and the rest is charged. See
+    `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
     s.append(("form", C["shape_branched"] if p.cx else C["shape_flat"], "shape"))
     for d in p.domains:
+        charged = C["domain_guarded"] if d.guarded else d.bits
+        if charged < C["domain_unannotated"]:
+            # what the function states (its annotation, a guard,
+            # enforce_domain) is known
+            s.append(("domain", C["domain_unannotated"] - charged,
+                      f"stated:{d.name}"))
         if d.guarded:
             s.append(("domain", C["domain_guarded"], "domain"))
         elif d.bits > 0:
@@ -533,76 +658,84 @@ def _claim_bindings(statement: str) -> dict:
         return {}
 
 
-def _finite_share(bound, d: "_ParamDomain") -> "float | None":
+def _region_on(bound, d: "_ParamDomain") -> tuple:
+    """The region a claim's binding `bound` names on parameter `d`, with
+    a binding that no count is made for (a language) read as the whole
+    type when it is at least as wide as `d`'s own domain."""
+    from ._clarity_reach import region
+    reading = region(bound)
+    if reading[0] == "narrower":
+        try:
+            wide = domain_bits(bound, True)[0] >= d.bits
+        except Exception:
+            wide = False
+        return ("whole",) if wide else reading
+    return reading
+
+
+def _claim_share(bindings: dict, domains) -> float:
     """Intent:
-        The share of parameter `d`'s domain that a claim's binding
-        `bound` on it covers, when that binding is a finite set: its
-        members over the members of `d`'s own finite domain, capped at
-        1, and 0 when `d`'s domain is infinite (k points of an infinite
-        type are a vanishing share of it). None when the binding is not
-        a finite set.
+        The share of the function's inputs a claim ranges over: for
+        each parameter it binds, the share of that parameter's domain
+        the binding covers, counted in the values the parameter's type
+        holds (`_clarity_reach.share`), multiplied together. A claim
+        binding nothing ranges over every input, a share of 1.
     """
-    _bits, finite, k = _domain_reading(bound, True)
-    if not finite:
-        return None
-    if not d.finite or d.points <= 0:
-        return 0.0
-    return min(1.0, k / d.points)
+    from ._clarity_reach import share
+    out = 1.0
+    for d in domains:
+        if d.name in bindings and d.universe is not None:
+            out *= share([_region_on(bindings[d.name], d)], d.universe)
+    return out
 
 
-def _scope_share(bindings: dict, d: "_ParamDomain") -> float:
-    """The share of `d`'s domain a claim with these bindings speaks
-    about: all of it unless the claim binds `d` to a finite set, in
-    which case that set's share (`_finite_share`)."""
-    bound = bindings.get(d.name)
-    if bound is None:
-        return 1.0
-    share = _finite_share(bound, d)
-    return 1.0 if share is None else share
-
-
-def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
-    """What the verified claims say about each unguarded parameter's
-    inputs beyond its completed domain.
-
-    Notes:
-        A proof by visiting every point of a finite set clears a
-        parameter whose own domain is that finite set. A claim binding a
-        finite set settles those points only: it removes their share of
-        the parameter's own finite domain, and nothing of an infinite
-        one, since the function still accepts every other value of its
-        type. A claim binding a narrower range or language lowers the
-        parameter's bits to that domain's (the reduction is the share of
-        bits removed).
+def _scoped_credit(items, domains) -> float:
+    """Intent:
+        What a source's crediting claims, `[(strength, bindings), ...]`,
+        establish of it together. The covered part is the strongest
+        strength times share of any one claim, or, where the claims bind
+        one parameter and nothing else, the strength each value of that
+        parameter is covered at, averaged over its domain, so claims
+        over different parts of one parameter add up. On top of it, a
+        tenth (`_CLAIM_FLOOR`) of what the strongest claim would earn
+        over the rest of the domain, counted once: one claim covering a
+        share `s` earns `s + 0.1 * (1 - s)` of its whole-domain credit.
     """
-    by_name = {d.name: d for d in profile.domains}
-    for row in verified_claims:
-        statement = row.get("statement") or row.get("law") or ""
-        name = row.get("name") or ""
-        if not statement or statement == name:
+    strongest = max((st for st, _b in items), default=0.0)
+    covered = _covered_credit(items, domains)
+    covered = _unit(covered)
+    return _unit(covered + _CLAIM_FLOOR * max(0.0, strongest - covered))
+
+
+def _covered_credit(items, domains) -> float:
+    """The covered part of `_scoped_credit`, without its floor."""
+    from ._clarity_reach import share
+    best = max((st * _claim_share(b, domains) for st, b in items), default=0.0)
+    names = {d.name for d in domains}
+    for d in domains:
+        if d.universe is None:
             continue
-        verdict = row.get("verdict") or ""
-        route = row.get("route") or ""
-        strength = _strength(verdict, route)
-        if strength <= 0:
+        single = [(st, _region_on(b[d.name], d) if d.name in b else ("whole",))
+                  for st, b in items if set(b) & names <= {d.name}]
+        if len(single) < 2:
             continue
-        bound_domains = _claim_bindings(statement)
-        if route == "derive:brute_force" and verdict == "proven":
-            for d in profile.domains:
-                if d.finite:
-                    bump(f"domain_soft:{d.name}", _scope_share(bound_domains, d))
-        for p, bound in bound_domains.items():
-            d = by_name.get(p)
-            if d is None or d.bits <= 0:
-                continue
-            share = _finite_share(bound, d)
-            if share is not None:
-                if share > 0:
-                    bump(f"domain_soft:{p}", strength * share)
-                continue
-            narrower, _finite = domain_bits(bound, True)
-            if narrower < d.bits:
-                bump(f"domain_soft:{p}", strength * (1.0 - narrower / d.bits))
+        levels = sorted({st for st, _r in single}, reverse=True) + [0.0]
+        credit = sum((hi - lo) * share([r for st, r in single if st >= hi],
+                                       d.universe)
+                     for hi, lo in zip(levels, levels[1:]))
+        best = max(best, credit)
+    return best
+
+
+def _is_absence_row(row: dict) -> bool:
+    """Whether a verified row states what the function does when a
+    parameter is absent (`absent[x]`, a stated `absent(f, x) ...`
+    policy, `is_absent_safe`), which speaks only about absence."""
+    from .families import claim_base_name
+    name = row.get("name") or ""
+    policy = (row.get("meta") or {}).get("mathema.policy") or {}
+    return policy.get("kind") == "absent" or (
+        bool(name) and claim_base_name(name) in ("is_absent_safe", "absent"))
 
 
 def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
@@ -618,7 +751,8 @@ def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
         name = row.get("name") or ""
         meta = row.get("meta") or {}
         policy = meta.get("mathema.policy") or {}
-        strength = _strength(row.get("verdict") or "", row.get("route") or "")
+        strength = _strength(row.get("verdict") or "", row.get("route") or "",
+                             row.get("n"))
         if strength <= 0:
             continue
         base = claim_base_name(name) if name else ""
@@ -641,7 +775,7 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     base_purity = C["base_pure"] if pure else C["base_impure"]
     r: dict = {
         "identity": 0.0, "extent": 0.0, "shape": 0.0, "domain": 0.0,
-        "domain_soft": C["base_domain_soft"], "raises": 0.0,
+        "raises": 0.0,
         "safety:is_state_safe": base_purity,
         "safety:is_deterministic": base_purity,
         "safety:is_numerically_stable": C["base_safety"],
@@ -651,11 +785,21 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     }
 
     def bump(key, val):
+        val = _unit(val)
         if val > r.get(key, 0.0):
             r[key] = val
 
-    # (statement, strength) of each claim settling the map or a boundary
-    settling: list = []
+    from .records import classify_verdict
+    domains = profile.domains if profile is not None else ()
+    soft = [f"domain_soft:{d.name}" for d in domains]
+    finite_soft = [f"domain_soft:{d.name}" for d in domains if d.finite]
+    for key in soft:
+        r[key] = C["base_domain_soft"]
+    for d in domains:
+        r[f"stated:{d.name}"] = 1.0
+    # (source, strength, bindings) of each credit a claim makes to a
+    # source it speaks about only over the inputs it ranges over
+    scoped: list = []
     for claim in verified_claims:
         name = claim.get("name") or ""
         statement = claim.get("statement") or claim.get("law") or ""
@@ -667,7 +811,9 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         if (claim.get("meta") or {}).get("mathema.corroboration") == \
                 "uncorroborated":
             continue
-        st = _strength(claim.get("verdict") or "", claim.get("route") or "")
+        verdict = claim.get("verdict") or ""
+        route = claim.get("route") or ""
+        st = _strength(verdict, route, claim.get("n"))
         meta = claim.get("meta") or {}
         if meta.get("mathema.companion_of"):
             # a float companion executes its parent's relation against the
@@ -675,52 +821,60 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             # establishes its family (is_numerically_stable) for the
             # function; falsified, it is a defect in the parent's
             # computation and says nothing about the family as a whole
-            from .records import classify_verdict
             family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
-            if family and classify_verdict(claim.get("verdict") or "") in (
-                    "holds", "proven"):
+            if family and classify_verdict(verdict) in ("holds", "proven"):
                 bump("safety:" + family, st)
             continue
         if st <= 0:
             continue
         from .families import claim_base_name, current_family_name
         base = current_family_name(claim_base_name(name))
-        if base in _NO_SOURCE:
+        if base in _NO_SOURCE or _is_absence_row(claim):
+            continue
+        if ((claim.get("meta") or {}).get("mathema.policy") or {}).get(
+                "kind") == "missing":
+            # a missing-value policy row says what the function does
+            # with a missing value, and nothing else
+            bump("safety:is_missing_safe", st)
             continue
         if base in _SAFETY_SOURCE:
             bump("safety:" + _SAFETY_SOURCE[base], st)
             continue
         kind = _claim_kind(name, statement)
+        bindings = _claim_bindings(statement) if domains else {}
+        # a falsified claim is knowledge about its own source only: a
+        # map shown wrong at a witness says nothing about the output's
+        # envelope, its shape or what the function accepts
+        holding = classify_verdict(verdict) != "falsified"
+        credits: list = []
         if kind in _IDENTITY_KINDS:
-            bump("identity", st)
-            settling.append((statement, st))
+            # knowing the exact map settles the output envelope, the
+            # relational shape and what each parameter accepts too
+            credits = ["identity"] + (["extent", "shape", *soft]
+                                      if holding else [])
         elif kind == "bound":
-            bump("extent", st)
-        elif kind == "partiality":
-            bump("raises", st)
+            credits = ["extent"]
+        elif kind in ("partiality", "definedness"):
+            if kind == "partiality":
+                bump("raises", st)
             bump("domain", st)                       # a raising guard IS a boundary
-            settling.append((statement, st))
-        elif kind == "definedness":
-            bump("domain", st)
-            settling.append((statement, st))
+            credits = soft if holding else []
         else:                                        # the shape / relation group
-            bump("shape", st)
-    # entailment: knowing the exact map settles the output envelope, the
-    # relational shape, and an unguarded parameter's domain, over the
-    # part of that domain the claim ranges over
-    r["extent"] = max(r["extent"], r["identity"])
-    r["shape"] = max(r["shape"], r["identity"])
-    r["domain_soft"] = max(r["domain_soft"], r["domain"], r["identity"])
+            credits = ["shape"]
+        if route == "derive:brute_force" and classify_verdict(verdict) == \
+                "proven":
+            # a proof visiting every point of the function's own finite
+            # domain settles what that parameter accepts
+            credits = credits + finite_soft
+        scoped.extend((source, st, bindings) for source in credits)
+    by_source: dict = {}
+    for source, st, bindings in scoped:
+        by_source.setdefault(source, []).append((st, bindings))
+    for source, items in by_source.items():
+        bump(source, _scoped_credit(items, domains) if domains
+             else max(st for st, _b in items))
     if profile is not None:
-        _binding_reductions(verified_claims, profile, bump)
         _absence_reductions(verified_claims, profile, bump)
-        scoped = [(_claim_bindings(statement), st) for statement, st in settling]
-        for d in profile.domains:
-            key = f"domain_soft:{d.name}"
-            entailed = max([C["base_domain_soft"]]
-                           + [st * _scope_share(bindings, d)
-                              for bindings, st in scoped])
-            r[key] = max(r.get(key, 0.0), entailed)
     return r
 
 
@@ -750,9 +904,15 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
                        for key, evidence in profile.callees})
     h0 = h_rem = 0.0
     for _dim, bits, reducer in _clarity_sources(profile):
+        bits = max(0.0, bits)
         h0 += bits
-        h_rem += bits * (1.0 - reductions.get(reducer, 0.0))
-    return h0, h_rem
+        h_rem += bits * (1.0 - _unit(reductions.get(reducer, 0.0)))
+    return h0, min(h0, max(0.0, h_rem))
+
+
+def _unit(value: float) -> float:
+    """`value` clamped to [0, 1]."""
+    return min(1.0, max(0.0, float(value)))
 
 
 def clarity_score(fn=None, verified_claims=None, root: str = ".",
@@ -792,7 +952,10 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     h0, h_rem = bits
     if h0 <= 0:
         return 0
-    return round(100 * (1.0 - h_rem / h0))
+    score = min(100, max(0, round(100 * (1.0 - h_rem / h0))))
+    # 100 means every source is settled by proof: anything left, however
+    # small, reads below it
+    return 99 if score == 100 and h_rem > 0 else score
 
 
 @dataclass(frozen=True)
