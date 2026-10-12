@@ -154,13 +154,17 @@ can know:
 |-----------|-------------------------|---------------------------|--------------------------|
 | **what it computes** | which function is this, exactly? | the map, 1 bit, plus 0.4 bits per branch region | `f(x) == 2*x`, an equivalence, a closed form |
 | **its bounds & shape** | what is the output's range and form? | the output envelope by return kind (a bool 0.5, a scalar 1, a sequence or mapping 1.5, a matrix 2) and its relational form (0.4 flat, 1 branched) | a bound, monotonicity, symmetry; a proof of *what it computes* settles these too |
-| **what it accepts** | which inputs are in and out of bounds? | each parameter's domain (below), and 0.5 bits for the absence an `Optional` admits | a domain, a binding to a narrower set, an `absent` row or policy |
-| **how safely it runs** | does it run cleanly and deterministically? | one source per safety family that can apply: state and determinism (0.15 bits each on a visibly pure function, 0.8 otherwise), numerical stability and representation (0.2 bits, plus 0.4 per loop), missing values for a sequence input (0.4), text for each string input (1) | the safety families (`is_state_safe`, `is_numerically_stable`, ...) |
-| **where it can go wrong** | how and where does it fail? | 0.5 bits per raise site, 2 bits per call into another function | a `raises` contract; for a call, the callee's own `is_defined` or `raises` row |
+| **what it accepts** | which inputs are in and out of bounds? | each parameter's domain (below), and 0.5 bits for the absence an `Optional` admits | a domain stated on the function, a proof of what it computes, a `raises` or `is_defined` row; an `absent` row or policy for the absence |
+| **how safely it runs** | does it run cleanly and deterministically? | one source per safety family that can apply: state and determinism (0.15 bits each on a visibly pure function, 0.8 otherwise), numerical stability and representation (0.2 bits, plus 0.4 per loop), missing values for a sequence input (0.4), text for each string input whose domain is not a finite set (1) | the safety families (`is_state_safe`, `is_numerically_stable`, ...); a `missing` policy row for missing values |
+| **where it can go wrong** | how and where does it fail? | 0.5 bits per raise site, 2 bits per call into another function | a `raises` contract; for a call, the callee's own record |
 
 A dimension that cannot apply has no sources, so it carries no entropy: a
 pure, total function with nothing that can fail has nothing in *where it
-can go wrong* to count against it.
+can go wrong* to count against it. A decorator is not a call the function
+makes, and a guard that states a parameter's domain (below) is charged as
+that domain, not also as a branch and a raise site, so
+`@enforce_domain({"side": {"buy", "sell"}})` and
+`if side not in {"buy", "sell"}: raise ValueError(side)` score the same.
 
 ### What a parameter accepts
 
@@ -168,7 +172,9 @@ Each parameter's entropy is what its completed domain leaves unknown, read
 from the same domain every check uses. That domain is what the function
 itself states: its annotation, a guard in the body refusing every value
 outside a set (`if side not in {"buy", "sell"}: raise ValueError`), or an
-`@enforce_domain(...)` decorator, which takes the place of the annotation:
+`@enforce_domain(...)` decorator, which takes the place of the annotation
+(a set, list or tuple of values there is the finite set of those values,
+and two numbers are the interval between them):
 
 | what is known about the parameter | bits |
 |-----------------------------------|------|
@@ -181,25 +187,51 @@ outside a set (`if side not in {"buy", "sell"}: raise ValueError`), or an
 | any other guard in the body (its boundary is the unknown) | 1.0 |
 
 A finite set of `k` values is a choice carrying `log2(k)` bits, scaled by
-a tenth because a closed set is already most of the way to known.
+a tenth because a closed set is already most of the way to known. A
+parameter the function narrows below its type still starts at the type's
+1 bit, and the narrowing counts as known, so stating a domain on the
+function never lowers its score: only what the narrower domain leaves is
+charged, and the claims clear part of that.
 
-What a proof that visits every member of a finite set clears depends on
-whose set it is. When the set is the function's own domain (a `Literal`
-annotation, a str `Enum`, a guard to a set, or `@enforce_domain` to a
-set), the proof covers every input the function accepts, and it clears
-the parameter entirely. When the set comes only
-from a claim's binding, the function still accepts every other value of
-its type. For example,
+Who states the domain matters. When a finite set is the function's own
+domain, a proof that visits every member covers every input the function
+accepts and clears the parameter entirely. When the set, or a range,
+comes only from a claim's binding, the function still accepts every other
+value of its type, so the claim speaks about its share of the inputs
+(below) and leaves the parameter charged for the rest. For example,
 `for name in {"Alice", " alice ", "ALICE"}, f(name) == "alice"` on
-`username_key(name: str)` settles three strings, and `name` stays charged
-for the rest of `str`. A claim binding part of the function's own finite
-set clears that part's share: two of three `Literal` values leave a third
-of the charge. A parameter guarded in the body by anything other than a
-set is charged as a guard, for its boundary, which a verified claim about
-what the guard refuses clears.
+`username_key(name: str)` settles three strings out of unboundedly many,
+which is a vanishing share, while the same proof on
+`username_key(name: Literal["Alice", " alice ", "ALICE"])` settles every
+input. A parameter guarded in the body by anything other than a set is
+charged as a guard, for its boundary, which a verified claim about what
+the guard refuses clears.
 
-A verified claim that binds a narrower range or language lowers the
-parameter's entropy to the narrower domain's.
+### How far a claim reaches
+
+A claim credits what it says about a function in proportion to the share
+of the function's inputs it ranges over. The share is counted in the
+values each parameter's type can actually hold:
+
+- a `float` holds float64 doubles, which crowd towards zero, so `[0, 1]`
+  holds about 25% of them, `[0, 100]` about 25.2%, `[0, inf)` half, and
+  `[0.5, 0.6]` about 0.005%;
+- an `int` is unbounded, so a bounded stretch of integers is a vanishing
+  share and a half-line half, unless the function itself bounds the
+  parameter, when the integers in its range are counted;
+- a finite domain counts its members, so two of three `Literal` values
+  are two thirds of it;
+- a string or any other type has unboundedly many values, so a few named
+  values or a narrower language are a vanishing share.
+
+A claim binding several parameters covers the product of their shares.
+The share scales every dimension the claim credits: what it computes, the
+envelope and shape a proof of that entails, and what the parameters
+accept. Claims over different parts of one parameter's domain add up, so
+`{"buy", "sell"}` and `{"hold", "skip"}` together settle a four-value
+`Literal`. The easy way to earn the full share is to state the domain on
+the function, with `@enforce_domain`, an annotation or a guard, and then
+claim over all of it.
 
 ### How much a verdict removes
 
@@ -215,16 +247,26 @@ less of the input space unexplored than random sampling:
 | a witnessed `falsified` | 0.85 |
 | `holds` from an algorithmic probe | 0.80 |
 | `holds` from a minimal-example probe | 0.78 |
-| `holds` from random sampling | 0.60 |
+| `holds` from random sampling over `n` draws | `0.60 * (1 - 3/n)` |
 | `unknown` | 0 |
 
+A subroute with no grade of its own (`derive:extensive`,
+`probe:counterfactual`) is graded as the route it refines. The random
+sampling grade shrinks with few draws because `n` failure-free draws
+leave, at 95% confidence, up to `3/n` of what they sample possibly
+failing; a row that records no count is graded 0.60.
+
 A witnessed falsification removes entropy because it is knowledge: you now
-know an input where the function fails. A `[float]` companion that holds
-or is proven credits numerical stability for its function, as a verified
-`is_numerically_stable` claim would; a falsified companion credits nothing,
-since it records one relation the float code breaks, not the function's
-stability. A safety family that only rolls others up (`is_computation_safe`,
-`is_repeatable`) credits nothing itself, since its children do.
+know an input where the function fails. It credits only the source the
+claim speaks about, since a map shown wrong at one input says nothing about
+the output's envelope, its shape or what the function accepts. A `[float]`
+companion that holds or is proven credits numerical stability for its
+function, as a verified `is_numerically_stable` claim would; a falsified
+companion credits nothing, since it records one relation the float code
+breaks, not the function's stability. A safety family that only rolls
+others up (`is_computation_safe`, `is_repeatable`) credits nothing itself,
+since its children do, and an `absent` or `missing` policy row speaks only
+about absence or missing values.
 
 ### Calls
 
@@ -232,24 +274,45 @@ Every call into another function, one of your own or a library's, is a
 two-bit source in *where it can go wrong*, and only the callee's own
 record reduces it. mathema looks one level down, at the callee's settled
 definedness rows (`is_defined`, bare or with a region, or a `raises`
-row): proven, the call's entropy is gone; holds removes the fraction the
-table gives; a row accepted with `--as trusted` counts as a holds. A
-callee with no record keeps its two bits, which caps the caller below 100.
-For a library function the record is the one `mathema verify` writes when
-it adjudicates the function's [compendium](../claims-transfer.md) rows
-against the installed library; a claims file nobody has verified is
-testimony and moves nothing. What the callee itself calls is the callee's
-own clarity, not the caller's. Built-in and standard-library calls with no
-claims file are not sources.
+row) and at any identity it holds over its whole domain, which gives a
+value at every input: proven, the call's entropy is gone; holds removes
+the fraction the table gives; a row accepted with `--as trusted` counts
+as a holds. A callee with no such record keeps its two bits, which caps
+the caller below 100. For a library function the record is the one
+`mathema verify` writes when it adjudicates the function's
+[compendium](../claims-transfer.md) rows against the installed library;
+a claims file nobody has verified is testimony and moves nothing. What
+the callee itself calls is the callee's own clarity, not the caller's.
+Built-in and standard-library calls with no claims file are not sources.
 
 ### A function nobody has claimed
 
 With no verified claims, a function is scored only on what its code
-visibly shows. Visible purity, an unguarded signature and the absence of
-hazards are facts examination establishes without a claim, and each
-removes part of its source, weaker than a verified claim would. A plainly
-pure, total helper therefore reads low but not zero, while a branchy,
-impure or call-heavy function floors much closer to zero.
+visibly shows. Visible purity, an unguarded signature, a domain stated on
+the function and the absence of hazards are facts examination establishes
+without a claim, and each removes part of its source, weaker than a
+verified claim would. A plainly pure, total helper therefore reads low but
+not zero, while a branchy, impure or call-heavy function floors much
+closer to zero.
+
+### What the score does not tell you
+
+The bit values are nominal: they rank the kinds of knowledge against each
+other sensibly, but nobody measured them, and calibrating them against
+real repositories is still to come, so a clarity of 60 against one of 70
+says more about order than about distance. The score is per function and
+reads one level of calls, so it says nothing about how functions behave
+together, and a repository's clarity is a weighted mean of those
+per-function views rather than a measure of the system. It depends on
+which claims are verified: a function whose behaviour is perfectly well
+understood but unclaimed reads low, and the score rises when that
+understanding is written down and checked, not when it exists. Proof
+attempts run under a wall-clock cap, so on a busy machine a claim that
+would be proven can be recorded as holds, and the score drops with it
+until the claim is verified again. Some of what a function does is not
+seen at all, for example a guard bounding a number to a range (only a
+guard to a set of strings is read as the domain), or a module-level list
+the function appends to (it reads as pure).
 
 The scoring algorithm is versioned, and its version is recorded beside
 every score, so a number is only ever compared with one computed the same
