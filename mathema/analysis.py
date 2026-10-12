@@ -93,16 +93,16 @@ class Facts:
     stages (the derive-route lifter, branch pruning) don't have to
     re-parse the source.
 
-    Every field except `tree` is language-neutral: names, kind
+    Every field except `tree` is frontend-neutral: names, kind
     vocabularies, `LoopFact` rows, hashes and counts, all statable
-    about a function in any language. `tree` is FRONTEND-PRIVATE, the
+    whatever frontend read the function. `tree` is FRONTEND-PRIVATE, the
     Python frontend's own attachment, and optional: every consumer
     treats `tree is None` as a valid state (the body-lifting derive
     routes decline, everything else proceeds), which is how a Facts
     built by something other than `analyze_source` participates.
     `mathema._doc_only_facts` is the shipping precedent, including its
-    NAMESPACED form hash (`"doc:<sha>"`), the shape a foreign
-    frontend's `"cpp:<sha>"`/`"ts:<sha>"` follows: form hashes are
+    NAMESPACED form hash (`"doc:<sha>"`), the shape any other
+    frontend's form follows (`"<frontend>:<sha>"`): form hashes are
     compared only within a namespace, never across. Only a form
     `analyze_source` computed from the Python body is a canonical form
     of that body (`form_is_computed`); any other form is an identity

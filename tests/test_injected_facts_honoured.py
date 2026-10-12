@@ -33,14 +33,14 @@ def _halve(y: float) -> float:
     return y / 2
 
 
-def _proxy(impl, params, form="ts:0011223344ab"):
+def _proxy(impl, params, form="ext:0011223344ab"):
     """A callable shaped like an adaptor proxy: an opaque closure body,
     an empty module, a signature of its own and injected facts with no
     syntax tree and a namespaced form."""
     def proxy(*args, **kwargs):
         return impl(*args, **kwargs)
     proxy.__name__ = impl.__name__
-    proxy.__qualname__ = f"ts:src/{impl.__name__}.ts#{impl.__name__}"
+    proxy.__qualname__ = f"ext:src/{impl.__name__}#{impl.__name__}"
     proxy.__module__ = ""
     proxy.__signature__ = inspect.Signature([
         inspect.Parameter(p, inspect.Parameter.POSITIONAL_OR_KEYWORD)
@@ -55,7 +55,7 @@ def test_a_bound_proxy_is_described_by_its_injected_facts():
     r = try_prove(_double, analyze_source(_double), "f(g(x))", "x", "==",
                   funcs={"g": g})
     assert r.status == "unliftable"
-    assert "ts:0011223344ab" in r.sketch, r.sketch
+    assert "ext:0011223344ab" in r.sketch, r.sketch
     # the wrapper takes no named parameters and calls `impl`; neither
     # may surface as a fact about g
     assert "no-parameters" not in r.sketch, r.sketch

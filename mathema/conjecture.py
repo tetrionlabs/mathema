@@ -633,7 +633,7 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
     uses) resolved to the live callable it names, including a method
     key like `pkg.mod.Class.method` (the longest importable prefix is
     the module, the rest is walked as attributes). A language-tagged
-    key (`ts:src/ema.ts#ema`) resolves through its registered target
+    key (`<tag>:src/ema#ema`) resolves through its registered target
     resolver instead, so a store sweep reaches foreign implementations
     the same way it reaches Python ones. `None` if nothing importable
     or the name isn't found there. A method or attribute of a runtime
