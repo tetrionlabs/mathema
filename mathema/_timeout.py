@@ -156,5 +156,13 @@ class _WallClockExpired(BaseException):
         The alarm's own in-flight exception, BaseException so no
         library-internal `except Exception` can absorb it before it
         reaches `_with_timeout`'s boundary, where it becomes the
-        public TimeoutError.
+        public TimeoutError. `fired` counts every one made in this
+        process, so a caller can tell whether any cap fired while its
+        work ran, wherever that cap was caught.
     """
+
+    fired = 0
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        _WallClockExpired.fired += 1

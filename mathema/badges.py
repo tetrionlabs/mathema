@@ -954,8 +954,10 @@ def repo_badges(targets=None, root: str = ".",
         result is the same whichever process scores it, and is rolled up
         in population order, so the scores do not depend on `jobs`. A
         cached result is used only when its digest matches exactly
-        (`_badges_cache.function_digest`), and a result with a capped
-        step is never cached. A `StateDependenceWarning` is shown once
+        (`_badges_cache.function_digest`), and a result is never cached
+        when any wall-clock cap fired while scoring it (a capped step,
+        or a cap inside its check), since that result depends on the
+        machine's load. A `StateDependenceWarning` is shown once
         per function, a cached function's included.
     """
     from ._run_scope import run_scope
@@ -1033,16 +1035,22 @@ def _score_one(key: str, fn, ctx: dict) -> dict:
     """Intent:
         One function's contribution to the badges: `statements` and
         `covered` line counts (None without the coverage pass),
-        `intent`, `clarity`, the steps the cap stopped (`capped`), and
-        the warnings shown while scoring it (`warnings`).
+        `intent`, `clarity`, the steps the cap stopped (`capped`), the
+        warnings shown while scoring it (`warnings`), and `timed_out`,
+        whether any wall-clock cap fired while scoring it (a proof cap
+        in its check, recorded as `mathema.timeout`, included), which
+        makes the result depend on the machine's load.
     """
     import warnings
 
+    from . import _timeout
     from .docstring import docstring_sync
     from .impl_coverage import function_coverage
     root = ctx["root"]
     stopped: list = []
-    out: dict = {"statements": None, "covered": None}
+    out: dict = {"key": key, "statements": None, "covered": None}
+    fired = _timeout._WallClockExpired.fired
+    recorded_timeout = False
     with warnings.catch_warnings(record=True) as caught:
         if ctx["implementation"]:
             stmts, test_cov, fresh = _test_reading(fn, ctx)
@@ -1057,6 +1065,7 @@ def _score_one(key: str, fn, ctx: dict) -> dict:
                         verified_store=ctx["verified"]))
                     covered = fc.covered & fc.statements
                     statements = fc.statements
+                    recorded_timeout = fc.timed_out
                 except _Capped:
                     stopped.append("implementation")
                     statements = stmts
@@ -1082,6 +1091,8 @@ def _score_one(key: str, fn, ctx: dict) -> dict:
             out["clarity"] = None
     out["capped"] = stopped
     out["warnings"] = _warning_rows(caught)
+    out["timed_out"] = bool(stopped or recorded_timeout
+                            or _timeout._WallClockExpired.fired != fired)
     return out
 
 
@@ -1184,7 +1195,8 @@ def _repo_badges(targets, root: str, implementation: bool,
     def finished(key: str, result: dict, computed: bool) -> None:
         results[key] = result
         _reissue(result.get("warnings") or [], shown)
-        if computed and fingerprint is not None and not result["capped"]:
+        if computed and fingerprint is not None and not result["capped"] \
+                and not result.get("timed_out"):
             _badges_cache.write(root, digests[key], result)
         if progress is not None:
             progress(len(results), total)

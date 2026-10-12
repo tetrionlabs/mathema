@@ -340,3 +340,61 @@ def test_worker_processes_give_the_same_snapshot_as_one_process(importable):
 def test_the_cli_takes_a_jobs_count():
     from mathema import badges as badges_module
     assert 1 <= badges_module.default_jobs() <= 4
+
+
+def _cached_keys(root) -> set:
+    import json
+    cache_dir = root / ".mathema" / "cache" / "badges"
+    out = set()
+    for path in cache_dir.glob("*/*.json"):
+        entry = json.loads(path.read_text())
+        if "intent" in entry:
+            out.add(entry["key"])
+    return out
+
+
+def test_a_proof_cap_recorded_in_check_leaves_that_function_uncached(
+        importable, monkeypatch):
+    from mathema import impl_coverage
+    from mathema.records import Probe
+    _package(importable, "bsc_proofcap", 2)
+    original = impl_coverage._trace_check
+
+    def recording(fn, *a, **k):
+        statements, executed, record = original(fn, *a, **k)
+        if fn.__name__ == "f0" and record is not None:
+            record.probes.append(Probe(
+                name="capped", statement="f0(1.0) > 1.0", verdict="unknown",
+                route="derive", meta={"mathema.timeout": "fast"}))
+        return statements, executed, record
+    monkeypatch.setattr(impl_coverage, "_trace_check", recording)
+    scores = repo_badges(["bsc_proofcap"], root=str(importable))
+    assert scores.capped == {}
+    assert _cached_keys(importable) == {"bsc_proofcap.mod.helper",
+                                        "bsc_proofcap.mod.f1"}
+    monkeypatch.setattr(impl_coverage, "_trace_check", original)
+    traced = _traces(monkeypatch)
+    repo_badges(["bsc_proofcap"], root=str(importable))
+    assert traced == ["f0"]
+
+
+def test_a_cap_fired_anywhere_while_scoring_leaves_that_function_uncached(
+        importable, monkeypatch):
+    import time
+
+    from mathema import docstring
+    _package(importable, "bsc_anycap", 2)
+    original = docstring.docstring_sync
+
+    def slow_once(fn, *a, **k):
+        if fn.__name__ == "f1" and not k.get("_shallow"):
+            try:
+                _timeout._with_timeout(lambda: time.sleep(5), 1)
+            except TimeoutError:
+                pass
+        return original(fn, *a, **k)
+    monkeypatch.setattr(docstring, "docstring_sync", slow_once)
+    scores = repo_badges(["bsc_anycap"], root=str(importable))
+    assert scores.capped == {}
+    assert _cached_keys(importable) == {"bsc_anycap.mod.helper",
+                                        "bsc_anycap.mod.f0"}

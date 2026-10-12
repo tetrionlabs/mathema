@@ -37,7 +37,7 @@ import sys
 CACHE_DIR = os.path.join(".mathema", "cache", "badges")
 
 #: the layout of an entry; a different layout is a different digest
-_SCHEMA = "badges-cache@1"
+_SCHEMA = "badges-cache@2"
 
 #: directories a walk of the project root never enters
 _SKIP_DIRS = frozenset({"__pycache__", "node_modules", "venv", "env",

@@ -71,6 +71,8 @@ class FunctionCoverage:
                                # claim would derive-cover it (None = unknown)
     freshness: "str | None" = None   # how test_stale was judged: "hash"
                                # (a stamped report), "mtime", or None (no report)
+    timed_out: bool = False   # a proof or sweep in the check stopped at a
+                               # wall-clock cap (`mathema.timeout` meta)
 
     @property
     def uncovered(self) -> set:
@@ -319,11 +321,13 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     except Exception:
         derivable = None
 
+    timed_out = any((getattr(p, "meta", None) or {}).get("mathema.timeout")
+                    for p in getattr(record, "probes", None) or [])
     return FunctionCoverage(key=key, statements=set(statements),
                             covered=covered, by_source=by_source,
                             traced=traced, test_stale=test_stale,
                             reclaimable=reclaimable, derivable=derivable,
-                            freshness=freshness.method)
+                            freshness=freshness.method, timed_out=timed_out)
 
 
 def _is_mathema_own(fn) -> bool:

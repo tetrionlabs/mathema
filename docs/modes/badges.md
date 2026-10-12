@@ -35,8 +35,10 @@ claims files, `README.md`, `pyproject.toml`, and, for implementation,
 whether the test report is fresh for the function's file and which of
 its lines the tests ran. Any such change scores every function again, so
 a second run on an unchanged project takes seconds and gives the same
-numbers. A result with a capped step is never kept. Deleting the
-directory clears the cache.
+numbers. A result is never kept when any wall-clock cap fired while
+scoring it, a capped step or a proof cap inside its check, since that
+result depends on how loaded the machine was; such a function is scored
+again on every run. Deleting the directory clears the cache.
 
 ## The three badges
 
