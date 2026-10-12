@@ -226,7 +226,7 @@ class Record:
                 line = f"  {mark} {p.name}: {p.statement}"
                 line += "\n           " + _pad(str(p.sketch))
                 if p.counterexample:
-                    line += f"\n           counterexample {p.counterexample}"
+                    line += f"\n           counterexample {_pad(str(p.counterexample))}"
                 if gate.get("next") and p.verdict not in ("holds", "proven"):
                     line += "\n           " + _pad(str(gate['next']))
                 lines.append(line)
@@ -261,7 +261,7 @@ class Record:
                     and p.note:
                 line += "\n           " + _pad(str(p.note))
             if p.counterexample:
-                line += f"\n           counterexample {p.counterexample}"
+                line += f"\n           counterexample {_pad(str(p.counterexample))}"
             for said in (p.meta or {}).get("mathema.let_warning") or ():
                 line += f"\n           warning: {said}"
             stratum = getattr(p, "stratum", None)

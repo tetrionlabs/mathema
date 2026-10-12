@@ -24,6 +24,7 @@ this module registering itself as an import side effect.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -90,12 +91,30 @@ def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domai
     return args
 
 
+#: the raises of the calls the running trial round made through
+#: `_call_with_target`, `[(target, arguments, raised)]`; None outside a
+#: round
+_ROUND_RAISES: "ContextVar[list | None]" = ContextVar("mathema_round_raises",
+                                                     default=None)
+
+
 def _call_with_target(fn: Callable[..., Any], facts: Facts, target: str, args: list,
                       value: Any) -> Any:
+    """Intent:
+        Call fn with `args` (one per parameter, in `facts.params` order)
+        and `target` at `value`. A raise inside a trial round is logged
+        for the round (`_ROUND_RAISES`) and raised on.
+    """
     values = dict(zip(facts.params, args))
     values[target] = value
     call_args, call_kwargs = call_arguments(fn, facts.params, values)
-    return fn(*call_args, **call_kwargs)
+    try:
+        return fn(*call_args, **call_kwargs)
+    except Exception as exc:
+        log = _ROUND_RAISES.get()
+        if log is not None:
+            log.append((target, dict(values), exception_name(exc)))
+        raise
 
 
 def _placed(values: dict, rng: random.Random, keep=(),
@@ -135,7 +154,12 @@ def _probe_trials(fn: Callable[..., Any], facts: Facts, target: str, domain: dic
         premise fixes is drawn on its surface), hand them to `trial`,
         count only the evaluable rounds, stop at the first
         counterexample. A round whose call lies outside the claim's
-        premises (`_premises.PremiseRejected`) is not a trial.
+        premises (`_premises.PremiseRejected`) is not a trial. A
+        counterexample reporting a raise is the target's only when the
+        raise goes away with the target at an ordinary value
+        (`_hazard_blame`); a round where no draw of the other arguments
+        tells them apart is not counted, and the run is then "unknown"
+        unless a later round falsifies.
 
     Notes:
         `trial(args)` returns None (nothing evaluable this round,
@@ -149,6 +173,7 @@ def _probe_trials(fn: Callable[..., Any], facts: Facts, target: str, domain: dic
     """
     from ._premises import PremiseRejected
     checked = 0
+    undecided = None
     for _ in range(trials):
         args = _synth_other_params(fn, facts, target, domain, rng)
         placed = _placed(dict(zip(facts.params, args)), rng, keep=(target,),
@@ -156,19 +181,160 @@ def _probe_trials(fn: Callable[..., Any], facts: Facts, target: str, domain: dic
         if placed is None:
             continue
         args = [placed[p] for p in facts.params]
+        token = _ROUND_RAISES.set([])
         try:
             outcome = trial(args)
         except PremiseRejected:
             # a call outside the claim's premises is not a trial
             continue
+        finally:
+            raises = _ROUND_RAISES.get() or []
+            _ROUND_RAISES.reset(token)
         if outcome is None:
             continue
-        checked += 1
         if outcome is not True:
-            return "falsified", checked, outcome
+            verdict, said = _hazard_blame(fn, facts, domain, outcome, raises)
+            if verdict == "unknown":
+                undecided = undecided or said
+                continue
+            checked += 1
+            if verdict == "falsified":
+                return "falsified", checked, said
+            continue
+        checked += 1
+    if undecided is not None:
+        return "unknown", checked, undecided
     if checked == 0:
         return "skipped", 0, None
     return "holds", checked, None
+
+
+def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
+                  raises: list) -> tuple[str, str]:
+    """Intent:
+        Whose the raise a trial's counterexample `cx` reports is: the
+        target's, at the input the round gave it, or another argument's.
+        The raise is the last one the round logged whose exception the
+        counterexample names. The same call is made with the target at
+        an ordinary value and every other argument held, then at other
+        draws of the other arguments (`_missing_policy.separate`).
+        `("falsified", text)` when the raise is the target's, the text
+        the raising call and the ordinary call returning on its first
+        line (`f(a=1, name='é') raises E; with name='a' it returns
+        b'a'`), `cx` on the next; `("holds", "")` when a draw
+        of the other arguments lets f run at the target's input;
+        `("unknown", why)` when no draw tells the two apart. A
+        counterexample that names no logged raise, or a function of one
+        parameter, stays as it is.
+    """
+    import re
+    named = [r for r in raises if re.search(rf"\b{re.escape(r[2])}\b", cx)]
+    if not named or len(facts.params) < 2:
+        return "falsified", cx
+    target, point, raised = named[-1]
+    ordinary = _ordinary_values(facts, target, point[target], domain.get(target))
+    if not ordinary:
+        return "falsified", cx
+    from ._missing_policy import Presence, separate
+
+    def call_at(at: dict) -> tuple:
+        from ._premises import PremiseRejected
+        call_args, call_kwargs = call_arguments(fn, facts.params, at)
+        try:
+            with _pinned_float_env():
+                return fn(*call_args, **call_kwargs), None
+        except PremiseRejected:
+            return None, "PremiseRejected"
+        except Exception as exc:
+            return None, exception_name(exc)
+
+    def cleared(at: dict, params, attempt: int) -> dict:
+        return {**at, target: ordinary[attempt % len(ordinary)]}
+
+    presence = Presence({p: facts.param_kinds.get(p, "unknown") for p in facts.params
+                         if p != target}, dict(domain))
+    found = separate(call_at, point, (target,), cleared, presence)
+    if found.moved is not None:
+        _, again = call_at(found.moved)
+        if again is None:
+            return "holds", ""
+        if again != raised:
+            found = type(found)((), others=found.others)
+    if found.present is not None and (found.owners or found.moved is not None):
+        at, output, _ = found.present
+        both = (f"{_call_text(facts, {**at, target: point[target]})} raises {raised}; "
+                f"with {target}={_short_value(at[target])} it returns "
+                f"{_short_value(output, argument=False)}")
+        return "falsified", f"{both}\n{cx}"
+    from .policy import _and
+    others = list(found.others)
+    return "unknown", (
+        f"f raised {raised} at {target} = {_short_value(point[target])} and again "
+        f"at {target} = {_short_value(ordinary[0])}, on every draw of {_and(others)} "
+        f"tried, so the raise is not {target}'s and nothing says what f does at "
+        f"that {target}")
+
+
+def _call_text(facts: Facts, at: dict) -> str:
+    """The call at `at` in Python spelling, by name: `f(language=0.5,
+    name='a')`, a large container by its shape and a first row."""
+    from ._shapes import witness_text
+    return "f(" + ", ".join(f"{p}={witness_text(at[p]) or _short_value(at[p])}"
+                            for p in facts.params) + ")"
+
+
+def _ordinary_values(facts: Facts, target: str, hazard: Any, bound) -> list:
+    """Intent:
+        Values of `target` that are no hazard, inside its `bound`, for
+        the call a hazard input's raise is read against: for text, short
+        plain words, then draws of the bound's languages that are none of
+        their hazards; otherwise draws of the parameter's kind. Never the
+        `hazard` itself; empty when nothing qualifies.
+    """
+    from ._missing_policy import _NO_VALUE, Presence, _same_output
+    from .domain import domain_contains
+    candidates: list = []
+    if isinstance(hazard, str):
+        candidates = ["a", "abc", "hello", "x1"]
+        if getattr(bound, "base_type", None) == "L":
+            rng = random.Random(7)
+            for _, language in _language_pieces(bound):
+                spare = {h.value for h in language.hazards() if isinstance(h.value, str)}
+                for _ in range(8):
+                    try:
+                        v = language.sample(rng)
+                    except Exception:
+                        break
+                    if v not in spare:
+                        candidates.append(v)
+    else:
+        presence = Presence({target: facts.param_kinds.get(target, "unknown")},
+                            {target: bound} if bound is not None else {})
+        for attempt in range(8):
+            v = presence.value(target, attempt)
+            if v is not _NO_VALUE:
+                candidates.append(v)
+
+    def admitted(v) -> bool:
+        if _same_output(v, hazard):
+            return False
+        if bound is None:
+            return True
+        try:
+            return bool(domain_contains(v, bound))
+        except Exception:
+            return False
+    return [v for v in candidates if admitted(v)]
+
+
+def _short_value(v: Any, argument: bool = True) -> str:
+    """A value as a witness shows it (an `argument` at full precision, so
+    the call reads back as the one made), a long one cut to its start."""
+    shown = _witness_coordinate(v) if argument else _witness_value(v)
+    if len(shown) <= 60:
+        return shown
+    size = f" ({len(v)} characters)" if isinstance(v, str) else ""
+    return f"{shown[:40]}...{size}"
 
 
 def _interval_ends(bounds) -> "tuple[float, float] | None":

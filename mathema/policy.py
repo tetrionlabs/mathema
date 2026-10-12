@@ -617,32 +617,44 @@ def _confirmed(calls: list, current: "Batch | None", floor: bool,
 
 
 def _witness(call: Call, param: "str | None" = None) -> str:
-    """`xs = [NA]: f raised TypeError`, `x = nan: f returned 1.0`, and
-    for a path what it reached: `d.note unset: f raised KeyError`."""
+    """The call in Python spelling and what f did there. A raise is shown
+    beside the call with its missing inputs present: `f(None) raises
+    TypeError; f("ab") returns "AB"`, `f(language=0.71, name=None) raises
+    AttributeError; with name="ab" it returns "AB"`. A value given back:
+    `f(nan) returns 1.0`, `f(rate=nan, n=3) returns 1.0`. A path names
+    its parameter and what it reached: `f(trade) with trade.memo = null
+    raises TypeError`, `f(d) with d.note unset raises KeyError`."""
     from ._missing_policy import is_path
-    from ._missing_words import point_shown, value_shown
-    did = (f"f raised {call.raised}" if call.raised
-           else f"f returned {value_shown(call.output)}")
+    from ._missing_words import call_shown, value_shown
+    did = (f"raises {call.raised}" if call.raised
+           else f"returns {value_shown(call.output)}")
     if param and is_path(param):
-        return f"{_at(call, param)}: {did}"
-    return f"{point_shown(call.point)}: {did}{_present_words(call)}"
+        root = re.match(r"[A-Za-z_]\w*", param)
+        reached = re.sub(r" \((absent|hole)\)$", "", _at(call, param))
+        return f"f({root.group(0) if root else param}) with {reached} {did}"
+    if call.raised:
+        return f"{call_shown(call.point)} {did}{_present_words(call)}"
+    return f"{call_shown(call.point)} {did}"
 
 
 def _present_words(call: Call) -> str:
-    """`, and at x = 1.0 f returned 1.0`: the call a raise was read
-    against, its missing inputs present and every other argument as it
-    was; empty where there is none, or where the call has no other
-    argument the raise could have come from."""
-    from ._missing_words import point_shown, value_shown
+    """`; f(1.0) returns 1.0`, or `; with x=1.0 it returns 1.0` where f
+    takes other arguments: the call a raise was read against, its
+    missing inputs present and every other argument as it was; empty
+    where there is none."""
+    from ._missing_words import _param_value, call_shown, value_shown
     if not call.raised or not call.present:
         return ""
     at, output, raised = call.present
+    did = f"raises {raised}" if raised else f"returns {value_shown(output)}"
+    if len(at) == 1:
+        return f"; {call_shown(at)} {did}"
     held = dict.fromkeys(q for q, _k, _m in _keys(call))
     shown = {q: at[q] for q in held if q in at}
-    if not shown or not set(call.point) - set(held):
+    if not shown:
         return ""
-    did = f"raised {raised}" if raised else f"returned {value_shown(output)}"
-    return f", and at {point_shown(shown)} f {did}"
+    words = ", ".join(f"{q}={_param_value(v)}" for q, v in shown.items())
+    return f"; with {words} it {did}"
 
 
 def _split_undecided(calls: list) -> tuple:
@@ -2709,7 +2721,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     b: _at(c, None) for b, c in ways.items()}})
                 said.append(f"{m} {both}, and no claim states either")
                 failures.append(f"f has no single policy for {p} = {m}")
-                witness = witness or "; ".join(_witness(c) for c in ways.values())
+                witness = witness or "\n".join(_witness(c) for c in ways.values())
                 nexts.append(((row.meta or {}).get("mathema.policy") or {}).get("next")
                              or "")
                 continue
@@ -2833,7 +2845,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                                             for c in ways.values()])
                             + ", and no claim states either")
                 failures.append(f"f has no single policy for {path} ({m})")
-                witness = witness or "; ".join(_witness(c, path) for c in ways.values())
+                witness = witness or "\n".join(_witness(c, path) for c in ways.values())
                 continue
             behaviour, call = next(iter(ways.items()))
             entry["behaviour"] = behaviour

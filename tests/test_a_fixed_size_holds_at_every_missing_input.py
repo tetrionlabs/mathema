@@ -74,7 +74,8 @@ def test_a_policy_row_alone_calls_f_at_the_fixed_size():
                                [claim("missing(f, xs, nan) raises", name="p")],
                                domain=space)
     assert row.verdict == "falsified"
-    assert row.counterexample.endswith("f returned 30.0"), row.counterexample
+    assert row.counterexample == "f([nan, nan, nan, nan, nan, nan, ...]) returns 30.0", \
+        row.counterexample
 
 
 def test_a_function_indifferent_to_the_hole_breaks_a_stated_raise():
@@ -82,7 +83,8 @@ def test_a_function_indifferent_to_the_hole_breaks_a_stated_raise():
     (row,) = check_conjectures(length, [claim("missing(f, xs, nan) raises", name="p")],
                                domain=space)
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample.endswith("f returned 30.0"), row.counterexample
+    assert row.counterexample == "f([nan, nan, nan, nan, nan, nan, ...]) returns 30.0", \
+        row.counterexample
 
 
 pd = pytest.importorskip("pandas")

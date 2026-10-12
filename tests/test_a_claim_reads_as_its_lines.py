@@ -36,8 +36,8 @@ def test_a_claim_with_lines_prints_as_a_block():
         "for x in [0, 4], f(x) >= 0", name="nonneg")])
     lines = _lines(rec)
     start = next(i for i, line in enumerate(lines) if line.startswith("  nonneg  "))
-    head, *block = lines[start:start + 9]
-    assert head.endswith("falsified at x = None"), head
+    head, *block = lines[start:start + 10]
+    assert head.endswith("falsified at f(None)"), head
     assert block[0].split() [:2] == ["proven", "mathematics"], block[0]
     assert "for x in [0.0, 4.0] ⊂ ℝ, f(x) >= 0" in block[0], block[0]
     assert block[1].split()[:2] == ["holds", "computation"], block[1]
@@ -45,14 +45,15 @@ def test_a_claim_with_lines_prints_as_a_block():
     assert block[1].rstrip().endswith("draws"), block[1]
     assert block[2].split()[:3] == ["proven", "policy", "f(nan)"], block[2]
     assert block[3].split()[:3] == ["falsified", "policy", "f(None)"], block[3]
-    assert "no absent policy stated; raises TypeError" in block[3], block[3]
-    assert [line.strip() for line in block[4:8]] == [
+    assert block[3].endswith("f(None) raises TypeError; f(3.16) returns 1.78"), block[3]
+    assert block[4].strip() == "no absent policy stated", block[4]
+    assert [line.strip() for line in block[5:9]] == [
         "possible fixes:",
         "(i) if the raise is intended, run: mathema accept "
         "test_a_claim_reads_as_its_lines.root_opt absent[x] --as discovery --corrected "
         "\"absent(f, x) raises(TypeError)\"",
         "(ii) exclude None",
-        "(iii) handle None at entry"], block[4:8]
+        "(iii) handle None at entry"], block[5:9]
 
 
 def test_the_verdict_words_are_spelled_out():
@@ -193,7 +194,8 @@ def test_a_falsified_case_says_what_f_did_and_offers_no_partial_command():
     lines = _lines(rec)
     at = next(i for i, line in enumerate(lines)
               if "assuming count(xs) == 0" in line and line.split()[0] == "falsified")
-    assert "raises TypeError, where the word is propagates" in lines[at], lines[at]
+    assert lines[at].endswith("count(xs) == 0   f([NA]) raises TypeError; "
+                              "f([0.0]) returns 0.0"), lines[at]
     # one claim per member settles it, so no single command is offered
     assert [line.strip() for line in lines[at + 1:at + 4]] == [
         "possible fixes:", "(i) exclude missing", "(ii) handle missing at entry"], \

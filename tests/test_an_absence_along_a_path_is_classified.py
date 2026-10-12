@@ -107,7 +107,7 @@ def test_an_unaccounted_raise_at_a_path_is_its_own_falsified_row():
     rows = _rows(note_upper, 'for d.note in {"a", "b"} | {None} \\ {null}, len(f(d)) == 1')
     row = rows["absent[d.note]"]
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample == "d.note unset: f raised KeyError"
+    assert row.counterexample == "f(d) with d.note unset raises KeyError"
     assert "state: absent(f, d.note) raises(KeyError)" in row.note, row.note
 
 
@@ -117,7 +117,7 @@ def test_members_that_behave_differently_get_a_row_each():
     assert rows["absent[d.note, unset]"].statement == "absent(f, d.note, unset) drops"
     assert rows["absent[d.note, null]"].verdict == "falsified"
     assert rows["absent[d.note, null]"].counterexample == \
-        "d.note = null (absent): f raised AttributeError"
+        "f(d) with d.note = null raises AttributeError"
 
 
 def test_a_stated_path_row_is_confirmed():
@@ -134,7 +134,7 @@ def test_a_stated_path_row_is_contradicted():
                  "absent(f, d.note, unset) drops")
     row = rows["c1"]
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample == "d.note unset: f raised KeyError"
+    assert row.counterexample == "f(d) with d.note unset raises KeyError"
     assert "state: absent(f, d.note, unset) raises(KeyError)" in row.note, row.note
 
 
@@ -161,7 +161,7 @@ def label_len(p: Parcel) -> int:
 def test_the_absence_gate_falsifies_on_an_unstated_raise_at_a_field():
     [row] = check_conjectures(label_len, [claim("is_absent_safe(f)")])
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample == "p.label = null (absent): f raised TypeError"
+    assert row.counterexample == "f(p) with p.label = null raises TypeError"
     assert "p.label (field): null raises TypeError, and no claim says it may" in row.note
 
 
