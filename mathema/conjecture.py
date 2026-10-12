@@ -982,11 +982,13 @@ def parameter_domain_facts(fn, facts) -> dict:
 def parameter_domains(fn, facts=None) -> dict:
     """Intent:
         `{param: bound}` for every parameter whose annotation, default
-        or guard states its domain (`parameter_domain_facts`), each
-        completed from the annotation's missing-value defaults
-        (`domain.complete`) exactly as a claim's resolved domain is:
-        the completed domain the checks use and the clarity score
-        reads.
+        or guard states its domain (`parameter_domain_facts`), or that
+        an `enforce_domain()` guard holds to a domain (which takes the
+        place of what the annotation states, as it does for the
+        checks), each completed from the annotation's missing-value
+        defaults (`domain.complete`) exactly as a claim's resolved
+        domain is: the completed domain the checks use and the clarity
+        score reads.
     """
     from .domain import NO_ANNOTATION, complete
     from .types import missing_policy_from_signature
@@ -996,8 +998,13 @@ def parameter_domains(fn, facts=None) -> dict:
         except Exception:
             return {}
     policy = missing_policy_from_signature(fn)
+    stated = {p: bound for p, (bound, _category, _detail)
+              in parameter_domain_facts(fn, facts).items()}
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    stated.update({p: bound for p, bound in enforced.items()
+                   if p in facts.params})
     out: dict = {}
-    for p, (bound, _category, _detail) in parameter_domain_facts(fn, facts).items():
+    for p, bound in stated.items():
         try:
             out[p] = complete(bound, policy.get(p, NO_ANNOTATION))
         except Exception:
@@ -8485,6 +8492,23 @@ def _real_set(bound):
     return joined
 
 
+def _finite_members(bound) -> "frozenset | None":
+    """Intent:
+        The members of a finite domain bound (a set of values, or an
+        enumerated domain with no shape), holes and absence left out.
+        None for any other bound, or one with no member left.
+    """
+    from .domain import Domain, _is_enumerated, is_sentinel
+    if isinstance(bound, frozenset):
+        members = frozenset(v for v in bound if not is_sentinel(v))
+    elif isinstance(bound, Domain) and _is_enumerated(bound) and not bound.dims:
+        members = frozenset(v for piece in bound.pieces for v in piece
+                            if not is_sentinel(v))
+    else:
+        return None
+    return members or None
+
+
 def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                                      ) -> "str | None":
     """Intent:
@@ -8526,6 +8550,12 @@ def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                 text = ast.unparse(arg)
 
                 def inside(text=text, bound=enforced.get(p)):
+                    listed = _finite_members(ctx.cj_domain.get(text))
+                    if listed is not None:
+                        # a parameter passed as itself over a finite set
+                        # stays inside when the guard admits every member
+                        from .domain import domain_contains
+                        return all(domain_contains(v, bound) for v in listed)
                     allowed = _real_set(bound)
                     if allowed is None:
                         return False

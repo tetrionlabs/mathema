@@ -165,7 +165,10 @@ can go wrong* to count against it.
 ### What a parameter accepts
 
 Each parameter's entropy is what its completed domain leaves unknown, read
-from the same domain every check uses:
+from the same domain every check uses. That domain is what the function
+itself states: its annotation, a guard in the body refusing every value
+outside a set (`if side not in {"buy", "sell"}: raise ValueError`), or an
+`@enforce_domain(...)` decorator, which takes the place of the annotation:
 
 | what is known about the parameter | bits |
 |-----------------------------------|------|
@@ -173,26 +176,27 @@ from the same domain every check uses:
 | a type alone (`float`, `str`, a language admitting every string) | 1.0 |
 | a language narrowed to an alphabet | 0.8 |
 | a language narrowed by a predicate | 0.6 |
-| a refined language (`L[ascii, len <= 80]`) or a bounded range | 0.4 |
-| a finite set of `k` values (a `Literal`, a str `Enum`) | `min(0.3, log2(k) / 10)` |
-| a guard in the body (its boundary is the unknown) | 1.0 |
+| a refined language (`L[ascii, len <= 80]`) or a bounded range (`@enforce_domain({"x": (0.0, 1.0)})`) | 0.4 |
+| a finite set of `k` values (a `Literal`, a str `Enum`, a guard to a set, `@enforce_domain` to a set) | `min(0.3, log2(k) / 10)` |
+| any other guard in the body (its boundary is the unknown) | 1.0 |
 
 A finite set of `k` values is a choice carrying `log2(k)` bits, scaled by
 a tenth because a closed set is already most of the way to known.
 
 What a proof that visits every member of a finite set clears depends on
 whose set it is. When the set is the function's own domain (a `Literal`
-annotation or a str `Enum`), the proof covers every input the function
-accepts, and it clears the parameter entirely. When the set comes only
+annotation, a str `Enum`, a guard to a set, or `@enforce_domain` to a
+set), the proof covers every input the function accepts, and it clears
+the parameter entirely. When the set comes only
 from a claim's binding, the function still accepts every other value of
 its type. For example,
 `for name in {"Alice", " alice ", "ALICE"}, f(name) == "alice"` on
 `username_key(name: str)` settles three strings, and `name` stays charged
 for the rest of `str`. A claim binding part of the function's own finite
 set clears that part's share: two of three `Literal` values leave a third
-of the charge. A parameter guarded to a set in the body is charged as a
-guard, for its boundary, which a verified claim about what the guard
-refuses clears.
+of the charge. A parameter guarded in the body by anything other than a
+set is charged as a guard, for its boundary, which a verified claim about
+what the guard refuses clears.
 
 A verified claim that binds a narrower range or language lowers the
 parameter's entropy to the narrower domain's.

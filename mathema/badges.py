@@ -42,10 +42,11 @@ _BITS: dict[str, float] = {
     "graph": 1.0, "region": 0.4,
     # form: the relational shape (the output envelope is _EXTENT_BITS)
     "shape_branched": 1.0, "shape_flat": 0.4,
-    # domain: what each parameter accepts. A guarded parameter has a
-    # real, implementation-specific boundary; an unguarded one costs
-    # what is left unknown about the inputs it takes, read from the
-    # domain the checks complete for it (conjecture.parameter_domains):
+    # domain: what each parameter accepts. A parameter guarded other
+    # than to a set has a real, implementation-specific boundary; any
+    # other costs what is left unknown about the inputs it takes, read
+    # from the domain the checks complete for it, a guard to a set and
+    # an enforce_domain() guard included (conjecture.parameter_domains):
     # nothing stated, a type alone (a language naming the whole type
     # adds nothing), a narrower language by its level, a bounded range
     # or a refined language, a finite set of k values (log2(k)/10, capped,
@@ -434,8 +435,8 @@ def _clarity_profile(fn, facts=None, root: str = ".",
                                                             "table")
                         else kinds.get(p, "scalar")
                         for p in params)
-    guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
     domains = _param_domains(fn, facts, params, guards)
+    guarded = sum(1 for d in domains if d.guarded)
     if store is None:
         from .spec import load_verified
         store = load_verified(root)
@@ -456,11 +457,14 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
     """One `_ParamDomain` per parameter: the bits of the domain the
     checks complete for it (`conjecture.parameter_domains`, the one
     reading), whether a guard bounds it, whether its annotation admits
-    absence, whether it is a finite set."""
+    absence, whether it is a finite set. A guard to a set and an
+    `enforce_domain()` guard state the parameter's domain, so the
+    parameter is charged by that domain rather than as a guard
+    boundary."""
     import warnings
 
     from .conjecture import parameter_domains
-    from .hazards import _annotated_params
+    from .hazards import _annotated_params, finite_guard_sets
     from .types import missing_policy_from_signature
     try:
         with warnings.catch_warnings():
@@ -476,6 +480,11 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
         policy = missing_policy_from_signature(fn)
     except Exception:
         policy = {}
+    try:
+        stated = set(finite_guard_sets(facts))
+    except Exception:
+        stated = set()
+    stated |= set(getattr(fn, "__mathema_enforced_domain__", None) or ())
     out = []
     for p in params:
         bound = completed.get(p)
@@ -483,8 +492,8 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
             bound, p in annotated or bound is not None)
         sig = policy.get(p)
         optional = bool(sig is not None and sig.annotated and sig.absent)
-        out.append(_ParamDomain(p, bits, guards.get(p) not in (None, "none"),
-                                optional, finite, points))
+        guarded = p not in stated and guards.get(p) not in (None, "none")
+        out.append(_ParamDomain(p, bits, guarded, optional, finite, points))
     return tuple(out)
 
 
