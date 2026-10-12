@@ -70,9 +70,19 @@ def _checked(fn, law):
 
 
 def _domain_sources(fn):
-    """The domain sources of `fn`'s profile, `(bits, reducer)`."""
+    """The charged domain sources of `fn`'s profile, `(bits, reducer)`:
+    every domain source but the share the function states, which is
+    always known."""
     return [(bits, reducer) for dim, bits, reducer
-            in _clarity_sources(_clarity_profile(fn)) if dim == "domain"]
+            in _clarity_sources(_clarity_profile(fn))
+            if dim == "domain" and not reducer.startswith("stated:")]
+
+
+def _stated_bits(fn):
+    """The bits of the domain share `fn` states narrower than its type."""
+    return sum(bits for _dim, bits, reducer
+               in _clarity_sources(_clarity_profile(fn))
+               if reducer.startswith("stated:"))
 
 
 def _domain_left(fn, rows, param):
@@ -146,3 +156,19 @@ def test_a_bare_str_bound_only_by_the_claim_stays_charged(mod):
 
 def test_an_enforced_bounded_range_is_charged_as_a_bounded_range(mod):
     assert _domain_sources(mod.ranged) == [(0.4, "domain_soft:x")]
+
+
+# --- what the function states is known --------------------------------------
+
+def test_the_share_a_stated_domain_narrows_is_known(mod):
+    (d,) = _clarity_profile(mod.enforced_key).domains
+    assert _stated_bits(mod.enforced_key) == pytest.approx(1.0 - d.bits)
+    assert _stated_bits(mod.guarded_key) == pytest.approx(1.0 - d.bits)
+    assert _stated_bits(mod.username_key) == 0.0
+
+
+def test_stating_the_domain_never_lowers_an_unclaimed_function(mod):
+    assert clarity_score(mod.enforced_key, verified_claims=[]) >= \
+        clarity_score(mod.username_key, verified_claims=[])
+    assert clarity_score(mod.guarded_key, verified_claims=[]) >= \
+        clarity_score(mod.username_key, verified_claims=[])

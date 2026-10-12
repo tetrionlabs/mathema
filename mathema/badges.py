@@ -578,12 +578,21 @@ def _clarity_sources(p: _Profile) -> list:
     `reducer` names which claim group (or structural baseline) clears
     it; a call's reducer is `callee:<key>`, cleared only by that
     callee's own recorded evidence; an unguarded parameter's reducer is
-    `domain_soft:<name>`, its absence `absence:<name>`. See `_BITS`."""
+    `domain_soft:<name>`, its absence `absence:<name>`. A parameter whose
+    function states a domain narrower than its type (a `Literal`, a
+    guard to a set, `enforce_domain`) starts at its type's bits: the
+    narrowing is the `stated:<name>` share, always cleared, and the
+    rest is charged. See `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
     s.append(("form", C["shape_branched"] if p.cx else C["shape_flat"], "shape"))
     for d in p.domains:
+        charged = C["domain_guarded"] if d.guarded else d.bits
+        if charged < C["domain_type"]:
+            # what the function states narrower than its type is known
+            s.append(("domain", C["domain_type"] - charged,
+                      f"stated:{d.name}"))
         if d.guarded:
             s.append(("domain", C["domain_guarded"], "domain"))
         elif d.bits > 0:
@@ -818,6 +827,8 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     r["shape"] = max(r["shape"], entailing)
     r["domain_soft"] = max(r["domain_soft"], r["domain"], entailing)
     if profile is not None:
+        for d in profile.domains:
+            r[f"stated:{d.name}"] = 1.0
         _binding_reductions(verified_claims, profile, bump)
         _absence_reductions(verified_claims, profile, bump)
         scoped = [(_claim_bindings(statement), st) for statement, st in settling]
