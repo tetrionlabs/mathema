@@ -87,6 +87,12 @@ def test_a_worker_cap_passes_through_a_library_except_exception():
 
 
 def test_guarded_code_on_a_worker_can_catch_the_in_flight_expiry():
+    # the class this module imported is the one the watchdog raises:
+    # a reload of mathema._timeout earlier in the process would make a
+    # new class that the handler below no longer matches
+    assert _WallClockExpired is sys.modules["mathema._timeout"]._WallClockExpired, \
+        "mathema._timeout was reloaded after this module imported it"
+
     def acting():
         try:
             _busy(20)

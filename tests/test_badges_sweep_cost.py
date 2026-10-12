@@ -167,19 +167,29 @@ def test_the_cap_is_the_badges_step_cap(monkeypatch):
     assert seen == [_timeout.BADGES_STEP_TIMEOUT_SECONDS]
 
 
-def test_the_badges_step_cap_is_sixty_seconds_unless_the_env_sets_it(
-        monkeypatch):
-    import importlib
-    monkeypatch.delenv("MATHEMA_BADGES_STEP_TIMEOUT", raising=False)
-    try:
-        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 60
-        monkeypatch.setenv("MATHEMA_BADGES_STEP_TIMEOUT", "90")
-        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 90
-        monkeypatch.setenv("MATHEMA_BADGES_STEP_TIMEOUT", "not a number")
-        assert importlib.reload(_timeout).BADGES_STEP_TIMEOUT_SECONDS == 60
-    finally:
-        monkeypatch.undo()
-        importlib.reload(_timeout)
+def _badges_step_cap_at_import(value):
+    """BADGES_STEP_TIMEOUT_SECONDS as a fresh interpreter reads it at
+    import, with MATHEMA_BADGES_STEP_TIMEOUT set to `value` (None leaves
+    it unset). The module in this process is left as it is: reloading
+    it would replace `_WallClockExpired` with a new class that the
+    other tests' handlers no longer catch."""
+    import subprocess
+    env = {k: v for k, v in os.environ.items()
+           if k != "MATHEMA_BADGES_STEP_TIMEOUT"}
+    if value is not None:
+        env["MATHEMA_BADGES_STEP_TIMEOUT"] = value
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from mathema._timeout import BADGES_STEP_TIMEOUT_SECONDS as s;"
+         " print(s)"],
+        env=env, capture_output=True, text=True, check=True)
+    return int(out.stdout)
+
+
+def test_the_badges_step_cap_is_sixty_seconds_unless_the_env_sets_it():
+    assert _badges_step_cap_at_import(None) == 60
+    assert _badges_step_cap_at_import("90") == 90
+    assert _badges_step_cap_at_import("not a number") == 60
 
 
 def test_the_snapshot_lists_capped_functions_only_when_there_are_some():
