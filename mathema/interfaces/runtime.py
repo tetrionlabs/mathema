@@ -4,14 +4,15 @@
 
 Adjudication builds every evaluation primitive core-side from the
 declared domain and the compiled law; the function under test only ever
-appears as a callable being invoked. That is why a C++ function behind
-a ctypes shim already passes through the whole probe and corroboration
-machinery with no special integration: any callable satisfying the
-conventions below is a runtime, whatever produced its values.
+appears as a callable being invoked. That is why a compiled function
+behind a ctypes shim already passes through the whole probe and
+corroboration machinery with no special integration: any callable
+satisfying the conventions below is a runtime, whatever produced its
+values.
 
 This module states those conventions in two layers. The ADAPTOR
 contract is the entire obligation of a foreign runner (a process
-serving another language's functions): two operations, `describe` and
+serving functions it runs itself): two operations, `describe` and
 `call`. The `PointRuntime` protocol is what core builds ON TOP of any
 conforming callable (`gates._point_evaluator` returns exactly this
 shape), stated here so the seam is testable from outside core.
@@ -21,7 +22,7 @@ The adaptor contract, as data rather than code this campaign:
 - `describe(target)` returns the facts a frontend can honestly state:
   the signature, parameter kinds in `analysis.Facts.param_kinds`'s
   vocabulary, purity where establishable, and a NAMESPACED form hash
-  (`"ts:<sha>"`, `"cpp:<sha>"`; the `"doc:<sha>"` fallback in
+  (`"<frontend>:<sha>"`; the `"doc:<sha>"` fallback in
   `mathema.analyze` is the shipping precedent). No syntax tree
   crosses the wire; `Facts.tree` is frontend-private.
 - `call(target, points)` evaluates a batch of concrete argument

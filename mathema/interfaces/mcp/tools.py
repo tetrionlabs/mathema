@@ -420,11 +420,11 @@ def _signature_mismatch(cj, target: str, root: str) -> "str | None":
     """
     import ast
 
-    from mathema.analysis import analyze_source
+    from mathema.analysis import effective_facts
     from mathema.targets import resolve_function
     try:
         _key, fn = resolve_function(target, root)
-        params = list(analyze_source(fn).params)
+        params = list(effective_facts(fn).params)
     except Exception:
         return None          # unresolvable target is not a lint failure
     # a `let name be ...` binding and any extra function letter are

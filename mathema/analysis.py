@@ -7,7 +7,7 @@ record produced here. No LLM, no guessing; only what the tree shows.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ._signatures import module_scope
 import ast
@@ -19,6 +19,9 @@ from . import identity
 from . import types as _types
 from .intent import parse_doc
 from ._signatures import callable_signature
+
+if TYPE_CHECKING:
+    from .koine.document import Document
 
 _IO_FUNCS = {"print", "input", "open", "exec", "eval", "__import__"}
 _IO_MODULES = {"os", "sys", "subprocess", "socket", "requests", "urllib",
@@ -90,20 +93,30 @@ class Facts:
     stages (the derive-route lifter, branch pruning) don't have to
     re-parse the source.
 
-    Every field except `tree` is language-neutral: names, kind
+    Every field except `tree` is frontend-neutral: names, kind
     vocabularies, `LoopFact` rows, hashes and counts, all statable
-    about a function in any language. `tree` is FRONTEND-PRIVATE, the
+    whatever frontend read the function. `tree` is FRONTEND-PRIVATE, the
     Python frontend's own attachment, and optional: every consumer
     treats `tree is None` as a valid state (the body-lifting derive
     routes decline, everything else proceeds), which is how a Facts
     built by something other than `analyze_source` participates.
     `mathema._doc_only_facts` is the shipping precedent, including its
-    NAMESPACED form hash (`"doc:<sha>"`), the shape a foreign
-    frontend's `"cpp:<sha>"`/`"ts:<sha>"` follows: form hashes are
+    NAMESPACED form hash (`"doc:<sha>"`), the shape any other
+    frontend's form follows (`"<frontend>:<sha>"`): form hashes are
     compared only within a namespace, never across. Only a form
     `analyze_source` computed from the Python body is a canonical form
     of that body (`form_is_computed`); any other form is an identity
-    label and proves nothing about what the body computes."""
+    label and proves nothing about what the body computes.
+
+    `koine` is the body as a KOINE document, the engine's internal
+    representation of it. A `Facts` carrying `koine` and no `tree` is
+    read with the tree rendered from the document and the structural
+    fields (loops, branches, recursion, guards, call groups) taken from
+    its body, wherever `effective_facts` resolves it. `provenance` says
+    where a body that arrived as KOINE came from: the frontend that wrote
+    it (`frontend`, the document's `lifter` line unless stated), its
+    `koine_hash`, and any evidence, supplied with the body, that the body
+    agrees with the function (`agreement`)."""
     name: str
     signature: str
     params: list[str]
@@ -159,6 +172,13 @@ class Facts:
     undrawable: dict = field(default_factory=dict)            # param -> class name: an
                                       # annotation naming a class mathema has no way to draw
                                       # (runtime_types.undrawable_parameters)
+    koine: "Document | None" = field(default=None, repr=False)  # the body as KOINE
+    provenance: dict | None = None    # where a KOINE body came from: "frontend",
+                                      # "koine_hash", "agreement" (free-form)
+    body_hashes: dict = field(default_factory=dict)  # frontend name -> the hash of the
+                                      # body it wrote, when a registered frontend wrote the
+                                      # body: its koine_hash, and the Python frontend's form
+                                      # hash under "python" when it can read the callable too
     _computed_form: str | None = field(default=None, repr=False)  # the form hash
                                       # analyze_source computed from the Python body; `form`
                                       # is a canonical form of the body only while it equals
@@ -1128,9 +1148,30 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
     the single entry point everything downstream (the derive-route
     lifter, the probe route, `mathema audit`'s population analyses)
     depends on. Raises `SourceUnavailable` if `fn`'s source can't be
-    retrieved."""
+    retrieved and no registered frontend writes its body.
+
+    A frontend registered under `mathema.frontends` is asked first
+    (`koine.frontends`): when one writes a body for `fn`, that KOINE
+    document is the body, and the Python frontend's facts, when it can
+    read `fn` too, supply everything else."""
+    from .koine.frontends import registered_body, registered_facts
+    found = registered_body(fn)
+    if found is None:
+        return _python_facts(fn)
+    try:
+        python = _python_facts(fn)
+    except SourceUnavailable:
+        python = None
+    return registered_facts(found[0], found[1], python)
 
 
+def _python_facts(fn: Callable[..., Any]) -> Facts:
+    """Intent:
+        The facts the Python frontend reads off `fn`'s source.
+
+    Raises:
+        SourceUnavailable: `fn`'s source cannot be retrieved.
+    """
     src, fdef = get_tree(fn)
     params = [a.arg for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]]
     # a library method read as a function of its receiver takes its
@@ -1244,6 +1285,52 @@ def analyze_source(fn: Callable[..., Any]) -> Facts:
     )
 
 
+def effective_facts(fn: Callable[..., Any]) -> Facts:
+    """Intent:
+        The facts mathema reads `fn` by: the `Facts` it carries as
+        `__mathema_facts__` when present (what a callable with no
+        Python body of its own states about the function it stands
+        for), else `analyze_source(fn)`. Every entry that analyses a
+        callable resolves its facts here, so injected facts hold at
+        each of them. Injected facts carrying a KOINE document and no
+        syntax tree are read through the document (`hydrated`).
+
+    Raises:
+        SourceUnavailable: no injected facts and no retrievable source.
+
+    Notes:
+        Injected facts are returned as they are, not copied, unless they
+        are hydrated; they may have `tree=None`, and then a reader that
+        needs a body to lift finds none and declines.
+    """
+    injected = getattr(fn, "__mathema_facts__", None)
+    if isinstance(injected, Facts):
+        return hydrated(injected)
+    return analyze_source(fn)
+
+
+def hydrated(facts: Facts) -> Facts:
+    """Intent:
+        `facts` with its syntax tree rendered from its KOINE document and
+        its structural fields taken from the document's body, when it
+        carries a document and no tree (`koine.facts.hydrated`); `facts`
+        itself otherwise.
+    """
+    if facts.koine is None or facts.tree is not None:
+        return facts
+    from .koine.facts import hydrated as _from_koine
+    return _from_koine(facts)
+
+
+def has_injected_facts(fn) -> bool:
+    """Intent:
+        True when `fn` carries `Facts` as `__mathema_facts__`, so its
+        Python source (if any) is a wrapper's and not the function the
+        facts describe.
+    """
+    return isinstance(getattr(fn, "__mathema_facts__", None), Facts)
+
+
 def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
     """Intent:
         Set, in place, the kind of each parameter whose first runtime
@@ -1281,7 +1368,7 @@ def with_declared_runtime_types(facts, fn, declared: "dict | None"):
 
 
 def quiet_facts(fn) -> "Facts | None":
-    """`analyze_source(fn)` in population-sweep posture: analysis
+    """`effective_facts(fn)` in population-sweep posture: analysis
     warnings suppressed (a sweep over every function in a package would
     otherwise print one global-scope/unresolved-name warning per
     affected function, drowning the report itself; the same signal is
@@ -1293,6 +1380,6 @@ def quiet_facts(fn) -> "Facts | None":
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            return analyze_source(fn)
+            return effective_facts(fn)
         except SourceUnavailable:
             return None

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Target resolvers: how a language-tagged key becomes callables.
+"""Target resolvers: how a tagged key becomes callables.
 
-A target like `ts:src/ema.ts#ema` names a function that is not a
+A target like `<tag>:src/ema#ema` names a function that is not a
 Python import at all. A registered resolver turns such a key into an
 ordinary `targets.Target` whose values are Python callables (proxies
 standing in for the foreign function), after which every downstream
@@ -11,7 +11,7 @@ runtime contract those proxies satisfy is `interfaces.runtime`.
 
 Discovery mirrors `_providers.py`: one entry-point scan per process,
 per-name load caching, fail-soft throughout. The entry-point NAME is
-the tag it serves (`ts`, `cpp`, `rs`), and the loaded object is a
+the tag it serves, and the loaded object is a
 callable `resolver(target, root) -> Target | None`, `None` meaning
 "not mine" so resolution falls through to the ordinary import path.
 """

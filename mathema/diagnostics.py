@@ -352,12 +352,12 @@ def critical_points(fn, facts=None, declared_domain: dict | None = None) -> list
         Never raises. Returns [] for anything that does not lift,
         matching domain_hazards's own contract.
     """
-    from .analysis import analyze_source
+    from .analysis import effective_facts
     from .audit import _try_derive_lift
 
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             return []
     try:

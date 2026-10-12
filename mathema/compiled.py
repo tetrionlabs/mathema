@@ -13,9 +13,8 @@ consumer states that provenance: the numeric-fallback route is
 `probe:lifted_numeric`, its ceiling is `holds`, and the record names
 the form that was actually sampled.
 
-A compiled form evaluates; it does not print. Turning one into
-compilable source in another language is not part of this module, and
-nothing here emits foreign code.
+A compiled form evaluates; it does not print. Nothing here emits
+source code.
 """
 from __future__ import annotations
 

@@ -3400,11 +3400,11 @@ def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
     """
     import random
 
-    from ..analysis import analyze_source
+    from ..analysis import effective_facts
     from ..probing import _synth
     from ._seq_common import _length_ties
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
     except Exception:
         return None
     for src in (lhs_src, rhs_src):
@@ -3625,7 +3625,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         # calls to it substitute exactly like f's own do. Any one of
         # them refusing names itself specifically, the claim's
         # verdict must say which function blocked it and why.
-        from ..analysis import analyze_source
+        from ..analysis import effective_facts
         from ._seq_common import transform_bindings
         seq_transforms = transform_bindings(funcs)
         for gname in sorted(funcs):
@@ -3637,12 +3637,19 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             gfn = funcs[gname]
             gqual = getattr(gfn, "__qualname__", None) or repr(gfn)
             try:
-                gfacts = analyze_source(gfn)
+                gfacts = effective_facts(gfn)
             except TimeoutError:
                 raise
             except Exception as e:
                 return ProofResult("unliftable", sketch=f"bound function "
                                    f"{gname} ({gqual}): {e}")
+            if gfacts.tree is None:
+                # injected facts state the function's parameters and
+                # form without a Python body, so there is nothing to lift
+                return ProofResult("unliftable", sketch=f"bound function "
+                                   f"{gname} ({gqual}) is not derivable: its "
+                                   f"injected facts (form {gfacts.form}) "
+                                   f"carry no body to lift")
             glift = lift(gfn, gfacts, max_callee_depth=max_callee_depth)
             conditioned_guards: list = []
             if glift is None:

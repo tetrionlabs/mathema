@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import sympy
 
-from .analysis import analyze_source
+from .analysis import effective_facts
 from .grammar import render_canonical
 from .symbolic._base import lift
 from .symbolic._forms import (
@@ -75,7 +75,7 @@ def _lifted_expr(fn, facts):
         closed form (a loop, a branch the lift cannot resolve, a tuple
         return).
     """
-    facts = facts or analyze_source(fn)
+    facts = facts or effective_facts(fn)
     lifted = lift(fn, facts)
     if lifted is None:
         from .inventory import unliftable_summary

@@ -95,10 +95,10 @@ def exact_value(fn, *args):
     value is not a finite real."""
     import sympy
 
-    from .analysis import analyze_source
+    from .analysis import effective_facts
     from .symbolic import lift
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
         lifted = lift(fn, facts)
     except Exception:
         return None

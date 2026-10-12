@@ -223,9 +223,9 @@ def _describe_signature(fn) -> str:
     except (TypeError, ValueError):
         return "(...)"
     try:
-        from .analysis import SourceUnavailable, analyze_source
+        from .analysis import SourceUnavailable, effective_facts
         with warnings.catch_warnings():
-            # analyze_source() warns on global-scope/unresolved-name
+            # effective_facts() warns on global-scope/unresolved-name
             # capture, real, useful signal on a single function, but a
             # sweep over every function in a package would otherwise
             # print one of these per affected function, drowning out the
@@ -233,7 +233,7 @@ def _describe_signature(fn) -> str:
             # every population-sweep function in inventory.py already
             # applies around its own analyze_source() call).
             warnings.simplefilter("ignore")
-            kinds = analyze_source(fn).param_kinds
+            kinds = effective_facts(fn).param_kinds
     except SourceUnavailable:
         kinds = {}
     parts = []

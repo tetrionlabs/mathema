@@ -17,7 +17,7 @@ exposes.
 | `mathema.claim_families` | a claim-adjudication strategy: can this claim be proven, and by which routes | `mathema.families` |
 | `mathema.capabilities` | a presentation hook: how should something already computed be shown | `mathema._providers` |
 | `mathema.mcp_tools` | extra tools for the MCP server | `mathema.interfaces.mcp.server` |
-| `mathema.target_resolvers` | a resolver for language-tagged target keys (`ts:...`) | `mathema._target_resolvers` |
+| `mathema.target_resolvers` | a resolver for tagged target keys (`<tag>:...`) | `mathema._target_resolvers` |
 | `mathema.runtime_types` | a runtime type adapter: how a vector, matrix or table is realised as the object a function receives (see [runtime types](runtime-types.md#adding-a-runtime-type)) | `mathema.runtime_types` |
 | `mathema.languages` | a named language a claim quantifies over with `L[<name>]` | `mathema.languages` |
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for an object it does not handle | `mathema.languages` |
@@ -34,8 +34,8 @@ Your extension being broken or absent never crashes someone's run.
 
 ## Target resolvers
 
-A fourth group, `mathema.target_resolvers`, turns a language-tagged
-target key (`ts:src/ema.ts#ema`) into ordinary callables. The entry
+A fourth group, `mathema.target_resolvers`, turns a tagged
+target key (`<tag>:src/ema#ema`) into ordinary callables. The entry
 point's name is the tag it serves; the loaded object is a callable
 `resolver(target, root)` returning a `Target` (from the `targets`
 seam) whose values are Python callables standing in for the foreign
@@ -171,10 +171,20 @@ record states; a row without one renders the unannotated default.
 A resolver-built proxy may carry a `__mathema_facts__` attribute
 holding a `Facts` instance (the `facts_ir` seam): what its frontend
 could honestly state, with `tree=None` and a namespaced form hash
-(`"ts:<sha>"`). `mathema.analyze` returns it outright when present,
+(`"<frontend>:<sha>"`). `mathema.analyze` returns it outright when present,
 which is richer than the documentation-only fallback a source-less
 callable would otherwise get. Form hashes are compared only within a
 namespace, never across.
+
+Every part of mathema that reads a callable's facts reads the injected
+ones when they are present: checking and proving its claims, a
+`funcs=`-bound function in another function's claim, suggestions,
+docstring scoring, `describe`, `audit` and `status`. None of them
+analyses the proxy's own Python source in their place. A derive route
+that needs a body to lift finds `tree=None` and declines, saying so.
+`docsync --write-docstrings` refuses such a callable with an error,
+since the proxy's source file is not where the function it stands for
+is written.
 
 ## The extension surface
 
