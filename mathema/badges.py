@@ -608,20 +608,21 @@ def _clarity_sources(p: _Profile) -> list:
     `reducer` names which claim group (or structural baseline) clears
     it; a call's reducer is `callee:<key>`, cleared only by that
     callee's own recorded evidence; an unguarded parameter's reducer is
-    `domain_soft:<name>`, its absence `absence:<name>`. A parameter whose
-    function states a domain narrower than its type (a `Literal`, a
-    guard to a set, `enforce_domain`) starts at its type's bits: the
-    narrowing is the `stated:<name>` share, always cleared, and the
-    rest is charged. See `_BITS`."""
+    `domain_soft:<name>`, its absence `absence:<name>`. Every parameter
+    starts at the bits of nothing known about it; what the function
+    states (its annotation, a guard, `enforce_domain`) is the
+    `stated:<name>` share, always cleared, and the rest is charged. See
+    `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
     s.append(("form", C["shape_branched"] if p.cx else C["shape_flat"], "shape"))
     for d in p.domains:
         charged = C["domain_guarded"] if d.guarded else d.bits
-        if charged < C["domain_type"]:
-            # what the function states narrower than its type is known
-            s.append(("domain", C["domain_type"] - charged,
+        if charged < C["domain_unannotated"]:
+            # what the function states (its annotation, a guard,
+            # enforce_domain) is known
+            s.append(("domain", C["domain_unannotated"] - charged,
                       f"stated:{d.name}"))
         if d.guarded:
             s.append(("domain", C["domain_guarded"], "domain"))

@@ -241,8 +241,9 @@ def test_repo_badges_implementation_is_a_raw_ratio_not_centrality(tmp_path):
     assert 0 <= scores.overall <= 100
     assert set(scores.per_function) == {"rbpkg.mod.core", "rbpkg.mod.wrap"}
     # no verified store here, so clarity sits at the structural floor
-    # (nothing verified, only what the code visibly shows), a low number
-    assert scores.clarity < 25
+    # (nothing verified, only what the code visibly shows, its type
+    # annotations included), a low number
+    assert scores.clarity < 30
     assert scores.algo == "entropy-dimensions@1.4"
 
 

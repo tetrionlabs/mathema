@@ -79,7 +79,7 @@ def _domain_sources(fn):
 
 
 def _stated_bits(fn):
-    """The bits of the domain share `fn` states narrower than its type."""
+    """The bits of the domain share `fn` states."""
     return sum(bits for _dim, bits, reducer
                in _clarity_sources(_clarity_profile(fn))
                if reducer.startswith("stated:"))
@@ -161,10 +161,12 @@ def test_an_enforced_bounded_range_is_charged_as_a_bounded_range(mod):
 # --- what the function states is known --------------------------------------
 
 def test_the_share_a_stated_domain_narrows_is_known(mod):
+    # every parameter starts at the 1.5 bits of nothing known; what the
+    # function states (its type, then the set) is known
     (d,) = _clarity_profile(mod.enforced_key).domains
-    assert _stated_bits(mod.enforced_key) == pytest.approx(1.0 - d.bits)
-    assert _stated_bits(mod.guarded_key) == pytest.approx(1.0 - d.bits)
-    assert _stated_bits(mod.username_key) == 0.0
+    assert _stated_bits(mod.enforced_key) == pytest.approx(1.5 - d.bits)
+    assert _stated_bits(mod.guarded_key) == pytest.approx(1.5 - d.bits)
+    assert _stated_bits(mod.username_key) == pytest.approx(0.5)
 
 
 def test_stating_the_domain_never_lowers_an_unclaimed_function(mod):
