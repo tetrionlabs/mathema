@@ -340,7 +340,7 @@ ema:
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"
   lineage:
-    generated_by: "mathema 0.6.1"
+    generated_by: "mathema 0.6.2"
     CDD_spec_version: "0.2.0"
 ```
 

@@ -2,6 +2,37 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## 0.6.2
+
+### Upgrading from 0.6.1
+- Record files under `.mathema/verified/` are named by a reversible encoding of their key, so keys with `/`, `:` or `#` save and load; existing files are renamed on the next write and old names are still read.
+- `verify` lists only the functions it checked again or that have a problem, then the summary; `--verbose` lists every function as before, and `--format json` is unchanged.
+- Sequences now meet the same-sign pair at the largest double, as scalars already did, so a claim over unbounded `R^n` whose code adds two such values is falsified on its computation line; bound the domain, or state `let |inf| be ...` to keep the float limit out of scope.
+- Clarity scores move once. A domain stated on the function (`@enforce_domain`, a guard to a set, `Literal`, a str `Enum`) is read as its domain, a claim is credited by the share of the function's inputs it covers (with a small floor, so any claim earns something), annotating a parameter never lowers a score, random-sampling evidence is graded by its number of draws, and a score of 100 means every source is settled by proof.
+- Witnesses for missing and absent values are calls: `f(None) raises TypeError; f("ab") returns "AB"`, with any explanation on the next line.
+
+### Soundness
+- A raise at a missing value, or at a hazard input (empty, encoding, length, representation), counts against that input only when the same call with an ordinary value runs; otherwise the row is `unknown` and names the other argument.
+- A falsification always rests on an executed witness at the claim's own point: a claim written at literal arguments (`f([]) == 0`, `f(nan) == 0`) is decided once at that call, a rounding miss in a numeric check no longer falsifies an exact identity, and installing z3 no longer moves a falsification off the mathematics line.
+- Two functions are proven equal at the form step only from forms mathema computed itself.
+- An annotated parameter is drawn as its annotation says (a `dict` in a module that imports numpy is drawn as a dict); a class mathema cannot draw is skipped with the reason; a claim's bound on a dataclass field or a table column bounds its draws; an empty pandas series is float like its draws.
+- A `SystemExit` from the function is recorded as a raise with its exit code, and `mathema check` exits with its own code.
+- `let` constants written by 0.6.0 read back as written, and a constant is recorded as its value (`let axis be 1`).
+- The wall-clock cap also works off the main thread, so MCP tool calls are bounded; the claim parser reads a long run of digits in linear time.
+
+### Languages
+- A language can declare how a function refuses input outside it and what counts as its answer inside it (`Refusal`, `DefinedAnswer`); `excluded_outside_domain` and `is_language_defined` read them, and the record's language entry states them.
+- Values removed with `\` count as outside draws, so `L[unicode] \ {""}` and `L[unicode, len >= 1]` agree.
+- Runtime-type adapters may state their module aliases (`ALIASES`), and usage hints name every registered adapter; `rdd`, `na`, `write` and `sparkSession` are table attributes, not columns.
+- The engine can read a function's body through an internal representation, so a body that arrives that way can be proven; facts injected on a callable are honoured everywhere mathema reads it, and a record names where such a body came from.
+
+### Tools
+- `@enforce_domain` with a plain set or list now enforces its values (it enforced nothing before); two numbers are the closed interval and a string uses the domain grammar (`"(0, 1]"`).
+- `mathema accept` refreshes the function's record, prints a shorter plan with the witness, and takes several claims at once (`accept KEY a b --as discovery`).
+- `verify` reads each record and claims file once per run, so it no longer slows with the square of the store; `verify --format json` gives an invalidated row's reason and witness.
+- `mathema badges` finishes on large packages: one read per run, a cap on each function's step, progress on a terminal, a per-function result cache (`--refresh` recomputes everything), and `--jobs N` worker processes. Scores are unchanged.
+- The effects line no longer reports non-mutating array methods (`Series.add`) as changing an argument.
+
 ## 0.6.1
 
 ### What a record now shows
