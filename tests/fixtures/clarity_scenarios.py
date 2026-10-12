@@ -159,6 +159,13 @@ _LERP_FULL = [_row("interpolates", "f(a, b, t) == a + t*(b - a)"),
 
 _QUARTER_FULL = [_row("quarters", "f(x) == x/4"), *_PURE_SAFE]
 
+_LERP_PROVEN = [_row("interpolates", "f(a, b, t) == a + t*(b - a)"),
+                *_PURE_SAFE,
+                *_safe("is_numerically_stable", "is_representation_safe")]
+
+_TERM_PROVEN = [_row("months", "f(term) == int(term[:-1])",
+                     route="derive:brute_force"), *_PURE_SAFE]
+
 _ABSENT = {"kind": "absent", "parameter": "name"}
 
 _TERM_PROOF = _row("months", "f(term) >= 1", route="derive:brute_force")
@@ -190,6 +197,7 @@ SCENARIOS = [
     # (iv) a pure total helper
     ("H1 lerp, no claims", "lerp", [], {}),
     ("H2 lerp, fully claimed", "lerp", _LERP_FULL, {}),
+    ("H3 lerp, every source proven", "lerp", _LERP_PROVEN, {}),
     # (v) branchy and impure
     ("B1 fee, no claims", "fee", [], {}),
     ("B2 fee, bound holds, impurity found", "fee",
@@ -217,7 +225,16 @@ SCENARIOS = [
     ("E2 guard, no claims", "term_months_guarded", [], {}),
     ("E3 enforce_domain, proof", "term_months_enforced", [_TERM_PROOF], {}),
     ("E4 guard, proof", "term_months_guarded", [_TERM_PROOF], {}),
+    ("E5 enforce_domain, every source proven", "term_months_enforced",
+     _TERM_PROVEN, {}),
+    ("E6 guard, every source proven", "term_months_guarded", _TERM_PROVEN,
+     {}),
 ]
+
+# scenarios where every source is settled by proof over the whole domain
+FULLY_PROVEN = ["H3 lerp, every source proven",
+                "E5 enforce_domain, every source proven",
+                "E6 guard, every source proven", "V2 callee defined, proven"]
 
 # each family's scenarios in the order a developer expects clarity to
 # rise, "<" a clear rise and "<=" no fall; a tuple is a group expected to
@@ -235,7 +252,8 @@ FAMILIES = {
                      "N6 random holds + bound + shape"],
     "reach": ["N1 no claims", "<", "C1 proven at 3 points", "<", "C2 proven over [0, 100]", "<",
               "C3 proven everywhere"],
-    "helper": ["H1 lerp, no claims", "<", "H2 lerp, fully claimed"],
+    "helper": ["H1 lerp, no claims", "<", "H2 lerp, fully claimed", "<",
+               "H3 lerp, every source proven"],
     "floors": ["B1 fee, no claims", "<", "H1 lerp, no claims"],
     "impure": ["B1 fee, no claims", "<", "B2 fee, bound holds, impurity found"],
     "callees": ["V1 callee unverified", "<",

@@ -703,7 +703,8 @@ def _scoped_credit(items, domains) -> float:
     """
     strongest = max((st for st, _b in items), default=0.0)
     covered = _covered_credit(items, domains)
-    return covered + _CLAIM_FLOOR * max(0.0, strongest - covered)
+    covered = _unit(covered)
+    return _unit(covered + _CLAIM_FLOOR * max(0.0, strongest - covered))
 
 
 def _covered_credit(items, domains) -> float:
@@ -784,6 +785,7 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     }
 
     def bump(key, val):
+        val = _unit(val)
         if val > r.get(key, 0.0):
             r[key] = val
 
@@ -902,9 +904,15 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
                        for key, evidence in profile.callees})
     h0 = h_rem = 0.0
     for _dim, bits, reducer in _clarity_sources(profile):
+        bits = max(0.0, bits)
         h0 += bits
-        h_rem += bits * (1.0 - reductions.get(reducer, 0.0))
-    return h0, h_rem
+        h_rem += bits * (1.0 - _unit(reductions.get(reducer, 0.0)))
+    return h0, min(h0, max(0.0, h_rem))
+
+
+def _unit(value: float) -> float:
+    """`value` clamped to [0, 1]."""
+    return min(1.0, max(0.0, float(value)))
 
 
 def clarity_score(fn=None, verified_claims=None, root: str = ".",
@@ -944,7 +952,10 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     h0, h_rem = bits
     if h0 <= 0:
         return 0
-    return round(100 * (1.0 - h_rem / h0))
+    score = min(100, max(0, round(100 * (1.0 - h_rem / h0))))
+    # 100 means every source is settled by proof: anything left, however
+    # small, reads below it
+    return 99 if score == 100 and h_rem > 0 else score
 
 
 @dataclass(frozen=True)

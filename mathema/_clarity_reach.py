@@ -110,8 +110,13 @@ def share(regions, universe: Universe) -> float:
     """Intent:
         The share of `universe` the union of `regions` covers, counted
         in the values the parameter's type holds (see the module
-        docstring), between 0 and 1.
+        docstring), clamped to [0, 1].
     """
+    return min(1.0, max(0.0, _share(regions, universe)))
+
+
+def _share(regions, universe: Universe) -> float:
+    """`share` before clamping."""
     regions = list(regions)
     if any(r[0] == "whole" for r in regions):
         return 1.0

@@ -83,3 +83,61 @@ def test_only_an_unverified_callee_keeps_the_caller_below_full(scores):
 
 def test_the_scores_are_deterministic(scores):
     assert {sid: S.clarity_of(sid) for sid in _IDS} == scores
+
+
+@pytest.mark.parametrize("sid", S.FULLY_PROVEN)
+def test_every_source_settled_by_proof_scores_exactly_100(sid, scores):
+    assert scores[sid] == 100
+
+
+@pytest.mark.parametrize("sid", _IDS)
+def test_only_proof_of_every_source_scores_100(sid, scores):
+    if scores[sid] == 100:
+        assert all(row["verdict"] == "proven" for row in _rows(sid)), sid
+
+
+@pytest.mark.parametrize("sid", S.FULLY_PROVEN)
+def test_any_holds_or_scoped_claim_keeps_a_proven_function_below_100(sid):
+    rows = _rows(sid)
+    for i, row in enumerate(rows):
+        held = rows[:i] + [dict(row, route="derive", verdict="holds")] + \
+            rows[i + 1:]
+        assert S.clarity_of(sid, held) < 100, row["name"]
+    first = rows[0]
+    param = first["statement"].split("f(", 1)[1].split(")")[0].split(",")[0]
+    if not first["statement"].startswith("for "):
+        scoped = [dict(first, statement=f"for {param} in {{{_point(sid)}}}, "
+                       + first["statement"])] + rows[1:]
+        assert S.clarity_of(sid, scoped) < 100
+
+
+def _point(sid):
+    return '"1m"' if sid.startswith(("E5", "E6")) else "1.0"
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_no_combination_of_claims_leaves_the_bounds(seed):
+    import random
+
+    from mathema.badges import (_clarity_profile, _reductions,
+                                clarity_bits)
+    rng = random.Random(seed)
+    pool = [row for sid in _IDS for row in _rows(sid)]
+    verdicts = [("proven", "derive"), ("holds", "probe"),
+                ("holds", "probe:semi_analytical"), ("falsified", "probe"),
+                ("holds", "derive:brute_force"), ("unknown", "probe")]
+    for sid in rng.sample(_IDS, 5):
+        fn = getattr(S, next(s[1] for s in S.SCENARIOS if s[0] == sid))
+        profile = _clarity_profile(fn, library_keys=frozenset())
+        for _ in range(4):
+            rows = []
+            for row in rng.choices(pool, k=rng.randint(1, 25)):
+                verdict, route = rng.choice(verdicts)
+                rows.append(dict(row, verdict=verdict, route=route,
+                                 n=rng.choice([None, 1, 3, 13, 400])))
+            for value in _reductions(rows, profile.pure, profile).values():
+                assert 0.0 <= value <= 1.0
+            h0, h_rem = clarity_bits(fn, verified_claims=rows,
+                                     library_keys=frozenset())
+            assert 0.0 <= h_rem <= h0
+            assert 0 <= S.clarity_of(sid, rows) <= 100
