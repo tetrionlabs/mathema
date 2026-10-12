@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The golden corpus: every `.koi` file with its frozen hash or the
-problems it must report. A changed hash is a change to KOINE's
+"""The golden corpus: every `.koi` file with its frozen canonical and
+nominal hashes, or the problems it must report. A changed hash is a change to KOINE's
 canonical form, never an edited expectation. Each valid document is
 the body of a function in `tests/fixtures/koine_py.py`, and says so
 in its envelope."""
@@ -10,7 +10,7 @@ import pathlib
 
 import pytest
 
-from mathema.koine import Document, KoineSyntaxError, koine_hash, validate
+from mathema.koine import Document, KoineSyntaxError, koine_hash, nominal_hash, validate
 from tests._koine_docs import GOLDEN, golden, golden_index, golden_text
 
 INDEX = golden_index()
@@ -21,7 +21,7 @@ VALID = sorted(n for n, e in INDEX.items() if "koine_hash" in e)
 def test_every_file_is_indexed_and_every_entry_has_a_file():
     files = {p.stem for p in GOLDEN.glob("*.koi")}
     assert files == set(INDEX)
-    assert len(VALID) == 7
+    assert len(VALID) == 9
     assert len([n for n in INDEX if "problems" in INDEX[n]]) == 5
 
 
@@ -40,6 +40,7 @@ def test_golden(name):
     doc = Document.parse(text)
     assert validate(doc) == []
     assert koine_hash(doc) == entry["koine_hash"]
+    assert nominal_hash(doc) == entry["nominal_hash"]
 
 
 @pytest.mark.parametrize("name", VALID)
@@ -59,3 +60,6 @@ def test_each_document_names_the_function_it_was_written_from(name):
 def test_different_mathematics_hashes_apart():
     hashes = [INDEX[n]["koine_hash"] for n in VALID]
     assert len(set(hashes)) == len(hashes)
+    nominal = [INDEX[n]["nominal_hash"] for n in VALID]
+    assert len(set(nominal)) == len(nominal)
+    assert not set(hashes) & set(nominal)

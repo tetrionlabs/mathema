@@ -54,3 +54,13 @@ def remainders(a: float, b: float) -> float:
     q = math.fmod(a, b)
     h = math.hypot(a, b)
     return q + h + round(a) + math.pi
+
+
+def fact_rec(n: int) -> int:
+    if n <= 1:
+        return 1
+    return n * fact_rec(n - 1)
+
+
+def calls_sibling(x: float, r: float) -> float:
+    return growth(x, r) - x

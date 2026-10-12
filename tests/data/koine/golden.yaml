@@ -1,14 +1,23 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-# The KOINE golden corpus: every valid document's frozen koine_hash, and
-# every invalid document's problems.
+# The KOINE golden corpus: every valid document's frozen koine_hash and
+# nominal_hash, and every invalid document's problems.
 # FROZEN: a changed hash is a change to KOINE's canonical form.
+calls_sibling_py:
+  koine_hash: koine-0.0.1:af98ae3ff43d4c96
+  nominal_hash: TBD
 dot_py:
-  koine_hash: koine-0.0.1:a5eaa225e8ebf3c6
+  koine_hash: koine-0.0.1:abd467d14753695c
+  nominal_hash: koine-0.0.1:a5eaa225e8ebf3c6
 ema_first_py:
-  koine_hash: koine-0.0.1:72f6a71f2dd22499
+  koine_hash: koine-0.0.1:006221c4290f5178
+  nominal_hash: koine-0.0.1:72f6a71f2dd22499
+fact_rec_py:
+  koine_hash: koine-0.0.1:8d6610982a4f0a5e
+  nominal_hash: TBD
 growth_py:
-  koine_hash: koine-0.0.1:bd9102d9efb1342e
+  koine_hash: koine-0.0.1:989acc442e1bdcd6
+  nominal_hash: koine-0.0.1:bd9102d9efb1342e
 invalid_after_return:
   problems:
   - 'body[1]: nothing may follow a return or a fail'
@@ -26,10 +35,14 @@ invalid_unknown_operator:
   problems:
   - operator::binary::division::banker(x, 2) is not an expression
 mean_py:
-  koine_hash: koine-0.0.1:56909d4e6bd8d2ff
+  koine_hash: koine-0.0.1:4386153d83ae883f
+  nominal_hash: koine-0.0.1:56909d4e6bd8d2ff
 piecewise_py:
-  koine_hash: koine-0.0.1:670de6065a3b8b8f
+  koine_hash: koine-0.0.1:fef5c3a388319d52
+  nominal_hash: koine-0.0.1:670de6065a3b8b8f
 quotient_py:
-  koine_hash: koine-0.0.1:fb51f0d786f2df30
+  koine_hash: koine-0.0.1:6782429af2d40f3a
+  nominal_hash: koine-0.0.1:fb51f0d786f2df30
 remainders_py:
-  koine_hash: koine-0.0.1:fe46c5be82b6249d
+  koine_hash: koine-0.0.1:2d8ba9965e42f221
+  nominal_hash: koine-0.0.1:fe46c5be82b6249d
