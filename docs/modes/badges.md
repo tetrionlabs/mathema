@@ -21,6 +21,23 @@ stopped is named on stderr and in the snapshot's `capped` list: its
 implementation then counts only the lines a fresh test report covers,
 and its intent or clarity is left out of that score's roll-up.
 
+The functions are scored in `--jobs N` worker processes (the CPU count,
+up to 4, by default; `--jobs 1` scores them in the one process), and the
+results are rolled up in the same order whatever N is, so the scores do
+not depend on it. Each function's result is kept in
+`.mathema/cache/badges/`, which carries its own `.gitignore` and is
+never committed. A later run uses a kept result only when nothing it was
+computed from has changed: the project's source and the code of every
+package it loads from outside the installed libraries, the installed
+packages and their versions, mathema's version and sampling seeds, the
+`MATHEMA_*` environment, the verified records, `.mathema/meta`, the
+claims files, `README.md`, `pyproject.toml`, and, for implementation,
+whether the test report is fresh for the function's file and which of
+its lines the tests ran. Any such change scores every function again, so
+a second run on an unchanged project takes seconds and gives the same
+numbers. A result with a capped step is never kept. Deleting the
+directory clears the cache.
+
 ## The three badges
 
 - **implementation** (code layer): the raw line ratio from `mathema

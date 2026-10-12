@@ -2932,7 +2932,8 @@ def cmd_badges(args) -> int:
         # the command before anything is printed
         os.makedirs(out_dir, exist_ok=True)
     scores = repo_badges(args.target or None, root=root,
-                         progress=_badges_progress(sys.stderr))
+                         progress=_badges_progress(sys.stderr),
+                         jobs=args.jobs)
     for key, steps in scores.capped.items():
         print(f"{key}: stopped at the wall-clock cap "
               f"({', '.join(steps)})", file=sys.stderr)
@@ -3172,6 +3173,11 @@ def main(argv: list[str] | None = None) -> int:
                          "snippet); bare --out writes to "
                          f"the standard {_badges.DEFAULT_BADGE_DIR}/ under "
                          "--root, or pass an explicit DIR")
+    pb.add_argument("--jobs", type=int, default=_badges.default_jobs(),
+                    metavar="N",
+                    help="score the functions in N worker processes "
+                         f"(default {_badges.default_jobs()}, the CPU "
+                         "count up to 4; 1 scores them in this process)")
     pb.set_defaults(fn=cmd_badges)
 
     pcomp = sub.add_parser("compendium", help="the claims about the "

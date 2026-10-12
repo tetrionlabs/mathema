@@ -673,12 +673,14 @@ def badges(targets: list[str] | None = None, root: str = ".") -> dict:
     is unavailable. `ascii` is the git-diffable triangle. Reads the
     verified store, so clarity reflects only declared-and-verified
     claims, the CDD loop it rewards. `capped` lists `[key, steps]` for
-    each function a step of which stopped at the wall-clock cap; the
-    cap is a main-thread alarm (`_timeout._with_timeout`), so a server
-    that runs tools on a worker thread never fires it."""
-    from mathema.badges import render_triangle, repo_badges
+    each function a step of which stopped at the wall-clock cap. The
+    functions are scored in worker processes (`badges.default_jobs`),
+    where the cap holds; a function scored in the server itself, on a
+    worker thread, runs without it."""
+    from mathema.badges import default_jobs, render_triangle, repo_badges
 
-    scores = repo_badges(list(targets or ()) or None, root=root)
+    scores = repo_badges(list(targets or ()) or None, root=root,
+                         jobs=default_jobs())
     rows = [[key, v["implementation"], v["intent"], v["clarity"]]
             for key, v in scores.per_function.items()]
     return {"implementation": scores.implementation,

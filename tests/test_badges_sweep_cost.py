@@ -244,3 +244,99 @@ def test_the_mcp_badges_tool_takes_its_targets_as_optional(tmp_path):
     from mathema.interfaces.mcp import tools
     out = tools.badges(root=str(tmp_path))
     assert out["rows"] == [] and out["capped"] == []
+
+
+def _snapshot(scores) -> str:
+    import json
+
+    from mathema.badges import ci_snapshot
+    return json.dumps(ci_snapshot(scores), sort_keys=True)
+
+
+def _traces(monkeypatch) -> list:
+    from mathema import impl_coverage
+    traced: list = []
+    original = impl_coverage._trace_check
+
+    def counting(fn, *a, **k):
+        traced.append(fn.__name__)
+        return original(fn, *a, **k)
+    monkeypatch.setattr(impl_coverage, "_trace_check", counting)
+    return traced
+
+
+def test_a_second_run_on_an_unchanged_project_reads_every_result_from_the_cache(
+        importable, monkeypatch):
+    _package(importable, "bsc_cache", 3)
+    traced = _traces(monkeypatch)
+    first = repo_badges(["bsc_cache"], root=str(importable))
+    assert sorted(traced) == ["f0", "f1", "f2", "helper"]
+    traced.clear()
+    from mathema import centrality
+    graphs = _counting(monkeypatch, {(centrality, "build_call_graph"): 1})
+    second = repo_badges(["bsc_cache"], root=str(importable))
+    assert traced == []
+    assert graphs == {}
+    assert _snapshot(second) == _snapshot(first)
+    uncached = repo_badges(["bsc_cache"], root=str(importable), cache=False)
+    assert sorted(traced) == ["f0", "f1", "f2", "helper"]
+    assert _snapshot(uncached) == _snapshot(first)
+    cache_dir = importable / ".mathema" / "cache" / "badges"
+    assert (cache_dir / ".gitignore").read_text() == "*\n"
+    # one entry per function and one for the centrality weights
+    assert len(list(cache_dir.glob("*/*.json"))) == 5
+
+
+def test_a_changed_record_or_source_computes_the_run_again(importable,
+                                                           monkeypatch):
+    from mathema.spec import verified_dir
+    _package(importable, "bsc_stale", 1)
+    traced = _traces(monkeypatch)
+    repo_badges(["bsc_stale"], root=str(importable))
+    record = os.path.join(verified_dir(str(importable)),
+                          "bsc_stale.mod.f0.yaml")
+    with open(record, "a") as fh:
+        fh.write("# edited\n")
+    traced.clear()
+    repo_badges(["bsc_stale"], root=str(importable))
+    assert sorted(traced) == ["f0", "helper"]
+    other = importable / "bsc_stale" / "extra.py"
+    other.write_text("LIMIT = 3\n")
+    traced.clear()
+    repo_badges(["bsc_stale"], root=str(importable))
+    assert sorted(traced) == ["f0", "helper"]
+
+
+def test_a_result_with_a_capped_step_is_never_cached(importable,
+                                                     monkeypatch):
+    from mathema import impl_coverage
+    _package(importable, "bsc_nocache", 1)
+    real = impl_coverage.function_coverage
+
+    def coverage(fn, *a, **k):
+        if fn.__name__ == "f0":
+            raise _timeout._WallClockExpired("cap")
+        return real(fn, *a, **k)
+    monkeypatch.setattr(impl_coverage, "function_coverage", coverage)
+    first = repo_badges(["bsc_nocache"], root=str(importable))
+    assert first.capped == {"bsc_nocache.mod.f0": ("implementation",)}
+    monkeypatch.setattr(impl_coverage, "function_coverage", real)
+    traced = _traces(monkeypatch)
+    second = repo_badges(["bsc_nocache"], root=str(importable))
+    assert traced == ["f0"]
+    assert second.capped == {}
+
+
+def test_worker_processes_give_the_same_snapshot_as_one_process(importable):
+    _package(importable, "bsc_jobs", 4)
+    alone = repo_badges(["bsc_jobs"], root=str(importable), cache=False)
+    seen = []
+    pooled = repo_badges(["bsc_jobs"], root=str(importable), cache=False,
+                         jobs=2, progress=lambda d, n: seen.append((d, n)))
+    assert _snapshot(pooled) == _snapshot(alone)
+    assert seen == [(d, 5) for d in range(1, 6)]
+
+
+def test_the_cli_takes_a_jobs_count():
+    from mathema import badges as badges_module
+    assert 1 <= badges_module.default_jobs() <= 4
