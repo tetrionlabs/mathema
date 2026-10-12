@@ -7633,7 +7633,8 @@ def _fill_value(bound):
 
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
-                     resolver, shared: bool, structured: bool):
+                     resolver, shared: bool, structured: bool,
+                     column_bounds: "dict | None" = None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -7641,6 +7642,7 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         holes its random draws carry; None
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
+        `column_bounds` holds a table's column bindings by column name.
     """
     from . import _floor
     from .domain import domain_contains
@@ -7678,8 +7680,12 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         floor = _floor.table_floor(holes, absent=absent)
         # each column meets the magnitude corners of the completed
         # element range, after the degenerate tables
+        # a column the claim binds (`for df.r in [0, 1]^n`) meets the
+        # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound))
+            sequence_corners(record if record is not None else bound),
+            {c: sequence_corners(_column_bound(b, None))
+             for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
 
@@ -10150,7 +10156,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      if key is not None and _p in users)
         made = _container_draws(_p, _k, cj_domain.get(_p),
                                 (ctx.record_domain or {}).get(_p), ctx.missing or {},
-                                resolver, shared, bool(param_structures.get(_p)))
+                                resolver, shared, bool(param_structures.get(_p)),
+                                {key[len(_p) + 1:]: b for key, b in cj_domain.items()
+                                 if key.startswith(_p + ".")
+                                 and key[len(_p) + 1:].isidentifier()})
         if made is not None:
             containers[_p] = made
 
