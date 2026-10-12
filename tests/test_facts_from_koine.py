@@ -73,14 +73,14 @@ def test_the_facts_carry_the_document_its_rendering_and_its_hash():
     assert facts.koine is d
     assert facts.tree is not None and facts.tree.name == "growth"
     assert facts.source.startswith("def growth(x: float, r: float) -> float:")
-    assert facts.form == koine_hash(d) == "koine-0.0.1:bd9102d9efb1342e"
+    assert facts.form == koine_hash(d) == "koine-0.0.1:989acc442e1bdcd6"
     assert not facts.form_is_computed()
     assert facts.signature == "(x: float, r: float) -> float"
     assert facts.name == "growth"
 
 
 def test_text_is_read_as_a_document():
-    assert facts_from_koine(golden_text("growth_py")).form == "koine-0.0.1:bd9102d9efb1342e"
+    assert facts_from_koine(golden_text("growth_py")).form == "koine-0.0.1:989acc442e1bdcd6"
 
 
 def test_guards_read_off_the_body():

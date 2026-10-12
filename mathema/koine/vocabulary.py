@@ -22,6 +22,9 @@ The tree:
     function::<family>::...               the closed set of named functions
     call::...                             another function, a library
                                           function, a local function
+    call::self, ::hashed, ::ancestor,     how the canonical form respells a
+      ::external                          call to another function of the
+                                          program; never written by a frontend
     failure::...                          an explicit refusal
     nonvalue::<stratum>::...              why an expression has no value
     as::...                               how a runtime shows a non-value
@@ -251,6 +254,10 @@ def _expression_signatures() -> dict[str, Signature]:
     out["call::function"] = _sig(STR, rest=EXPR)
     out["call::library"] = _sig(STR, rest=EXPR, any_named=LITERAL)
     out["call::local"] = _sig(NAME, rest=EXPR)
+    out["call::self"] = _sig(rest=EXPR)
+    out["call::hashed"] = _sig(STR, rest=EXPR)
+    out["call::ancestor"] = _sig(POSINT, rest=EXPR)
+    out["call::external"] = _sig(STR, rest=EXPR)
     return out
 
 
