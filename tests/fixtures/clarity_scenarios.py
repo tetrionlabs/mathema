@@ -256,15 +256,16 @@ STATED_PAIRS = [("S1 bare str", "S1e enforce_domain, no claims"),
                 ("S2 bare str, claim at 3 names", "S4 enforce_domain, proof")]
 
 
-def clarity_of(scenario_id: str) -> int:
-    """The clarity score of one scenario, from its rows alone: the
-    callees' records come from the scenario, and no library claims file
-    or verified store on disk is read."""
+def clarity_of(scenario_id: str, rows: "list | None" = None) -> int:
+    """The clarity score of one scenario, from its rows (or `rows` in
+    their place) alone: the callees' records come from the scenario,
+    and no library claims file or verified store on disk is read."""
     import sys
 
     from mathema.badges import clarity_score
-    _id, fn_name, rows, callee_rows = next(
+    _id, fn_name, own_rows, callee_rows = next(
         s for s in SCENARIOS if s[0] == scenario_id)
+    rows = own_rows if rows is None else rows
     module = sys.modules[__name__]
     fn = getattr(module, fn_name)
     store = {f"{module.__name__}.{callee}": {"entry": {"claims": claims}}
