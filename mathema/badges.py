@@ -486,6 +486,9 @@ def _clarity_profile(fn, facts=None, root: str = ".",
                         for p in params)
     domains = _param_domains(fn, facts, params, guards)
     guarded = sum(1 for d in domains if d.guarded)
+    # a string parameter whose domain is a finite set admits no
+    # arbitrary text, so it carries no arbitrary-input source
+    finite = {d.name for d in domains if d.finite}
     if store is None:
         from .spec import load_verified
         store = load_verified(root)
@@ -498,7 +501,7 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         output=getattr(facts, "returns_kind", "scalar") or "none",
         numeric=numeric, loops=len(getattr(facts, "loops", []) or []),
         pure=bool(getattr(facts, "is_pure", True)),
-        str_params=len(str_params), n_raises=n_raises,
+        str_params=len(str_params - finite), n_raises=n_raises,
         callees=callees)
 
 
