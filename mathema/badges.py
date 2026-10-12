@@ -655,6 +655,17 @@ def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
                 bump(f"domain_soft:{p}", strength * (1.0 - narrower / d.bits))
 
 
+def _is_absence_row(row: dict) -> bool:
+    """Whether a verified row states what the function does when a
+    parameter is absent (`absent[x]`, a stated `absent(f, x) ...`
+    policy, `is_absent_safe`), which speaks only about absence."""
+    from .families import claim_base_name
+    name = row.get("name") or ""
+    policy = (row.get("meta") or {}).get("mathema.policy") or {}
+    return policy.get("kind") == "absent" or (
+        bool(name) and claim_base_name(name) in ("is_absent_safe", "absent"))
+
+
 def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
     """A verified absence row (`absent[x]`, a stated `absent(f, x) ...`
     policy, `is_absent_safe`) clears the absence source of the
@@ -735,7 +746,7 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             continue
         from .families import claim_base_name, current_family_name
         base = current_family_name(claim_base_name(name))
-        if base in _NO_SOURCE:
+        if base in _NO_SOURCE or _is_absence_row(claim):
             continue
         if base in _SAFETY_SOURCE:
             bump("safety:" + _SAFETY_SOURCE[base], st)
