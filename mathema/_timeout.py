@@ -185,6 +185,7 @@ class _WallClockExpired(BaseException):
         super().__init__(*args)
         _WallClockExpired.fired += 1
 
+
 class _Guard:
     """Intent:
         One watchdog cap: the thread it guards, the monotonic deadline,
