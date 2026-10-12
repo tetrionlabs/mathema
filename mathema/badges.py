@@ -452,7 +452,10 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         return None
     cx = n_raises = 0
     numeric = False
+    stating = _domain_stating_guards(facts)
     for node in ast.walk(tree):
+        if id(node) in stating:
+            continue
         if isinstance(node, ast.Raise):
             n_raises += 1
         elif isinstance(node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor,
@@ -497,6 +500,30 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         pure=bool(getattr(facts, "is_pure", True)),
         str_params=len(str_params), n_raises=n_raises,
         callees=callees)
+
+
+def _domain_stating_guards(facts) -> set:
+    """Intent:
+        The ids of the AST nodes of each guard that states a parameter's
+        domain (`if side not in {"buy", "sell"}: raise ValueError(side)`,
+        whose body only raises): the `if` and its raise. Such a guard is
+        the parameter's domain, charged as that domain, not as a branch
+        and a raise site of its own.
+    """
+    import ast
+
+    from .hazards import finite_guards
+    out: set = set()
+    try:
+        guards = finite_guards(facts)
+    except Exception:
+        return out
+    for _param, _values, node in guards:
+        if node.orelse or not all(isinstance(s, ast.Raise) for s in node.body):
+            continue
+        out.add(id(node))
+        out.update(id(s) for s in node.body)
+    return out
 
 
 def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
