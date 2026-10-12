@@ -122,7 +122,9 @@ _NO_SOURCE = frozenset({
 
 def _strength(verdict: str, route: str) -> float:
     """How much of a source's entropy this verdict, reached by this
-    mechanism, eliminates. See the @1 constants above."""
+    mechanism, eliminates. See the @1 constants above. A holds reached
+    by a subroute with no grade of its own (`derive:extensive`,
+    `probe:counterfactual`) is graded as the route it refines."""
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
@@ -130,7 +132,10 @@ def _strength(verdict: str, route: str) -> float:
     if v == "falsified":
         return _FALSIFIED_STRENGTH
     if v == "holds":
-        return _HOLDS_STRENGTH.get(route or "probe", _HOLDS_DEFAULT)
+        route = route or "probe"
+        while route not in _HOLDS_STRENGTH and ":" in route:
+            route = route.rsplit(":", 1)[0]
+        return _HOLDS_STRENGTH.get(route, _HOLDS_DEFAULT)
     return 0.0
 
 
