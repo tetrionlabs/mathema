@@ -82,6 +82,10 @@ _HOLDS_STRENGTH: dict[str, float] = {
     "examine": 0.90, "derive": 0.90, "probe:semi_analytical": 0.85,
     "probe:algorithmic": 0.80, "probe:minimal_example": 0.78, "probe": 0.60}
 _HOLDS_DEFAULT = 0.60
+# the share of its whole-domain credit a claim earns over the part of the
+# domain it does not cover, so every claim earns something: a claim
+# covering a share s earns s + _CLAIM_FLOOR * (1 - s)
+_CLAIM_FLOOR = 0.1
 
 _IDENTITY_KINDS = frozenset({"value_identity", "equivalence", "closed_form",
                              "roundtrip"})
@@ -687,12 +691,22 @@ def _claim_share(bindings: dict, domains) -> float:
 def _scoped_credit(items, domains) -> float:
     """Intent:
         What a source's crediting claims, `[(strength, bindings), ...]`,
-        establish of it together: the strongest strength times share of
-        any one claim, or, where the claims bind one parameter and
-        nothing else, the strength each value of that parameter is
-        covered at, averaged over its domain, so claims over different
-        parts of one parameter add up.
+        establish of it together. The covered part is the strongest
+        strength times share of any one claim, or, where the claims bind
+        one parameter and nothing else, the strength each value of that
+        parameter is covered at, averaged over its domain, so claims
+        over different parts of one parameter add up. On top of it, a
+        tenth (`_CLAIM_FLOOR`) of what the strongest claim would earn
+        over the rest of the domain, counted once: one claim covering a
+        share `s` earns `s + 0.1 * (1 - s)` of its whole-domain credit.
     """
+    strongest = max((st for st, _b in items), default=0.0)
+    covered = _covered_credit(items, domains)
+    return covered + _CLAIM_FLOOR * max(0.0, strongest - covered)
+
+
+def _covered_credit(items, domains) -> float:
+    """The covered part of `_scoped_credit`, without its floor."""
     from ._clarity_reach import share
     best = max((st * _claim_share(b, domains) for st, b in items), default=0.0)
     names = {d.name for d in domains}

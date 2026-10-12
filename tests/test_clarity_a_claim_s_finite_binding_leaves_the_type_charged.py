@@ -115,9 +115,10 @@ def test_a_claim_over_part_of_a_literal_clears_only_its_share(mod):
     before = _domain_left(mod.literal_key, [], "name")
     after = _domain_left(mod.literal_key, rows, "name")
     assert 0 < after < before
-    # two of the three members are settled; the third keeps its share
+    # two of the three members are settled; the third keeps its share,
+    # less the tenth every claim earns over what it does not cover
     (d,) = _clarity_profile(mod.literal_key).domains
-    assert after == pytest.approx(d.bits / 3, rel=1e-9)
+    assert after == pytest.approx(d.bits * (1 / 3) * 0.9, rel=1e-9)
 
 
 # --- the function's own finite domain ---------------------------------------

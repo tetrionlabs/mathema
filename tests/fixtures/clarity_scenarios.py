@@ -222,9 +222,10 @@ SCENARIOS = [
 # each family's scenarios in the order a developer expects clarity to
 # rise, "<" a clear rise and "<=" no fall; a tuple is a group expected to
 # score about the same. Three points of an infinite type are a vanishing
-# share of it, so a claim at three names may add little.
+# share of it, so a claim at three names earns only the floor every
+# claim earns, a small step above nothing.
 FAMILIES = {
-    "strings": ["S1 bare str", "<=", "S2 bare str, claim at 3 names", "<",
+    "strings": ["S1 bare str", "<", "S2 bare str, claim at 3 names", "<",
                 ("S3 guard to the set, proof", "S4 enforce_domain, proof",
                  "S5 Literal, proof")],
     "verdicts": ["N1 no claims", "<", "N2 holds, random probe", "<",
@@ -232,7 +233,7 @@ FAMILIES = {
     "entailed": [("N4 proven", "N5 proven + bound + shape")],
     "claims added": ["N2 holds, random probe", "<",
                      "N6 random holds + bound + shape"],
-    "reach": ["C1 proven at 3 points", "<", "C2 proven over [0, 100]", "<",
+    "reach": ["N1 no claims", "<", "C1 proven at 3 points", "<", "C2 proven over [0, 100]", "<",
               "C3 proven everywhere"],
     "helper": ["H1 lerp, no claims", "<", "H2 lerp, fully claimed"],
     "floors": ["B1 fee, no claims", "<", "H1 lerp, no claims"],

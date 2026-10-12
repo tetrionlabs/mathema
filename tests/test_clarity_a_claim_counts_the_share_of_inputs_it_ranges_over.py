@@ -61,8 +61,9 @@ def test_a_few_points_say_less_than_a_range_and_a_range_less_than_everything():
 def test_a_claim_s_share_scales_every_dimension_it_credits():
     profile = _clarity_profile(fahrenheit, library_keys=frozenset())
     r = _reductions(_identity("for c in [0, 100], "), profile.pure, profile)
+    # the share covered, and a tenth of the rest (the claim floor)
     assert r["identity"] == r["extent"] == r["shape"] == pytest.approx(
-        0.2515, abs=1e-4)
+        0.2515 + 0.1 * (1 - 0.2515), abs=1e-4)
 
 
 def side_word(side: Literal["buy", "sell", "hold", "skip"]) -> str:
@@ -79,6 +80,6 @@ def test_claims_over_halves_of_a_finite_domain_add_up():
     one = _reductions([row('{"buy", "sell"}')], profile.pure, profile)
     both = _reductions([row('{"buy", "sell"}'), row('{"hold", "skip"}')],
                        profile.pure, profile)
-    assert one["identity"] == pytest.approx(0.5)
+    assert one["identity"] == pytest.approx(0.5 + 0.1 * 0.5)
     assert both["identity"] == pytest.approx(1.0)
     assert both["domain_soft:side"] == pytest.approx(1.0)
