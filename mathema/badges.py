@@ -794,6 +794,12 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         base = current_family_name(claim_base_name(name))
         if base in _NO_SOURCE or _is_absence_row(claim):
             continue
+        if ((claim.get("meta") or {}).get("mathema.policy") or {}).get(
+                "kind") == "missing":
+            # a missing-value policy row says what the function does
+            # with a missing value, and nothing else
+            bump("safety:is_missing_safe", st)
+            continue
         if base in _SAFETY_SOURCE:
             bump("safety:" + _SAFETY_SOURCE[base], st)
             continue
