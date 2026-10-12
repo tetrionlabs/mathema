@@ -42,6 +42,7 @@ def _one(fn, law, route):
     return p
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_boolean_body_proves_the_boolean_it_computes(rules):
     p = _one(rules.beats_chance,
              "for mi in [0,1], chance in [0,1], "
@@ -49,6 +50,7 @@ def test_a_boolean_body_proves_the_boolean_it_computes(rules):
     assert p.verdict == "proven", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_boolean_connectives_and_negation_lift(rules):
     p = _one(rules.in_band,
              "for x in [0,10], lo in [0,3], hi in [7,10], "
@@ -68,6 +70,7 @@ def test_a_wrong_boolean_claim_falsifies_with_an_executed_witness(rules):
     assert p.counterexample, "falsified requires an executed witness"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_the_indicator_reading_gives_boolean_values_numeric_claims(rules):
     p = _one(rules.beats_chance,
              "for mi in [0,1], chance in [0,1], f(mi, chance) >= 0",

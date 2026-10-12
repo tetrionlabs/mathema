@@ -92,6 +92,14 @@ def point_shown(point: dict) -> str:
     return ", ".join(f"{p} = {_param_value(v)}" for p, v in point.items())
 
 
+def call_shown(point: dict) -> str:
+    """A call in Python spelling: `f(None)` for one argument, several by
+    name: `f(language=0.71, name=None)`."""
+    if len(point) == 1:
+        return f"f({_param_value(next(iter(point.values())))})"
+    return "f(" + ", ".join(f"{p}={_param_value(v)}" for p, v in point.items()) + ")"
+
+
 def _param_value(v) -> str:
     if isinstance(v, dict):
         return "{" + ", ".join(f"{k}: {value_shown(c, in_slot=True) if not isinstance(c, (list, tuple)) else value_shown(list(c))}"

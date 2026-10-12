@@ -1841,11 +1841,14 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         `bounds` (None the whole line, an unbounded end at the number
         representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
-        range's own limit, and the range's opposite ends `[lo, hi]`;
+        range's own limit, the range's opposite ends `[lo, hi]`, and
+        the same-sign pair `[e, e]` at each end `e` past half the
+        representation's reach, where the sum of the pair overflows;
         every entry inside the range. With `n`, each pair is repeated
         to length `n`, and none is given below 2. Empty when the
         elements are not one real interval.
     """
+    from ._sampling import representation_reach
     span = _element_range(bounds)
     if span is None or (n is not None and n < 2):
         return []
@@ -1855,6 +1858,10 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
     if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
         pairs.append([lo, hi])
+    half = representation_reach() / 2
+    for end in (hi, lo):
+        if abs(end) > half and [end, end] not in pairs:
+            pairs.append([end, end])
     if n is None:
         return pairs
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
@@ -2296,6 +2303,11 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
             # or a few generic ones, each value a free scalar
             return ("Dict(keys the body reads, else 1 to 4 generic keys; "
                     "values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3])")
+        if k == "bool" and _classify_bound(bounds) not in (
+                "domain", "frozenset", "Z", "N", "C", "language"):
+            # `_synth` draws a bool parameter as False or True unless a
+            # set-like bound draws it
+            return "U{False, True}"
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not numeric_excluded(bounds)):

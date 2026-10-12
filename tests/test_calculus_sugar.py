@@ -10,6 +10,8 @@ differentiating then substituting a value. `integrate(...)`'s own
 space or comma does), `∫`/`integral` synonyms, and a bracket-free
 multivariable form chaining one bound-bar per differential. `lim`'s own
 bracket-free form, with the variable always named explicitly."""
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 from mathema.grammar import normalize
 
@@ -313,6 +315,7 @@ def test_pv_traditional_spelling_normalizes_and_renders():
     assert "cauchy_pv(" in normalize("P.V.(integrate(1/x, x, -1, 1)) == 0")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_pv_as_an_ordinary_parameter_name_never_collides():
     # a present-value function's parameter named PV is just a name: it
     # binds, proves, and renders with no reserved meaning anywhere

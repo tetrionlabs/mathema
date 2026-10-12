@@ -5,10 +5,61 @@ Three orthogonal measures of a codebase, each 0-100, and one picture.
 ```
 mathema badges [targets]                # print the triangle + numbers
 mathema badges [targets] --out .mathema/badges/   # also write artifacts
+mathema badges [targets] --refresh       # score every function again
 ```
 
 Omit targets for the rootwide analogue of `verify` (every function the
 store knows under `--root`).
+
+A run reads the stores, the claims files and the library claims once,
+so its cost grows with the number of functions it scores. On a terminal
+it reports progress to stderr every 50 functions, with the count and the
+time elapsed, and prints nothing extra when stderr is not a terminal, so
+a CI log or an `--out` directory stays as it was. Each function's three
+steps stop at the badges step cap (60 seconds unless
+`MATHEMA_BADGES_STEP_TIMEOUT` sets another), and a function whose step
+stopped is named on stderr and in the snapshot's `capped` list: its
+implementation then counts only the lines a fresh test report covers,
+and its intent or clarity is left out of that score's roll-up.
+
+The functions are scored in `--jobs N` worker processes (the CPU count,
+up to 4, by default; `--jobs 1` scores them in the one process), and the
+results are rolled up in the same order whatever N is, so the scores do
+not depend on it. Each function's result is kept in
+`.mathema/cache/badges/`, which carries its own `.gitignore` and is
+never committed. A later run uses a kept result only when nothing that
+function's result is computed from has changed:
+
+- the function itself and everything it reaches: the functions and
+  classes its source calls, theirs in turn, and any function a reached
+  verified record lists among its dependencies, each by its source, its
+  place in its file, its module docstring and the values of the
+  module-level names it reads, with its verified record and its
+  claims-file entry;
+- for implementation, whether the test report is fresh for the
+  function's file and which of its lines the tests ran;
+- what every function shares: mathema's version and its own code, the
+  sampling seeds, the Python version and platform, the `MATHEMA_*`
+  environment, the installed packages and their versions, the library
+  claims, `README.md`, `pyproject.toml`, `.mathema/index.yaml` and
+  `.mathema/meta`.
+
+So editing one function scores that function and its callers again, and
+leaves every other function's result in place; a second run on an
+unchanged project takes seconds and gives the same numbers as a run
+without the cache. A result is never kept when any wall-clock cap fired
+while scoring it, a capped step or a proof cap inside its check, since
+that result depends on how loaded the machine was; such a function is
+scored again on every run.
+
+The reach is what the source names. A function reached only at run
+time, through a name the source does not bind (a callable looked up in
+a table, passed in, or built by `getattr`), is not part of it, so an
+edit to that function leaves its callers' kept results in place.
+`--refresh` is the full recomputation: it scores every function again
+and rewrites the cache. Deleting the directory clears the cache too.
+From Python, `repo_badges(cache="refresh")` does the same, and
+`repo_badges(cache=False)` neither reads nor writes the cache.
 
 ## The three badges
 
@@ -259,4 +310,7 @@ score means.
   no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and
-  comment the area delta between commits.
+  comment the area delta between commits. When a step stopped at the
+  badges step cap it also holds `capped`, a `[key, steps]` pair for each
+  such function; with nothing capped the key is absent, so a snapshot
+  reads as it always has.

@@ -80,7 +80,7 @@ def is_pure_enough(fn) -> bool | None:
     from .symbolic import lift, lift_dot, lift_fold, lift_sum
 
     facts = quiet_facts(fn)
-    if facts is None:
+    if facts is None or facts.tree is None:
         return None
     if facts.params and facts.params[0] in ("self", "cls") \
             and _self_use_blocks(facts.tree, facts.params[0]):
@@ -944,7 +944,8 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
     straight there, never grepping), and, for a plain function; its
     current `form` hash, which is what freshness checks compare against
     the callee's own verified record and against the form stored when
-    this function was adjudicated. A function reached through a
+    this function was adjudicated, and, for a callee whose body arrived
+    as KOINE, its body `provenance`. A function reached through a
     referenced module (`lib.g(x)`) is recorded as its own callee beside
     the module. One level deep is enough by
     design: freshness composes, an unchanged callee form means that
@@ -999,6 +1000,10 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             callee_facts = quiet_facts(obj)
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
+                from .koine.facts import provenance
+                body = provenance(callee_facts)
+                if body:
+                    dep["provenance"] = body
         out.append(dep)
         if kind == "module":
             out.extend(_module_attribute_callees(fn, name, obj))

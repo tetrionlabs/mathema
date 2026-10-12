@@ -6,6 +6,8 @@ symbol, interval machinery membership), and a target that is a
 nonnegative multiple of an assumed gap proves outright. The corpus's
 minimal pairs; identical mathematics phrased as let-var vs parameter,
 previously proved on one side only."""
+import pytest
+
 from mathema.claims import check_conjectures, claim
 
 
@@ -41,6 +43,7 @@ def test_scaled_assumed_gap_proves():
     assert p.verdict == "falsified"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_integer_multiple_of_an_assumed_gap_proves():
     # the corpus's Putnam 2004 A2 shape: -2x+2y+2z is twice y+z-x
     def twice_slack(x, y, z):

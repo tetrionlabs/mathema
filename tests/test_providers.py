@@ -4,10 +4,18 @@
 discovery, caching, and fail-soft fallback."""
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mathema import _providers
 
 
-def teardown_function(_fn):
+@pytest.fixture(autouse=True)
+def _fresh_discovery():
+    """Each test starts and ends with no discovery cached, whatever ran
+    before it in the same process."""
+    _providers._discovered.cache_clear()
+    _providers._load.cache_clear()
+    yield
     _providers._discovered.cache_clear()
     _providers._load.cache_clear()
 
@@ -56,3 +64,16 @@ def test_discovery_is_cached_across_calls():
         _providers.get_provider("thing")
         _providers.get_provider("thing")
         assert mock_ep.call_count == 1
+
+
+def test_a_render_caches_the_discovery_it_made():
+    from mathema.conjecture import claim
+    from mathema.spec import render_claim_text
+    render_claim_text(claim("for x in [0, 1], f(x) >= 0"))
+    assert _providers._discovered.cache_info().currsize == 1
+
+
+def test_a_test_never_sees_the_discovery_an_earlier_test_cached():
+    # run straight after the render above, in the same process
+    assert _providers._discovered.cache_info().currsize == 0
+    test_discovery_is_cached_across_calls()

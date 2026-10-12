@@ -78,11 +78,18 @@ def _rational_cover(lo, hi):
         Returns `(rlo, rhi, widened)`. A widened cover is sound for
         proving (the true interval is inside it) but not for producing
         a counterexample point, which might land in the slack; the
-        caller must suppress disproof when `widened` is True.
+        caller must suppress disproof when `widened` is True. None when
+        an endpoint is not a number (a sequence, a string, an object).
     """
     if getattr(lo, "is_rational", False) and getattr(hi, "is_rational", False):
         return lo, hi, False
     try:
+        # only a number is scaled: a sequence or a string times the
+        # scale would be repeated a billion times
+        lo = sympy.sympify(lo, strict=True)
+        hi = sympy.sympify(hi, strict=True)
+        if not (isinstance(lo, sympy.Expr) and isinstance(hi, sympy.Expr)):
+            return None
         scale = sympy.Integer(10) ** 9
         rlo = sympy.Rational(sympy.floor(lo * scale), scale)
         rhi = sympy.Rational(sympy.ceiling(hi * scale), scale)

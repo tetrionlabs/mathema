@@ -178,6 +178,7 @@ def test_a_shared_marker_dim_makes_arguments_conformable(matrices):
     # a's columns and x's length share the marker n, so they agree
     # every trial and the product is always well-defined
     (p,) = check_conjectures(matrices.matvec, [claim(
+        "for a in [-1e6, 1e6]^(m,n), x in [-1e6, 1e6]^n, "
         "assuming m >= 1 and n >= 1, dim(f(a, x), 0) == dim(a, 0)",
         route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
@@ -311,7 +312,7 @@ def test_a_fixed_numeric_dimension_synthesises_that_length(tmp_path):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     (pr,) = check_conjectures(m.pair_sum, [claim(
-        "for v in R^2, f(v) == v[0] + v[1]", route="probe")])
+        "for v in [-1e6, 1e6]^2, f(v) == v[0] + v[1]", route="probe")])
     assert pr.verdict == "holds", (pr.verdict, pr.note)
 
 

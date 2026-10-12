@@ -182,7 +182,7 @@ def resolve(target: str, root: str = ".", *,
     mod_part, _, qual_part = target.partition(":")
 
     if ":" in target and not _is_pathlike(mod_part):
-        # a language-tagged key (`ts:src/ema.ts#ema`): a registered
+        # a tagged key (`<tag>:src/ema#ema`): a registered
         # resolver turns it into a Target of callable proxies; None
         # means "not mine" and resolution falls through to the
         # ordinary import path unchanged

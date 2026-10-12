@@ -116,7 +116,7 @@ def test_the_absent_gate_calls_f_at_present_inputs_itself():
 def test_an_unaccounted_raise_falsifies_the_absent_gate():
     row = _gate(root_opt, "is_absent_safe(f)")
     assert row.verdict == "falsified"
-    assert row.counterexample == "x = None: f raised TypeError"
+    assert row.counterexample == "f(None) raises TypeError; f(5.79) returns 2.41"
     assert row.note == "x (float): None raises TypeError, and no claim says it may"
     assert row.meta["mathema.gate"]["reason"] == (
         "f raised TypeError at x = None, and no claim says it may")

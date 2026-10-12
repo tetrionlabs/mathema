@@ -116,23 +116,35 @@ def corner_floor(corners: list, length_free: bool) -> list:
     return items
 
 
-def table_corner_floor(corners: list) -> list:
+def table_corner_floor(corners: list, column_corners: "dict | None" = None) -> list:
     """Intent:
         Floor items for a table's magnitude corners, one per corner,
         after `_DRAWS_BEFORE_CORNERS` items that pass the draw through:
         every column set to the pair repeated to the column's length
-        (the pair itself for a column shorter than 2).
+        (the pair itself for a column shorter than 2). A column in
+        `column_corners` meets its own corners instead, the k-th item
+        setting it to its own pair k (cycling through them), and keeps
+        its drawn value when it has none.
     """
-    if not corners:
+    column_corners = column_corners or {}
+    count = len(corners) or max((len(c) for c in column_corners.values()),
+                                default=0)
+    if not count:
         return []
     items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
 
     def column(pair, col):
         n = len(col) if isinstance(col, (list, tuple)) and len(col) > 1 else 2
         return [pair[i % 2] for i in range(n)]
-    for pair in corners:
-        items.append(lambda base, pair=pair: {c: column(pair, col)
-                                              for c, col in base.items()}
+
+    def cornered(k, name, col):
+        own = column_corners.get(name)
+        if own is not None:
+            return column(own[k % len(own)], col) if own else col
+        return column(corners[k], col) if k < len(corners) else col
+    for k in range(count):
+        items.append(lambda base, k=k: {c: cornered(k, c, col)
+                                        for c, col in base.items()}
                      if isinstance(base, dict) and base else None)
     return items
 

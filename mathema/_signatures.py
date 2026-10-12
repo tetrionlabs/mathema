@@ -125,7 +125,25 @@ def module_scope(fn) -> dict:
         whose source is the one read, so its names resolve where it was
         written rather than in the decorator's module. Empty for a
         callable with no globals of its own, such as a numpy dispatcher.
+        A callable carrying `__mathema_scope__` (a mapping) is read in
+        that scope instead. A callable whose injected facts carry a KOINE
+        document reads the names its rendered body uses (`math`, the
+        helpers, its exception classes) over its own globals.
     """
+    stated = getattr(fn, "__mathema_scope__", None)
+    if isinstance(stated, dict):
+        return stated
+    scope = _own_scope(fn)
+    injected = getattr(fn, "__mathema_facts__", None)
+    if getattr(injected, "koine", None) is not None:
+        from .koine.facts import rendered_scope
+        rendered = rendered_scope(injected)
+        if rendered:
+            return {**scope, **rendered}
+    return scope
+
+
+def _own_scope(fn) -> dict:
     own = getattr(fn, "__globals__", None)
     if not own:
         return {}

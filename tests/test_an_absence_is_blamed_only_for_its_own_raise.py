@@ -54,9 +54,9 @@ def test_a_raise_another_argument_causes_leaves_the_absence_row_unknown():
 def test_a_raise_the_absence_causes_is_falsified_with_the_present_call_shown():
     row = _row(shout, "absent[name]")
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert "name = None: f raised AttributeError" in row.counterexample
-    assert ", and at name = " in row.counterexample, row.counterexample
-    assert " f returned " in row.counterexample, row.counterexample
+    assert row.counterexample.startswith("f(language="), row.counterexample
+    assert ", name=None) raises AttributeError; with name=" in row.counterexample
+    assert " it returns " in row.counterexample, row.counterexample
 
 
 def test_another_argument_raising_on_some_draws_is_redrawn_and_the_absence_decided():

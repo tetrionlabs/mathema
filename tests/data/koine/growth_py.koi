@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# KOINE golden corpus: the body of tests/fixtures/koine_py.py#growth.
+# FROZEN: see golden.yaml.
+koine("0.0.1")
+lifter(language: "py", name: "mathema", version: "0")
+source(
+  file: "tests/fixtures/koine_py.py",
+  line: 10,
+  sha256: "5d2d8adc429c50a287172e68fb03993f5ba329f63488b33bf3e5bb07cabe914d",
+)
+function(name: "growth", key: "py:tests/fixtures/koine_py.py#growth")
+parameter(x, kind::scalar, representation::f64)
+parameter(r, kind::scalar, representation::f64)
+returns(kind::scalar, representation::f64)
+manifest(nonvalue::mathematical::singular, as::raise("ZeroDivisionError"))
+manifest(
+  nonvalue::mathematical::singular,
+  as::raise("ValueError"),
+  operation: operator::binary::remainder::truncation,
+)
+manifest(nonvalue::mathematical::domain, as::raise("ValueError"))
+manifest(
+  nonvalue::mathematical::domain,
+  as::complex,
+  operation: operator::binary::power,
+)
+manifest(nonvalue::machine::overflow, as::raise("OverflowError"))
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::addition,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::subtraction,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::multiplication,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::division::real,
+)
+structure(loops: 0, branches: 1, recursion: false)
+body(
+  statement::require(
+    operator::logic::not(operator::comparison::less(r, operator::unary::negation(1))),
+    failure::raise("ValueError", message: "rate below -1"),
+    at: span(11, 12, "if r < -1:"),
+  ),
+  statement::bind(g, operator::binary::addition(1, r), at: span(13, 13, "g = 1 + r")),
+  statement::return(
+    operator::binary::multiplication(x, g),
+    at: span(14, 14, "return x * g"),
+  ),
+)

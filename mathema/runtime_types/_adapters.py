@@ -359,8 +359,11 @@ class PandasDataFrameAdapter:
 def _pandas_column(abstract: AbstractVec, options: dict, index):
     """A vector as a pandas Series on `index`, a missing position held
     as `nan` (a float Series, the default), `None` (an object Series)
-    or `pd.NA` (a nullable `Float64` Series)."""
+    or `pd.NA` (a nullable `Float64` Series). A vector with no
+    positions is an empty float Series, the dtype of a float draw."""
     import pandas as pd
+    if not abstract.values:
+        return pd.Series([], index=index, dtype=float)
     spellings = {"nan": lambda: math.nan, "null": lambda: None,
                  "NA": lambda: pd.NA}
     fill = _spelling(options, spellings, "nan", abstract.spelling)

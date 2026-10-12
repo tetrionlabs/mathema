@@ -1116,6 +1116,21 @@ def _library_version_moved(merged_entry: dict,
     return None
 
 
+def _provenance_moved(facts, verified_entry: dict) -> "str | None":
+    """Intent:
+        What moved in the provenance of the body `facts` are read by
+        since the record was written (`meta["mathema.provenance"]`), as
+        `koine.facts.provenance_change` says it: `"body"`, `"frontend"`
+        or None. A proof from a body rests on both, so either change
+        makes the record stale, and every claim it proved by derive
+        with it.
+    """
+    from .koine.facts import provenance, provenance_change
+    return provenance_change(
+        provenance(facts),
+        (verified_entry.get("meta") or {}).get("mathema.provenance"))
+
+
 def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
                            verified_entry: dict) -> bool:
     """Intent:
@@ -1804,9 +1819,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                             verified_entry)
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
+        body_moved = _provenance_moved(facts_now, verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
-                    and version_moved is None
+                    and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -1825,6 +1841,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             dependency_changed = any(
                 d.get("key") in stored_forms and d.get("form")
                 and d.get("form") != stored_forms[d.get("key")]
+                for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
+            # a callee's body provenance stored when this record was
+            # adjudicated against the callee's live one: a body that
+            # moved under the same form re-adjudicates too
+            from .koine.facts import provenance_change
+            stored_bodies = {d.get("key"): d.get("provenance") for d in
+                             verified_entry.get("dependencies") or []
+                             if d.get("kind") == "function" and d.get("key")}
+            dependency_changed = any(
+                d.get("key") in stored_bodies
+                and provenance_change(d.get("provenance"),
+                                      stored_bodies[d.get("key")]) is not None
                 for d in deps_now or [] if d.get("kind") == "function")
         if is_fresh and not dependency_changed:
             # a module-level constant is compared by VALUE against this
@@ -1909,6 +1938,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
                else "definition rows changed" if definitions_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
+               else f"{body_moved} changed" if body_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh

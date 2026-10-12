@@ -123,6 +123,8 @@ exclude = ["mathema._devtools*"]
 # the per-library subdirectories alike (mathema/compendium/**/*.yaml);
 # the loader reads the files beside its own source
 "mathema.compendium" = ["*.yaml", "**/*.yaml"]
+# the short names for KOINE's operations, read beside the source
+"mathema.koine" = ["data/*.yaml"]
 # PEP 561: without this marker a type checker ignores the annotations
 # in the installed package and every imported name resolves to Any,
 # however carefully the source is typed

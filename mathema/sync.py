@@ -501,9 +501,23 @@ def write_claims_into_docstring(fn, names_with_statements: list) -> bool:
         Returns False without touching the file when there is no
         block, the source can't be located, or nothing is missing,
         never creates a block, never rewrites a human's prose.
+
+    Raises:
+        ValueError: `fn` carries injected facts, so its Python source
+            is a wrapper's and not the source of the function the facts
+            describe.
     """
     import inspect
     import re
+
+    from .analysis import has_injected_facts
+    if has_injected_facts(fn):
+        name = getattr(fn, "__qualname__", None) or repr(fn)
+        raise ValueError(
+            f"cannot write claims into the docstring of {name}: it carries "
+            f"injected facts, so its Python source is not the source of "
+            f"the function they describe; add the claims to that "
+            f"function's own docstring or to a claims file")
     if not names_with_statements:
         return False
     try:

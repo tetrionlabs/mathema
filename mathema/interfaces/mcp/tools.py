@@ -420,11 +420,11 @@ def _signature_mismatch(cj, target: str, root: str) -> "str | None":
     """
     import ast
 
-    from mathema.analysis import analyze_source
+    from mathema.analysis import effective_facts
     from mathema.targets import resolve_function
     try:
         _key, fn = resolve_function(target, root)
-        params = list(analyze_source(fn).params)
+        params = list(effective_facts(fn).params)
     except Exception:
         return None          # unresolvable target is not a lint failure
     # a `let name be ...` binding and any extra function letter are
@@ -659,9 +659,9 @@ def implementation_coverage(targets: list[str], root: str = ".",
             "test_report_stale": any(fc.test_stale for fc in pc.functions)}
 
 
-def badges(targets: list[str], root: str = ".") -> dict:
-    """The three badges over a target set (or rootwide when empty):
-    `implementation` (code coverage, a raw line ratio), `intent`
+def badges(targets: list[str] | None = None, root: str = ".") -> dict:
+    """The three badges over a target set (or rootwide when omitted or
+    empty): `implementation` (code coverage, a raw line ratio), `intent`
     (docsync), and `clarity` (how much is KNOWN about the behaviour,
     scored from VERIFIED claims, NOT a pass-rate; a falsified claim still
     counts as knowledge). Intent and clarity roll up to
@@ -672,10 +672,15 @@ def badges(targets: list[str], root: str = ".") -> dict:
     implementation, intent, clarity]`; a null clarity means the source
     is unavailable. `ascii` is the git-diffable triangle. Reads the
     verified store, so clarity reflects only declared-and-verified
-    claims, the CDD loop it rewards."""
-    from mathema.badges import render_triangle, repo_badges
+    claims, the CDD loop it rewards. `capped` lists `[key, steps]` for
+    each function a step of which stopped at the wall-clock cap. The
+    functions are scored in worker processes (`badges.default_jobs`),
+    where the cap holds; a function scored in the server itself, on a
+    worker thread, runs without it."""
+    from mathema.badges import default_jobs, render_triangle, repo_badges
 
-    scores = repo_badges(list(targets) or None, root=root)
+    scores = repo_badges(list(targets or ()) or None, root=root,
+                         jobs=default_jobs())
     rows = [[key, v["implementation"], v["intent"], v["clarity"]]
             for key, v in scores.per_function.items()]
     return {"implementation": scores.implementation,
@@ -685,7 +690,9 @@ def badges(targets: list[str], root: str = ".") -> dict:
             "cols": ["key", "implementation", "intent", "clarity"],
             "rows": rows,
             "ascii": render_triangle(scores.implementation, scores.intent,
-                                     scores.clarity)}
+                                     scores.clarity),
+            "capped": [[key, list(steps)]
+                       for key, steps in scores.capped.items()]}
 
 
 # every tool the server registers, in one place; server.py reads this

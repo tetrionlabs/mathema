@@ -58,10 +58,11 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 <!-- example: reading output -->
 ```text
 mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
-  in_unit  for rate in R|missing, 0 <= f(rate) <= 1   falsified at rate = nan
+  in_unit  for rate in R|missing, 0 <= f(rate) <= 1   falsified at f(nan)
     proven     mathematics  for rate in R, 0 <= f(rate) <= 1
     holds      computation  for rate in R, 0 <= f(rate) <= 1   43 draws
-    falsified  policy       f(nan)   no missing policy stated; returns 1.0
+    falsified  policy       f(nan)   f(nan) returns 1.0
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping nan is intended, run: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
                               (ii) exclude nan
@@ -70,10 +71,11 @@ mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
 
 <!-- illustration -->
 ```text
-in_unit  <claim as resolved>               falsified at rate = nan    headline: name, claim, verdict, witness
+in_unit  <claim as resolved>               falsified at f(nan)        headline: name, claim, verdict, witness
   proven     mathematics  <claim over R>                              the claim over the real numbers
   holds      computation  <claim : float>  43 draws                   the same claim run in float64
-  falsified  policy       f(nan)           returns 1.0                an input that is not an ordinary value
+  falsified  policy       f(nan)           f(nan) returns 1.0         an input that is not an ordinary value
+                          no missing policy stated
                           possible fixes: (i) ... (ii) ... (iii) ...
 ```
 

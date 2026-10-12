@@ -265,10 +265,11 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 <!-- example: core output -->
 ```text
 mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
-  in_unit  for rate in R|missing, 0 <= clamp_discount(rate) <= 1   falsified at rate = nan
+  in_unit  for rate in R|missing, 0 <= clamp_discount(rate) <= 1   falsified at f(nan)
     proven     mathematics  for rate in R, 0 <= clamp_discount(rate) <= 1
     holds      computation  for rate in R, 0 <= clamp_discount(rate) <= 1   43 draws
-    falsified  policy       f(nan)   no missing policy stated; returns 1.0
+    falsified  policy       f(nan)   f(nan) returns 1.0
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping nan is intended, run: mathema accept pricing.clamp_discount missing[rate] --as discovery --corrected "missing(f, rate) drops"
                               (ii) exclude nan
@@ -302,14 +303,16 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 <!-- example: core output -->
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
-  labels  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at score = nan
+  labels  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at f(nan)
     holds      computation  for score in [0.0, 1.0] : float, risk_label(score) in {"high", "low"}   34 draws
-    falsified  policy       f(nan)   no missing policy stated; returns "low"
+    falsified  policy       f(nan)   f(nan) returns "low"
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping nan is intended, run: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
                               (ii) exclude nan
                               (iii) handle nan at entry
-    falsified  policy       f(None)   no absent policy stated; raises TypeError
+    falsified  policy       f(None)   f(None) raises TypeError; f(0.959) returns "high"
+                            no absent policy stated
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept pricing.risk_label absent[score] --as discovery --corrected "absent(f, score) raises(TypeError)"
                               (ii) exclude None
@@ -429,10 +432,11 @@ print(mathema.check(average_return, claims=[mathema.claim(
 <!-- example: containers output -->
 ```text
 mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
-  nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at positions = [null]
+  nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at f([null])
     proven     mathematics  for positions in ([0.0, 1.0])^n ⊂ ℝ, total_exposure(positions) >= 0
     holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   208 entries across 44 draws, sizes (1, 1) to (8, 1)
-    falsified  policy       f([..., null, ...])   no missing policy stated; raises TypeError
+    falsified  policy       f([..., null, ...])   f([null]) raises TypeError; f([0.5]) returns 0.5
+                            no missing policy stated
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept portfolio.total_exposure missing[positions, null] --as discovery --corrected "missing(f, positions, null) raises(TypeError)"
                               (ii) exclude null
@@ -480,9 +484,10 @@ print(mathema.check(greeting, claims=[mathema.claim(
 <!-- example: strings output match=subset -->
 ```text
 mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
-  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at nickname = None
+  long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at f(None)
     holds      computation  for nickname in L[unicode], len(greeting(nickname)) >= 3   223 draws
-    falsified  policy       f(None)   no absent policy stated; raises AttributeError
+    falsified  policy       f(None)   f(None) raises AttributeError; f("a😀😀😀😀😀😀") returns "Hi a😀😀😀😀😀😀"
+                            no absent policy stated
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept names.greeting absent[nickname] --as discovery --corrected "absent(f, nickname) raises(AttributeError)"
                               (ii) exclude None
@@ -524,9 +529,10 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 <!-- example: slip output -->
 ```text
 mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
-  has_text  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   falsified at order.note unset
+  has_text  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   falsified at f(order) with order.note unset
     holds      computation  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   87 draws
-    falsified  policy       f(order) at order.note unset   no absent policy stated; raises KeyError
+    falsified  policy       f(order) at order.note unset   f(order) with order.note unset raises KeyError
+                            no absent policy stated
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept slips.delivery_note absent[order.note] --as discovery --corrected "absent(f, order.note) raises(KeyError)"
                               (ii) exclude unset at order.note
@@ -701,14 +707,16 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 <!-- example: core output -->
 ```text
 mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
-  risk_label_score_in_high_low  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at score = nan
+  risk_label_score_in_high_low  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at f(nan)
     holds      computation  for score in [0.0, 1.0] : float, risk_label(score) in {"high", "low"}   34 draws
-    falsified  policy       f(nan)   no missing policy stated; returns "low"
+    falsified  policy       f(nan)   f(nan) returns "low"
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping nan is intended, run: mathema accept pricing.risk_label missing[score] --as discovery --corrected "missing(f, score) drops"
                               (ii) exclude nan
                               (iii) handle nan at entry
-    falsified  policy       f(None)   no absent policy stated; raises TypeError
+    falsified  policy       f(None)   f(None) raises TypeError; f(0.959) returns "high"
+                            no absent policy stated
                             possible fixes:
                               (i) if the raise is intended, run: mathema accept pricing.risk_label absent[score] --as discovery --corrected "absent(f, score) raises(TypeError)"
                               (ii) exclude None
@@ -717,7 +725,7 @@ mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
            score (float): nan drops, confirmed by calling f at score = nan; no claim states it yet
   falsified is_absent_safe[f]: is_absent_safe(f)
            score (float): None raises TypeError, and no claim says it may
-           counterexample score = None: f raised TypeError
+           counterexample f(None) raises TypeError; f(0.959) returns "high"
            score is Optional[float], so f promised to take None.
            (i) if the raise is intended, state: absent(f, score) raises(TypeError)
            (ii) if not, handle None in f, or annotate score as float

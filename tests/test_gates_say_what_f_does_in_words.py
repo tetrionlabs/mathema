@@ -117,7 +117,8 @@ def test_a_falsified_gate_prints_its_reason_and_next_step():
     assert under[1] == (
         "           xs (list): null raises TypeError, and no claim says it may; nan "
         "propagates, confirmed on the 44 draws of c0[float]; no claim states it yet")
-    assert under[2] == "           counterexample xs = [null]: f raised TypeError"
+    assert under[2] == ("           counterexample f([null]) raises TypeError; "
+                        "f([0.5]) returns 0.5")
     assert under[3:5] == [
         "           (i) if the raise is intended, state: missing(f, xs, null) "
         "raises(TypeError)",
@@ -158,7 +159,7 @@ def test_a_declared_none_reads_as_a_sentence():
 
 def test_a_witness_lists_parameters_in_signature_order():
     (row,) = check_conjectures(ratio, [claim("is_absent_safe(f)")])
-    assert row.counterexample.startswith("x = None, y = ")
+    assert row.counterexample.startswith("f(x=None, y=")
 
 
 def test_the_gate_payload_says_unstated_not_none():

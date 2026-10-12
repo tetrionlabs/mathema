@@ -210,7 +210,7 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     (magnitudes, "for x in R^n, f(-x) == f(x)", "underivable"),
     # numpy.cumsum definition carries this once an index into a vector
     # lowers
-    (running, "for x in R^n, f(x)[dim(x) - 1] == sum(x)",
+    (running, "for x in [-1e6, 1e6]^n, f(x)[dim(x) - 1] == sum(x)",
      "only the reversal"),
 ])
 def test_held_on_the_probe_until_the_derive_route_reads_the_row(fn, law,

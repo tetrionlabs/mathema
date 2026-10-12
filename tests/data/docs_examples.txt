@@ -48,7 +48,7 @@
 [x] docs/derive-route.md:linspace                run verdicts  (requires)
 [x] docs/evidence-ladder.md:companion            run output
 [x] docs/existing-codebase.md:codebase           file file file run output run output run output run output run output run output file file run output run output  (requires)
-[ ] docs/extending.md:295
+[ ] docs/extending.md:329
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
@@ -63,6 +63,7 @@
 [x] docs/index.md:audit                          run output  (requires)
 [x] docs/index.md:lock                           file run output file session
 [x] docs/index.md:parity                         file run output
+[x] docs/language.md:refusal                     run output
 [x] docs/lemmas.md:chain                         run output
 [x] docs/lemmas.md:weakest                       run output  (after)
 [x] docs/lemmas.md:orphan                        run output  (after)
@@ -87,7 +88,7 @@
 [x] docs/missing-values.md:defines               file run output  (requires)
 [x] docs/missing-values.md:enforce               run output
 [-] docs/missing-values.md:17
-[-] docs/missing-values.md:558
+[-] docs/missing-values.md:564
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl
@@ -115,7 +116,7 @@
 [x] docs/runtime-types.md:rt-frame               run verdicts verdicts  (requires)
 [x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
-[-] docs/runtime-types.md:106
+[-] docs/runtime-types.md:114
 [x] docs/security.md:let-warning                 file session session
 [h] docs/start.md:59
 [h] docs/start.md:90
@@ -127,7 +128,7 @@
 [-] docs/three-layers.md:36
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] docs/verdicts.md:reading                     file run output
-[-] docs/verdicts.md:72
+[-] docs/verdicts.md:73
 [x] README.md:quick                              run output  (requires)
 [x] README.md:parity                             file run output
 [x] README.md:pole                               run output
@@ -135,4 +136,4 @@
 [x] README.md:pandas                             file run output  (requires)
 [x] README.md:stale                              file file run file session
 
-# 107 examples checked, 4 output fences not yet marked, 10 commands checked by hand
+# 108 examples checked, 4 output fences not yet marked, 10 commands checked by hand

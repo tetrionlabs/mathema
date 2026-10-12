@@ -22,10 +22,10 @@ def _double(x: float) -> float:
 
 
 def _foreign_facts():
-    # what a frontend for another language could honestly produce:
+    # what a frontend other than Python's could honestly produce:
     # the real fields, minus the Python tree, with a namespaced form
     facts = analyze_source(_double)
-    return replace(facts, tree=None, form="ts:0011223344ab")
+    return replace(facts, tree=None, form="ext:0011223344ab")
 
 
 def test_probe_route_adjudicates_normally_with_no_tree():
@@ -58,7 +58,7 @@ def test_route_best_falls_through_to_the_probe():
 
 def test_the_namespaced_form_hash_is_carried_not_recomputed():
     facts = _foreign_facts()
-    assert facts.form.startswith("ts:")
+    assert facts.form.startswith("ext:")
     (p,) = check_conjectures(_double, [claim("f(x) >= 0", route="probe")],
                              facts=facts)
     assert p.verdict in ("holds", "falsified")
@@ -72,14 +72,14 @@ def _proxy_shaped(impl, params):
     def proxy(*args, **kwargs):
         return impl(*args, **kwargs)
     proxy.__name__ = impl.__name__
-    proxy.__qualname__ = f"ts:src/{impl.__name__}.ts#{impl.__name__}"
+    proxy.__qualname__ = f"ext:src/{impl.__name__}#{impl.__name__}"
     proxy.__module__ = ""
     proxy.__signature__ = inspect.Signature([
         inspect.Parameter(p, inspect.Parameter.POSITIONAL_OR_KEYWORD)
         for p in params])
     facts = analyze_source(impl)
     proxy.__mathema_facts__ = replace(facts, tree=None,
-                                      form="ts:0011223344ab")
+                                      form="ext:0011223344ab")
     return proxy
 
 

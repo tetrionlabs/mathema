@@ -48,7 +48,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry
@@ -96,13 +96,13 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry
   falsified is_missing_safe[f]: is_missing_safe(f)
            xs (pandas.Series): nan and null follow pandas.Series.mean's own policy row (drops when values remain, propagates when every slot is missing); NA does not: f raises TypeError when every slot is NA
-           counterexample xs = [NA]: f raised TypeError
+           counterexample f([NA]) raises TypeError; f([0.0]) returns 0.0
            (i) if the raise is intended, state: assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)
            (ii) if not, change f
 ```
@@ -110,7 +110,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
 The value claim's block repeats above it, since the gate is checked
 beside it. `nan` and `null` follow pandas' rows. `NA` does not, and no
 claim says it may raise, so the gate is falsified with the call that
-shows it, and with the claim that would state the raise if it is what
+shows it beside the call that runs, and with the claim that would state the raise if it is what
 you meant.
 
 ## And with no slots at all?
@@ -134,7 +134,7 @@ mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
                               (i) if nan for no data is intended, state: mean_return([]) in {missing}
                               (ii) guard the empty input at entry
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
-    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   raises TypeError, where the word is propagates (from pandas.Series.mean's own policy row, which f calls)
+    falsified  policy       f([..., missing, ...]) assuming count(xs) == 0   f([NA]) raises TypeError; f([0.0]) returns 0.0
                             possible fixes:
                               (i) exclude missing
                               (ii) handle missing at entry

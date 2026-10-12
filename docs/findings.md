@@ -181,15 +181,15 @@ Among the results, all found with no claims written:
 
 <!-- example: finds output match=subset -->
 ```text
-  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [-9.061657584416523, 4.25155583491923, -8.416545984598887, -6.660970548921725, -1.6521312176947394], alpha = 3.9461414228077967
-    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [-9.061657584416523, 4.25155583491923, -8.416545984598887, -6.660970548921725, -1.6521312176947394], alpha = 3.9461414228077967: -9.061657584416523 vs -1329.070615525632
+  bounded_lower  min(x) <= f(x, alpha)   falsified at x = [3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268], alpha = -1.9849565326553186e+115
+    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268], alpha = -1.9849565326553186e+115: f returned -inf, and an infinity for a finite input is no value
     falsified  computation  min(x) <= f(x, alpha)   counterexample x = [1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.8642753322018042e+135: f returned nan
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
                               (ii) guard the empty input at entry
-  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [6.82330182650789, 2.6787942416109196, 1.7838785067417557], alpha = -2.435470685631305
-    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [6.82330182650789, 2.6787942416109196, 1.7838785067417557], alpha = -2.435470685631305: 53.77371542895705 vs -17.977238606534264
+  permutation_invariant  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   falsified at x = [8.6338492787308, 4.71865260026944, -2.6880969810273942, -9.949931458213397, 0.18213495115984912, 5.228217794578978, 8.329741555874289, -5.381751396732593], alpha = 2.9581766625133312
+    falsified  computation  let g = mathema.f.reverse_seq, f(x, alpha) = f(g(x), alpha)   counterexample x = [8.6338492787308, 4.71865260026944, -2.6880969810273942, -9.949931458213397, 0.18213495115984912, 5.228217794578978, 8.329741555874289, -5.381751396732593], alpha = 2.9581766625133312: -378.93676851822386 vs 1734.7013930509886
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)

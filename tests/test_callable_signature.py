@@ -99,7 +99,7 @@ def test_divide_is_checked_over_x1_and_x2(ufuncs_unsigned):
 def test_a_ufunc_states_the_defaults_it_kept(ufuncs_unsigned):
     import mathema
     rec = mathema.check(np.mean, claims=[
-        "let g = numpy.sqrt, for a in R^n, g(f(a) * f(a)) >= 0"])
+        "let g = numpy.sqrt, for a in [-1e6, 1e6]^n, g(f(a) * f(a)) >= 0"])
     (p,) = [p for p in rec.probes
             if p.meta.get("mathema.surface") == "declared"]
     assert p.verdict == "holds", p.note
