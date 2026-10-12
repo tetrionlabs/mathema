@@ -5,6 +5,7 @@ Three orthogonal measures of a codebase, each 0-100, and one picture.
 ```
 mathema badges [targets]                # print the triangle + numbers
 mathema badges [targets] --out .mathema/badges/   # also write artifacts
+mathema badges [targets] --refresh       # score every function again
 ```
 
 Omit targets for the rootwide analogue of `verify` (every function the
@@ -26,19 +27,39 @@ up to 4, by default; `--jobs 1` scores them in the one process), and the
 results are rolled up in the same order whatever N is, so the scores do
 not depend on it. Each function's result is kept in
 `.mathema/cache/badges/`, which carries its own `.gitignore` and is
-never committed. A later run uses a kept result only when nothing it was
-computed from has changed: the project's source and the code of every
-package it loads from outside the installed libraries, the installed
-packages and their versions, mathema's version and sampling seeds, the
-`MATHEMA_*` environment, the verified records, `.mathema/meta`, the
-claims files, `README.md`, `pyproject.toml`, and, for implementation,
-whether the test report is fresh for the function's file and which of
-its lines the tests ran. Any such change scores every function again, so
-a second run on an unchanged project takes seconds and gives the same
-numbers. A result is never kept when any wall-clock cap fired while
-scoring it, a capped step or a proof cap inside its check, since that
-result depends on how loaded the machine was; such a function is scored
-again on every run. Deleting the directory clears the cache.
+never committed. A later run uses a kept result only when nothing that
+function's result is computed from has changed:
+
+- the function itself and everything it reaches: the functions and
+  classes its source calls, theirs in turn, and any function a reached
+  verified record lists among its dependencies, each by its source, its
+  place in its file, its module docstring and the values of the
+  module-level names it reads, with its verified record and its
+  claims-file entry;
+- for implementation, whether the test report is fresh for the
+  function's file and which of its lines the tests ran;
+- what every function shares: mathema's version and its own code, the
+  sampling seeds, the Python version and platform, the `MATHEMA_*`
+  environment, the installed packages and their versions, the library
+  claims, `README.md`, `pyproject.toml`, `.mathema/index.yaml` and
+  `.mathema/meta`.
+
+So editing one function scores that function and its callers again, and
+leaves every other function's result in place; a second run on an
+unchanged project takes seconds and gives the same numbers as a run
+without the cache. A result is never kept when any wall-clock cap fired
+while scoring it, a capped step or a proof cap inside its check, since
+that result depends on how loaded the machine was; such a function is
+scored again on every run.
+
+The reach is what the source names. A function reached only at run
+time, through a name the source does not bind (a callable looked up in
+a table, passed in, or built by `getattr`), is not part of it, so an
+edit to that function leaves its callers' kept results in place.
+`--refresh` is the full recomputation: it scores every function again
+and rewrites the cache. Deleting the directory clears the cache too.
+From Python, `repo_badges(cache="refresh")` does the same, and
+`repo_badges(cache=False)` neither reads nor writes the cache.
 
 ## The three badges
 

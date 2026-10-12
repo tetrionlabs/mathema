@@ -917,7 +917,7 @@ def default_jobs() -> int:
 def repo_badges(targets=None, root: str = ".",
                 implementation: bool = True,
                 progress=None, jobs: int = 1,
-                cache: bool = True) -> BadgeScores:
+                cache: "bool | str" = True) -> BadgeScores:
     """Intent:
         Compute the badges over the population. Implementation is the raw
         repo line ratio of the test-union-probe-union-derive coverage (no
@@ -928,9 +928,10 @@ def repo_badges(targets=None, root: str = ".",
         None (nothing is output for them), it does not fall back to a
         cheaper, different number. `progress`, when given, is called as
         `progress(done, total)` after each function is scored. `jobs`
-        above 1 scores the functions in that many worker processes;
-        `cache` reads and writes the per-function cache
-        (`_badges_cache`).
+        above 1 scores the functions in that many worker processes.
+        `cache` True reads and writes the per-function cache
+        (`_badges_cache`), `"refresh"` computes every function again and
+        writes the cache, and False neither reads nor writes it.
     Notes:
         Implementation is the real union of all three sources, so it
         re-runs `check()` (under line tracing) for a function whose lines
@@ -954,7 +955,10 @@ def repo_badges(targets=None, root: str = ".",
         result is the same whichever process scores it, and is rolled up
         in population order, so the scores do not depend on `jobs`. A
         cached result is used only when its digest matches exactly
-        (`_badges_cache.function_digest`), and a result is never cached
+        (`_badges_cache.function_digest`: the function, everything it
+        statically reaches, their records and the environment; a
+        function reached only at run time is not part of it, which
+        `"refresh"` covers), and a result is never cached
         when any wall-clock cap fired while scoring it (a capped step,
         or a cap inside its check), since that result depends on the
         machine's load. A `StateDependenceWarning` is shown once
@@ -1164,7 +1168,7 @@ def _score_in_workers(keys: list, jobs: int, targets, root: str,
 
 
 def _repo_badges(targets, root: str, implementation: bool,
-                 progress, jobs: int, cache: bool) -> BadgeScores:
+                  progress, jobs: int, cache) -> BadgeScores:
     """Intent:
         `repo_badges` inside its run scope.
     """
@@ -1175,44 +1179,46 @@ def _repo_badges(targets, root: str, implementation: bool,
 
     root = os.path.abspath(root)
     functions = _population(targets, root)
-    fingerprint = _badges_cache.run_fingerprint(root) if cache else None
+    ctx = _score_context(root, implementation)
+    reading = bool(cache) and cache != "refresh"
+    digests: dict = {}
+    if cache:
+        env = _badges_cache.environment_digest(root, ctx["library_keys"])
+        reach = _badges_cache.Reach(root, ctx["verified"], ctx["declared"])
+        reaches = {key: reach.digest(env, key, fn)
+                   for key, fn in functions.items()}
+        for key, fn in functions.items():
+            fresh, test_lines = False, ()
+            if implementation:
+                _stmts, test_lines, fresh = _test_reading(fn, ctx)
+            digests[key] = _badges_cache.function_digest(
+                reaches[key], implementation, fresh, test_lines)
+        weights_key = _badges_cache.weights_digest(env, reaches)
     weights = None
-    if fingerprint is not None:
-        weights_key = _badges_cache.weights_digest(fingerprint, functions)
+    if reading:
         kept = _badges_cache.read(root, weights_key)
         weights = (kept or {}).get("weights")
     if weights is None:
         weights = centrality_weights(functions)
-        if fingerprint is not None:
+        if cache:
             _badges_cache.write(root, weights_key, {"weights": weights})
-    ctx = _score_context(root, implementation)
 
     results: dict = {}
-    digests: dict = {}
     shown: set = set()
     total = len(functions)
 
     def finished(key: str, result: dict, computed: bool) -> None:
         results[key] = result
         _reissue(result.get("warnings") or [], shown)
-        if computed and fingerprint is not None and not result["capped"] \
+        if computed and cache and not result["capped"] \
                 and not result.get("timed_out"):
             _badges_cache.write(root, digests[key], result)
         if progress is not None:
             progress(len(results), total)
 
     todo = []
-    for key, fn in functions.items():
-        if fingerprint is None:
-            todo.append(key)
-            continue
-        fresh, test_lines = False, ()
-        if implementation:
-            _stmts, test_cov, fresh = _test_reading(fn, ctx)
-            test_lines = test_cov
-        digests[key] = _badges_cache.function_digest(
-            fingerprint, key, implementation, fresh, test_lines)
-        hit = _badges_cache.read(root, digests[key])
+    for key in functions:
+        hit = _badges_cache.read(root, digests[key]) if reading else None
         if hit is not None:
             finished(key, hit, computed=False)
         else:

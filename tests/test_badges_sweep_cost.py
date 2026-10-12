@@ -287,24 +287,175 @@ def test_a_second_run_on_an_unchanged_project_reads_every_result_from_the_cache(
     assert len(list(cache_dir.glob("*/*.json"))) == 5
 
 
-def test_a_changed_record_or_source_computes_the_run_again(importable,
-                                                           monkeypatch):
-    from mathema.spec import verified_dir
-    _package(importable, "bsc_stale", 1)
+def _fresh_import(name: str) -> None:
+    for m in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+        del sys.modules[m]
+
+
+_GRAPH_SOURCE = '''\
+def helper(x: float) -> float:
+    """Intent:
+        Twice x.
+    """
+    return x + x
+def f0(x: float) -> float:
+    """Intent:
+        Twice x plus 0.
+    """
+    return helper(x) + 0
+def f1(x: float) -> float:
+    """Intent:
+        Twice x plus 1.
+    """
+    return helper(x) + 1
+def lone(x: float) -> float:
+    """Intent:
+        x plus 3.
+    """
+    return x + 3
+'''
+
+
+def _graph_package(root, name: str) -> None:
+    """`helper`, two callers of it (`f0`, `f1`), and `lone`, which calls
+    nothing; each with a verified record and a claims-file entry."""
+    from mathema.spec import verified_dir, write_yaml
+    pkg = root / name
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "mod.py").write_text(_GRAPH_SOURCE)
+    os.makedirs(verified_dir(str(root)), exist_ok=True)
+    claims = {}
+    for short in ("helper", "f0", "f1", "lone"):
+        key = f"{name}.mod.{short}"
+        write_yaml(os.path.join(verified_dir(str(root)), f"{key}.yaml"),
+                   {key: {"name": short, "claims": [
+                       {"name": "grows", "statement": f"{short}(1.0) > 1.0",
+                        "verdict": "proven", "route": "derive"}]}})
+        claims[key] = {"claims": [{"name": "grows",
+                                   "statement": f"{short}(1.0) > 1.0"}]}
+    (root / "claims").mkdir()
+    write_yaml(str(root / "claims" / f"{name}.claims.yaml"), claims)
+
+
+def _edit(path, old: str, new: str) -> None:
+    text = path.read_text()
+    assert old in text
+    path.write_text(text.replace(old, new))
+
+
+def test_editing_one_function_computes_it_and_its_callers_again(
+        importable, monkeypatch):
+    _graph_package(importable, "bsc_graph")
     traced = _traces(monkeypatch)
-    repo_badges(["bsc_stale"], root=str(importable))
-    record = os.path.join(verified_dir(str(importable)),
-                          "bsc_stale.mod.f0.yaml")
-    with open(record, "a") as fh:
-        fh.write("# edited\n")
+    repo_badges(["bsc_graph"], root=str(importable))
+    assert sorted(traced) == ["f0", "f1", "helper", "lone"]
+    mod = importable / "bsc_graph" / "mod.py"
+    _edit(mod, "return helper(x) + 0", "return helper(x) + 70")
+    _fresh_import("bsc_graph")
     traced.clear()
-    repo_badges(["bsc_stale"], root=str(importable))
-    assert sorted(traced) == ["f0", "helper"]
-    other = importable / "bsc_stale" / "extra.py"
-    other.write_text("LIMIT = 3\n")
+    repo_badges(["bsc_graph"], root=str(importable))
+    assert traced == ["f0"]
+    _edit(mod, "return x + x", "return x + x + 0.0")
+    _fresh_import("bsc_graph")
     traced.clear()
-    repo_badges(["bsc_stale"], root=str(importable))
-    assert sorted(traced) == ["f0", "helper"]
+    cached = repo_badges(["bsc_graph"], root=str(importable))
+    assert sorted(traced) == ["f0", "f1", "helper"]
+    uncached = repo_badges(["bsc_graph"], root=str(importable), cache=False)
+    assert _snapshot(cached) == _snapshot(uncached)
+
+
+def test_a_changed_record_computes_that_function_and_its_callers_again(
+        importable, monkeypatch):
+    import pathlib
+
+    from mathema.spec import verified_dir
+    _graph_package(importable, "bsc_record")
+    traced = _traces(monkeypatch)
+    repo_badges(["bsc_record"], root=str(importable))
+    store = pathlib.Path(verified_dir(str(importable)))
+    _edit(store / "bsc_record.mod.lone.yaml", "lone(1.0) > 1.0",
+          "lone(2.0) > 1.0")
+    traced.clear()
+    repo_badges(["bsc_record"], root=str(importable))
+    assert traced == ["lone"]
+    _edit(store / "bsc_record.mod.helper.yaml", "helper(1.0) > 1.0",
+          "helper(2.0) > 1.0")
+    traced.clear()
+    repo_badges(["bsc_record"], root=str(importable))
+    assert sorted(traced) == ["f0", "f1", "helper"]
+
+
+def test_a_new_unrelated_file_computes_nothing_again(importable,
+                                                     monkeypatch):
+    _graph_package(importable, "bsc_unrelated")
+    traced = _traces(monkeypatch)
+    repo_badges(["bsc_unrelated"], root=str(importable))
+    (importable / "bsc_unrelated" / "extra.py").write_text("LIMIT = 3\n")
+    traced.clear()
+    repo_badges(["bsc_unrelated"], root=str(importable))
+    assert traced == []
+
+
+def test_a_function_its_record_lists_as_a_dependency_counts_as_reached(
+        importable, monkeypatch):
+    from mathema.spec import verified_dir, write_yaml
+    _graph_package(importable, "bsc_listed")
+    key = "bsc_listed.mod.lone"
+    write_yaml(os.path.join(verified_dir(str(importable)), f"{key}.yaml"),
+               {key: {"name": "lone", "claims": [
+                   {"name": "grows", "statement": "lone(1.0) > 1.0",
+                    "verdict": "proven", "route": "derive"}],
+                   "dependencies": [{"name": "helper", "kind": "function",
+                                     "key": "bsc_listed.mod.helper"}]}})
+    traced = _traces(monkeypatch)
+    repo_badges(["bsc_listed"], root=str(importable))
+    _edit(importable / "bsc_listed" / "mod.py", "return x + x",
+          "return x + x + 0.0")
+    _fresh_import("bsc_listed")
+    traced.clear()
+    repo_badges(["bsc_listed"], root=str(importable))
+    assert sorted(traced) == ["f0", "f1", "helper", "lone"]
+
+
+def test_refresh_computes_every_function_again_and_rewrites_the_cache(
+        importable, monkeypatch):
+    import json
+    _graph_package(importable, "bsc_refresh")
+    traced = _traces(monkeypatch)
+    first = repo_badges(["bsc_refresh"], root=str(importable))
+    cache_dir = importable / ".mathema" / "cache" / "badges"
+    for path in cache_dir.glob("*/*.json"):
+        entry = json.loads(path.read_text())
+        if "intent" in entry:
+            entry["intent"] = 3
+            path.write_text(json.dumps(entry))
+    traced.clear()
+    stale = repo_badges(["bsc_refresh"], root=str(importable))
+    assert traced == [] and _snapshot(stale) != _snapshot(first)
+    refreshed = repo_badges(["bsc_refresh"], root=str(importable),
+                            cache="refresh")
+    assert sorted(traced) == ["f0", "f1", "helper", "lone"]
+    assert _snapshot(refreshed) == _snapshot(first)
+    traced.clear()
+    again = repo_badges(["bsc_refresh"], root=str(importable))
+    assert traced == []
+    assert _snapshot(again) == _snapshot(first)
+
+
+def test_the_cli_passes_refresh_to_the_run(tmp_path, monkeypatch, capsys):
+    from mathema import badges
+    from mathema.cli import main
+    seen = []
+    real = badges.repo_badges
+
+    def recording(*a, **k):
+        seen.append(k.get("cache"))
+        return real(*a, **k)
+    monkeypatch.setattr(badges, "repo_badges", recording)
+    main(["badges", "--root", str(tmp_path), "--refresh"])
+    main(["badges", "--root", str(tmp_path)])
+    assert seen == ["refresh", True]
 
 
 def test_a_result_with_a_capped_step_is_never_cached(importable,

@@ -2933,7 +2933,8 @@ def cmd_badges(args) -> int:
         os.makedirs(out_dir, exist_ok=True)
     scores = repo_badges(args.target or None, root=root,
                          progress=_badges_progress(sys.stderr),
-                         jobs=args.jobs)
+                         jobs=args.jobs,
+                         cache="refresh" if args.refresh else True)
     for key, steps in scores.capped.items():
         print(f"{key}: stopped at the wall-clock cap "
               f"({', '.join(steps)})", file=sys.stderr)
@@ -3178,6 +3179,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="score the functions in N worker processes "
                          f"(default {_badges.default_jobs()}, the CPU "
                          "count up to 4; 1 scores them in this process)")
+    pb.add_argument("--refresh", action="store_true",
+                    help="compute every function again and rewrite the "
+                         "badges cache (a function's cached result is "
+                         "otherwise kept while it, everything it "
+                         "statically reaches and their records are "
+                         "unchanged)")
     pb.set_defaults(fn=cmd_badges)
 
     pcomp = sub.add_parser("compendium", help="the claims about the "
