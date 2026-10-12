@@ -5,7 +5,7 @@
 # FROZEN: a changed hash is a change to KOINE's canonical form.
 calls_sibling_py:
   koine_hash: koine-0.0.1:af98ae3ff43d4c96
-  nominal_hash: TBD
+  nominal_hash: koine-0.0.1:758966d78bdca35d
 dot_py:
   koine_hash: koine-0.0.1:abd467d14753695c
   nominal_hash: koine-0.0.1:a5eaa225e8ebf3c6
@@ -14,7 +14,7 @@ ema_first_py:
   nominal_hash: koine-0.0.1:72f6a71f2dd22499
 fact_rec_py:
   koine_hash: koine-0.0.1:8d6610982a4f0a5e
-  nominal_hash: TBD
+  nominal_hash: koine-0.0.1:12137b80b0d0892a
 growth_py:
   koine_hash: koine-0.0.1:989acc442e1bdcd6
   nominal_hash: koine-0.0.1:bd9102d9efb1342e
