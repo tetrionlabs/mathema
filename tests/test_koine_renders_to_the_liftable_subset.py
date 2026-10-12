@@ -4,6 +4,7 @@
 computes what the interpreter says, agrees with the Python function the
 document was written from, and proves through the derive route the
 claims that function proves."""
+import ast
 import inspect
 import math
 
@@ -38,6 +39,18 @@ GOLDEN_FUNCTIONS = {"growth_py": "growth", "ema_first_py": "ema", "piecewise_py"
                     "remainders_py": "remainders"}
 
 
+def spelled(fragment):
+    """The fragment as this Python's `ast.unparse` spells it, the
+    spelling the renderer writes: a compound-statement header such as
+    `for i, v in enumerate(xs):` is parsed with a `pass` body and only
+    its header line kept, so `for (i, v) in ...` on 3.10 and
+    `for i, v in ...` on later versions both match."""
+    header = fragment.endswith(":")
+    tree = ast.parse(fragment + " pass" if header else fragment)
+    text = ast.unparse(tree)
+    return text.splitlines()[0] if header else text
+
+
 def verdicts(rec):
     """Named claims only, without the `[float]` companion and the
     default policy rows."""
@@ -49,7 +62,7 @@ def verdicts(rec):
 def test_growth_renders_to_the_liftable_subset():
     r = render(growth())
     assert r.source.startswith("def growth(x: float, r: float) -> float:")
-    assert "if r < -1:" in r.source and "raise ValueError" in r.source
+    assert spelled("if r < -1:") in r.source and spelled("raise ValueError") in r.source
     assert r.exceptions == {"ValueError"}
     assert r.line_map == {2: 2, 4: 3, 5: 4}
 
@@ -68,7 +81,7 @@ def test_a_qualified_failure_type_is_raised_under_its_last_segment():
     d = doc(GROWTH_BODY.replace('"ValueError"', '"pkg.errors.RateError"'), name="growth")
     r = render(d)
     assert r.exceptions == {"pkg.errors.RateError"}
-    assert "raise RateError()" in r.source
+    assert spelled("raise RateError()") in r.source
     with pytest.raises(Exception) as caught:
         materialise(r)(2.0, -2.0)
     assert type(caught.value).__name__ == "pkg.errors.RateError"
@@ -108,7 +121,7 @@ def test_the_rendering_and_the_original_prove_alike():
 
 def test_the_fold_renders_over_the_tail():
     r = render(golden("ema_first_py"))
-    assert "for v in xs[1:]:" in r.source
+    assert spelled("for v in xs[1:]:") in r.source
     assert materialise(r)([1.0, 2.0, 3.0], 0.5) == 2.25
 
 
@@ -116,14 +129,14 @@ def test_operations_without_a_python_spelling_use_the_helpers():
     r = render(doc(OPS))
     for spelling in ("math.fmod(x, r)", "math.hypot(x, r)", "round_ties_up(x)",
                      "div_trunc(x, r)", "sign(x)", "math.pi"):
-        assert spelling in r.source, spelling
+        assert spelled(spelling) in r.source, spelling
     fn = materialise(r)
     assert fn(-7.5, 2.0)[:4] == (-1.5, pytest.approx(7.762087348130012), -7, -3.0)
 
 
 def test_locals_and_externals():
     r = render(doc(LOCAL_AND_CALLS))
-    assert "sq = lambda t: t * t" in r.source
+    assert spelled("sq = lambda t: t * t") in r.source
     assert r.externals == {"twice": "py:src/shapes.py#twice"}
     with pytest.raises(NameError, match="no binding for external 'twice'"):
         materialise(r)
@@ -139,7 +152,7 @@ def test_loop_forms():
       ], {at()}, index: i),
       statement::return(acc, {at()}),
     """, params=SEQUENCE)
-    assert "for i, v in enumerate(xs):" in render(each).source
+    assert spelled("for i, v in enumerate(xs):") in render(each).source
     assert materialise(render(each))([1.0, 2.0, 3.0], 0.0) == 8.0
     bad = Document.parse(each.text().replace("statement::loop::each(\n    v,\n    xs,\n    0,",
                                              "statement::loop::each(\n    v,\n    xs,\n    1,"))
