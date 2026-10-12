@@ -464,7 +464,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         conflicts = [c for c in claim_conflicts(fn, file_entry)
                      if c.get("kind") != "release-move"]
         from .authoring import retrieve
-        merged = retrieve(fn, root)
+        merged = retrieve(fn, root, store=declared)
         drift = docstring_drift(fn, merged, verified_entry)
         unknown = any(d["kind"] == "unknown-in-docstring" for d in drift)
         claims_in_sync = not conflicts and not unknown
@@ -499,7 +499,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     verified_claim_count = len(verified_entry.get("claims") or [])
     try:
         from .authoring import retrieve as _retrieve
-        declared_claim_count = len(_retrieve(fn, root).get("claims") or [])
+        declared_claim_count = len(_retrieve(fn, root, store=declared)
+                                   .get("claims") or [])
     except Exception:
         declared_claim_count = 0
     claims_actual = max(len(parsed.claims), verified_claim_count,

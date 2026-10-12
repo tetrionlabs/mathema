@@ -22,6 +22,7 @@ scores span.
 """
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 
 # The clarity ALGORITHM is versioned like a route: an open string, so a
@@ -800,13 +801,17 @@ class BadgeScores:
     `implementation`/`intent`/`clarity` are 0-100; `overall` is the
     radar-triangle area (0-100), the single health number CI diffs across
     commits. `per_function` maps each key to its own three scores (a
-    clarity None means the function posed no question)."""
+    clarity None means the function posed no question). `capped` maps
+    each key whose step outran the wall-clock cap to the scores that
+    step feeds (`implementation`, `intent`, `clarity`); see
+    `repo_badges`."""
     implementation: int | None
     intent: int
     clarity: int
     overall: int | None
     per_function: dict = field(default_factory=dict)
     algo: str = CLARITY_ALGO
+    capped: dict = field(default_factory=dict)
 
 
 def _population(targets, root: str) -> dict:
@@ -852,8 +857,67 @@ def triangle_area(a: float, b: float, c: float) -> int:
     return round(100 * fc * (fa + fb) / 2.0)
 
 
+class _Capped(Exception):
+    """A per-function step that outran its wall-clock cap."""
+
+
+def _capped(step):
+    """Intent:
+        `step()` under the badges step cap
+        (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`).
+
+    Raises:
+        _Capped: the cap fired before `step` returned.
+    """
+    from . import _timeout
+    try:
+        return _timeout._with_timeout(
+            step, _timeout.BADGES_STEP_TIMEOUT_SECONDS)
+    except TimeoutError:
+        raise _Capped() from None
+
+
+@contextlib.contextmanager
+def _state_warnings_once():
+    """Intent:
+        Within the block, show each distinct `StateDependenceWarning`
+        (one per function, its text names the function and the state it
+        reads) once, however many times the run analyses that function;
+        every other warning is shown as it would be outside.
+    """
+    import warnings
+
+    from .analysis import StateDependenceWarning
+    seen: set = set()
+    with warnings.catch_warnings():
+        show = warnings.showwarning
+
+        def _show(message, category, filename, lineno, file=None,
+                  line=None):
+            if issubclass(category, StateDependenceWarning):
+                text = str(message)
+                if text in seen:
+                    return
+                seen.add(text)
+            show(message, category, filename, lineno, file, line)
+
+        warnings.showwarning = _show
+        yield
+
+
+def default_jobs() -> int:
+    """Intent:
+        The number of worker processes a badges run uses unless told
+        otherwise: the machine's CPU count, at most 4.
+    """
+    import os
+    return max(1, min(os.cpu_count() or 1, 4))
+
+
 def repo_badges(targets=None, root: str = ".",
-                implementation: bool = True) -> BadgeScores:
+                implementation: bool = True,
+                progress=None, jobs: int = 1,
+                cache: "bool | str" = True) -> BadgeScores:
     """Intent:
         Compute the badges over the population. Implementation is the raw
         repo line ratio of the test-union-probe-union-derive coverage (no
@@ -862,7 +926,12 @@ def repo_badges(targets=None, root: str = ".",
         is the triangle area. `implementation=False` SKIPS the coverage
         pass entirely: the implementation score and `overall` come back
         None (nothing is output for them), it does not fall back to a
-        cheaper, different number.
+        cheaper, different number. `progress`, when given, is called as
+        `progress(done, total)` after each function is scored. `jobs`
+        above 1 scores the functions in that many worker processes.
+        `cache` True reads and writes the per-function cache
+        (`_badges_cache`), `"refresh"` computes every function again and
+        writes the cache, and False neither reads nor writes it.
     Notes:
         Implementation is the real union of all three sources, so it
         re-runs `check()` (under line tracing) for a function whose lines
@@ -875,55 +944,315 @@ def repo_badges(targets=None, root: str = ".",
         committed verified store (no re-adjudication) and is recorded with
         its algorithm version in `algo` (`CLARITY_ALGO`). A clarity
         None (source unavailable) drops out of the clarity roll-up.
+        The run shares its reads (`_run_scope.run_scope`): the stores,
+        the claims files and the library claims are read once, in each
+        worker process too. Each function's three steps run under the
+        badges step cap (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`), which
+        is a main-thread alarm, so it holds in every worker process; a
+        step the cap stops is named in `capped`, its function's
+        implementation counts the fresh test lines alone, and its intent
+        or clarity is None and drops out of that roll-up. A function's
+        result is the same whichever process scores it, and is rolled up
+        in population order, so the scores do not depend on `jobs`. A
+        cached result is used only when its digest matches exactly
+        (`_badges_cache.function_digest`: the function, everything it
+        statically reaches, their records and the environment; a
+        function reached only at run time is not part of it, which
+        `"refresh"` covers), and a result is never cached
+        when any wall-clock cap fired while scoring it (a capped step,
+        or a cap inside its check), since that result depends on the
+        machine's load. A `StateDependenceWarning` is shown once
+        per function, a cached function's included.
     """
-    from .centrality import centrality_weights
-    from .docstring import docstring_sync
-    from .impl_coverage import (_external_lines, _line_range,
-                                _statement_lines, function_coverage)
-    from .inventory import coverage_freshness, read_test_coverage
-    from .spec import load_verified
+    from ._run_scope import run_scope
+    with run_scope(), _state_warnings_once():
+        return _repo_badges(targets, root, implementation, progress,
+                            max(1, int(jobs or 1)), cache)
 
-    functions = _population(targets, root)
-    weights = centrality_weights(functions)
-    verified = load_verified(root)
+
+def _score_context(root: str, implementation: bool) -> dict:
+    """Intent:
+        What every function's scoring reads, loaded once: the declared
+        and verified stores, the library keys, the test report and its
+        freshness, and the docsync cache of callees already measured.
+    """
     from .compendium import load_library_claims
-    library_keys = frozenset(load_library_claims(root))
-    coverage_data = read_test_coverage(root) if implementation else None
-    freshness = coverage_freshness(root) if implementation else None
+    from .inventory import coverage_freshness, read_test_coverage
+    from .spec import load_declared, load_verified
+    return {"root": root, "implementation": implementation,
+            "verified": load_verified(root), "declared": load_declared(root),
+            "library_keys": frozenset(load_library_claims(root)),
+            "coverage_data": (read_test_coverage(root) if implementation
+                              else None),
+            "freshness": coverage_freshness(root) if implementation else None,
+            "sync_cache": {}}
+
+
+def _test_reading(fn, ctx: dict) -> "tuple[set, set, bool]":
+    """Intent:
+        `(statements, test_lines, fresh)` for `fn`: its statement lines,
+        the ones the test report executed, and whether the report is
+        fresh for its file.
+    """
+    from .impl_coverage import _external_lines, _line_range, _statement_lines
+    stmts = _statement_lines(fn)
+    test_cov = _external_lines(fn, ctx["coverage_data"]) & stmts
+    rng = _line_range(fn)
+    fresh = rng is not None and not ctx["freshness"].is_stale(rng[0])
+    return stmts, test_cov, fresh
+
+
+def _warning_rows(caught) -> list:
+    """Intent:
+        Recorded warnings as plain rows, `[category module, category
+        name, text, filename, line]`.
+    """
+    return [[w.category.__module__, w.category.__qualname__,
+             str(w.message), str(w.filename), int(w.lineno or 0)]
+            for w in caught]
+
+
+def _reissue(rows, shown: set) -> None:
+    """Intent:
+        Show each warning row (`_warning_rows`) not already in `shown`,
+        as the warning it was.
+    """
+    import importlib
+    import warnings
+    for row in rows:
+        marker = tuple(row)
+        if marker in shown:
+            continue
+        shown.add(marker)
+        module, name, text, filename, line = row
+        try:
+            category = getattr(importlib.import_module(module), name)
+            if not (isinstance(category, type)
+                    and issubclass(category, Warning)):
+                category = UserWarning
+        except Exception:
+            category = UserWarning
+        warnings.warn_explicit(text, category, filename, line)
+
+
+def _score_one(key: str, fn, ctx: dict) -> dict:
+    """Intent:
+        One function's contribution to the badges: `statements` and
+        `covered` line counts (None without the coverage pass),
+        `intent`, `clarity`, the steps the cap stopped (`capped`), the
+        warnings shown while scoring it (`warnings`), and `timed_out`,
+        whether any wall-clock cap fired while scoring it (a proof cap
+        in its check, recorded as `mathema.timeout`, included), which
+        makes the result depend on the machine's load.
+    """
+    import warnings
+
+    from . import _timeout
+    from .docstring import docstring_sync
+    from .impl_coverage import function_coverage
+    root = ctx["root"]
+    stopped: list = []
+    out: dict = {"key": key, "statements": None, "covered": None}
+    fired = _timeout._WallClockExpired.fired
+    recorded_timeout = False
+    with warnings.catch_warnings(record=True) as caught:
+        if ctx["implementation"]:
+            stmts, test_cov, fresh = _test_reading(fn, ctx)
+            if stmts and fresh and not (stmts - test_cov):
+                covered, statements = stmts, stmts   # fresh tests cover it all
+            else:
+                try:
+                    fc = _capped(lambda: function_coverage(
+                        fn, root=root, coverage_data=ctx["coverage_data"],
+                        freshness=ctx["freshness"],
+                        declared_store=ctx["declared"],
+                        verified_store=ctx["verified"]))
+                    covered = fc.covered & fc.statements
+                    statements = fc.statements
+                    recorded_timeout = fc.timed_out
+                except _Capped:
+                    stopped.append("implementation")
+                    statements = stmts
+                    covered = test_cov if fresh else set()
+            out["statements"] = len(statements)
+            out["covered"] = len(covered)
+        try:
+            out["intent"] = _capped(lambda: docstring_sync(
+                fn, root=root, declared=ctx["declared"],
+                verified=ctx["verified"], claims_floor=0,
+                sync_cache=ctx["sync_cache"]).percent)
+        except _Capped:
+            stopped.append("intent")
+            out["intent"] = None
+        claims = ((ctx["verified"].get(key) or {}).get("entry", {})
+                  .get("claims") or [])
+        try:
+            out["clarity"] = _capped(lambda: clarity_score(
+                fn, verified_claims=claims, root=root,
+                store=ctx["verified"], library_keys=ctx["library_keys"]))
+        except _Capped:
+            stopped.append("clarity")
+            out["clarity"] = None
+    out["capped"] = stopped
+    out["warnings"] = _warning_rows(caught)
+    out["timed_out"] = bool(stopped or recorded_timeout
+                            or _timeout._WallClockExpired.fired != fired)
+    return out
+
+
+#: a worker process's population and scoring context
+_WORKER: dict = {}
+
+
+def _worker_start(path: list, targets, root: str,
+                  implementation: bool) -> None:
+    """Intent:
+        Set up a worker process: the parent's import path, a run scope
+        held for the life of the process, the population and the
+        scoring context.
+    """
+    import sys
+
+    from ._run_scope import run_scope
+    sys.path[:] = path
+    stack = contextlib.ExitStack()
+    stack.enter_context(run_scope())
+    _WORKER.update(stack=stack, functions=_population(targets, root),
+                   ctx=_score_context(root, implementation))
+
+
+def _worker_score(key: str) -> "tuple[str, dict | None]":
+    """Intent:
+        `(key, result)` for the function `key` in a worker process, the
+        result None when the worker's population does not hold it.
+    """
+    fn = _WORKER["functions"].get(key)
+    if fn is None:
+        return key, None
+    return key, _score_one(key, fn, _WORKER["ctx"])
+
+
+def _score_in_workers(keys: list, jobs: int, targets, root: str,
+                      implementation: bool, done) -> list:
+    """Intent:
+        Score `keys` across `jobs` worker processes, calling
+        `done(key, result)` for each as it arrives; returns the keys no
+        worker scored.
+    """
+    import multiprocessing
+    import sys
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    left = set(keys)
+    try:
+        pool = ProcessPoolExecutor(
+            max_workers=min(jobs, len(keys)),
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_worker_start,
+            initargs=(list(sys.path), list(targets) if targets else None,
+                      root, implementation))
+    except Exception:
+        return keys
+    try:
+        futures = [pool.submit(_worker_score, key) for key in keys]
+        for future in as_completed(futures):
+            try:
+                key, result = future.result()
+            except Exception:
+                continue
+            if result is not None:
+                left.discard(key)
+                done(key, result)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    return [key for key in keys if key in left]
+
+
+def _repo_badges(targets, root: str, implementation: bool,
+                  progress, jobs: int, cache) -> BadgeScores:
+    """Intent:
+        `repo_badges` inside its run scope.
+    """
+    import os
+
+    from . import _badges_cache
+    from .centrality import centrality_weights
+
+    root = os.path.abspath(root)
+    functions = _population(targets, root)
+    ctx = _score_context(root, implementation)
+    reading = bool(cache) and cache != "refresh"
+    digests: dict = {}
+    if cache:
+        env = _badges_cache.environment_digest(root, ctx["library_keys"])
+        reach = _badges_cache.Reach(root, ctx["verified"], ctx["declared"])
+        reaches = {key: reach.digest(env, key, fn)
+                   for key, fn in functions.items()}
+        for key, fn in functions.items():
+            fresh, test_lines = False, ()
+            if implementation:
+                _stmts, test_lines, fresh = _test_reading(fn, ctx)
+            digests[key] = _badges_cache.function_digest(
+                reaches[key], implementation, fresh, test_lines)
+        weights_key = _badges_cache.weights_digest(env, reaches)
+    weights = None
+    if reading:
+        kept = _badges_cache.read(root, weights_key)
+        weights = (kept or {}).get("weights")
+    if weights is None:
+        weights = centrality_weights(functions)
+        if cache:
+            _badges_cache.write(root, weights_key, {"weights": weights})
+
+    results: dict = {}
+    shown: set = set()
+    total = len(functions)
+
+    def finished(key: str, result: dict, computed: bool) -> None:
+        results[key] = result
+        _reissue(result.get("warnings") or [], shown)
+        if computed and cache and not result["capped"] \
+                and not result.get("timed_out"):
+            _badges_cache.write(root, digests[key], result)
+        if progress is not None:
+            progress(len(results), total)
+
+    todo = []
+    for key in functions:
+        hit = _badges_cache.read(root, digests[key]) if reading else None
+        if hit is not None:
+            finished(key, hit, computed=False)
+        else:
+            todo.append(key)
+    if jobs > 1 and len(todo) > 1:
+        todo = _score_in_workers(
+            todo, jobs, targets, root, implementation,
+            lambda key, result: finished(key, result, computed=True))
+    for key in todo:
+        finished(key, _score_one(key, functions[key], ctx), computed=True)
 
     covered_lines = statement_lines = 0
     intent_pairs: list[tuple[float, float]] = []
     behav_pairs: list[tuple[float, float]] = []
     per_function: dict = {}
-    for key, fn in functions.items():
+    capped: dict = {}
+    for key in functions:
+        result = results[key]
         w = weights.get(key, 1.0)
         impl = None
         if implementation:
-            stmts = _statement_lines(fn)
-            test_cov = _external_lines(fn, coverage_data) & stmts
-            rng = _line_range(fn)
-            fresh = rng is not None and not freshness.is_stale(rng[0])
-            if stmts and fresh and not (stmts - test_cov):
-                covered, statements = stmts, stmts   # fresh tests cover it all
-            else:
-                fc = function_coverage(fn, root=root,
-                                       coverage_data=coverage_data,
-                                       freshness=freshness)
-                covered = fc.covered & fc.statements
-                statements = fc.statements
-            covered_lines += len(covered)
-            statement_lines += len(statements)
-            impl = (round(100 * len(covered) / len(statements))
-                    if statements else 100)
-        intent = docstring_sync(fn, root=root).percent
-        intent_pairs.append((w, intent))
-        claims = (verified.get(key) or {}).get("entry", {}).get("claims") or []
-        behav = clarity_score(fn, verified_claims=claims, root=root,
-                              store=verified, library_keys=library_keys)
-        if behav is not None:
-            behav_pairs.append((w, behav))
+            covered, statements = result["covered"], result["statements"]
+            covered_lines += covered
+            statement_lines += statements
+            impl = round(100 * covered / statements) if statements else 100
+        if result["intent"] is not None:
+            intent_pairs.append((w, result["intent"]))
+        if result["clarity"] is not None:
+            behav_pairs.append((w, result["clarity"]))
         per_function[key] = {"implementation": impl,
-                             "intent": intent, "clarity": behav}
+                             "intent": result["intent"],
+                             "clarity": result["clarity"]}
+        if result["capped"]:
+            capped[key] = tuple(result["capped"])
 
     intent = _weighted_mean(intent_pairs)
     clarity = _weighted_mean(behav_pairs)
@@ -935,7 +1264,7 @@ def repo_badges(targets=None, root: str = ".",
         impl_score = overall = None
     return BadgeScores(implementation=impl_score, intent=intent,
                        clarity=clarity, overall=overall,
-                       per_function=per_function)
+                       per_function=per_function, capped=capped)
 
 
 # --- the radar triangle -----------------------------------------------
@@ -1158,13 +1487,19 @@ def ci_snapshot(scores: BadgeScores) -> dict:
     per-function rows, so a job can compute and comment the area delta
     between two commits. `clarity_algo` records the clarity algorithm
     version, so a diff across a version bump reads as an algorithm change,
-    not a regression."""
-    return {"implementation": scores.implementation,
-            "intent": scores.intent,
-            "clarity": scores.clarity,
-            "overall": scores.overall,
-            "clarity_algo": scores.algo,
-            "per_function": scores.per_function}
+    not a regression. `capped`, present only when a step stopped at the
+    badges step cap, lists `[key, steps]` for each such function, sorted
+    by key."""
+    out = {"implementation": scores.implementation,
+           "intent": scores.intent,
+           "clarity": scores.clarity,
+           "overall": scores.overall,
+           "clarity_algo": scores.algo,
+           "per_function": scores.per_function}
+    if scores.capped:
+        out["capped"] = [[key, list(steps)]
+                         for key, steps in sorted(scores.capped.items())]
+    return out
 
 
 # The standard, documented home for the written badge artifacts, under

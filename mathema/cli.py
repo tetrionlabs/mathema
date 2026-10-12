@@ -2883,6 +2883,28 @@ def cmd_coverage(args) -> int:
     return 0
 
 
+def _badges_progress(stream, every: int = 50):
+    """Intent:
+        A `repo_badges` progress callback that writes
+        `badges: <done>/<total> functions, <elapsed>s` to `stream` after
+        every `every` functions and after the last, or None when
+        `stream` is not a terminal.
+    """
+    import time
+    if not getattr(stream, "isatty", lambda: False)():
+        return None
+    started = time.monotonic()
+
+    def _report(done: int, total: int) -> None:
+        if done % every and done != total:
+            return
+        elapsed = time.monotonic() - started
+        print(f"badges: {done}/{total} functions, {elapsed:.0f}s",
+              file=stream, flush=True)
+
+    return _report
+
+
 def cmd_badges(args) -> int:
     """`mathema badges [targets]`: the three badges, implementation
     (code), intent (spec), and clarity (behaviour), each 0-100, rolled up
@@ -2909,7 +2931,13 @@ def cmd_badges(args) -> int:
         # the output directory is made first, so an unwritable one stops
         # the command before anything is printed
         os.makedirs(out_dir, exist_ok=True)
-    scores = repo_badges(args.target or None, root=root)
+    scores = repo_badges(args.target or None, root=root,
+                         progress=_badges_progress(sys.stderr),
+                         jobs=args.jobs,
+                         cache="refresh" if args.refresh else True)
+    for key, steps in scores.capped.items():
+        print(f"{key}: stopped at the wall-clock cap "
+              f"({', '.join(steps)})", file=sys.stderr)
     print(render_triangle(scores.implementation, scores.intent,
                           scores.clarity))
     if out_dir is not None:
@@ -3146,6 +3174,17 @@ def main(argv: list[str] | None = None) -> int:
                          "snippet); bare --out writes to "
                          f"the standard {_badges.DEFAULT_BADGE_DIR}/ under "
                          "--root, or pass an explicit DIR")
+    pb.add_argument("--jobs", type=int, default=_badges.default_jobs(),
+                    metavar="N",
+                    help="score the functions in N worker processes "
+                         f"(default {_badges.default_jobs()}, the CPU "
+                         "count up to 4; 1 scores them in this process)")
+    pb.add_argument("--refresh", action="store_true",
+                    help="compute every function again and rewrite the "
+                         "badges cache (a function's cached result is "
+                         "otherwise kept while it, everything it "
+                         "statically reaches and their records are "
+                         "unchanged)")
     pb.set_defaults(fn=cmd_badges)
 
     pcomp = sub.add_parser("compendium", help="the claims about the "

@@ -45,6 +45,11 @@ def _seconds_from_env(name: str, default: int) -> int:
 # finite.
 FAST_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_FAST_TIMEOUT", 3)
 EXTENSIVE_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_EXTENSIVE_TIMEOUT", 15)
+# The cap on each per-function step of a `mathema badges` run (its
+# coverage pass, its docsync, its clarity), whole seconds;
+# MATHEMA_BADGES_STEP_TIMEOUT overrides it for a whole process.
+BADGES_STEP_TIMEOUT_SECONDS = _seconds_from_env("MATHEMA_BADGES_STEP_TIMEOUT",
+                                                60)
 
 _EXPIRED = "exceeded the wall-clock cap"
 
@@ -169,9 +174,16 @@ class _WallClockExpired(BaseException):
         The alarm's own in-flight exception, BaseException so no
         library-internal `except Exception` can absorb it before it
         reaches `_with_timeout`'s boundary, where it becomes the
-        public TimeoutError.
+        public TimeoutError. `fired` counts every one made in this
+        process, so a caller can tell whether any cap fired while its
+        work ran, wherever that cap was caught.
     """
 
+    fired = 0
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        _WallClockExpired.fired += 1
 
 class _Guard:
     """Intent:

@@ -71,6 +71,8 @@ class FunctionCoverage:
                                # claim would derive-cover it (None = unknown)
     freshness: "str | None" = None   # how test_stale was judged: "hash"
                                # (a stamped report), "mtime", or None (no report)
+    timed_out: bool = False   # a proof or sweep in the check stopped at a
+                               # wall-clock cap (`mathema.timeout` meta)
 
     @property
     def uncovered(self) -> set:
@@ -217,14 +219,19 @@ def _derive_covered_lines(record, statements: set, recorded=frozenset(),
     return covered & statements
 
 
-def _verified_names(key: str, root: str) -> tuple:
+def _verified_names(key: str, root: str,
+                    store: "dict | None" = None) -> tuple:
     """Intent:
         From the function's verified record: the claim names verify has
-        recorded, and the ones a person accepted as evidence.
+        recorded, and the ones a person accepted as evidence. `store` is
+        the verified store already loaded (`spec.load_verified`), read
+        from `root` when None.
     """
     try:
-        from .spec import load_verified
-        entry = (load_verified(root).get(key) or {}).get("entry") or {}
+        if store is None:
+            from .spec import load_verified
+            store = load_verified(root)
+        entry = (store.get(key) or {}).get("entry") or {}
     except Exception:
         return frozenset(), frozenset()
     claims = entry.get("claims") or []
@@ -237,7 +244,9 @@ def _verified_names(key: str, root: str) -> tuple:
 def function_coverage(fn, key: str | None = None, root: str = ".",
                       coverage_data: dict | None = None,
                       report_mtime: float | None = None,
-                      freshness: ReportFreshness | None = None
+                      freshness: ReportFreshness | None = None, *,
+                      declared_store: "dict | None" = None,
+                      verified_store: "dict | None" = None
                       ) -> FunctionCoverage:
     """The merged implementation coverage of one function: test-executed
     ∪ probe-executed ∪ derive-modeled lines, over its executable
@@ -246,7 +255,12 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     whether the report's lines for this function's file still describe
     its code (`inventory.coverage_freshness`, by content hash when the
     report is stamped, else by file time); read from `root` when not
-    given, and `report_mtime` alone forces the file-time check."""
+    given, and `report_mtime` alone forces the file-time check.
+    `declared_store` and `verified_store` are the declared and verified
+    stores already loaded (`spec.load_declared`, `spec.load_verified`),
+    each read from `root` when None."""
+    import copy
+
     from .authoring import _fn_key
 
     key = key or _fn_key(fn)
@@ -258,7 +272,7 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
 
     try:
         from .authoring import retrieve
-        declared = retrieve(fn, root)
+        declared = copy.deepcopy(retrieve(fn, root, store=declared_store))
     except Exception:
         declared = None
     statements, probe_executed, record = _trace_check(fn, declared)
@@ -281,7 +295,7 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     by_source: dict = {}
     if probe_executed and not _is_mathema_own(fn):
         by_source["probe"] = probe_executed & statements
-    recorded, accepted = _verified_names(key, root)
+    recorded, accepted = _verified_names(key, root, verified_store)
     derive_lines = _derive_covered_lines(record, statements, recorded,
                                          accepted)
     if derive_lines:
@@ -307,11 +321,13 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
     except Exception:
         derivable = None
 
+    timed_out = any((getattr(p, "meta", None) or {}).get("mathema.timeout")
+                    for p in getattr(record, "probes", None) or [])
     return FunctionCoverage(key=key, statements=set(statements),
                             covered=covered, by_source=by_source,
                             traced=traced, test_stale=test_stale,
                             reclaimable=reclaimable, derivable=derivable,
-                            freshness=freshness.method)
+                            freshness=freshness.method, timed_out=timed_out)
 
 
 def _is_mathema_own(fn) -> bool:
