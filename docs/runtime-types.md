@@ -102,9 +102,13 @@ sampling note says what they were realised as (`as pandas.Series`).
 When the body uses a parameter as a vector, a matrix or a table (a
 method such as `.mean()` or `.std()`, `np.mean(x)`, `.T`, `@`,
 indexing, a column read by name) but the signature names no runtime
-type, the parameter is still sampled as a list, and in a module that
-imports numpy, pandas, polars or a library with a registered adapter
-the record names the runtime type to annotate:
+type, how it is drawn depends on the use. A use only a numpy array
+supports (`.T`, `@`, `.shape`, a numpy function called on it), in a
+module that imports numpy, draws it as an ndarray, and the record says
+so ("the body uses it as a numpy array"). Any other such use draws it
+as a list, and in a module that imports numpy, pandas, polars or a
+library with a registered adapter the record names the runtime type
+to annotate:
 
 <!-- illustration -->
 ```text
