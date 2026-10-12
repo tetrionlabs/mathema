@@ -477,6 +477,27 @@ def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
     return out
 
 
+def _explicit_bound(bounds):
+    """Intent:
+        An explicit `enforce_domain` bound in the shape the domain
+        checks read: a set, list or tuple of values is the finite set
+        of those values (a frozenset), except that two real numbers
+        given as a plain tuple or list are the closed interval between
+        them. Any other shape (an `Interval`, a `Domain`, a named type)
+        is returned unchanged.
+    """
+    import numbers
+    if isinstance(bounds, (set, frozenset)):
+        return frozenset(bounds)
+    if type(bounds) in (list, tuple):
+        if len(bounds) == 2 and all(
+                isinstance(v, numbers.Real) and not isinstance(v, bool)
+                for v in bounds):
+            return tuple(bounds)
+        return frozenset(bounds)
+    return bounds
+
+
 def enforce_domain(domain: dict | None = None, key: str | None = None,
                    root: str = "."):
     """Decorator: wrap a function so a call with an out-of-domain
@@ -506,7 +527,8 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     picking a value and letting the two drift apart. Every domain shape
     `check()` accepts is enforced here too: an `(lo, hi)` interval,
     `"Z"`/`"N"` (integer / non-negative integer), an explicit
-    discrete set, and a composite domain (`[0, 100] \\ {∅}`,
+    discrete set (a set, list or tuple of values, other than two numbers,
+    which are an interval), and a composite domain (`[0, 100] \\ {∅}`,
     `[0, 100] ⊂ Z`, a union), whether declared on a claim or passed
     explicitly. A parameter no source says
     anything about is left unchecked; this only ever narrows what a
@@ -520,10 +542,9 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
         from .types import domain_from_signature
 
         declared_domain = _domain_from_declared_claims(fn, key, root)
-        explicit = domain or {}
-        for p, bounds in explicit.items():
-            given = (tuple(bounds) if isinstance(bounds, (list, tuple))
-                     else bounds)
+        explicit = {p: _explicit_bound(bounds)
+                    for p, bounds in (domain or {}).items()}
+        for p, given in explicit.items():
             if p in declared_domain and declared_domain[p] != given:
                 raise DomainError(
                     f"enforce_domain(): explicit domain for {p!r} {given} "
