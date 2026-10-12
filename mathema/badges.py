@@ -331,7 +331,8 @@ def _callee_evidence(entry: dict) -> float:
     """Intent:
         The share of a call's hazard the callee's own record removes:
         the strongest settled definedness row it holds (an `is_defined`
-        row, bare or a restriction, or a `raises` row). Proven removes
+        row, bare or a restriction, or a `raises` row), or an identity
+        over its whole domain, which gives a value at every input. Proven removes
         it all; a holds removes what a holds removes of any source, by
         mechanism; a row accepted as trusted counts as a holds, never as
         proven. Anything else (no record, a bound, an unsettled or
@@ -349,7 +350,8 @@ def _callee_evidence(entry: dict) -> float:
             continue
         statement = str(row.get("statement") or row.get("law") or "")
         if region_row_kind(row.get("name")) != "is_defined" and not (
-                statement.startswith("raises(") or " raises(" in statement):
+                statement.startswith("raises(") or " raises(" in statement) \
+                and not _whole_domain_identity(row.get("name") or "", statement):
             continue
         accepted = row.get("accepted") or {}
         verdict = classify_verdict(row.get("verdict") or "")
@@ -362,6 +364,14 @@ def _callee_evidence(entry: dict) -> float:
             strength = 0.0
         best = max(best, strength)
     return best
+
+
+def _whole_domain_identity(name: str, statement: str) -> bool:
+    """Whether a row states what a function computes (an identity, an
+    equivalence, a closed form) over every input, binding no parameter
+    to a narrower set."""
+    return _claim_kind(name, statement) in _IDENTITY_KINDS and \
+        not _claim_bindings(statement)
 
 
 def _decorator_only_calls(fn, facts) -> frozenset:
