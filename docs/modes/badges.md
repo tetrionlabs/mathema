@@ -173,8 +173,9 @@ from the same domain every check uses. That domain is what the function
 itself states: its annotation, a guard in the body refusing every value
 outside a set (`if side not in {"buy", "sell"}: raise ValueError`), or an
 `@enforce_domain(...)` decorator, which takes the place of the annotation
-(a set, list or tuple of values there is the finite set of those values,
-and two numbers are the interval between them):
+(two numbers there are the closed interval between them, a string is read
+in the domain grammar, and any other set, list or tuple is the finite set
+of its members):
 
 | what is known about the parameter | bits |
 |-----------------------------------|------|
@@ -187,11 +188,12 @@ and two numbers are the interval between them):
 | any other guard in the body (its boundary is the unknown) | 1.0 |
 
 A finite set of `k` values is a choice carrying `log2(k)` bits, scaled by
-a tenth because a closed set is already most of the way to known. A
-parameter the function narrows below its type still starts at the type's
-1 bit, and the narrowing counts as known, so stating a domain on the
-function never lowers its score: only what the narrower domain leaves is
-charged, and the claims clear part of that.
+a tenth because a closed set is already most of the way to known. Every
+parameter starts at the 1.5 bits of nothing known, and whatever the
+function states about it (its annotation, a guard, `@enforce_domain`)
+counts as known, so annotating a parameter or stating its domain never
+lowers a score: only what the stated domain leaves is charged, and the
+claims clear part of that.
 
 Who states the domain matters. When a finite set is the function's own
 domain, a proof that visits every member covers every input the function
@@ -215,7 +217,7 @@ values each parameter's type can actually hold:
 
 - a `float` holds float64 doubles, which crowd towards zero, so `[0, 1]`
   holds about 25% of them, `[0, 100]` about 25.2%, `[0, inf)` half, and
-  `[0.5, 0.6]` about 0.005%;
+  `[0.5, 0.6]` about 0.005% (these shares are exact counts of doubles);
 - an `int` is unbounded, so a bounded stretch of integers is a vanishing
   share and a half-line half, unless the function itself bounds the
   parameter, when the integers in its range are counted;
@@ -227,9 +229,15 @@ values each parameter's type can actually hold:
 A claim binding several parameters covers the product of their shares.
 The share scales every dimension the claim credits: what it computes, the
 envelope and shape a proof of that entails, and what the parameters
-accept. Claims over different parts of one parameter's domain add up, so
-`{"buy", "sell"}` and `{"hold", "skip"}` together settle a four-value
-`Literal`. The easy way to earn the full share is to state the domain on
+accept. Every claim also earns a tenth of what it would earn over the part
+of the domain it does not cover, so a claim covering a share `s` is
+credited `s + 0.1 * (1 - s)` of its whole-domain credit: a proof at three
+names of a bare `str` earns a tenth, a claim over most of a stated domain
+nearly all of it, and a claim over everything exactly all of it. That
+tenth is counted once per source, so a pile of claims at single points
+earns no more than one does. Claims over different parts of one
+parameter's domain add up, so `{"buy", "sell"}` and `{"hold", "skip"}`
+together settle a four-value `Literal`. The easy way to earn the full share is to state the domain on
 the function, with `@enforce_domain`, an annotation or a guard, and then
 claim over all of it.
 
@@ -313,6 +321,12 @@ until the claim is verified again. Some of what a function does is not
 seen at all, for example a guard bounding a number to a range (only a
 guard to a set of strings is read as the domain), or a module-level list
 the function appends to (it reads as pure).
+
+Every fraction removed, every share and every credit stays between 0 and
+1, so the score stays between 0 and 100. A score of 100 means every source
+is settled by proof over the whole domain: a single holds, a claim over
+part of the domain or an unsettled callee leaves something, and the score
+then reads 99 at most, even where rounding would say 100.
 
 The scoring algorithm is versioned, and its version is recorded beside
 every score, so a number is only ever compared with one computed the same
