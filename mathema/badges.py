@@ -720,8 +720,11 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         if val > r.get(key, 0.0):
             r[key] = val
 
-    # (statement, strength) of each claim settling the map or a boundary
+    from .records import classify_verdict
+    # (statement, strength) of each holding claim settling the map or a
+    # boundary, and the strongest holding identity
     settling: list = []
+    entailing = 0.0
     for claim in verified_claims:
         name = claim.get("name") or ""
         statement = claim.get("statement") or claim.get("law") or ""
@@ -741,7 +744,6 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             # establishes its family (is_numerically_stable) for the
             # function; falsified, it is a defect in the parent's
             # computation and says nothing about the family as a whole
-            from .records import classify_verdict
             family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
             if family and classify_verdict(claim.get("verdict") or "") in (
                     "holds", "proven"):
@@ -757,26 +759,34 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             bump("safety:" + _SAFETY_SOURCE[base], st)
             continue
         kind = _claim_kind(name, statement)
+        # a falsified claim is knowledge about its own source only: a
+        # map shown wrong at a witness says nothing about the output's
+        # envelope, its shape or what the function accepts
+        holding = classify_verdict(claim.get("verdict") or "") != "falsified"
         if kind in _IDENTITY_KINDS:
             bump("identity", st)
-            settling.append((statement, st))
+            if holding:
+                entailing = max(entailing, st)
+                settling.append((statement, st))
         elif kind == "bound":
             bump("extent", st)
         elif kind == "partiality":
             bump("raises", st)
             bump("domain", st)                       # a raising guard IS a boundary
-            settling.append((statement, st))
+            if holding:
+                settling.append((statement, st))
         elif kind == "definedness":
             bump("domain", st)
-            settling.append((statement, st))
+            if holding:
+                settling.append((statement, st))
         else:                                        # the shape / relation group
             bump("shape", st)
     # entailment: knowing the exact map settles the output envelope, the
     # relational shape, and an unguarded parameter's domain, over the
     # part of that domain the claim ranges over
-    r["extent"] = max(r["extent"], r["identity"])
-    r["shape"] = max(r["shape"], r["identity"])
-    r["domain_soft"] = max(r["domain_soft"], r["domain"], r["identity"])
+    r["extent"] = max(r["extent"], entailing)
+    r["shape"] = max(r["shape"], entailing)
+    r["domain_soft"] = max(r["domain_soft"], r["domain"], entailing)
     if profile is not None:
         _binding_reductions(verified_claims, profile, bump)
         _absence_reductions(verified_claims, profile, bump)
