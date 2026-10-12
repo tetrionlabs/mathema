@@ -7,7 +7,7 @@ lifter(language: "py", name: "mathema", version: "0")
 source(
   file: "tests/fixtures/koine_py.py",
   line: 42,
-  sha256: "5d2d8adc429c50a287172e68fb03993f5ba329f63488b33bf3e5bb07cabe914d",
+  sha256: "7c455ec7544f56d613443d7c03fdd56ff867d7869db861ff7e92ddfada08b763",
 )
 function(name: "dot", key: "py:tests/fixtures/koine_py.py#dot")
 parameter(a, kind::sequence, representation::f64, element: representation::f64)

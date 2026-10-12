@@ -3,11 +3,19 @@
 """The canonical form and `koine_hash`: what they drop, what they
 respell, what they keep, and the specification's worked example, whose
 canonical spelling and hash are fixed."""
-from mathema.koine import Document, canonical_text, koine_hash
+from mathema.koine import Document, canonical_text, koine_hash, nominal_hash, nominal_text
 from mathema.koine.canonical import canonical_terms
 from tests._koine_docs import NONFINITE, at, doc, golden, growth, growth_restated
 
 WORKED_EXAMPLE_CANONICAL = (
+    'koine("0.0.1")\n'
+    "parameter(_p0,kind::scalar)\n"
+    "parameter(_p1,kind::scalar)\n"
+    "body(statement::require(operator::logic::not(operator::comparison::less(_p1,-1)),"
+    "failure::raise),statement::bind(_0,operator::binary::addition(1,_p1)),"
+    "statement::return(operator::binary::multiplication(_p0,_0)))")
+
+WORKED_EXAMPLE_NOMINAL = (
     'koine("0.0.1")\n'
     "parameter(x,kind::scalar)\n"
     "parameter(r,kind::scalar)\n"
@@ -19,7 +27,13 @@ WORKED_EXAMPLE_CANONICAL = (
 def test_the_worked_example_has_its_fixed_canonical_spelling_and_hash():
     for d in (growth(), golden("growth_py")):
         assert canonical_text(d) == WORKED_EXAMPLE_CANONICAL
-        assert koine_hash(d) == "koine-0.0.1:bd9102d9efb1342e"
+        assert koine_hash(d) == "koine-0.0.1:989acc442e1bdcd6"
+
+
+def test_the_worked_example_has_its_fixed_nominal_spelling_and_hash():
+    for d in (growth(), golden("growth_py")):
+        assert nominal_text(d) == WORKED_EXAMPLE_NOMINAL
+        assert nominal_hash(d) == "koine-0.0.1:bd9102d9efb1342e"
 
 
 def test_the_worked_example_hashes_alike_under_another_envelope():
@@ -35,7 +49,7 @@ def test_what_is_kept():
     text = canonical_text(d)
     assert "at:" not in text and "RateError" not in text
     assert "failure::raise" in text
-    assert "operator::comparison::less(r,-1)" in text
+    assert "operator::comparison::less(_p1,-1)" in text
 
 
 def test_canonical_is_deterministic_and_pure():
@@ -45,7 +59,7 @@ def test_canonical_is_deterministic_and_pure():
     assert d.text() == before
 
 
-def test_locals_renamed_in_binding_order_parameters_kept():
+def test_locals_renamed_in_binding_order():
     a = doc(f"statement::bind(g, 1, {at()}), statement::bind(h, g, {at()}),"
             f" statement::return(operator::binary::multiplication(x, h), {at()})")
     b = doc(f"statement::bind(first, 1, {at()}), statement::bind(second, first, {at()}),"
