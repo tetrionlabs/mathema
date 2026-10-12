@@ -142,7 +142,7 @@ def test_a_stored_proven_identity_scores_as_an_identity(tmp_path,
     mathema.write_spec(mod.double, root=str(tmp_path))
     stored = clarity_score(mod.double, root=str(tmp_path))
     by_hand = clarity_score(mod.double, verified_claims=[
-        {"name": "doubles", "statement": "f(x) == 2*x",
+        {"name": "doubles", "statement": "for x in [0, 10], f(x) == 2*x",
          "verdict": "proven", "route": "derive"},
         {"name": "doubles[float]", "statement": "f(x) == 2*x",
          "verdict": "holds", "route": "probe",

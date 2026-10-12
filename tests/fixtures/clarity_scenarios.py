@@ -142,7 +142,7 @@ _F_RANGE = _row("conversion", f"for c in [0, 100], {_F_LAW}")
 _F_WHOLE = _row("conversion", _F_LAW)
 _F_BOUND = _row("above_absolute_zero",
                 "for c in [-273.15, inf), f(c) >= -459.67")
-_F_SHAPE = _row("increasing[c]", "for c1 < c2, f(c1) < f(c2)")
+_F_SHAPE = _row("increasing[c]", "d(f(c), c) > 0")
 
 
 def _safe(*families, verdict="proven", route="examine"):

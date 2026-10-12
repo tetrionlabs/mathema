@@ -9,7 +9,7 @@ The algorithm version moves with the scale."""
 import textwrap
 
 from mathema.badges import (CLARITY_ALGO, _clarity_profile, _clarity_sources,
-                            clarity_bits, clarity_score)
+                            _reductions, clarity_bits, clarity_score)
 
 
 def _load(tmp_path, body, name):
@@ -86,11 +86,18 @@ def test_an_exhaustive_proof_clears_a_finite_set(tmp_path):
     assert rem_swept < rem_plain
 
 
-def test_a_claim_binding_a_narrower_domain_lowers_the_parameter_s_bits(tmp_path):
+def test_a_claim_over_a_narrower_range_credits_less_than_over_the_whole(tmp_path):
+    # a claim's own binding does not settle the function's domain: it
+    # speaks about the share of the inputs it ranges over, so the same
+    # claim over [0, 1] says less than over every float, and nothing
+    # about the parameter's domain
     mod = _load(tmp_path, _BODY, "clarity_bound")
     narrow = [{"name": "small", "statement": "for x in [0, 1], f(x) <= 2",
                "verdict": "holds", "route": "probe"}]
     whole = [{"name": "small", "statement": "f(x) <= 2",
               "verdict": "holds", "route": "probe"}]
-    assert clarity_score(mod.wide, verified_claims=narrow) > \
+    assert clarity_score(mod.wide, verified_claims=narrow) < \
         clarity_score(mod.wide, verified_claims=whole)
+    profile = _clarity_profile(mod.wide)
+    assert _reductions(narrow, profile.pure, profile)["domain_soft:x"] == \
+        _reductions([], profile.pure, profile)["domain_soft:x"]
