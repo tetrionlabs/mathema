@@ -4311,13 +4311,17 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     bound = cj_domain.get(p)
     if getattr(bound, "base_type", None) == "L":
         # the parameter is quantified over a language: its members are
-        # the instances, and a claim-level field bound narrows them by
-        # a bounded rejection
-        from .domain import path_bindings_hold
+        # the instances. A field the claim binds directly is redrawn
+        # inside its bound, every other field keeps the language's
+        # draw, and the instance is kept once it is still a member and
+        # every path binding holds, within a bounded rejection
+        from .domain import domain_contains, path_bindings_hold
         inst = None
         for _ in range(20):
-            inst = _synth("object", rng, bound)
-            if path_bindings_hold(inst, p, cj_domain):
+            inst = _with_bound_fields(_synth("object", rng, bound), cls,
+                                      fields, p, cj_domain, rng, specials)
+            if path_bindings_hold(inst, p, cj_domain) \
+                    and _still_member(inst, bound, domain_contains):
                 break
         return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
@@ -4328,6 +4332,65 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     for f, v in values.items():
         setattr(inst, f, v)
     return inst
+
+
+def _field_kind(cls, field: str) -> str:
+    """Intent:
+        The draw kind of a field of `cls`: `"int"` for a dataclass field
+        annotated `int`, `"float"` otherwise.
+    """
+    import dataclasses as _dc
+    if not (isinstance(cls, type) and _dc.is_dataclass(cls)):
+        return "float"
+    for f in _dc.fields(cls):
+        if f.name == field:
+            t = f.type
+            spelled = t.strip().lower() if isinstance(t, str) else None
+            return "int" if t is int or spelled == "int" else "float"
+    return "float"
+
+
+def _with_bound_fields(inst, cls, fields, p: str, cj_domain: dict, rng,
+                       specials):
+    """Intent:
+        `inst` with every field the claim binds directly (`p.field`)
+        drawn again inside its bound, as its own type draws it; the
+        fields the claim leaves unbound keep their values. A dataclass
+        is rebuilt with `dataclasses.replace`, any other instance is
+        copied and the fields set on the copy. `inst` itself when the
+        claim binds none of its fields or it is not an instance of
+        `cls`.
+    """
+    import copy
+    import dataclasses as _dc
+
+    from .probing import _synth
+    bound_fields = {f: cj_domain[f"{p}.{f}"] for f in fields or ()
+                    if f"{p}.{f}" in cj_domain}
+    if not bound_fields or not (isinstance(cls, type) and isinstance(inst, cls)):
+        return inst
+    values = {f: _synth(_field_kind(cls, f), rng, b, specials=specials)
+              for f, b in bound_fields.items()}
+    if _dc.is_dataclass(inst) and not isinstance(inst, type):
+        try:
+            return _dc.replace(inst, **values)
+        except Exception:
+            return inst
+    out = copy.copy(inst)
+    for f, v in values.items():
+        setattr(out, f, v)
+    return out
+
+
+def _still_member(inst, bound, domain_contains) -> bool:
+    """Intent:
+        Whether `inst` is a member of the language domain `bound`; a
+        membership test that raises counts as not a member.
+    """
+    try:
+        return bool(domain_contains(inst, bound))
+    except Exception:
+        return False
 
 
 def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
@@ -5204,6 +5267,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
+        undrawn = _undrawable_drawn(cj, fn, facts, domain)
+        if undrawn is not None:
+            out.append(_stamped(Probe(
+                cj.name, _chain_statement(cj) if cj.links else
+                statement_text(cj.relation, cj.lhs, cj.rhs),
+                "skipped", route="probe", note=undrawn,
+                meta={"mathema.probe_gap": "input-synthesis"}), cj))
+            continue
         gate_premise = _gate_premise_refusal(cj)
         if cj.links and gate_premise is not None:
             # a gate written as a premise is refused once for the claim,
@@ -5880,6 +5951,37 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 _WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
 
 
+def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
+    """Intent:
+        The reason a claim has no evaluable inputs when it would draw a
+        parameter annotated with a class mathema has no way to draw
+        (`Facts.undrawable`), else None. A parameter the claim binds to a
+        language, or one a runtime type now names, is drawn; one the
+        claim never names while it calls f (`f(Box((2, 3)))`) is not
+        drawn.
+    """
+    from .runtime_types import realised_parameters
+    undrawable = getattr(facts, "undrawable", None) or {}
+    if not undrawable:
+        return None
+    srcs = [cj.lhs, cj.rhs, *(part for link in cj.links or ()
+                              for part in (link[0], link[2]))]
+    text = " ".join(str(s) for s in srcs if s)
+    calls_f = re.search(r"(?<![\w.])f\s*\(", text) is not None
+    bounds = {**(domain or {}), **(cj.domain or {})}
+    realised = realised_parameters(facts)
+    for p, cls in undrawable.items():
+        if p in realised or getattr(bounds.get(p), "base_type", None) == "L":
+            continue
+        if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
+            continue
+        return (f"no evaluable inputs: {p} is annotated {cls}, a class "
+                f"mathema has no way to draw; supply {cls} through a "
+                f"runtime type adapter, or bind {p} in the claim "
+                f"(for {p} in L[...])")
+    return None
+
+
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                       extensive, float_companions=False,
                       ) -> "tuple[Probe, Probe | None]":
@@ -5897,10 +5999,11 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         setup. A named-reference `assuming` inside a chain is the one
         unsupported combination (the referenced sibling isn't in the
         per-link batch), rare enough to leave to a future pass. Returns
-        the chain's verdict and, when `float_companions` is set and the
-        chain is proven with every link's float companion spawned, the
-        chain's own companion, `<name>[float]`, folded from theirs by
-        the same conjunction rule.
+        the chain's verdict and, when `float_companions` is set, the
+        chain's own companion, `<name>[float]`, folded from the links'
+        by the same conjunction rule: when the chain is proven with
+        every link's float companion spawned, or when it holds and a
+        link's companion falsifies.
     """
     from dataclasses import replace as _replace
 
@@ -5940,10 +6043,19 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     combined.meta = {**(combined.meta or {}),
                      "mathema.chain_lines": list(empty.values())} if empty \
         else combined.meta
-    companions = [p for p in probes if p.name not in link_names
-                  and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    # each link's float companion, with that link's label
+    paired = [(p, label) for c, label in zip(link_cjs, labels)
+              for p in probes if p.name.startswith(f"{c.name}[")
+              and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    companions = [p for p, _label in paired]
     empty_broken = next((p for p in empty.values() if p.verdict == "falsified"), None)
-    if combined.verdict != "proven" or len(companions) != len(links):
+    # a proven chain folds every link's companion; a chain that holds on
+    # the probe standing in for derive keeps a link's companion only
+    # where it falsifies, as a single claim's computation line does
+    kept = (combined.verdict == "proven" and len(companions) == len(links)) or (
+        combined.verdict == "holds"
+        and any(p.verdict == "falsified" for p in companions))
+    if not kept:
         if empty_broken is not None and combined.verdict != "falsified":
             combined = _falsified_by_empty_input(combined, empty_broken)
         return combined, None
@@ -5952,7 +6064,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         companion_representation(cj.domain, facts)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
-        labels, what="float companion")
+        [label for _p, label in paired], what="float companion")
     companion.note = (f"the {representation_word} computation of {cj.name} ran "
                       f"link by link, and every link holds"
                       if companion.verdict == "holds" else
@@ -7627,7 +7739,8 @@ def _fill_value(bound):
 
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
-                     resolver, shared: bool, structured: bool):
+                     resolver, shared: bool, structured: bool,
+                     column_bounds: "dict | None" = None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -7635,6 +7748,7 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         holes its random draws carry; None
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
+        `column_bounds` holds a table's column bindings by column name.
     """
     from . import _floor
     from .domain import domain_contains
@@ -7672,8 +7786,12 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         floor = _floor.table_floor(holes, absent=absent)
         # each column meets the magnitude corners of the completed
         # element range, after the degenerate tables
+        # a column the claim binds (`for df.r in [0, 1]^n`) meets the
+        # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound))
+            sequence_corners(record if record is not None else bound),
+            {c: sequence_corners(_column_bound(b, None))
+             for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
 
@@ -10201,7 +10319,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      if key is not None and _p in users)
         made = _container_draws(_p, _k, cj_domain.get(_p),
                                 (ctx.record_domain or {}).get(_p), ctx.missing or {},
-                                resolver, shared, bool(param_structures.get(_p)))
+                                resolver, shared, bool(param_structures.get(_p)),
+                                {key[len(_p) + 1:]: b for key, b in cj_domain.items()
+                                 if key.startswith(_p + ".")
+                                 and key[len(_p) + 1:].isidentifier()})
         if made is not None:
             containers[_p] = made
 
@@ -10616,8 +10737,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     args.append(v)
                     continue
                 if p in bundles:
-                    v = _synth_instance(bundles[p], p, cj_domain, rng,
-                                        specials)
+                    v = narrowed(p, lambda p=p: _synth_instance(
+                        bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
                     args.append(v)
                     continue

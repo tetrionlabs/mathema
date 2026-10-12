@@ -345,11 +345,26 @@ def _doc_only_facts(fn) -> Facts:
             params = [f"x{i}" for i in range(arity)] if arity > 1 else ["x"]
             sig_str = "(" + ", ".join(params) + ")"
             break
+    from .analysis import finite_annotation_domains, signature_kinds
+    try:
+        kinds, detected, undrawable = signature_kinds(fn, params)
+    except Exception:
+        kinds, detected, undrawable = {p: "unknown" for p in params}, {}, {}
+    try:
+        finite = finite_annotation_domains(fn)
+    except Exception:
+        finite = {}
     return Facts(
         name=name,
         signature=sig_str,
         params=params,
-        param_kinds={p: "unknown" for p in params},
+        # read from the signature, as the sourced analysis reads its
+        # annotations: the kind, the runtime type and the finite domain
+        # each parameter's type states
+        param_kinds=kinds,
+        runtime_types=detected,
+        undrawable=undrawable,
+        finite_domains=finite,
         returns_kind="unknown",
         docstring=doc or None,
         source="<no Python source; documentation-only record>",

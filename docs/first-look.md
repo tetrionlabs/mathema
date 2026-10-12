@@ -223,11 +223,11 @@ print(mathema.check(ema, claims=collapses))
 ```text
 mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
   collapses_probed  assuming len(x) >= 1, f(x, 1.0) = x[-1]   holds
-    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   658 entries across 137 draws, sizes (1, 1) to (8, 1)
+    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   628 entries across 132 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
   collapses_derived  assuming len(x) >= 1, f(x, 1.0) = x[-1]   holds
     proven     mathematics  assuming len(x) >= 1, f(x, 1.0) = x[-1]
-    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   235 entries across 45 draws, sizes (1, 1) to (8, 1)
+    holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   241 entries across 47 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
@@ -298,19 +298,19 @@ ema:
     - name: "collapses_derived[float]"
       statement: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 45
-      note: "the float64 computation of collapses_derived ran at 45 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
+      n: 47
+      note: "the float64 computation of collapses_derived ran at 47 points: every corner and 40 interior points; unbounded directions (x) run to magnitude 1.79769e+308, sampled log-uniformly (no |inf| declared)"
       route: "probe"
     - name: "collapses_probed"
       statement: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       verdict: "holds"
-      n: 137
+      n: 132
       note: "inferred alpha=1 from the claim's own literal argument; at x = [nan, nan, nan, nan, nan, nan, ...] f gave nan back"
       route: "probe"
     - name: "missing[x]"
       statement: "missing(f, x) propagates"
       verdict: "holds"
-      n: 32
+      n: 37
       note: "default for a list[float] slot that may be nan; confirmed on the draws of collapses_probed and collapses_derived[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims ema --write"
       route: "probe:counterfactual"
   concepts:
@@ -326,16 +326,16 @@ ema:
       basis: "read off the AST"
     - step: "evidence"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
-      basis: "probed, n=137"
+      basis: "probed, n=132"
     - step: "derivation"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
       basis: "when L = 1: x[0]; otherwise x[L - 1] and x[L - 1] simplify identically"
     - step: "evidence"
       claim: "assuming len(x) >= 1, f(x, 1.0) = x[-1]"
-      basis: "probed, n=45"
+      basis: "probed, n=47"
     - step: "evidence"
       claim: "missing(f, x) propagates"
-      basis: "probed, n=32"
+      basis: "probed, n=37"
     - step: "situating"
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"

@@ -360,6 +360,82 @@ def detect_parameters(fn, declared: "dict | None" = None) -> dict:
     return out
 
 
+def _drawable_class(cls) -> bool:
+    """Intent:
+        Whether mathema has a way to draw an instance of `cls`, or leaves
+        the reading of it to the body as before: a class of the standard
+        library or of a runtime type adapter's library, a dataclass, an
+        Enum, a TypedDict, a NamedTuple, a Protocol, and a subclass of a
+        built-in value or container type or of `numbers.Number`.
+    """
+    import dataclasses
+    import enum
+    import numbers
+    import sys
+    root = (getattr(cls, "__module__", "") or "").split(".", 1)[0]
+    if root in ("builtins", "__future__", "mathema") \
+            or root in sys.stdlib_module_names or root in _libraries():
+        return True
+    if dataclasses.is_dataclass(cls) or getattr(cls, "_is_protocol", False) \
+            or typing.is_typeddict(cls):
+        return True
+    return issubclass(cls, (enum.Enum, numbers.Number, bool, int, float,
+                            complex, str, bytes, list, tuple, dict, set,
+                            frozenset))
+
+
+def _adapts_to_language(cls) -> bool:
+    """Whether a `mathema.language_adaptors` adaptor turns `cls` into a
+    language, the domain a parameter annotated with it is drawn from."""
+    from ..languages import adapt_annotation
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            return adapt_annotation(cls) is not None
+        except Exception:
+            return False
+
+
+def undrawable_parameters(fn, detected: dict) -> dict:
+    """Intent:
+        `{param: class name}` for each parameter of `fn` annotated with a
+        class mathema has no way to draw (`_drawable_class` false) and
+        that no runtime type in `detected` names. An `Optional[...]` or
+        `Annotated[...]` is read through to the one class inside; any
+        other annotation, a union of several classes among them, names
+        no such class.
+    """
+    sig = _signature(fn)
+    if sig is None:
+        return {}
+    scope = module_scope(fn)
+    try:
+        hints = typing.get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = {}
+    out: dict = {}
+    for p, param in sig.parameters.items():
+        if p in detected or param.kind in (param.VAR_POSITIONAL,
+                                           param.VAR_KEYWORD):
+            continue
+        live = hints.get(p, param.annotation)
+        if live is inspect.Parameter.empty:
+            continue
+        if isinstance(live, str):
+            try:
+                live = eval(live, dict(scope))   # noqa: S307
+            except Exception:
+                continue
+        members = _union_members(_strip_annotated(live))
+        if len(members) != 1:
+            continue
+        cls = _strip_annotated(members[0])
+        if isinstance(cls, type) and typing.get_origin(cls) is None \
+                and not _drawable_class(cls) and not _adapts_to_language(cls):
+            out[p] = cls.__name__
+    return out
+
+
 def realised_parameters(facts) -> dict:
     """The parameters whose first detection names a runtime type other
     than a list, `{param: Detection}`: the ones whose drawn values are

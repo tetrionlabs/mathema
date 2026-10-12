@@ -154,7 +154,7 @@ def test_unannotated_numpy_sequence_param_is_synthesized_as_a_sequence(tmp_path)
     # and `assuming is_defined(f)` runs trials instead of unknown(n=0).
     (pr2,) = check_conjectures(
         mod.needs_seven,
-        [_claim("assuming is_defined(f), f(x, y, True) >= -1e9",
+        [_claim("for x in [-1e6, 1e6]^n, assuming is_defined(f), f(x, y, True) >= -1e9",
                 route="probe")])
     assert pr2.verdict == "holds" and pr2.n > 0
 

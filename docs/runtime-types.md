@@ -32,17 +32,21 @@ def series_mean(xs: pd.Series):
 
 <!-- example: rt-mean verdicts fn=mean_of route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 <!-- example: rt-mean verdicts fn=series_mean route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 Sampled as a list, as it was before runtime types, `mean_of` raises
 `AttributeError` (a list has no `.mean()`) and the claim is falsified;
 sampled as the array its signature names, it holds.
+Over all of `R^n` the mean overflows: at two of the largest doubles the
+float64 sum is `inf`, so the computation is falsified there while the
+mathematics is still proven (see [the computation
+line](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
 
 ## Detection, from the signature only
 
@@ -121,6 +125,14 @@ decides how it is drawn, whatever attributes the body reads off it.
 `order: dict` is drawn as a dict even when the body calls
 `order.values()` in a module that imports numpy. Only an annotation of
 `Any` or `object` leaves the reading to the body.
+
+A class mathema has no way to draw (one of your own that is not a
+dataclass, with no runtime type adapter and no language adaptor for it)
+is never drawn as something else: a claim that would draw it is
+`skipped` with no evaluable inputs, and the note names the class and
+the two ways to supply one, a runtime type adapter or a binding in the
+claim (`for b in L[...]`). A claim that passes an instance itself
+(`f(Box((2, 3))) == 6`) draws nothing for it and is checked as usual.
 
 ## The built-in runtime types
 
