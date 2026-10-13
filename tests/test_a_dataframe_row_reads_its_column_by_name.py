@@ -58,12 +58,7 @@ def test_no_dataframe_row_reads_a_result_by_position():
 def test_the_row_holds_for_a_table_whose_first_column_is_not_x(method):
     from mathema.conjecture import check_conjectures, claim
     row = _rows()[method]
-    statement = row["statement"]
-    if method == "cumsum":
-        # a running sum over all of R^n overflows at the largest doubles
-        statement = statement.replace("for a in R^n", "for a in [-1e6, 1e6]^n")
-        assert statement != row["statement"], row["statement"]
     (p,) = check_conjectures(_with_y_first(method),
-                             [claim(statement, name=row["name"])])
+                             [claim(row["statement"], name=row["name"])])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
                                               p.counterexample)
