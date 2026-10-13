@@ -588,18 +588,23 @@ def claimed_count(key: str, fn, declared: dict, verified: dict | None = None) ->
     from .authoring import resolve_declared
     from .records import stance
     from .spec import entry_claims
+    from .verify import split_unparseable_entry
 
     file_entry = declared.get(key, {}).get("entry", {})
-    merged = resolve_declared(fn, file_entry=file_entry)
+    merged, unreadable = split_unparseable_entry(
+        resolve_declared(fn, file_entry=file_entry))
+    # a claim that does not parse is authored and has no record, so it
+    # counts like any claim with no record yet
     claims = entry_claims(merged)
     if not verified:
-        return len(claims)
+        return len(claims) + len(unreadable)
     rec = verified.get(key)
     if rec is None:
-        return len(claims)
+        return len(claims) + len(unreadable)
     blocked = {row.get("name") for row in (rec["entry"].get("claims") or [])
                if stance(row.get("verdict") or "") == "blocked"}
-    return sum(1 for cj in claims if cj.name not in blocked)
+    return (sum(1 for cj in claims if cj.name not in blocked)
+            + len(unreadable))
 
 
 def _docsync_score(fn, root: str = ".", declared: dict | None = None,
