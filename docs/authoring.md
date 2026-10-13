@@ -755,11 +755,8 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
     falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
-    falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
-    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   826 entries across 184 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
@@ -770,10 +767,8 @@ mathema's built-in battery: every function gets the determinism and
 state probes, a function computing a number from numbers gets the
 stability probe too, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
-permutes nor sorts its input. A third, `raises[scores]`, is a
-suggestion read off the guard: it asks whether `softmax` always raises
-`ValueError`, and the witness `[0]` shows it does not. The guard raises
-only for an empty list, which `is_empty_safe[scores]` reports, proven.
+permutes nor sorts its input. The guard raises only for an empty
+list, which `is_empty_safe[scores]` reports, proven.
 The `policy` lines under each claim say what `softmax` does with an
 empty list and with a `nan` score.
 
