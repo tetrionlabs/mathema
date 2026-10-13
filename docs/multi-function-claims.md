@@ -59,9 +59,10 @@ f equiv g
 
 The equivalence relation asks whether two implementations are the same
 mathematics, which is the question behind every rewrite, refactor and
-port: an agent's new version against the one it replaces, a C++ or
-TypeScript implementation against the Python reference. It climbs a
-ladder, strongest rung first, and each rung may decline:
+port: an agent's new version against the one it replaces, or another
+runtime's implementation against the Python reference. Between two
+Python functions it climbs a ladder, strongest rung first, and each
+rung may decline:
 
 1. **Identical canonical form.** Both functions lift to the same
    alpha-renamed shape, and the claim is proven by the form hash
@@ -140,15 +141,17 @@ an extension point that maps a key such as `cpp:` or `ts:` to a
 callable.
 
 Because `g` may be any callable, the other implementation need not be
-Python: `examples/cpp-equivalence/` checks a C++ `ema` (reached
-through a ctypes shim over the C ABI) equivalent to the Python
-reference, landing `holds` on shared-draw sampling with no special
-integration. The example's README spells out the honest reading:
-sampling never proves, the shim's library handle is real out-of-walk
-state, a live-callable binding does not survive the record, and
-safety claims never transfer between implementations, because they
-are facts about an implementation and its language rather than about
-the mathematics.
+Python. The ladder above compares two Python forms, so it runs only
+when the Python frontend read both sides. When either side's facts
+came from another frontend, as for a function a runtime adaptor
+serves, `f =:= g` is answered by the equivalence family: a claim
+family registered under the name `equivalence`, which can bring that
+runtime's own reading of a refusal, a tolerance and a region. With no
+such family, or one that declines, the claim is `skipped` with the
+reason `equivalence across runtimes needs the equivalence family`.
+Whatever the family finds, safety claims never transfer between
+implementations, because they are facts about an implementation and
+its language rather than about the mathematics.
 
 ## Premises over bound functions
 
