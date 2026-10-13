@@ -570,7 +570,8 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         sequence and the rest are scalar, a lower and upper bound
         against min/max(xs), permutation-invariance, scale-equivariance,
         and translation-equivariance; a raises(...) claim per guarded
-        parameter.
+        parameter, bound to the region where its guard raises (none
+        when that region cannot be stated).
 
     Notes:
         Declares, never verifies. Nothing here is run or proven.
@@ -596,11 +597,8 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         claim grammar via Conjecture's own funcs={} extension point,
         binding an extra function letter to a plain Python closure over
         fn, rather than a new grammar primitive (probe and derive share
-        one grammar; only how a claim gets proved differs). A
-        derive-routed raises(...) suggestion may itself come back
-        unliftable later without a narrow enough domain. That is fine,
-        it is declared, not verified, the same as any hand-authored
-        claim. write=True appends to <root>/claims/<key>.claims.yaml,
+        one grammar; only how a claim gets proved differs).
+        write=True appends to <root>/claims/<key>.claims.yaml,
         the declared layer load_declared() actually scans, not
         .mathema/declared/..., which load_declared() skips.
     """
@@ -1000,8 +998,11 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
 
     guard_types = _raise_guard_types(facts.tree, facts.params)
     for p, exc_name in guard_types.items():
-        out.append(_made(f"raises({call}, {exc_name})", name=f"raises[{p}]",
-                         source="mathema", route="best"))
+        binding = _raising_binding(fn, facts, p, exc_name)
+        if binding is None:
+            continue
+        out.append(_made(f"{binding}raises({call}, {exc_name})",
+                         name=f"raises[{p}]", source="mathema", route="best"))
 
     premises, blocked = _guard_premises(fn, facts, cut)
     if cut or premises or blocked:
@@ -1186,6 +1187,175 @@ def _single_guard_region(fn, facts, p: str):
         if region is not None:
             raising = raising | region
     return raising
+
+
+def _region_words(found) -> "str | None":
+    """A sympy set of reals in claim grammar, intervals of positive
+    width and finite sets of points alike (`(-oo, 0) ∪ (1, oo)`,
+    `{0}`), or None when it is empty or holds a point no float spells
+    exactly."""
+    import sympy
+    parts = list(found.args) if isinstance(found, sympy.Union) else [found]
+    words = []
+    for part in parts:
+        if isinstance(part, sympy.Interval) and part.measure > 0:
+            words.append(_set_words(part))
+        elif isinstance(part, sympy.FiniteSet) and all(
+                value.is_Rational and all(prime in (2, 5) for prime in
+                                          sympy.factorint(value.q))
+                for value in part.args):
+            words.append("{" + ", ".join(
+                _num_words(value) for value in sorted(part.args)) + "}")
+        else:
+            return None
+    return " ∪ ".join(words) or None
+
+
+def _guard_box(cond) -> "tuple[dict, list] | None":
+    """Intent:
+        One raise guard's path condition as `({param: sympy set},
+        [premise text])`: the region of each conjunct that reads one
+        parameter, and each plain relation on several parameters as the
+        claim-grammar text an `assuming` premise states. None for any
+        other shape.
+    """
+    import sympy
+    from .symbolic._base import REL_TEXT
+    if len(cond.free_symbols) == 1:
+        parts = [cond]
+    else:
+        parts = list(cond.args) if isinstance(cond, sympy.And) else [cond]
+    regions: dict = {}
+    texts: list = []
+    for part in parts:
+        names = {str(sym) for sym in part.free_symbols}
+        if len(names) == 1:
+            region = _guard_region(part)
+            if region is None:
+                return None
+            (name,) = names
+            regions[name] = regions.get(name, sympy.S.Reals) & region
+        elif type(part) in REL_TEXT:
+            texts.append(f"{part.lhs} {REL_TEXT[type(part)]} {part.rhs}")
+        else:
+            return None
+    return regions, texts
+
+
+def _raising_binding(fn, facts, p: str, exc_name: str) -> "str | None":
+    """Intent:
+        The prefix (`for x in (-oo, 0), `, `assuming x > y, `) that
+        binds the raises(f(...), exc_name) suggestion on parameter `p`
+        to where a guard reading `p` raises exc_name: the union of the
+        guards that read `p` alone, else the first guard on several
+        parameters, each parameter bound to its region within the
+        declared domain and each relation on several parameters stated
+        as a premise. None when no such region can be stated.
+    """
+    import sympy
+    if facts.param_kinds.get(p) == "string":
+        return _string_raising_binding(facts.tree, p, exc_name)
+    if facts.param_kinds.get(p) not in ("scalar", "int", "unknown"):
+        return None
+    boxes = []
+    for cond, name in _lifted_guards(fn, facts) or ():
+        if name != exc_name or cond is sympy.false or \
+                not hasattr(cond, "free_symbols"):
+            continue
+        if p in {str(sym) for sym in cond.free_symbols}:
+            box = _guard_box(cond)
+            if box is not None:
+                boxes.append(box)
+    alone = [found[p] for found, premise in boxes
+             if set(found) == {p} and not premise]
+    regions: dict
+    texts: list
+    if alone:
+        regions, texts = {p: sympy.Union(*alone)}, []
+    elif boxes:
+        regions, texts = boxes[0]
+    else:
+        return None
+    from .conjecture import _real_set
+    from .types import domain_from_signature
+    try:
+        bounds = domain_from_signature(fn)
+    except Exception:
+        bounds = {}
+    binds = []
+    for q in facts.params:
+        if q not in regions:
+            continue
+        base = _real_set(bounds.get(q)) if q in bounds else None
+        words = _region_words(regions[q] if base is None
+                              else regions[q] & base)
+        if words is None:
+            return None
+        binds.append(f"{q} in {words}")
+    return (f"for {', '.join(binds)}, " if binds else "") + (
+        f"assuming {' and '.join(texts)}, " if texts else "")
+
+
+def _string_words(values: list) -> str:
+    import json
+    return "{" + ", ".join(json.dumps(v, ensure_ascii=False)
+                           for v in dict.fromkeys(values)) + "}"
+
+
+def _string_raising_binding(fdef, p: str, exc_name: str) -> "str | None":
+    """Intent:
+        The prefix binding a raises(...) suggestion on string parameter
+        `p` to where its guard raises exc_name, for a top-level guard
+        that compares `p` alone with string constants (`p not in {"a",
+        "b"}`, `p == "a"`): the listed strings, or every string but
+        them (`L[unicode] \\ {"a", "b"}`) when that language is
+        installed. None for any other guard, or when an earlier
+        statement may raise first.
+    """
+    for stmt in fdef.body:
+        if isinstance(stmt, ast.If) and stmt.body and \
+                isinstance(stmt.body[0], ast.Raise):
+            raised = _raised_name(stmt.body[0])
+            listed = _string_test(stmt.test, p)
+            if listed is not None and raised == exc_name:
+                values, inside = listed
+                if inside:
+                    return f"for {p} in {_string_words(values)}, "
+                from .languages import resolves
+                if not resolves("unicode"):
+                    return None
+                return f"for {p} in L[unicode] \\ {_string_words(values)}, "
+        if any(isinstance(node, ast.Raise) for node in ast.walk(stmt)):
+            return None
+    return None
+
+
+def _raised_name(stmt) -> "str | None":
+    exc = stmt.exc
+    if isinstance(exc, ast.Call):
+        exc = exc.func
+    return exc.id if isinstance(exc, ast.Name) else None
+
+
+def _string_test(test, p: str) -> "tuple[list, bool] | None":
+    """`(strings, inside)` for a test of `p` against string constants:
+    the strings it names, and whether the test holds for exactly them
+    (True) or for every other string (False)."""
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.left, ast.Name) and test.left.id == p):
+        return None
+    op, other = test.ops[0], test.comparators[0]
+    if isinstance(op, (ast.In, ast.NotIn)) and isinstance(
+            other, (ast.Set, ast.Tuple, ast.List)):
+        items = other.elts
+    elif isinstance(op, (ast.Eq, ast.NotEq)):
+        items = [other]
+    else:
+        return None
+    if not items or not all(isinstance(item, ast.Constant)
+                            and isinstance(item.value, str) for item in items):
+        return None
+    return [item.value for item in items], isinstance(op, (ast.In, ast.Eq))
 
 
 def _guard_premises(fn, facts, cut: dict) -> "tuple[list, set]":

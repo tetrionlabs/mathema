@@ -253,7 +253,7 @@ it; this is the metric meant to catch that.
 ✓ intent concise (8 words)
 ✓ Claims: block in sync (names known, no surface conflicts)
 ✓ Claims: present (1 parsed)
-· claims {14 | 1 | -} floor | actual | expected (not scored)
+· claims {13 | 1 | -} floor | actual | expected (not scored)
 ✓ domain declared (1/1)
 ✗ domain enforced
 ✓ raises covered (1/1)
@@ -309,7 +309,7 @@ ema.ema || yes           | yes         | 2/2    | no      | 1/1    | 5/6        
 
 docsync:
 key     || intent | notes | claims   | {min_expected|actual|est_applicable} || domain_declared | enforced || raises_declared || params_typed | return_typed || callees_doc_quality | callees_docsync || sync_score
-ema.ema || yes    | -     | 1 parsed | {14 | 1 | -}                         || 1/1             | no       || 1/1             || 2/2          | yes          || -                   | -               || 90%
+ema.ema || yes    | -     | 1 parsed | {13 | 1 | -}                         || 1/1             | no       || 1/1             || 2/2          | yes          || -                   | -               || 90%
 
 mean docsync 90% (how much of what each function does is surfaced as context) (1 function).
 ```
@@ -318,7 +318,7 @@ mean docsync 90% (how much of what each function does is surfaced as context) (1
 `raises_declared` in its own single-column group, the `||` marks a group boundary,
 `|` a column boundary within one, same convention the loose `docs`
 table already uses. the claims column is `{min_expected|actual|est_applicable}`:
-the floor for `ema` is 11 (one claim per claim family relevant to a
+the floor for `ema` is 13 (one claim per claim family relevant to a
 function of its shape), so its one parsed claim sits under it, and
 `expected` reads `-` until a corpus can say what a function of this
 shape typically carries.
