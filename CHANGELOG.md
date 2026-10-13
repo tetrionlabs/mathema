@@ -15,6 +15,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A raise at a missing value, or at a hazard input (empty, encoding, length, representation), counts against that input only when the same call with an ordinary value runs; otherwise the row is `unknown` and names the other argument.
 - A falsification always rests on an executed witness at the claim's own point: a claim written at literal arguments (`f([]) == 0`, `f(nan) == 0`) is decided once at that call, a rounding miss in a numeric check no longer falsifies an exact identity, and installing z3 no longer moves a falsification off the mathematics line.
 - Two functions are proven equal at the form step only from forms mathema computed itself.
+- `f =:= g` with a side read by another frontend is answered by the equivalence family, or skipped with the reason `equivalence across runtimes needs the equivalence family` when none gives a verdict; the built-in steps compare two Python functions only.
 - An annotated parameter is drawn as its annotation says (a `dict` in a module that imports numpy is drawn as a dict); a class mathema cannot draw is skipped with the reason; a claim's bound on a dataclass field or a table column bounds its draws; an empty pandas series is float like its draws.
 - A `SystemExit` from the function is recorded as a raise with its exit code, and `mathema check` exits with its own code.
 - `let` constants written by 0.6.0 read back as written, and a constant is recorded as its value (`let axis be 1`).

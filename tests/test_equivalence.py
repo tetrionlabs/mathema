@@ -112,7 +112,7 @@ def test_check_keeps_a_live_funcs_binding_through_the_declared_merge():
 
     from mathema.analysis import analyze_source
     proxy.__mathema_facts__ = replace(analyze_source(local_twin),
-                                      tree=None, form="ext:0011223344ab")
+                                      tree=None, form="doc:0011223344ab")
     rec = mathema.check(tri_naive, claims=[
         mathema.claim("for a in [-3, 3], b in [-3, 3], c in [-3, 3], "
                       "f =:= g", funcs={"g": proxy})])

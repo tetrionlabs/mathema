@@ -13,7 +13,10 @@ A claim family registered under the name `equivalence` is consulted
 before the built-in ladder and may return a verdict of its own; the
 result passes the same family verdict contract every family route
 does (a falsification must carry its witness), and this module still
-assembles the Probe. `f =:= g` means `for x in D, f(x) == g(x)`, so a
+assembles the Probe. The ladder compares two Python forms: when
+either side's facts were read by a frontend other than the Python one
+(`_read_elsewhere`), only the family adjudicates, and with no family
+verdict the claim is skipped. `f =:= g` means `for x in D, f(x) == g(x)`, so a
 point where one side raises and the other returns a value falsifies,
 with the executed raise as the witness. A complex result under a real
 claim counts as a raise (unless that side is annotated `complex`). A
@@ -275,6 +278,10 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
     family_probe = _family_verdict(case)
     if family_probe is not None:
         return family_probe
+    if _read_elsewhere(facts) or _read_elsewhere(gfacts):
+        return Probe(cj.name, statement, "skipped", route="equivalence",
+                     note=_joined(note, _ACROSS_RUNTIMES),
+                     meta=dict(annotations))
 
     state = _LadderState()
     for _, rung in RUNGS:
@@ -282,6 +289,38 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         if probe is not None:
             return probe
     return _fallthrough(case, state)
+
+
+#: the note on a pair across runtimes that no family adjudicated
+_ACROSS_RUNTIMES = "equivalence across runtimes needs the equivalence family"
+
+#: form-hash namespaces the Python frontend and the documentation-only
+#: fallback write; a bare hash is the Python frontend's own form
+_PYTHON_FORM_NAMESPACES = frozenset({"py", "doc"})
+
+
+def _joined(note: str, text: str) -> str:
+    return f"{note}; {text}" if note else text
+
+
+def _read_elsewhere(facts) -> bool:
+    """Intent:
+        Whether `facts` were read by a frontend other than the Python
+        one: their `provenance` names another frontend (by `name` in a
+        mapping, or as a string), or, with no frontend named, their form
+        hash is namespaced (`"<frontend>:<sha>"`) outside `py` and `doc`.
+    """
+    stated = getattr(facts, "provenance", None) or {}
+    frontend = stated.get("frontend") if isinstance(stated, dict) else None
+    if isinstance(frontend, dict):
+        frontend = frontend.get("name")
+    from .koine.frontends import PYTHON
+    if frontend:
+        return frontend != PYTHON
+    form = getattr(facts, "form", None) or ""
+    if ":" not in form:
+        return False
+    return form.split(":", 1)[0] not in _PYTHON_FORM_NAMESPACES
 
 
 def _family_verdict(case: _Case) -> Probe | None:

@@ -467,16 +467,20 @@ file.
 
 The equivalence relation (`f =:= g`, and the call-form law
 `f(x) == g(x)`) accepts any callable for `g`, so the other
-implementation need not be Python.
-[`examples/cpp-equivalence/`](https://github.com/tetrionlabs/mathema/tree/main/examples/cpp-equivalence) checks a C++ `ema`
-reached through a ctypes shim over the C ABI against the Python
-reference: `holds`, on shared draws, with no special integration.
+implementation need not be Python. When either side of `f =:= g` was
+read by a frontend other than the Python one, the claim is answered
+by the equivalence family, a claim family registered under the name
+`equivalence`, or `skipped` with the reason `equivalence across
+runtimes needs the equivalence family` when no family gives a
+verdict. The built-in ladder compares two Python forms and never runs
+on such a pair.
 
 Read such a result honestly:
 
-- **Sampling never proves.** A C++ side has no Python source, so the
-  form-hash and symbolic rungs cannot run; shared-draw execution
-  carries it, and its ceiling is `holds`.
+- **Sampling never proves.** A side with no Python source gives the
+  form-hash and symbolic rungs nothing to read, so evidence across
+  runtimes usually rests on executed draws, and their ceiling is
+  `holds`.
 - **What transfers is the mathematics.** A claim like
   `for x in [0,1], f(x) <= 1` is about the function's behaviour, and
   equivalence at evidence level E lets it stand for the other

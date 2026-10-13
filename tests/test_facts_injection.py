@@ -79,15 +79,16 @@ def _proxy_shaped(impl, params):
         for p in params])
     facts = analyze_source(impl)
     proxy.__mathema_facts__ = replace(facts, tree=None,
-                                      form="ext:0011223344ab")
+                                      form="doc:0011223344ab")
     return proxy
 
 
 def test_equivalence_honours_injected_facts_on_the_bound_function():
-    """`f =:= g` with g a foreign proxy: g's params must come from its
+    """`f =:= g` with g an opaque proxy: g's params must come from its
     injected facts, not from analyzing the closure (which has none),
     and the code-vs-code rung must then adjudicate both real
-    callables."""
+    callables. A proxy whose facts another frontend read is skipped
+    instead (tests/test_equivalence_across_runtimes.py)."""
     g = _proxy_shaped(_double, ["x"])
     (p,) = check_conjectures(_double, [claim("for x in [-4, 4], f =:= g",
                                              funcs={"g": g})])
