@@ -28,6 +28,8 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Tools
 - `@enforce_domain` with a plain set or list now enforces its values (it enforced nothing before); two numbers are the closed interval and a string uses the domain grammar (`"(0, 1]"`).
+- `mathema check` and the MCP tools report a claim that does not parse, with the parser's message, and still check the function's other claims, as `verify` does.
+- A suggested `raises(...)` row is bound to the region where the function's guard raises (`for x in (-oo, 0), raises(f(x), ValueError)`), and is left out when no region can be stated; it is no longer falsified at the inputs the guard admits.
 - `mathema accept` refreshes the function's record, prints a shorter plan with the witness, and takes several claims at once (`accept KEY a b --as discovery`).
 - `verify` reads each record and claims file once per run, so it no longer slows with the square of the store; `verify --format json` gives an invalidated row's reason and witness.
 - `mathema badges` finishes on large packages: one read per run, a cap on each function's step, progress on a terminal, a per-function result cache (`--refresh` recomputes everything), and `--jobs N` worker processes. Scores are unchanged.
