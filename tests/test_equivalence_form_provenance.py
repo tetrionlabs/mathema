@@ -11,7 +11,7 @@ from dataclasses import replace
 from mathema.analysis import analyze_source
 from mathema.claims import check_conjectures, claim
 
-SUPPLIED_FORM = "ext:85b0e1bf68f8accc"
+SUPPLIED_FORM = "doc:85b0e1bf68f8accc"
 
 
 def _twice(x):
