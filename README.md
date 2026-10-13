@@ -8,7 +8,7 @@ Proofs and counterexamples for Python functions, kept as records bound to the ex
 [![licence](https://img.shields.io/static/v1?label=licence&message=BUSL-1.1&color=blue)](https://github.com/tetrionlabs/mathema/blob/main/LICENSING.md)
 [![docs](https://img.shields.io/static/v1?label=docs&message=mathema.tetrionlabs.com&color=blue)](https://mathema.tetrionlabs.com/)
 
-![A discount factor checked by mathema: falsified at the pole rate = 1 over the full range, proven over rates up to 0.99](docs/assets/readme-hero.svg)
+![A discount factor checked by mathema: falsified at the pole rate = 1 over the full range, proven over rates up to 0.99](https://raw.githubusercontent.com/tetrionlabs/mathema/main/docs/assets/readme-hero.svg)
 
 mathema checks Python functions against claims, short mathematical statements of what a function is meant to do, and keeps each result as a record bound to the code. It proves the mathematics of a claim over its whole domain where the body reads as mathematics, and checks the computation by running the real function on inputs chosen to break it, keeping proof and evidence apart. The name is Greek, μάθημα, that which is learned.
 

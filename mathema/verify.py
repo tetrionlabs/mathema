@@ -444,6 +444,46 @@ def _split_unparseable(claims: list, grammar: str, fn,
     return readable, unreadable
 
 
+def split_unparseable_entry(entry: dict) -> tuple:
+    """Intent:
+        `(readable_entry, unreadable)`: a declared entry (the shape
+        `authoring.retrieve` returns) with each claim whose statement
+        does not parse left out, and `(name, error)` for each claim
+        left out, so one bad claim is reported on its own while the
+        function's other claims are adjudicated. A row
+        `spec.entry_claims` passes over (a past verdict, or no
+        statement) is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import _declared_conjecture
+    grammar = entry.get("grammar", "mathema")
+    readable, unreadable = [], []
+    for c in entry.get("claims") or []:
+        if (c.get("statement") or c.get("law")) and "verdict" not in c:
+            try:
+                _declared_conjecture(c, grammar)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    if not unreadable:
+        return entry, []
+    out = dict(entry)
+    out["claims"] = readable
+    return out, unreadable
+
+
+def unparseable_claim_message(key: str, name: str, where: "str | None",
+                              error, rerun: str = "verify") -> str:
+    """Intent:
+        The one line naming a declared claim that does not parse, with
+        the parser's message and where to correct it.
+    """
+    where = where or "its docstring or claims file"
+    return (f"{key}: claim {name!r} declared in {where} does not parse "
+            f"({error}); correct it there and re-run {rerun}")
+
+
 @dataclass
 class VerifyResult:
     """One sweep: the per-key report lines, every problem found (empty
@@ -1370,6 +1410,135 @@ def _library_population(root: str, verified: dict, declared: dict,
     return {k: library_claims[k]["source"] for k in sorted(wanted)}
 
 
+def _premise_rows(key: str, root: str, declared: dict,
+                  verified: dict) -> list:
+    """Intent:
+        `[(claim name, [premise reference, ...]), ...]` for the claims
+        `key` states in its claims file, its verified record and its
+        live function's decorator or docstring: each verdict premise
+        (`assuming X holds`, `assuming X is proven`) its claims name.
+    """
+    from .compendium import _referenced_names
+    from .conjecture import _resolve_func_ref
+
+    rows = list(((declared.get(key) or {}).get("entry") or {})
+                .get("claims") or [])
+    rows += list(((verified.get(key) or {}).get("entry") or {})
+                 .get("claims") or [])
+    try:
+        fn = _resolve_func_ref(key, root=root)
+        if fn is not None:
+            from .authoring import resolve_declared
+            rows += list(resolve_declared(fn, file_entry={})
+                         .get("claims") or [])
+    except TimeoutError:
+        raise
+    except Exception:
+        pass
+    out: list = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        refs = sorted(_referenced_names([row]))
+        if refs:
+            out.append((row["name"], refs))
+    return out
+
+
+def _reach_of(node: tuple, edges: dict) -> set:
+    """Intent:
+        Every claim node that `node`'s premises lead to through
+        `edges`, directly or through other claims' premises.
+    """
+    reach: set = set()
+    stack = list(edges.get(node, {}).values())
+    while stack:
+        here = stack.pop()
+        if here in reach:
+            continue
+        reach.add(here)
+        stack.extend(edges.get(here, {}).values())
+    return reach
+
+
+def _premise_order(keys: list, premise_rows: dict) -> tuple:
+    """Intent:
+        `(order, cycles)`: `keys` arranged so a function is adjudicated
+        after every function its claims' verdict premises name
+        (`assuming pkg.fn.claim holds`), and, per key, the premise
+        references its claims make into a premise cycle that runs
+        across functions.
+
+    Notes:
+        `premise_rows` maps a key to `_premise_rows`' pairs. A reference
+        is `<key>.<claim>` for another swept key, or a bare sibling
+        name; a key outside `keys` orders nothing. Order is stable: a
+        key keeps its place relative to its peers unless a prerequisite
+        has to move ahead of it.
+
+        Cycles are found between claims, not functions. A claim is in
+        a cross-function cycle when its premises lead back to itself
+        through a claim of another function, and a claim resting on
+        such a claim is caught by it too, as within one function.
+        `cycles[key]` is the set of references the claims of `key`
+        make into that set.
+    """
+    swept = set(keys)
+    edges: dict = {}
+    for key in keys:
+        for name, refs in premise_rows.get(key) or []:
+            node = edges.setdefault((key, name), {})
+            for ref in refs:
+                head, _, claim_name = ref.rpartition(".")
+                hit = ((head, claim_name) if head in swept
+                       else (key, ref) if not head else None)
+                if hit is not None and hit != (key, name):
+                    node[ref] = hit
+
+    after: dict = {key: [] for key in keys}
+    for (key, _name), refs in edges.items():
+        for head, _claim in refs.values():
+            if head != key and head not in after[key]:
+                after[key].append(head)
+    order: list = []
+    placed: set = set()
+    visiting: set = set()
+
+    def visit(key: str) -> None:
+        if key in placed or key in visiting:
+            return
+        visiting.add(key)
+        for head in after[key]:
+            visit(head)
+        visiting.discard(key)
+        placed.add(key)
+        order.append(key)
+
+    for key in keys:
+        visit(key)
+
+    reaches = {node: _reach_of(node, edges) for node in edges}
+    caught = {node for node, reach in reaches.items()
+              if any(other[0] != node[0] and node in reaches.get(other, ())
+                     for other in reach)}
+    changed = True
+    while changed:
+        changed = False
+        for node, refs in edges.items():
+            if node not in caught and any(h in caught
+                                          for h in refs.values()):
+                caught.add(node)
+                changed = True
+    cycles: dict = {}
+    for (key, name), refs in edges.items():
+        if (key, name) not in caught:
+            continue
+        for ref, hit in refs.items():
+            if hit in caught:
+                cycles.setdefault(key, set()).add(ref)
+    return order, cycles
+
+
 def problems_text(problems: list) -> str:
     """Intent:
         A record's problems as the sweep line prints them after `<-`:
@@ -1513,6 +1682,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     if not keys and not lock_only:
         out.nothing_declared = not kept_records
         return out
+    # a function is adjudicated after the functions its claims'
+    # premises name, and a key some later key rests on refreshes the
+    # premises after its record is written
+    premise_rows = {key: _premise_rows(key, root, declared, verified)
+                    for key in keys if key not in broken}
+    keys, premise_cycles = _premise_order(keys, premise_rows)
+    prerequisite_keys = {ref.rpartition(".")[0]
+                         for rows in premise_rows.values()
+                         for _name, refs in rows for ref in refs}
 
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
@@ -1715,12 +1893,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
             entry_grammar = now["grammar"]
             current_claims = now["claims"]
-            where = ((declared_info or {}).get("source")
-                     or "its docstring or claims file")
             for claim_name, error in now["unreadable"]:
-                msg = (f"{key}: claim {claim_name!r} declared in {where} "
-                       f"does not parse ({error}); correct it there and "
-                       f"re-run verify")
+                msg = unparseable_claim_message(
+                    key, claim_name, (declared_info or {}).get("source"),
+                    error)
                 out.authoring_errors.append(msg)
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")
@@ -1908,9 +2084,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # (an empty declared set means no claims, not "go conjecture")
         from .spec import attach_recorded_pins
         attach_recorded_pins(claims, verified_entry or None)
+        premises = stub_premises
+        if premise_cycles.get(key):
+            premises = {**stub_premises,
+                        **{ref: {"cycle": True}
+                           for ref in premise_cycles[key]}}
         rec = check(fn, claims=claims if claims else [],
                     trials_downscale=trials_scale,
-                    known_premises=stub_premises,
+                    known_premises=premises,
                     pseudo_infinity=merged_entry.get("pseudo_infinity"),
                     runtime_types=merged_entry.get("runtime_types"))
         rec.probes = [p for p in rec.probes
@@ -1962,7 +2143,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # accepted risk from it, never from the record it replaced
         accepted = _accepted_risk(_entry_at(written, key))
         out.adjudicated += 1
-        if key in library:
+        if key in library or key in prerequisite_keys:
             # this key's rows now resolve premises at their local verdict
             stub_premises = _external_premises(
                 root, library_claims=library_claims)
