@@ -685,7 +685,8 @@ def implementation_coverage(targets: list[str], root: str = ".",
             "test_report_stale": any(fc.test_stale for fc in pc.functions)}
 
 
-def badges(targets: list[str] | None = None, root: str = ".") -> dict:
+def badges(targets: list[str] | None = None, root: str = ".",
+           implementation: bool = True) -> dict:
     """The three badges over a target set (or rootwide when omitted or
     empty): `implementation` (code coverage, a raw line ratio), `intent`
     (docsync), and `clarity` (how much is KNOWN about the behaviour,
@@ -702,11 +703,14 @@ def badges(targets: list[str] | None = None, root: str = ".") -> dict:
     each function a step of which stopped at the wall-clock cap. The
     functions are scored in worker processes (`badges.default_jobs`),
     where the cap holds; a function scored in the server itself, on a
-    worker thread, runs without it."""
+    worker thread, runs without it. `clarity_algo` is the clarity
+    algorithm version the scores were computed under. Pass
+    `implementation=false` to skip the coverage pass: `implementation`,
+    `overall`, `ascii` and each row's implementation come back null."""
     from mathema.badges import default_jobs, render_triangle, repo_badges
 
     scores = repo_badges(list(targets or ()) or None, root=root,
-                         jobs=default_jobs())
+                         implementation=implementation, jobs=default_jobs())
     rows = [[key, v["implementation"], v["intent"], v["clarity"]]
             for key, v in scores.per_function.items()]
     return {"implementation": scores.implementation,
@@ -715,8 +719,10 @@ def badges(targets: list[str] | None = None, root: str = ".") -> dict:
             "overall": scores.overall,
             "cols": ["key", "implementation", "intent", "clarity"],
             "rows": rows,
-            "ascii": render_triangle(scores.implementation, scores.intent,
-                                     scores.clarity),
+            "ascii": (render_triangle(scores.implementation, scores.intent,
+                                      scores.clarity)
+                      if scores.implementation is not None else None),
+            "clarity_algo": scores.algo,
             "capped": [[key, list(steps)]
                        for key, steps in scores.capped.items()]}
 

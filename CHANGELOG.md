@@ -33,6 +33,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `mathema accept` refreshes the function's record, prints a shorter plan with the witness, and takes several claims at once (`accept KEY a b --as discovery`).
 - `verify` reads each record and claims file once per run, so it no longer slows with the square of the store; `verify --format json` gives an invalidated row's reason and witness.
 - `mathema badges` finishes on large packages: one read per run, a cap on each function's step, progress on a terminal, a per-function result cache (`--refresh` recomputes everything), and `--jobs N` worker processes. Scores are unchanged.
+- The `badges` MCP tool takes `implementation=false` to skip the coverage pass (implementation, overall and each function's implementation come back null), and reports the clarity algorithm version as `clarity_algo`.
 - The effects line no longer reports non-mutating array methods (`Series.add`) as changing an argument.
 
 ## 0.6.1
