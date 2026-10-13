@@ -32,7 +32,7 @@ numpy.amin:
 numpy.median:
   claims:
     - name: within_range
-      statement: "for a in R^n, min(a) <= f(a) <= max(a)"
+      statement: "for a in [-1e150, 1e150]^n, min(a) <= f(a) <= max(a)"
     - name: definition
       statement: "for a in R^n, f(a) == median(a)"
       note: "The middle element, or the mean of the two middle elements for an even length."

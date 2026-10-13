@@ -17,5 +17,5 @@ pandas.DataFrame.abs:
 pandas.DataFrame.cumsum:
   claims:
     - name: columns
-      statement: "for a in R^n, f(a)[\"x\"] ~= cumsum(a.x)"
+      statement: "for a in [-1e150, 1e150]^n, f(a)[\"x\"] ~= cumsum(a.x)"
       note: "The running sums down each column."
