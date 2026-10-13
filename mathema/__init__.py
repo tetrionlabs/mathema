@@ -650,7 +650,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     claim name to a human line (usually from
     `compendium.external_premises`) that the missing-prerequisite note
     then includes. Data only; it never satisfies a premise, and
-    check() itself stays IO-free.
+    check() itself stays IO-free. An entry `{"cycle": True}` marks a
+    reference the caller found in a premise cycle across functions: a
+    claim naming it is skipped as a premise cycle.
 
     `runtime_types` (`{param: "pandas.Series"}`, else a `declared`
     entry's `runtime_types:`) names the runtime type of a parameter

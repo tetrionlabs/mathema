@@ -5386,7 +5386,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             statement = f"assuming {display}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {display}")
             ref_name = refs[0][0]
-            if cj.name in premise_cycles:
+            # a reference the caller places in a premise cycle across
+            # functions is reported as a cycle like a sibling one
+            cycled = [name for name, _ in refs
+                      if isinstance((known_premises or {}).get(name), dict)
+                      and known_premises[name].get("cycle")]
+            if cycled:
+                ref_name = cycled[0]
+            if cj.name in premise_cycles or cycled:
                 out.append(_stamped(Probe(
                     cj.name, statement, "skipped", route=None,
                     note=f"{note}; premise cycle: {cj.name} and "
