@@ -100,3 +100,24 @@ def test_the_mcp_batch_tool_adjudicates_the_other_claim(project):
     assert out["passed"] is False
     assert any("'list_domain'" in p and _PARSER_SAYS in p
                for p in out["problems"])
+
+
+def test_the_audit_counts_the_function_as_claimed(project):
+    out = tools.audit_targets(["onebadclaim"], root=str(project))
+    (row,) = out["rows"]
+    assert row[out["cols"].index("claims")] == 2
+
+
+def test_claims_lists_both_declared_claims(project, capsys):
+    rc = main(["claims", "onebadclaim.discounted", "--root", str(project)])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "2 declared claim(s)" in out
+    assert "list_domain" in out
+
+
+def test_init_writes_no_stub_over_an_authored_claim(project, capsys):
+    rc = main(["init", "onebadclaim", "--root", str(project)])
+    capsys.readouterr()
+    assert rc == 0
+    assert not (project / "claims" / "onebadclaim.claims.yaml").exists()

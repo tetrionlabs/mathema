@@ -444,6 +444,46 @@ def _split_unparseable(claims: list, grammar: str, fn,
     return readable, unreadable
 
 
+def split_unparseable_entry(entry: dict) -> tuple:
+    """Intent:
+        `(readable_entry, unreadable)`: a declared entry (the shape
+        `authoring.retrieve` returns) with each claim whose statement
+        does not parse left out, and `(name, error)` for each claim
+        left out, so one bad claim is reported on its own while the
+        function's other claims are adjudicated. A row
+        `spec.entry_claims` passes over (a past verdict, or no
+        statement) is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import _declared_conjecture
+    grammar = entry.get("grammar", "mathema")
+    readable, unreadable = [], []
+    for c in entry.get("claims") or []:
+        if (c.get("statement") or c.get("law")) and "verdict" not in c:
+            try:
+                _declared_conjecture(c, grammar)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    if not unreadable:
+        return entry, []
+    out = dict(entry)
+    out["claims"] = readable
+    return out, unreadable
+
+
+def unparseable_claim_message(key: str, name: str, where: "str | None",
+                              error, rerun: str = "verify") -> str:
+    """Intent:
+        The one line naming a declared claim that does not parse, with
+        the parser's message and where to correct it.
+    """
+    where = where or "its docstring or claims file"
+    return (f"{key}: claim {name!r} declared in {where} does not parse "
+            f"({error}); correct it there and re-run {rerun}")
+
+
 @dataclass
 class VerifyResult:
     """One sweep: the per-key report lines, every problem found (empty
@@ -1715,12 +1755,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
             entry_grammar = now["grammar"]
             current_claims = now["claims"]
-            where = ((declared_info or {}).get("source")
-                     or "its docstring or claims file")
             for claim_name, error in now["unreadable"]:
-                msg = (f"{key}: claim {claim_name!r} declared in {where} "
-                       f"does not parse ({error}); correct it there and "
-                       f"re-run verify")
+                msg = unparseable_claim_message(
+                    key, claim_name, (declared_info or {}).get("source"),
+                    error)
                 out.authoring_errors.append(msg)
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")

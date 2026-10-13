@@ -137,7 +137,8 @@ def _check_rows(args) -> list[dict]:
     from .authoring import retrieve
     from .records import claim_row
     from .spec import load_declared, load_verified
-    from .verify import _accepted_risk, gate
+    from .verify import (_accepted_risk, gate, split_unparseable_entry,
+                         unparseable_claim_message)
 
     _validate_trials_scale(args.trials_scale)
 
@@ -165,10 +166,19 @@ def _check_rows(args) -> list[dict]:
     install(root)
     premises = external_premises(root, verified=verified_store)
     for name, fn in sorted(target.functions.items()):
+        # a declared claim that does not parse is named on its own line
+        # and the function's other claims are checked, as in verify
+        entry, unreadable = split_unparseable_entry(
+            retrieve(fn, root, store=declared_store))
+        authoring_errors = [
+            unparseable_claim_message(
+                name, claim_name, (declared_store.get(name) or {}).get("source"),
+                error, rerun="check")
+            for claim_name, error in unreadable]
         rec = check(fn, claims=list(args.claim) if args.claim else None,
                     domain=domain or None,
                     trials_downscale=args.trials_scale,
-                    declared=retrieve(fn, root, store=declared_store),
+                    declared=entry,
                     known_premises=premises)
         # the one gate (verify.gate): provenance population, so a
         # falsified suggestion surfaces in the printed detail (real
@@ -184,7 +194,7 @@ def _check_rows(args) -> list[dict]:
         total = (proven + holds + report.refuted + report.skipped
                  + report.unknown + report.owned)
         verified = proven + holds + report.refuted   # refutation is knowledge
-        problems = report.problems
+        problems = authoring_errors + report.problems
         # the runtime type to annotate, for each parameter the body
         # uses as a vector while the signature names none: always when
         # a list cannot serve that use, else when a claim was skipped
@@ -212,6 +222,8 @@ def _check_rows(args) -> list[dict]:
                                     for p in rec.probes],
                      "problems": problems,
                      "policy": list(report.unaccounted),
+                     **({"authoring_errors": authoring_errors}
+                        if authoring_errors else {}),
                      **({"hints": hints} if hints else {}),
                      **({"warnings": warnings} if warnings else {})})
     return rows
@@ -237,7 +249,7 @@ def _format_check(rows: list[dict], fmt: str) -> str:
                   "total": sum(r["total"] for r in rows),
                   "failed": sum(1 for r in rows if r["problems"])}
         slim = [{k: v for k, v in r.items()
-                 if k not in ("claim_rows", "effects")}
+                 if k not in ("claim_rows", "effects", "authoring_errors")}
                 for r in rows]
         return json.dumps({"tool": "mathema", "version": __version__,
                            "CDD_spec_version": SPEC_VERSION,
@@ -287,14 +299,17 @@ def _format_check(rows: list[dict], fmt: str) -> str:
     # text
     lines = []
     for r in rows:
+        unparsed = r.get("authoring_errors") or []
+        lines.extend(f"FAIL {msg}" for msg in unparsed)
         state = "FAIL" if r["problems"] else "ok"
         line = (f'{state:4} {r["name"]}: '
                 f'{tier_word(r["tier"], r.get("claim_rows") or (), r.get("effects"))}; '
                 f'claims {r["coverage"]} '
                 f'checked ({summary_counts(r)})')
-        if r["problems"]:
+        rest = [p for p in r["problems"] if p not in unparsed]
+        if rest:
             from .verify import problems_text
-            line += "  <- " + problems_text(r["problems"])
+            line += "  <- " + problems_text(rest)
         lines.append(line)
         lines.extend(f"     hint: {h}" for h in r.get("hints", ()))
         lines.extend(f"     warning: {w}" for w in r.get("warnings", ()))
@@ -334,8 +349,10 @@ def cmd_check(args) -> int:
     `--claim`s. Prints (or writes with `--output`) the formatted result.
     Exit code is 1 if any row had a problem (a falsified or unknown
     claim in any mode; skipped claims and unenforced domains under
-    `--strict`), 0 otherwise, suitable for a pre-commit check on a
-    single target."""
+    `--strict`), 2 when a declared claim does not parse (named on its
+    own line while the function's other claims are checked, as in
+    verify), 0 otherwise, suitable for a pre-commit check on a single
+    target."""
     _warn_small_pseudo_infinity()
     from .spec import foreign_grammar_warnings
     for line in foreign_grammar_warnings(getattr(args, "root", ".")):
@@ -347,6 +364,8 @@ def cmd_check(args) -> int:
             fh.write(out + "\n")
     else:
         print(out)
+    if any(r.get("authoring_errors") for r in rows):
+        return 2
     return 1 if any(r["problems"] for r in rows) else 0
 
 
@@ -1964,7 +1983,9 @@ def _suggested_policies(fn, declared_rows: list) -> list:
     import mathema
 
     from .spec import entry_claims
-    claims = entry_claims({"claims": declared_rows}) if declared_rows else []
+    from .verify import split_unparseable_entry
+    readable, _ = split_unparseable_entry({"claims": declared_rows})
+    claims = entry_claims(readable) if declared_rows else []
     rec = mathema.check(fn, claims=claims)
     return [p for p in rec.probes
             if (p.meta or {}).get("mathema.policy")
