@@ -146,6 +146,7 @@ def test_two_python_functions_with_different_refusals_are_still_falsified():
     ({"frontend": "python"}, None),
     (None, "doc:0011aabb"),
     (None, "py:0011aabb"),
+    ({"frontend": {"name": "python"}}, "koine-1:0011aabb"),
 ])
 def test_facts_read_by_the_python_frontend_are_not_foreign(provenance, form):
     p = _check(_halve, _served(_halve_again, provenance=provenance,

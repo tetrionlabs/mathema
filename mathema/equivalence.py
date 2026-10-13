@@ -307,16 +307,16 @@ def _read_elsewhere(facts) -> bool:
     """Intent:
         Whether `facts` were read by a frontend other than the Python
         one: their `provenance` names another frontend (by `name` in a
-        mapping, or as a string), or their form hash is namespaced
-        (`"<frontend>:<sha>"`) outside `py` and `doc`.
+        mapping, or as a string), or, with no frontend named, their form
+        hash is namespaced (`"<frontend>:<sha>"`) outside `py` and `doc`.
     """
     stated = getattr(facts, "provenance", None) or {}
     frontend = stated.get("frontend") if isinstance(stated, dict) else None
     if isinstance(frontend, dict):
         frontend = frontend.get("name")
     from .koine.frontends import PYTHON
-    if frontend and frontend != PYTHON:
-        return True
+    if frontend:
+        return frontend != PYTHON
     form = getattr(facts, "form", None) or ""
     if ":" not in form:
         return False
