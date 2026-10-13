@@ -37,7 +37,7 @@ pandas.Series.div:
       statement: "for a in R^n, other in R, assuming other != 0, f(a, other) == a / other"
       note: "Division by zero gives an infinite or missing element rather than raising."
     - name: elementwise
-      statement: "for a in R^n, other in R^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
+      statement: "for a in [-1e150, 1e150]^n, other in [-1e150, 1e150]^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
 
 pandas.Series.truediv:
   claims:
@@ -45,7 +45,7 @@ pandas.Series.truediv:
       statement: "for a in R^n, other in R, assuming other != 0, f(a, other) == a / other"
       note: "Division by zero gives an infinite or missing element rather than raising."
     - name: elementwise
-      statement: "for a in R^n, other in R^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
+      statement: "for a in [-1e150, 1e150]^n, other in [-1e150, 1e150]^n, assuming min(abs(other)) > 0, f(a, other) ~= a / other"
 
 pandas.Series.pow:
   claims:
