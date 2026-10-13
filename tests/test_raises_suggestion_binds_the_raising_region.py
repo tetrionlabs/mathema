@@ -53,6 +53,12 @@ def ordered(x: float, y: float) -> float:
     return y - x
 
 
+def either_not_positive(sig: float, t: float) -> float:
+    if sig <= 0 or t <= 0:
+        raise ValueError("sig and t must be positive")
+    return sig * t
+
+
 def first_of(scores: list) -> float:
     if not scores:
         raise ValueError("empty")
@@ -71,6 +77,8 @@ def _raises_row(fn, name):
     (zero_only, "raises[x]", "for x in {0}, "),
     (second_guarded, "raises[y]", "for y in (-oo, 0), "),
     (ordered, "raises[x]", "assuming x > y, "),
+    (either_not_positive, "raises[sig]", "for sig in (-oo, 0], "),
+    (either_not_positive, "raises[t]", "for t in (-oo, 0], "),
 ], ids=lambda v: getattr(v, "__name__", None))
 def test_a_raises_suggestion_is_bound_to_where_the_guard_raises(
         fn, name, binding):
@@ -93,7 +101,7 @@ def test_a_guard_on_a_set_of_strings_binds_the_strings_outside_it():
 
 @pytest.mark.parametrize("fn", [below_zero, at_or_below_zero, probability,
                                 zero_only, second_guarded, side_sign,
-                                ordered, first_of],
+                                ordered, either_not_positive, first_of],
                          ids=lambda f: f.__name__)
 def test_no_raises_suggestion_is_falsified(fn):
     for p in check(fn).probes:

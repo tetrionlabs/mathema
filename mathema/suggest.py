@@ -1247,7 +1247,9 @@ def _raising_binding(fn, facts, p: str, exc_name: str) -> "str | None":
         The prefix (`for x in (-oo, 0), `, `assuming x > y, `) that
         binds the raises(f(...), exc_name) suggestion on parameter `p`
         to where a guard reading `p` raises exc_name: the union of the
-        guards that read `p` alone, else the first guard on several
+        guards that read `p` alone (each disjunct of an `or` guard is a
+        guard of its own, since it raises whatever the other disjuncts
+        hold), else the first guard on several
         parameters, each parameter bound to its region within the
         declared domain and each relation on several parameters stated
         as a premise. None when no such region can be stated.
@@ -1262,10 +1264,11 @@ def _raising_binding(fn, facts, p: str, exc_name: str) -> "str | None":
         if name != exc_name or cond is sympy.false or \
                 not hasattr(cond, "free_symbols"):
             continue
-        if p in {str(sym) for sym in cond.free_symbols}:
-            box = _guard_box(cond)
-            if box is not None:
-                boxes.append(box)
+        for part in (cond.args if isinstance(cond, sympy.Or) else (cond,)):
+            if p in {str(sym) for sym in part.free_symbols}:
+                box = _guard_box(part)
+                if box is not None:
+                    boxes.append(box)
     alone = [found[p] for found, premise in boxes
              if set(found) == {p} and not premise]
     regions: dict
