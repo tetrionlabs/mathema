@@ -65,10 +65,9 @@ def _aspect(p) -> str:
         `mathematics unsound`, corroboration `reproduced`) and stays on
         the `mathematics` line whichever route reproduced it, and a
         probe standing in for a derive attempt that could not settle the
-        mathematics with a float companion named beneath it, whose draws
-        judge the mathematics while the companion is the computation
-        line. A probe with no companion is the record's only evidence of
-        what the code computes, so it stays the computation line.
+        mathematics (derive status `undecided`, or a float companion
+        named beneath it), whose draws judge the mathematics while the
+        companion is the computation line.
     """
     meta = p.meta or {}
     stratum = getattr(p, "stratum", None) or {}
@@ -76,7 +75,8 @@ def _aspect(p) -> str:
             and meta.get("mathema.corroboration") == "reproduced":
         return "mathematics"
     companion = str(meta.get("mathema.float_companion") or "")
-    if companion and not companion.startswith("none"):
+    if meta.get("mathema.derive_status") == "undecided" \
+            or (companion and not companion.startswith("none")):
         return "mathematics"
     return "computation" if _ran(p.route) else "mathematics"
 

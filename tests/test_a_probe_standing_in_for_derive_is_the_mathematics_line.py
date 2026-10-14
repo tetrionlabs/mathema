@@ -36,11 +36,3 @@ def test_a_probe_verdict_without_a_computation_line_stays_the_computation():
     from mathema.records import Probe
     row = Probe("between", _BETWEEN, "holds", route="probe", meta={})
     assert _aspect(row) == "computation"
-
-
-def test_an_undecided_derive_with_no_companion_keeps_the_computation_line():
-    from mathema._layout import _aspect
-    from mathema.records import Probe
-    row = Probe("bounded", _BETWEEN, "holds", route="probe",
-                meta={"mathema.derive_status": "undecided"})
-    assert _aspect(row) == "computation"
