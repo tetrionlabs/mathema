@@ -6,6 +6,10 @@ a domain by core's derive rungs. Equal bodies are proven with the rung
 named; bodies that differ are falsified only at a point executed on
 both; refusal names are compared only when both bodies come from one
 runtime."""
+import math
+
+import pytest
+
 from mathema.interfaces.extension import BodyEquivalence, prove_bodies_equal
 
 SHA = "0" * 64
@@ -184,3 +188,82 @@ def test_a_bound_given_as_text_is_read_and_stated():
                                 body(returns("x"), language="ext"), {"x": "(0, inf)"})
     assert answer.verdict == "proven", answer
     assert answer.meta["mathema.domain"]["x"].startswith("(0")
+
+
+# --- two bodies refusing on one region are compared where both return ---
+
+ROOT = "function::root::square(x)"
+SQUARED = "operator::binary::multiplication(x, x)"
+TWICE_ROOT = "operator::binary::multiplication(2, function::root::square(x))"
+ROOT_NUDGED = "operator::binary::addition(function::root::square(x), 1e-12)"
+NOT_NEGATIVE = "operator::comparison::greater_equal(x, 0)"
+
+
+def guarded(expression: str, failure: str = "ValueError",
+            admits: str = "operator::logic::not("
+                          "operator::comparison::less(x, 0))") -> str:
+    """A body that refuses where `admits` fails and returns
+    `expression` elsewhere."""
+    return f"""statement::require(
+    {admits},
+    failure::raise("{failure}"), {AT}),
+  {returns(expression)}"""
+
+
+#: (right body's expression, its refusal name, its language)
+GUARDED_PAIRS = [
+    (SQUARED, "ValueError", "py"),
+    (SQUARED, "DomainError", "ext"),
+    (TWICE_ROOT, "ValueError", "py"),
+    (TWICE_ROOT, "DomainError", "ext"),
+    (ROOT_NUDGED, "ValueError", "py"),
+    (ROOT, "ValueError", "py"),
+]
+
+
+@pytest.mark.parametrize("expression, failure, language", GUARDED_PAIRS)
+def test_bodies_refusing_alike_answer_as_they_do_where_both_return(
+        expression, failure, language):
+    both_refusing = prove_bodies_equal(
+        body(guarded(ROOT)),
+        body(guarded(expression, failure, admits=NOT_NEGATIVE),
+             language=language),
+        {"x": [-4.0, 4.0]})
+    where_both_return = prove_bodies_equal(
+        body(returns(ROOT)), body(returns(expression), language="ext"),
+        {"x": [0.0, 4.0]})
+    assert both_refusing.verdict == where_both_return.verdict, (
+        both_refusing, where_both_return)
+    assert (both_refusing.meta.get("mathema.corroboration")
+            == where_both_return.meta.get("mathema.corroboration"))
+
+
+@pytest.mark.parametrize("language", ["py", "ext"])
+def test_bodies_refusing_alike_but_differing_elsewhere_are_falsified(language):
+    answer = prove_bodies_equal(
+        body(guarded(ROOT)),
+        body(guarded(SQUARED, "ValueError" if language == "py"
+                     else "DomainError"), language=language),
+        {"x": [-4.0, 4.0]})
+    assert answer.verdict == "falsified", answer
+    assert answer.rung == "symbolic"
+    x = answer.point["x"]
+    assert 0 <= x <= 4 and math.sqrt(x) != x * x, answer
+    assert "f returned" in answer.witness and "g returned" in answer.witness
+    assert answer.meta["mathema.corroboration"] == "reproduced"
+
+
+def test_bodies_refusing_alike_and_agreeing_elsewhere_are_proven():
+    answer = prove_bodies_equal(
+        body(guarded(ROOT)), body(guarded(ROOT, admits=NOT_NEGATIVE)),
+        {"x": [-4.0, 4.0]})
+    assert answer.verdict == "proven", answer
+    assert answer.rung == "symbolic"
+
+
+def test_a_difference_no_executed_point_shows_stays_unknown():
+    answer = prove_bodies_equal(
+        body(guarded(ROOT)), body(guarded(ROOT_NUDGED, admits=NOT_NEGATIVE)),
+        {"x": [-4.0, 4.0]})
+    assert answer.verdict == "unknown", answer
+    assert answer.meta["mathema.corroboration"] == "uncorroborated"
