@@ -63,11 +63,20 @@ def _aspect(p) -> str:
         it was reached by running the code, except a derive disproof
         the code reproduced, which indicts the mathematics (stratum
         `mathematics unsound`, corroboration `reproduced`) and stays on
-        the `mathematics` line whichever route reproduced it.
+        the `mathematics` line whichever route reproduced it, and a
+        probe standing in for a derive attempt that could not settle the
+        mathematics (derive status `undecided`, or a float companion
+        named beneath it), whose draws judge the mathematics while the
+        companion is the computation line.
     """
+    meta = p.meta or {}
     stratum = getattr(p, "stratum", None) or {}
     if _verdict(p) == "falsified" and stratum.get("mathematics") == "unsound" \
-            and (p.meta or {}).get("mathema.corroboration") == "reproduced":
+            and meta.get("mathema.corroboration") == "reproduced":
+        return "mathematics"
+    companion = str(meta.get("mathema.float_companion") or "")
+    if meta.get("mathema.derive_status") == "undecided" \
+            or (companion and not companion.startswith("none")):
         return "mathematics"
     return "computation" if _ran(p.route) else "mathematics"
 
