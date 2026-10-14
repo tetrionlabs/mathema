@@ -124,7 +124,14 @@ machinery's. Test and derive lines still count.
 
 ## How clarity is scored
 
-Clarity is an entropy measure. Before any evidence, a function carries an
+Clarity is an entropy measure, in the sense Shannon gave the word: entropy
+is uncertainty counted in bits, where one bit is the uncertainty of a
+single fair yes-or-no question, so a fair coin carries 1 bit, a choice
+among eight equally likely options carries 3 (`log2 8`), and an outcome you
+already know carries none. Evidence that rules possibilities out lowers it,
+which is exactly what a verified claim does.
+
+Before any evidence, a function carries an
 a-priori uncertainty about its behaviour: which map it computes, which
 inputs it takes, what its output looks like, how safely it runs and where
 it can fail. mathema splits that uncertainty into sources, gives each
@@ -305,10 +312,10 @@ closer to zero.
 
 ### What the score does not tell you
 
-The bit values are nominal: they rank the kinds of knowledge against each
-other sensibly, but nobody measured them, and calibrating them against
-real repositories is still to come, so a clarity of 60 against one of 70
-says more about order than about distance. The score is per function and
+The bit values have been calibrated so that the kinds of knowledge rank
+against each other as they should, and ongoing refinement is likely as more
+repositories are scored, so a clarity of 60 against one of 70 says more
+about order than about distance. The score is per function and
 reads one level of calls, so it says nothing about how functions behave
 together, and a repository's clarity is a weighted mean of those
 per-function views rather than a measure of the system. It depends on
