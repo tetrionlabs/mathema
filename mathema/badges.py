@@ -983,18 +983,23 @@ def _population(targets, root: str) -> dict:
         defined under `targets`, or, rootwide (no targets), every
         function the declared/verified store knows. One population feeds
         all three scores and the centrality graph, so they line up.
+        The targets and keys are imported with `root` on `sys.path`, so a
+        worker process finds the same population as the parent.
     """
+    from .targets import _root_on_path
     if targets:
         from .audit import discover
-        return dict(discover(list(targets)))
+        with _root_on_path(root):
+            return dict(discover(list(targets)))
     from .conjecture import _resolve_func_ref
     from .spec import load_declared, load_verified
     keys = sorted(set(load_declared(root)) | set(load_verified(root)))
     out = {}
-    for key in keys:
-        fn = _resolve_func_ref(key)
-        if fn is not None:
-            out[key] = fn
+    with _root_on_path(root):
+        for key in keys:
+            fn = _resolve_func_ref(key)
+            if fn is not None:
+                out[key] = fn
     return out
 
 

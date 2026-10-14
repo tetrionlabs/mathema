@@ -294,8 +294,8 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
-        bounds = domain.get(p)
-        if not isinstance(bounds, tuple):
+        bounds = _numeric_span(domain.get(p))
+        if bounds is None:
             continue
         lo, hi = bounds
         if math.isinf(lo) or math.isinf(hi) or (hi - lo) > policy.wide_span:
@@ -314,6 +314,23 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     if language is not None:
         risk["language"] = language
     return risk
+
+
+def _numeric_span(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The `(lo, hi)` a parameter's bound spans on the real line: the
+        bound itself for an interval, the hull of the interval pieces
+        for a real-valued `Domain` (`for x in R` reaches the float
+        range's ends), `None` for any other shape.
+    """
+    if isinstance(bounds, tuple) and len(bounds) == 2:
+        return bounds
+    if isinstance(bounds, Domain) and bounds.base_type != "L":
+        spans = [b for b in bounds.pieces
+                 if isinstance(b, tuple) and len(b) == 2]
+        if spans:
+            return (min(lo for lo, _hi in spans), max(hi for _lo, hi in spans))
+    return None
 
 
 def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
@@ -2519,6 +2536,7 @@ class SamplingSetup:
     affine: bool = False
     explicit_trials: bool = False
     scale: float = 1.0
+    domain: dict = dataclasses.field(default_factory=dict)
     # "probe:semi_analytical" when an analytically discovered critical
     # point exists, else "probe"; the subroute is earned only once a
     # draw lands on one of `analytical_hints` (`earned_route`)
@@ -2610,7 +2628,8 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
                          truncated_hints=truncated_hints,
                          extra_cycles=extra_cycles, route=route_value,
                          affine=affine, explicit_trials=trials is not None,
-                         scale=scale, analytical_hints=analytical_hints)
+                         scale=scale, analytical_hints=analytical_hints,
+                         domain=dict(domain or {}))
 
 
 def _scaled_budget(budget: int, scale: float) -> int:
@@ -2624,18 +2643,27 @@ def _scaled_budget(budget: int, scale: float) -> int:
     return budget
 
 
-def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict,
+                          bound: "dict | None" = None) -> "tuple[dict, int]":
     """Intent:
         The risk and trial budget for one claim: the function's own
-        setup, with the `language` factor read off the claim's domain
-        (a written binding or an inferred one), and the budget set from
-        the complexity that factor adds. An explicit trial count is kept
-        as given.
+        setup, with the `wide_domain` and `float_extremes` factors read
+        off the claim's own written binding `bound` (which replaces the
+        setup's domain for each parameter it binds), the `language`
+        factor read off the claim's domain (a written binding or an
+        inferred one), and the budget set from the complexity those
+        factors give. An explicit trial count is kept as given.
     """
+    risk = dict(setup.risk)
+    if bound:
+        claimed = _structural_risk(facts, {**setup.domain, **bound})
+        risk["wide_domain"] = claimed["wide_domain"]
+        risk["float_extremes"] = claimed["float_extremes"]
     language = _language_risk(facts.params, cj_domain)
-    if language is None or language == setup.risk.get("language"):
+    if language is not None:
+        risk["language"] = language
+    if risk == setup.risk:
         return setup.risk, setup.budget
-    risk = {**setup.risk, "language": language}
     if setup.explicit_trials:
         return risk, setup.budget
     return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
