@@ -638,7 +638,7 @@ def _call(fn, sig, args: dict):
         else fn(*[args[p] for p in sig.parameters if p in args])
 
 
-def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: set,
+def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                                rng: random.Random,
                                fixed: "dict | None" = None) -> Probe | None:
     """Does the real function guard against mismatched input shapes, the
@@ -696,7 +696,7 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: set,
                       "declared shared dims")
 
 
-def _returns_in_shape(fn, sig, param_dims: dict, names: set,
+def _returns_in_shape(fn, sig, param_dims: dict, names: tuple,
                       rng: random.Random, fixed: "dict | None") -> bool:
     """Whether one call at consistent, in-shape arguments returns: the
     evidence a rejection probe needs before a raise at a wrong shape
@@ -722,7 +722,7 @@ def _shape_words(dims: tuple) -> str:
     return text if text.startswith(("length", "shape", "a ")) else f"shape {text}"
 
 
-def _size_enforced_probe(fn, sig, param_dims: dict, names: set,
+def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                          rng: random.Random, marker_dims: dict,
                          fixed: "dict | None" = None) -> Probe | None:
     """Does the real function reject a value of the wrong FIXED size (a
@@ -852,8 +852,11 @@ def type_probes(fn, trials: int = _TYPE_PROBE_TRIALS,
     from .runtime_types import calling, detect_parameters
     fn = calling(fn, SimpleNamespace(runtime_types=detect_parameters(fn)))
 
-    names = {d for dims in param_dims.values() for d in dims if isinstance(d, str)}
-    names |= {d for d in (return_dims or ()) if isinstance(d, str)}
+    # the dimension names in the order they first appear in the
+    # signature, so every draw below is the same in every process
+    names = tuple(dict.fromkeys(
+        d for dims in (*param_dims.values(), return_dims or ())
+        for d in dims if isinstance(d, str)))
     rng = random.Random(_RNG_SEED)
     probes: list[Probe] = []
     if return_dims is not None:
