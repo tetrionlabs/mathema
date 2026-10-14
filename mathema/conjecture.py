@@ -2841,16 +2841,18 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     from .domain import bound_to_sympy_set
     if facts is None:
         return {}
+    enforced_texts = _enforced_working_texts(fn, facts, cj, domain)
     if cj.relation not in routes.examine_predicates():
         # a value claim: only a parameter it binds no domain for
         if not _reads_working_domain(fn, facts, cj, domain):
-            return {}
+            return enforced_texts
         unbound = {p: found[1] for p in facts.params
                    if domain.get(p) is None
                    and (found := _unbound_working_bound(fn, facts, p))}
         cuts = guard_cut_texts(fn, facts) or [
             str(c) for c in _own_guard_conditions(fn, facts)]
         cuts += _finite_guard_texts(facts, domain)
+        unbound = {**enforced_texts, **unbound}
         if cuts:
             unbound["guards"] = cuts
         return unbound
@@ -2897,8 +2899,36 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
                 continue
         if narrowed != here:
             out[p] = _set_text(narrowed)
+    for p, text in enforced_texts.items():
+        out.setdefault(p, text)
     if out and (cuts or listed_texts):
         out["guards"] = list(cuts) + listed_texts
+    return out
+
+
+def _enforced_working_texts(fn, facts, cj, domain: dict) -> dict:
+    """Intent:
+        The working domain of each parameter `@enforce_domain` guards
+        that the claim reads and binds no domain for, as text: the
+        enforced domain, cut by f's own conditional raises where they
+        read that parameter too. Empty when the call binds a domain of
+        its own for the parameter.
+    """
+    from .domain import render_domain_bound
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not enforced:
+        return {}
+    read = _names_in_claim(cj)
+    if cj.relation in routes.examine_predicates() \
+            and (cj.lhs or "").strip() == "f" and "f" not in facts.params:
+        read |= set(facts.params)
+    out: dict = {}
+    for p, bound in enforced.items():
+        if p not in read or p in (cj.domain or {}) \
+                or domain.get(p) is not bound:
+            continue
+        found = _unbound_working_bound(fn, facts, p)
+        out[p] = found[1] if found else render_domain_bound(bound)
     return out
 
 
