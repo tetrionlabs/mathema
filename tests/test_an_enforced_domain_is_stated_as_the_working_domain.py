@@ -49,3 +49,33 @@ def test_a_domain_the_claim_binds_is_not_restated():
     assert p.verdict == "proven", (p.verdict, p.note)
     assert "the working domain" not in (p.note or ""), p.note
     assert "mathema.working_domain" not in (p.meta or {}), p.meta
+
+
+@enforce_domain({"rate": (0, 1)})
+def capped_discount(rate: float) -> float:
+    if rate > 0.5:
+        raise ValueError("rate is above one half")
+    return 1 - rate
+
+
+def test_a_guard_inside_the_enforced_domain_cuts_the_working_domain():
+    import mathema
+    rec = mathema.check(capped_discount, claims=["f(rate) > 0"])
+    rows = [p for p in rec.probes if p.name.startswith("f_rate_gt_0")]
+    assert {p.name for p in rows} >= {"f_rate_gt_0", "f_rate_gt_0[float]"}, \
+        [p.name for p in rec.probes]
+    for p in rows:
+        assert p.verdict in ("proven", "holds"), (p.name, p.verdict,
+                                                  p.counterexample, p.note)
+        assert p.counterexample is None, (p.name, p.counterexample)
+        assert "the working domain is rate in [0, 1/2]" in (p.note or ""), \
+            (p.name, p.note)
+        assert (p.meta or {}).get("mathema.working_domain", {}).get("rate") \
+            == "[0, 1/2]", p.meta
+    (main,) = [p for p in rows if p.name == "f_rate_gt_0"]
+    assert main.verdict == "proven", (main.verdict, main.note)
+
+
+def test_a_stated_domain_past_the_guard_still_falsifies():
+    p = _one(capped_discount, "for rate in [0, 1], f(rate) > 0")
+    assert p.verdict == "falsified", (p.verdict, p.note)
