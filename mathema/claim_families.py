@@ -3892,14 +3892,16 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return satisfies(compiled, point)
 
     shapes = _region_shapes(links, params, domain)
-    # the parameters a `Vec`/`Mat` marker shapes, drawn at their
-    # declared axes with shared dimension names sized alike
+    # the parameters a `Vec`/`Mat` marker or the claim's space binding
+    # (`R^n`, `[a, b]^(n,n)`) shapes, drawn at their declared axes with
+    # shared dimension names sized alike
     from . import dimensions as _dimensions
     from .types import shapes_from_signature
     markers = shapes_from_signature(fn)
     marked = [p for p in params
-              if p not in shapes and p not in call_pins
-              and getattr(markers.get(p), "dims", ())]
+              if p not in call_pins
+              and (getattr(markers.get(p), "dims", ())
+                   or getattr((domain or {}).get(p), "dims", ()))]
     resolver = None
     if marked:
         try:
@@ -3911,6 +3913,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     from .probing import _bound_is_complex as _complex_bound
     numeric = [p for p in params
                if p not in marked
+               and facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "table",
+                                                    "dict")
                and (facts.param_kinds.get(p, "unknown")
                     in _WITNESS_SCALAR_KINDS
                     or _interval_ends((domain or {}).get(p)) is not None
@@ -3959,6 +3963,32 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return False
         return True
 
+    # the form each unshaped array parameter is drawn in: a table as a
+    # dict of equal-length columns (realised into its runtime type by
+    # the caller), a list of lists where the parameter's type is a
+    # matrix, else a sequence in the container its annotation names
+    from .conjecture import _table_columns
+    array_forms: dict = {}
+    for p in params:
+        if p in marked or p in call_pins or p in shapes:
+            continue
+        p_kind = facts.param_kinds.get(p, "unknown")
+        detected = (getattr(facts, "runtime_types", None) or {}).get(p) or ()
+        if p_kind == "table":
+            array_forms[p] = "table"
+        elif p_kind == "mat" or (p_kind in SEQUENCE_KINDS and detected
+                                 and detected[0].kind == "mat"):
+            array_forms[p] = "mat"
+        elif p_kind in SEQUENCE_KINDS:
+            array_forms[p] = "vec"
+    columns = {p: _table_columns(p, cj, facts)
+               for p, form in array_forms.items() if form == "table"}
+    containers = {p: _annotated_container(fn, p) for p in array_forms}
+
+    def as_container(p: str, value):
+        made = containers.get(p)
+        return made(value) if made is not None else value
+
     def draw_one(p: str):
         from .matrices import _rand
         if p in call_pins:
@@ -3968,8 +3998,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if shapes.get(p) == "sequence":
             return [rng.uniform(-10.0, 10.0)
                     for _ in range(rng.randint(1, 6))]
-        return _synth(facts.param_kinds.get(p, "unknown"), rng,
-                      (domain or {}).get(p))
+        form = array_forms.get(p)
+        if form == "table":
+            n = rng.randint(1, 6)
+            return {c: _synth("sequence", rng, None, length=n)
+                    for c in columns[p]}
+        if form == "mat":
+            rows, cols = rng.randint(1, 5), rng.randint(1, 5)
+            return [[rng.uniform(-10.0, 10.0) for _ in range(cols)]
+                    for _ in range(rows)]
+        value = _synth(facts.param_kinds.get(p, "unknown"), rng,
+                       (domain or {}).get(p))
+        return as_container(p, value) if form == "vec" else value
 
     def draw_marked(sizes: dict, p: str):
         bound = (domain or {}).get(p)
@@ -3980,14 +4020,54 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return resolver.synth(p, sizes, lambda: rng.uniform(-10.0, 10.0),
                               rng)
 
-    def draw() -> dict:
+    def draw(corner: "tuple | None" = None) -> dict:
+        # `corner`, `(param, pair)`: that array parameter holds the
+        # pair's two values in turn, element after element, with at
+        # least two elements along each axis its shape leaves free
+        lo = ({resolver.key(corner[0], a): 2
+               for a in range(resolver.shapes[corner[0]].ndim)}
+              if corner is not None and corner[0] in marked else {})
         sizes = (resolver.draw_sizes(
-            rng, hi={k: 5 for k in resolver.distinct_keys()})
+            rng, lo=lo, hi={k: 5 for k in resolver.distinct_keys()})
             if resolver is not None else {})
         point = {p: draw_marked(sizes, p) if p in marked else draw_one(p)
                  for p in params}
+        if corner is not None:
+            point[corner[0]] = corner_array(corner[0], corner[1], sizes)
         placed = _placed(point, rng, keep=tuple(call_pins))
         return point if placed is None else placed
+
+    def corner_array(p: str, pair: list, sizes: dict):
+        import itertools
+        if p in marked:
+            cycle = itertools.cycle(pair)
+            return resolver.synth(p, sizes, lambda: next(cycle), rng)
+        line = [pair[i % 2] for i in range(3)]
+        form = array_forms[p]
+        if form == "table":
+            return {c: list(line) for c in columns[p]}
+        if form == "mat":
+            return [[pair[(i + j) % 2] for j in range(2)] for i in range(2)]
+        return as_container(p, line)
+
+    def array_corners():
+        # every array parameter meets the magnitude corners of its
+        # element range (`probing.sequence_corners`): the pairs that
+        # cancel at a large magnitude and the same-sign pair at each
+        # end past half the representation's reach, the other
+        # parameters drawn as usual
+        from .probing import sequence_corners
+        from .records import operational_range
+        pinf = operational_range(cj)
+        for p in params:
+            if p not in marked and p not in array_forms:
+                continue
+            bound = (domain or {}).get(p)
+            if pinf is not None and not getattr(bound, "pieces", None) \
+                    and _interval_ends(bound) is None:
+                bound = tuple(pinf)
+            for pair in sequence_corners(bound):
+                yield draw((p, pair))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
@@ -4019,7 +4099,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if ends is None:
                 continue
             lo, hi = ends
-            for v in (lo, hi, (lo + hi) / 2):
+            mid = (lo + hi) / 2
+            if facts.param_kinds.get(p) == "int":
+                # an integer parameter's corners are the whole numbers
+                # at and between its ends
+                lo, hi, mid = math.ceil(lo), math.floor(hi), math.floor(mid)
+            for v in (lo, hi, mid):
                 yield {**draw(), p: v}
 
     def extremes():
@@ -4072,6 +4157,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def candidates():
         yield from corners()
+        yield from array_corners()
         if bare and kind == "is_overflow_safe":
             yield from extremes()
         if not bare:
@@ -4185,6 +4271,37 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if weakest == "skipped":
         weakest = verdict
     return weakest, checked, cx, None, meta
+
+
+#: the Python container a sequence annotation names, by the last dotted
+#: part of its constructor, lowercased; any other sequence is a list
+_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
+                         "frozenset": frozenset, "tuple": tuple}
+
+
+def _annotated_container(fn, param: str) -> "type | None":
+    """Intent:
+        The container type `param`'s annotation names when it is a set,
+        a frozenset or a tuple (`set`, `typing.Set[float]`,
+        `Optional[frozenset]`), so a sequence drawn as a list is passed
+        as a member of that type; None for any other annotation or none.
+    """
+    from .probing import _annotation_text
+    try:
+        spec = callable_signature(fn).parameters.get(param)
+    except (TypeError, ValueError):
+        return None
+    if spec is None:
+        return None
+    text = _annotation_text(spec).replace(" ", "").lower()
+    for wrapper in ("optional[", "typing.optional["):
+        if text.startswith(wrapper) and text.endswith("]"):
+            text = text[len(wrapper):-1]
+    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
+    if len(parts) != 1:
+        return None
+    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
+    return _ANNOTATED_CONTAINERS.get(head)
 
 
 def _has_axes(value, axes: int) -> bool:
