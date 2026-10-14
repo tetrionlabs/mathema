@@ -9868,6 +9868,77 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
     return None
 
 
+def _exactly_raises_at(fn, facts, args, kwargs) -> "bool | None":
+    """Intent:
+        Whether f, read in exact arithmetic, has no value at the point it
+        was called with (`args`, `kwargs`, its float arguments read as
+        the exact rationals they hold): True when one of its raise
+        regions (`_definedness_guards`, the implicit ones such as a zero
+        divisor and its explicit raise branches) holds there, False when
+        the region list is complete and every region is decided false
+        there, None when it cannot be read (a region that does not lift
+        or does not settle, a non-numeric argument, the fast wall-clock
+        cap).
+    """
+    import inspect
+    from fractions import Fraction
+
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        bound = inspect.signature(fn).bind(*args, **(kwargs or {}))
+    except (TypeError, ValueError):
+        return None
+    point: dict = {}
+    for name, value in bound.arguments.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or value != value or value in (float("inf"), float("-inf")):
+            return None
+        point[name] = sympy.Rational(Fraction(value))
+
+    def decided(cond) -> "bool | None":
+        if cond is sympy.true or cond is sympy.false:
+            return bool(cond)
+        if isinstance(cond, sympy.Not):
+            inner = decided(cond.args[0])
+            return None if inner is None else not inner
+        if isinstance(cond, (sympy.And, sympy.Or)):
+            parts = [decided(a) for a in cond.args]
+            stop = isinstance(cond, sympy.Or)
+            if stop in parts:
+                return stop
+            return None if None in parts else not stop
+        if isinstance(cond, sympy.core.relational.Relational):
+            settled = cond.func(sympy.simplify(cond.lhs - cond.rhs), 0)
+            if settled is sympy.true or settled is sympy.false:
+                return bool(settled)
+        return None
+
+    def read() -> "bool | None":
+        guards, gaps = _definedness_guards(fn, facts)
+        complete = not gaps
+        for cond, _exc in guards:
+            subs = {s: point[s.name] for s in cond.free_symbols
+                    if s.name in point}
+            if len(subs) != len(cond.free_symbols):
+                complete = False
+                continue
+            holds = decided(cond.subs(subs))
+            if holds is True:
+                return True
+            if holds is None:
+                complete = False
+        return False if complete else None
+
+    try:
+        return _with_timeout(read, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+
+
 def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       sampling) -> "Probe":
     """Intent:
@@ -10309,6 +10380,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         budget = cj.trials
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    # whether a draw evaluated this pass sat on an analytically
+    # discovered critical point (`SamplingSetup.earned_route`)
+    drew_critical = False
     from .probing import _language_lap
     # a language-bound parameter's first draws are one lap over its
     # language's hazards
@@ -10455,6 +10529,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                         literal_args)
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
+    # the callee that last raised, with the arguments it was called with
+    call_raised_at: list = [None]
     call_nan = [None]      # the LABEL of the first callee to return a NaN
     # the first callee to return a hole of another member (`pd.NA`, `NaT`,
     # a Decimal NaN), as `(label, member)`
@@ -10519,6 +10595,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 value = _exits.call(callee, *a, **k)
             except Exception:
                 call_raised[0] = label
+                call_raised_at[0] = (callee, a, k)
                 raise
             if complex_raises and is_complex_value(value):
                 call_raised[0] = label
@@ -10932,6 +11009,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[a_name] = rng.uniform(-5, 5)
             if not _premises.admits(assum_eval, {**env, **premise_words}):
                 continue
+        if not drew_critical and setup.is_critical_draw(
+                {p: env.get(p) for p in kinds}):
+            drew_critical = True
         for p in sequence_params:
             if isinstance(env.get(p), (list, tuple)) or (
                     _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
@@ -11066,7 +11146,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # falsifies like any other; when every input nudged within
             # the tolerance evaluates AND satisfies the claim, the
             # counterexample names it as sub-epsilon fragility (stratum
-            # 5.6) with the clamp remedy instead of the domain one.
+            # 5.6) with the clamp remedy instead of the domain one. An
+            # isolated pole passes the same nudge test, so the exact
+            # mathematics at the point decides between the two.
             slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
             boundary = False
             # a refusal by the function's own mathema guard is the guard
@@ -11096,20 +11178,32 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if jok:
                     boundary = True
                     break
-            if boundary:
+            # the exact mathematics at the raising call: True at a pole
+            # (a raise region of f holds there), False where f has a
+            # value, None when it cannot be read
+            exact_raise = None
+            if boundary and call_raised[0] == "f" \
+                    and call_raised_at[0] is not None:
+                _callee, call_args, call_kwargs = call_raised_at[0]
+                exact_raise = _exactly_raises_at(fn, facts, call_args,
+                                                 call_kwargs)
+            if boundary and exact_raise is not True:
                 checked += 1
                 cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
-                      f"operation's argument would remove the instability")
-                # nudged inputs evaluating cleanly IS the maths-sound
-                # evidence: the failure lives in the number
-                # representation's last ulp
-                cx_stratum = {"mathematics": "sound",
-                              "blame": "implementation",
+                      f"operation's argument would remove the instability"
+                      + ("" if exact_raise is False else
+                         " if the exact mathematics has a value there"))
+                cx_stratum = {"blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
                               "witness": _point_text(args)}
+                if exact_raise is False:
+                    # f has a value at the exact point and the nudged
+                    # inputs satisfy the claim: the failure lives in the
+                    # number representation's last ulp
+                    cx_stratum = {"mathematics": "sound", **cx_stratum}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -11172,7 +11266,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _point_text(args))
+            cx_stratum = ({"mathematics": "unsound", "blame": "claim",
+                           "witness": _point_text(args)}
+                          if exact_raise is True else
+                          _machine_failure_stratum(e, _point_text(args)))
             break
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
@@ -11598,6 +11695,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if steps:
                 note = (f"{note}; the witness was shrunk inside the language "
                         f"in {steps} step{'s' if steps != 1 else ''}").lstrip("; ")
+    probe_route = setup.earned_route(drew_critical)
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,

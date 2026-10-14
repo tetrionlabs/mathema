@@ -4,7 +4,9 @@
 value claim's domain falsifies it, even where the same inputs nudged
 within epsilon evaluate cleanly. That sub-epsilon case is named in the
 counterexample with the clamp remedy and stratum 5.6, the same way the
-is_numerically_stable axis reports it."""
+is_numerically_stable axis reports it, when the function read exactly
+has a value there; a raise the exact function makes too is the
+mathematics failing, with the domain remedy."""
 import math
 
 import pytest
@@ -28,17 +30,18 @@ def hard_edge(x: float) -> float:
     return x
 
 
-def test_sub_epsilon_boundary_raise_falsifies_with_the_clamp_remedy():
+def test_a_knife_edge_raise_the_exact_function_makes_names_the_mathematics():
     # the degenerate domain pins every sample to the knife edge itself:
-    # each call raises there, and each nudge within epsilon escapes,
-    # so the raise is sub-epsilon, yet still a raise in the domain
+    # each call raises there and each nudge within epsilon escapes, but
+    # x = 1 is inside the explicit raise branch read exactly (1 <= 1), so
+    # the mathematics fails there and the domain remedy is the one named
     (p,) = check_conjectures(
         knife_edge, [claim("for x in [1, 1], f(x) == 0", route="probe",
                            tolerance=1e-6)])
     assert p.verdict == "falsified"
-    assert "floating-point boundary" in p.counterexample
-    assert "clamp" in p.counterexample
-    assert p.stratum["cause"] == "implementation:sub-epsilon-boundary"
+    assert "floating-point boundary" not in p.counterexample
+    assert "narrow the claim's domain" in p.counterexample
+    assert p.stratum["mathematics"] == "unsound"
     assert p.meta["mathema.counterexample_args"] == [1.0]
     with pytest.raises(ValueError):
         knife_edge(*p.meta["mathema.counterexample_args"])
