@@ -2926,11 +2926,14 @@ def _always_raises(stmts) -> bool:
 
 def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     """Intent:
-        Whether a family claim's working domain is empty: f's own guards
+        Whether a claim's working domain is empty: f's own guards
         refuse every input its annotations and binding admit. The
         stateless families (is_state_safe, is_deterministic,
         is_reproducible) are examined from the source alone and are
-        never read over a domain. Read from
+        never read over a domain. A value claim is read over the
+        working domain only for the parameters it binds no domain for,
+        so only those parameters can empty it; a raise inside a domain
+        it states is a counterexample instead. Read from
         the body (no `return` anywhere and every path ends in a `raise`,
         or a guard cut or `enforce_domain` that leaves no point of a
         parameter's domain) and corroborated by calls at points of the
@@ -2941,8 +2944,10 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     import sympy
 
     from .domain import bound_to_sympy_set, without_sentinels
-    if cj.relation not in routes.examine_predicates() or facts is None \
-            or facts.tree is None or not facts.params:
+    if facts is None or facts.tree is None or not facts.params:
+        return False
+    value_claim = cj.relation not in routes.examine_predicates()
+    if value_claim and not _reads_working_domain(fn, facts, cj, domain):
         return False
     if cj.relation in families.GROUPS["stateless"]:
         # state and repeatability are read from the source, never by
@@ -2962,6 +2967,8 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
         cuts = guard_cut_texts(fn, facts)
         for p in facts.params:
             bound = domain.get(p)
+            if value_claim and bound is not None:
+                continue
             try:
                 here = bound_to_sympy_set(bound) if bound is not None \
                     else sympy.S.Reals
@@ -5174,13 +5181,20 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         f"{families.current_family_name(accepted)}")
                 if said not in (probe.note or ""):
                     probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
-        if probe.verdict != "falsified" and _working_domain_empty(
-                fn, facts, cj, {**domain, **(cj.domain or {})}):
+        value_claim = cj.relation not in routes.examine_predicates()
+        no_valid_domain = (probe.verdict != "falsified" or value_claim) \
+            and _working_domain_empty(fn, facts, cj,
+                                      {**domain, **(cj.domain or {})})
+        if no_valid_domain:
             # every input f admits is refused by its own guards: there is
-            # nothing to judge, and no verdict over nothing
+            # nothing to judge, and no verdict over nothing; a value
+            # claim's witness there is a refused input, not a
+            # counterexample
             probe.verdict = "unknown"
             probe.route = None
             probe.sketch = None
+            probe.counterexample = None
+            probe.stratum = None
             probe.note = ("no valid domain: f's own guards refuse every "
                           "input its annotations and binding admit")
         working = _working_domain_record(fn, facts, cj,
@@ -5196,9 +5210,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                            f"{' or '.join(working['guards'])}"
                            if working.get("guards") else
                            ": f's own guard rejects the rest"))
+            elif no_valid_domain:
+                said = (f"f's own guard raises where "
+                        f"{' or '.join(working.get('guards') or [])}")
             else:
                 said = (f"the working domain is the domain left by f's "
-                        f"guards ({' or '.join(working.get('guards') or [])})")
+                        f"guards: f's own guard raises where "
+                        f"{' or '.join(working.get('guards') or [])}")
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
