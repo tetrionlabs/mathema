@@ -68,7 +68,7 @@ jobs:
       # render and record L[...] and resolve no name on its own
       - name: no language package is installed
         run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('mathema_language') is not None)"
-      - run: python -m pytest -q
+      - run: python -m pytest -q -n 2
 
   # The core install alone: no optional extra, so the degraded paths
   # (no numpy, no z3, no pandas or polars) are exercised as a user who
@@ -142,7 +142,7 @@ jobs:
           python-version: "3.15"
           allow-prereleases: true
       - run: pip install -e '.[test]'
-      - run: python -m pytest -q
+      - run: python -m pytest -q -n 2
 
   lint:
     runs-on: ubuntu-latest
