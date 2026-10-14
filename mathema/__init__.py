@@ -52,7 +52,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .analysis import Facts, SourceUnavailable, _parse_notes, effective_facts
+from .analysis import (Facts, SourceUnavailable, _intent_block_text,
+                       _parse_notes, effective_facts)
 from .analysis import analyze_source as analyze_source
 # aliased on import: the bare name `claims` is already the conjecture-module
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
@@ -381,7 +382,7 @@ def _doc_only_facts(fn) -> Facts:
         form="doc:" + hashlib.sha256((doc or name).encode()).hexdigest()[:8],
         sigh=hashlib.sha256(sig_str.encode()).hexdigest()[:12],
         tier=0, tree=None,
-        doc_intent=parsed.summary or None,
+        doc_intent=parsed.summary or _intent_block_text(doc),
         doc_refs=parsed.refs,
         doc_hints=parsed.concept_hints,
         doc_notes=_parse_notes(doc),
