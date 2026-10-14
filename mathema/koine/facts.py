@@ -353,6 +353,44 @@ def sibling_scope(fn, siblings: Mapping[str, object]) -> dict:
     return {**rendered_scope(facts), **bound}
 
 
+def materialised(doc: Document, siblings: "Mapping[str, object] | None" = None):
+    """Intent:
+        The engine's rendering of `doc` as a Python function in a
+        module of its own, its calls to other functions of the program
+        bound from `siblings` as `sibling_scope` binds them; a call
+        `siblings` does not resolve stays unbound.
+
+    Raises:
+        RenderError: the body has no rendering.
+    """
+    rendered = render(doc)
+    fn = materialise(rendered, key=doc.key,
+                     bindings={name: None for name in rendered.externals})
+    bound = _bound_siblings(rendered.externals, siblings or {})
+    for name in rendered.externals:
+        if name in bound:
+            fn.__globals__[name] = bound[name]
+        else:
+            fn.__globals__.pop(name, None)
+    return fn
+
+
+def sibling_documents(siblings: "Mapping[str, object] | None") -> dict:
+    """Intent:
+        `{locator: Document}` for each entry of `siblings` given as a
+        document or as KOINE text the engine takes; callables and
+        declined documents are left out.
+    """
+    out: dict = {}
+    for key, value in (siblings or {}).items():
+        if isinstance(value, (Document, str)):
+            try:
+                out[key] = _document(value)
+            except KoineDeclined:
+                continue
+    return out
+
+
 def _bound_siblings(externals: dict, siblings: Mapping[str, object]) -> dict:
     """Intent:
         `{name: function}` for each name in `externals` (rendered name

@@ -93,6 +93,8 @@ from ..probing import _fmt
 from ..probing import sample_bound as sample_bound
 from .._shrink import shrink as shrink
 from ..koine.facts import sibling_scope as sibling_scope
+from ..equivalence import BodyEquivalence as BodyEquivalence
+from ..equivalence import prove_bodies_equal as prove_bodies_equal
 
 from .runtime import POINT_RUNTIME_PROTOCOL as POINT_RUNTIME_PROTOCOL
 from .runtime import PointRuntime as PointRuntime
@@ -173,6 +175,9 @@ SURFACE: dict[str, tuple[str, ...]] = {
     # a lifted body's calls to the other functions of its program,
     # bound to the documents or callables the caller supplies
     "body_scope": ("sibling_scope",),
+    # two lifted bodies compared on a domain by the derive rungs, and
+    # the rung and witness it answers with
+    "body_equivalence": ("prove_bodies_equal", "BodyEquivalence"),
 }
 
 # What core calls on a registered capability provider: the attribute it

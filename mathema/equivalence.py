@@ -29,11 +29,18 @@ opposite infinity. A drawn point with a missing input, or where either
 side returns something non-numeric, is not adjudicated, and every such
 point is counted in the record's sampling meta rather than dropped
 silently.
+
+`prove_bodies_equal(left, right, domain)` runs the derive rungs alone on
+two lifted bodies (KOINE documents, materialised through the engine's
+rendering), for a pair whose sides were read by different frontends:
+the answer names the rung reached and, for a falsification, the point
+both bodies were executed at. Exception names are compared only when
+both documents name one language.
 """
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable, Protocol
 
 from .records import Probe
@@ -78,6 +85,9 @@ class _Case:
     gfacts: object
     rhs_name: str
     annotations: dict
+    #: whether two raises of different exception types disagree; the
+    #: names are compared only when both sides run in one runtime
+    compare_refusals: bool = True
 
 
 @dataclass
@@ -401,6 +411,7 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
         # left to the value rungs
         falsified = _raise_witness_probe(case, proof)
         if falsified is not None:
+            state.proof = proof
             return falsified
         coinciding = _coinciding_raise_proof(case)
         if coinciding is not None:
@@ -419,19 +430,11 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
         has no complete point, both sides raise the same kind, or both
         return.
     """
-    from .domain import _as_int_if_whole
     from .probing import complex_is_a_raise
-    witness = proof.witness or {}
-    params = list(case.facts.params)
-    if not all(p in witness for p in params):
+    args = _witness_args(case, proof)
+    if args is None:
         return None
-    args = []
-    for p in params:
-        v = witness[p]
-        kind = case.facts.param_kinds.get(p, "unknown")
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            v = _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
-        args.append(v)
+    params = list(case.facts.params)
     from .runtime_types import calling
     fv, f_exc = _run_side(calling(case.fn, case.facts), args,
                           complex_is_a_raise(case.fn, case.cj_domain))
@@ -439,7 +442,7 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
                           complex_is_a_raise(case.gfn, case.cj_domain))
     cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, case.rhs_name)
     what = "one side raises where the other returns a value"
-    if cx is None:
+    if cx is None and case.compare_refusals:
         cx = _differing_raises(args, params, fv, f_exc, gv, g_exc,
                                case.rhs_name)
         what = "the two sides raise different exceptions"
@@ -451,6 +454,28 @@ def _raise_witness_probe(case: _Case, proof) -> Probe | None:
         note=f"{case.note}; {what}: {proof.sketch}",
         meta={**case.annotations, "mathema.corroboration": "reproduced"}),
         "symbolic")
+
+
+def _witness_args(case: _Case, proof) -> list | None:
+    """Intent:
+        The arguments a proof's witness names, in `f`'s parameter
+        order, each read as its parameter's kind (a whole number for an
+        `int` or `bool` parameter, a float otherwise); None when the
+        witness does not name every parameter.
+    """
+    from .domain import _as_int_if_whole
+    witness = proof.witness or {}
+    params = list(case.facts.params)
+    if not all(p in witness for p in params):
+        return None
+    args = []
+    for p in params:
+        v = witness[p]
+        kind = case.facts.param_kinds.get(p, "unknown")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            v = _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
+        args.append(v)
+    return args
 
 
 def _coinciding_raise_proof(case: _Case) -> Probe | None:
@@ -489,12 +514,21 @@ def _coinciding_raise_proof(case: _Case) -> Probe | None:
     if proof.status != "proven":
         return None
     name = case.facts.params[0]
-    where = "; ".join(f"{exc} where {_region_text(region, name)}"
-                      for exc, region in sorted(regions.items()))
+    if case.compare_refusals:
+        where = "; ".join(f"{exc} where {_region_text(region, name)}"
+                          for exc, region in sorted(regions.items()))
+        same = "both sides raise the same exception on the same region"
+    else:
+        where = "; ".join(
+            f"{side} raises {', '.join(sorted(by_side))} where "
+            f"{_region_text(_union(by_side.values()), name)}"
+            for side, by_side in (("f", regions["f"]),
+                                  (case.rhs_name, regions[case.rhs_name])))
+        same = ("both sides refuse on the same region, the exception names "
+                "left uncompared across runtimes")
     return _stamp(Probe(
         case.cj.name, case.statement, "proven", route="derive",
-        sketch=f"both sides raise the same exception on the same region "
-               f"({where}), and wherever both return the symbolic "
+        sketch=f"{same} ({where}), and wherever both return the symbolic "
                f"difference vanishes: {proof.sketch}",
         condition=proof.quantifier, note=case.note,
         meta=dict(case.annotations)), "symbolic")
@@ -529,13 +563,21 @@ def _region_text(region, name: str) -> str:
     return f"{name} in {region}"
 
 
+def _union(regions):
+    import sympy
+    return sympy.Union(*regions)
+
+
 def _coinciding_raise_regions(case: _Case) -> "dict | None":
     """Intent:
         The shared raise regions of the two sides, as {exception name:
         region inside the declared domain}, when both sides' complete
         raise regions are the same exception by exception and the
-        regions of different exceptions are disjoint. None otherwise,
-        including whenever a region cannot be decided.
+        regions of different exceptions are disjoint. When the case
+        does not compare refusal names, the regions are compared
+        whatever exception raises them, and the result is
+        {"f": regions of f, <rhs name>: regions of the other side}.
+        None otherwise, including whenever a region cannot be decided.
     """
     import sympy
 
@@ -550,19 +592,31 @@ def _coinciding_raise_regions(case: _Case) -> "dict | None":
                     case.cj_domain.get(case.facts.params[0])}
         g_regions = _raise_regions(case.gfn, case.gfacts, g_domain,
                                    case.facts.params[0])
-        if g_regions is None or set(f_regions) != set(g_regions):
+        if g_regions is None:
+            return None
+        for side in (f_regions, g_regions):
+            kinds = sorted(side)
+            for i, a in enumerate(kinds):
+                for b in kinds[i + 1:]:
+                    if sympy.Intersection(side[a],
+                                          side[b]).is_empty is not True:
+                        return None
+        if not case.compare_refusals:
+            if not f_regions or not g_regions:
+                return None
+            same = sympy.SymmetricDifference(
+                _union(f_regions.values()),
+                _union(g_regions.values())).is_empty
+            if same is not True:
+                return None
+            return {"f": f_regions, case.rhs_name: g_regions}
+        if set(f_regions) != set(g_regions):
             return None
         for exc in f_regions:
             same = sympy.SymmetricDifference(f_regions[exc],
                                              g_regions[exc]).is_empty
             if same is not True:
                 return None
-        kinds = sorted(f_regions)
-        for i, a in enumerate(kinds):
-            for b in kinds[i + 1:]:
-                if sympy.Intersection(f_regions[a],
-                                      f_regions[b]).is_empty is not True:
-                    return None
         return f_regions
 
     return _with_timeout(compute, FAST_TIMEOUT_SECONDS)
@@ -907,3 +961,303 @@ def _closed_forms_identical(fn, facts, gfn, gfacts, cj_domain) -> str | None:
                 "domain: both sides read as expressions whose difference "
                 "simplifies to zero")
     return None
+
+
+@dataclass(frozen=True)
+class BodyEquivalence:
+    """What `prove_bodies_equal` found about two lifted bodies.
+
+    `verdict` is `proven`, `falsified` or `unknown`. `rung` names the
+    derive rung that reached it: `form` (the two bodies have one
+    canonical form), `symbolic` (their difference, read symbolically,
+    vanishes on the domain, or a disproof from it reproduced on both),
+    `closed-forms` (their closed forms are identical), or None when no
+    rung engaged. A falsification carries `witness`, the executed
+    point and what each side did there, and `point`, the arguments by
+    the left body's parameter names. `meta` holds the corroboration
+    (`reproduced`, or `uncorroborated` for a disproof no executed point
+    reproduced) and `mathema.timeout` when the cap fired.
+    """
+    verdict: str
+    rung: str | None
+    sketch: str | None = None
+    witness: str | None = None
+    point: dict | None = None
+    note: str | None = None
+    meta: dict = field(default_factory=dict)
+
+
+def prove_bodies_equal(left, right, domain: dict, *,
+                       tolerance: float | None = None,
+                       siblings: dict | None = None) -> BodyEquivalence:
+    """Whether two lifted bodies compute the same function on `domain`.
+
+    `left` and `right` are the documents frontends wrote, each as a
+    document or as KOINE text. `domain` maps the left body's parameter
+    names to their bounds: a bound as a claim's domain holds it (what
+    a registered equivalence family receives), its text (`"(0, inf)"`),
+    or a list `[lo, hi]` for a closed interval. The right body's
+    parameters align with the left's by position. The answer's
+    `meta["mathema.domain"]` states each bound as it was read.
+    `tolerance` is the absolute difference two values may differ by.
+    `siblings` binds the other functions either body calls, as
+    `sibling_scope` takes them.
+
+    The derive rungs of `f =:= g` run on the engine's rendering of each
+    body, under the extensive wall-clock cap: one canonical form, the
+    symbolic difference, the closed forms. Nothing is sampled. A
+    falsification stands only at a point executed on both bodies; a
+    disproof no executed point reproduces is `unknown`. A point where
+    both bodies refuse is agreement when they raise the same exception;
+    when the two documents name different languages, the bodies run in
+    different runtimes and their exception names are not compared, so
+    a refusal on one side matches any refusal on the other.
+
+    Raises:
+        ValueError: a document the engine does not take (the message
+            says why), or a `domain` name that is not a parameter of
+            `left`.
+    """
+    import types
+
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    from .koine.canonical import koine_hash, unresolved_calls
+    from .koine.facts import (_document, facts_from_koine, materialised,
+                              sibling_documents)
+
+    ldoc, rdoc = _document(left), _document(right)
+    lfacts, rfacts = facts_from_koine(ldoc), facts_from_koine(rdoc)
+    unknown_names = sorted(set(domain or {}) - set(lfacts.params))
+    if unknown_names:
+        raise ValueError(f"domain names {', '.join(unknown_names)}, not a "
+                         f"parameter of the left body ({', '.join(lfacts.params)})")
+    bounds = {name: _read_bound(name, b) for name, b in (domain or {}).items()}
+    stated = {"mathema.domain": _stated_domain(bounds)}
+    if len(lfacts.params) != len(rfacts.params):
+        return BodyEquivalence(
+            "unknown", None,
+            note=f"arity differs (the left body takes {len(lfacts.params)}, "
+                 f"the right {len(rfacts.params)}), positional equivalence "
+                 f"is not meaningful", meta=stated)
+    same_runtime = ldoc.language is not None and ldoc.language == rdoc.language
+    docs = sibling_documents(siblings)
+    if not (unresolved_calls(ldoc, docs) or unresolved_calls(rdoc, docs)) \
+            and koine_hash(ldoc, docs) == koine_hash(rdoc, docs) \
+            and (not same_runtime or _refusals(ldoc) == _refusals(rdoc)):
+        return BodyEquivalence(
+            "proven", "form",
+            sketch=f"the two bodies have one canonical form "
+                   f"({koine_hash(ldoc, docs)})", meta=stated)
+    case = _Case(cj=types.SimpleNamespace(name="bodies", tolerance=tolerance),
+                 statement="", note="", cj_domain=bounds,
+                 fn=materialised(ldoc, siblings), facts=lfacts,
+                 gfn=materialised(rdoc, siblings), gfacts=rfacts,
+                 rhs_name="g", annotations={},
+                 compare_refusals=same_runtime)
+    try:
+        answer = _with_timeout(lambda: _derive_bodies(case),
+                               EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        answer = BodyEquivalence(
+            "unknown", None,
+            note=f"the derive rungs did not finish within the extensive "
+                 f"cap ({EXTENSIVE_TIMEOUT_SECONDS}s)",
+            meta={"mathema.timeout": "extensive"})
+    return replace(answer, meta={**stated, **answer.meta})
+
+
+def _read_bound(name: str, bound):
+    """Intent:
+        One parameter's bound as a claim's domain holds it: text read
+        as the binding `<name> in <text>`, a list or a stored mapping
+        read as `domain_bound_from_json` reads it, any other bound
+        kept as given.
+
+    Raises:
+        ValueError: text that does not read as a bound.
+    """
+    from .domain import domain_bound_from_json, parse_binding
+    if isinstance(bound, str):
+        read = parse_binding(f"{name} in {bound}")
+        if read is None:
+            raise ValueError(f"{name}: {bound!r} does not read as a bound")
+        return read[1]
+    if isinstance(bound, (list, dict)):
+        return domain_bound_from_json(bound)
+    return bound
+
+
+def _stated_domain(bounds: dict) -> dict:
+    """Intent:
+        Each bound rendered as the domain text a record shows.
+    """
+    from .domain import render_domain_bound
+    out = {}
+    for name, bound in bounds.items():
+        try:
+            out[name] = render_domain_bound(bound)
+        except Exception:
+            out[name] = repr(bound)
+    return out
+
+
+def _refusals(doc) -> list:
+    """Intent:
+        The exception type every `failure::raise` in `doc`'s body
+        names, in body order.
+    """
+    from .koine.facts import _terms
+    from .koine.syntax import Str
+    return [t.args[0].value for t in _terms(doc.first("body"))
+            if t.head == "failure::raise" and t.args
+            and isinstance(t.args[0], Str)]
+
+
+def _derive_bodies(case: _Case) -> BodyEquivalence:
+    """Intent:
+        The symbolic and closed-form rungs on two materialised bodies,
+        with a disproof that carries no executed witness checked at its
+        point on both sides.
+    """
+    state = _LadderState()
+    probe = _rung_symbolic(case, state)
+    if probe is None and state.proof is not None \
+            and state.proof.status == "disproven":
+        return _corroborated(case, state.proof)
+    if probe is None and state.raise_note is not None:
+        probe = _raise_region_witness(case, state)
+    if probe is None:
+        probe = _rung_closed_forms(case, state)
+    if probe is None:
+        engaged = (state.proof is not None
+                   and state.proof.status != "unliftable")
+        note = ("neither the canonical forms, the symbolic difference, nor "
+                "the closed forms settle it")
+        if state.raise_note:
+            note += f"; {state.raise_note}"
+        return BodyEquivalence(
+            "unknown", "symbolic" if engaged else None,
+            sketch=state.proof.sketch if state.proof is not None else None,
+            note=note)
+    meta = dict(probe.meta or {})
+    rung = meta.pop("mathema.equivalence.rung", None)
+    point = None
+    if probe.verdict == "falsified" and state.proof is not None:
+        args = _witness_args(case, state.proof)
+        point = dict(zip(case.facts.params, args)) if args else None
+    return BodyEquivalence(probe.verdict, rung, sketch=probe.sketch,
+                           witness=probe.counterexample, point=point,
+                           note=(probe.note or "").lstrip("; ") or None,
+                           meta=meta)
+
+
+def _raise_region_witness(case: _Case, state: _LadderState) -> Probe | None:
+    """Intent:
+        A falsification at a point inside the domain where exactly one
+        side raises: the two sides' complete raise regions (whatever
+        exception raises them) differ there, and both sides executed at
+        that point confirm it. None when the regions cannot be read,
+        do not differ, or no point of the difference reproduces.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import ProofResult
+
+    def difference():
+        f_regions = _raise_regions(case.fn, case.facts, case.cj_domain,
+                                   case.facts.params[0])
+        g_domain = {case.gfacts.params[0]:
+                    case.cj_domain.get(case.facts.params[0])}
+        g_regions = _raise_regions(case.gfn, case.gfacts, g_domain,
+                                   case.facts.params[0])
+        if f_regions is None or g_regions is None:
+            return None
+        return sympy.SymmetricDifference(_union(f_regions.values()),
+                                         _union(g_regions.values()))
+
+    try:
+        region = _with_timeout(difference, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    point = _point_in(region)
+    if point is None:
+        return None
+    proof = ProofResult("disproven", sketch=state.raise_note,
+                        witness={case.facts.params[0]: point})
+    probe = _raise_witness_probe(case, proof)
+    if probe is not None:
+        state.proof = proof
+    return probe
+
+
+def _point_in(region) -> float | None:
+    """Intent:
+        One real point of a sympy set of reals: the first member of a
+        finite set, the midpoint of a bounded interval, a point one
+        unit inside a half-bounded one, the first piece's point for a
+        union. None for an empty or unrecognised set.
+    """
+    import sympy
+    if region is None or region.is_empty is not False:
+        return None
+    if isinstance(region, sympy.Union):
+        for part in region.args:
+            point = _point_in(part)
+            if point is not None:
+                return point
+        return None
+    if isinstance(region, sympy.FiniteSet):
+        return float(min(region))
+    if isinstance(region, sympy.Interval):
+        lo, hi = region.start, region.end
+        if lo.is_finite and hi.is_finite:
+            return float((lo + hi) / 2)
+        if lo.is_finite:
+            return float(lo + 1)
+        if hi.is_finite:
+            return float(hi - 1)
+        return 0.0
+    return None
+
+
+def _corroborated(case: _Case, proof) -> BodyEquivalence:
+    """Intent:
+        A symbolic disproof checked at its own point: both bodies run
+        there, and the pair is falsified when they disagree (a raise
+        against a value, a refusal of another type within one runtime,
+        or values further apart than the tolerance); `unknown` with the
+        engine-bug flag otherwise.
+    """
+    from .conjecture import DEFAULT_TOLERANCE
+    from .probing import _fmt, _fmt_value
+
+    args = _witness_args(case, proof)
+    params = list(case.facts.params)
+    cx = None
+    if args is not None:
+        fv, f_exc = _run_side(case.fn, args, False)
+        gv, g_exc = _run_side(case.gfn, args, False)
+        cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, "g")
+        if cx is None and case.compare_refusals:
+            cx = _differing_raises(args, params, fv, f_exc, gv, g_exc, "g")
+        if cx is None and _finite(fv) and _finite(gv):
+            tol = (case.cj.tolerance if case.cj.tolerance is not None
+                   else DEFAULT_TOLERANCE)
+            slack = 0.0 if case.cj.tolerance is not None else EQUIV_REL_SLACK
+            if abs(fv - gv) > tol + slack * max(abs(fv), abs(gv), 1.0):
+                cx = (_fmt(tuple(args), names=tuple(params))
+                      + f": f returned {_fmt_value(fv)}, g returned "
+                        f"{_fmt_value(gv)}")
+    if cx is not None:
+        return BodyEquivalence(
+            "falsified", "symbolic", sketch=proof.sketch, witness=cx,
+            point=dict(zip(params, args or ())),
+            note="the two bodies disagree at the executed point",
+            meta={"mathema.corroboration": "reproduced"})
+    return BodyEquivalence(
+        "unknown", "symbolic", sketch=proof.sketch,
+        note="derive found the two bodies different, but no executed "
+             "point reproduces it, which is probably a mathema bug worth "
+             "reporting",
+        meta={"mathema.corroboration": "uncorroborated"})

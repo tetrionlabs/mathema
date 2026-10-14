@@ -54,6 +54,7 @@ EXPECTED_SURFACE = {
                  "format_point", "pinned_float_env"),
     "sampling": ("sample_bound", "shrink"),
     "body_scope": ("sibling_scope",),
+    "body_equivalence": ("prove_bodies_equal", "BodyEquivalence"),
 }
 
 MODULE_LEVEL = {"EXTENSION_API_VERSION", "SURFACE", "CAPABILITY_PROTOCOLS",
