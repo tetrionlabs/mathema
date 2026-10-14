@@ -3843,14 +3843,39 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return satisfies(compiled, point)
 
     shapes = _region_shapes(links, params, domain)
+    # the parameters a `Vec`/`Mat` marker shapes, drawn at their
+    # declared axes with shared dimension names sized alike
+    from . import dimensions as _dimensions
+    from .types import shapes_from_signature
+    markers = shapes_from_signature(fn)
+    marked = [p for p in params
+              if p not in shapes and p not in call_pins
+              and getattr(markers.get(p), "dims", ())]
+    resolver = None
+    if marked:
+        try:
+            resolver = _dimensions.resolve(facts, markers,
+                                           claim_domain=domain)
+        except _dimensions.DimensionConflict:
+            resolver = _dimensions.resolve(facts, markers)
+    # only a real number has a magnitude reach and corners
+    from .probing import _bound_is_complex as _complex_bound
+    numeric = [p for p in params
+               if p not in marked
+               and (facts.param_kinds.get(p, "unknown")
+                    in _WITNESS_SCALAR_KINDS
+                    or _interval_ends((domain or {}).get(p)) is not None
+                    or _complex_bound((domain or {}).get(p)))]
+    unreached = {p: "array" for p in params if p not in numeric}
     reach, reach_note = ({}, None)
     overflow_safe: list = []
     overflow_texts: list = []
     if kind == "is_defined":
         links_o, overflow_texts, owner = _overflow_safe_rows(fn, cj)
         reach, reach_note = _is_defined_reach(fn, cj, params, domain,
-                                              shapes, links_o,
-                                              overflow_texts, owner)
+                                              {**unreached, **shapes},
+                                              links_o, overflow_texts,
+                                              owner)
         overflow_safe = _compiled_links(links_o, params)
 
     def admitted(point: dict) -> bool:
@@ -3897,8 +3922,21 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return _synth(facts.param_kinds.get(p, "unknown"), rng,
                       (domain or {}).get(p))
 
+    def draw_marked(sizes: dict, p: str):
+        bound = (domain or {}).get(p)
+        if getattr(bound, "pieces", None):
+            # a declared element bound (`[a, b]^n`) holds every element
+            return resolver.synth(p, sizes,
+                                  lambda: _synth("float", rng, bound), rng)
+        return resolver.synth(p, sizes, lambda: rng.uniform(-10.0, 10.0),
+                              rng)
+
     def draw() -> dict:
-        point = {p: draw_one(p) for p in params}
+        sizes = (resolver.draw_sizes(
+            rng, hi={k: 5 for k in resolver.distinct_keys()})
+            if resolver is not None else {})
+        point = {p: draw_marked(sizes, p) if p in marked else draw_one(p)
+                 for p in params}
         placed = _placed(point, rng, keep=tuple(call_pins))
         return point if placed is None else placed
 
@@ -3915,7 +3953,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         from .probing import _bound_is_complex
         from .representations import PY_COMPLEX128
         for p in params:
-            if p in call_pins:
+            if p in call_pins or p in marked:
                 continue
             if _bound_is_complex((domain or {}).get(p)):
                 # the plane's far points on both axes, at the reach
@@ -3925,6 +3963,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 for v in (complex(-r, 0.0), complex(r, 0.0),
                           complex(0.0, -r), complex(0.0, r)):
                     yield {**draw(), p: v}
+                continue
+            if p not in numeric:
                 continue
             ends = reach.get(p) or _interval_ends((domain or {}).get(p))
             if ends is None:
@@ -3941,7 +3981,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         pinf = operational_range(cj)
         for p in params:
             if p in call_pins or shapes.get(p) is not None \
-                    or facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "string"):
+                    or p not in numeric:
                 continue
             for v in _extreme_candidates((domain or {}).get(p),
                                          pseudo_infinity=pinf):
