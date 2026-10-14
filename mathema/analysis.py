@@ -396,6 +396,10 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
             iterated.add(node.iter.id)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id in {"len", "sum", "min", "max", "sorted", "enumerate", "reversed"}:
+            # `max(a, b)` and `min(a, b)` compare their arguments as
+            # values; only the one-argument form iterates its argument
+            if node.func.id in {"min", "max"} and len(node.args) != 1:
+                continue
             for call_arg in node.args:
                 if isinstance(call_arg, ast.Name):
                     iterated.add(call_arg.id)
