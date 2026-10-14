@@ -4,39 +4,45 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## 0.6.2
 
+### Highlights
+- Claims compose across functions: `mathema verify` checks a function after the functions its claims' premises name, so `assuming app.helpers.g.nonneg is proven, ...` resolves in the same run, and a cycle of such premises is reported as one.
+- `mathema badges` scales to large packages, with one read of the store per run, a time cap on each function's step, progress on a terminal, a per-function result cache (`--refresh` recomputes everything) and `--jobs N` worker processes.
+- `@enforce_domain` reads every common spelling of a domain: two numbers are the closed interval, a string uses the domain grammar (`"(0, 1]"`), and a set or list is the finite set of its values, each enforced at the call.
+- Clarity reflects what a function's claims actually cover: a domain stated on the function is read as its domain, each claim is credited by the share of the inputs it covers, and a score of 100 means every source is settled by proof.
+
 ### Upgrading from 0.6.1
 - Record files under `.mathema/verified/` are named by a reversible encoding of their key, so keys with `/`, `:` or `#` save and load; existing files are renamed on the next write and old names are still read.
-- `verify` lists only the functions it checked again or that have a problem, then the summary; `--verbose` lists every function as before, and `--format json` is unchanged.
-- Sequences now meet the same-sign pair at the largest double, as scalars already did, so a claim over unbounded `R^n` whose code adds two such values is falsified on its computation line; bound the domain, or state `let |inf| be ...` to keep the float limit out of scope. The bundled rows this breaks are stated over `[-1e150, 1e150]^n`: `numpy.median` within range, `pandas.DataFrame.cumsum` columns, `pandas.Series.div` and `truediv` elementwise, and polars `rolling_mean` and `rolling_sum`.
-- Clarity scores move once. A domain stated on the function (`@enforce_domain`, a guard to a set, `Literal`, a str `Enum`) is read as its domain, a claim is credited by the share of the function's inputs it covers (with a small floor, so any claim earns something), annotating a parameter never lowers a score, random-sampling evidence is graded by its number of draws, and a score of 100 means every source is settled by proof.
-- Witnesses for missing and absent values are calls: `f(None) raises TypeError; f("ab") returns "AB"`, with any explanation on the next line.
+- `verify` lists the functions it checked again or that need attention, then the summary; `--verbose` lists every function, and `--format json` is unchanged.
+- Sequences meet the same-sign pair at the largest double, as scalars do, so a claim over unbounded `R^n` whose code adds two such values is decided on its computation line at that corner; bound the domain, or state `let |inf| be ...` to keep the float limit out of scope. The bundled rows for `numpy.median` within range, `pandas.DataFrame.cumsum` columns, `pandas.Series.div` and `truediv` elementwise, and polars `rolling_mean` and `rolling_sum` are stated over `[-1e150, 1e150]^n`.
+- Clarity scores move once with this release: annotating a parameter never lowers a score, every claim earns credit (a small floor, rising with the share of inputs it covers), and random-sampling evidence is graded by its number of draws.
+- Witnesses for missing and absent values are written as calls, `f(None) raises TypeError; f("ab") returns "AB"`, with any explanation on the next line.
 
-### Soundness
-- A raise at a missing value, or at a hazard input (empty, encoding, length, representation), counts against that input only when the same call with an ordinary value runs; otherwise the row is `unknown` and names the other argument.
-- A falsification always rests on an executed witness at the claim's own point: a claim written at literal arguments (`f([]) == 0`, `f(nan) == 0`) is decided once at that call, a rounding miss in a numeric check no longer falsifies an exact identity, and installing z3 no longer moves a falsification off the mathematics line.
-- Two functions are proven equal at the form step only from forms mathema computed itself.
-- `f =:= g` with a side read by another frontend is answered by the equivalence family, or skipped with the reason `equivalence across runtimes needs the equivalence family` when none gives a verdict; the built-in steps compare two Python functions only.
-- An annotated parameter is drawn as its annotation says (a `dict` in a module that imports numpy is drawn as a dict); a class mathema cannot draw is skipped with the reason; a claim's bound on a dataclass field or a table column bounds its draws; an empty pandas series is float like its draws.
-- A `SystemExit` from the function is recorded as a raise with its exit code, and `mathema check` exits with its own code.
-- `let` constants written by 0.6.0 read back as written, and a constant is recorded as its value (`let axis be 1`).
-- The wall-clock cap also works off the main thread, so MCP tool calls are bounded; the claim parser reads a long run of digits in linear time.
+### Evidence
+- Every falsification rests on an executed witness at the claim's own point: a claim written at literal arguments (`f([]) == 0`, `f(nan) == 0`) is decided at that call, an exact identity is judged exactly, and the mathematics line reads the same with or without z3 installed.
+- A raise at a missing value or a hazard input (empty, encoding, length, representation) is attributed to that input when the same call with an ordinary value runs, and otherwise the row is `unknown` and names the other argument.
+- Two functions are proven equal at the form step from forms mathema computed itself, and `f =:= g` with a side read by another frontend is answered by the equivalence family, or skipped with the reason `equivalence across runtimes needs the equivalence family` when none is registered.
+- The wall-clock cap holds on every thread, so MCP tool calls are bounded, and the claim parser reads a long run of digits in linear time.
 
 ### Languages
 - A language can declare how a function refuses input outside it and what counts as its answer inside it (`Refusal`, `DefinedAnswer`); `excluded_outside_domain` and `is_language_defined` read them, and the record's language entry states them.
 - Values removed with `\` count as outside draws, so `L[unicode] \ {""}` and `L[unicode, len >= 1]` agree.
-- Runtime-type adapters may state their module aliases (`ALIASES`), and usage hints name every registered adapter; `rdd`, `na`, `write` and `sparkSession` are table attributes, not columns.
-- The engine can read a function's body through an internal representation, so a body that arrives that way can be proven; facts injected on a callable are honoured everywhere mathema reads it, and a record names where such a body came from.
+- Runtime-type adapters can state their module aliases (`ALIASES`), usage hints name every registered adapter, and table attributes such as `rdd`, `na`, `write` and `sparkSession` are read as attributes.
+- The engine reads a function's body through an internal representation, so a body supplied that way can be proven; facts injected on a callable are honoured everywhere mathema reads it, and the record names where the body came from.
 
 ### Tools
-- `@enforce_domain` with a plain set or list now enforces its values (it enforced nothing before); two numbers are the closed interval and a string uses the domain grammar (`"(0, 1]"`).
-- `mathema check` and the MCP tools report a claim that does not parse, with the parser's message, and still check the function's other claims, as `verify` does.
-- A suggested `raises(...)` row is bound to the region where the function's guard raises (`for x in (-oo, 0), raises(f(x), ValueError)`), and is left out when no region can be stated; it is no longer falsified at the inputs the guard admits.
-- `mathema accept` refreshes the function's record, prints a shorter plan with the witness, and takes several claims at once (`accept KEY a b --as discovery`).
-- `verify` reads each record and claims file once per run, so it no longer slows with the square of the store; `verify --format json` gives an invalidated row's reason and witness.
-- `mathema verify` checks a function after the functions its claims' premises name, so a premise on another function's claim resolves on the first run; a cycle of such premises is reported as one.
-- `mathema badges` finishes on large packages: one read per run, a cap on each function's step, progress on a terminal, a per-function result cache (`--refresh` recomputes everything), and `--jobs N` worker processes. Scores are unchanged.
-- The `badges` MCP tool takes `implementation=false` to skip the coverage pass (implementation, overall and each function's implementation come back null), and reports the clarity algorithm version as `clarity_algo`.
-- The effects line no longer reports non-mutating array methods (`Series.add`) as changing an argument.
+- `mathema accept` refreshes the function's record, prints a short plan with the witness, and takes several claims at once (`accept KEY a b --as discovery`).
+- `verify` reads each record and claims file once per run, so its time grows with the store rather than its square, and `verify --format json` gives an invalidated row's reason and witness.
+- The `badges` MCP tool takes `implementation=false` to skip the coverage pass (implementation, overall and each function's implementation come back null) and reports the clarity algorithm version as `clarity_algo`; badge scores are the same with or without the cache.
+
+### Fixes
+Each is narrow, and its scope is stated with it.
+- `@enforce_domain` given a plain set or list enforces its values; the number and string spellings already did.
+- `mathema check` and the MCP tools report a claim that does not parse with the parser's message and still check the function's other claims, as `verify` already did.
+- A suggested `raises(...)` row is bound to the region where its guard raises (`for x in (-oo, 0), raises(f(x), ValueError)`, each part of an `or` guard included). Only the suggestion changed: an unbound row could be falsified at inputs the guard admits, and the claims an author writes are read as before.
+- A `dict` parameter in a module that imports numpy is drawn as a dict, an empty pandas series has the float dtype of its draws, a class mathema cannot draw is skipped with the reason, and a claim's bound on a dataclass field or a table column bounds its draws.
+- A `SystemExit` raised by the function is recorded as a raise with its exit code, and `mathema check` exits with its own code.
+- `let` constants written by 0.6.0 read back as written, and a constant is recorded as its value (`let axis be 1`).
+- The effects line lists a non-mutating method such as `Series.add` as no effect.
 
 ## 0.6.1
 
