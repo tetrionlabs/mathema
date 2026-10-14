@@ -41,9 +41,12 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field, replace
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from .records import Probe
+
+if TYPE_CHECKING:
+    from .koine.document import Document
 
 #: shared draws per sampling run
 EQUIV_SAMPLE_DRAWS = 96
@@ -987,7 +990,8 @@ class BodyEquivalence:
     meta: dict = field(default_factory=dict)
 
 
-def prove_bodies_equal(left, right, domain: dict, *,
+def prove_bodies_equal(left: Document | str, right: Document | str,
+                       domain: dict, *,
                        tolerance: float | None = None,
                        siblings: dict | None = None) -> BodyEquivalence:
     """Whether two lifted bodies compute the same function on `domain`.

@@ -29,7 +29,7 @@ from __future__ import annotations
 import ast
 import hashlib
 from dataclasses import dataclass, replace
-from typing import Iterator, Mapping
+from typing import Callable, Iterator, Mapping
 
 from ..analysis import Facts, _call_groups, _loops, _max_depth
 from ._render import RenderError, materialise, namespace, render
@@ -317,7 +317,8 @@ def rendered_scope(facts) -> dict:
     return scope
 
 
-def sibling_scope(fn, siblings: Mapping[str, object]) -> dict:
+def sibling_scope(fn: Callable[..., object] | Facts,
+                  siblings: Mapping[str, object]) -> dict:
     """The names a lifted body reads, with the functions it calls bound.
 
     `fn` is a callable whose injected facts (`__mathema_facts__`) carry
