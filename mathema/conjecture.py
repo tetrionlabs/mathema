@@ -2865,9 +2865,13 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     for p, values in finite_guard_sets(facts).items():
         if domain.get(p) is None:
             out[p] = _render_bound(values)
+    read = _names_in_claim(cj)
     for p in facts.params:
         bound = domain.get(p)
         if bound is None:
+            if p in read and p not in out \
+                    and (found := _unbound_working_bound(fn, facts, p)):
+                out[p] = found[1]
             continue
         try:
             here = bound_to_sympy_set(bound)
@@ -7150,8 +7154,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # claim reads is a coordinate; one it fills with a literal, or
     # leaves at its default, has nothing to infer
     read = _names_in_claim(cj)
+    # a predicate over the whole function (`is_defined(f)`) reads every
+    # parameter, so a guard to a set leaves its set for each of them
+    whole = (cj.relation in routes.examine_predicates()
+             and (cj.lhs or "").strip() == "f" and "f" not in facts.params)
     stated = {p: fact for p, fact in parameter_domain_facts(fn, facts).items()
-              if p not in cj_domain and p in read}
+              if p not in cj_domain
+              and (p in read or (whole and fact[1] == "guard"))}
     annotation_inferred = {p: b for p, (b, cat, _d) in stated.items() if cat == "int"}
     if annotation_inferred:
         cj_domain = {**annotation_inferred, **cj_domain}
@@ -7212,8 +7221,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # domain f's own guards leave (decision A); the record states it. A
     # raises claim asks about the inputs the guards refuse, so it keeps
     # the whole domain
-    if cj.relation not in (*routes.examine_predicates(), "raises",
-                           "excluded_outside_domain"):
+    if cj.relation not in ("raises", "excluded_outside_domain"):
         for p in facts.params:
             if p in read and p not in cj_domain:
                 found = _unbound_working_bound(fn, facts, p)
