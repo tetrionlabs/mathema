@@ -121,8 +121,23 @@ def _put(h, part) -> None:
         Add `part` to the running digest `h` as canonical JSON, then a
         separator.
     """
-    h.update(json.dumps(part, sort_keys=True, default=str).encode())
+    h.update(json.dumps(_str_keys(part), sort_keys=True,
+                        default=str).encode())
     h.update(b"\0")
+
+
+def _str_keys(node):
+    """Intent:
+        `node` with every mapping key a string, so its keys sort: a
+        string key as it is, any other key as its type name and value
+        (`NoneType:None`, `int:3`).
+    """
+    if isinstance(node, dict):
+        return {(k if isinstance(k, str) else f"{type(k).__name__}:{k}"):
+                _str_keys(v) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        return [_str_keys(v) for v in node]
+    return node
 
 
 def _under(path: str, dirs) -> bool:
