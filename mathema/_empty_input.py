@@ -33,6 +33,8 @@ import contextvars
 import random
 import re
 
+from . import _exits
+
 #: the claims of the check in progress, outermost first, whose literal
 #: calls at the empty input state the empty policy of the value claims
 #: checked beside them (a chained claim checks its links in a nested
@@ -96,7 +98,7 @@ def claim_calls(fn, srcs, point: dict, bound_funcs: "dict | None" = None,
                 continue
             result = None
             try:
-                result = fn(*args, **kwargs)
+                result = _exits.call(fn, *args, **kwargs)
                 raised = None
             except Exception as e:
                 raised = e

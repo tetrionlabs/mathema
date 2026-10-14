@@ -34,7 +34,7 @@ its tests counted, draws as:
 
 <!-- illustration -->
 ```text
-        CLARITY 34
+        CLARITY 37
               ◆
              · ·
             ·   ·
@@ -45,19 +45,19 @@ its tests counted, draws as:
        ·             ·
       ·               ·
      ·        ●        ·
-    ·       ···         ·
+    ·      ····         ·
    ·     ·······         ·
   ·   ···········         ·
  · ···············         ·
 ●·············+···●·········◆
   IMPL 100           INTENT 31
-        overall 22
+        overall 24
 ```
 
 Every line is exercised, intent is about a third specified and clarity
-about a third pinned down, and the overall comes out at 22,
-`0.34 * (1.00 + 0.31) / 2`, where the mean of the three would have said
-55.
+a little over a third pinned down, and the overall comes out at 24,
+`0.37 * (1.00 + 0.31) / 2`, where the mean of the three would have said
+56.
 
 Intent and clarity roll up to the project by a mean weighted by how central
 each function is in the call graph, so a function the rest of the code leans

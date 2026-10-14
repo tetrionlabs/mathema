@@ -659,32 +659,280 @@ def refill(call_at, point: dict, output, raised: "str | None",
     return out
 
 
-def raise_is_the_absences(call_at, point: dict, raised: "str | None",
-                          fills: dict) -> bool:
+# --- whose raise: a raise at a missing input, against the call present ---
+
+#: what a call at a missing input is when f raised there and raised too
+#: with every missing input present, on every draw of the other
+#: arguments tried: the raise is not the missing input's, and the call
+#: says nothing about it
+UNDECIDED = "undecided"
+
+#: no present value could be drawn
+_NO_VALUE = object()
+
+
+@dataclass(frozen=True)
+class Presence:
     """Intent:
-        Whether a call that raised while holding both a hole and an
-        absence (not along a path) still raises with every hole filled,
-        so the raise comes from the absence and says nothing about the
-        holes. False when the call did not raise, holds no such pair, or
-        a hole has neither a present value nor a fill.
+        How to draw arguments that are present: each parameter's kind
+        and domain bound, from which `probing._synth` draws a value with
+        nothing missing in it, and how many draws the raise check tries
+        before it calls a raise undecided. A parameter with no kind here
+        is never drawn: it keeps the value the call gave it.
     """
-    if raised is None:
-        return False
-    keys = keys_of(point)
-    if any(is_path(q) for q, _k, _m in keys):
-        return False
-    holes = [(q, m) for q, k, m in keys if k == MISSING]
-    if not holes or not any(k == ABSENT for _q, k, _m in keys):
-        return False
-    holding = list(dict.fromkeys(q for q, _m in holes))
-    fill_of = {q: (present_value(point[q]) if present_value(point[q]) is not None
-                   else fills.get(q)) for q in holding}
-    if any(v is None for v in fill_of.values()):
-        return False
-    members = list(dict.fromkeys(m for _q, m in holes))
-    at = {q: (filled(v, members, fill_of[q]) if q in holding else v)
-          for q, v in point.items()}
-    return call_at(at)[1] is not None
+    kinds: dict
+    domain: dict = field(default_factory=dict)
+    tries: int = 8
+
+    def value(self, param: str, attempt: int, point: "dict | None" = None):
+        """A present value of `param`, the `attempt`-th draw; `_NO_VALUE`
+        where none can be drawn. A space binding (`[0, 1]^n`) is drawn as
+        a vector or matrix whose named sizes match the arguments in
+        `point` bound with the same names."""
+        import random
+
+        from ._sampling import _RNG_SEED
+        from .domain import without_sentinels
+        from .probing import _synth, inputs_missing
+        if param not in self.kinds:
+            return _NO_VALUE
+        order = list(self.kinds)
+        rng = random.Random(_RNG_SEED + 7919 * (attempt + 1) + order.index(param))
+        bound = self.domain.get(param)
+        bound = without_sentinels(bound) if bound is not None else None
+        for _ in range(4):
+            try:
+                if getattr(bound, "dims", ()):
+                    value = self._space_value(param, bound, rng, point or {})
+                else:
+                    value = _synth(self.kinds[param], rng, bound)
+            except Exception:
+                return _NO_VALUE
+            if not inputs_missing([value]):
+                return value
+        return _NO_VALUE
+
+    def _space_value(self, param: str, bound, rng, point: dict):
+        """A vector (one size) or matrix (two) of elements drawn from
+        `bound` without its sizes; a size another argument in `point`
+        shares by name is that argument's, a free one 3."""
+        from dataclasses import replace
+
+        from .probing import _synth
+        element = replace(bound, dims=())
+
+        def size(dim) -> int:
+            if isinstance(dim, int):
+                return dim
+            for q, v in point.items():
+                dims = getattr(self.domain.get(q), "dims", ()) or ()
+                if q == param or v is None or dim not in dims:
+                    continue
+                try:
+                    import numpy
+                    return int(numpy.shape(v)[list(dims).index(dim)])
+                except Exception:
+                    continue
+            return 3
+        sizes = [size(d) for d in bound.dims]
+        if len(sizes) == 1:
+            return [_synth("float", rng, element) for _ in range(sizes[0])]
+        if len(sizes) == 2:
+            return [[_synth("float", rng, element) for _ in range(sizes[1])]
+                    for _ in range(sizes[0])]
+        raise ValueError(f"no present draw of a {len(sizes)}-way space")
+
+    def redrawn(self, point: dict, keep, attempt: int) -> dict:
+        """`point` with every argument this presence draws, outside
+        `keep`, drawn again."""
+        out = dict(point)
+        for q in point:
+            if q in keep or q not in self.kinds:
+                continue
+            value = self.value(q, attempt, out)
+            if value is not _NO_VALUE:
+                out[q] = value
+        return out
+
+
+@dataclass
+class Blame:
+    """Whose a raise at missing (or hazard) inputs is. `owners`, the
+    parameters it is blamed on; `present`, `(point, output, raised)` of
+    the call that shows it, the owners present (at an ordinary value)
+    and every other argument as it was; `moved`, a draw of the other
+    arguments where f ran with every suspect present, when the call as
+    made could not tell;
+    `others`, the arguments the raise stayed with when nothing told it
+    apart (no owner, no move)."""
+    owners: tuple
+    present: "tuple | None" = None
+    moved: "dict | None" = None
+    others: tuple = ()
+
+
+def _present_at(point: dict, params, holes: dict, fills: dict,
+                presence: "Presence | None", attempt: int) -> "dict | None":
+    """`point` with each of `params` present: a parameter holding holes
+    with every hole filled (a value another slot holds, else its fill), a
+    parameter that is absent replaced by a present draw. None where some
+    parameter cannot be made present."""
+    out = dict(point)
+    for q in params:
+        if q in holes:
+            fill = present_value(point[q])
+            fill = fill if fill is not None else fills.get(q)
+            if fill is None:
+                return None
+            out[q] = filled(point[q], holes[q], fill)
+            continue
+        value = presence.value(q, attempt, out) if presence is not None else _NO_VALUE
+        if value is _NO_VALUE:
+            return None
+        out[q] = value
+    return out
+
+
+def blame(call_at, point: dict, raised: "str | None", fills: dict,
+          presence: "Presence | None" = None, paths: "dict | None" = None) -> Blame:
+    """Intent:
+        Whose a raise at missing inputs (not along a path) is, read by
+        making the same call with each missing parameter present and
+        every other argument held. A parameter the raise goes away for
+        owns it, and the call that shows so is kept. Where no parameter
+        alone stops it but all of them present together do, the raise is
+        the combination's, owned by each. Where it stays with every
+        missing input present, the raise is something else's: other
+        draws of the other arguments (and of the present values) are
+        tried, and the first where f runs with every missing input
+        present is `moved`, for the call to be read again there; where
+        none does, nothing owns it and `others` names the arguments it
+        stayed with. A call that did not raise, holds no missing input,
+        reaches one along a path, or cannot be made present is owned by
+        every missing parameter it holds, as it was made. `paths` are the
+        paths a claim binds (`keys_of`).
+
+    Notes:
+        `call_at(point)` calls f at the arguments by name and returns
+        `(output, raised)`.
+    """
+    keys = keys_of(point, paths)
+    missing = tuple(dict.fromkeys(q for q, _k, _m in keys))
+    if raised is None or not missing or any(is_path(q) for q in missing):
+        return Blame(missing)
+    holes: dict = {}
+    for q, k, m in keys:
+        if k == MISSING:
+            holes.setdefault(q, []).append(m)
+
+    def present_at(at: dict, params, attempt: int) -> "dict | None":
+        return _present_at(at, params, holes, fills, presence, attempt)
+    return separate(call_at, point, missing, present_at, presence)
+
+
+def separate(call_at, point: dict, suspects: tuple, cleared,
+             presence: "Presence | None" = None) -> Blame:
+    """Intent:
+        Whose a raise at `point` is, among the `suspects` (parameters
+        holding a value the raise may be blamed on), read by making the
+        same call with each suspect at an ordinary value and every other
+        argument held. A suspect the raise goes away for owns it, and
+        the call that shows so is kept. Where no suspect alone stops it
+        but all of them together do, the raise is the combination's,
+        owned by each. Where it stays with every suspect ordinary, other
+        draws of the other arguments (and of the ordinary values) are
+        tried, and the first where f runs with every suspect ordinary is
+        `moved`; where none does, nothing owns it and `others` names the
+        arguments it stayed with. A suspect that cannot be made ordinary
+        leaves the raise with every suspect, as it was made.
+
+    Notes:
+        `call_at(point)` calls f at the arguments by name and returns
+        `(output, raised)`. `cleared(point, params, attempt)` is `point`
+        with each of `params` at its `attempt`-th ordinary value, or None
+        where some parameter has none.
+    """
+    alone = {q: cleared(point, [q], 0) for q in suspects}
+    if any(at is None for at in alone.values()):
+        return Blame(suspects)
+    answers = {q: call_at(at) for q, at in alone.items()}
+    owners = tuple(q for q in suspects if answers[q][1] is None)
+    if owners:
+        return Blame(owners, (alone[owners[0]], *answers[owners[0]]))
+    if len(suspects) > 1:
+        together = cleared(point, suspects, 0)
+        if together is not None:
+            answer = call_at(together)
+            if answer[1] is None:
+                return Blame(suspects, (together, *answer))
+    others = tuple(q for q in point if q not in suspects)
+    for attempt in range(1, (presence.tries if presence is not None else 0) + 1):
+        moved = presence.redrawn(point, suspects, attempt)
+        at = cleared(moved, suspects, attempt)
+        if at is None:
+            continue
+        answer = call_at(at)
+        if answer[1] is None:
+            return Blame((), (at, *answer), moved=moved, others=others)
+    return Blame((), others=others)
+
+@dataclass
+class Reading:
+    """One reading of a call at missing inputs: the call (`at`, what it
+    gave back or raised), the behaviour read for it (None: classified
+    from the keys it is filed under), those keys (None: every key it
+    holds), the call it was read from where that differs, the call with
+    a raise's owners present, and, for an `UNDECIDED` raise, the
+    arguments it stayed with."""
+    at: dict
+    output: object = None
+    raised: "str | None" = None
+    behaviour: "str | None" = None
+    keys: "list | None" = None
+    origin: "dict | None" = None
+    present: "tuple | None" = None
+    others: tuple = ()
+
+
+def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
+              presence: "Presence | None" = None, refills: bool = True,
+              paths: "dict | None" = None) -> list:
+    """Intent:
+        What one call at missing inputs says, as `[Reading, ...]`. A
+        raise is first given its owners (`blame`): one nothing owns is a
+        single `UNDECIDED` reading; one found apart only at another draw
+        of the other arguments is read at that draw instead, the call
+        made there; one owned by some of the missing parameters is filed
+        under their keys alone, the others' keys `INCONCLUSIVE`. The rest
+        is read by refilling its holes (`refill`, when `refills`), else
+        filed as it is. Every reading of a raise carries the call with
+        its owners present. `paths` are the paths a claim binds.
+
+    Notes:
+        `call_at(point)` calls f at the arguments by name and returns
+        `(output, raised)`.
+    """
+    found = blame(call_at, point, raised, fills, presence, paths)
+    missing = tuple(dict.fromkeys(q for q, _k, _m in keys_of(point, paths)))
+    if found.moved is not None:
+        point = found.moved
+        output, raised = call_at(point)
+        found = Blame(missing, found.present if raised is not None else None)
+    if missing and not found.owners and raised is not None:
+        return [Reading(point, output, raised, UNDECIDED, others=found.others)]
+    present = found.present if raised is not None else None
+    if raised is not None and set(found.owners) != set(missing):
+        keys = keys_of(point, paths)
+        return [Reading(point, output, raised, None,
+                        [k for k in keys if k[0] in found.owners], present=present),
+                Reading(point, output, raised, INCONCLUSIVE,
+                        [k for k in keys if k[0] not in found.owners])]
+    pieces = refill(call_at, point, output, raised, fills) if refills else None
+    if pieces is None:
+        return [Reading(point, output, raised, present=present)]
+    return [Reading(at, got, err, behaviour, origin=point if at is not point else None,
+                    present=present if err is not None else None)
+            for at, got, err, behaviour in pieces]
 
 
 def _scaled(v, scale: float):

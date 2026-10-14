@@ -33,9 +33,5 @@ site/
 _external/
 design/
 
-# compiled example artifacts (examples/cpp-equivalence)
-*.dylib
-*.so
-
 # output the runnable cdd_workflow example writes beside itself
 examples/walkthrough/

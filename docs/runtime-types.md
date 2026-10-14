@@ -32,17 +32,21 @@ def series_mean(xs: pd.Series):
 
 <!-- example: rt-mean verdicts fn=mean_of route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 <!-- example: rt-mean verdicts fn=series_mean route=probe requires=pandas -->
 ```
-for xs in R^n, min(xs) <= f(xs) <= max(xs)   # holds
+for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)   # holds
 ```
 
 Sampled as a list, as it was before runtime types, `mean_of` raises
 `AttributeError` (a list has no `.mean()`) and the claim is falsified;
 sampled as the array its signature names, it holds.
+Over all of `R^n` the mean overflows: at two of the largest doubles the
+float64 sum is `inf`, so the computation is falsified there while the
+mathematics is still proven (see [the computation
+line](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-code)).
 
 ## Detection, from the signature only
 
@@ -59,7 +63,8 @@ evidence first:
    (`pd.Series | pd.DataFrame` is sampled as a Series);
 3. the annotation's source text, when the hints do not resolve (a name
    imported only under `TYPE_CHECKING`, say), read through the
-   module's own aliases and the usual `np`, `pd` and `pl`;
+   module's own aliases and the usual `np`, `pd` and `pl` (and any
+   alias a registered adapter states);
 4. for code that cannot be annotated, a claims-file entry's
    `runtime_types:` field, used only for a parameter the signature
    says nothing about:
@@ -97,9 +102,13 @@ sampling note says what they were realised as (`as pandas.Series`).
 When the body uses a parameter as a vector, a matrix or a table (a
 method such as `.mean()` or `.std()`, `np.mean(x)`, `.T`, `@`,
 indexing, a column read by name) but the signature names no runtime
-type, the parameter is still sampled as a list, and in a module that
-imports numpy, pandas or polars the record names the runtime type to
-annotate:
+type, how it is drawn depends on the use. A use only a numpy array
+supports (`.T`, `@`, `.shape`, a numpy function called on it), in a
+module that imports numpy, draws it as an ndarray, and the record says
+so ("the body uses it as a numpy array"). Any other such use draws it
+as a list, and in a module that imports numpy, pandas, polars or a
+library with a registered adapter the record names the runtime type
+to annotate:
 
 <!-- illustration -->
 ```text
@@ -113,6 +122,21 @@ prints it under the function. When the function raises a
 is `skipped:misspecified` with the same hint, never `falsified`: the
 list was the wrong object to hand the function. With a runtime type
 declared, a raise falsifies as always.
+
+A parameter annotated with any other type (`dict`, `Mapping[str,
+int]`, `list[float]`, a class of its own) has no hint: its annotation
+decides how it is drawn, whatever attributes the body reads off it.
+`order: dict` is drawn as a dict even when the body calls
+`order.values()` in a module that imports numpy. Only an annotation of
+`Any` or `object` leaves the reading to the body.
+
+A class mathema has no way to draw (one of your own that is not a
+dataclass, with no runtime type adapter and no language adaptor for it)
+is never drawn as something else: a claim that would draw it is
+`skipped` with no evaluable inputs, and the note names the class and
+the two ways to supply one, a runtime type adapter or a binding in the
+claim (`for b in L[...]`). A claim that passes an instance itself
+(`f(Box((2, 3))) == 6`) draws nothing for it and is checked as usual.
 
 ## The built-in runtime types
 
@@ -313,10 +337,11 @@ for row in proof.meta["mathema.definitions"]:
 <!-- example: rt-proofs output -->
 ```text
 mathema.Record(sharpe) · source, no side effects · form ef276c12c167
-  f_s_returns_c_approx_f_returns  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)   falsified at returns = [nan, -0.009, 0.000606]
+  f_s_returns_c_approx_f_returns  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float, f(s(returns, c)) ~= f(returns)   falsified at f([nan, -0.009, 0.000606])
     proven     mathematics  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n ⊂ ℝ, f(s(returns, c)) ~= f(returns)
     holds      computation  assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1])^n : float, f(s(returns, c)) ~= f(returns)   210 entries across 36 draws, sizes (2, 1) to (8, 1)
-    falsified  policy       f([..., missing, ...])   no missing policy stated; returns -9.81
+    falsified  policy       f([..., missing, ...])   f([nan, -0.009, 0.000606]) returns -9.81
+                            no missing policy stated
                             possible fixes:
                               (i) if dropping missing is intended, run: mathema accept sharpe missing[returns] --as discovery --corrected "missing(f, returns) drops"
                               (ii) exclude missing
@@ -434,5 +459,10 @@ source text as a string) and returns a `Detection` or None;
 `realise(abstract, options)`, which builds the object passed to the
 function from an `AbstractVec`, `AbstractMat` or `AbstractTable`; and
 `observe(obj)`, which turns a returned object into an abstract value or
-a plain number, or returns `NotMine`. A built-in adapter wins a name
-clash, and an adapter that fails to load is skipped with a warning.
+a plain number, or returns `NotMine`. An adapter may also state
+`ALIASES`, the module aliases its library is usually imported under
+(`{"pd": "pandas"}` for the pandas adapters): an annotation's source
+text is read through them, and the hint for an undeclared parameter
+names the adapter's runtime type in a module that imports its library.
+A built-in adapter wins a name clash, and an adapter that fails to
+load is skipped with a warning.

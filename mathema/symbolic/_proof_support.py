@@ -950,13 +950,37 @@ def _corroborate_disproof(diff, domain: dict, params: dict,
             if settled is True:
                 return full_point
             continue
-        try:
-            value = complex(diff.subs(point).evalf())
-        except (TypeError, ValueError):
-            continue
-        if _beyond(value, tolerance, negative):
+        value = _value_at(diff, point)
+        if value is not None and _beyond(value, tolerance, negative):
             return full_point
     return None
+
+
+def _value_at(diff, point: dict) -> "complex | None":
+    """Intent:
+        `diff` at `point`, each coordinate read as the exact value of
+        its float and the result evaluated to 30 significant digits, so
+        two large sides that agree exactly give a difference near zero
+        rather than the rounding of either side; evaluated at the
+        floats themselves when the exact substitution has no numeric
+        value. None when neither has one, or when the exact evaluation
+        resolves no significant digit of a part (a cancellation too
+        deep for the working precision), since such a value is known
+        only to lie inside an error bound.
+    """
+    try:
+        exact = diff.subs({sym: sympy.Rational(v) for sym, v in point.items()})
+        value = exact.evalf(30)
+        for part in value.as_real_imag():
+            if isinstance(part, sympy.Float) and part._prec < 10:
+                return None
+        return complex(value)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        return complex(diff.subs(point).evalf())
+    except (TypeError, ValueError):
+        return None
 
 
 def _beyond(value: complex, tolerance: float, negative: bool) -> bool:

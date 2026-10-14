@@ -25,7 +25,7 @@ from fractions import Fraction
 from .._math_vocab import (_BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _PV_FUNC,
                            _SYMPY_FUNCS, _call_name)
 from ..grammar import is_reserved
-from .. import families
+from .. import _exits, families
 from ..finite_sets import is_opaque_eligible
 from ._base import (
     Lifted, NotSymbolic, _SymbolicArray, _bind_params, _display_value,
@@ -1685,7 +1685,7 @@ def _call_at_witness(callable_target, arg_exprs: list,
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            return ("returned", callable_target(*vals))
+            return ("returned", _exits.call(callable_target, *vals))
     except TimeoutError:
         raise
     except Exception as e:
@@ -1720,7 +1720,7 @@ def _returned_words(callable_target, arg_exprs: list, witness: dict) -> str:
         return ""
     kind, value = outcome
     if kind == "raised":
-        return f"raised {type(value).__name__}"
+        return f"raised {_exits.exception_name(value)}"
     if isinstance(value, complex) or getattr(value, "dtype", None) is not None \
             and getattr(value.dtype, "kind", "") == "c":
         return f"returned the complex value {value!r}"
@@ -3341,9 +3341,9 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
         if args is None:
             continue
         try:
-            fn(*args)
+            _exits.call(fn, *args)
         except Exception as e:
-            exc = type(e).__name__
+            exc = _exits.exception_name(e)
         else:
             continue
         where = ", ".join(f"{p} = {a!r}" for p, a in zip(facts.params, args))
@@ -3364,7 +3364,7 @@ def _empty_sequence_raise(fn, facts, lhs_src: str, rhs_src: str, domain,
                 return ProofResult(
                     "disproven",
                     sketch=f"the claim calls {call_text}, and f raises "
-                           f"{type(call_exc).__name__} at {at}, an empty list the claim "
+                           f"{_exits.exception_name(call_exc)} at {at}, an empty list the claim "
                            f"admits, so the claim has no value there; "
                            f"narrow it with assuming len({target}) >= 1",
                     counterexample=at,
@@ -3400,11 +3400,11 @@ def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
     """
     import random
 
-    from ..analysis import analyze_source
+    from ..analysis import effective_facts
     from ..probing import _synth
     from ._seq_common import _length_ties
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
     except Exception:
         return None
     for src in (lhs_src, rhs_src):
@@ -3443,13 +3443,13 @@ def _mismatch_raise(fn, lhs_src: str, rhs_src: str, pair: tuple, domain,
                     is not True:
                 continue
             try:
-                fn(*args)
+                _exits.call(fn, *args)
             except Exception as e:
                 where = ", ".join(f"{p} = {v!r}"
                                   for p, v in zip(facts.params, args))
                 return ProofResult(
                     "disproven",
-                    sketch=f"f raises {type(e).__name__} at {where}, where "
+                    sketch=f"f raises {_exits.exception_name(e)} at {where}, where "
                            f"the claim admits {a} and {b} of different "
                            f"lengths, so the claim has no value there; bind "
                            f"both over one length (for {a} in R^n, {b} in "
@@ -3625,7 +3625,7 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         # calls to it substitute exactly like f's own do. Any one of
         # them refusing names itself specifically, the claim's
         # verdict must say which function blocked it and why.
-        from ..analysis import analyze_source
+        from ..analysis import effective_facts
         from ._seq_common import transform_bindings
         seq_transforms = transform_bindings(funcs)
         for gname in sorted(funcs):
@@ -3637,12 +3637,19 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             gfn = funcs[gname]
             gqual = getattr(gfn, "__qualname__", None) or repr(gfn)
             try:
-                gfacts = analyze_source(gfn)
+                gfacts = effective_facts(gfn)
             except TimeoutError:
                 raise
             except Exception as e:
                 return ProofResult("unliftable", sketch=f"bound function "
                                    f"{gname} ({gqual}): {e}")
+            if gfacts.tree is None:
+                # injected facts state the function's parameters and
+                # form without a Python body, so there is nothing to lift
+                return ProofResult("unliftable", sketch=f"bound function "
+                                   f"{gname} ({gqual}) is not derivable: its "
+                                   f"injected facts (form {gfacts.form}) "
+                                   f"carry no body to lift")
             glift = lift(gfn, gfacts, max_callee_depth=max_callee_depth)
             conditioned_guards: list = []
             if glift is None:

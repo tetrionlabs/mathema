@@ -30,7 +30,11 @@ premises partition.
 A policy claim is decided on the calls the function already made in the
 same check (value claims, their companions, a proof that executed every
 point), and on a floor of its own only for a parameter and member no
-other claim executed. Its source says where it came from: `stated` by
+other claim executed. A raise at a missing value is that value's only
+when the same call with it present runs (`_missing_policy.blame`);
+where f raises with it present too, on every draw of the other
+arguments tried, the call decides nothing, and a row no other call
+decides is unknown. A row's source says where it came from: `stated` by
 the author, `derived` from a guard in the body or from a library's
 policy row the body calls, `default` for a kind the type alone admits
 (a hole propagates, an absence raises), `observed` for a kind the
@@ -145,6 +149,13 @@ class Call:
     # the arguments as the call was first made, where this call is one
     # member's reading of it with the other members filled
     origin: "dict | None" = None
+    # `(point, output, raised)`: for a raise, the same call with the
+    # missing inputs it is blamed on present, where f did not raise
+    present: "tuple | None" = None
+    # for a raise that stayed with every missing input present on every
+    # draw tried, the other arguments it stayed with: the call decides
+    # nothing
+    others: "tuple | None" = None
 
 
 @dataclass
@@ -159,6 +170,9 @@ class Batch:
     # the calls that answered otherwise when made again, as `(point,
     # first answer, second answer)`, each answer `(output, raised)`
     unrepeatable: list = field(default_factory=list)
+    # the calls whose raise stayed with every missing input present
+    # (`Call.others`), which decide nothing
+    undecided: list = field(default_factory=list)
 
 
 _BATCH: contextvars.ContextVar = contextvars.ContextVar("mathema_policy_batch",
@@ -198,14 +212,18 @@ def claim_scope(name: "str | None"):
 
 def record_call(point: dict, output=None, raised: "str | None" = None,
                 keys: "list | None" = None, behaviour: "str | None" = None,
-                indifferent: bool = False, origin: "dict | None" = None) -> None:
-    """File one call at a missing input into the active batch."""
+                indifferent: bool = False, origin: "dict | None" = None,
+                present: "tuple | None" = None, others: "tuple | None" = None) -> None:
+    """File one call at a missing input into the active batch, under
+    `undecided` when `others` names the arguments its raise stayed with."""
     current = _BATCH.get()
     if current is None:
         return
-    current.calls.append(Call(dict(point), output, raised, _CLAIM.get(),
-                              list(keys) if keys is not None else None, behaviour,
-                              indifferent, dict(origin) if origin is not None else None))
+    made = Call(dict(point), output, raised, _CLAIM.get(),
+                list(keys) if keys is not None else None, behaviour,
+                indifferent, dict(origin) if origin is not None else None,
+                present, tuple(others) if others is not None else None)
+    (current.undecided if others is not None else current.calls).append(made)
 
 
 def record_unrepeatable(point: dict, first: tuple, second: tuple) -> None:
@@ -460,13 +478,15 @@ def _corners(bound) -> list:
 
 
 def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
-    """The calls f makes at `points`; with the claim's `domain`, a call at
-    a hole is read by refilling it (`_missing_policy.refill`): one call
-    per hole member; a call whose refill is inconclusive or not repeatable
-    is left out, and one indifferent to the slot is filed as a drop marked
-    indifferent."""
-    from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, MISSING, NOT_REPEATABLE,
-                                  keys_of, raise_is_the_absences, refill)
+    """The calls f makes at `points`, each read by `_missing_policy.read_call`:
+    a raise filed only under the missing inputs it is theirs, a call whose
+    raise stayed with every missing input present on every draw tried
+    marked undecided (`others`), and, with the claim's `domain`, a call
+    at a hole read by refilling it: one call per hole member; a call
+    whose refill is inconclusive or not repeatable is left out, and one
+    indifferent to the slot is filed as a drop marked indifferent."""
+    from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, NOT_REPEATABLE, UNDECIDED,
+                                  read_call)
     from .conjecture import _fill_value
     from .probing import _pinned_float_env
     from .runtime_types import calling
@@ -483,28 +503,34 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
     fills = ({p: fill for p in facts.params
               if (fill := _fill_value((domain or {}).get(p))) is not None}
              if domain is not None else {})
+    presence = _presence(fn, facts, domain)
     out = []
     for point in points:
         value, raised = call_at(point)
-        pieces = refill(call_at, point, value, raised, fills) if fills else None
-        if pieces is None and fills and raise_is_the_absences(call_at, point, raised,
-                                                               fills):
-            # the raise is the absence's: filed under it alone
-            out.append(Call(point, value, raised, None,
-                            [k for k in keys_of(point) if k[1] != MISSING]))
-            continue
-        if pieces is None:
-            out.append(Call(point, value, raised, None))
-            continue
-        for at, got, err, behaviour in pieces:
-            if behaviour == NOT_REPEATABLE:
-                record_unrepeatable(at, (value, raised), (got, err))
-        out.extend(Call(at, got, err, None, None,
-                        "drops" if behaviour == INDIFFERENT else behaviour,
-                        behaviour == INDIFFERENT, point if at is not point else None)
-                   for at, got, err, behaviour in pieces
-                   if behaviour not in (INCONCLUSIVE, NOT_REPEATABLE))
+        for r in read_call(call_at, point, value, raised, fills, presence,
+                           refills=bool(fills)):
+            if r.behaviour == NOT_REPEATABLE:
+                record_unrepeatable(r.at, (value, raised), (r.output, r.raised))
+            if r.behaviour in (INCONCLUSIVE, NOT_REPEATABLE):
+                continue
+            if r.behaviour == UNDECIDED:
+                out.append(Call(r.at, r.output, r.raised, None, others=r.others))
+                continue
+            out.append(Call(r.at, r.output, r.raised, None, r.keys,
+                            "drops" if r.behaviour == INDIFFERENT else r.behaviour,
+                            r.behaviour == INDIFFERENT, r.origin, present=r.present))
     return out
+
+
+def _presence(fn, facts, domain: "dict | None"):
+    """How the raise check draws f's arguments present: each parameter
+    at its kind, inside the claim's `domain`, a defaulted one left as the
+    call gave it."""
+    from ._missing_policy import Presence
+    from .probing import signature_defaults
+    defaulted = signature_defaults(fn)
+    return Presence({p: facts.param_kinds.get(p, "unknown") for p in facts.params
+                     if p not in defaulted}, dict(domain or {}))
 
 
 def _present_calls(fn, facts, domain: dict, draws: int = 24) -> list:
@@ -591,15 +617,82 @@ def _confirmed(calls: list, current: "Batch | None", floor: bool,
 
 
 def _witness(call: Call, param: "str | None" = None) -> str:
-    """`xs = [NA]: f raised TypeError`, `x = nan: f returned 1.0`, and
-    for a path what it reached: `d.note unset: f raised KeyError`."""
+    """The call in Python spelling and what f did there. A raise is shown
+    beside the call with its missing inputs present: `f(None) raises
+    TypeError; f("ab") returns "AB"`, `f(language=0.71, name=None) raises
+    AttributeError; with name="ab" it returns "AB"`. A value given back:
+    `f(nan) returns 1.0`, `f(rate=nan, n=3) returns 1.0`. A path names
+    its parameter and what it reached: `f(trade) with trade.memo = null
+    raises TypeError`, `f(d) with d.note unset raises KeyError`."""
     from ._missing_policy import is_path
-    from ._missing_words import point_shown, value_shown
-    did = (f"f raised {call.raised}" if call.raised
-           else f"f returned {value_shown(call.output)}")
+    from ._missing_words import call_shown, value_shown
+    did = (f"raises {call.raised}" if call.raised
+           else f"returns {value_shown(call.output)}")
     if param and is_path(param):
-        return f"{_at(call, param)}: {did}"
-    return f"{point_shown(call.point)}: {did}"
+        root = re.match(r"[A-Za-z_]\w*", param)
+        reached = re.sub(r" \((absent|hole)\)$", "", _at(call, param))
+        return f"f({root.group(0) if root else param}) with {reached} {did}"
+    if call.raised:
+        return f"{call_shown(call.point)} {did}{_present_words(call)}"
+    return f"{call_shown(call.point)} {did}"
+
+
+def _present_words(call: Call) -> str:
+    """`; f(1.0) returns 1.0`, or `; with x=1.0 it returns 1.0` where f
+    takes other arguments: the call a raise was read against, its
+    missing inputs present and every other argument as it was; empty
+    where there is none."""
+    from ._missing_words import _param_value, call_shown, value_shown
+    if not call.raised or not call.present:
+        return ""
+    at, output, raised = call.present
+    did = f"raises {raised}" if raised else f"returns {value_shown(output)}"
+    if len(at) == 1:
+        return f"; {call_shown(at)} {did}"
+    held = dict.fromkeys(q for q, _k, _m in _keys(call))
+    shown = {q: at[q] for q in held if q in at}
+    if not shown:
+        return ""
+    words = ", ".join(f"{q}={_param_value(v)}" for q, v in shown.items())
+    return f"; with {words} it {did}"
+
+
+def _split_undecided(calls: list) -> tuple:
+    """`(decided, undecided)`: the calls apart from those whose raise
+    stayed with every missing input present (`Call.others`)."""
+    return ([c for c in calls if c.others is None],
+            [c for c in calls if c.others is not None])
+
+
+def _undecided_at(current: "Batch | None", param: str, kind: str,
+                  member: "str | None" = None) -> list:
+    """The batch's undecided calls at a missing `param` (at `member`)."""
+    return [c for c in (current.undecided if current else [])
+            if (member in _members_at(c, param, kind) if member
+                else _members_at(c, param, kind))]
+
+
+def _undecided_reason(call: Call, param: str, kind: str) -> str:
+    """Why an undecided call says nothing about `param`: `f raised
+    AttributeError at name = None and again with name present, on every
+    draw of language tried, so the raise is not name's and nothing says
+    what f does at name = None`."""
+    what = f"{param} = None" if kind == "absent" else f"a missing {param}"
+    tried = (f"on every draw of {_and(list(call.others))} tried" if call.others
+             else f"at every present {param} tried")
+    return (f"f raised {call.raised} at {_at(call, param)} and again with {param} "
+            f"present, {tried}, so the raise is not {param}'s and nothing says what "
+            f"f does at {what}")
+
+
+def _undecided_next(call: Call, param: str, kind: str) -> str:
+    """The step that lets an undecided row be read: the other arguments
+    bound to values f runs on."""
+    what = f"{param} = None" if kind == "absent" else f"a missing {param}"
+    if not call.others:
+        return ""
+    return (f"bind {_and(list(call.others))} in a claim to values f runs on, so f can "
+            f"be read at {what}")
 
 
 def _in_slot(call: Call, param: str, kind: str) -> bool:
@@ -807,6 +900,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
     params = [stated.parameter] if stated.parameter else [
         p for p in facts.params if _admits(fn, p, stated.kind)]
     rows_calls: list = []
+    undecided: list = []
     floor = False
     for p in params:
         found = _relevant(current.calls if current else [], p, stated.kind,
@@ -826,12 +920,29 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                       if _premise_holds(stated.premise, pt)]
             found = _run_floor(fn, facts, points, domain or {})
             floor = floor or bool(found)
-        rows_calls += [(p, c) for c in found]
+        found, unread = _split_undecided(found)
+        undecided += [(p, c) for c in unread + _undecided_at(
+            current, p, stated.kind, stated.member) if _in_region(stated.premise, c)]
+        # a call read at another draw of the other arguments is evidence
+        # only where that draw meets the premise too
+        rows_calls += [(p, c) for c in found if c.origin is not None
+                       or _premise_holds(stated.premise, c.point)]
     if (stated.behaviour or "") in ("drops", "converts", "introduces"):
         # a call indifferent to the slot breaks only raises and
         # propagates: a hole read as a fixed value is consistent with the
         # other words
         rows_calls = [(p, c) for p, c in rows_calls if not c.indifferent]
+    if not rows_calls and undecided:
+        p, c = undecided[0]
+        nxt = _undecided_next(c, p, stated.kind)
+        meta["mathema.policy"]["next"] = nxt
+        return Probe(cj.name, statement, "unknown", n=len(undecided),
+                     route="probe:counterfactual",
+                     note=". ".join(t for t in (_undecided_reason(c, p, stated.kind), nxt)
+                                    if t),
+                     meta={**meta, "mathema.policy": {
+                         **meta["mathema.policy"],
+                         "reason": _undecided_reason(c, p, stated.kind)}})
     if not rows_calls:
         return unknown(_why_undecided(stated, params, current))
     calls = [c for _p, c in rows_calls]
@@ -1358,21 +1469,27 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of,
                                 for r in made}
                 if None in done_members:
                     continue
+            def open_case(c, p=p, kind=kind, done_members=done_members,
+                          stated_members=stated_members, premised=premised) -> bool:
+                return not (set(_members_at(c, p, kind)) & (done_members | stated_members)) \
+                    and not any((m is None or m in _members_at(c, p, kind))
+                                and _in_region(pr, c) for m, pr in premised)
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
-                                          None, "")
-                     if not (set(_members_at(c, p, kind))
-                             & (done_members | stated_members))
-                     and not any((m is None or m in _members_at(c, p, kind))
-                                 and _in_region(pr, c) for m, pr in premised)]
+                                          None, "") if open_case(c)]
+            undecided = [c for c in _undecided_at(current, p, kind) if open_case(c)]
             if not calls and kind == "absent" and sig.annotated and sig.absent \
                     and not mine:
                 # what f does at None is judged for every Optional
                 # parameter: where no claim's draw reached it (a text
                 # parameter no claim samples), the row calls f there
                 # itself
-                calls = _run_floor(fn, facts,
-                                   _floor_points(fn, facts, p, kind, ["None"], domain),
-                                   domain)
+                calls, unread = _split_undecided(_run_floor(
+                    fn, facts, _floor_points(fn, facts, p, kind, ["None"], domain),
+                    domain))
+                undecided += unread
+            if not calls and undecided:
+                rows.append(_undecided_row(fn, p, kind, undecided, origin, name_of, Probe))
+                continue
             # a record's own rows read the calls its claims made, and run
             # nothing of their own beyond that
             if not calls:
@@ -1385,6 +1502,25 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of,
     rows += _path_rows(fn, covered, current, guards, name_of)
     rows += _return_rows(fn, covered, current, name_of)
     return rows
+
+
+def _undecided_row(fn, p, kind, undecided: list, origin, name_of, Probe):
+    """The row for `p` where every call at its missing value raised with
+    the value present too: unknown, saying which arguments the raise
+    stayed with."""
+    call = undecided[0]
+    policy = Policy(kind=kind, parameter=p)
+    reason = _undecided_reason(call, p, kind)
+    nxt = _undecided_next(call, p, kind)
+    meta_policy = {"kind": kind, "parameter": p, "member": None, "premise": "",
+                   "behaviour": None, "exception": None,
+                   "source": "default" if origin == "type" else "observed",
+                   "reason": reason, "sentence": reason}
+    if nxt:
+        meta_policy["next"] = nxt
+    return Probe(name_of(policy), policy_text(policy), "unknown", n=len(undecided),
+                 route="probe:counterfactual", note=". ".join(t for t in (reason, nxt) if t),
+                 meta={"mathema.policy": meta_policy, "mathema.surface": "mathema"})
 
 
 def _member_rows(fn, p, kind, calls, origin, sig, guards, current, name_of, Probe,
@@ -2472,14 +2608,22 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         guarded = [m for m in members if _guard_for(guards, fn, p, kind, m)]
         for m in members:
             calls = _relevant(current.calls if current else [], p, kind, m, "")
+            undecided = _undecided_at(current, p, kind, m)
             floor = False
             if not calls:
-                calls = _run_floor(fn, facts, _floor_points(fn, facts, p, kind, [m],
-                                                            domain, cj), domain or {})
+                calls, unread = _split_undecided(_run_floor(
+                    fn, facts, _floor_points(fn, facts, p, kind, [m], domain, cj),
+                    domain or {}))
+                undecided += unread
                 floor = bool(calls)
             n += len(calls)
             entry: dict = {"member": m}
             table.setdefault(p, []).append(entry)
+            if not calls and undecided:
+                entry["source"] = "unstated"
+                said.append(f"{m} is undecided: {_undecided_reason(undecided[0], p, kind)}")
+                weakest = "unknown" if weakest != "falsified" else weakest
+                continue
             if not calls:
                 entry["source"] = "unstated"
                 said.append(f"{m} was never reached")
@@ -2577,7 +2721,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     b: _at(c, None) for b, c in ways.items()}})
                 said.append(f"{m} {both}, and no claim states either")
                 failures.append(f"f has no single policy for {p} = {m}")
-                witness = witness or "; ".join(_witness(c) for c in ways.values())
+                witness = witness or "\n".join(_witness(c) for c in ways.values())
                 nexts.append(((row.meta or {}).get("mathema.policy") or {}).get("next")
                              or "")
                 continue
@@ -2701,7 +2845,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                                             for c in ways.values()])
                             + ", and no claim states either")
                 failures.append(f"f has no single policy for {path} ({m})")
-                witness = witness or "; ".join(_witness(c, path) for c in ways.values())
+                witness = witness or "\n".join(_witness(c, path) for c in ways.values())
                 continue
             behaviour, call = next(iter(ways.items()))
             entry["behaviour"] = behaviour

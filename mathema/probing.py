@@ -672,6 +672,9 @@ class ExecutedMissing:
         self.indifferent: dict = {}
         self.inconclusive: dict = {}
         self.not_repeatable: dict = {}
+        # how the raise check draws the arguments present
+        # (`_missing_policy.Presence`), set by the route
+        self.presence = None
 
     def add_call(self, point: dict, output=None, raised: "str | None" = None) -> None:
         """File one call at `point` (its arguments by name) that returned
@@ -691,54 +694,50 @@ class ExecutedMissing:
         if at_default and any(p not in at_default for p, _k, _m in keys):
             point = {p: v for p, v in point.items() if p not in at_default}
             keys = keys_of(point, self.paths)
-        from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, MISSING, NOT_REPEATABLE,
-                                      raise_is_the_absences, refill)
+        from ._missing_policy import (INCONCLUSIVE, INDIFFERENT, NOT_REPEATABLE,
+                                      UNDECIDED, read_call)
         given, refill_at = self.given, self.refill_at
-        pieces = (refill(lambda at: refill_at(at, given), point, output, raised,
-                         self.fills)
-                  if refill_at is not None and not self.paths else None)
-        if pieces is None and refill_at is not None and raise_is_the_absences(
-                lambda at: refill_at(at, given), point, raised, self.fills):
-            # the raise is the absence's: filed under it alone, and the
-            # holes beside it are inconclusive
-            for p, kind, _m in keys:
-                if kind == MISSING:
-                    self.inconclusive[p] = self.inconclusive.get(p, 0) + 1
-            absent_keys = [k for k in keys if k[1] != MISSING]
-            self._file(point, output, raised, absent_keys,
-                       classify_call(point, output, raised,
-                                     unseen_kinds(point, absent_keys)))
-            return
-        if pieces is None:
+        if refill_at is None:
             self._file(point, output, raised, keys,
                        classify_call(point, output, raised, unseen_kinds(point, keys)))
             return
-        for at, got, err, behaviour in pieces:
-            if behaviour in (INDIFFERENT, INCONCLUSIVE, NOT_REPEATABLE):
+        readings = read_call(lambda at: refill_at(at, given), point, output, raised,
+                             self.fills, self.presence, refills=not self.paths,
+                             paths=self.paths)
+        for r in readings:
+            if r.behaviour in (INDIFFERENT, INCONCLUSIVE, NOT_REPEATABLE, UNDECIDED):
                 # no fill changed the output (f is indifferent to the
-                # slot), the filled call gave no value back, or the call
-                # did not repeat
+                # slot), the filled call gave no value back, the call did
+                # not repeat, or its raise stayed with every missing input
+                # present
                 counted = {INDIFFERENT: self.indifferent, INCONCLUSIVE: self.inconclusive,
-                           NOT_REPEATABLE: self.not_repeatable}[behaviour]
-                if behaviour == NOT_REPEATABLE:
+                           NOT_REPEATABLE: self.not_repeatable,
+                           UNDECIDED: self.inconclusive}[r.behaviour]
+                if r.behaviour == NOT_REPEATABLE:
                     # an executed witness against determinism
                     from .policy import record_unrepeatable
-                    record_unrepeatable(at, (output, raised), (got, err))
-                for p, _k, _m in keys_of(at):
+                    record_unrepeatable(r.at, (output, raised), (r.output, r.raised))
+                for p, _k, _m in (r.keys if r.keys is not None else keys_of(r.at)):
                     counted[p] = counted.get(p, 0) + 1
-                if behaviour == INDIFFERENT:
-                    # a value returned with the hole there: evidence against
-                    # raises and propagates only
+                if r.behaviour in (INDIFFERENT, UNDECIDED):
+                    # a value returned with the hole there is evidence
+                    # against raises and propagates only; an undecided
+                    # raise is kept for the row to say why it is unknown
                     from .policy import record_call
-                    record_call(at, got, err, keys=keys_of(at, self.paths),
-                                behaviour="drops", indifferent=True,
-                                origin=point if at is not point else None)
+                    record_call(r.at, r.output, r.raised, keys=keys_of(r.at, self.paths),
+                                behaviour="drops" if r.behaviour == INDIFFERENT else None,
+                                indifferent=r.behaviour == INDIFFERENT, origin=r.origin,
+                                others=r.others if r.behaviour == UNDECIDED else None)
                 continue
-            self._file(at, got, err, keys_of(at, self.paths), behaviour,
-                       origin=point if at is not point else None)
+            at_keys = r.keys if r.keys is not None else keys_of(r.at, self.paths)
+            self._file(r.at, r.output, r.raised, at_keys,
+                       r.behaviour or classify_call(r.at, r.output, r.raised,
+                                                    unseen_kinds(r.at, at_keys)),
+                       origin=r.origin, present=r.present)
 
     def _file(self, point: dict, output, raised: "str | None", keys: list,
-              behaviour: str, origin: "dict | None" = None) -> None:
+              behaviour: str, origin: "dict | None" = None,
+              present: "tuple | None" = None) -> None:
         """File one call's behaviour under every key it holds."""
         from ._missing_policy import is_path, member_changes, no_value_slots
         from ._missing_words import outcome_entry, path_said, said, value_shown
@@ -754,7 +753,8 @@ class ExecutedMissing:
                 respelled.setdefault((p, word),
                                      f"{p}{where}={shown} returned as {back}")
         from .policy import record_call
-        record_call(point, output, raised, keys=keys, behaviour=behaviour, origin=origin)
+        record_call(point, output, raised, keys=keys, behaviour=behaviour, origin=origin,
+                    present=present)
         for p, kind, member in keys:
             if is_path(p):
                 # a field's or key's no-value, said by its path
@@ -1841,11 +1841,14 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         `bounds` (None the whole line, an unbounded end at the number
         representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
-        range's own limit, and the range's opposite ends `[lo, hi]`;
+        range's own limit, the range's opposite ends `[lo, hi]`, and
+        the same-sign pair `[e, e]` at each end `e` past half the
+        representation's reach, where the sum of the pair overflows;
         every entry inside the range. With `n`, each pair is repeated
         to length `n`, and none is given below 2. Empty when the
         elements are not one real interval.
     """
+    from ._sampling import representation_reach
     span = _element_range(bounds)
     if span is None or (n is not None and n < 2):
         return []
@@ -1855,6 +1858,10 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         pairs = [[m, -m] for m in _cancel_magnitudes(min(-lo, hi))]
     if lo < hi and [lo, hi] not in pairs and [hi, lo] not in pairs:
         pairs.append([lo, hi])
+    half = representation_reach() / 2
+    for end in (hi, lo):
+        if abs(end) > half and [end, end] not in pairs:
+            pairs.append([end, end])
     if n is None:
         return pairs
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
@@ -2291,6 +2298,16 @@ def _sampling_shorthand(kinds: dict, domain: dict, n: int,
         if k == "table":
             return (f"Table(equal-length columns, {size_text(p, 'len∈[1,8]')}, "
                     f"each drawn as a free Seq)")
+        if k == "dict" and bounds is None:
+            # a mapping drawn by `_synth_dict`: the keys the body reads,
+            # or a few generic ones, each value a free scalar
+            return ("Dict(keys the body reads, else 1 to 4 generic keys; "
+                    "values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3])")
+        if k == "bool" and _classify_bound(bounds) not in (
+                "domain", "frozenset", "Z", "N", "C", "language"):
+            # `_synth` draws a bool parameter as False or True unless a
+            # set-like bound draws it
+            return "U{False, True}"
         if (isinstance(bounds, Domain) and len(bounds.pieces) == 1
                 and getattr(bounds.pieces[0], "bare", False)
                 and not numeric_excluded(bounds)):
@@ -2369,7 +2386,9 @@ def _out_of_domain_candidates(bounds) -> list:
     explicit type refinement), not only a bare interval. A `Domain`
     that explicitly excludes `MISSING` also contributes a NaN
     candidate; that's a real, declared fact worth testing the real
-    function against now, not just a numeric range."""
+    function against now, not just a numeric range. Each value the
+    domain removes with `\\` lies outside it and is a candidate too
+    (`0` for `R \\ {0}`)."""
     if isinstance(bounds, tuple):
         lo, hi = bounds
         span = (hi - lo) or 1.0
@@ -2385,6 +2404,7 @@ def _out_of_domain_candidates(bounds) -> list:
                 lo, hi = piece
                 span = (hi - lo) or 1.0
                 candidates += [lo - 0.5 * span, hi + 0.5 * span]
+        candidates += sorted(numeric_excluded(bounds), key=repr)
         if MISSING in bounds.excluded:
             candidates.append(float("nan"))
         return [c for c in candidates if not domain_contains(c, bounds)]

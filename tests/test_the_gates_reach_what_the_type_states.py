@@ -63,13 +63,13 @@ def test_the_missing_gate_draws_a_hole_inside_a_list_of_records():
 def test_the_absent_gate_leaves_a_not_required_key_out():
     row = _gate(memo_len, "is_absent_safe(f)")
     assert row.verdict == "falsified", row.note
-    assert row.counterexample == "t.memo unset: f raised KeyError"
+    assert row.counterexample == "f(t) with t.memo unset raises KeyError"
 
 
 def test_the_absent_gate_holds_none_at_an_optional_key():
     row = _gate(venue_len, "is_absent_safe(f)")
     assert row.verdict == "falsified", row.note
-    assert row.counterexample == "t.venue = null (absent): f raised TypeError"
+    assert row.counterexample == "f(t) with t.venue = null raises TypeError"
 
 
 def test_a_plain_dict_is_reached_only_through_a_claim_and_says_so():

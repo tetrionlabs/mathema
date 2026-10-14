@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import itertools
 
+from ._exits import call, exception_name
 from .domain import _as_domain, _set_sentinels, finite_members
 from .probing import ExecutedMissing, LastCall, executed_missing, with_executed
 from .symbolic import ProofResult
 
-__all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof"]
+__all__ = ["BRUTE_FORCE_POINT_BUDGET", "brute_force_proof", "ground_proof"]
 
 #: the most points one claim's sweep will visit. A domain larger than
 #: this declines rather than being truncated: the budget bounds the work
@@ -136,23 +137,63 @@ def _membership_words(rhs: str, wanted: bool) -> str:
     return f"is {'' if wanted else 'not '}in {text}"
 
 
-def _holds_at(total: int, judged: list) -> str:
+class _Scope:
+    """Where a sweep's finite points came from, in words: the claim's
+    own binding (`the claim ranges over 3 points`), the function's
+    domain (`the function's domain has 3 points`: its annotation, a
+    guard to a set, or a domain the check was given), or the two
+    together for a claim binding some parameters and not others."""
+
+    def __init__(self, cj, names: list):
+        bound = set(getattr(cj, "domain", None) or {})
+        claimed = [n for n in names if n in bound]
+        if len(claimed) == len(names):
+            self.kind = "claim"
+        elif not claimed:
+            self.kind = "function"
+        else:
+            self.kind = "both"
+
+    def has(self, n: int) -> str:
+        """How many points the sweep covers, named by their source:
+        `the claim ranges over 3 points`, `the function's domain has 3
+        points`."""
+        if self.kind == "claim":
+            return f"the claim ranges over {_points(n)}"
+        if self.kind == "function":
+            return f"the function's domain has {_points(n)}"
+        return (f"the claim's binding with the function's domain gives "
+                f"{_points(n)}")
+
+    def holds(self) -> str:
+        """The subject a holding claim is then named by."""
+        return "it" if self.kind == "claim" else "the claim"
+
+    def quantifier(self, names: list, n: int) -> str:
+        """The `∀` line of a proof over the swept points."""
+        where = {"claim": "the claim's finite scope",
+                 "function": "the function's finite domain",
+                 "both": "the claim's binding with the function's finite "
+                         "domain"}[self.kind]
+        return f"∀ {', '.join(names)} in {where} ({_points(n)})"
+
+
+def _holds_at(total: int, judged: list, scope: _Scope) -> str:
     """The proof sketch of a claim checked at every point of a finite
-    domain, counting the points where the function gave no value to
+    set, counting the points where the function gave no value to
     compare apart from the ones the claim was compared at."""
     others = total - len(judged)
     if others == 0:
         if total == 1:
-            return (f"the declared domain has one point, {_point_words(judged[0])}, "
-                    f"and the claim holds there")
-        return f"the declared domain has {total} points, and the claim holds at every one"
+            return (f"{scope.has(1)}, {_point_words(judged[0])}, "
+                    f"and {scope.holds()} holds there")
+        return f"{scope.has(total)}, and {scope.holds()} holds at every one"
     where = (_point_words(judged[0]) if len(judged) == 1
              else f"the {len(judged)} points where f returns a value")
     rest = ("the other point gives no value, so it is recorded, not compared"
             if others == 1 else
             f"the other {others} give no value, so they are recorded, not compared")
-    return (f"the declared domain has {total} points; the claim holds at {where}, "
-            f"and {rest}")
+    return f"{scope.has(total)}; {scope.holds()} holds at {where}, and {rest}"
 
 
 def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
@@ -168,7 +209,7 @@ def _raised_at(fn, facts, point: dict) -> "str | None":
     if any(p not in point for p in facts.params):
         return None
     try:
-        fn(*[point[p] for p in facts.params])
+        call(fn, *[point[p] for p in facts.params])
     except Exception as e:
         return type(e).__name__
     return None
@@ -243,10 +284,9 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         "proven",
         sketch=(f"at the only point, {_point_words(last)}, f({names[0]}) {is_in}"
                 if checked == 1 and len(names) == 1 else
-                f"the declared domain has {_points(checked)}, and at every one "
+                f"{_Scope(cj, names).has(checked)}, and at every one "
                 f"the value {is_in}"),
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(checked)})",
+        quantifier=_Scope(cj, names).quantifier(names, checked),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -288,7 +328,7 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
 
         def tagged(*args, **kwargs):
             try:
-                return fn(*args, **kwargs)
+                return call(fn, *args, **kwargs)
             except Exception as e:
                 raised.append(e)
                 raise
@@ -306,9 +346,9 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                 return ProofResult(
                     "disproven",
                     sketch=f"at {where} the call raised "
-                           f"{type(raised[0]).__name__}, not {cj.rhs}",
+                           f"{exception_name(raised[0])}, not {cj.rhs}",
                     counterexample=f"{where}: raised "
-                                   f"{type(raised[0]).__name__}, claimed {cj.rhs}",
+                                   f"{exception_name(raised[0])}, claimed {cj.rhs}",
                     witness=dict(point),
                     meta=with_executed({"mathema.derive_route": "brute_force",
                                         **_tried(grid)}, executed))
@@ -329,10 +369,9 @@ def _raises_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         "proven",
         sketch=(f"the only point, {_point_words(last)}, raises"
                 if checked == 1 else
-                f"the declared domain has {_points(checked)}, and the call "
+                f"{_Scope(cj, names).has(checked)}, and the call "
                 f"raises at every one"),
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(checked)})",
+        quantifier=_Scope(cj, names).quantifier(names, checked),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid)},
                            executed))
 
@@ -476,7 +515,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     if unexamined is not None:
         return ProofResult(
             "undecided",
-            sketch=(f"{_holds_at(total, judged)}{outside}; every point "
+            sketch=(f"{_holds_at(total, judged, _Scope(cj, names))}{outside}; every point "
                     f"executed; proven needs the function to be shown "
                     f"pure: {unexamined}"),
             meta=with_executed({"mathema.derive_route": "brute_force",
@@ -485,15 +524,144 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                                executed_missing(deps)))
     return ProofResult(
         "proven",
-        sketch=_holds_at(total, judged) + outside,
-        quantifier=f"∀ {', '.join(names)} in the declared finite domain "
-                   f"({_points(total)})",
+        sketch=_holds_at(total, judged, _Scope(cj, names)) + outside,
+        quantifier=_Scope(cj, names).quantifier(names, total),
         meta=with_executed({"mathema.derive_route": "brute_force", **_tried(grid),
                             **counted},
                            executed_missing(deps)))
 
 
 _STATEFUL = object()
+
+#: the relations a ground claim is evaluated for: a value relation the
+#: point evaluator decides
+_GROUND_RELATIONS = frozenset({"==", "~=", "!=", "<=", ">=", "<", ">"})
+
+
+def _calls_f(cj) -> bool:
+    """Whether either side of the claim calls f."""
+    import ast
+    for side in (cj.lhs, cj.rhs):
+        try:
+            tree = ast.parse(side or "0", mode="eval")
+        except SyntaxError:
+            return False
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "f" for n in ast.walk(tree)):
+            return True
+    return False
+
+
+def _call_text(fn, facts, args: tuple, kwargs: dict) -> str:
+    """One call's arguments as a point, `x = nan, k = 2`, each named by
+    the parameter it binds; the arguments as written, `f(nan, 2)`, when
+    they do not bind by name."""
+    from .gates import _fmt_point
+    params = list(facts.params)
+    if len(args) <= len(params) and all(k in params for k in kwargs):
+        point = {**dict(zip(params, args)), **kwargs}
+        return _fmt_point(point, [p for p in params if p in point])
+    return _written_call(args, kwargs)
+
+
+def _written_call(args: tuple, kwargs: dict) -> str:
+    """A call as written, `f(1, k=2)`."""
+    from .probing import _fmt_coordinate, _fmt_value
+
+    def shown(v):
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    parts = [shown(a) for a in args] + [
+        f"{k}={shown(v)}" for k, v in kwargs.items()]
+    return f"f({', '.join(parts)})"
+
+
+def _ground_witness(fn, facts, calls: list) -> str:
+    """Intent:
+        The calls a ground claim's evaluation made, as its witness: the
+        raising call when one raised, else the one call made (`xs =
+        []`), else every distinct call as written (`f(1), f(2)`).
+    """
+    raised = [c for c in calls if c[0] == "raised"]
+    shown = raised[-1:] if raised else calls
+    distinct: list = []
+    for _kind, _out, args, kwargs in shown:
+        key = (repr(args), repr(sorted(kwargs.items())))
+        if key not in [k for k, _a, _kw in distinct]:
+            distinct.append((key, args, kwargs))
+    if len(distinct) == 1:
+        _key, args, kwargs = distinct[0]
+        return _call_text(fn, facts, args, kwargs)
+    return ", ".join(_written_call(args, kwargs)
+                     for _key, args, kwargs in distinct)
+
+
+def ground_proof(cj, fn, facts, bound_funcs):
+    """Intent:
+        A `ProofResult` for a ground claim, one that names no variable
+        and calls f only at literal arguments (`f(nan) == 0`, `f([]) ==
+        0`): the claim evaluated once, at its own calls. `disproven`
+        when it fails there, the calls as the witness (`x = nan: raised
+        ValueError`, `xs = []: 0.0 vs 1`); `proven` when it holds and
+        the function is shown pure; `undecided` with
+        `mathema.sweep_holds` when it holds but purity is not shown.
+        None when the claim is not ground or the evaluation cannot
+        decide it.
+
+    Notes:
+        The relation is decided by the corroboration gate's point
+        evaluator (`gates._point_evaluator`) at the empty point, so the
+        computation allowance, the raise rule and the no-value rule are
+        the ones every executed witness is judged by. A parameter the
+        claim never reads is no coordinate of that point: each call
+        binds what the claim passes it, and nothing is drawn.
+    """
+    if cj.relation not in _GROUND_RELATIONS or cj.links or cj.free_vars \
+            or cj.domain or cj.assuming or not _calls_f(cj):
+        return None
+    from .gates import _point_evaluator
+    deps = _point_evaluator(cj, fn, facts, {}, bound_funcs, sequences=True)
+    if deps is None or deps["names"]:
+        return None
+    evaluate = deps["evaluate"]
+    verdict = evaluate({})
+    calls = evaluate.calls()
+    if verdict is None or not calls:
+        return None
+    witness = _ground_witness(fn, facts, calls)
+    if verdict is False:
+        raised = [c for c in calls if c[0] == "raised"]
+        sides = evaluate.sides()
+        if raised:
+            detail = f"raised {raised[-1][1]}"
+        elif sides is not None:
+            from .probing import holds_nan
+            detail = f"{sides[0]!r} vs {sides[1]!r}" + (
+                ", and a nan is no value" if any(holds_nan(v) for v in sides)
+                else "")
+        else:
+            found = deps["probe_finite"]({})
+            detail = found if isinstance(found, str) else "the claim fails"
+        return ProofResult(
+            "disproven",
+            sketch=f"the claim fails at its own call, {witness}",
+            counterexample=f"{witness}: {detail}",
+            witness={},
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.witness_executed": True},
+                               executed_missing(deps)))
+    sketch = f"the claim holds at its own call, {witness}"
+    if facts.is_pure is not True or _examination_obstacle(fn) is not None:
+        return ProofResult(
+            "undecided",
+            sketch=(f"{sketch}; proven needs the function to be shown "
+                    f"pure, and one call says nothing about the next"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.sweep_holds": True},
+                               executed_missing(deps)))
+    return ProofResult(
+        "proven", sketch=sketch,
+        meta=with_executed({"mathema.derive_route": "brute_force"},
+                           executed_missing(deps)))
 
 
 def _examination_obstacle(fn):

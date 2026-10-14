@@ -1949,8 +1949,8 @@ def _integral_word_to_call(text: str) -> str:
     return re.sub(r"\bintegral\(", "integrate(", text)
 
 
-_IMAG_SUFFIX = re.compile(r"(?<![\w.])((?:\d+\.?\d*|\.\d+))i\b")
-_IMAG_UNICODE_SUFFIX = re.compile(r"(?<![\w.])((?:\d+\.?\d*|\.\d+))\s*[ⅈ𝑖]")
+_IMAG_SUFFIX = re.compile(r"(?<![\w.])((?:\d+(?:\.\d*)?|\.\d+))i\b")
+_IMAG_UNICODE_SUFFIX = re.compile(r"(?<![\w.])((?:\d+(?:\.\d*)?|\.\d+))\s*[ⅈ𝑖]")
 _IMAG_UNICODE_BARE = re.compile(r"[ⅈ𝑖]")
 
 

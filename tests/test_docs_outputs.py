@@ -300,6 +300,18 @@ def _no_providers():
     _providers._load.cache_clear()
 
 
+def _full_proof_budget():
+    """A documented example shows what a run gives on an unloaded
+    machine: the proof caps and the sweep budgets are raised as the
+    `needs_full_proof_budget` marker raises them for a test
+    (`tests/_proof_budget.py`), in this process and in the environment
+    every command it starts inherits."""
+    from _proof_budget import ENVIRONMENT, raise_budget
+    for name, value in ENVIRONMENT.items():
+        os.environ.setdefault(name, value)
+    raise_budget()
+
+
 def _wrappers(workdir):
     """A bin directory with `mathema` and `python` on it, both this
     interpreter, the CLI isolated from installed providers."""
@@ -311,6 +323,8 @@ def _wrappers(workdir):
                  f"sys.path.insert(0, {os.path.dirname(__file__)!r})\n"
                  "from test_docs_outputs import _no_providers\n"
                  "_no_providers()\n"
+                 "from test_docs_outputs import _full_proof_budget\n"
+                 "_full_proof_budget()\n"
                  "from mathema.cli import main\nsys.exit(main())\n")
     py = os.path.join(bindir, "python")
     with open(py, "w") as fh:
@@ -335,12 +349,6 @@ class _Driver:
         # policy set on this machine never reaches a documented command
         os.environ.setdefault("XDG_CONFIG_HOME",
                               os.path.join(workdir, ".config"))
-        # a documented example asks whether a claim is provable, not
-        # whether it is provable within the default cap on this machine,
-        # so the driver runs with the same generous proof budget the
-        # needs_full_proof_budget marker gives a test
-        os.environ.setdefault("MATHEMA_FAST_TIMEOUT", "60")
-        os.environ.setdefault("MATHEMA_EXTENSIVE_TIMEOUT", "120")
         env = dict(os.environ)
         env.pop("VIRTUAL_ENV", None)
         env.pop("MATHEMA_PSEUDO_INFINITY", None)
@@ -532,6 +540,7 @@ def drive(spec_path):
     os.chdir(workdir)
     sys.path.insert(0, workdir)
     _no_providers()
+    _full_proof_budget()
     d = _Driver(workdir)
     for part in spec.get("before", []):
         if part["role"] in ("file", "run"):
@@ -576,8 +585,8 @@ def test_the_output_shown_is_the_output_a_run_gives(example, tmp_path):
     env.pop("VIRTUAL_ENV", None)
     env.pop("MATHEMA_PSEUDO_INFINITY", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
-    env["MATHEMA_FAST_TIMEOUT"] = "60"
-    env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
+    from tests._proof_budget import raise_environment
+    raise_environment(env)
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
                         spec_path], cwd=workdir, env=env, capture_output=True,
                        text=True, timeout=600)
@@ -695,8 +704,8 @@ def test_the_three_layers_triangle_is_the_billing_modules_real_state(tmp_path):
     env.pop("VIRTUAL_ENV", None)
     env.pop("MATHEMA_PSEUDO_INFINITY", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
-    env["MATHEMA_FAST_TIMEOUT"] = "60"
-    env["MATHEMA_EXTENSIVE_TIMEOUT"] = "120"
+    from tests._proof_budget import raise_environment
+    raise_environment(env)
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",
                         spec_path], cwd=workdir, env=env, capture_output=True,
                        text=True, timeout=600)

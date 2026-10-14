@@ -22,6 +22,7 @@ scores span.
 """
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 
 # The clarity ALGORITHM is versioned like a route: an open string, so a
@@ -29,7 +30,7 @@ from dataclasses import dataclass, field
 # calibration change (the constants below) bumps the minor (@1.1); a
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
-CLARITY_ALGO = "entropy-dimensions@1.3"
+CLARITY_ALGO = "entropy-dimensions@1.4"
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -41,10 +42,11 @@ _BITS: dict[str, float] = {
     "graph": 1.0, "region": 0.4,
     # form: the relational shape (the output envelope is _EXTENT_BITS)
     "shape_branched": 1.0, "shape_flat": 0.4,
-    # domain: what each parameter accepts. A guarded parameter has a
-    # real, implementation-specific boundary; an unguarded one costs
-    # what is left unknown about the inputs it takes, read from the
-    # domain the checks complete for it (conjecture.parameter_domains):
+    # domain: what each parameter accepts. A parameter guarded other
+    # than to a set has a real, implementation-specific boundary; any
+    # other costs what is left unknown about the inputs it takes, read
+    # from the domain the checks complete for it, a guard to a set and
+    # an enforce_domain() guard included (conjecture.parameter_domains):
     # nothing stated, a type alone (a language naming the whole type
     # adds nothing), a narrower language by its level, a bounded range
     # or a refined language, a finite set of k values (log2(k)/10, capped,
@@ -80,6 +82,10 @@ _HOLDS_STRENGTH: dict[str, float] = {
     "examine": 0.90, "derive": 0.90, "probe:semi_analytical": 0.85,
     "probe:algorithmic": 0.80, "probe:minimal_example": 0.78, "probe": 0.60}
 _HOLDS_DEFAULT = 0.60
+# the share of its whole-domain credit a claim earns over the part of the
+# domain it does not cover, so every claim earns something: a claim
+# covering a share s earns s + _CLAIM_FLOOR * (1 - s)
+_CLAIM_FLOOR = 0.1
 
 _IDENTITY_KINDS = frozenset({"value_identity", "equivalence", "closed_form",
                              "roundtrip"})
@@ -118,9 +124,14 @@ _NO_SOURCE = frozenset({
     "is_representation_consistent"})
 
 
-def _strength(verdict: str, route: str) -> float:
+def _strength(verdict: str, route: str, n: "int | None" = None) -> float:
     """How much of a source's entropy this verdict, reached by this
-    mechanism, eliminates. See the @1 constants above."""
+    mechanism, eliminates. See the @1 constants above. A holds reached
+    by a subroute with no grade of its own (`derive:extensive`,
+    `probe:counterfactual`) is graded as the route it refines. A holds
+    from random sampling over `n` failure-free draws is scaled by
+    `1 - 3/n`: at 95% confidence, n draws without a failure leave up to
+    3/n of what they sample possibly failing (the rule of three)."""
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
@@ -128,7 +139,14 @@ def _strength(verdict: str, route: str) -> float:
     if v == "falsified":
         return _FALSIFIED_STRENGTH
     if v == "holds":
-        return _HOLDS_STRENGTH.get(route or "probe", _HOLDS_DEFAULT)
+        sampled = (route or "probe") == "probe"
+        route = route or "probe"
+        while route not in _HOLDS_STRENGTH and ":" in route:
+            route = route.rsplit(":", 1)[0]
+        strength = _HOLDS_STRENGTH.get(route, _HOLDS_DEFAULT)
+        if sampled and isinstance(n, int) and n > 0:
+            strength *= max(0.0, 1.0 - 3.0 / n)
+        return strength
     return 0.0
 
 
@@ -193,12 +211,17 @@ class _ParamDomain:
     """What is known about one parameter's inputs: its name, the bits
     its completed domain leaves (`domain_bits`), whether a guard in the
     body bounds it, whether an Optional annotation admits its absence,
-    and whether its domain is a finite set."""
+    whether its domain is a finite set, how many members that set
+    has (0 when it is not finite), and the `_clarity_reach.Universe` a
+    claim's share of it is counted in."""
     name: str
     bits: float
     guarded: bool = False
     optional: bool = False
     finite: bool = False
+    points: int = 0
+    # what the domain holds, for counting the share a claim covers
+    universe: "object" = field(default=None, compare=False)
 
 
 def _whole_type_language(language) -> bool:
@@ -223,64 +246,76 @@ def domain_bits(bound, annotated: bool) -> "tuple[float, bool]":
         a predicate, regular or schema language 0.6, a refined one 0.4;
         a bounded number range 0.4; a finite set of k values
         min(0.3, log2(k) / 10). `finite` says the domain is a finite
-        set, which an exhaustive proof clears entirely.
+        set, which an exhaustive proof over the function's own domain
+        clears entirely.
+    """
+    bits, finite, _points = _domain_reading(bound, annotated)
+    return bits, finite
+
+
+def _domain_reading(bound, annotated: bool) -> "tuple[float, bool, frozenset]":
+    """Intent:
+        `(bits, finite, members)`: `domain_bits` plus the members of
+        a finite domain, empty for one that is not finite.
     """
     import math
 
     from .domain import Domain, LanguageRef, _is_enumerated, is_sentinel
     C = _BITS
 
-    def finite_bits(k: int):
-        return (min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1 else 0.0), True
+    def finite_bits(members) -> tuple:
+        k = len(members)
+        return ((min(C["domain_finite_cap"], math.log2(k) / 10) if k > 1
+                 else 0.0), True, frozenset(members))
 
     if bound is None:
-        return (C["domain_type"] if annotated else C["domain_unannotated"]), False
+        return (C["domain_type"] if annotated else C["domain_unannotated"]), False, frozenset()
     if isinstance(bound, frozenset):
-        return finite_bits(len([v for v in bound if not is_sentinel(v)]))
+        return finite_bits({v for v in bound if not is_sentinel(v)})
     if isinstance(bound, str):
-        return C["domain_type"], False
+        return C["domain_type"], False, frozenset()
     if isinstance(bound, Domain):
         if bound.base_type == "L":
             refs = [p for p in bound.pieces if isinstance(p, LanguageRef)]
             if any(ref.refinements for ref in refs):
-                return C["domain_refined"], False
+                return C["domain_refined"], False, frozenset()
             from .languages import resolve
             levels = set()
             for ref in refs:
                 try:
                     language, _source = resolve(ref)
                 except Exception:
-                    return C["domain_type"], False
+                    return C["domain_type"], False, frozenset()
                 if getattr(language, "level", "") == "finite":
                     members = language.members(1024)
                     if members is not None:
-                        return finite_bits(len(members))
+                        return finite_bits(set(members))
                 if _whole_type_language(language):
-                    return C["domain_type"], False
+                    return C["domain_type"], False, frozenset()
                 levels.add(getattr(language, "level", "predicate"))
             if not levels:
-                return C["domain_type"], False
+                return C["domain_type"], False, frozenset()
             if levels == {"alphabet"}:
-                return C["domain_alphabet"], False
-            return C["domain_predicate"], False
+                return C["domain_alphabet"], False, frozenset()
+            return C["domain_predicate"], False, frozenset()
         if _is_enumerated(bound) and not bound.dims:
-            return finite_bits(len({v for p in bound.pieces for v in p
-                                    if not is_sentinel(v)}))
+            return finite_bits({v for p in bound.pieces for v in p
+                                if not is_sentinel(v)})
         pieces = [p for p in bound.pieces
                   if not (isinstance(p, frozenset) and all(is_sentinel(v) for v in p))]
         if pieces and all(isinstance(p, tuple) and not isinstance(p, frozenset)
                           and all(math.isfinite(float(v)) for v in p[:2])
                           for p in pieces):
-            return C["domain_bounded"], False
-        return C["domain_type"], False
+            return C["domain_bounded"], False, frozenset()
+        return C["domain_type"], False, frozenset()
     if isinstance(bound, tuple):
         try:
             if all(math.isfinite(float(v)) for v in bound[:2]):
-                return C["domain_bounded"], False
+                return C["domain_bounded"], False, frozenset()
         except (TypeError, ValueError):
             pass
-        return C["domain_type"], False
-    return C["domain_type"], False
+        return C["domain_type"], False, frozenset()
+    return C["domain_type"], False, frozenset()
 
 
 @dataclass(frozen=True)
@@ -307,7 +342,8 @@ def _callee_evidence(entry: dict) -> float:
     """Intent:
         The share of a call's hazard the callee's own record removes:
         the strongest settled definedness row it holds (an `is_defined`
-        row, bare or a restriction, or a `raises` row). Proven removes
+        row, bare or a restriction, or a `raises` row), or an identity
+        over its whole domain, which gives a value at every input. Proven removes
         it all; a holds removes what a holds removes of any source, by
         mechanism; a row accepted as trusted counts as a holds, never as
         proven. Anything else (no record, a bound, an unsettled or
@@ -325,7 +361,8 @@ def _callee_evidence(entry: dict) -> float:
             continue
         statement = str(row.get("statement") or row.get("law") or "")
         if region_row_kind(row.get("name")) != "is_defined" and not (
-                statement.startswith("raises(") or " raises(" in statement):
+                statement.startswith("raises(") or " raises(" in statement) \
+                and not _whole_domain_identity(row.get("name") or "", statement):
             continue
         accepted = row.get("accepted") or {}
         verdict = classify_verdict(row.get("verdict") or "")
@@ -333,11 +370,57 @@ def _callee_evidence(entry: dict) -> float:
             strength = _HOLDS_DEFAULT if verdict in ("proven", "holds") \
                 else 0.0
         elif verdict in ("proven", "holds"):
-            strength = _strength(verdict, row.get("route") or "")
+            strength = _strength(verdict, row.get("route") or "", row.get("n"))
         else:
             strength = 0.0
         best = max(best, strength)
     return best
+
+
+def _whole_domain_identity(name: str, statement: str) -> bool:
+    """Whether a row states what a function computes (an identity, an
+    equivalence, a closed form) over every input, binding no parameter
+    to a narrower set."""
+    return _claim_kind(name, statement) in _IDENTITY_KINDS and \
+        not _claim_bindings(statement)
+
+
+def _decorator_only_calls(fn, facts) -> frozenset:
+    """Intent:
+        The dotted keys of the calls `fn`'s source makes only in its
+        decorators (`@enforce_domain({...})`), resolved through `fn`'s
+        import aliases. A decorator runs when the function is defined,
+        so it is not a call the body makes.
+    """
+    import ast
+
+    from .compendium import _alias_origins
+
+    def names(nodes) -> set:
+        found = set()
+        for root in nodes:
+            for node in ast.walk(root):
+                if isinstance(node, ast.Call):
+                    try:
+                        found.add(ast.unparse(node.func))
+                    except Exception:
+                        continue
+        return found
+
+    tree = getattr(facts, "tree", None)
+    fdef = next((n for n in ast.walk(tree) if isinstance(
+        n, (ast.FunctionDef, ast.AsyncFunctionDef))), None) if tree else None
+    if fdef is None or not fdef.decorator_list:
+        return frozenset()
+    only = names(fdef.decorator_list) - names(fdef.body)
+    origin = _alias_origins(fn, facts)
+    out = set()
+    for name in only:
+        head, dot, rest = name.partition(".")
+        base = origin.get(head)
+        if base is not None:
+            out.add(f"{base}.{rest}" if dot else base)
+    return frozenset(out)
 
 
 def _callees(fn, facts, root: str, store: dict,
@@ -356,10 +439,13 @@ def _callees(fn, facts, root: str, store: dict,
     stdlib: frozenset = getattr(sys, "stdlib_module_names", frozenset())
     if library_keys is None:
         library_keys = frozenset(load_library_claims(root))
+    decorators = _decorator_only_calls(fn, facts)
     out = []
     for key in resolved_calls(fn, facts):
         head = key.split(".")[0]
         if key not in library_keys and (head in stdlib or head == "builtins"):
+            continue
+        if key in decorators:
             continue
         entry = (store.get(key) or {}).get("entry") or {}
         out.append((key, _callee_evidence(entry)))
@@ -381,10 +467,10 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         return None
     try:
         if facts is None:
-            from .analysis import analyze_source
+            from .analysis import effective_facts
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                facts = analyze_source(fn)
+                facts = effective_facts(fn)
     except Exception:
         return None
     tree = getattr(facts, "tree", None)
@@ -392,7 +478,10 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         return None
     cx = n_raises = 0
     numeric = False
+    stating = _domain_stating_guards(facts)
     for node in ast.walk(tree):
+        if id(node) in stating:
+            continue
         if isinstance(node, ast.Raise):
             n_raises += 1
         elif isinstance(node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor,
@@ -421,8 +510,11 @@ def _clarity_profile(fn, facts=None, root: str = ".",
                                                             "table")
                         else kinds.get(p, "scalar")
                         for p in params)
-    guarded = sum(1 for p in params if guards.get(p) not in (None, "none"))
     domains = _param_domains(fn, facts, params, guards)
+    guarded = sum(1 for d in domains if d.guarded)
+    # a string parameter whose domain is a finite set admits no
+    # arbitrary text, so it carries no arbitrary-input source
+    finite = {d.name for d in domains if d.finite}
     if store is None:
         from .spec import load_verified
         store = load_verified(root)
@@ -435,19 +527,46 @@ def _clarity_profile(fn, facts=None, root: str = ".",
         output=getattr(facts, "returns_kind", "scalar") or "none",
         numeric=numeric, loops=len(getattr(facts, "loops", []) or []),
         pure=bool(getattr(facts, "is_pure", True)),
-        str_params=len(str_params), n_raises=n_raises,
+        str_params=len(str_params - finite), n_raises=n_raises,
         callees=callees)
+
+
+def _domain_stating_guards(facts) -> set:
+    """Intent:
+        The ids of the AST nodes of each guard that states a parameter's
+        domain (`if side not in {"buy", "sell"}: raise ValueError(side)`,
+        whose body only raises): the `if` and its raise. Such a guard is
+        the parameter's domain, charged as that domain, not as a branch
+        and a raise site of its own.
+    """
+    import ast
+
+    from .hazards import finite_guards
+    out: set = set()
+    try:
+        guards = finite_guards(facts)
+    except Exception:
+        return out
+    for _param, _values, node in guards:
+        if node.orelse or not all(isinstance(s, ast.Raise) for s in node.body):
+            continue
+        out.add(id(node))
+        out.update(id(s) for s in node.body)
+    return out
 
 
 def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
     """One `_ParamDomain` per parameter: the bits of the domain the
     checks complete for it (`conjecture.parameter_domains`, the one
     reading), whether a guard bounds it, whether its annotation admits
-    absence, whether it is a finite set."""
+    absence, whether it is a finite set. A guard to a set and an
+    `enforce_domain()` guard state the parameter's domain, so the
+    parameter is charged by that domain rather than as a guard
+    boundary."""
     import warnings
 
     from .conjecture import parameter_domains
-    from .hazards import _annotated_params
+    from .hazards import _annotated_params, finite_guard_sets
     from .types import missing_policy_from_signature
     try:
         with warnings.catch_warnings():
@@ -463,14 +582,24 @@ def _param_domains(fn, facts, params: list, guards: dict) -> tuple:
         policy = missing_policy_from_signature(fn)
     except Exception:
         policy = {}
+    try:
+        stated = set(finite_guard_sets(facts))
+    except Exception:
+        stated = set()
+    stated |= set(getattr(fn, "__mathema_enforced_domain__", None) or ())
+    from ._clarity_reach import universe
+    kinds = getattr(facts, "param_kinds", {}) or {}
     out = []
     for p in params:
         bound = completed.get(p)
-        bits, finite = domain_bits(bound, p in annotated or bound is not None)
+        bits, finite, members = _domain_reading(
+            bound, p in annotated or bound is not None)
         sig = policy.get(p)
         optional = bool(sig is not None and sig.annotated and sig.absent)
-        out.append(_ParamDomain(p, bits, guards.get(p) not in (None, "none"),
-                                optional, finite))
+        guarded = p not in stated and guards.get(p) not in (None, "none")
+        out.append(_ParamDomain(p, bits, guarded, optional, finite,
+                                len(members),
+                                universe(bound, kinds.get(p, "unknown"), members)))
     return tuple(out)
 
 
@@ -479,12 +608,22 @@ def _clarity_sources(p: _Profile) -> list:
     `reducer` names which claim group (or structural baseline) clears
     it; a call's reducer is `callee:<key>`, cleared only by that
     callee's own recorded evidence; an unguarded parameter's reducer is
-    `domain_soft:<name>`, its absence `absence:<name>`. See `_BITS`."""
+    `domain_soft:<name>`, its absence `absence:<name>`. Every parameter
+    starts at the bits of nothing known about it; what the function
+    states (its annotation, a guard, `enforce_domain`) is the
+    `stated:<name>` share, always cleared, and the rest is charged. See
+    `_BITS`."""
     C = _BITS
     s: list = [("identity", C["graph"] + C["region"] * p.cx, "identity")]
     s.append(("form", _EXTENT_BITS.get(p.output, 1.0), "extent"))
     s.append(("form", C["shape_branched"] if p.cx else C["shape_flat"], "shape"))
     for d in p.domains:
+        charged = C["domain_guarded"] if d.guarded else d.bits
+        if charged < C["domain_unannotated"]:
+            # what the function states (its annotation, a guard,
+            # enforce_domain) is known
+            s.append(("domain", C["domain_unannotated"] - charged,
+                      f"stated:{d.name}"))
         if d.guarded:
             s.append(("domain", C["domain_guarded"], "domain"))
         elif d.bits > 0:
@@ -509,39 +648,94 @@ def _clarity_sources(p: _Profile) -> list:
     return s
 
 
-def _binding_reductions(verified_claims, profile: "_Profile", bump) -> None:
-    """What the verified claims say about each unguarded parameter's
-    inputs beyond its completed domain: a claim binding a narrower domain
-    for it lowers its bits to that domain's (the reduction is the share
-    removed), and a proof by visiting every point of a finite set clears
-    it entirely."""
+def _claim_bindings(statement: str) -> dict:
+    """The domains a claim's own quantifier binds, by parameter, or `{}`
+    when it binds none or does not parse."""
     from .conjecture import claim as _claim
-    by_name = {d.name: d for d in profile.domains}
-    for row in verified_claims:
-        statement = row.get("statement") or row.get("law") or ""
-        name = row.get("name") or ""
-        if not statement or statement == name:
-            continue
-        verdict = row.get("verdict") or ""
-        route = row.get("route") or ""
-        strength = _strength(verdict, route)
-        if strength <= 0:
-            continue
-        if route == "derive:brute_force" and verdict == "proven":
-            for d in profile.domains:
-                if d.finite:
-                    bump(f"domain_soft:{d.name}", 1.0)
+    try:
+        return dict(_claim(statement).domain or {})
+    except Exception:
+        return {}
+
+
+def _region_on(bound, d: "_ParamDomain") -> tuple:
+    """The region a claim's binding `bound` names on parameter `d`, with
+    a binding that no count is made for (a language) read as the whole
+    type when it is at least as wide as `d`'s own domain."""
+    from ._clarity_reach import region
+    reading = region(bound)
+    if reading[0] == "narrower":
         try:
-            bound_domains = _claim(statement).domain or {}
+            wide = domain_bits(bound, True)[0] >= d.bits
         except Exception:
+            wide = False
+        return ("whole",) if wide else reading
+    return reading
+
+
+def _claim_share(bindings: dict, domains) -> float:
+    """Intent:
+        The share of the function's inputs a claim ranges over: for
+        each parameter it binds, the share of that parameter's domain
+        the binding covers, counted in the values the parameter's type
+        holds (`_clarity_reach.share`), multiplied together. A claim
+        binding nothing ranges over every input, a share of 1.
+    """
+    from ._clarity_reach import share
+    out = 1.0
+    for d in domains:
+        if d.name in bindings and d.universe is not None:
+            out *= share([_region_on(bindings[d.name], d)], d.universe)
+    return out
+
+
+def _scoped_credit(items, domains) -> float:
+    """Intent:
+        What a source's crediting claims, `[(strength, bindings), ...]`,
+        establish of it together. The covered part is the strongest
+        strength times share of any one claim, or, where the claims bind
+        one parameter and nothing else, the strength each value of that
+        parameter is covered at, averaged over its domain, so claims
+        over different parts of one parameter add up. On top of it, a
+        tenth (`_CLAIM_FLOOR`) of what the strongest claim would earn
+        over the rest of the domain, counted once: one claim covering a
+        share `s` earns `s + 0.1 * (1 - s)` of its whole-domain credit.
+    """
+    strongest = max((st for st, _b in items), default=0.0)
+    covered = _covered_credit(items, domains)
+    covered = _unit(covered)
+    return _unit(covered + _CLAIM_FLOOR * max(0.0, strongest - covered))
+
+
+def _covered_credit(items, domains) -> float:
+    """The covered part of `_scoped_credit`, without its floor."""
+    from ._clarity_reach import share
+    best = max((st * _claim_share(b, domains) for st, b in items), default=0.0)
+    names = {d.name for d in domains}
+    for d in domains:
+        if d.universe is None:
             continue
-        for p, bound in bound_domains.items():
-            d = by_name.get(p)
-            if d is None or d.bits <= 0:
-                continue
-            narrower, _finite = domain_bits(bound, True)
-            if narrower < d.bits:
-                bump(f"domain_soft:{p}", strength * (1.0 - narrower / d.bits))
+        single = [(st, _region_on(b[d.name], d) if d.name in b else ("whole",))
+                  for st, b in items if set(b) & names <= {d.name}]
+        if len(single) < 2:
+            continue
+        levels = sorted({st for st, _r in single}, reverse=True) + [0.0]
+        credit = sum((hi - lo) * share([r for st, r in single if st >= hi],
+                                       d.universe)
+                     for hi, lo in zip(levels, levels[1:]))
+        best = max(best, credit)
+    return best
+
+
+def _is_absence_row(row: dict) -> bool:
+    """Whether a verified row states what the function does when a
+    parameter is absent (`absent[x]`, a stated `absent(f, x) ...`
+    policy, `is_absent_safe`), which speaks only about absence."""
+    from .families import claim_base_name
+    name = row.get("name") or ""
+    policy = (row.get("meta") or {}).get("mathema.policy") or {}
+    return policy.get("kind") == "absent" or (
+        bool(name) and claim_base_name(name) in ("is_absent_safe", "absent"))
 
 
 def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
@@ -557,7 +751,8 @@ def _absence_reductions(verified_claims, profile: "_Profile", bump) -> None:
         name = row.get("name") or ""
         meta = row.get("meta") or {}
         policy = meta.get("mathema.policy") or {}
-        strength = _strength(row.get("verdict") or "", row.get("route") or "")
+        strength = _strength(row.get("verdict") or "", row.get("route") or "",
+                             row.get("n"))
         if strength <= 0:
             continue
         base = claim_base_name(name) if name else ""
@@ -580,7 +775,7 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     base_purity = C["base_pure"] if pure else C["base_impure"]
     r: dict = {
         "identity": 0.0, "extent": 0.0, "shape": 0.0, "domain": 0.0,
-        "domain_soft": C["base_domain_soft"], "raises": 0.0,
+        "raises": 0.0,
         "safety:is_state_safe": base_purity,
         "safety:is_deterministic": base_purity,
         "safety:is_numerically_stable": C["base_safety"],
@@ -590,9 +785,21 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
     }
 
     def bump(key, val):
+        val = _unit(val)
         if val > r.get(key, 0.0):
             r[key] = val
 
+    from .records import classify_verdict
+    domains = profile.domains if profile is not None else ()
+    soft = [f"domain_soft:{d.name}" for d in domains]
+    finite_soft = [f"domain_soft:{d.name}" for d in domains if d.finite]
+    for key in soft:
+        r[key] = C["base_domain_soft"]
+    for d in domains:
+        r[f"stated:{d.name}"] = 1.0
+    # (source, strength, bindings) of each credit a claim makes to a
+    # source it speaks about only over the inputs it ranges over
+    scoped: list = []
     for claim in verified_claims:
         name = claim.get("name") or ""
         statement = claim.get("statement") or claim.get("law") or ""
@@ -604,7 +811,9 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
         if (claim.get("meta") or {}).get("mathema.corroboration") == \
                 "uncorroborated":
             continue
-        st = _strength(claim.get("verdict") or "", claim.get("route") or "")
+        verdict = claim.get("verdict") or ""
+        route = claim.get("route") or ""
+        st = _strength(verdict, route, claim.get("n"))
         meta = claim.get("meta") or {}
         if meta.get("mathema.companion_of"):
             # a float companion executes its parent's relation against the
@@ -612,44 +821,60 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             # establishes its family (is_numerically_stable) for the
             # function; falsified, it is a defect in the parent's
             # computation and says nothing about the family as a whole
-            from .records import classify_verdict
             family = _SAFETY_SOURCE.get(meta.get("mathema.family") or "")
-            if family and classify_verdict(claim.get("verdict") or "") in (
-                    "holds", "proven"):
+            if family and classify_verdict(verdict) in ("holds", "proven"):
                 bump("safety:" + family, st)
             continue
         if st <= 0:
             continue
         from .families import claim_base_name, current_family_name
         base = current_family_name(claim_base_name(name))
-        if base in _NO_SOURCE:
+        if base in _NO_SOURCE or _is_absence_row(claim):
+            continue
+        if ((claim.get("meta") or {}).get("mathema.policy") or {}).get(
+                "kind") == "missing":
+            # a missing-value policy row says what the function does
+            # with a missing value, and nothing else
+            bump("safety:is_missing_safe", st)
             continue
         if base in _SAFETY_SOURCE:
             bump("safety:" + _SAFETY_SOURCE[base], st)
             continue
         kind = _claim_kind(name, statement)
+        bindings = _claim_bindings(statement) if domains else {}
+        # a falsified claim is knowledge about its own source only: a
+        # map shown wrong at a witness says nothing about the output's
+        # envelope, its shape or what the function accepts
+        holding = classify_verdict(verdict) != "falsified"
+        credits: list = []
         if kind in _IDENTITY_KINDS:
-            bump("identity", st)
+            # knowing the exact map settles the output envelope, the
+            # relational shape and what each parameter accepts too
+            credits = ["identity"] + (["extent", "shape", *soft]
+                                      if holding else [])
         elif kind == "bound":
-            bump("extent", st)
-        elif kind == "partiality":
-            bump("raises", st)
+            credits = ["extent"]
+        elif kind in ("partiality", "definedness"):
+            if kind == "partiality":
+                bump("raises", st)
             bump("domain", st)                       # a raising guard IS a boundary
-        elif kind == "definedness":
-            bump("domain", st)
+            credits = soft if holding else []
         else:                                        # the shape / relation group
-            bump("shape", st)
-    # entailment: knowing the exact map settles the output envelope, the
-    # relational shape, and an unguarded parameter's domain
-    r["extent"] = max(r["extent"], r["identity"])
-    r["shape"] = max(r["shape"], r["identity"])
-    r["domain_soft"] = max(r["domain_soft"], r["domain"], r["identity"])
+            credits = ["shape"]
+        if route == "derive:brute_force" and classify_verdict(verdict) == \
+                "proven":
+            # a proof visiting every point of the function's own finite
+            # domain settles what that parameter accepts
+            credits = credits + finite_soft
+        scoped.extend((source, st, bindings) for source in credits)
+    by_source: dict = {}
+    for source, st, bindings in scoped:
+        by_source.setdefault(source, []).append((st, bindings))
+    for source, items in by_source.items():
+        bump(source, _scoped_credit(items, domains) if domains
+             else max(st for st, _b in items))
     if profile is not None:
-        _binding_reductions(verified_claims, profile, bump)
         _absence_reductions(verified_claims, profile, bump)
-        for d in profile.domains:
-            key = f"domain_soft:{d.name}"
-            r[key] = max(r.get(key, 0.0), r["domain_soft"])
     return r
 
 
@@ -679,9 +904,15 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
                        for key, evidence in profile.callees})
     h0 = h_rem = 0.0
     for _dim, bits, reducer in _clarity_sources(profile):
+        bits = max(0.0, bits)
         h0 += bits
-        h_rem += bits * (1.0 - reductions.get(reducer, 0.0))
-    return h0, h_rem
+        h_rem += bits * (1.0 - _unit(reductions.get(reducer, 0.0)))
+    return h0, min(h0, max(0.0, h_rem))
+
+
+def _unit(value: float) -> float:
+    """`value` clamped to [0, 1]."""
+    return min(1.0, max(0.0, float(value)))
 
 
 def clarity_score(fn=None, verified_claims=None, root: str = ".",
@@ -721,7 +952,10 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     h0, h_rem = bits
     if h0 <= 0:
         return 0
-    return round(100 * (1.0 - h_rem / h0))
+    score = min(100, max(0, round(100 * (1.0 - h_rem / h0))))
+    # 100 means every source is settled by proof: anything left, however
+    # small, reads below it
+    return 99 if score == 100 and h_rem > 0 else score
 
 
 @dataclass(frozen=True)
@@ -730,13 +964,17 @@ class BadgeScores:
     `implementation`/`intent`/`clarity` are 0-100; `overall` is the
     radar-triangle area (0-100), the single health number CI diffs across
     commits. `per_function` maps each key to its own three scores (a
-    clarity None means the function posed no question)."""
+    clarity None means the function posed no question). `capped` maps
+    each key whose step outran the wall-clock cap to the scores that
+    step feeds (`implementation`, `intent`, `clarity`); see
+    `repo_badges`."""
     implementation: int | None
     intent: int
     clarity: int
     overall: int | None
     per_function: dict = field(default_factory=dict)
     algo: str = CLARITY_ALGO
+    capped: dict = field(default_factory=dict)
 
 
 def _population(targets, root: str) -> dict:
@@ -782,8 +1020,67 @@ def triangle_area(a: float, b: float, c: float) -> int:
     return round(100 * fc * (fa + fb) / 2.0)
 
 
+class _Capped(Exception):
+    """A per-function step that outran its wall-clock cap."""
+
+
+def _capped(step):
+    """Intent:
+        `step()` under the badges step cap
+        (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`).
+
+    Raises:
+        _Capped: the cap fired before `step` returned.
+    """
+    from . import _timeout
+    try:
+        return _timeout._with_timeout(
+            step, _timeout.BADGES_STEP_TIMEOUT_SECONDS)
+    except TimeoutError:
+        raise _Capped() from None
+
+
+@contextlib.contextmanager
+def _state_warnings_once():
+    """Intent:
+        Within the block, show each distinct `StateDependenceWarning`
+        (one per function, its text names the function and the state it
+        reads) once, however many times the run analyses that function;
+        every other warning is shown as it would be outside.
+    """
+    import warnings
+
+    from .analysis import StateDependenceWarning
+    seen: set = set()
+    with warnings.catch_warnings():
+        show = warnings.showwarning
+
+        def _show(message, category, filename, lineno, file=None,
+                  line=None):
+            if issubclass(category, StateDependenceWarning):
+                text = str(message)
+                if text in seen:
+                    return
+                seen.add(text)
+            show(message, category, filename, lineno, file, line)
+
+        warnings.showwarning = _show
+        yield
+
+
+def default_jobs() -> int:
+    """Intent:
+        The number of worker processes a badges run uses unless told
+        otherwise: the machine's CPU count, at most 4.
+    """
+    import os
+    return max(1, min(os.cpu_count() or 1, 4))
+
+
 def repo_badges(targets=None, root: str = ".",
-                implementation: bool = True) -> BadgeScores:
+                implementation: bool = True,
+                progress=None, jobs: int = 1,
+                cache: "bool | str" = True) -> BadgeScores:
     """Intent:
         Compute the badges over the population. Implementation is the raw
         repo line ratio of the test-union-probe-union-derive coverage (no
@@ -792,7 +1089,12 @@ def repo_badges(targets=None, root: str = ".",
         is the triangle area. `implementation=False` SKIPS the coverage
         pass entirely: the implementation score and `overall` come back
         None (nothing is output for them), it does not fall back to a
-        cheaper, different number.
+        cheaper, different number. `progress`, when given, is called as
+        `progress(done, total)` after each function is scored. `jobs`
+        above 1 scores the functions in that many worker processes.
+        `cache` True reads and writes the per-function cache
+        (`_badges_cache`), `"refresh"` computes every function again and
+        writes the cache, and False neither reads nor writes it.
     Notes:
         Implementation is the real union of all three sources, so it
         re-runs `check()` (under line tracing) for a function whose lines
@@ -805,55 +1107,315 @@ def repo_badges(targets=None, root: str = ".",
         committed verified store (no re-adjudication) and is recorded with
         its algorithm version in `algo` (`CLARITY_ALGO`). A clarity
         None (source unavailable) drops out of the clarity roll-up.
+        The run shares its reads (`_run_scope.run_scope`): the stores,
+        the claims files and the library claims are read once, in each
+        worker process too. Each function's three steps run under the
+        badges step cap (`_timeout.BADGES_STEP_TIMEOUT_SECONDS`), which
+        is a main-thread alarm, so it holds in every worker process; a
+        step the cap stops is named in `capped`, its function's
+        implementation counts the fresh test lines alone, and its intent
+        or clarity is None and drops out of that roll-up. A function's
+        result is the same whichever process scores it, and is rolled up
+        in population order, so the scores do not depend on `jobs`. A
+        cached result is used only when its digest matches exactly
+        (`_badges_cache.function_digest`: the function, everything it
+        statically reaches, their records and the environment; a
+        function reached only at run time is not part of it, which
+        `"refresh"` covers), and a result is never cached
+        when any wall-clock cap fired while scoring it (a capped step,
+        or a cap inside its check), since that result depends on the
+        machine's load. A `StateDependenceWarning` is shown once
+        per function, a cached function's included.
     """
-    from .centrality import centrality_weights
-    from .docstring import docstring_sync
-    from .impl_coverage import (_external_lines, _line_range,
-                                _statement_lines, function_coverage)
-    from .inventory import coverage_freshness, read_test_coverage
-    from .spec import load_verified
+    from ._run_scope import run_scope
+    with run_scope(), _state_warnings_once():
+        return _repo_badges(targets, root, implementation, progress,
+                            max(1, int(jobs or 1)), cache)
 
-    functions = _population(targets, root)
-    weights = centrality_weights(functions)
-    verified = load_verified(root)
+
+def _score_context(root: str, implementation: bool) -> dict:
+    """Intent:
+        What every function's scoring reads, loaded once: the declared
+        and verified stores, the library keys, the test report and its
+        freshness, and the docsync cache of callees already measured.
+    """
     from .compendium import load_library_claims
-    library_keys = frozenset(load_library_claims(root))
-    coverage_data = read_test_coverage(root) if implementation else None
-    freshness = coverage_freshness(root) if implementation else None
+    from .inventory import coverage_freshness, read_test_coverage
+    from .spec import load_declared, load_verified
+    return {"root": root, "implementation": implementation,
+            "verified": load_verified(root), "declared": load_declared(root),
+            "library_keys": frozenset(load_library_claims(root)),
+            "coverage_data": (read_test_coverage(root) if implementation
+                              else None),
+            "freshness": coverage_freshness(root) if implementation else None,
+            "sync_cache": {}}
+
+
+def _test_reading(fn, ctx: dict) -> "tuple[set, set, bool]":
+    """Intent:
+        `(statements, test_lines, fresh)` for `fn`: its statement lines,
+        the ones the test report executed, and whether the report is
+        fresh for its file.
+    """
+    from .impl_coverage import _external_lines, _line_range, _statement_lines
+    stmts = _statement_lines(fn)
+    test_cov = _external_lines(fn, ctx["coverage_data"]) & stmts
+    rng = _line_range(fn)
+    fresh = rng is not None and not ctx["freshness"].is_stale(rng[0])
+    return stmts, test_cov, fresh
+
+
+def _warning_rows(caught) -> list:
+    """Intent:
+        Recorded warnings as plain rows, `[category module, category
+        name, text, filename, line]`.
+    """
+    return [[w.category.__module__, w.category.__qualname__,
+             str(w.message), str(w.filename), int(w.lineno or 0)]
+            for w in caught]
+
+
+def _reissue(rows, shown: set) -> None:
+    """Intent:
+        Show each warning row (`_warning_rows`) not already in `shown`,
+        as the warning it was.
+    """
+    import importlib
+    import warnings
+    for row in rows:
+        marker = tuple(row)
+        if marker in shown:
+            continue
+        shown.add(marker)
+        module, name, text, filename, line = row
+        try:
+            category = getattr(importlib.import_module(module), name)
+            if not (isinstance(category, type)
+                    and issubclass(category, Warning)):
+                category = UserWarning
+        except Exception:
+            category = UserWarning
+        warnings.warn_explicit(text, category, filename, line)
+
+
+def _score_one(key: str, fn, ctx: dict) -> dict:
+    """Intent:
+        One function's contribution to the badges: `statements` and
+        `covered` line counts (None without the coverage pass),
+        `intent`, `clarity`, the steps the cap stopped (`capped`), the
+        warnings shown while scoring it (`warnings`), and `timed_out`,
+        whether any wall-clock cap fired while scoring it (a proof cap
+        in its check, recorded as `mathema.timeout`, included), which
+        makes the result depend on the machine's load.
+    """
+    import warnings
+
+    from . import _timeout
+    from .docstring import docstring_sync
+    from .impl_coverage import function_coverage
+    root = ctx["root"]
+    stopped: list = []
+    out: dict = {"key": key, "statements": None, "covered": None}
+    fired = _timeout._WallClockExpired.fired
+    recorded_timeout = False
+    with warnings.catch_warnings(record=True) as caught:
+        if ctx["implementation"]:
+            stmts, test_cov, fresh = _test_reading(fn, ctx)
+            if stmts and fresh and not (stmts - test_cov):
+                covered, statements = stmts, stmts   # fresh tests cover it all
+            else:
+                try:
+                    fc = _capped(lambda: function_coverage(
+                        fn, root=root, coverage_data=ctx["coverage_data"],
+                        freshness=ctx["freshness"],
+                        declared_store=ctx["declared"],
+                        verified_store=ctx["verified"]))
+                    covered = fc.covered & fc.statements
+                    statements = fc.statements
+                    recorded_timeout = fc.timed_out
+                except _Capped:
+                    stopped.append("implementation")
+                    statements = stmts
+                    covered = test_cov if fresh else set()
+            out["statements"] = len(statements)
+            out["covered"] = len(covered)
+        try:
+            out["intent"] = _capped(lambda: docstring_sync(
+                fn, root=root, declared=ctx["declared"],
+                verified=ctx["verified"], claims_floor=0,
+                sync_cache=ctx["sync_cache"]).percent)
+        except _Capped:
+            stopped.append("intent")
+            out["intent"] = None
+        claims = ((ctx["verified"].get(key) or {}).get("entry", {})
+                  .get("claims") or [])
+        try:
+            out["clarity"] = _capped(lambda: clarity_score(
+                fn, verified_claims=claims, root=root,
+                store=ctx["verified"], library_keys=ctx["library_keys"]))
+        except _Capped:
+            stopped.append("clarity")
+            out["clarity"] = None
+    out["capped"] = stopped
+    out["warnings"] = _warning_rows(caught)
+    out["timed_out"] = bool(stopped or recorded_timeout
+                            or _timeout._WallClockExpired.fired != fired)
+    return out
+
+
+#: a worker process's population and scoring context
+_WORKER: dict = {}
+
+
+def _worker_start(path: list, targets, root: str,
+                  implementation: bool) -> None:
+    """Intent:
+        Set up a worker process: the parent's import path, a run scope
+        held for the life of the process, the population and the
+        scoring context.
+    """
+    import sys
+
+    from ._run_scope import run_scope
+    sys.path[:] = path
+    stack = contextlib.ExitStack()
+    stack.enter_context(run_scope())
+    _WORKER.update(stack=stack, functions=_population(targets, root),
+                   ctx=_score_context(root, implementation))
+
+
+def _worker_score(key: str) -> "tuple[str, dict | None]":
+    """Intent:
+        `(key, result)` for the function `key` in a worker process, the
+        result None when the worker's population does not hold it.
+    """
+    fn = _WORKER["functions"].get(key)
+    if fn is None:
+        return key, None
+    return key, _score_one(key, fn, _WORKER["ctx"])
+
+
+def _score_in_workers(keys: list, jobs: int, targets, root: str,
+                      implementation: bool, done) -> list:
+    """Intent:
+        Score `keys` across `jobs` worker processes, calling
+        `done(key, result)` for each as it arrives; returns the keys no
+        worker scored.
+    """
+    import multiprocessing
+    import sys
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    left = set(keys)
+    try:
+        pool = ProcessPoolExecutor(
+            max_workers=min(jobs, len(keys)),
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_worker_start,
+            initargs=(list(sys.path), list(targets) if targets else None,
+                      root, implementation))
+    except Exception:
+        return keys
+    try:
+        futures = [pool.submit(_worker_score, key) for key in keys]
+        for future in as_completed(futures):
+            try:
+                key, result = future.result()
+            except Exception:
+                continue
+            if result is not None:
+                left.discard(key)
+                done(key, result)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    return [key for key in keys if key in left]
+
+
+def _repo_badges(targets, root: str, implementation: bool,
+                  progress, jobs: int, cache) -> BadgeScores:
+    """Intent:
+        `repo_badges` inside its run scope.
+    """
+    import os
+
+    from . import _badges_cache
+    from .centrality import centrality_weights
+
+    root = os.path.abspath(root)
+    functions = _population(targets, root)
+    ctx = _score_context(root, implementation)
+    reading = bool(cache) and cache != "refresh"
+    digests: dict = {}
+    if cache:
+        env = _badges_cache.environment_digest(root, ctx["library_keys"])
+        reach = _badges_cache.Reach(root, ctx["verified"], ctx["declared"])
+        reaches = {key: reach.digest(env, key, fn)
+                   for key, fn in functions.items()}
+        for key, fn in functions.items():
+            fresh, test_lines = False, ()
+            if implementation:
+                _stmts, test_lines, fresh = _test_reading(fn, ctx)
+            digests[key] = _badges_cache.function_digest(
+                reaches[key], implementation, fresh, test_lines)
+        weights_key = _badges_cache.weights_digest(env, reaches)
+    weights = None
+    if reading:
+        kept = _badges_cache.read(root, weights_key)
+        weights = (kept or {}).get("weights")
+    if weights is None:
+        weights = centrality_weights(functions)
+        if cache:
+            _badges_cache.write(root, weights_key, {"weights": weights})
+
+    results: dict = {}
+    shown: set = set()
+    total = len(functions)
+
+    def finished(key: str, result: dict, computed: bool) -> None:
+        results[key] = result
+        _reissue(result.get("warnings") or [], shown)
+        if computed and cache and not result["capped"] \
+                and not result.get("timed_out"):
+            _badges_cache.write(root, digests[key], result)
+        if progress is not None:
+            progress(len(results), total)
+
+    todo = []
+    for key in functions:
+        hit = _badges_cache.read(root, digests[key]) if reading else None
+        if hit is not None:
+            finished(key, hit, computed=False)
+        else:
+            todo.append(key)
+    if jobs > 1 and len(todo) > 1:
+        todo = _score_in_workers(
+            todo, jobs, targets, root, implementation,
+            lambda key, result: finished(key, result, computed=True))
+    for key in todo:
+        finished(key, _score_one(key, functions[key], ctx), computed=True)
 
     covered_lines = statement_lines = 0
     intent_pairs: list[tuple[float, float]] = []
     behav_pairs: list[tuple[float, float]] = []
     per_function: dict = {}
-    for key, fn in functions.items():
+    capped: dict = {}
+    for key in functions:
+        result = results[key]
         w = weights.get(key, 1.0)
         impl = None
         if implementation:
-            stmts = _statement_lines(fn)
-            test_cov = _external_lines(fn, coverage_data) & stmts
-            rng = _line_range(fn)
-            fresh = rng is not None and not freshness.is_stale(rng[0])
-            if stmts and fresh and not (stmts - test_cov):
-                covered, statements = stmts, stmts   # fresh tests cover it all
-            else:
-                fc = function_coverage(fn, root=root,
-                                       coverage_data=coverage_data,
-                                       freshness=freshness)
-                covered = fc.covered & fc.statements
-                statements = fc.statements
-            covered_lines += len(covered)
-            statement_lines += len(statements)
-            impl = (round(100 * len(covered) / len(statements))
-                    if statements else 100)
-        intent = docstring_sync(fn, root=root).percent
-        intent_pairs.append((w, intent))
-        claims = (verified.get(key) or {}).get("entry", {}).get("claims") or []
-        behav = clarity_score(fn, verified_claims=claims, root=root,
-                              store=verified, library_keys=library_keys)
-        if behav is not None:
-            behav_pairs.append((w, behav))
+            covered, statements = result["covered"], result["statements"]
+            covered_lines += covered
+            statement_lines += statements
+            impl = round(100 * covered / statements) if statements else 100
+        if result["intent"] is not None:
+            intent_pairs.append((w, result["intent"]))
+        if result["clarity"] is not None:
+            behav_pairs.append((w, result["clarity"]))
         per_function[key] = {"implementation": impl,
-                             "intent": intent, "clarity": behav}
+                             "intent": result["intent"],
+                             "clarity": result["clarity"]}
+        if result["capped"]:
+            capped[key] = tuple(result["capped"])
 
     intent = _weighted_mean(intent_pairs)
     clarity = _weighted_mean(behav_pairs)
@@ -865,7 +1427,7 @@ def repo_badges(targets=None, root: str = ".",
         impl_score = overall = None
     return BadgeScores(implementation=impl_score, intent=intent,
                        clarity=clarity, overall=overall,
-                       per_function=per_function)
+                       per_function=per_function, capped=capped)
 
 
 # --- the radar triangle -----------------------------------------------
@@ -1088,13 +1650,19 @@ def ci_snapshot(scores: BadgeScores) -> dict:
     per-function rows, so a job can compute and comment the area delta
     between two commits. `clarity_algo` records the clarity algorithm
     version, so a diff across a version bump reads as an algorithm change,
-    not a regression."""
-    return {"implementation": scores.implementation,
-            "intent": scores.intent,
-            "clarity": scores.clarity,
-            "overall": scores.overall,
-            "clarity_algo": scores.algo,
-            "per_function": scores.per_function}
+    not a regression. `capped`, present only when a step stopped at the
+    badges step cap, lists `[key, steps]` for each such function, sorted
+    by key."""
+    out = {"implementation": scores.implementation,
+           "intent": scores.intent,
+           "clarity": scores.clarity,
+           "overall": scores.overall,
+           "clarity_algo": scores.algo,
+           "per_function": scores.per_function}
+    if scores.capped:
+        out["capped"] = [[key, list(steps)]
+                         for key, steps in sorted(scores.capped.items())]
+    return out
 
 
 # The standard, documented home for the written badge artifacts, under

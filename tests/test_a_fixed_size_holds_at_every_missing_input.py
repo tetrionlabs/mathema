@@ -41,12 +41,14 @@ def _shapes(fn, text, *more):
     return rows, shapes
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_fixed_length_is_kept_at_every_missing_input():
     rows, shapes = _shapes(total, "for xs in [0, 1]^30, f(xs) >= 0")
     assert any(p.name == "c[float]" for p in rows), [p.name for p in rows]
     assert shapes == {(30, 1)}, sorted(shapes)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_fixed_matrix_shape_is_kept_at_every_missing_input():
     rows, shapes = _shapes(gram, "for A in [-1, 1]^(30,15), f(A) >= 0")
     assert any(p.name.startswith("c[") for p in rows), [p.name for p in rows]
@@ -74,7 +76,8 @@ def test_a_policy_row_alone_calls_f_at_the_fixed_size():
                                [claim("missing(f, xs, nan) raises", name="p")],
                                domain=space)
     assert row.verdict == "falsified"
-    assert row.counterexample.endswith("f returned 30.0"), row.counterexample
+    assert row.counterexample == "f([nan, nan, nan, nan, nan, nan, ...]) returns 30.0", \
+        row.counterexample
 
 
 def test_a_function_indifferent_to_the_hole_breaks_a_stated_raise():
@@ -82,7 +85,8 @@ def test_a_function_indifferent_to_the_hole_breaks_a_stated_raise():
     (row,) = check_conjectures(length, [claim("missing(f, xs, nan) raises", name="p")],
                                domain=space)
     assert row.verdict == "falsified", (row.verdict, row.note)
-    assert row.counterexample.endswith("f returned 30.0"), row.counterexample
+    assert row.counterexample == "f([nan, nan, nan, nan, nan, nan, ...]) returns 30.0", \
+        row.counterexample
 
 
 pd = pytest.importorskip("pandas")

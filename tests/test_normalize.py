@@ -151,7 +151,8 @@ def test_changed_module_constant_invalidates_the_record(tmp_path):
         return subprocess.run(
             [sys.executable, "-c",
              "import sys; from mathema.cli import main; "
-             f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
+             f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}, "
+             f"'--verbose']))"],
             cwd=str(tmp_path), capture_output=True, text=True, env=env)
 
     r = run_verify()

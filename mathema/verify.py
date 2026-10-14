@@ -220,7 +220,8 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
         under that name rather than as the fresh `falsified`.
 
     Notes:
-        A stored `invalidated` is carried over, and so is the accepted
+        A stored `invalidated` is carried over with the verdict it fell
+        from and the one it fell to, and so is the accepted
         level of a trusted row the sweep could not settle
         (`mathema.trusted_unsettled`) or settled only more weakly
         (`mathema.strongest_evidence`, with the row's note), with that
@@ -238,9 +239,13 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     trusted = {c.get("name"): c for c in entry.get("claims") or []
                if {"mathema.trusted_unsettled", "mathema.strongest_evidence"}
                & set(c.get("meta") or {})}
+    rows = {c.get("name"): c for c in entry.get("claims") or []}
     for p in probes:
         if classify_verdict(stored.get(p.name) or "") == "invalidated":
             p.verdict = stored[p.name]
+            p.meta = {**(p.meta or {}), **{
+                k: v for k, v in (rows[p.name].get("meta") or {}).items()
+                if k in ("mathema.previous_verdict", "mathema.regressed_to")}}
         elif p.name in trusted:
             row = trusted[p.name]
             p.verdict = stored[p.name]
@@ -439,6 +444,46 @@ def _split_unparseable(claims: list, grammar: str, fn,
     return readable, unreadable
 
 
+def split_unparseable_entry(entry: dict) -> tuple:
+    """Intent:
+        `(readable_entry, unreadable)`: a declared entry (the shape
+        `authoring.retrieve` returns) with each claim whose statement
+        does not parse left out, and `(name, error)` for each claim
+        left out, so one bad claim is reported on its own while the
+        function's other claims are adjudicated. A row
+        `spec.entry_claims` passes over (a past verdict, or no
+        statement) is kept as it is.
+    """
+    from .conjecture import InvalidConjecture
+    from .spec import _declared_conjecture
+    grammar = entry.get("grammar", "mathema")
+    readable, unreadable = [], []
+    for c in entry.get("claims") or []:
+        if (c.get("statement") or c.get("law")) and "verdict" not in c:
+            try:
+                _declared_conjecture(c, grammar)
+            except InvalidConjecture as e:
+                unreadable.append((c.get("name") or c.get("statement"), e))
+                continue
+        readable.append(c)
+    if not unreadable:
+        return entry, []
+    out = dict(entry)
+    out["claims"] = readable
+    return out, unreadable
+
+
+def unparseable_claim_message(key: str, name: str, where: "str | None",
+                              error, rerun: str = "verify") -> str:
+    """Intent:
+        The one line naming a declared claim that does not parse, with
+        the parser's message and where to correct it.
+    """
+    where = where or "its docstring or claims file"
+    return (f"{key}: claim {name!r} declared in {where} does not parse "
+            f"({error}); correct it there and re-run {rerun}")
+
+
 @dataclass
 class VerifyResult:
     """One sweep: the per-key report lines, every problem found (empty
@@ -448,6 +493,9 @@ class VerifyResult:
     `authoring_errors` lists the problems that are the author's to fix
     on an authoring surface (a declared claim that does not parse),
     which the CLI exits 2 on rather than 1.
+
+    `quiet` holds the indices in `lines` of each fresh, passing key's
+    rows, the ones `mathema verify` prints only with `--verbose`.
 
     `keys` is the same sweep as structured data rather than prose;
     one entry per key with `why` it was looked at, its gate counts,
@@ -463,6 +511,9 @@ class VerifyResult:
     nothing_declared: bool = False
     keys: list = field(default_factory=list)
     authoring_errors: list = field(default_factory=list)
+    # the indices in `lines` of the rows of keys that were fresh and
+    # passed, which the text report leaves out unless asked for them
+    quiet: set = field(default_factory=set)
 
 
 def _declared_reference_triples(refs) -> list:
@@ -842,6 +893,54 @@ def _union_verified_membership(current_claims: list,
     return out
 
 
+def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
+               conflicts: list, source: "str | None") -> dict:
+    """Intent:
+        The claim set a sweep adjudicates for one function, from its
+        authoring surfaces (`file_entry` merged over the live
+        function's own claims) and its verified record, with the
+        fingerprint the record's freshness is compared on. Returns a
+        dict: `entry` (the merged entry carrying those claims),
+        `claims`, `grammar`, `fingerprint`, `retired_notes` (one note
+        per declared claim already retired as a discovery) and
+        `unreadable` (`(name, error)` per authored claim that does not
+        parse).
+
+    Raises:
+        InvalidConjecture: a claim the fingerprint cannot read.
+
+    Notes:
+        A claim named in an authoring `conflicts` entry is left out.
+        A pending supersession keeps the verified version. The verified
+        layer is append-only in membership: a claim removed from every
+        authoring surface is rebuilt from its verified row, so the set
+        never silently shrinks; its exits are a discovery and a
+        historical acceptance, never deletion.
+    """
+    from .authoring import resolve_declared
+    from .conjecture import GRAMMAR
+    from .spec import claims_fingerprint
+    from .sync import apply_verified_wins
+    withheld = {c["claim"] for c in conflicts
+                if c.get("kind") == "authoring"}
+    merged = resolve_declared(fn, file_entry=file_entry)
+    claims = [c for c in merged.get("claims") or []
+              if c.get("name") not in withheld]
+    if verified_entry:
+        claims = apply_verified_wins(claims, conflicts, verified_entry)
+    claims = _union_verified_membership(claims, verified_entry)
+    claims, retired_notes = _drop_retired_declared(key, claims,
+                                                   verified_entry, source)
+    grammar = merged.get("grammar", GRAMMAR)
+    authored = {c.get("name") for c in merged.get("claims") or []}
+    claims, unreadable = _split_unparseable(claims, grammar, fn, authored)
+    entry = dict(merged)
+    entry["claims"] = claims
+    return {"entry": entry, "claims": claims, "grammar": grammar,
+            "fingerprint": claims_fingerprint(claims, grammar, fn),
+            "retired_notes": retired_notes, "unreadable": unreadable}
+
+
 def verify_project(root: str = ".", *, all: bool = False,
                    strict: bool = True,
                    trials_downscale: float | None = None,
@@ -879,9 +978,11 @@ def verify_project(root: str = ".", *, all: bool = False,
         # inventory's own analyze shields; only this category is
         # silenced, every other warning still surfaces.
         warnings.simplefilter("ignore", StateDependenceWarning)
-        return _verify_sweep(root, all=all, strict=strict,
-                             trials_scale=trials_scale, only=only,
-                             files=files)
+        from ._run_scope import run_scope
+        with run_scope():
+            return _verify_sweep(root, all=all, strict=strict,
+                                 trials_scale=trials_scale, only=only,
+                                 files=files)
 
 
 def resolve_claims_file(target: str, root: str = ".") -> "str | None":
@@ -1053,6 +1154,21 @@ def _library_version_moved(merged_entry: dict,
         if name in was and was[name] != now[name]:
             return (was[name].split(":", 1)[-1], now[name].split(":", 1)[-1])
     return None
+
+
+def _provenance_moved(facts, verified_entry: dict) -> "str | None":
+    """Intent:
+        What moved in the provenance of the body `facts` are read by
+        since the record was written (`meta["mathema.provenance"]`), as
+        `koine.facts.provenance_change` says it: `"body"`, `"frontend"`
+        or None. A proof from a body rests on both, so either change
+        makes the record stale, and every claim it proved by derive
+        with it.
+    """
+    from .koine.facts import provenance, provenance_change
+    return provenance_change(
+        provenance(facts),
+        (verified_entry.get("meta") or {}).get("mathema.provenance"))
 
 
 def _pseudo_infinity_moved(fn, facts, merged_entry: dict,
@@ -1294,6 +1410,135 @@ def _library_population(root: str, verified: dict, declared: dict,
     return {k: library_claims[k]["source"] for k in sorted(wanted)}
 
 
+def _premise_rows(key: str, root: str, declared: dict,
+                  verified: dict) -> list:
+    """Intent:
+        `[(claim name, [premise reference, ...]), ...]` for the claims
+        `key` states in its claims file, its verified record and its
+        live function's decorator or docstring: each verdict premise
+        (`assuming X holds`, `assuming X is proven`) its claims name.
+    """
+    from .compendium import _referenced_names
+    from .conjecture import _resolve_func_ref
+
+    rows = list(((declared.get(key) or {}).get("entry") or {})
+                .get("claims") or [])
+    rows += list(((verified.get(key) or {}).get("entry") or {})
+                 .get("claims") or [])
+    try:
+        fn = _resolve_func_ref(key, root=root)
+        if fn is not None:
+            from .authoring import resolve_declared
+            rows += list(resolve_declared(fn, file_entry={})
+                         .get("claims") or [])
+    except TimeoutError:
+        raise
+    except Exception:
+        pass
+    out: list = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        refs = sorted(_referenced_names([row]))
+        if refs:
+            out.append((row["name"], refs))
+    return out
+
+
+def _reach_of(node: tuple, edges: dict) -> set:
+    """Intent:
+        Every claim node that `node`'s premises lead to through
+        `edges`, directly or through other claims' premises.
+    """
+    reach: set = set()
+    stack = list(edges.get(node, {}).values())
+    while stack:
+        here = stack.pop()
+        if here in reach:
+            continue
+        reach.add(here)
+        stack.extend(edges.get(here, {}).values())
+    return reach
+
+
+def _premise_order(keys: list, premise_rows: dict) -> tuple:
+    """Intent:
+        `(order, cycles)`: `keys` arranged so a function is adjudicated
+        after every function its claims' verdict premises name
+        (`assuming pkg.fn.claim holds`), and, per key, the premise
+        references its claims make into a premise cycle that runs
+        across functions.
+
+    Notes:
+        `premise_rows` maps a key to `_premise_rows`' pairs. A reference
+        is `<key>.<claim>` for another swept key, or a bare sibling
+        name; a key outside `keys` orders nothing. Order is stable: a
+        key keeps its place relative to its peers unless a prerequisite
+        has to move ahead of it.
+
+        Cycles are found between claims, not functions. A claim is in
+        a cross-function cycle when its premises lead back to itself
+        through a claim of another function, and a claim resting on
+        such a claim is caught by it too, as within one function.
+        `cycles[key]` is the set of references the claims of `key`
+        make into that set.
+    """
+    swept = set(keys)
+    edges: dict = {}
+    for key in keys:
+        for name, refs in premise_rows.get(key) or []:
+            node = edges.setdefault((key, name), {})
+            for ref in refs:
+                head, _, claim_name = ref.rpartition(".")
+                hit = ((head, claim_name) if head in swept
+                       else (key, ref) if not head else None)
+                if hit is not None and hit != (key, name):
+                    node[ref] = hit
+
+    after: dict = {key: [] for key in keys}
+    for (key, _name), refs in edges.items():
+        for head, _claim in refs.values():
+            if head != key and head not in after[key]:
+                after[key].append(head)
+    order: list = []
+    placed: set = set()
+    visiting: set = set()
+
+    def visit(key: str) -> None:
+        if key in placed or key in visiting:
+            return
+        visiting.add(key)
+        for head in after[key]:
+            visit(head)
+        visiting.discard(key)
+        placed.add(key)
+        order.append(key)
+
+    for key in keys:
+        visit(key)
+
+    reaches = {node: _reach_of(node, edges) for node in edges}
+    caught = {node for node, reach in reaches.items()
+              if any(other[0] != node[0] and node in reaches.get(other, ())
+                     for other in reach)}
+    changed = True
+    while changed:
+        changed = False
+        for node, refs in edges.items():
+            if node not in caught and any(h in caught
+                                          for h in refs.values()):
+                caught.add(node)
+                changed = True
+    cycles: dict = {}
+    for (key, name), refs in edges.items():
+        if (key, name) not in caught:
+            continue
+        for ref, hit in refs.items():
+            if hit in caught:
+                cycles.setdefault(key, set()).add(ref)
+    return order, cycles
+
+
 def problems_text(problems: list) -> str:
     """Intent:
         A record's problems as the sweep line prints them after `<-`:
@@ -1329,14 +1574,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
-    from .authoring import resolve_declared
-    from .conjecture import (GRAMMAR, InvalidConjecture,
-                             _resolve_func_ref)
+    from .conjecture import InvalidConjecture, _resolve_func_ref
     from .inventory import function_dependencies
-    from .spec import (_dependency_state, claims_fingerprint,
-                       dependencies_current_probe, entry_claims,
-                       load_declared, load_verified, record as write_record,
-                       write_yaml)
+    from .spec import (_dependency_state, dependencies_current_probe,
+                       entry_claims, load_declared, load_verified,
+                       record as write_record, write_yaml)
 
     out = VerifyResult()
     for lkey, row, where, reason in _compendium.unregistered_project_rows():
@@ -1440,6 +1682,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     if not keys and not lock_only:
         out.nothing_declared = not kept_records
         return out
+    # a function is adjudicated after the functions its claims'
+    # premises name, and a key some later key rests on refreshes the
+    # premises after its record is written
+    premise_rows = {key: _premise_rows(key, root, declared, verified)
+                    for key in keys if key not in broken}
+    keys, premise_cycles = _premise_order(keys, premise_rows)
+    prerequisite_keys = {ref.rpartition(".")[0]
+                         for rows in premise_rows.values()
+                         for _name, refs in rows for ref in refs}
 
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
@@ -1611,7 +1862,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # is committed evidence, and every other key still deserves
         # its verdict
         try:
-            from .sync import apply_verified_wins, claim_conflicts
+            from .sync import claim_conflicts
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "release-move":
@@ -1635,54 +1886,32 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # to record, so neither version is adjudicated or written
             withheld = {c["claim"] for c in _conflicts
                         if c.get("kind") == "authoring"}
-            merged_entry = resolve_declared(fn, file_entry=file_entry)
-            current_claims = [c for c in merged_entry.get("claims") or []
-                              if c.get("name") not in withheld]
-            if verified_entry:
-                # the record never gets silently rewritten by a
-                # re-authored claim: pending supersessions adjudicate the
-                # VERIFIED version until accepted
-                current_claims = apply_verified_wins(
-                    current_claims, _conflicts, verified_entry)
-            # the verified layer is append-only in MEMBERSHIP: a claim
-            # removed from every authoring surface is repopulated from
-            # its verified row (statement/route reconstruct it), so the
-            # adjudication set never silently shrinks and acceptance/
-            # verdict history are never dropped. The exits are
-            # supersession (discoveries) and human acceptance
-            # (historical), never deletion.
-            current_claims = _union_verified_membership(
-                current_claims, verified_entry)
-            current_claims, retired_notes = _drop_retired_declared(
-                key, current_claims, verified_entry,
-                (declared_info or {}).get("source"))
+            now = claims_now(key, fn, file_entry, verified_entry,
+                             _conflicts, (declared_info or {}).get("source"))
+            retired_notes = now["retired_notes"]
             out.lines.extend(retired_notes)
             retired_noted = {ln.split("'")[1] for ln in retired_notes}
-            entry_grammar = merged_entry.get("grammar", GRAMMAR)
-            authored = {c.get("name") for c in merged_entry.get("claims")
-                        or []}
-            current_claims, unreadable = _split_unparseable(
-                current_claims, entry_grammar, fn, authored)
-            where = ((declared_info or {}).get("source")
-                     or "its docstring or claims file")
-            for claim_name, error in unreadable:
-                msg = (f"{key}: claim {claim_name!r} declared in {where} "
-                       f"does not parse ({error}); correct it there and "
-                       f"re-run verify")
+            entry_grammar = now["grammar"]
+            current_claims = now["claims"]
+            for claim_name, error in now["unreadable"]:
+                msg = unparseable_claim_message(
+                    key, claim_name, (declared_info or {}).get("source"),
+                    error)
                 out.authoring_errors.append(msg)
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")
-            merged_entry = dict(merged_entry)
-            merged_entry["claims"] = current_claims
+            merged_entry = now["entry"]
             out.grammars_seen.update(c.get("grammar", entry_grammar)
                                      for c in current_claims)
-            current_fp = claims_fingerprint(current_claims, entry_grammar, fn)
+            current_fp = now["fingerprint"]
         except InvalidConjecture as e:
             if _record_has_unreadable_claim(verified_entry):
+                from .spec import record_file_name
                 msg = (f"{key}: a claim in this function's verified "
                        f"record does not parse under the current "
                        f"grammar ({e}); rebuild the record: delete "
-                       f".mathema/verified/{key}.yaml and re-run verify")
+                       f".mathema/verified/{record_file_name(key)} and "
+                       f"re-run verify")
             else:
                 where = ((declared_info or {}).get("source")
                          or "its docstring or claims file")
@@ -1766,9 +1995,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                             verified_entry)
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
+        body_moved = _provenance_moved(facts_now, verified_entry)
         is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
                     and recorded_fp == current_fp and not defaults_moved
-                    and version_moved is None
+                    and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -1787,6 +2017,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             dependency_changed = any(
                 d.get("key") in stored_forms and d.get("form")
                 and d.get("form") != stored_forms[d.get("key")]
+                for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
+            # a callee's body provenance stored when this record was
+            # adjudicated against the callee's live one: a body that
+            # moved under the same form re-adjudicates too
+            from .koine.facts import provenance_change
+            stored_bodies = {d.get("key"): d.get("provenance") for d in
+                             verified_entry.get("dependencies") or []
+                             if d.get("kind") == "function" and d.get("key")}
+            dependency_changed = any(
+                d.get("key") in stored_bodies
+                and provenance_change(d.get("provenance"),
+                                      stored_bodies[d.get("key")]) is not None
                 for d in deps_now or [] if d.get("kind") == "function")
         if is_fresh and not dependency_changed:
             # a module-level constant is compared by VALUE against this
@@ -1841,9 +2084,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # (an empty declared set means no claims, not "go conjecture")
         from .spec import attach_recorded_pins
         attach_recorded_pins(claims, verified_entry or None)
+        premises = stub_premises
+        if premise_cycles.get(key):
+            premises = {**stub_premises,
+                        **{ref: {"cycle": True}
+                           for ref in premise_cycles[key]}}
         rec = check(fn, claims=claims if claims else [],
                     trials_downscale=trials_scale,
-                    known_premises=stub_premises,
+                    known_premises=premises,
                     pseudo_infinity=merged_entry.get("pseudo_infinity"),
                     runtime_types=merged_entry.get("runtime_types"))
         rec.probes = [p for p in rec.probes
@@ -1873,6 +2121,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "definition rows changed" if definitions_moved
                and facts_now.form == recorded_form
                and recorded_fp == current_fp
+               else f"{body_moved} changed" if body_moved
+               and facts_now.form == recorded_form
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -1892,7 +2143,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # accepted risk from it, never from the record it replaced
         accepted = _accepted_risk(_entry_at(written, key))
         out.adjudicated += 1
-        if key in library:
+        if key in library or key in prerequisite_keys:
             # this key's rows now resolve premises at their local verdict
             stub_premises = _external_premises(
                 root, library_claims=library_claims)
@@ -2017,6 +2268,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 # a problem's options sit on their own lines, under it
                 line += "  <- " + problems_text(report.problems + hints)
         out.problems.extend(f"{key}: {p}" for p in report.problems)
+        first_line = len(out.lines)
         out.lines.append(line)
         # a definition row's corner finding: the library's computation
         # gave no value at a magnitude corner, and the row stands
@@ -2031,6 +2283,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"mathema; its grammar is now {grammar!r}, so mathema no "
             f"longer checks it"
             for name, grammar in grammar_changes.get(key, {}).items())
+        if why == "fresh" and state == "ok" and key not in lock_messages:
+            out.quiet.update(range(first_line, len(out.lines)))
         out.keys.append({
             "key": key,
             "why": why,

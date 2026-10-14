@@ -40,9 +40,9 @@ import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
-from . import _shapes, families, routes
+from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import analyze_source
+from .analysis import effective_facts, hydrated
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -633,7 +633,7 @@ def _resolve_func_ref(ref: str, *, root: str = "."):
     uses) resolved to the live callable it names, including a method
     key like `pkg.mod.Class.method` (the longest importable prefix is
     the module, the rest is walked as attributes). A language-tagged
-    key (`ts:src/ema.ts#ema`) resolves through its registered target
+    key (`<tag>:src/ema#ema`) resolves through its registered target
     resolver instead, so a store sweep reaches foreign implementations
     the same way it reaches Python ones. `None` if nothing importable
     or the name isn't found there. A method or attribute of a runtime
@@ -982,22 +982,29 @@ def parameter_domain_facts(fn, facts) -> dict:
 def parameter_domains(fn, facts=None) -> dict:
     """Intent:
         `{param: bound}` for every parameter whose annotation, default
-        or guard states its domain (`parameter_domain_facts`), each
-        completed from the annotation's missing-value defaults
-        (`domain.complete`) exactly as a claim's resolved domain is:
-        the completed domain the checks use and the clarity score
-        reads.
+        or guard states its domain (`parameter_domain_facts`), or that
+        an `enforce_domain()` guard holds to a domain (which takes the
+        place of what the annotation states, as it does for the
+        checks), each completed from the annotation's missing-value
+        defaults (`domain.complete`) exactly as a claim's resolved
+        domain is: the completed domain the checks use and the clarity
+        score reads.
     """
     from .domain import NO_ANNOTATION, complete
     from .types import missing_policy_from_signature
     if facts is None:
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except Exception:
             return {}
     policy = missing_policy_from_signature(fn)
+    stated = {p: bound for p, (bound, _category, _detail)
+              in parameter_domain_facts(fn, facts).items()}
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    stated.update({p: bound for p, bound in enforced.items()
+                   if p in facts.params})
     out: dict = {}
-    for p, (bound, _category, _detail) in parameter_domain_facts(fn, facts).items():
+    for p, bound in stated.items():
         try:
             out[p] = complete(bound, policy.get(p, NO_ANNOTATION))
         except Exception:
@@ -1493,7 +1500,96 @@ def claim(law: str, name: str | None = None, source: str = "user",
     `for ... in ...` in one claim, though, raises `ConflictingDomainBinding`
     immediately; two different bounds for one name has no principled
     default to pick silently. `trials` is the claim's own trial
-    budget, a positive whole number, which may exceed the usual limit."""
+    budget, a positive whole number, which may exceed the usual limit.
+
+    Inside a run scope (`_run_scope.run_scope`) a claim stated again with
+    the same text and arguments is parsed once for the run; each call
+    gets its own copy of the parse."""
+    from . import _run_scope
+    kept = _run_scope.kept("claims")
+    if kept is not None:
+        key = _claim_cache_key(law, name, source, route, grammar, funcs,
+                               tolerance, pseudo_infinity, meta,
+                               matrix_names, trials)
+        if key is not None:
+            hit = kept.get(key)
+            if hit is None:
+                hit = kept[key] = _claim_parse(
+                    law, name, source, route, grammar, funcs, tolerance,
+                    pseudo_infinity, meta, matrix_names, trials)
+            return _claim_copy(hit)
+    return _claim_parse(law, name, source, route, grammar, funcs, tolerance,
+                        pseudo_infinity, meta, matrix_names, trials)
+
+
+def _claim_copy(cj: Conjecture) -> Conjecture:
+    """Intent:
+        A copy of a parsed claim that its holder may change without
+        touching `cj`: every dict and list field is a new container
+        (holding the same members, which nothing changes in place), and
+        `meta` is copied all the way down.
+    """
+    import copy
+    from dataclasses import fields
+    out = copy.copy(cj)
+    for f in fields(cj):
+        value = getattr(cj, f.name)
+        if isinstance(value, dict):
+            setattr(out, f.name, dict(value))
+        elif isinstance(value, list):
+            setattr(out, f.name, list(value))
+    out.meta = copy.deepcopy(cj.meta)
+    return out
+
+
+def _plain(value) -> bool:
+    """Whether `value` is built only of strings, numbers, booleans,
+    None, and lists, tuples and dicts of those."""
+    if value is None or isinstance(value, (str, int, float)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain(v) for v in value)
+    if isinstance(value, dict):
+        return all(_plain(k) and _plain(v) for k, v in value.items())
+    return False
+
+
+def _claim_cache_key(*args) -> "str | None":
+    """Intent:
+        The run-scope key of one `claim()` call: its arguments' `repr`
+        (which tells 1 from 1.0 and True, a list from a tuple, and keeps
+        a dict's order), or None when an argument is not plain data
+        (`_plain`) or a reading context is set that changes how claim
+        text parses (a matrix or constant reading, an exception scope).
+    """
+    from . import grammar as _grammar
+    from .policy import _SCOPE as _policy_scope
+    if (_grammar._BAR_MATRICES.get() or _grammar._ORDERED_MATRICES.get()
+            or _grammar._SHADOWED_CONSTANTS.get()
+            or _grammar._RENDER_MATRICES.get()
+            or _policy_scope.get() is not None):
+        return None
+    law, *rest = args
+    if not isinstance(law, str):
+        return None
+    matrix_names = rest[-2]
+    rest[-2] = sorted(matrix_names) if isinstance(
+        matrix_names, frozenset) and all(isinstance(m, str)
+                                         for m in matrix_names) else object()
+    if not all(_plain(a) for a in rest):
+        return None
+    return repr((law, *rest))
+
+
+def _claim_parse(law: str, name: str | None, source: str, route: str,
+                 grammar: str, funcs: dict | None, tolerance: float | None,
+                 pseudo_infinity: float | None, meta: dict | None,
+                 matrix_names: frozenset,
+                 trials: "int | None") -> Conjecture:
+    """Intent:
+        `claim`'s reading of one law text with its arguments, with no
+        run-scope sharing.
+    """
     if trials is not None:
         if isinstance(trials, bool) or not isinstance(trials, int) or trials < 1:
             raise InvalidConjecture(
@@ -4222,13 +4318,17 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     bound = cj_domain.get(p)
     if getattr(bound, "base_type", None) == "L":
         # the parameter is quantified over a language: its members are
-        # the instances, and a claim-level field bound narrows them by
-        # a bounded rejection
-        from .domain import path_bindings_hold
+        # the instances. A field the claim binds directly is redrawn
+        # inside its bound, every other field keeps the language's
+        # draw, and the instance is kept once it is still a member and
+        # every path binding holds, within a bounded rejection
+        from .domain import domain_contains, path_bindings_hold
         inst = None
         for _ in range(20):
-            inst = _synth("object", rng, bound)
-            if path_bindings_hold(inst, p, cj_domain):
+            inst = _with_bound_fields(_synth("object", rng, bound), cls,
+                                      fields, p, cj_domain, rng, specials)
+            if path_bindings_hold(inst, p, cj_domain) \
+                    and _still_member(inst, bound, domain_contains):
                 break
         return inst
     values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
@@ -4239,6 +4339,65 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     for f, v in values.items():
         setattr(inst, f, v)
     return inst
+
+
+def _field_kind(cls, field: str) -> str:
+    """Intent:
+        The draw kind of a field of `cls`: `"int"` for a dataclass field
+        annotated `int`, `"float"` otherwise.
+    """
+    import dataclasses as _dc
+    if not (isinstance(cls, type) and _dc.is_dataclass(cls)):
+        return "float"
+    for f in _dc.fields(cls):
+        if f.name == field:
+            t = f.type
+            spelled = t.strip().lower() if isinstance(t, str) else None
+            return "int" if t is int or spelled == "int" else "float"
+    return "float"
+
+
+def _with_bound_fields(inst, cls, fields, p: str, cj_domain: dict, rng,
+                       specials):
+    """Intent:
+        `inst` with every field the claim binds directly (`p.field`)
+        drawn again inside its bound, as its own type draws it; the
+        fields the claim leaves unbound keep their values. A dataclass
+        is rebuilt with `dataclasses.replace`, any other instance is
+        copied and the fields set on the copy. `inst` itself when the
+        claim binds none of its fields or it is not an instance of
+        `cls`.
+    """
+    import copy
+    import dataclasses as _dc
+
+    from .probing import _synth
+    bound_fields = {f: cj_domain[f"{p}.{f}"] for f in fields or ()
+                    if f"{p}.{f}" in cj_domain}
+    if not bound_fields or not (isinstance(cls, type) and isinstance(inst, cls)):
+        return inst
+    values = {f: _synth(_field_kind(cls, f), rng, b, specials=specials)
+              for f, b in bound_fields.items()}
+    if _dc.is_dataclass(inst) and not isinstance(inst, type):
+        try:
+            return _dc.replace(inst, **values)
+        except Exception:
+            return inst
+    out = copy.copy(inst)
+    for f, v in values.items():
+        setattr(out, f, v)
+    return out
+
+
+def _still_member(inst, bound, domain_contains) -> bool:
+    """Intent:
+        Whether `inst` is a member of the language domain `bound`; a
+        membership test that raises counts as not a member.
+    """
+    try:
+        return bool(domain_contains(inst, bound))
+    except Exception:
+        return False
 
 
 def _emit_position(probe, conjectures: list, declared_order: dict) -> float:
@@ -4481,23 +4640,12 @@ def _resolve_matrix_sugar(cj: "Conjecture", fn_matrix_names: frozenset) -> "Conj
 def _effective_facts(fn, facts=None):
     """Intent:
         The facts to adjudicate `fn` under: the caller's when given,
-        else the callable's own injected `__mathema_facts__` (how a
-        foreign proxy states its real parameters and kinds without a
-        Python body to read), else analysis of its source. Every
-        entry that meets a callable, including a `funcs=`-bound one,
-        resolves facts through here so the injection seam holds at
-        each of them.
-
-    Notes:
-        The injected value is recognized by type name rather than
-        isinstance so this stays import-cycle-free with analysis.
+        else `analysis.effective_facts(fn)` (the callable's injected
+        `__mathema_facts__` when it carries them, else analysis of its
+        source). Facts carrying a KOINE document and no syntax tree are
+        read through the document either way.
     """
-    if facts is not None:
-        return facts
-    injected = getattr(fn, "__mathema_facts__", None)
-    if type(injected).__name__ == "Facts":
-        return injected
-    return analyze_source(fn)
+    return hydrated(facts) if facts is not None else effective_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):
@@ -5115,6 +5263,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the opt-out adjudicates exactly as a derive claim; only the
             # companion it would spawn is withheld
             cj = _dc_replace(cj, route="derive")
+        undrawn = _undrawable_drawn(cj, fn, facts, domain)
+        if undrawn is not None:
+            out.append(_stamped(Probe(
+                cj.name, _chain_statement(cj) if cj.links else
+                statement_text(cj.relation, cj.lhs, cj.rhs),
+                "skipped", route="probe", note=undrawn,
+                meta={"mathema.probe_gap": "input-synthesis"}), cj))
+            continue
         gate_premise = _gate_premise_refusal(cj)
         if cj.links and gate_premise is not None:
             # a gate written as a premise is refused once for the claim,
@@ -5230,7 +5386,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             statement = f"assuming {display}, {statement}"
             cj = _dc_replace(cj, assuming=f"assuming {display}")
             ref_name = refs[0][0]
-            if cj.name in premise_cycles:
+            # a reference the caller places in a premise cycle across
+            # functions is reported as a cycle like a sibling one
+            cycled = [name for name, _ in refs
+                      if isinstance((known_premises or {}).get(name), dict)
+                      and known_premises[name].get("cycle")]
+            if cycled:
+                ref_name = cycled[0]
+            if cj.name in premise_cycles or cycled:
                 out.append(_stamped(Probe(
                     cj.name, statement, "skipped", route=None,
                     note=f"{note}; premise cycle: {cj.name} and "
@@ -5449,6 +5612,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_examined(ctx, fn, facts),
                              _cap=verdict_cap))
             continue
+        grounded = (None if call_pins or ctx.family is not None
+                    or ctx.assumption else _ground_proof_of(ctx, fn, facts))
+        if grounded is not None and (grounded.status == "disproven"
+                                     or cj.route == "probe"):
+            # a ground claim is decided at its own call: a failure there
+            # is the falsification, its call the witness
+            out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                             _cap=verdict_cap))
+            continue
         from .probing import LanguageDrawFailed
         try:
             if call_pins:
@@ -5470,6 +5642,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 derived = _adjudicate_derive(
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
+                if grounded is not None and (derived is None
+                                             or derived.verdict != "proven"):
+                    # a ground claim that holds at its own call and no
+                    # symbolic proof covers: the call decides it
+                    ctx.companion = None
+                    out.append(stamp(_ground_probe(ctx, grounded, cj.route),
+                                     _cap=verdict_cap))
+                    continue
                 if derived is not None:
                     derived, lines = _with_empty_input_lines(
                         derived, ctx, fn, facts, float_companions,
@@ -5774,6 +5954,37 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 _WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
 
 
+def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
+    """Intent:
+        The reason a claim has no evaluable inputs when it would draw a
+        parameter annotated with a class mathema has no way to draw
+        (`Facts.undrawable`), else None. A parameter the claim binds to a
+        language, or one a runtime type now names, is drawn; one the
+        claim never names while it calls f (`f(Box((2, 3)))`) is not
+        drawn.
+    """
+    from .runtime_types import realised_parameters
+    undrawable = getattr(facts, "undrawable", None) or {}
+    if not undrawable:
+        return None
+    srcs = [cj.lhs, cj.rhs, *(part for link in cj.links or ()
+                              for part in (link[0], link[2]))]
+    text = " ".join(str(s) for s in srcs if s)
+    calls_f = re.search(r"(?<![\w.])f\s*\(", text) is not None
+    bounds = {**(domain or {}), **(cj.domain or {})}
+    realised = realised_parameters(facts)
+    for p, cls in undrawable.items():
+        if p in realised or getattr(bounds.get(p), "base_type", None) == "L":
+            continue
+        if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
+            continue
+        return (f"no evaluable inputs: {p} is annotated {cls}, a class "
+                f"mathema has no way to draw; supply {cls} through a "
+                f"runtime type adapter, or bind {p} in the claim "
+                f"(for {p} in L[...])")
+    return None
+
+
 def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                       extensive, float_companions=False,
                       ) -> "tuple[Probe, Probe | None]":
@@ -5791,10 +6002,11 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         setup. A named-reference `assuming` inside a chain is the one
         unsupported combination (the referenced sibling isn't in the
         per-link batch), rare enough to leave to a future pass. Returns
-        the chain's verdict and, when `float_companions` is set and the
-        chain is proven with every link's float companion spawned, the
-        chain's own companion, `<name>[float]`, folded from theirs by
-        the same conjunction rule.
+        the chain's verdict and, when `float_companions` is set, the
+        chain's own companion, `<name>[float]`, folded from the links'
+        by the same conjunction rule: when the chain is proven with
+        every link's float companion spawned, or when it holds and a
+        link's companion falsifies.
     """
     from dataclasses import replace as _replace
 
@@ -5834,10 +6046,19 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     combined.meta = {**(combined.meta or {}),
                      "mathema.chain_lines": list(empty.values())} if empty \
         else combined.meta
-    companions = [p for p in probes if p.name not in link_names
-                  and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    # each link's float companion, with that link's label
+    paired = [(p, label) for c, label in zip(link_cjs, labels)
+              for p in probes if p.name.startswith(f"{c.name}[")
+              and (p.meta or {}).get("mathema.family") != "is_empty_safe"]
+    companions = [p for p, _label in paired]
     empty_broken = next((p for p in empty.values() if p.verdict == "falsified"), None)
-    if combined.verdict != "proven" or len(companions) != len(links):
+    # a proven chain folds every link's companion; a chain that holds on
+    # the probe standing in for derive keeps a link's companion only
+    # where it falsifies, as a single claim's computation line does
+    kept = (combined.verdict == "proven" and len(companions) == len(links)) or (
+        combined.verdict == "holds"
+        and any(p.verdict == "falsified" for p in companions))
+    if not kept:
         if empty_broken is not None and combined.verdict != "falsified":
             combined = _falsified_by_empty_input(combined, empty_broken)
         return combined, None
@@ -5846,7 +6067,7 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         companion_representation(cj.domain, facts)
     companion = _combine_conjunction(
         companions, companion_name(cj.name, descriptor), _chain_statement(cj),
-        labels, what="float companion")
+        [label for _p, label in paired], what="float companion")
     companion.note = (f"the {representation_word} computation of {cj.name} ran "
                       f"link by link, and every link holds"
                       if companion.verdict == "holds" else
@@ -6308,7 +6529,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if inputs_missing(args) and cj.relation not in ("in", "not in"):
             # a raise at a missing input is classified, not judged
             return None
-        return (f"{_fmt(tuple(args), *labels)}: raised {type(e).__name__}, narrow "
+        return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
     if cj.relation in ("in", "not in"):
@@ -6622,10 +6843,12 @@ def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
                               structures)
 
 
-#: attributes of a DataFrame that are not columns
+#: attributes of a table object (pandas, polars or Spark DataFrame) that
+#: are not columns
 _TABLE_ATTRIBUTES = frozenset({"T", "shape", "columns", "index", "values",
                                "iloc", "loc", "dtypes", "empty", "size",
-                               "ndim", "schema", "height", "width"})
+                               "ndim", "schema", "height", "width", "rdd",
+                               "na", "write", "sparkSession"})
 
 
 def _table_columns(param: str, cj, facts) -> list:
@@ -7519,7 +7742,8 @@ def _fill_value(bound):
 
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
-                     resolver, shared: bool, structured: bool):
+                     resolver, shared: bool, structured: bool,
+                     column_bounds: "dict | None" = None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -7527,6 +7751,7 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         holes its random draws carry; None
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
+        `column_bounds` holds a table's column bindings by column name.
     """
     from . import _floor
     from .domain import domain_contains
@@ -7564,8 +7789,12 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         floor = _floor.table_floor(holes, absent=absent)
         # each column meets the magnitude corners of the completed
         # element range, after the degenerate tables
+        # a column the claim binds (`for df.r in [0, 1]^n`) meets the
+        # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound))
+            sequence_corners(record if record is not None else bound),
+            {c: sequence_corners(_column_bound(b, None))
+             for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
 
@@ -8270,6 +8499,23 @@ def _real_set(bound):
     return joined
 
 
+def _finite_members(bound) -> "frozenset | None":
+    """Intent:
+        The members of a finite domain bound (a set of values, or an
+        enumerated domain with no shape), holes and absence left out.
+        None for any other bound, or one with no member left.
+    """
+    from .domain import Domain, _is_enumerated, is_sentinel
+    if isinstance(bound, frozenset):
+        members = frozenset(v for v in bound if not is_sentinel(v))
+    elif isinstance(bound, Domain) and _is_enumerated(bound) and not bound.dims:
+        members = frozenset(v for piece in bound.pieces for v in piece
+                            if not is_sentinel(v))
+    else:
+        return None
+    return members or None
+
+
 def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                                      ) -> "str | None":
     """Intent:
@@ -8311,6 +8557,12 @@ def _guard_refuses_part_of_the_claim(ctx: "_ClaimContext", fn, facts
                 text = ast.unparse(arg)
 
                 def inside(text=text, bound=enforced.get(p)):
+                    listed = _finite_members(ctx.cj_domain.get(text))
+                    if listed is not None:
+                        # a parameter passed as itself over a finite set
+                        # stays inside when the guard admits every member
+                        from .domain import domain_contains
+                        return all(domain_contains(v, bound) for v in listed)
                     allowed = _real_set(bound)
                     if allowed is None:
                         return False
@@ -9306,7 +9558,7 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
 
     def _recording(*a, **kw):
         try:
-            return fn(*a, **kw)
+            return _exits.call(fn, *a, **kw)
         except Exception as exc:
             raised.append(exc)
             raise
@@ -9335,6 +9587,63 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                  stratum=_machine_failure_stratum(raised[-1], where),
                  meta={"mathema.corroboration": "reproduced",
                        "mathema.recursion_depth": dict(info)})
+
+
+def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
+    """Intent:
+        `_brute_force.ground_proof` for this claim under the extensive
+        wall-clock cap: the claim evaluated once at its own literal
+        calls, or None when it is not ground, cannot be decided there,
+        or outruns the cap.
+    """
+    from ._brute_force import ground_proof
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(
+            lambda: ground_proof(ctx.cj, fn, facts, _bound_funcs_of(ctx.cj)),
+            EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+
+
+def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
+    """Intent:
+        The record of a ground claim decided at its own call. On the
+        probe route: `falsified` with the call as the witness, else
+        `holds`. On a derive route the mechanism is the one-point sweep,
+        `derive:brute_force`: `falsified` with the call as an executed
+        witness, `proven` when the function is shown pure, else `holds`.
+    """
+    cj, note = ctx.cj, ctx.note
+    said = "evaluated once, at the claim's own call"
+    note = f"{note}; {said}".lstrip("; ")
+    meta = {k: v for k, v in _provenance_meta(proof).items()
+            if route != "probe" or k != "mathema.derive_route"}
+    if proof.status == "disproven":
+        if route != "probe":
+            meta["mathema.corroboration"] = "reproduced"
+        return Probe(cj.name, ctx.statement, "falsified",
+                     route="probe" if route == "probe" else "derive:brute_force",
+                     sketch=None if route == "probe" else proof.sketch,
+                     counterexample=proof.counterexample, note=note,
+                     meta=meta)
+    verdict = ("proven" if proof.status == "proven" and route != "probe"
+               else "holds")
+    note = f"{note}; {proof.sketch}"
+    fallen = ctx.derive_undecided
+    if fallen is not None and route != "probe":
+        # the symbolic attempt that did not decide it, in the trail
+        trail = _derive_attempt_label(fallen)
+        note = f"{note}; symbolic {trail}"
+        meta["mathema.routes_attempted"] = (
+            f"routes attempted, {trail}; derive:brute_force: {verdict}")
+        meta.update({k: v for k, v in (fallen.meta or {}).items()
+                     if k.startswith("mathema.derive_") or k == "mathema.timeout"})
+        meta["mathema.derive_route"] = "brute_force"
+    return Probe(cj.name, ctx.statement, verdict,
+                 route="probe" if route == "probe" else "derive:brute_force",
+                 sketch=None if route == "probe" else proof.sketch,
+                 note=note, meta=meta)
 
 
 def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
@@ -10036,7 +10345,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      if key is not None and _p in users)
         made = _container_draws(_p, _k, cj_domain.get(_p),
                                 (ctx.record_domain or {}).get(_p), ctx.missing or {},
-                                resolver, shared, bool(param_structures.get(_p)))
+                                resolver, shared, bool(param_structures.get(_p)),
+                                {key[len(_p) + 1:]: b for key, b in cj_domain.items()
+                                 if key.startswith(_p + ".")
+                                 and key[len(_p) + 1:].isidentifier()})
         if made is not None:
             containers[_p] = made
 
@@ -10186,7 +10498,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 except TypeError:
                     raise   # the law called it wrong: untagged
             try:
-                value = callee(*a, **k)
+                value = _exits.call(callee, *a, **k)
             except Exception:
                 call_raised[0] = label
                 raise
@@ -10236,6 +10548,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         p: fill for p in kinds
         if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
                                 )) is not None}
+    from ._missing_policy import Presence
+    executed_record.presence = Presence(
+        {p: k for p, k in sampled_kinds.items() if p not in literal_args},
+        {p: (ctx.record_domain or {}).get(p) or cj_domain.get(p) for p in kinds})
     from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
                   if any(key.startswith(p + ".") or key.startswith(p + "[")
@@ -10447,8 +10763,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     args.append(v)
                     continue
                 if p in bundles:
-                    v = _synth_instance(bundles[p], p, cj_domain, rng,
-                                        specials)
+                    v = narrowed(p, lambda p=p: _synth_instance(
+                        bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
                     args.append(v)
                     continue
@@ -10622,7 +10938,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
                     cx = (f"{_point_text(args)}: raised "
-                          f"{type(e).__name__}, claimed {cj.rhs}")
+                          f"{_exits.exception_name(e)}, claimed {cj.rhs}")
                     break
                 continue
             checked += 1
@@ -10698,7 +11014,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if decided is None:
                     if undecided_at is None:
                         undecided_at = (f"{_point_text(args)}: the claim's own "
-                                        f"side raised {type(e).__name__} "
+                                        f"side raised {_exits.exception_name(e)} "
                                         f"({e})")
                     undecided += 1
                     continue
@@ -10764,7 +11080,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     break
             if boundary:
                 checked += 1
-                cx = (f"{_point_text(args)}: raised {type(e).__name__} at a "
+                cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
                       f"operation's argument would remove the instability")
@@ -10823,7 +11139,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     return Probe(
                         cj.name, statement, "skipped:misspecified",
                         route=None,
-                        note=f"{note}; f raised {type(e).__name__} at "
+                        note=f"{note}; f raised {_exits.exception_name(e)} at "
                              f"{_point_text(args)}, sampled as a list: "
                              + "; ".join(listed))
             # a raise is not a value: the claim asserts an equality or
@@ -10835,7 +11151,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       f"as a raise; narrow the claim's domain to where every "
                       f"call is real, or annotate the function complex")
                 break
-            cx = (f"{_point_text(args)}: raised {type(e).__name__}, narrow "
+            cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
             cx_stratum = _machine_failure_stratum(e, _point_text(args))

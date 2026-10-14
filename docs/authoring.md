@@ -468,6 +468,18 @@ declared `excluded_outside_domain(p)` claim, stated explicitly,
 opted into with the `excluding` keyword, or auto-declared by
 `@enforce_domain` (the decorator that makes it true).
 
+An explicit domain passed to `@enforce_domain({...})` takes four
+spellings. A tuple or list of exactly two numbers is the closed interval
+between them, so `{"x": (0, 1)}` and `{"x": [0, 1]}` both mean `[0, 1]`.
+A string is read in the domain grammar, which is how to write an open,
+half-open or union domain: `{"x": "(0, 1]"}` or
+`{"x": "[-1, -0.5] ∪ [0.5, 3]"}`, with a bare `"Z"`, `"N"` or `"R"` the
+named type. Every other set, list or tuple is the finite set of its
+members, whatever they are, so `{"side": {"buy", "sell"}}`,
+`{"n": [1, 3, 6, 12]}` and `{"v": [0, "a", None]}` admit exactly the
+values listed. A string the grammar cannot read is refused when the
+decorator is applied, naming these forms.
+
 `@enforce_domain` also reads the function's policy claims, what it
 does with a value that is not there. It is opt-in, like every
 enforcement. A `raises` row rejects the input at entry: under
@@ -729,7 +741,7 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   proven    is_empty_safe[scores]: is_empty_safe(scores)
   holds     is_dimension_safe[f]: is_dimension_safe(f) (224 draws)
   preserves_length  len(f(scores)) = len(scores)   holds
-    holds      computation  len(f(scores)) = len(scores)   851 entries across 183 draws, sizes (1, 1) to (8, 1)
+    holds      computation  len(f(scores)) = len(scores)   865 entries across 184 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_permutation_of_input  sorted(f(scores)) = sorted(scores)   falsified at scores = [0]
@@ -737,17 +749,14 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   preserves_type  type(f(scores)) = type(scores)   holds
-    holds      computation  type(f(scores)) = type(scores)   817 entries across 189 draws, sizes (1, 1) to (8, 1)
+    holds      computation  type(f(scores)) = type(scores)   801 entries across 186 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   is_sorted_output  is_sorted_output(f(scores))   falsified at scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]
     falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-  raises[scores]  raises(f(scores), ValueError)   falsified at scores = [0]
-    falsified  computation  raises(f(scores), ValueError)   counterexample scores = [0]: returned array([1.]) instead of raising
-    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   880 entries across 190 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
@@ -758,10 +767,8 @@ mathema's built-in battery: every function gets the determinism and
 state probes, a function computing a number from numbers gets the
 stability probe too, and a list-in, list-out function also gets the
 sequence laws. Two of those rightly falsify, because softmax neither
-permutes nor sorts its input. A third, `raises[scores]`, is a
-suggestion read off the guard: it asks whether `softmax` always raises
-`ValueError`, and the witness `[0]` shows it does not. The guard raises
-only for an empty list, which `is_empty_safe[scores]` reports, proven.
+permutes nor sorts its input. The guard raises only for an empty
+list, which `is_empty_safe[scores]` reports, proven.
 The `policy` lines under each claim say what `softmax` does with an
 empty list and with a `nan` score.
 

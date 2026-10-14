@@ -69,8 +69,21 @@ def _verdict(fn, law, **kw):
 @pytest.mark.parametrize("fn", [mean_of, series_mean, polars_mean,
                                 marked_mean])
 def test_a_mean_lies_between_the_extremes_whatever_the_runtime_type(fn):
+    # the mathematics is proven; the float64 computation overflows at
+    # the same-sign pair of largest doubles, where the sum is inf, and
+    # holds on a range whose sums stay finite
+    (proof,) = check_conjectures(fn, [claim(_BETWEEN)])
+    assert (proof.verdict, proof.route) == ("proven", "derive"), \
+        (proof.verdict, proof.note)
     p = _verdict(fn, _BETWEEN)
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert p.counterexample == (
+        "link 1: min(xs) <= f(xs): xs = [1.7976931348623157e+308, "
+        "1.7976931348623157e+308]: f returned inf, and an infinity for a "
+        "finite input is no value"), p.counterexample
+    bounded = _verdict(fn, "for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)")
+    assert bounded.verdict == "holds", \
+        (bounded.verdict, bounded.note, bounded.counterexample)
 
 
 def test_numpy_transpose_is_an_involution():

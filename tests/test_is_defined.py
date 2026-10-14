@@ -9,6 +9,8 @@ assumptions, probe rejects raising samples as outside the quantifier."""
 import math
 import re
 
+import pytest
+
 from mathema.conjecture import claim, check_conjectures
 from mathema.spec import render_claim_text
 
@@ -22,6 +24,7 @@ _LAW = ("assuming is_defined(f), for F0 in [0.1,10], k in [0.1,100], "
         "f(F0,k,m,-w,c) == f(F0,k,m,w,c)")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_symmetry_proves_under_is_defined_with_the_exact_region_rendered():
     (p,) = check_conjectures(oscillator_amplitude,
                              [claim(_LAW, route="derive")])
@@ -46,6 +49,7 @@ def test_probe_route_rejects_raising_samples_as_outside_the_quantifier():
     assert p.verdict == "holds"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_postfix_natural_language_form_is_equivalent():
     (p,) = check_conjectures(
         oscillator_amplitude,
@@ -63,6 +67,7 @@ def test_bare_defined_is_not_a_recognized_spelling():
     assert "assuming" in (p.note or "")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_rendered_statement_round_trips_with_the_pinned_region():
     # the record's statement pins the resolved region behind `-->`;
     # reparsing consumes that region VERBATIM, never recomputing from
@@ -90,6 +95,7 @@ def test_rendered_statement_round_trips_with_the_pinned_region():
     assert "no longer matches the code" in (rp2.note or "")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_conjunction_assumptions_thread_through_both_routes():
     def scaled(x, k, j):
         return x / (k * j)
@@ -135,6 +141,7 @@ def test_the_definedness_premise_has_one_spelling_everywhere():
     assert "is_pole_safe(x)" in normalize("is pole safe(x)")
 
 
+@pytest.mark.needs_full_proof_budget
 def test_is_defined_family_region_equivalence():
     # a declared claim NAMED is_defined adjudicates as region
     # equivalence against the current body: match -> proven; a drifted
@@ -161,6 +168,7 @@ def test_is_defined_family_region_equivalence():
     assert "no raise regions" in rs[0].sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_assuming_references_the_declared_is_defined_claim():
     rs = check_conjectures(oscillator_amplitude, [
         claim("sqrt(c^2*w^2 + (k - m*w^2)^2) != 0", name="is_defined",
@@ -181,6 +189,7 @@ def test_is_defined_is_suggested_for_a_partial_function():
     assert "!=" in f"{names['is_defined'].lhs} {names['is_defined'].relation}"
 
 
+@pytest.mark.needs_full_proof_budget
 def test_outcome_marker_still_splits_outcome_shaped_text_only():
     from mathema.grammar import extract_outcome_clause
 
@@ -191,6 +200,7 @@ def test_outcome_marker_still_splits_outcome_shaped_text_only():
     assert outcome is None
 
 
+@pytest.mark.needs_full_proof_budget
 def test_multi_conjunct_region_suggests_and_adjudicates_per_conjunct():
     from mathema.suggest import suggest_claims
 
@@ -243,6 +253,7 @@ def _total(x):
     return x * 2.0
 
 
+@pytest.mark.needs_full_proof_budget
 def test_bare_is_defined_claims_totality_not_a_restriction():
     # the same predicate carries both readings, told apart by whether a
     # region is stated: `is_defined(f)` with no region asserts the
@@ -268,6 +279,7 @@ def test_bare_is_defined_claims_totality_not_a_restriction():
     assert "x < 0" in p.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_stated_region_still_reads_as_a_restriction():
     # the restriction reading is untouched by the overload
     (p,) = check_conjectures(_guarded, [claim("x >= 0", name="is_defined",
@@ -281,6 +293,7 @@ def test_stated_region_still_reads_as_a_restriction():
     assert "restriction" in p.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_an_unindexed_restriction_must_name_the_whole_region():
     # two_guards returns only on x > 0 and y >= 0: `y >= 0` alone,
     # stated as THE region (no index), is not it, on either route
@@ -311,6 +324,7 @@ def _lower_only(x):
     return x + 1.0
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_chained_region_is_one_region_on_derive():
     (p,) = check_conjectures(_two_sided, [
         claim("-1 <= x <= 1", name="is_defined", route="derive")])

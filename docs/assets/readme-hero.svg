@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="844" height="474" viewBox="0 0 844 474" role="img" aria-label="mathema checking a discount factor: falsified at the pole rate = 1 over the full range, proven over rates up to 0.99">
+  <rect width="844" height="474" rx="10" fill="#0f1419"/>
+  <path d="M0 10 a10 10 0 0 1 10 -10 h824 a10 10 0 0 1 10 10 v26 h-844 z" fill="#1b2129"/>
+  <circle cx="22" cy="18" r="6" fill="#ff5f57"/><circle cx="42" cy="18" r="6" fill="#febc2e"/><circle cx="62" cy="18" r="6" fill="#28c840"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#d6dde6">
+    <text x="26" y="66" xml:space="preserve" textLength="123.2" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">$ </tspan>cat rates.py</text>
+    <text x="26" y="86" xml:space="preserve" textLength="369.6" lengthAdjust="spacingAndGlyphs">def discount_factor(rate: float) -&gt; float:</text>
+    <text x="26" y="106" xml:space="preserve" textLength="554.4" lengthAdjust="spacingAndGlyphs">    &quot;&quot;&quot;A discount factor that divides by one minus the rate.&quot;&quot;&quot;</text>
+    <text x="26" y="126" xml:space="preserve" textLength="220.0" lengthAdjust="spacingAndGlyphs">    return 1 / (1 - rate)</text>
+    <text x="26" y="166" xml:space="preserve" textLength="96.8" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">$ </tspan>python -q</text>
+    <text x="26" y="186" xml:space="preserve" textLength="158.4" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>import mathema</text>
+    <text x="26" y="206" xml:space="preserve" textLength="325.6" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>from rates import discount_factor</text>
+    <text x="26" y="226" xml:space="preserve" textLength="748.0" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>full_range = mathema.claim(&quot;for rate in [0, 1], f(rate) &gt;= 1&quot;, name=&quot;full_range&quot;)</text>
+    <text x="26" y="246" xml:space="preserve" textLength="774.4" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>safe_range = mathema.claim(&quot;for rate in [0, 0.99], f(rate) &gt;= 1&quot;, name=&quot;safe_range&quot;)</text>
+    <text x="26" y="266" xml:space="preserve" textLength="589.6" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>mathema.check(discount_factor, claims=[full_range, safe_range])</text>
+    <text x="26" y="286" xml:space="preserve" textLength="677.6" lengthAdjust="spacingAndGlyphs">mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847</text>
+    <text x="26" y="306" xml:space="preserve" textLength="792.0" lengthAdjust="spacingAndGlyphs">  full_range  for rate in [0.0, 1.0] : float|missing, f(rate) &gt;= 1   <tspan fill="#ff7b72">falsified</tspan> at rate = 1</text>
+    <text x="26" y="326" xml:space="preserve" textLength="598.4" lengthAdjust="spacingAndGlyphs">    <tspan fill="#ff7b72">falsified</tspan>  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(rate) &gt;= 1</text>
+    <text x="26" y="346" xml:space="preserve" textLength="448.8" lengthAdjust="spacingAndGlyphs">                            <tspan fill="#ff7b72" font-weight="bold">counterexample</tspan> rate = 1</text>
+    <text x="26" y="366" xml:space="preserve" textLength="712.8" lengthAdjust="spacingAndGlyphs">    <tspan fill="#e6c06b">holds</tspan>      policy       f(nan)   no missing policy stated; assumed propagates</text>
+    <text x="26" y="386" xml:space="preserve" textLength="660.0" lengthAdjust="spacingAndGlyphs">  safe_range  for rate in [0.0, 0.99] : float|missing, f(rate) &gt;= 1   <tspan fill="#e6c06b">holds</tspan></text>
+    <text x="26" y="406" xml:space="preserve" textLength="607.2" lengthAdjust="spacingAndGlyphs">    <tspan fill="#7ad48a">proven</tspan>     mathematics  for rate in [0.0, 0.99] ⊂ ℝ, f(rate) &gt;= 1</text>
+    <text x="26" y="426" xml:space="preserve" textLength="739.2" lengthAdjust="spacingAndGlyphs">    <tspan fill="#e6c06b">holds</tspan>      computation  for rate in [0.0, 0.99] : float, f(rate) &gt;= 1   43 draws</text>
+    <text x="26" y="446" xml:space="preserve" textLength="712.8" lengthAdjust="spacingAndGlyphs">    <tspan fill="#e6c06b">holds</tspan>      policy       f(nan)   no missing policy stated; assumed propagates</text>
+  </g>
+</svg>

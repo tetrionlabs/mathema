@@ -603,5 +603,41 @@ def test_badges_tool_reports_three_scores_and_the_triangle(tmp_path):
     assert any(r[0] == "btpkg.mod.add" for r in out["rows"])
     assert "IMPL" in out["ascii"]
     # no verified store: clarity sits at the structural floor (nothing
-    # verified, only what the code visibly shows), a low number not a 0
-    assert out["clarity"] < 25
+    # verified, only what the code visibly shows, its type annotations
+    # included), a low number not a 0
+    assert out["clarity"] < 35
+
+
+def _badges_on_one_function(tmp_path, **kw):
+    import sys
+    pkg = tmp_path / "bipkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "mod.py").write_text(
+        "def add(a: float, b: float) -> float:\n"
+        "    '''Sum.'''\n"
+        "    return a + b\n")
+    sys.path.insert(0, str(tmp_path))
+    try:
+        return tools.badges(["bipkg"], root=str(tmp_path), **kw)
+    finally:
+        sys.path.remove(str(tmp_path))
+        for m in [m for m in sys.modules if m.startswith("bipkg")]:
+            del sys.modules[m]
+
+
+def test_badges_tool_reports_the_clarity_algorithm_version(tmp_path):
+    from mathema.badges import CLARITY_ALGO
+    out = _badges_on_one_function(tmp_path)
+    assert out["clarity_algo"] == CLARITY_ALGO
+
+
+def test_badges_tool_without_implementation_skips_the_coverage_pass(tmp_path):
+    out = _badges_on_one_function(tmp_path, implementation=False)
+    assert out["implementation"] is None
+    assert out["overall"] is None
+    assert out["ascii"] is None
+    row = next(r for r in out["rows"] if r[0] == "bipkg.mod.add")
+    assert row[1] is None
+    assert row[2] is not None and row[3] is not None
+    assert out["intent"] is not None and out["clarity"] is not None

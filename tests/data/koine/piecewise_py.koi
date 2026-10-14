@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# KOINE golden corpus: the body of tests/fixtures/koine_py.py#tax.
+# FROZEN: see golden.yaml.
+koine("0.0.1")
+lifter(language: "py", name: "mathema", version: "0")
+source(
+  file: "tests/fixtures/koine_py.py",
+  line: 26,
+  sha256: "7c455ec7544f56d613443d7c03fdd56ff867d7869db861ff7e92ddfada08b763",
+)
+function(name: "tax", key: "py:tests/fixtures/koine_py.py#tax")
+parameter(x, kind::scalar, representation::f64)
+parameter(r, kind::scalar, representation::f64)
+returns(kind::scalar, representation::f64)
+manifest(nonvalue::mathematical::singular, as::raise("ZeroDivisionError"))
+manifest(
+  nonvalue::mathematical::singular,
+  as::raise("ValueError"),
+  operation: operator::binary::remainder::truncation,
+)
+manifest(nonvalue::mathematical::domain, as::raise("ValueError"))
+manifest(
+  nonvalue::mathematical::domain,
+  as::complex,
+  operation: operator::binary::power,
+)
+manifest(nonvalue::machine::overflow, as::raise("OverflowError"))
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::addition,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::subtraction,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::multiplication,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::division::real,
+)
+structure(loops: 0, branches: 2, recursion: false)
+body(
+  statement::branch(
+    operator::comparison::less(x, 0),
+    [statement::return(0, at: span(28, 28, "return 0"))],
+    [
+      statement::branch(
+        operator::comparison::less(x, 0.5),
+        [
+          statement::return(
+            operator::binary::multiplication(r, x),
+            at: span(30, 30, "return r * x"),
+          ),
+        ],
+        [
+          statement::return(
+            operator::binary::addition(
+              operator::binary::multiplication(r, 0.5),
+              operator::binary::multiplication(
+                operator::binary::subtraction(x, 0.5),
+                operator::binary::multiplication(2, r),
+              ),
+            ),
+            at: span(32, 32, "return r * HALF + (x - HALF) * (2 * r)"),
+          ),
+        ],
+        at: span(29, 32, "elif x < HALF:"),
+      ),
+    ],
+    at: span(27, 32, "if x < 0:"),
+  ),
+)

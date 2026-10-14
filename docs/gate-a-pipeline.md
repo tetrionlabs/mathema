@@ -184,16 +184,13 @@ mathema verify --root .; echo "exit code $?"
 
 <!-- example: gate output wrap=80 -->
 ```text
-accepting math.log :: log_monotone (verdict unknown) as trusted, by Grace Hopper
-  - trust log_monotone at its claimed level (holds), on the word of
-      compendium:math; when `mathema verify` checks this key again, a local
-      verdict replaces the testimony
-written: trust log_monotone at its claimed level (holds), on the word of
-    compendium:math; when `mathema verify` checks this key again, a local
-    verdict replaces the testimony
-ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
+accept math.log :: log_monotone as trusted, by Grace Hopper
+  verdict unknown
+  the claim is trusted at its claimed level, holds, on the word of
+      compendium:math; a local verdict replaces it when verify checks this key
+      again
+written.
 FAIL fees.discounted: fresh; 1 falsified claim(s)
-ok   fees.late_fee: fresh
 3 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 1
@@ -230,9 +227,7 @@ mathema verify --root .; echo "exit code $?"
 
 <!-- example: gate output -->
 ```text
-ok   math.log: fresh; library claims from mathema/compendium/math.claims.yaml
 ok   fees.discounted: form changed; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
-ok   fees.late_fee: fresh
 2 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
 exit code 0

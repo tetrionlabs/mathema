@@ -33,6 +33,14 @@ from .runtime_types import SEQUENCE_KINDS
 from ._signatures import callable_signature
 
 
+def _declared_record(root: str, key: str) -> str | None:
+    """The materialized declared record for `key`, relative to `root`,
+    or None when there is none."""
+    from .spec import declared_dir, find_record
+    path = find_record(declared_dir(root), key)
+    return os.path.relpath(path, root) if path else None
+
+
 def _source_span(fn) -> str | None:
     """Intent:
         The function's own line range in its source file, in the
@@ -215,9 +223,9 @@ def _describe_signature(fn) -> str:
     except (TypeError, ValueError):
         return "(...)"
     try:
-        from .analysis import SourceUnavailable, analyze_source
+        from .analysis import SourceUnavailable, effective_facts
         with warnings.catch_warnings():
-            # analyze_source() warns on global-scope/unresolved-name
+            # effective_facts() warns on global-scope/unresolved-name
             # capture, real, useful signal on a single function, but a
             # sweep over every function in a package would otherwise
             # print one of these per affected function, drowning out the
@@ -225,7 +233,7 @@ def _describe_signature(fn) -> str:
             # every population-sweep function in inventory.py already
             # applies around its own analyze_source() call).
             warnings.simplefilter("ignore")
-            kinds = analyze_source(fn).param_kinds
+            kinds = effective_facts(fn).param_kinds
     except SourceUnavailable:
         kinds = {}
     parts = []
@@ -580,18 +588,23 @@ def claimed_count(key: str, fn, declared: dict, verified: dict | None = None) ->
     from .authoring import resolve_declared
     from .records import stance
     from .spec import entry_claims
+    from .verify import split_unparseable_entry
 
     file_entry = declared.get(key, {}).get("entry", {})
-    merged = resolve_declared(fn, file_entry=file_entry)
+    merged, unreadable = split_unparseable_entry(
+        resolve_declared(fn, file_entry=file_entry))
+    # a claim that does not parse is authored and has no record, so it
+    # counts like any claim with no record yet
     claims = entry_claims(merged)
     if not verified:
-        return len(claims)
+        return len(claims) + len(unreadable)
     rec = verified.get(key)
     if rec is None:
-        return len(claims)
+        return len(claims) + len(unreadable)
     blocked = {row.get("name") for row in (rec["entry"].get("claims") or [])
                if stance(row.get("verdict") or "") == "blocked"}
-    return sum(1 for cj in claims if cj.name not in blocked)
+    return (sum(1 for cj in claims if cj.name not in blocked)
+            + len(unreadable))
 
 
 def _docsync_score(fn, root: str = ".", declared: dict | None = None,
@@ -1369,13 +1382,9 @@ def build_index(targets: list[str], root: str = ".") -> dict:
             "file": entry["file"],
             "span": _source_span(fn),
             "verified": key in verified,
-            "spec": (os.path.join(".mathema", "verified", f"{key}.yaml")
+            "spec": ((verified.get(key) or {}).get("source")
                      if key in verified else None),
-            "declared": (os.path.join(".mathema", "declared",
-                                      f"{key}.yaml")
-                         if os.path.exists(os.path.join(
-                             root_abs, ".mathema", "declared",
-                             f"{key}.yaml")) else None),
+            "declared": _declared_record(root_abs, key),
             "concepts": (list((ventry.get("meta") or {}).get("concepts")
                               or [])
                          or _row_concepts(key, fn, {}, verified)),

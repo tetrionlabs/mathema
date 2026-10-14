@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+# KOINE golden corpus: the body of tests/fixtures/koine_py.py#remainders.
+# FROZEN: see golden.yaml.
+koine("0.0.1")
+lifter(language: "py", name: "mathema", version: "0")
+source(
+  file: "tests/fixtures/koine_py.py",
+  line: 53,
+  sha256: "7c455ec7544f56d613443d7c03fdd56ff867d7869db861ff7e92ddfada08b763",
+)
+function(name: "remainders", key: "py:tests/fixtures/koine_py.py#remainders")
+parameter(a, kind::scalar, representation::f64)
+parameter(b, kind::scalar, representation::f64)
+returns(kind::scalar, representation::f64)
+manifest(nonvalue::mathematical::singular, as::raise("ZeroDivisionError"))
+manifest(
+  nonvalue::mathematical::singular,
+  as::raise("ValueError"),
+  operation: operator::binary::remainder::truncation,
+)
+manifest(nonvalue::mathematical::domain, as::raise("ValueError"))
+manifest(
+  nonvalue::mathematical::domain,
+  as::complex,
+  operation: operator::binary::power,
+)
+manifest(nonvalue::machine::overflow, as::raise("OverflowError"))
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::addition,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::subtraction,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::multiplication,
+)
+manifest(
+  nonvalue::machine::overflow,
+  as::nonfinite,
+  operation: operator::binary::division::real,
+)
+structure(loops: 0, branches: 0, recursion: false)
+body(
+  statement::bind(
+    q,
+    operator::binary::remainder::truncation(a, b),
+    at: span(54, 54, "q = math.fmod(a, b)"),
+  ),
+  statement::bind(
+    h,
+    function::magnitude::hypotenuse(a, b),
+    at: span(55, 55, "h = math.hypot(a, b)"),
+  ),
+  statement::return(
+    operator::binary::addition(
+      operator::binary::addition(
+        operator::binary::addition(q, h),
+        function::rounding::ties_even(a),
+      ),
+      constant::pi,
+    ),
+    at: span(56, 56, "return q + h + round(a) + math.pi"),
+  ),
+)

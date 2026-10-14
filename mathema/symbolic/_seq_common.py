@@ -795,10 +795,10 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
     fold when empty (it reads `xs[0]`, or divides by `len(xs)`) is
     adjudicated on the executed call first; see
     `_prove._empty_sequence_raise`."""
-    from ..analysis import analyze_source
+    from ..analysis import effective_facts
     from ._prove import _empty_sequence_raise
     try:
-        empty = _empty_sequence_raise(fn, analyze_source(fn), lhs_src,
+        empty = _empty_sequence_raise(fn, effective_facts(fn), lhs_src,
                                       rhs_src, domain, assumption)
     except TimeoutError:
         raise

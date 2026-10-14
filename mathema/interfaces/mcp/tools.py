@@ -66,7 +66,12 @@ def adjudicate_target(target: str, claims: list | None = None,
     be true beside a refuted row exactly when that row is a
     SUGGESTION mathema volunteered (`gates` false): a falsified
     suggestion is information, not a failure. Envelope rule:
-    `counterexample` present iff refuted, `blocked_by` iff blocked."""
+    `counterexample` present iff refuted, `blocked_by` iff blocked.
+
+    A declared claim whose statement does not parse is not
+    adjudicated: it comes back as `{"claim", "error"}` (the parser's
+    message, and no `stance`), its line is in `problems`, and the
+    function's other claims are adjudicated as usual."""
     if include not in ("declared", "suggested", "all"):
         return {"ok": False, "error": f"unknown include={include!r}; "
                                       "choose declared, suggested, or all"}
@@ -85,9 +90,10 @@ def adjudicate_target(target: str, claims: list | None = None,
 
     from mathema import check
     from mathema.authoring import retrieve
-    from mathema.spec import load_verified
+    from mathema.spec import load_declared, load_verified
     from mathema.targets import resolve_function
-    from mathema.verify import _accepted_risk, gate
+    from mathema.verify import (_accepted_risk, gate, split_unparseable_entry,
+                                unparseable_claim_message)
 
     key, fn = resolve_function(target, root)
     # `is not None`, deliberately: an explicit [] means "the declared
@@ -99,7 +105,10 @@ def adjudicate_target(target: str, claims: list | None = None,
     from mathema.compendium import install as _install_compendium
     from mathema.compendium import external_premises as _stub_premise_names
     _install_compendium(root)
-    rec = check(fn, claims=passed_claims, declared=retrieve(fn, root),
+    declared_store = load_declared(root)
+    entry, unreadable = split_unparseable_entry(
+        retrieve(fn, root, store=declared_store))
+    rec = check(fn, claims=passed_claims, declared=entry,
                 known_premises=_stub_premise_names(root))
     accepted = _accepted_risk((load_verified(root).get(key) or {}).get("entry"))
     report = gate(rec.probes, strict=strict, accepted_risk=accepted,
@@ -110,10 +119,18 @@ def adjudicate_target(target: str, claims: list | None = None,
         rows = [r for r in rows if r["source"] != "suggested"]
     elif include == "suggested":
         rows = [r for r in rows if r["source"] == "suggested"]
+    where = (declared_store.get(key) or {}).get("source")
+    unparsed = [unparseable_claim_message(key, name, where, error,
+                                          rerun="check")
+                for name, error in unreadable]
+    if include != "suggested":
+        rows += [{"claim": name, "error": str(error)}
+                 for name, error in unreadable]
+    problems = unparsed + report.problems
     out = {
         "key": key,
-        "problems": report.problems,
-        "passed": not report.problems,
+        "problems": problems,
+        "passed": not problems,
         "counts": {"proven": report.proven, "holds": report.holds,
                    "refuted": report.refuted, "unknown": report.unknown,
                    "accepted_risk": report.owned, "skipped": report.skipped},
@@ -143,14 +160,17 @@ def adjudicate_targets(targets: list[str], root: str = ".",
     per-claim shape (counterexample, blocked_by, evidence) stays on
     `adjudicate_target`, which is the right call once a specific row
     needs diagnosing. `failed` lists the targets that would not
-    resolve, so one bad name never costs the batch."""
+    resolve, so one bad name never costs the batch, and a declared
+    claim that does not parse is named in `problems` while its
+    function's other claims are adjudicated."""
     from mathema import check
     from mathema.audit import _common_key_prefix
     from mathema.authoring import retrieve
     from mathema.records import claim_row
     from mathema.spec import load_declared, load_verified
     from mathema.targets import resolve_function
-    from mathema.verify import _accepted_risk, gate
+    from mathema.verify import (_accepted_risk, gate, split_unparseable_entry,
+                                unparseable_claim_message)
 
     if include not in ("declared", "suggested", "all"):
         return {"ok": False, "error": f"unknown include={include!r}; "
@@ -176,9 +196,15 @@ def adjudicate_targets(targets: list[str], root: str = ".",
     problems: list = []
     for key, fn in resolved:
         passed_claims: list | None = [] if include == "declared" else None
+        entry, unreadable = split_unparseable_entry(
+            retrieve(fn, root, store=declared_store))
+        where = (declared_store.get(key) or {}).get("source")
+        problems.extend(unparseable_claim_message(key, name, where, error,
+                                                  rerun="check")
+                        for name, error in unreadable)
         rec = check(fn, claims=passed_claims,
                     known_premises=stub_premises,
-                    declared=retrieve(fn, root, store=declared_store))
+                    declared=entry)
         accepted = _accepted_risk(
             (verified_store.get(key) or {}).get("entry"))
         report = gate(rec.probes, strict=strict, accepted_risk=accepted,
@@ -420,11 +446,11 @@ def _signature_mismatch(cj, target: str, root: str) -> "str | None":
     """
     import ast
 
-    from mathema.analysis import analyze_source
+    from mathema.analysis import effective_facts
     from mathema.targets import resolve_function
     try:
         _key, fn = resolve_function(target, root)
-        params = list(analyze_source(fn).params)
+        params = list(effective_facts(fn).params)
     except Exception:
         return None          # unresolvable target is not a lint failure
     # a `let name be ...` binding and any extra function letter are
@@ -659,9 +685,10 @@ def implementation_coverage(targets: list[str], root: str = ".",
             "test_report_stale": any(fc.test_stale for fc in pc.functions)}
 
 
-def badges(targets: list[str], root: str = ".") -> dict:
-    """The three badges over a target set (or rootwide when empty):
-    `implementation` (code coverage, a raw line ratio), `intent`
+def badges(targets: list[str] | None = None, root: str = ".",
+           implementation: bool = True) -> dict:
+    """The three badges over a target set (or rootwide when omitted or
+    empty): `implementation` (code coverage, a raw line ratio), `intent`
     (docsync), and `clarity` (how much is KNOWN about the behaviour,
     scored from VERIFIED claims, NOT a pass-rate; a falsified claim still
     counts as knowledge). Intent and clarity roll up to
@@ -672,10 +699,18 @@ def badges(targets: list[str], root: str = ".") -> dict:
     implementation, intent, clarity]`; a null clarity means the source
     is unavailable. `ascii` is the git-diffable triangle. Reads the
     verified store, so clarity reflects only declared-and-verified
-    claims, the CDD loop it rewards."""
-    from mathema.badges import render_triangle, repo_badges
+    claims, the CDD loop it rewards. `capped` lists `[key, steps]` for
+    each function a step of which stopped at the wall-clock cap. The
+    functions are scored in worker processes (`badges.default_jobs`),
+    where the cap holds; a function scored in the server itself, on a
+    worker thread, runs without it. `clarity_algo` is the clarity
+    algorithm version the scores were computed under. Pass
+    `implementation=false` to skip the coverage pass: `implementation`,
+    `overall`, `ascii` and each row's implementation come back null."""
+    from mathema.badges import default_jobs, render_triangle, repo_badges
 
-    scores = repo_badges(list(targets) or None, root=root)
+    scores = repo_badges(list(targets or ()) or None, root=root,
+                         implementation=implementation, jobs=default_jobs())
     rows = [[key, v["implementation"], v["intent"], v["clarity"]]
             for key, v in scores.per_function.items()]
     return {"implementation": scores.implementation,
@@ -684,8 +719,12 @@ def badges(targets: list[str], root: str = ".") -> dict:
             "overall": scores.overall,
             "cols": ["key", "implementation", "intent", "clarity"],
             "rows": rows,
-            "ascii": render_triangle(scores.implementation, scores.intent,
-                                     scores.clarity)}
+            "ascii": (render_triangle(scores.implementation, scores.intent,
+                                      scores.clarity)
+                      if scores.implementation is not None else None),
+            "clarity_algo": scores.algo,
+            "capped": [[key, list(steps)]
+                       for key, steps in scores.capped.items()]}
 
 
 # every tool the server registers, in one place; server.py reads this

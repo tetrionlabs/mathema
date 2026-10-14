@@ -57,6 +57,21 @@ def _ran(route) -> bool:
     return str(route or "").startswith("probe")
 
 
+def _aspect(p) -> str:
+    """Intent:
+        The line a claim's own verdict is shown on: `computation` when
+        it was reached by running the code, except a derive disproof
+        the code reproduced, which indicts the mathematics (stratum
+        `mathematics unsound`, corroboration `reproduced`) and stays on
+        the `mathematics` line whichever route reproduced it.
+    """
+    stratum = getattr(p, "stratum", None) or {}
+    if _verdict(p) == "falsified" and stratum.get("mathematics") == "unsound" \
+            and (p.meta or {}).get("mathema.corroboration") == "reproduced":
+        return "mathematics"
+    return "computation" if _ran(p.route) else "mathematics"
+
+
 def _shown(statement: str, aspect: str) -> str:
     """The claim as the line of `aspect` restates it."""
     return over_the_reals(statement) if aspect == "mathematics" \
@@ -111,10 +126,47 @@ def _call(params: list, kinds: dict, param: str, word: str) -> str:
 
 
 def _did(counterexample: str) -> str:
-    """`raises TypeError` from `x = None: f raised TypeError`."""
+    """`returns 1.0` from `x = nan: f returned 1.0`; a witness written as
+    calls (`f(None) raises TypeError; f(1.0) returns 1.0`) as it is."""
+    if (counterexample or "").startswith("f("):
+        return counterexample
     said = (counterexample or "").split(": ", 1)[-1]
     said = re.sub(r"^f raised ", "raises ", said)
     return re.sub(r"^f returned ", "returns ", said)
+
+
+#: what a call-form witness says f did after the call
+_DID = re.compile(r" (?:raises|returns) ")
+
+
+def _first_call(witness: str) -> str:
+    """The call a witness written as calls opens with: `f(None)` from
+    `f(None) raises TypeError; f(1.0) returns 1.0`, `f(d) with d.note
+    unset` from `f(d) with d.note unset raises KeyError`."""
+    return _DID.split(witness.splitlines()[0], 1)[0]
+
+
+def _reached(witness: str, kind: str) -> str:
+    """What a path witness reached: `d.note unset`, `d.note = null
+    (absent)` for an absence and `(hole)` for a hole at a null; from an
+    older witness, the text before its colon."""
+    if not witness.startswith("f("):
+        return witness.split(": ", 1)[0]
+    call = _first_call(witness)
+    if " with " not in call:
+        return ""
+    reached = call.split(" with ", 1)[1]
+    if reached.endswith(" = null"):
+        reached += " (absent)" if kind == "absent" else " (hole)"
+    return reached
+
+
+def _calls_first(counterexample: str, said: str) -> str:
+    """A witness written as calls on the line, `said` on the next; an
+    older witness after `said` on one line, as `said; raises TypeError`."""
+    if (counterexample or "").startswith("f("):
+        return f"{counterexample}\n{said}"
+    return f"{said}; {_did(counterexample)}"
 
 
 def _policy_detail(p) -> str:
@@ -122,7 +174,7 @@ def _policy_detail(p) -> str:
     if pol.get("sentence"):
         if pol.get("source") != "stated" and p.counterexample \
                 and not pol["sentence"].startswith("f has no single policy"):
-            return f"no {pol.get('kind')} policy stated; {_did(p.counterexample)}"
+            return _calls_first(p.counterexample, f"no {pol.get('kind')} policy stated")
         return pol["sentence"]
     behaviour = pol.get("behaviour") or ""
     if pol.get("exception"):
@@ -130,8 +182,11 @@ def _policy_detail(p) -> str:
     if pol.get("source") == "default":
         if _verdict(p) in ("holds", "proven"):
             return f"no {pol.get('kind')} policy stated; assumed {behaviour}"
-        return f"no {pol.get('kind')} policy stated; {_did(p.counterexample)}"
+        return _calls_first(p.counterexample, f"no {pol.get('kind')} policy stated")
     source = (pol.get("reason") or "").split("; ", 1)[0]
+    if _verdict(p) == "falsified" and (p.counterexample or "").startswith("f("):
+        # the calls alone: the fixes under the line say what the word was
+        return p.counterexample
     if _verdict(p) == "falsified" and p.counterexample:
         # what f did, beside the word it broke
         said = f"{_did(p.counterexample)}, where the word is {behaviour}"
@@ -237,6 +292,7 @@ def _split_lines(p, key: str) -> list:
 def _row(verdict: str, aspect: str, what: str, detail: str = "") -> str:
     verdict = "unknown" if verdict == "skipped" else verdict
     line = f"    {verdict:<9}  {aspect:<11}  {what}"
+    detail = detail.replace("\n", "\n" + " " * 28)
     return f"{line}   {detail}" if detail else line
 
 
@@ -287,7 +343,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             aspect = "computation" if _ran(found.get("route")) else "mathematics"
             lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
         else:
-            aspect = "computation" if _ran(main.route) else "mathematics"
+            aspect = _aspect(main)
             lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
                               _detail(main, count_words)))
             if _verdict(main) == "falsified":
@@ -341,7 +397,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 # and its witness names the member reached (`o.note =
                 # null (absent)`, `order.note unset`)
                 root = re.match(r"[A-Za-z_]\w*", path)
-                reached = (r.counterexample or "").split(": ", 1)[0] or f"{path} = {word}"
+                reached = _reached(r.counterexample or "", kind) or f"{path} = {word}"
                 word = "unset" if reached.endswith(" unset") else (
                     "null" if kind == "absent" else word)
                 what = f"f({root.group(0) if root else path}) at {reached}"
@@ -355,7 +411,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 falsified.append(r.counterexample)
                 lines += [" " * 28 + part for part in _fixes(r, key, word, path).splitlines()]
             used.add(id(r))
-        if falsified:
+        if falsified and (falsified[0] or "").startswith("f("):
+            # a witness written as calls is named by its first call
+            head = f"falsified at {_first_call(falsified[0])}"
+        elif falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
             head = head.split(": ", 1)[0] if ": " in head else head
         else:

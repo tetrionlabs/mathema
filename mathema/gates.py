@@ -16,7 +16,7 @@ module at load, this module reaches back only when a gate actually
 runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
-from . import _shapes
+from . import _exits, _shapes
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -195,6 +195,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the first callee that returned a nan or an infinity for finite,
     # non-missing arguments, as the witness text ("f returned inf")
     calls_nonfinite: list = [None]
+    # every call of the function under test at the last point evaluated,
+    # and the claim's sides there (None when either raised)
+    point_calls: list = []
+    last_sides: list = [None]
     # the calls the function under test (or a bound function) made at
     # the current point, for the executed missing inputs
     f_calls = LastCall()
@@ -216,14 +220,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
         def _wrapped(*a, **kw):
             try:
-                out = callee(*a, **kw)
+                out = _exits.call(callee, *a, **kw)
             except Exception as exc:
                 calls_raised[0] = type(exc).__name__
                 if under_test:
                     f_calls.calls.append(("raised", type(exc).__name__, a, kw))
+                    point_calls.append(("raised", _exits.exception_name(exc), a, kw))
                 raise
             if under_test:
                 f_calls.calls.append(("returned", out, a, kw))
+                point_calls.append(("returned", out, a, kw))
             if complex_raises and is_complex_value(out):
                 calls_raised[0] = "a complex result"
                 raise ComplexResult(label, out)
@@ -309,6 +315,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     executed.refill_at = _refill_caller(fn_call)
     executed.fills = {p: fill for p in kinds
                       if (fill := _fill_value(cj_domain.get(p))) is not None}
+    from ._missing_policy import Presence
+    executed.presence = Presence(dict(kinds), {p: cj_domain.get(p) for p in kinds})
     base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
@@ -346,6 +354,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 for n, v in point.items()}
 
     def _values(point):
+        last_sides[0] = None
+        point_calls.clear()
         # the bindings are the globals, so a Sum/Prod term (a lambda)
         # resolves f and the point's coordinates too
         env = {"__builtins__": {}, **base_env, **_typed(point)}
@@ -354,7 +364,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if as_arrays:
             # a 1-by-1 result (`x.T @ A @ x` over a column) is the number it holds
             lv, rv = scalar(lv), scalar(rv)
-        return plain_value(lv), plain_value(rv)
+        last_sides[0] = (plain_value(lv), plain_value(rv))
+        return last_sides[0]
 
     def _nan_unread(point, lv, rv) -> bool:
         # whether the claim's sides never read a nan f returned: they
@@ -1076,6 +1087,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return point
         return None
     evaluate.last_args = last_args  # type: ignore[attr-defined]
+    # every call of the function under test at the last point evaluated,
+    # `(kind, outcome, args, kwargs)` with kind "returned" or "raised",
+    # and the claim's two sides there
+    evaluate.calls = lambda: list(point_calls)  # type: ignore[attr-defined]
+    evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
 

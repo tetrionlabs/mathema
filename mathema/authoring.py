@@ -292,12 +292,10 @@ def materialize_declared(fn, key: str, root: str = ".") -> str:
     which read the live function directly, regenerate this file as often
     as convenient, and never hand-edit it.
     """
-    import os
-
-    from .spec import write_yaml
+    from .spec import declared_dir, record_path, write_yaml
 
     entry = {"claims": declared_from_function(fn)}
-    path = os.path.join(root, ".mathema", "declared", f"{key}.yaml")
+    path = record_path(declared_dir(root), key)
     return write_yaml(path, {key: entry},
                       header=f"machine-generated from decorator/docstring claims "
                              f"on {key}; regenerated on every "
@@ -479,6 +477,47 @@ def _domain_from_declared_claims(fn, key: str | None, root: str) -> dict:
     return out
 
 
+_NAMED_TYPES = frozenset({"Z", "N", "R"})
+
+
+def _explicit_bound(bounds):
+    """Intent:
+        An explicit `enforce_domain` bound in the shape the domain
+        checks read: a plain tuple or list of exactly two real numbers
+        is the closed interval between them; any other set, list or
+        tuple is the finite set of its members, whatever they are; a
+        string is read in the domain grammar (`"(0, 1]"`,
+        `"[-1, -0.5] ∪ [0.5, 3]"`), a bare `"Z"`, `"N"` or `"R"` staying
+        the named type. Any other shape (an `Interval`, a `Domain`) is
+        returned unchanged.
+
+    Raises:
+        DomainError: a string the domain grammar cannot read.
+    """
+    import numbers
+    if isinstance(bounds, (set, frozenset)):
+        return frozenset(bounds)
+    if type(bounds) in (list, tuple):
+        if len(bounds) == 2 and all(
+                isinstance(v, numbers.Real) and not isinstance(v, bool)
+                for v in bounds):
+            return tuple(bounds)
+        return frozenset(bounds)
+    if isinstance(bounds, str) and bounds.strip() not in _NAMED_TYPES:
+        from .conjecture import claim
+        try:
+            return claim(f"for _value in {bounds}, f(_value) == f(_value)"
+                         ).domain["_value"]
+        except Exception as e:
+            raise DomainError(
+                f"enforce_domain(): cannot read the domain {bounds!r}: give "
+                "an interval as two numbers, (lo, hi), or as text in the "
+                "domain grammar, '(0, 1]' or '[-1, -0.5] ∪ [0.5, 3]'; a set, "
+                "list or tuple of values for a finite set; or a named type, "
+                "'Z', 'N' or 'R'") from e
+    return bounds
+
+
 def enforce_domain(domain: dict | None = None, key: str | None = None,
                    root: str = "."):
     """Decorator: wrap a function so a call with an out-of-domain
@@ -508,7 +547,9 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
     picking a value and letting the two drift apart. Every domain shape
     `check()` accepts is enforced here too: an `(lo, hi)` interval,
     `"Z"`/`"N"` (integer / non-negative integer), an explicit
-    discrete set, and a composite domain (`[0, 100] \\ {∅}`,
+    discrete set (a set, list or tuple of values, other than two numbers,
+    which are an interval), a string in the domain grammar (`"(0, 1]"`,
+    `"[-1, -0.5] ∪ [0.5, 3]"`), and a composite domain (`[0, 100] \\ {∅}`,
     `[0, 100] ⊂ Z`, a union), whether declared on a claim or passed
     explicitly. A parameter no source says
     anything about is left unchecked; this only ever narrows what a
@@ -522,10 +563,9 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
         from .types import domain_from_signature
 
         declared_domain = _domain_from_declared_claims(fn, key, root)
-        explicit = domain or {}
-        for p, bounds in explicit.items():
-            given = (tuple(bounds) if isinstance(bounds, (list, tuple))
-                     else bounds)
+        explicit = {p: _explicit_bound(bounds)
+                    for p, bounds in (domain or {}).items()}
+        for p, given in explicit.items():
             if p in declared_domain and declared_domain[p] != given:
                 raise DomainError(
                     f"enforce_domain(): explicit domain for {p!r} {given} "
@@ -553,6 +593,12 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             numeric-only exemption above must never also silently
             exempt a missing value from a domain that explicitly
             excludes it."""
+            if isinstance(bounds, frozenset):
+                try:
+                    if value in bounds:
+                        return True     # a listed member, None included
+                except TypeError:
+                    pass
             if is_missing(value):
                 return domain_contains(value, bounds, slot=slot)
             if getattr(bounds, "base_type", None) == "L":

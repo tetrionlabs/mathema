@@ -90,11 +90,11 @@ grep -m1 counterexample .mathema/verified/numpy.ptp.yaml
 
 <!-- example: ptp output -->
 ```text
-      counterexample: "a = [-15.864774136188714], axis = None, out = None, keepdims = <no value>: 0.0 vs -15.864774136188714"
+      counterexample: "a = [-100, -100], axis = None, out = None, keepdims = <no value>: 0.0 vs -100.0"
 ```
 
-One value, and a negative one: the range of `[-54.43]` is 0, and the
-largest value is -54.43. Whenever every value is negative the range sits
+Two values, both negative: the range of `[-100, -100]` is 0, and the
+largest value is -100. Whenever every value is negative the range sits
 above the largest value. The test's own first array says the same in
 another way, since its range of 15 is above its largest value of 10; the
 claim found a case without anyone choosing the array. The other
@@ -116,28 +116,15 @@ mathema accept numpy.ptp at_most_the_largest --as discovery --corrected "for a i
 
 <!-- example: ptp output match=subset wrap=80 -->
 ```text
-accepting numpy.ptp :: at_most_the_largest (verdict falsified) as discovery, by
-    Ada Lovelace
-  - move at_most_the_largest to the record's discoveries section (superseded_by:
-      at_most_the_largest_corrected), keeping its counterexample as the witness
-  - declare the stated corrected claim 'at_most_the_largest_corrected': 'for a
-      in [-100, 100]^n, f(a) == max(a) - min(a)', checked now: holds over 131
-      trials
-  - rewrite claims/numpy.claims.yaml: replace declared claim
-      'at_most_the_largest' with 'at_most_the_largest_corrected'
-written: move at_most_the_largest to the record's discoveries section
-    (superseded_by: at_most_the_largest_corrected), keeping its counterexample
-    as the witness; declare the stated corrected claim
-    'at_most_the_largest_corrected': 'for a in [-100, 100]^n, f(a) == max(a) -
-    min(a)', checked now: holds over 131 trials; rewrite
-    claims/numpy.claims.yaml: replace declared claim 'at_most_the_largest' with
-    'at_most_the_largest_corrected'
-declared layer: claims/numpy.claims.yaml now declares
-    at_most_the_largest_corrected in place of at_most_the_largest (the
-    superseded claim stays in the record's discoveries section):
-  - name: at_most_the_largest_corrected
-    statement: "for a in [-100, 100]^n, f(a) == max(a) - min(a)"
-    route: probe
+accept numpy.ptp :: at_most_the_largest as a discovery, by Ada Lovelace
+  falsified at a = [-100, -100], axis = None, out = None, keepdims = <no value>:
+      0.0 vs -100.0
+  the claim moves to discoveries with that witness, out of
+      claims/numpy.claims.yaml
+  the corrected claim takes its place: at_most_the_largest_corrected [probe]:
+      for a in [-100, 100]^n, f(a) == max(a) - min(a), checked now: holds over
+      131 trials
+written.
 ```
 
 `holds over 160 trials`, on the probe route: the corrected claim is the

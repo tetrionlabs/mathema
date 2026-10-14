@@ -39,7 +39,7 @@ def test_is_defined_on_mean_holds_with_its_defaults_stated():
 
 
 def test_a_bound_on_mean_samples_only_the_array():
-    p = _declared(np.mean, "for a in R^n, min(a) <= f(a) <= max(a)")
+    p = _declared(np.mean, "for a in [-1e6, 1e6]^n, min(a) <= f(a) <= max(a)")
     assert p.verdict == "holds", p.note
     assert set(p.meta["mathema.defaults"]["numpy.mean"]) == _MEAN_DEFAULTS
 
@@ -57,7 +57,7 @@ def test_a_pinned_axis_is_passed_and_shown_pinned():
 
 
 def test_a_literal_pin_survives_the_canonical_text():
-    p = _declared(np.mean, "let keepdims be True, for a in R^n, dim(f(a)) == 1")
+    p = _declared(np.mean, "let keepdims be True, for a in [-1e6, 1e6]^n, dim(f(a)) == 1")
     assert p.verdict == "holds", p.note
     assert p.meta["mathema.defaults"]["numpy.mean"]["keepdims"] == \
         "True (pinned)"
@@ -212,7 +212,7 @@ def test_a_let_bound_library_function_states_the_defaults_it_kept():
     # one claim can call several library functions: each one's kept
     # values are stated under its own name
     p = _declared(np.mean,
-                  "let g = numpy.sqrt, for a in R^n, g(f(a) * f(a)) >= 0")
+                  "let g = numpy.sqrt, for a in [-1e6, 1e6]^n, g(f(a) * f(a)) >= 0")
     assert p.verdict == "holds", p.note
     stated = p.meta["mathema.defaults"]
     assert set(stated) == {"numpy.mean", "numpy.sqrt"}

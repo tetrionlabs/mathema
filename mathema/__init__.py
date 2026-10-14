@@ -52,7 +52,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .analysis import Facts, SourceUnavailable, _parse_notes, analyze_source
+from .analysis import Facts, SourceUnavailable, _parse_notes, effective_facts
+from .analysis import analyze_source as analyze_source
 # aliased on import: the bare name `claims` is already the conjecture-module
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
 # the claims()-decorator is exposed as `claims_decorator` at this level,
@@ -106,7 +107,7 @@ _register_dot_family()
 _register_fold_family()
 _register_sum_family()
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "status", "track_claims",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
@@ -226,7 +227,7 @@ class Record:
                 line = f"  {mark} {p.name}: {p.statement}"
                 line += "\n           " + _pad(str(p.sketch))
                 if p.counterexample:
-                    line += f"\n           counterexample {p.counterexample}"
+                    line += f"\n           counterexample {_pad(str(p.counterexample))}"
                 if gate.get("next") and p.verdict not in ("holds", "proven"):
                     line += "\n           " + _pad(str(gate['next']))
                 lines.append(line)
@@ -261,7 +262,7 @@ class Record:
                     and p.note:
                 line += "\n           " + _pad(str(p.note))
             if p.counterexample:
-                line += f"\n           counterexample {p.counterexample}"
+                line += f"\n           counterexample {_pad(str(p.counterexample))}"
             for said in (p.meta or {}).get("mathema.let_warning") or ():
                 line += f"\n           warning: {said}"
             stratum = getattr(p, "stratum", None)
@@ -305,9 +306,9 @@ def analyze(fn) -> Facts:
         # honestly state (a namespaced form hash, real param kinds,
         # tree=None); they are richer than the doc-only fallback the
         # source-less path below would produce, so they win outright
-        return injected
+        return effective_facts(fn)
     try:
-        facts = analyze_source(fn)
+        facts = effective_facts(fn)
     except SourceUnavailable:
         return _doc_only_facts(fn)
     facts.tier = 3 if not facts.is_pure else 2
@@ -345,11 +346,26 @@ def _doc_only_facts(fn) -> Facts:
             params = [f"x{i}" for i in range(arity)] if arity > 1 else ["x"]
             sig_str = "(" + ", ".join(params) + ")"
             break
+    from .analysis import finite_annotation_domains, signature_kinds
+    try:
+        kinds, detected, undrawable = signature_kinds(fn, params)
+    except Exception:
+        kinds, detected, undrawable = {p: "unknown" for p in params}, {}, {}
+    try:
+        finite = finite_annotation_domains(fn)
+    except Exception:
+        finite = {}
     return Facts(
         name=name,
         signature=sig_str,
         params=params,
-        param_kinds={p: "unknown" for p in params},
+        # read from the signature, as the sourced analysis reads its
+        # annotations: the kind, the runtime type and the finite domain
+        # each parameter's type states
+        param_kinds=kinds,
+        runtime_types=detected,
+        undrawable=undrawable,
+        finite_domains=finite,
         returns_kind="unknown",
         docstring=doc or None,
         source="<no Python source; documentation-only record>",
@@ -634,7 +650,9 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     claim name to a human line (usually from
     `compendium.external_premises`) that the missing-prerequisite note
     then includes. Data only; it never satisfies a premise, and
-    check() itself stays IO-free.
+    check() itself stays IO-free. An entry `{"cycle": True}` marks a
+    reference the caller found in a premise cycle across functions: a
+    claim naming it is skipped as a premise cycle.
 
     `runtime_types` (`{param: "pandas.Series"}`, else a `declared`
     entry's `runtime_types:`) names the runtime type of a parameter
@@ -995,7 +1013,7 @@ def status(root: str = ".") -> str:
     lines = []
     for key, fn in sorted(tagged().items()):
         try:
-            current = analyze_source(fn).form
+            current = effective_facts(fn).form
         except SourceUnavailable:
             current = None
         rec = verified.get(key) or verified.get(fn.__name__)

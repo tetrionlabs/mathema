@@ -139,12 +139,12 @@ def parse_mathema_docstring(fn) -> MathemaDocstring:
     an unparseable docstring just scores low and lists why in `errors`."""
     import warnings
 
-    from .analysis import SourceUnavailable, analyze_source
+    from .analysis import SourceUnavailable, effective_facts
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except SourceUnavailable:
             facts = None
 
@@ -306,7 +306,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     once per function."""
     import warnings
 
-    from .analysis import SourceUnavailable, analyze_source
+    from .analysis import SourceUnavailable, effective_facts
     from .authoring import _fn_key
     from .grammar import parse_raises
     from .inventory import _raised_exception_names, docstring_quality
@@ -318,7 +318,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            facts = analyze_source(fn)
+            facts = effective_facts(fn)
         except SourceUnavailable:
             facts = None
 
@@ -464,7 +464,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         conflicts = [c for c in claim_conflicts(fn, file_entry)
                      if c.get("kind") != "release-move"]
         from .authoring import retrieve
-        merged = retrieve(fn, root)
+        merged = retrieve(fn, root, store=declared)
         drift = docstring_drift(fn, merged, verified_entry)
         unknown = any(d["kind"] == "unknown-in-docstring" for d in drift)
         claims_in_sync = not conflicts and not unknown
@@ -499,7 +499,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
     verified_claim_count = len(verified_entry.get("claims") or [])
     try:
         from .authoring import retrieve as _retrieve
-        declared_claim_count = len(_retrieve(fn, root).get("claims") or [])
+        declared_claim_count = len(_retrieve(fn, root, store=declared)
+                                   .get("claims") or [])
     except Exception:
         declared_claim_count = 0
     claims_actual = max(len(parsed.claims), verified_claim_count,
