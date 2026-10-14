@@ -66,14 +66,33 @@ def test_a_raise_at_a_closed_endpoint_falsifies_on_the_probe_route(fn, law):
     assert "mathema.boundary_fragility" not in p.meta
 
 
-def test_a_suggested_value_claim_still_falsifies_the_same_fragility():
-    # the raise is not an accuracy failure (is_numerically_stable reads
-    # accuracy only); the suggested idempotence claim meets it
+def _pieces_contain(domain: dict, value: float) -> bool:
+    for piece in domain["x"]["pieces"]:
+        if "lo" not in piece:
+            continue
+        above = (value >= piece["lo"] if piece["closed_lo"]
+                 else value > piece["lo"])
+        below = (value <= piece["hi"] if piece["closed_hi"]
+                 else value < piece["hi"])
+        if above and below:
+            return True
+    return False
+
+
+def test_a_suggested_value_claim_is_bound_outside_the_raising_band():
+    # the raise region read exactly is both ends of the band, x*x in
+    # [1, 1.0000000000000002], so the suggested idempotence claim is
+    # bound to the rest of the line and the raise is stated as its own
+    # raises row at x = -1 and x = 1
     rec = mathema.check(knife_edge)
     ns = next(p for p in rec.probes if p.name == "idempotent")
-    assert ns.verdict == "falsified"
-    assert "clamp" in ns.counterexample
-    assert "floating-point boundary" in ns.counterexample
+    assert ns.verdict in ("holds", "proven"), (ns.verdict, ns.counterexample)
+    assert not _pieces_contain(ns.domain, 1.0)
+    assert not _pieces_contain(ns.domain, -1.0)
+    raises = next(p for p in rec.probes if p.name == "raises[x]")
+    assert raises.verdict in ("holds", "proven")
+    assert _pieces_contain(raises.domain, 1.0)
+    assert _pieces_contain(raises.domain, -1.0)
 
 
 def test_a_real_raise_region_is_never_absorbed():
