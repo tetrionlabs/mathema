@@ -10285,7 +10285,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     setup = sampling()
     rng, specials = setup.rng, setup.specials
     from .probing import claim_sampling_budget
-    risk, budget = claim_sampling_budget(setup, facts, cj_domain)
+    risk, budget = claim_sampling_budget(
+        setup, facts, cj_domain,
+        bound={p: cj_domain[p] for p in (cj.domain or {}) if p in cj_domain})
     if getattr(cj, "trials", None) is not None:
         # the claim's own trials, which may exceed the usual limit
         budget = cj.trials
