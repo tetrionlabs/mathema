@@ -32,6 +32,23 @@ _UNLOOKED = object()
 F_CALL = "__f__"
 
 
+def alias_f_calls(tree, params):
+    """Intent:
+        `tree` (a parsed claim side) with each call `f(...)` renamed to
+        `F_CALL` when one of `params` is named `f`, so a bare `f` reads
+        the parameter and the call still reaches the function under
+        test; renamed in place and returned.
+    """
+    import ast
+    if "f" not in params:
+        return tree
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "f":
+            node.func.id = F_CALL
+    return tree
+
+
 def calls_f_by_alias(*codes) -> bool:
     """Intent:
         Whether any of `codes` (compiled claim sides, `None` skipped)

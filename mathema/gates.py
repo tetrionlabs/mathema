@@ -147,10 +147,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a Sum/Prod index is bound over its summand: it is no
             # coordinate of the point, even when a parameter shares its
             # name
-            code_l, aux_l, bound_l = _indexed.compile_indexed(cj.lhs, aux_l)
+            code_l, aux_l, bound_l = _indexed.compile_indexed(
+                cj.lhs, aux_l, set(kinds))
             bound_r: set = set()
             if cj.rhs:
-                code_r, aux_r, bound_r = _indexed.compile_indexed(cj.rhs, aux_r)
+                code_r, aux_r, bound_r = _indexed.compile_indexed(
+                    cj.rhs, aux_r, set(kinds))
             bound_indices = bound_l | bound_r
     except (InvalidConjecture, ValueError):
         return None

@@ -7,6 +7,7 @@ a bare `f` is the parameter, on every route."""
 import pytest
 
 import mathema
+from mathema.types import Mat
 
 
 def to_celsius(f):
@@ -66,3 +67,40 @@ def test_the_suggested_rows_agree_with_the_renamed_twin():
     for name in ("even", "odd", "idempotent"):
         assert named_f[name] == renamed[name], name
         assert named_f[name][0] == "falsified", name
+
+
+def test_a_property_of_the_result_gets_the_renamed_twins_verdict():
+    named_f = _verdicts(to_celsius, [mathema.claim(
+        "for f in [32, 212], is_finite(f(f))", name="finite")])
+    renamed = _verdicts(to_celsius_deg, [mathema.claim(
+        "for deg in [32, 212], is_finite(f(deg))", name="finite")])
+    assert named_f["finite"] == renamed["finite"]
+    assert named_f["finite"][0] == "holds"
+
+
+def scaled(f: Mat("n", "n")):
+    return [[2 * x for x in row] for row in f]
+
+
+def scaled_a(a: Mat("n", "n")):
+    return [[2 * x for x in row] for row in a]
+
+
+def test_a_matrix_property_of_the_result_gets_the_renamed_twins_verdict():
+    named_f = _verdicts(scaled, [mathema.claim(
+        "is_symmetric(f(f))", name="symmetric")])
+    renamed = _verdicts(scaled_a, [mathema.claim(
+        "is_symmetric(f(a))", name="symmetric")])
+    assert named_f["symmetric"] == renamed["symmetric"]
+    assert named_f["symmetric"][0] == "falsified"
+
+
+def test_an_indexed_sum_over_f_gets_the_renamed_twins_verdicts():
+    named_f = _verdicts(to_celsius, [mathema.claim(
+        "for f in [0, 10], Sum(f(f) + i, i, 1, 3) >= -100", name="summed")])
+    renamed = _verdicts(to_celsius_deg, [mathema.claim(
+        "for deg in [0, 10], Sum(f(deg) + i, i, 1, 3) >= -100",
+        name="summed")])
+    for name in ("summed", "summed[float]"):
+        assert named_f[name] == renamed[name], name
+    assert named_f["summed[float]"] == ("holds", "probe")

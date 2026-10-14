@@ -115,20 +115,23 @@ def uses_indexed_form(src: str | None) -> bool:
                and n.func.id in INDEXED_FORMS for n in ast.walk(tree))
 
 
-def compile_indexed(src: str, aux: set[str]):
+def compile_indexed(src: str, aux: set[str], params=()):
     """Intent:
         Compile an already validated law that calls `Sum`/`Prod` for
         point evaluation: `(code, aux, bound)`, where `code` evaluates
         with `Sum`/`Prod` bound to `indexed_total` (see `indexed_env`),
         `aux` narrows the validated auxiliary names to those still free
         once each index is bound, and `bound` names every index that
-        occurs nowhere free in the law.
+        occurs nowhere free in the law. When one of the function's
+        `params` is named `f`, each call `f(...)` is compiled as a call
+        through `_exact_side.F_CALL`, as the validated law reads it.
 
     Raises:
         ValueError: a `Sum`/`Prod` call that is not (expr, bare index
             name, lo, hi).
     """
-    tree = ast.parse(src, mode="eval")
+    from ._exact_side import alias_f_calls
+    tree = alias_f_calls(ast.parse(src, mode="eval"), params)
     rewrite = _Rewrite()
     tree = ast.fix_missing_locations(rewrite.visit(tree))
     if rewrite.malformed:

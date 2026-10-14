@@ -4472,8 +4472,10 @@ def _matrix_output_probe(prop):
 
         from .domain import is_missing
         from ._premises import PremiseRejected
+        from ._exact_side import alias_f_calls
         try:
-            code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
+            code = compile(alias_f_calls(_ast.parse(cj.lhs, mode="eval"),
+                                         facts.params), "<claim>", "eval")
         except SyntaxError:
             return None
         draw = _structured_draws(fn, facts, cj, domain)
@@ -4565,7 +4567,10 @@ def _eval_matrix_expr(code, env: dict, fn, raised: "list | None" = None):
             except Exception as exc:
                 raised.append(exc)
                 raise
-    names = {"f": call, **lae.FUNCTIONS,
+    from ._exact_side import F_CALL
+    # a parameter named f in `env` takes the name f; the call reaches
+    # the function as F_CALL then
+    names = {"f": call, F_CALL: call, **lae.FUNCTIONS,
              **{k: lae.as_array(v) for k, v in env.items()}}
     with _pinned_float_env():
         value = eval(code, {"__builtins__": {}}, names)
