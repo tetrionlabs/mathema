@@ -14,6 +14,7 @@ regeneration.
 from __future__ import annotations
 
 import datetime
+import functools
 import os
 import re
 import unicodedata
@@ -326,13 +327,51 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
     return spec
 
 
+@functools.lru_cache(maxsize=4096)
+def _bare_key_reads_back(key: str) -> bool:
+    """Whether `key` written bare as a mapping key reads back as the
+    same string (`null`, `true`, `1` and `a: b` do not)."""
+    import yaml
+    try:
+        return yaml.safe_load(f"{key}: 0") == {key: 0}
+    except yaml.YAMLError:
+        return False
+
+
+def _key(k) -> str:
+    """A mapping key as YAML text: bare when it reads back as itself,
+    else in the form `_scalar` gives its value."""
+    if isinstance(k, str) and _bare_key_reads_back(k):
+        return k
+    return _scalar(k)
+
+
+def _word_keys(node):
+    """Intent:
+        `node` with every mapping key YAML read as null or a boolean
+        given back as its word (`null`, `true`, `false`), at any depth.
+
+    Notes:
+        A record written before keys were quoted holds `null:` bare,
+        which reads as None.
+    """
+    if isinstance(node, dict):
+        return {({None: "null", True: "true", False: "false"}[k]
+                 if k is None or isinstance(k, bool) else k): _word_keys(v)
+                for k, v in node.items()}
+    if isinstance(node, list):
+        return [_word_keys(v) for v in node]
+    return node
+
+
 def _dump(value, indent: int = 0) -> str:
     pad = "  " * indent
     if isinstance(value, dict):
         if not value:
             return pad + "{}\n"
         out = ""
-        for k, v in value.items():
+        for key, v in value.items():
+            k = _key(key)
             if isinstance(v, (dict, list)) and v:
                 out += f"{pad}{k}:\n" + _dump(v, indent + 1)
             elif isinstance(v, list):      # empty list: inline [], not the
@@ -1529,7 +1568,7 @@ def _parsed_yaml(path: str, fh=None):
             text = own.read()
     else:
         text = fh.read()
-    data = yaml.load(text, Loader=_SAFE_LOADER)
+    data = _word_keys(yaml.load(text, Loader=_SAFE_LOADER))
     _PARSED[path] = (stamp, data)
     return copy.deepcopy(data)
 
@@ -1558,7 +1597,7 @@ def read_verified_file(path: str) -> "tuple[dict | None, str | None]":
         if hit is not None and hit[0] == stamp:
             data = copy.deepcopy(hit[1])
         else:
-            data = yaml.load(text, Loader=_SAFE_LOADER)
+            data = _word_keys(yaml.load(text, Loader=_SAFE_LOADER))
             _PARSED[path] = (stamp, data)
             data = copy.deepcopy(data)
     except yaml.YAMLError as e:
