@@ -92,6 +92,7 @@ from ..symbolic import ProofResult as ProofResult
 from ..probing import _fmt
 from ..probing import sample_bound as sample_bound
 from .._shrink import shrink as shrink
+from ..koine.facts import sibling_scope as sibling_scope
 
 from .runtime import POINT_RUNTIME_PROTOCOL as POINT_RUNTIME_PROTOCOL
 from .runtime import PointRuntime as PointRuntime
@@ -169,6 +170,9 @@ SURFACE: dict[str, tuple[str, ...]] = {
                  "format_point", "pinned_float_env"),
     # drawing a member of any declared bound, and shrinking a witness
     "sampling": ("sample_bound", "shrink"),
+    # a lifted body's calls to the other functions of its program,
+    # bound to the documents or callables the caller supplies
+    "body_scope": ("sibling_scope",),
 }
 
 # What core calls on a registered capability provider: the attribute it

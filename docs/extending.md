@@ -210,6 +210,31 @@ that needs a body to lift finds `tree=None` and declines, saying so.
 since the proxy's source file is not where the function it stands for
 is written.
 
+## Lifted bodies
+
+A resolver that lifts a foreign function's body hands the engine a
+document, carried in the `koine` field of the `Facts` it injects, as a
+document or as its text. Two calls on the surface take such documents
+as they stand.
+
+`sibling_scope(fn, siblings)` binds the other functions of the program
+a lifted body calls. `fn` is the proxy (or its `Facts`); `siblings`
+maps the locator the body calls each one by to that function, as its
+document or as a callable. The result is the scope the body is read
+in, with each called function under the name the engine's rendering
+gives it; set it on the proxy and derive reads through the calls:
+
+```python
+from mathema.interfaces.extension import sibling_scope
+
+proxy.__mathema_scope__ = sibling_scope(proxy, {"src/shapes#scaled": scaled_doc})
+```
+
+A document is bound as the engine's rendering of it, with its own calls
+bound from the same mapping; a callable is bound as given. A call whose
+locator is not in the mapping stays unbound, and derive declines to read
+through it rather than guessing.
+
 ## The extension surface
 
 Everything a provider may import lives in
@@ -234,6 +259,7 @@ Everything a provider may import lives in
 | `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
+| `body_scope` | `sibling_scope` |
 
 `evidence_rank` ranks a route or an intent class, strongest lowest. A
 compendium definition row's route, `axiom`, ranks with trusted testimony,
