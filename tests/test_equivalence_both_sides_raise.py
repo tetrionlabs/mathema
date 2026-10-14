@@ -8,6 +8,8 @@ forms agree wherever both return and both sides raise the same exception
 on the same region."""
 import math
 
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -96,3 +98,45 @@ def test_sampling_falsifies_different_exception_types():
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "f raised ZeroDivisionError" in p.counterexample
     assert "g raised ValueError" in p.counterexample
+
+
+def _guarded_root(x):
+    if x < 0:
+        raise ValueError("x must be non-negative")
+    return math.sqrt(x)
+
+
+def _guarded_square(x):
+    if x < 0:
+        raise ValueError("x must be non-negative")
+    return x * x
+
+
+def _guarded_nudged_root(x):
+    if x < 0:
+        raise ValueError("x must be non-negative")
+    return math.sqrt(x) + 1e-12
+
+
+def _root(x):
+    return math.sqrt(x)
+
+
+def _square(x):
+    return x * x
+
+
+def _nudged_root(x):
+    return math.sqrt(x) + 1e-12
+
+
+@pytest.mark.parametrize("guarded, plain", [
+    (_guarded_square, _square), (_guarded_nudged_root, _nudged_root)])
+def test_sides_raising_alike_answer_as_they_do_where_both_return(guarded,
+                                                                 plain):
+    both_raising = _eq(_guarded_root, guarded, "x in [-4, 4]")
+    where_both_return = _eq(_root, plain, "x in [0, 4]")
+    assert both_raising.verdict == where_both_return.verdict, (
+        both_raising, where_both_return)
+    assert ((both_raising.meta or {}).get("mathema.corroboration")
+            == (where_both_return.meta or {}).get("mathema.corroboration"))

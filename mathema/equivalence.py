@@ -416,9 +416,14 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
         if falsified is not None:
             state.proof = proof
             return falsified
-        coinciding = _coinciding_raise_proof(case)
+        coinciding = _coinciding_raise_proof(case, state)
         if coinciding is not None:
             return coinciding
+        if state.proof is not None and state.proof.status == "disproven":
+            # the two sides refuse alike, and derive found their values
+            # different at a point where both return: the next rung
+            # executes both sides there
+            return None
         state.raise_note = proof.sketch
         proof = replace(proof, status="undecided")
     state.proof = proof
@@ -481,11 +486,16 @@ def _witness_args(case: _Case, proof) -> list | None:
     return args
 
 
-def _coinciding_raise_proof(case: _Case) -> Probe | None:
+def _coinciding_raise_proof(case: _Case,
+                            state: "_LadderState | None" = None
+                            ) -> Probe | None:
     """Intent:
         Proven when both sides raise the same exception on exactly the
         same region of the declared domain and their closed forms agree
-        everywhere else, else None.
+        everywhere else, else None. When the regions coincide and
+        derive finds the values different at a point where both return,
+        that disproof is left in `state.proof` for the next rung to
+        execute.
 
     Notes:
         The value half is the symbolic difference proved under
@@ -515,6 +525,7 @@ def _coinciding_raise_proof(case: _Case) -> Probe | None:
     except Exception:
         return None
     if proof.status != "proven":
+        _where_both_return(case, regions, state)
         return None
     name = case.facts.params[0]
     if case.compare_refusals:
@@ -535,6 +546,74 @@ def _coinciding_raise_proof(case: _Case) -> Probe | None:
                f"difference vanishes: {proof.sketch}",
         condition=proof.quantifier, note=case.note,
         meta=dict(case.annotations)), "symbolic")
+
+
+def _where_both_return(case: _Case, regions: dict,
+                       state: "_LadderState | None") -> None:
+    """Intent:
+        The value question on the part of the declared domain where
+        neither side refuses: each piece of the domain minus the shared
+        raise region is handed to the symbolic rung as the domain, and
+        the first disproof naming a point is left in `state.proof`,
+        where the next rung executes both sides at that point, as for
+        any symbolic disproof.
+    """
+    from .symbolic import try_prove
+    if state is None:
+        return
+    try:
+        pieces = _returning_pieces(case, regions)
+    except TimeoutError:
+        return
+    name = case.facts.params[0]
+    params = ", ".join(case.facts.params)
+    for bound in pieces:
+        try:
+            proof = try_prove(case.fn, case.facts, f"f({params})",
+                              f"{case.rhs_name}({params})", "==",
+                              domain={name: bound},
+                              tolerance=case.cj.tolerance,
+                              funcs={case.rhs_name: case.gfn})
+        except Exception:
+            return
+        if proof.status == "disproven" and _witness_args(case, proof):
+            state.proof = proof
+            return
+
+
+def _returning_pieces(case: _Case, regions: dict) -> list:
+    """Intent:
+        The declared domain of the single parameter minus the shared
+        raise region, one bound per piece: an `Interval` (its ends as
+        floats) or a finite set. Empty when the remainder is not a
+        union of intervals and finite sets.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import Interval, bound_to_sympy_set
+
+    refused = (_union(regions["f"].values()) if not case.compare_refusals
+               else _union(regions.values()))
+
+    def remainder():
+        bound = (case.cj_domain or {}).get(case.facts.params[0])
+        domain = (sympy.S.Reals if bound is None
+                  else bound_to_sympy_set(bound))
+        return sympy.Complement(domain, refused)
+
+    rest = _with_timeout(remainder, FAST_TIMEOUT_SECONDS)
+    out: list = []
+    for part in (rest.args if isinstance(rest, sympy.Union) else (rest,)):
+        if isinstance(part, sympy.Interval):
+            out.append(Interval(float(part.start), float(part.end),
+                                closed_lo=not part.left_open,
+                                closed_hi=not part.right_open))
+        elif isinstance(part, sympy.FiniteSet):
+            out.append(frozenset(float(v) for v in part))
+        else:
+            return []
+    return out
 
 
 def _region_text(region, name: str) -> str:
