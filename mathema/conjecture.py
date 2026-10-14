@@ -60,7 +60,7 @@ from .domain import operational_domain as _operational_domain
 from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
                          relation_within)
-from ._exact_side import exact_sides
+from ._exact_side import F_CALL, exact_sides, f_slot
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -3776,6 +3776,13 @@ def _validate(src: str, param_names: set[str],
                 # _MATH_ATTRS rather than being sampled randomly
                 if node.id not in callable_names and node.id not in MATH_CONSTANTS:
                     aux.add(node.id)
+    if "f" in param_names:
+        # a parameter named f: the bare name reads the parameter, and
+        # each call f(...) reaches the function under test as F_CALL
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id == "f":
+                node.func.id = F_CALL
     code = compile(_exact_products(tree), "<conjecture>", "eval")
     from ._exact_side import register_source
     register_source(code, src, tree)
@@ -9936,7 +9943,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
     inner = calling(fn, facts)
     if array_params:
         inner = _linalg_eval.law_callable(inner)
-    base = {"f": inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
+    base = {"f": inner, F_CALL: inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
             **MATH_CONSTANTS, **bound}
     from .claim_families import _OUTSIDE_DOMAIN_FAMILIES
     ignore = (frozenset({cj.lhs.strip()})
@@ -10662,7 +10669,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         plain_f = _tagged(fn_call, "f", inject=call_pins)
         try:
             for fill in (1.0, 2.0, 0.9):
-                env_filled = {**env, "f": lambda *a, _fill=fill, **k:
+                env_filled = {**env, f_slot(code_l, code_r):
+                              lambda *a, _fill=fill, **k:
                               _nan_filled(plain_f(*a, **k), _fill)}
                 try:
                     lf = eval(code_l, {"__builtins__": {}}, env_filled)
@@ -10718,8 +10726,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # MATH_CONSTANTS before the per-trial parameter assignment
         # below, so a parameter named `e`/`pi` overrides the constant
         # (precedence identical to the derive route)
-        env = {"f": fn_tagged, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
-               **MATH_CONSTANTS, **bound_tagged}
+        env = {"f": fn_tagged, F_CALL: fn_tagged, **_SAFE_FUNCS,
+               **_linalg_eval.FUNCTIONS, **MATH_CONSTANTS, **bound_tagged}
         args = []
         if trial < len(pinned):
             # a counterexample already on record replays before any

@@ -25,6 +25,47 @@ EXACT_TYPES = (int, Fraction, bool)
 #: numpy not looked for yet; `_NUMPY` holds the module or None after
 #: the one lookup, since the interpreter does not cache a failed import
 _UNLOOKED = object()
+
+#: the name a claim's call `f(...)` is compiled to when one of the
+#: function's own parameters is named `f`: a bare `f` then reads the
+#: parameter and the call reaches the function under this name
+F_CALL = "__f__"
+
+
+def calls_f_by_alias(*codes) -> bool:
+    """Intent:
+        Whether any of `codes` (compiled claim sides, `None` skipped)
+        calls the function under test through `F_CALL`, nested code
+        objects included.
+    """
+    import types
+    for code in codes:
+        if code is None:
+            continue
+        if F_CALL in code.co_names or calls_f_by_alias(
+                *(c for c in code.co_consts if isinstance(c, types.CodeType))):
+            return True
+    return False
+
+
+def f_slot(*codes) -> str:
+    """Intent:
+        The name `codes` call the function under test by: `F_CALL` when
+        they read a bare `f` as a parameter, `f` otherwise.
+    """
+    return F_CALL if calls_f_by_alias(*codes) else "f"
+
+
+def _aliased_callees(callees: dict, codes) -> dict:
+    """Intent:
+        `callees` as `codes` call them: the function under test under
+        `F_CALL` rather than `f` when the claim reads a bare `f` as a
+        parameter, so the parameter's value keeps the name `f`.
+    """
+    if "f" not in callees or not calls_f_by_alias(*codes):
+        return callees
+    return {**{k: v for k, v in callees.items() if k != "f"},
+            F_CALL: callees["f"]}
 _NUMPY: object = _UNLOOKED
 
 
@@ -384,6 +425,7 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         number representation reads them.
     """
     from ._math_vocab import MATH_CONSTANTS
+    callees = _aliased_callees(callees, (code_l, code_r))
     # a named constant (pi, e) keeps its float, which no exact side
     # survives
     exact_env = {k: (wrap(callees[k], exact_calls) if k in callees
@@ -422,6 +464,7 @@ def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
         float sides at the same infinity then do not agree: the value
         they stand for is finite.
     """
+    callees = _aliased_callees(callees, (code_l, code_r))
     exact_env = {k: (wrap(callees[k]) if k in callees else to_exact(v))
                  for k, v in env.items() if k != "__builtins__"}
     for k, v in callees.items():

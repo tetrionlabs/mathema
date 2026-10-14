@@ -17,6 +17,7 @@ runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
 from . import _exits, _shapes
+from ._exact_side import F_CALL, f_slot
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -317,7 +318,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                       if (fill := _fill_value(cj_domain.get(p))) is not None}
     from ._missing_policy import Presence
     executed.presence = Presence(dict(kinds), {p: cj_domain.get(p) for p in kinds})
-    base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
+    base_env = {"f": _tag(fn_call, "f"), F_CALL: _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
                 **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
@@ -379,7 +380,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         try:
             for fill in (1.0, 2.0, 0.9):
                 env = {"__builtins__": {}, **base_env, **_typed(point),
-                       "f": lambda *a, _fill=fill, **k:
+                       f_slot(code_l, code_r): lambda *a, _fill=fill, **k:
                        _nan_filled(fn_call(*a, **k), _fill)}
                 try:
                     lf = eval(code_l, env)
