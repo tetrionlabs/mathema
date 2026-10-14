@@ -2519,8 +2519,33 @@ class SamplingSetup:
     affine: bool = False
     explicit_trials: bool = False
     scale: float = 1.0
-    # "probe" or "probe:semi_analytical", the route value the evidence
-    # honestly earns, per record-schema.md's open route field.
+    # "probe:semi_analytical" when an analytically discovered critical
+    # point exists, else "probe"; the subroute is earned only once a
+    # draw lands on one of `analytical_hints` (`earned_route`)
+    analytical_hints: dict = dataclasses.field(default_factory=dict)
+
+    def earned_route(self, drew_critical: bool) -> str:
+        """Intent:
+            The route a sampling pass reports: `route`, except that
+            `probe:semi_analytical` falls back to plain `probe` when no
+            draw it evaluated was an analytically discovered critical
+            point.
+        """
+        if self.route == "probe:semi_analytical" and not drew_critical:
+            return "probe"
+        return self.route
+
+    def is_critical_draw(self, values: dict) -> bool:
+        """Intent:
+            Whether a draw (`{param: value}`) puts some parameter exactly
+            on one of its own analytically discovered critical points.
+        """
+        for p, hints in self.analytical_hints.items():
+            v = values.get(p)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and v in hints:
+                return True
+        return False
 
 
 def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
@@ -2563,6 +2588,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     # this function; hazard-channel values (the decade sweep, stub
     # boundaries) widen the sampling but never relabel its mechanism
     analytical = bool(critical_hints)
+    analytical_hints = {p: list(vs) for p, vs in critical_hints.items()}
     for param, values in _hazard_hint_values(fn, facts, domain).items():
         critical_hints.setdefault(param, []).extend(values)
     # kept per-parameter, not merged into the shared `specials` pool, so
@@ -2575,16 +2601,16 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     scale = min(1.0, trials_scale)
     budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
-    # states plainly that at least one parameter's own sampling was
-    # informed by an analytically discovered critical point this run,
-    # not blind trial-and-error.
+    # states plainly that at least one draw evaluated this run was an
+    # analytically discovered critical point, not blind trial-and-error;
+    # a pass reports it through `SamplingSetup.earned_route`.
     route_value = "probe:semi_analytical" if analytical else "probe"
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
                          extra_cycles=extra_cycles, route=route_value,
                          affine=affine, explicit_trials=trials is not None,
-                         scale=scale)
+                         scale=scale, analytical_hints=analytical_hints)
 
 
 def _scaled_budget(budget: int, scale: float) -> int:

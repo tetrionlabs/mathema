@@ -10362,6 +10362,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         budget = cj.trials
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    # whether a draw evaluated this pass sat on an analytically
+    # discovered critical point (`SamplingSetup.earned_route`)
+    drew_critical = False
     from .probing import _language_lap
     # a language-bound parameter's first draws are one lap over its
     # language's hazards
@@ -10988,6 +10991,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[a_name] = rng.uniform(-5, 5)
             if not _premises.admits(assum_eval, {**env, **premise_words}):
                 continue
+        if not drew_critical and setup.is_critical_draw(
+                {p: env.get(p) for p in kinds}):
+            drew_critical = True
         for p in sequence_params:
             if isinstance(env.get(p), (list, tuple)) or (
                     _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
@@ -11671,6 +11677,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if steps:
                 note = (f"{note}; the witness was shrunk inside the language "
                         f"in {steps} step{'s' if steps != 1 else ''}").lstrip("; ")
+    probe_route = setup.earned_route(drew_critical)
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
