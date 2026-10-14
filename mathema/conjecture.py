@@ -5600,7 +5600,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
             continue
         if getattr(ctx.family, "examined_only", False) and not (
-                cj.relation == families.claim_base_name(cj.name)
+                cj.relation == getattr(ctx.family, "_base_name", None)
                 or (cj.relation == "==" and (cj.lhs or "").replace(" ", "")
                     == (cj.rhs or "").replace(" ", ""))):
             # a claim that shares the family's name and states something
