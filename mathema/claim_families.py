@@ -853,9 +853,14 @@ def _piece_bounds(piece):
     return None
 
 
-def _in_safe_range(lo: float, hi: float, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl) -> bool:
-    lo_ok = lo > safe_lo or (lo == safe_lo and safe_lo_incl)
-    hi_ok = hi < safe_hi or (hi == safe_hi and safe_hi_incl)
+def _in_safe_range(lo: float, hi: float, safe_lo, safe_lo_incl, safe_hi,
+                   safe_hi_incl, closed_lo: bool = True,
+                   closed_hi: bool = True) -> bool:
+    """Whether the piece from lo to hi lies inside the safe range: an
+    end the safe range excludes may be met only by an open end of the
+    piece, which excludes it too."""
+    lo_ok = lo > safe_lo or (lo == safe_lo and (safe_lo_incl or not closed_lo))
+    hi_ok = hi < safe_hi or (hi == safe_hi and (safe_hi_incl or not closed_hi))
     return lo_ok and hi_ok
 
 
@@ -904,8 +909,11 @@ def _range_piece_verdict(name: str, piece) -> str:
     if bounds is None:
         return "undecided"
     lo, hi = bounds
-    return ("proven" if _in_safe_range(lo, hi, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl)
-           else "falsified")
+    return ("proven" if _in_safe_range(
+                lo, hi, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl,
+                getattr(piece, "closed_lo", True),
+                getattr(piece, "closed_hi", True))
+            else "falsified")
 
 
 def _combine_piece_verdicts(verdicts: list) -> str:
@@ -3109,11 +3117,52 @@ def _every_link_holds(rels: list, domain: dict) -> bool:
         if not params or not all(name in domain for name in params):
             return False
         try:
-            if _relational_truth_over_domain(rel, domain, params) is not True:
-                return False
+            if _relational_truth_over_domain(rel, domain, params) is True:
+                continue
         except Exception:
             return False
+        if not _holds_on_open_interval(rel, domain):
+            return False
     return True
+
+
+def _holds_on_open_interval(rel, domain: dict) -> bool:
+    """Intent:
+        Whether a relation in one parameter holds at every point of that
+        parameter's interval read with its open ends excluded: `ratio > 0`
+        holds on `(0, 10]` though not on `[0, 10]`. False when the
+        relation reads more than one parameter, the bound is not an
+        interval with an open end, or the containment is not settled
+        within the fast wall-clock cap.
+    """
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    free = list(rel.free_symbols)
+    if len(free) != 1:
+        return False
+    bound = domain.get(str(free[0]))
+    closed_lo = getattr(bound, "closed_lo", True)
+    closed_hi = getattr(bound, "closed_hi", True)
+    if closed_lo and closed_hi:
+        return False
+    try:
+        lo, hi = float(bound[0]), float(bound[1])
+    except (TypeError, ValueError, IndexError):
+        return False
+
+    def contained():
+        ends = [_sympy.Float(e) if math.isfinite(e)
+                else (_sympy.oo if e > 0 else -_sympy.oo) for e in (lo, hi)]
+        box = _sympy.Interval(ends[0], ends[1], not closed_lo, not closed_hi)
+        real = _sympy.Symbol(str(free[0]), real=True)
+        return bool(box.is_subset(rel.subs(free[0], real).as_set()))
+    try:
+        return _with_timeout(contained, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False
+    except Exception:
+        return False
 
 
 def _certified_undefined_point(computed_rels: list, facts,
