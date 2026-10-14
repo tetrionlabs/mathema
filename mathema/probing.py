@@ -316,18 +316,27 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     return risk
 
 
+def _real_pair(pair) -> bool:
+    """Whether both ends of a two-ended bound are real numbers."""
+    return all(isinstance(b, (int, float)) and not isinstance(b, bool)
+               for b in pair)
+
+
 def _numeric_span(bounds) -> "tuple[float, float] | None":
     """Intent:
         The `(lo, hi)` a parameter's bound spans on the real line: the
         bound itself for an interval, the hull of the interval pieces
         for a real-valued `Domain` (`for x in R` reaches the float
-        range's ends), `None` for any other shape.
+        range's ends), `None` for any other shape, a complex rectangle
+        included.
     """
     if isinstance(bounds, tuple) and len(bounds) == 2:
-        return bounds
+        return bounds if _real_pair(bounds) else None
     if isinstance(bounds, Domain) and bounds.base_type != "L":
         spans = [b for b in bounds.pieces
-                 if isinstance(b, tuple) and len(b) == 2]
+                 if isinstance(b, (tuple, list)) and len(b) == 2]
+        if any(not _real_pair(b) for b in spans):
+            return None
         if spans:
             return (min(lo for lo, _hi in spans), max(hi for _lo, hi in spans))
     return None

@@ -42,3 +42,19 @@ def test_a_narrow_claim_binding_keeps_the_affine_budget():
     row = _row("for x in [0, 1], f(x) == 2*x + 1")
     assert row.verdict == "holds"
     assert row.n < 64
+
+
+def test_a_complex_rectangle_is_not_read_as_a_real_span():
+    from mathema.probing import _numeric_span
+    assert _numeric_span((-1 - 1j, 1 + 1j)) is None
+    assert _numeric_span((-1.0, 2.0)) == (-1.0, 2.0)
+    assert _numeric_span((0, float("inf"))) == (0, float("inf"))
+
+
+def test_a_complex_domain_is_not_read_as_a_real_span():
+    from mathema.conjecture import claim
+    from mathema.probing import _numeric_span
+    bound = claim("for z in [-1-1j, 1+1j], f(z) == z").domain["z"]
+    assert _numeric_span(bound) is None
+    real = claim("for x in [-2, 3], f(x) == x").domain["x"]
+    assert _numeric_span(real) == (-2, 3)
