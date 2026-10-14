@@ -2,6 +2,11 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## 0.6.2.1
+
+- `mathema badges` and the MCP `badges` tool run on every project, including one whose records hold a missing-value map for a list parameter (a key spelled `null`). Records keep every mapping key as written, and records written by 0.6.1 and 0.6.2 read as they are, with no need to verify again.
+- The `language` extra installs mathema-language 0.2.
+
 ## 0.6.2
 
 ### Upgrading from 0.6.1
