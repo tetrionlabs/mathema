@@ -2827,19 +2827,29 @@ def _definedness_guards(fn, facts, working: bool = False,
     return guards, gaps
 
 
+# claims never judged over the working domain: `raises` and
+# `excluded_outside_domain` ask about the inputs the guards refuse, over
+# the whole domain, and the state and repeatability families are read
+# from the source without calling f
+_WHOLE_DOMAIN_RELATIONS = frozenset(
+    ("raises", "excluded_outside_domain", "is_repeatable")
+    + tuple(families.GROUPS["stateless"]))
+
+
 def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     """Intent:
         What a family claim's working domain is, for the record: each
         parameter whose domain the function's own guards narrow, mapped
         to the narrowed domain as text, and `guards` listing the
         conditions a conditional raise cuts. Empty for a value claim
-        (its explicit domain is never narrowed) and where no guard
-        narrows anything.
+        (its explicit domain is never narrowed), where no guard
+        narrows anything, and for a claim never judged over the working
+        domain (`_WHOLE_DOMAIN_RELATIONS`).
     """
     import sympy
 
     from .domain import bound_to_sympy_set
-    if facts is None:
+    if facts is None or cj.relation in _WHOLE_DOMAIN_RELATIONS:
         return {}
     enforced_texts = _enforced_working_texts(fn, facts, cj, domain)
     if cj.relation not in routes.examine_predicates():
@@ -2969,15 +2979,16 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
         so only those parameters can empty it; a raise inside a domain
         it states is a counterexample instead. Read from
         the body (no `return` anywhere and every path ends in a `raise`,
-        or a guard cut or `enforce_domain` that leaves no point of a
-        parameter's domain) and corroborated by calls at points of the
-        domain, each of which must be refused by f's own guard.
+        or the region the admitted domains, `enforce_domain` and every
+        raise condition leave, over all parameters at once, shown to
+        hold no point) and corroborated by calls at points of the
+        domain, each of which must be refused by f's own guard. A
+        region whose emptiness is not shown is not empty.
     """
     import inspect
 
-    import sympy
-
-    from .domain import bound_to_sympy_set, without_sentinels
+    from ._guard_region import region_is_empty
+    from .domain import without_sentinels
     if facts is None or facts.tree is None or not facts.params:
         return False
     value_claim = cj.relation not in routes.examine_predicates()
@@ -2987,42 +2998,13 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
         # state and repeatability are read from the source, never by
         # calling f, and say nothing about which inputs f accepts
         return False
+    empty = _body_always_raises(facts) or region_is_empty(
+        _working_region(fn, facts, cj, domain, value_claim))
+    if not empty:
+        return False
     # the numbers each parameter admits, its holes and absence aside
     domain = {p: without_sentinels(b) if b is not None else None
               for p, b in domain.items()}
-    func = next((n for n in ast.walk(facts.tree)
-                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
-    if func is None:
-        return False
-    returns = any(isinstance(n, ast.Return) for n in ast.walk(func))
-    empty = not returns and _always_raises(func.body)
-    if not empty:
-        enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
-        cuts = guard_cut_texts(fn, facts)
-        for p in facts.params:
-            bound = domain.get(p)
-            if value_claim and bound is not None:
-                continue
-            try:
-                here = bound_to_sympy_set(bound) if bound is not None \
-                    else sympy.S.Reals
-                if p in enforced:
-                    here = here & bound_to_sympy_set(enforced[p])
-            except Exception:
-                continue
-            sym = sympy.Symbol(p, real=True)
-            for text in cuts:
-                try:
-                    cond = sympy.sympify(text, locals={p: sym})
-                    if getattr(cond, "free_symbols", None) == {sym}:
-                        here = here - cond.as_set()
-                except Exception:
-                    continue
-            if here is sympy.S.EmptySet:
-                empty = True
-                break
-    if not empty:
-        return False
     # corroborated: f's own guard refuses a call at each point tried
     from .claim_families import _interval_ends
     points = []
@@ -3047,6 +3029,41 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
             continue
         return False
     return True
+
+
+def _working_region(fn, facts, cj, domain: dict, value_claim: bool):
+    """Intent:
+        The working domain as one sympy boolean over the real
+        parameters: each parameter's admitted interval (the claim's or
+        the call's binding, cut to what `@enforce_domain` admits), and
+        outside every one of f's own raise conditions. A value claim
+        reads only the parameters it binds no domain for. A domain that
+        has no reading as a real set contributes no constraint, so the
+        region only ever admits more points than the working domain.
+    """
+    import sympy
+
+    from .domain import bound_to_sympy_set, without_sentinels
+    conds = _own_guard_conditions(fn, facts)
+    symbol_of = {str(sym): sym for cond in conds
+                 for sym in getattr(cond, "free_symbols", ())}
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    bound = _bound_by_claim(fn, cj, domain) if value_claim else set()
+    box = []
+    for p in facts.params:
+        if p in bound:
+            continue
+        sym = symbol_of.get(p) or sympy.Symbol(p, real=True)
+        here = domain.get(p)
+        for b in ((here,) if here is not None and here is not enforced.get(p)
+                  else ()) + ((enforced[p],) if p in enforced else ()):
+            try:
+                # the numbers the bound admits, its holes and absence aside
+                box.append(bound_to_sympy_set(without_sentinels(b))
+                           .as_relational(sym))
+            except Exception:
+                continue
+    return sympy.And(*box, sympy.Not(sympy.Or(*conds)))
 
 
 def _point_of(text: "str | None") -> dict:
@@ -3096,8 +3113,13 @@ def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
     """Intent:
         Whether a value claim is read over the working domain f's own
         raise branches leave: it binds no domain (in the claim or the
-        call) for any parameter those branches read.
+        call) for any parameter those branches read. A raise branch
+        true at every input, and a body that raises before any return,
+        read every parameter. The domain `@enforce_domain` states is f's
+        own guard, not a binding.
     """
+    import sympy
+
     from .hazards import finite_guard_sets
     if cj.relation in routes.examine_predicates() or cj.relation == "raises":
         return False
@@ -3105,8 +3127,36 @@ def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
     read = {str(sym) for cond in conds
             for sym in getattr(cond, "free_symbols", ())}
     read |= set(finite_guard_sets(facts))
-    bound = set(cj.domain or {}) | set(domain or {})
-    return bool(read) and not (read & bound)
+    if any(cond is sympy.true for cond in conds) \
+            or _body_always_raises(facts):
+        # a guard raising on every input, or a body that raises before
+        # any return, refuses whatever each parameter is
+        read |= set(facts.params)
+    return bool(read) and not (read & _bound_by_claim(fn, cj, domain))
+
+
+def _bound_by_claim(fn, cj, domain: "dict | None") -> set:
+    """Intent:
+        The parameters a claim or its call binds a domain for. A
+        parameter whose domain is the one `@enforce_domain` states is
+        not bound by the claim: that domain is one of f's own guards.
+    """
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    return set(cj.domain or {}) | {
+        p for p, b in (domain or {}).items()
+        if p not in enforced or b is not enforced[p]}
+
+
+def _body_always_raises(facts) -> bool:
+    """Whether f's own body holds no `return` and every path through it
+    ends in a `raise`: f refuses every input."""
+    func = next((n for n in ast.walk(facts.tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None) if facts is not None and facts.tree is not None else None
+    if func is None:
+        return False
+    returns = any(isinstance(n, ast.Return) for n in ast.walk(func))
+    return not returns and _always_raises(func.body)
 
 
 def _unbound_working_bound(fn, facts, p: str):
@@ -3192,8 +3242,15 @@ def guard_cut_texts(fn, facts) -> list:
         pw = lift_piecewise(fn, facts)
     except Exception:
         return []
+    import sympy
     out: list = []
     for cond, _exc in (getattr(pw, "raise_guards", None) or []):
+        if cond is sympy.true:
+            # a guard true at every input is named by its own source
+            for text in _constant_guard_sources(fn, facts):
+                if text not in out:
+                    out.append(text)
+            continue
         pieces = list(cond.args) if hasattr(cond, "args") and \
             type(cond).__name__ == "Or" else [cond]
         for piece in pieces:
@@ -3202,6 +3259,36 @@ def guard_cut_texts(fn, facts) -> list:
                     else str(piece))
             if text not in out:
                 out.append(text)
+    return out
+
+
+def _constant_guard_sources(fn, facts) -> list:
+    """Intent:
+        The source text of each `if` test in f's body whose branch
+        always raises and whose condition holds at every input (`x < 0
+        or x >= 0`, `abs(x) >= 0`): the guard named by its condition as
+        written, where its lifted form has collapsed to True.
+    """
+    import sympy
+
+    from .symbolic._base import _bind_params, _expr_to_sympy
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return []
+    out: list = []
+    for node in ast.walk(facts.tree):
+        if not (isinstance(node, ast.If) and _always_raises(node.body)):
+            continue
+        try:
+            value = _expr_to_sympy(node.test, dict(params))
+        except Exception:
+            continue
+        if isinstance(value, tuple) or getattr(value, "free_symbols", None):
+            continue
+        if value is sympy.true or (getattr(value, "is_number", False)
+                                   and value != 0):
+            out.append(ast.unparse(node.test))
     return out
 
 
@@ -3553,6 +3640,78 @@ def _outside_definedness(fn, facts, cj):
             return True
         return False
     return outside
+
+
+def _refused_by_own_guards_at(fn, facts, cj):
+    """Intent:
+        A predicate over a claim's points: True where some call to f in
+        the claim, executed at the point, is refused by one of f's own
+        guards (`deliberate_raise`). A call whose arguments do not read
+        as numbers at the point is not refused here: the claim's own
+        evaluation runs it and judges what it does.
+    """
+    import sympy
+
+    from .symbolic._base import NotSymbolic, _bind_params, _expr_to_sympy
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return None
+    calls: list = []
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            return None
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "f"
+                    and len(node.args) == len(facts.params)
+                    and not node.keywords):
+                continue
+            try:
+                args = [_expr_to_sympy(arg, dict(params)) for arg in node.args]
+            except NotSymbolic:
+                continue
+            if any(isinstance(a, tuple) for a in args):
+                continue
+            calls.append(args)
+    if not calls:
+        return None
+
+    def refused(point: dict) -> bool:
+        values = {}
+        for name, sym in params.items():
+            value = point.get(name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not math.isfinite(value):
+                continue
+            values[sym] = sympy.Rational(value)
+        for args in calls:
+            call: "dict | None" = {}
+            for p, arg in zip(facts.params, args):
+                try:
+                    exact = arg.subs(values) if hasattr(arg, "subs") else arg
+                    if getattr(exact, "free_symbols", None):
+                        raise ValueError(p)
+                    value = float(exact)
+                except Exception:
+                    call = None
+                    break
+                call[p] = (int(value) if facts.param_kinds.get(p) == "int"
+                           and value.is_integer() else value)
+            if call is None:
+                continue
+            try:
+                _call_by_name(fn, call)
+            except Exception as exc:
+                if deliberate_raise(exc, fn):
+                    return True
+        return False
+    return refused
 
 
 def _calling_scope() -> dict:
@@ -5240,6 +5399,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                           "input its annotations and binding admit")
         working = _working_domain_record(fn, facts, cj,
                                          {**domain, **(cj.domain or {})})
+        if working and probe.verdict == "falsified" \
+                and _refused_by_own_guard(fn, _point_of(probe.counterexample)):
+            # the witness is an input f's own guards refuse: the row was
+            # judged over its own domain, not the working domain
+            working = {}
         if working:
             probe.meta = {**(probe.meta or {}),
                           "mathema.working_domain": working}
@@ -7277,8 +7441,14 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # raises claim asks about the inputs the guards refuse, so it keeps
     # the whole domain
     if cj.relation not in ("raises", "excluded_outside_domain"):
+        enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
         for p in facts.params:
-            if p in read and p not in cj_domain:
+            # a parameter `@enforce_domain` guards and nothing else binds
+            # ranges over the enforced domain, which its other guards cut
+            # further
+            unbound = p not in cj_domain or (
+                p in enforced and cj_domain[p] is enforced[p])
+            if p in read and unbound:
                 found = _unbound_working_bound(fn, facts, p)
                 if found is not None and found[0] is not None:
                     cj_domain[p] = found[0]
@@ -8798,7 +8968,11 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            "none (a built-in claim decides this claim)"}
         return
     excluded = (_outside_definedness(fn, facts, ctx.cj)
-                if ctx.assume_defined else None)
+                if ctx.assume_defined else
+                # a claim read over the working domain never executes an
+                # input f's own guards refuse
+                _refused_by_own_guards_at(fn, facts, ctx.cj)
+                if ctx.exclude_own_guards else None)
     containers, holes = _admitted_container_points(ctx, facts)
     companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
                                  bound_funcs, assum=assumption,
