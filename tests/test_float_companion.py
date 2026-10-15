@@ -214,6 +214,23 @@ def test_a_chain_proof_spawns_one_companion_folded_from_its_links():
     assert probes["law[float]"].verdict == "holds"
 
 
+def test_a_chain_companion_carries_the_conditioning_of_its_failing_link():
+    # link 2 (f(x) <= 1) holds at 1e300, where f gives 0.0; link 1
+    # (0.5 <= f(x)) fails there, so the folded line's conditioning is
+    # link 1's: the code's loss, not the inputs'
+    probes, _ = _check(plus_one_minus, "for x in [0, 1e300], 0.5 <= f(x) <= 1")
+    comp = probes["law[float]"]
+    assert comp.verdict == "falsified"
+    found = comp.meta["mathema.conditioning"]
+    assert found["inherent"] is False, found
+    assert found["words"].startswith(
+        "f loses more than the conditioning explains"), found
+    links = mathema.check(plus_one_minus, claims=[claim(
+        "for x in [0, 1e300], 0.5 <= f(x)", name="link", route="derive")])
+    alone = {p.name: p for p in links.probes}["link[float]"]
+    assert found == alone.meta["mathema.conditioning"]
+
+
 _STORE_FIXTURE = '''\
 def plus_one_minus(x: float) -> float:
     """One, computed the long way round.

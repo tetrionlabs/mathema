@@ -6299,6 +6299,12 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
         companion.stratum = broken.stratum
+        # the folded line is falsified at the first failing link, so what
+        # the conditioning says at that link's witness is its own
+        found = (broken.meta or {}).get("mathema.conditioning")
+        if found:
+            companion.meta = {**(companion.meta or {}),
+                              "mathema.conditioning": found}
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
     if empty_broken is not None:
