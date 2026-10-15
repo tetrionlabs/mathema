@@ -2,12 +2,22 @@
 # Copyright 2026 Tetrion Ltd
 """The `f =:= g` (equivalence) ladder over two live callables.
 
-Four rungs, strongest first, each free to decline: identical canonical
-form; the symbolic difference of the two lifts; the read-only closed
-forms compared directly; shared-draw sampling of both real functions.
-A falsification from the symbolic rung must reproduce on an executed
-point before it stands (the executed-witness invariant); an
-unreproduced one downgrades to unknown with the engine-bug flag.
+An equivalence claim has two lines. The mathematics line is derive's
+exact ladder, strongest first, each rung free to decline: identical
+canonical form; the symbolic difference of the two lifts (with the
+regions where both sides refuse alike); the read-only closed forms
+compared directly. A disproof from the symbolic rung stands once both
+sides, run at derive's witness and compared exactly, disagree there,
+however small the difference (`_exact_disagreement`); one that exact
+evaluation does not confirm downgrades to unknown with the engine-bug
+flag. The mathematics is exact: a declared tolerance never reaches it.
+
+The computation line runs both real functions at shared draws and
+compares what they return under the claim's tolerance. When the
+mathematics line decides, the computation is its own row,
+`<name>[float]`, beside the claim's row. When derive cannot decide,
+the shared draws are the claim's only row, as the probe's row is for a
+value claim.
 
 A claim family registered under the name `equivalence` is consulted
 before the built-in ladder and may return a verdict of its own; the
@@ -41,6 +51,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import TYPE_CHECKING, Callable, Protocol
 
 from .records import Probe
@@ -231,11 +242,15 @@ def _differing_raises(args, names, fv, f_exc, gv, g_exc,
     return f"{point}: {said('f', f_exc)}, {said(rhs_name, g_exc)}"
 
 
-def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
+def adjudicate(ctx: EquivalenceContext, fn,
+               facts) -> "tuple[Probe, Probe | None]":
     """Intent:
-        The full `=:=` adjudication: validate the claim shape, bind
-        and analyze the right-hand side, consult a registered
-        equivalence family, then run the rung ladder. Records carry
+        The full `=:=` adjudication, as `(claim row, computation row)`:
+        validate the claim shape, bind and analyze the right-hand side,
+        consult a registered equivalence family, then run the rung
+        ladder. When a mathematics rung decides (proven or falsified),
+        the computation row runs both functions at shared draws
+        (`_computation_row`); otherwise there is none. Records carry
         both sides' structural complexity as annotations, never
         verdict-bearing.
 
@@ -254,7 +269,7 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
         return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=f"{note}; equivalence takes bare function names: "
                           f"f =:= g with g bound via funcs= (got "
-                          f"{cj.lhs!r} =:= {cj.rhs!r})")
+                          f"{cj.lhs!r} =:= {cj.rhs!r})"), None
     try:
         bound = {name: (v if callable(v) else _resolve_bound_ref(v))
                  for name, v in cj.funcs.items()}
@@ -264,18 +279,18 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
     if gfn is None:
         return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=f"{note}; {rhs_name!r} is not bound, pass "
-                          f"funcs={{{rhs_name!r}: <function>}}")
+                          f"funcs={{{rhs_name!r}: <function>}}"), None
     try:
         gfacts = _effective_facts(gfn)
     except Exception as e:
         return Probe(cj.name, statement, "skipped", route=None,
-                     note=f"{note}; could not analyze {rhs_name}: {e}")
+                     note=f"{note}; could not analyze {rhs_name}: {e}"), None
     if len(facts.params) != len(gfacts.params):
         return Probe(cj.name, statement, "skipped:misspecified", route=None,
                      note=f"{note}; arity differs (f takes "
                           f"{len(facts.params)}, {rhs_name} takes "
                           f"{len(gfacts.params)}), positional equivalence "
-                          f"is not meaningful")
+                          f"is not meaningful"), None
     annotations: dict = {}
     try:
         annotations["mathema.equivalence.complexity"] = {
@@ -290,18 +305,22 @@ def adjudicate(ctx: EquivalenceContext, fn, facts) -> Probe:
 
     family_probe = _family_verdict(case)
     if family_probe is not None:
-        return family_probe
+        return family_probe, None
     if _read_elsewhere(facts) or _read_elsewhere(gfacts):
         return Probe(cj.name, statement, "skipped", route="equivalence",
                      note=_joined(note, _ACROSS_RUNTIMES),
-                     meta=dict(annotations))
+                     meta=dict(annotations)), None
 
     state = _LadderState()
-    for _, rung in RUNGS:
+    for name, rung in RUNGS:
         probe = rung(case, state)
-        if probe is not None:
-            return probe
-    return _fallthrough(case, state)
+        if probe is None:
+            continue
+        if name in _MATHEMATICS_RUNGS and probe.verdict in ("proven",
+                                                            "falsified"):
+            return probe, _computation_row(case, probe)
+        return probe, None
+    return _fallthrough(case, state), None
 
 
 #: the note on a pair across runtimes that no family adjudicated
@@ -395,7 +414,7 @@ def _rung_symbolic(case: _Case, state: _LadderState) -> Probe | None:
         proof = try_prove(case.fn, case.facts, f"f({params})",
                           f"{case.rhs_name}({params})", "==",
                           domain=case.cj_domain,
-                          tolerance=case.cj.tolerance,
+                          tolerance=None,
                           funcs={case.rhs_name: case.gfn})
     except Exception:
         proof = None
@@ -519,7 +538,7 @@ def _coinciding_raise_proof(case: _Case,
         proof = try_prove(case.fn, case.facts, f"f({params})",
                           f"{case.rhs_name}({params})", "==",
                           domain=case.cj_domain,
-                          tolerance=case.cj.tolerance,
+                          tolerance=None,
                           funcs={case.rhs_name: case.gfn},
                           assume_defined=True)
     except Exception:
@@ -572,7 +591,7 @@ def _where_both_return(case: _Case, regions: dict,
             proof = try_prove(case.fn, case.facts, f"f({params})",
                               f"{case.rhs_name}({params})", "==",
                               domain={name: bound},
-                              tolerance=case.cj.tolerance,
+                              tolerance=None,
                               funcs={case.rhs_name: case.gfn})
         except Exception:
             return
@@ -798,25 +817,70 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
     return None
 
 
-def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
-    from .conjecture import DEFAULT_TOLERANCE
-    from .probing import (_fmt, _fmt_value, _synth, complex_is_a_raise,
-                          classified, missing_class,
-                          same_infinity)
+@dataclass
+class _Sampled:
+    """What one run of both functions at the shared draws found: the
+    first disagreement's text (None when every compared point agreed),
+    the points compared, the points executed, and the sampling meta."""
+    counterexample: str | None
+    checked: int
+    executed: int
+    both_raised: int
+    discarded: dict
+    meta: dict
 
-    cj = case.cj
+    def aside(self) -> str:
+        """The note's account of points not compared, and of agreeing
+        points where both sides raised the same exception."""
+        skipped = self.discarded["not_compared"] + self.discarded["non_numeric"]
+        text = (f"; {skipped} of {self.executed} executed points were "
+                f"not comparable" if skipped else "")
+        if self.both_raised:
+            text += (f"; at {self.both_raised} of the agreeing points both "
+                     f"sides raised the same exception")
+        return text
+
+
+def _values_agree(case: _Case, fv, gv) -> bool:
+    """Intent:
+        Whether two finite values the functions returned at one point
+        agree under the claim's tolerance: within the declared absolute
+        tolerance, or within the default one plus a relative slack of
+        `EQUIV_REL_SLACK` times the larger magnitude (at least 1).
+    """
+    from .conjecture import DEFAULT_TOLERANCE
+    tol = case.cj.tolerance
+    if tol is None:
+        scale = max(abs(fv), abs(gv), 1.0)
+        return abs(fv - gv) <= DEFAULT_TOLERANCE + EQUIV_REL_SLACK * scale
+    return abs(fv - gv) <= tol
+
+
+def _sample_pair(case: _Case) -> _Sampled:
+    """Intent:
+        Run both functions at `EQUIV_SAMPLE_DRAWS` shared draws from
+        the claim's domain (seed `EQUIV_SEED`) and compare them point by
+        point, stopping at the first disagreement: a raise on one side
+        against a value on the other, two raises of different kinds
+        when the refusal names are compared, no value against a value,
+        or two values the tolerance does not cover (`_values_agree`). A
+        point where both sides raise alike, both return None, or both
+        give the same no-value result (the same infinity, two NaN
+        holes) agrees.
+    """
+    from .probing import (_fmt, _fmt_value, _synth, classified,
+                          complex_is_a_raise, missing_class, same_infinity)
+    from .runtime_types import calling
+
     kinds = {p: case.facts.param_kinds.get(p, "unknown")
              for p in case.facts.params}
     rng = random.Random(EQUIV_SEED)
-    tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
-    rel_slack = 0.0 if cj.tolerance is not None else EQUIV_REL_SLACK
     f_complex = complex_is_a_raise(case.fn, case.cj_domain)
     g_complex = complex_is_a_raise(case.gfn, case.cj_domain)
     # each side's drawn values realised as its parameters' runtime types
-    from .runtime_types import calling
     f_call = calling(case.fn, case.facts)
     g_call = calling(case.gfn, case.gfacts)
-    checked, cx, both_raised = 0, None, 0
+    checked, executed, cx, both_raised = 0, 0, None, 0
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
         args = [_synth(k, rng, case.cj_domain.get(p))
@@ -827,7 +891,7 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
             continue
         fv, f_exc = _run_side(f_call, args, f_complex)
         gv, g_exc = _run_side(g_call, args, g_complex)
-        state.executed += 1
+        executed += 1
         if classified(args, [v for v in (fv, gv) if v is not _RAISED],
                       fv is _RAISED or gv is _RAISED):
             # a raise or a missing output at a missing input is
@@ -873,8 +937,7 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
             break
         checked += 1
-        scale = max(abs(fv), abs(gv), 1.0)
-        if abs(fv - gv) > tol + rel_slack * scale:
+        if not _values_agree(case, fv, gv):
             cx = (_fmt(tuple(args), names=tuple(kinds))
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
             break
@@ -886,29 +949,46 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     nonzero = {k: v for k, v in discarded.items() if v}
     if nonzero:
         sampling["discarded"] = nonzero
-    meta = {**case.annotations, "mathema.equivalence.sampling": sampling}
-    skipped = discarded["not_compared"] + discarded["non_numeric"]
-    aside = (f"; {skipped} of {state.executed} executed points were "
-             f"not comparable" if skipped else "")
-    if both_raised:
-        aside += (f"; at {both_raised} of the agreeing points both sides "
-                  f"raised the same exception")
+    return _Sampled(cx, checked, executed, both_raised, discarded,
+                    {"mathema.equivalence.sampling": sampling})
+
+
+#: what the note of a falsified shared-draw row says counts as a
+#: disagreement
+_DISAGREEMENT = ("a raise on one side against a value on the other, "
+                 "different exceptions, or no value (a NaN, or an infinity "
+                 "other than the other side's), counting as a disagreement")
+
+
+def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
+    """Intent:
+        The shared draws standing in for a mathematics line derive
+        could not decide: falsified at the first disagreement, holds
+        once `EQUIV_MIN_AGREEMENTS` points agree, and unknown with the
+        engine-bug flag when the symbolic rung found the two different
+        and no executed point shows it. None when too few points were
+        compared, the tallies parked for the fallthrough note.
+    """
+    cj = case.cj
+    run = _sample_pair(case)
+    state.executed += run.executed
+    checked = run.checked
+    meta = {**case.annotations, **run.meta}
+    aside = run.aside()
     if state.raise_note:
         aside += f"; not proven, since {state.raise_note}"
 
-    if cx is not None:
+    if run.counterexample is not None:
         return _stamp(Probe(
             cj.name, case.statement, "falsified", route="probe",
-            n=checked, counterexample=cx,
+            n=checked, counterexample=run.counterexample,
             note=f"{case.note}; the two implementations disagree at an "
-                 f"executed shared point, a raise on one side against a "
-                 f"value on the other, different exceptions, or no value "
-                 f"(a NaN, or an infinity other than the other side's), "
-                 f"counting as a disagreement{aside}",
+                 f"executed shared point, {_DISAGREEMENT}{aside}",
             meta=meta), "sampled")
     if state.proof is not None and state.proof.status == "disproven":
-        # the symbolic rung claimed inequivalence but no executed point
-        # reproduces it: the standard uncorroborated downgrade
+        # the symbolic rung claimed inequivalence but neither exact
+        # evaluation at its witness nor any executed point reproduces
+        # it: the standard uncorroborated downgrade
         return _stamp(Probe(
             cj.name, case.statement, "unknown", route="derive",
             sketch=state.proof.sketch,
@@ -927,12 +1007,197 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
     return None
 
 
+def _computation_row(case: _Case, main: Probe) -> Probe:
+    """Intent:
+        The computation line of a claim whose mathematics line decided:
+        both functions run at the shared draws (`_sample_pair`) under
+        the claim's tolerance, as the row `<name>[float]` (the number
+        representation and runtime types named as for a value claim's
+        companion). Falsified at the first disagreement, holds once
+        `EQUIV_MIN_AGREEMENTS` points agree, unknown with fewer.
+    """
+    from .gates import companion_name, companion_representation
+    descriptor, _representation, word = companion_representation(
+        case.cj_domain, case.facts)
+    run = _sample_pair(case)
+    meta = dict(run.meta)
+    what = (f"the {word} computation of {case.cj.name} ran both "
+            f"functions at {run.checked} shared point"
+            f"{'s' if run.checked != 1 else ''}{run.aside()}")
+    name = companion_name(main.name, descriptor)
+    if run.counterexample is not None:
+        return _stamp(Probe(
+            name, main.statement, "falsified", route="probe",
+            n=run.checked, counterexample=run.counterexample,
+            note=f"{what}; the two implementations disagree at an "
+                 f"executed shared point, {_DISAGREEMENT}",
+            meta=meta), "sampled")
+    if run.checked >= EQUIV_MIN_AGREEMENTS:
+        return _stamp(Probe(
+            name, main.statement, "holds", route="probe", n=run.checked,
+            note=f"{what}, and they agree within tolerance at every one "
+                 f"(sampling, never proof)",
+            meta=meta), "sampled")
+    return _stamp(Probe(
+        name, main.statement, "unknown", route="probe", n=run.checked,
+        note=f"{what}; at least {EQUIV_MIN_AGREEMENTS} agreeing points "
+             f"are needed before the computation holds",
+        meta=meta), "sampled")
+
+
+def _rung_exact_witness(case: _Case, state: _LadderState) -> Probe | None:
+    """Intent:
+        A symbolic disproof whose witness is not yet an executed call,
+        confirmed or not by both sides evaluated exactly at derive's
+        witness (`_exact_disagreement`): falsified on the mathematics
+        line when they disagree there, however small the difference.
+        None otherwise, leaving the disproof to the shared draws,
+        which reproduce it or downgrade it to unknown with the
+        engine-bug flag.
+    """
+    proof = state.proof
+    if proof is None or proof.status != "disproven" \
+            or (proof.meta or {}).get("mathema.witness_executed"):
+        return None
+    found = _exact_disagreement(case, proof, case.rhs_name)
+    if found is None:
+        return None
+    cx, _point = found
+    return _stamp(Probe(
+        case.cj.name, case.statement, "falsified", route="derive",
+        counterexample=cx, sketch=proof.sketch,
+        note=f"{case.note}; derive found the two functions different, and "
+             f"both sides evaluated exactly at its witness confirm it: "
+             f"{proof.sketch}",
+        meta={**case.annotations, "mathema.corroboration": "reproduced"}),
+        "symbolic")
+
+
+def _witness_points(case: _Case, proof) -> list:
+    """Intent:
+        The points at which to check a disproof, each a list of
+        arguments in `f`'s parameter order: derive's witness when it
+        names every parameter, else up to eight completions of it, each
+        coordinate the witness leaves free drawn from its declared
+        bound with a fixed seed. Only points inside the declared domain
+        are kept; a witness coordinate that is not a real number gives
+        none.
+    """
+    from .domain import _as_int_if_whole
+    from .probing import _synth
+    witness = proof.witness or {}
+    params = list(case.facts.params)
+
+    def read(p, v):
+        kind = case.facts.param_kinds.get(p, "unknown")
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return None
+        return _as_int_if_whole(v) if kind in ("int", "bool") else float(v)
+
+    named = {p: read(p, witness[p]) for p in params if p in witness}
+    if any(v is None for v in named.values()):
+        return []
+    free = [p for p in params if p not in named]
+    rng = random.Random(0)
+    points = []
+    for _ in range(8 if free else 1):
+        drawn = {p: _synth(case.facts.param_kinds.get(p, "unknown"), rng,
+                           case.cj_domain.get(p)) for p in free}
+        args = [named[p] if p in named else drawn[p] for p in params]
+        if all(_draw_in_domain(a, case.cj_domain.get(p))
+               for p, a in zip(params, args)):
+            points.append(args)
+    return points
+
+
+def _exact_disagreement(case: _Case, proof, rhs_name: str,
+                        named: bool = False) -> "tuple[str, list] | None":
+    """Intent:
+        `(witness text, arguments)` when both sides, run at the first
+        admissible point of derive's witness (`_witness_points`),
+        disagree there exactly: one side raises and the other returns,
+        the two raise different exceptions within one runtime, or their
+        values differ. The values are compared exactly: each side run on
+        the point's exact rationals when both then return exact
+        numbers, which is the mathematics of the point; otherwise the
+        floats each side returned, read as the exact rationals they
+        hold. None when the sides agree there, a value is not a finite
+        number, or the evaluation runs past the fast wall-clock cap.
+        Two values are written in full, `<f's> vs <g's>`, or with
+        `named`, as what each side returned.
+    """
+    from ._exact_side import to_exact, wrap
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .probing import _fmt, complex_is_a_raise
+    from .runtime_types import calling
+
+    points = _witness_points(case, proof)
+    if not points:
+        return None
+    args = points[0]
+    params = list(case.facts.params)
+
+    def exact_value(callee):
+        if not all(_numberlike(a) for a in args):
+            return None
+        try:
+            value = wrap(callee, exact_calls=True)(*[to_exact(a)
+                                                     for a in args])
+        except Exception:
+            return None
+        return value if _numberlike(value) or isinstance(value, Fraction) \
+            else None
+
+    def decide():
+        fv, f_exc = _run_side(calling(case.fn, case.facts), args,
+                              complex_is_a_raise(case.fn, case.cj_domain))
+        gv, g_exc = _run_side(calling(case.gfn, case.gfacts), args,
+                              complex_is_a_raise(case.gfn, case.cj_domain))
+        cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, rhs_name)
+        if cx is None and case.compare_refusals:
+            cx = _differing_raises(args, params, fv, f_exc, gv, g_exc,
+                                   rhs_name)
+        if cx is not None:
+            return cx
+        if not (_finite(fv) and _finite(gv)):
+            return None
+        fx, gx = exact_value(case.fn), exact_value(case.gfn)
+        if fx is not None and gx is not None:
+            # the exact values themselves, an integer or a ratio
+            left, right = str(Fraction(fx)), str(Fraction(gx))
+        else:
+            # every digit a float holds, since the two may differ in the
+            # last of them
+            left, right = repr(fv), repr(gv)
+            fx, gx = fv, gv
+        if Fraction(fx) == Fraction(gx):
+            return None
+        said = (f"f returned {left}, {rhs_name} returned {right}" if named
+                else f"{left} vs {right}")
+        return f"{_fmt(tuple(args), names=tuple(params))}: {said}"
+
+    try:
+        cx = _with_timeout(decide, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    return None if cx is None else (cx, args)
+
+
 RUNGS: tuple = (
     ("form", _rung_form),
     ("symbolic", _rung_symbolic),
     ("closed-forms", _rung_closed_forms),
+    ("symbolic witness", _rung_exact_witness),
     ("sampled", _rung_sampled),
 )
+
+#: the rungs of the mathematics line: a verdict from one of them is
+#: derive's, and the claim's computation is a row of its own
+_MATHEMATICS_RUNGS = frozenset({"form", "symbolic", "closed-forms",
+                                "symbolic witness"})
 
 
 def _fallthrough(case: _Case, state: _LadderState) -> Probe:
@@ -1082,14 +1347,15 @@ def prove_bodies_equal(left: Document | str, right: Document | str,
     or a list `[lo, hi]` for a closed interval. The right body's
     parameters align with the left's by position. The answer's
     `meta["mathema.domain"]` states each bound as it was read.
-    `tolerance` is the absolute difference two values may differ by.
     `siblings` binds the other functions either body calls, as
-    `sibling_scope` takes them.
+    `sibling_scope` takes them. The answer is the mathematics line of
+    `f =:= g`, which is exact: `tolerance` does not change it.
 
     The derive rungs of `f =:= g` run on the engine's rendering of each
     body, under the extensive wall-clock cap: one canonical form, the
     symbolic difference, the closed forms. Nothing is sampled. A
-    falsification stands only at a point executed on both bodies; a
+    falsification stands only at a point executed on both bodies, where
+    the two compared exactly disagree, however small the difference; a
     disproof no executed point reproduces is `unknown`. A point where
     both bodies refuse is agreement when they raise the same exception;
     when the two documents name different languages, the bodies run in
@@ -1307,35 +1573,17 @@ def _point_in(region) -> float | None:
 def _corroborated(case: _Case, proof) -> BodyEquivalence:
     """Intent:
         A symbolic disproof checked at its own point: both bodies run
-        there, and the pair is falsified when they disagree (a raise
-        against a value, a refusal of another type within one runtime,
-        or values further apart than the tolerance); `unknown` with the
-        engine-bug flag otherwise.
+        there and compared exactly (`_exact_disagreement`), and the pair
+        is falsified when they disagree (a raise against a value, a
+        refusal of another type within one runtime, or values that
+        differ at all); `unknown` with the engine-bug flag otherwise.
     """
-    from .conjecture import DEFAULT_TOLERANCE
-    from .probing import _fmt, _fmt_value
-
-    args = _witness_args(case, proof)
-    params = list(case.facts.params)
-    cx = None
-    if args is not None:
-        fv, f_exc = _run_side(case.fn, args, False)
-        gv, g_exc = _run_side(case.gfn, args, False)
-        cx = _one_sided_raise(args, params, fv, f_exc, gv, g_exc, "g")
-        if cx is None and case.compare_refusals:
-            cx = _differing_raises(args, params, fv, f_exc, gv, g_exc, "g")
-        if cx is None and _finite(fv) and _finite(gv):
-            tol = (case.cj.tolerance if case.cj.tolerance is not None
-                   else DEFAULT_TOLERANCE)
-            slack = 0.0 if case.cj.tolerance is not None else EQUIV_REL_SLACK
-            if abs(fv - gv) > tol + slack * max(abs(fv), abs(gv), 1.0):
-                cx = (_fmt(tuple(args), names=tuple(params))
-                      + f": f returned {_fmt_value(fv)}, g returned "
-                        f"{_fmt_value(gv)}")
-    if cx is not None:
+    found = _exact_disagreement(case, proof, "g", named=True)
+    if found is not None:
+        cx, args = found
         return BodyEquivalence(
             "falsified", "symbolic", sketch=proof.sketch, witness=cx,
-            point=dict(zip(params, args or ())),
+            point=dict(zip(case.facts.params, args)),
             note="the two bodies disagree at the executed point",
             meta={"mathema.corroboration": "reproduced"})
     return BodyEquivalence(

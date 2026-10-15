@@ -261,9 +261,10 @@ def test_bodies_refusing_alike_and_agreeing_elsewhere_are_proven():
     assert answer.rung == "symbolic"
 
 
-def test_a_difference_no_executed_point_shows_stays_unknown():
+def test_a_difference_below_any_float_tolerance_is_falsified_exactly():
     answer = prove_bodies_equal(
         body(guarded(ROOT)), body(guarded(ROOT_NUDGED, admits=NOT_NEGATIVE)),
         {"x": [-4.0, 4.0]})
-    assert answer.verdict == "unknown", answer
-    assert answer.meta["mathema.corroboration"] == "uncorroborated"
+    assert answer.verdict == "falsified", answer
+    assert answer.meta["mathema.corroboration"] == "reproduced"
+    assert 0 <= answer.point["x"] <= 4

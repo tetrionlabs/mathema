@@ -11,6 +11,7 @@ import math
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
+from tests._equivalence_rows import claim_row
 
 
 def recip(x: float) -> float:
@@ -54,8 +55,8 @@ def gap_recip_value_error(x: float, y: float) -> float:
 
 
 def _eq(f, g, domain, route="best"):
-    (p,) = check_conjectures(f, [claim(f"for {domain}, f =:= g",
-                                       funcs={"g": g}, route=route)])
+    p = claim_row(check_conjectures(f, [claim(f"for {domain}, f =:= g",
+                                              funcs={"g": g}, route=route)]))
     return p
 
 

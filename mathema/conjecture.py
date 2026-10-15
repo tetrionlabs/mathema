@@ -5819,8 +5819,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if cj.relation == "=:=":
             # function equivalence has its own ladder (form hash ->
             # symbolic difference -> code-vs-code sampling); neither
-            # generic stage applies
-            out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
+            # generic stage applies. A mathematics line derive decided
+            # comes with its computation row, `<name>[float]`
+            main, computation = _adjudicate_equivalence(ctx, fn, facts)
+            main = stamp(main)
+            out.append(main)
+            if computation is not None:
+                _emit_companion(out, _stamped(computation, cj_record,
+                                              written=cj.domain or {}),
+                                main.name)
             continue
         if getattr(ctx.family, "examined_only", False) and not (
                 cj.relation == getattr(ctx.family, "_base_name", None)
@@ -9883,8 +9890,10 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
                  note=note, meta=meta)
 
 
-def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
-    """The `f =:= g` ladder, in its own module; see equivalence.py."""
+def _adjudicate_equivalence(ctx: "_ClaimContext", fn,
+                            facts) -> "tuple[Probe, Probe | None]":
+    """The `f =:= g` ladder, in its own module, as `(claim row,
+    computation row)`; see equivalence.py."""
     from .equivalence import adjudicate
     return adjudicate(ctx, fn, facts)
 

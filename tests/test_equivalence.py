@@ -6,6 +6,7 @@ symbolic difference of their lifts, then code-vs-code sampling with
 both real functions executed on shared draws. Complexity annotations
 ride the record without bearing on the verdict."""
 from mathema.claims import check_conjectures, claim
+from tests._equivalence_rows import claim_row, computation_row
 from mathema.spec import render_claim_text
 
 
@@ -21,9 +22,9 @@ def tri_incr(a, b, c):
 
 
 def test_equivalent_implementations_prove_symbolically():
-    (p,) = check_conjectures(tri_naive, [claim("f =:= g",
-                                               funcs={"g": tri_incr},
-                                               route="derive")])
+    p = claim_row(check_conjectures(tri_naive, [claim("f =:= g",
+                                                      funcs={"g": tri_incr},
+                                                      route="derive")]))
     assert p.verdict == "proven"
     assert ("read symbolically, is zero" in p.sketch
             or "canonical form" in p.sketch)
@@ -38,9 +39,9 @@ def test_loop_and_closed_form_agree():
 
     def sum_closed(n: int) -> float:
         return n * (n + 1) / 2.0
-    (p,) = check_conjectures(sum_loop, [claim(
+    p = claim_row(check_conjectures(sum_loop, [claim(
         "for n in [0, 30] subset Z, f =:= g", funcs={"g": sum_closed},
-        route="derive")])
+        route="derive")]))
     # rung 2b compares the two READ-ONLY closed forms directly, so the
     # loop lift meets the scalar closed form symbolically
     assert p.verdict == "proven"
@@ -50,9 +51,9 @@ def test_loop_and_closed_form_agree():
 def test_inequivalent_functions_falsify_with_an_executed_witness():
     def scaled(a, b, c):
         return (a + 2 * b + 3 * c) / 5.0
-    (p,) = check_conjectures(tri_naive, [claim("f =:= g",
-                                               funcs={"g": scaled},
-                                               route="derive")])
+    p = claim_row(check_conjectures(tri_naive, [claim("f =:= g",
+                                                      funcs={"g": scaled},
+                                                      route="derive")]))
     assert p.verdict == "falsified"
     assert p.counterexample and " vs " in p.counterexample
 
@@ -67,23 +68,23 @@ def test_equiv_word_alias_and_unicode_render():
 def test_arity_mismatch_is_a_misspecification_not_a_verdict():
     def two_args(a, b):
         return a + b
-    (p,) = check_conjectures(tri_naive, [claim("f =:= g",
-                                               funcs={"g": two_args},
-                                               route="derive")])
+    p = claim_row(check_conjectures(tri_naive, [claim("f =:= g",
+                                                      funcs={"g": two_args},
+                                                      route="derive")]))
     assert p.verdict == "skipped:misspecified"
     assert "arity" in p.note
 
 
 def test_unbound_name_gets_guidance():
-    (p,) = check_conjectures(tri_naive, [claim("f =:= g", route="derive")])
+    p = claim_row(check_conjectures(tri_naive, [claim("f =:= g", route="derive")]))
     assert p.verdict == "skipped:misspecified"
     assert "funcs=" in p.note
 
 
 def test_complexity_annotations_ride_the_record():
-    (p,) = check_conjectures(tri_naive, [claim("f =:= g",
-                                               funcs={"g": tri_incr},
-                                               route="derive")])
+    p = claim_row(check_conjectures(tri_naive, [claim("f =:= g",
+                                                      funcs={"g": tri_incr},
+                                                      route="derive")]))
     ann = (p.meta or {}).get("mathema.equivalence.complexity")
     assert ann and set(ann) == {"f", "g"}
 
@@ -116,7 +117,7 @@ def test_check_keeps_a_live_funcs_binding_through_the_declared_merge():
     rec = mathema.check(tri_naive, claims=[
         mathema.claim("for a in [-3, 3], b in [-3, 3], c in [-3, 3], "
                       "f =:= g", funcs={"g": proxy})])
-    (p,) = [q for q in rec.probes if "=:=" in q.statement]
+    p = claim_row([q for q in rec.probes if "=:=" in q.statement])
     assert p.verdict == "holds", (p.verdict, p.note)
 
 
@@ -145,9 +146,9 @@ def test_discarded_points_are_tallied_never_silent():
     partial_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
                                              tree=None, form="doc:ffee0011")
 
-    (p,) = check_conjectures(partial_naive, [claim(
+    p = claim_row(check_conjectures(partial_naive, [claim(
         "for a in [-5, 5], b in [-1, 1], c in [-1, 1], f =:= g",
-        funcs={"g": partial_twin}, route="probe")])
+        funcs={"g": partial_twin}, route="probe")]))
     assert p.verdict == "holds", (p.verdict, p.note)
     sampling = p.meta["mathema.equivalence.sampling"]
     assert sampling["both_raised"] > 0
@@ -171,9 +172,9 @@ def test_one_side_raising_where_the_other_returns_falsifies():
     partial_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
                                              tree=None, form="doc:ffee0011")
 
-    (p,) = check_conjectures(tri_naive, [claim(
+    p = claim_row(check_conjectures(tri_naive, [claim(
         "for a in [-5, 5], b in [-1, 1], c in [-1, 1], f =:= g",
-        funcs={"g": partial_twin}, route="probe")])
+        funcs={"g": partial_twin}, route="probe")]))
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "g raised ValueError" in p.counterexample
     a = float(p.counterexample.split("a = ")[1].split(",")[0])
@@ -181,12 +182,12 @@ def test_one_side_raising_where_the_other_returns_falsifies():
 
 
 def test_the_deciding_rung_is_stamped():
-    (identical,) = check_conjectures(tri_naive, [claim(
-        "f =:= g", funcs={"g": tri_naive})])
+    identical = claim_row(check_conjectures(tri_naive, [claim(
+        "f =:= g", funcs={"g": tri_naive})]))
     assert identical.meta["mathema.equivalence.rung"] == "form"
 
-    (symbolic,) = check_conjectures(tri_naive, [claim(
-        "f =:= g", funcs={"g": tri_incr}, route="derive")])
+    symbolic = claim_row(check_conjectures(tri_naive, [claim(
+        "f =:= g", funcs={"g": tri_incr}, route="derive")]))
     assert symbolic.meta["mathema.equivalence.rung"] in (
         "symbolic", "closed-forms")
 
@@ -200,9 +201,9 @@ def test_the_deciding_rung_is_stamped():
     # rung can decide
     opaque_twin.__mathema_facts__ = replace(analyze_source(tri_naive),
                                             tree=None, form="doc:00aa11bb22")
-    (sampled,) = check_conjectures(tri_naive, [claim(
+    sampled = claim_row(check_conjectures(tri_naive, [claim(
         "for a in [-2, 2], b in [-2, 2], c in [-2, 2], f =:= g",
-        funcs={"g": opaque_twin}, route="probe")])
+        funcs={"g": opaque_twin}, route="probe")]))
     assert sampled.verdict == "holds"
     assert sampled.meta["mathema.equivalence.rung"] == "sampled"
     assert sampled.meta["mathema.equivalence.sampling"]["seed"] == 20260718
@@ -225,9 +226,9 @@ def test_a_sequence_argument_counterexample_formats_cleanly():
             acc += x * k
         return acc
 
-    (p,) = check_conjectures(total, [claim(
+    p = claim_row(check_conjectures(total, [claim(
         "for k in [0, 1], f =:= g", funcs={"g": total_off_by_one},
-        route="probe")])
+        route="probe")]))
     assert p.verdict == "falsified"
     assert " vs " in (p.counterexample or "")
     assert "xs = " in p.counterexample
@@ -251,9 +252,9 @@ def test_fallthrough_route_reflects_what_actually_ran():
     wordy_twin.__mathema_facts__ = replace(analyze_source(wordy),
                                            tree=None, form="doc:aa5566")
 
-    (p,) = check_conjectures(wordy, [claim(
+    p = claim_row(check_conjectures(wordy, [claim(
         "for a in [-1, 1], b in [-1, 1], c in [-1, 1], f =:= g",
-        funcs={"g": wordy_twin}, route="probe")])
+        funcs={"g": wordy_twin}, route="probe")]))
     assert p.verdict == "unknown"
     assert p.route == "probe"
     sampling = p.meta["mathema.equivalence.sampling"]
@@ -282,8 +283,8 @@ def test_a_registered_equivalence_family_is_consulted_first():
                 "meta": {"mathema.equivalence.rung": "sampled"}}
     families = _register_equivalence_family(decide)
     try:
-        (p,) = check_conjectures(tri_naive, [claim(
-            "f =:= g", funcs={"g": tri_incr})])
+        p = claim_row(check_conjectures(tri_naive, [claim(
+            "f =:= g", funcs={"g": tri_incr})]))
         assert p.verdict == "holds" and p.route == "probe:algorithmic"
         assert p.n == 7
         assert "registered family" in (p.note or "")
@@ -295,8 +296,8 @@ def test_a_declining_family_falls_back_to_the_built_in_ladder():
     families = _register_equivalence_family(
         lambda fn, facts, gfn, gfacts, **kwargs: None)
     try:
-        (p,) = check_conjectures(tri_naive, [claim(
-            "f =:= g", funcs={"g": tri_incr}, route="derive")])
+        p = claim_row(check_conjectures(tri_naive, [claim(
+            "f =:= g", funcs={"g": tri_incr}, route="derive")]))
         assert p.verdict == "proven"
     finally:
         families._REGISTRY.pop("equivalence", None)
@@ -372,22 +373,22 @@ def test_a_side_that_raises_inside_the_domain_is_never_proven_equivalent():
                       (_root_squared, _identity, "f =:= g"),
                       (_root_squared, _identity,
                        "for x in [-1, 1], f =:= g")):
-        (p,) = check_conjectures(f, [claim(law, funcs={"g": g},
-                                           route="derive")])
+        p = claim_row(check_conjectures(f, [claim(law, funcs={"g": g},
+                                                  route="derive")]))
         assert p.verdict != "proven", (f.__name__, law, p.sketch)
 
 
 def test_the_raising_point_is_named_in_the_record():
-    (p,) = check_conjectures(_self_ratio, [claim(
-        "for x in [-1, 1], f =:= g", funcs={"g": _one}, route="derive")])
+    p = claim_row(check_conjectures(_self_ratio, [claim(
+        "for x in [-1, 1], f =:= g", funcs={"g": _one}, route="derive")]))
     assert "ZeroDivisionError" in (p.note or "")
     assert "x = 0" in (p.note or "")
 
 
 def test_raise_free_closed_forms_still_prove():
-    (p,) = check_conjectures(_root_squared, [claim(
+    p = claim_row(check_conjectures(_root_squared, [claim(
         "for x in [0, 4], f =:= g", funcs={"g": _identity},
-        route="derive")])
+        route="derive")]))
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
 
 
@@ -399,8 +400,8 @@ def test_a_raise_region_found_symbolically_falsifies_with_its_witness():
              "ZeroDivisionError"),
             (_root_squared, _identity, "for x in [-1, 1], f =:= g",
              "ValueError")):
-        (p,) = check_conjectures(f, [claim(law, funcs={"g": g},
-                                           route="derive")])
+        p = claim_row(check_conjectures(f, [claim(law, funcs={"g": g},
+                                                  route="derive")]))
         assert p.verdict == "falsified", (f.__name__, p.verdict, p.note)
         assert f"f raised {raised}" in p.counterexample, p.counterexample
 
@@ -416,8 +417,8 @@ def _abs_half_power(x: float) -> float:
 
 
 def test_a_complex_result_on_one_side_falsifies():
-    (p,) = check_conjectures(_half_power, [claim(
-        "for x in [-1, 1], f =:= g", funcs={"g": _abs_half_power})])
+    p = claim_row(check_conjectures(_half_power, [claim(
+        "for x in [-1, 1], f =:= g", funcs={"g": _abs_half_power})]))
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "complex" in p.counterexample
 
@@ -431,15 +432,23 @@ def _big_plus(x: float) -> float:
 def test_a_declared_tolerance_is_the_whole_allowance():
     """With x near 1e7 a relative term of 1e-9 alone would allow 1e-2;
     a declared tolerance of 1e-4 allows exactly 1e-4, so a gap of 1e-3
-    is a counterexample."""
-    (p,) = check_conjectures(_big_plus, [claim(
+    is a counterexample on the computation line."""
+    rows = check_conjectures(_big_plus, [claim(
         "for x in [1e7, 1e8], f =:= g", funcs={"g": _identity},
         tolerance=1e-4)])
+    p = claim_row(rows)
     assert p.verdict == "falsified", (p.verdict, p.note)
+    computed = computation_row(rows)
+    assert computed.verdict == "falsified", (computed.verdict, computed.note)
 
 
 def test_a_declared_tolerance_still_admits_a_gap_within_it():
-    (p,) = check_conjectures(_big_plus, [claim(
+    """The tolerance is the computation's allowance: the mathematics of
+    x + 1e-3 against x is exact, and they differ."""
+    rows = check_conjectures(_big_plus, [claim(
         "for x in [1e7, 1e8], f =:= g", funcs={"g": _identity},
         tolerance=1e-2)])
-    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    p = claim_row(rows)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    computed = computation_row(rows)
+    assert computed.verdict == "holds", (computed.verdict, computed.note)
