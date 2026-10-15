@@ -55,8 +55,13 @@ and `--concepts` accept the function's stated intent and concept tags.
   witness by the condition number its note gives. Where the code loses
   more than that, or the conditioning could not be read, the
   acceptance is refused with the cause and the ways out: fix the code,
-  or narrow the claim's domain knowingly, edit it and accept it
-  `--as superseded`. A corrected claim is declared alongside only
+  accept the whole claim as a discovery, or narrow the claim's domain
+  knowingly, edit it and accept it `--as superseded`. Accepting the
+  whole claim, `mathema accept KEY NAME --as discovery` on the proven
+  claim itself, moves its row and its computation line to discoveries
+  under one acceptance, with the computation's witness kept, and the
+  claim no longer counts as proven (an `f =:= g` claim retires the same
+  way); a proven claim whose computation holds has nothing to accept. A corrected claim is declared alongside only
   when it is verified first. State it yourself with
   `--corrected "<law>"` and mathema adjudicates it against the live
   function before anything is written (a correction that itself

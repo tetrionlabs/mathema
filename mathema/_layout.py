@@ -253,10 +253,11 @@ def _return_fixes(pol: dict) -> str:
     return "possible fixes:\n" + "\n".join(f"  {line}" for line in nxt.splitlines())
 
 
-def _conditioning_lines(p, key: str) -> list:
+def _conditioning_lines(p, key: str, whole: bool = False) -> list:
     """What the conditioning says under a falsified computation line, and
     the fixes it offers: a narrower domain where float64 can honour the
-    claim, or accepting the discovery."""
+    claim, or accepting the discovery. `whole` is whether the claim the
+    line is the computation of is proven, so it can be accepted whole."""
     found = (p.meta or {}).get("mathema.conditioning")
     if not found:
         return []
@@ -264,7 +265,7 @@ def _conditioning_lines(p, key: str) -> list:
     from ._missing_words import options
     from .gates import computation_line_of
     fixes = conditioning_fixes(found, str(p.name), key,
-                               computation_line_of(p.meta))
+                               computation_line_of(p.meta), whole=whole)
     return [" " * 28 + found["words"],
             " " * 28 + "possible fixes:",
             *(" " * 30 + line for line in options(fixes).splitlines())]
@@ -368,7 +369,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                                   _detail(c, count_words)))
                 lines += _extras(c)
                 if _verdict(c) == "falsified":
-                    lines += _conditioning_lines(c, key)
+                    lines += _conditioning_lines(
+                        c, key, whole=_verdict(main) == "proven")
             if _verdict(c) == "falsified":
                 falsified.append(c.counterexample)
             used.add(id(c))

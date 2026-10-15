@@ -188,7 +188,11 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
                                 whether this loss is inherent is not decided
                             possible fixes:
                               (i) fix the code
-                              (ii) to narrow the domain knowingly, edit
+                              (ii) to accept the whole claim as a discovery,
+                                  keeping both lines, run: mathema accept
+                                  returns.sharpe leverage_invariant --as
+                                  discovery
+                              (iii) to narrow the domain knowingly, edit
                                   leverage_invariant, then run: mathema accept
                                   returns.sharpe leverage_invariant --as
                                   superseded
@@ -206,7 +210,9 @@ read the condition number at the witness, and says it cannot here, since
 the function's body is pandas rather than arithmetic derive can read.
 Undecided counts as the code's, so the record does not offer to accept
 the computation line on its own; the ways out it gives are fixing the
-code and narrowing the claim knowingly.
+code, accepting the whole claim as a discovery (its proven row and its
+computation line retire together, the witness kept), and narrowing the
+claim knowingly.
 The premise
 took the one-day series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on both lines alike: mathema computes the premise's `std` exactly rather than

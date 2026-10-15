@@ -108,8 +108,11 @@ Which remedies apply depends on what the condition number at the
 witness says. Here it says the loss is the code's: `(x + 1) - x` is a
 well-conditioned way to write `1`, and the precision goes in the
 arithmetic rather than in the inputs, so the companion is not accepted
-on its own. The ways out are to fix the code, to narrow the claim's
-domain knowingly (edit it, then accept it `--as superseded`), or to
+on its own. The ways out are to fix the code, to accept the whole claim
+as a discovery (the proven row and its companion retire together under
+one acceptance, the witness kept, and the claim no longer counts as
+proven), to narrow the claim's domain knowingly (edit it, then accept
+it `--as superseded`), or to
 state the claim with `route="derive:math_only"` (`[derive:math_only]` in
 a docstring), which proves the mathematics alone, spawns no companion,
 and records the opt-out on the proof's row. Where the loss is inherent

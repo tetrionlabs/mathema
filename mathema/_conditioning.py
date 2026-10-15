@@ -515,8 +515,16 @@ def command_word(word: str) -> str:
     return f'"{escaped}"'
 
 
+def whole_claim_option(key: str, parent: str) -> str:
+    """The option that accepts the claim `parent` whole as a discovery,
+    its row and its computation line together."""
+    return (f"to accept the whole claim as a discovery, keeping both "
+            f"lines, run: mathema accept {key} {command_word(parent)} "
+            f"--as discovery")
+
+
 def fixes(found: "dict | None", row: str, key: str,
-          parent: "str | None" = None) -> list:
+          parent: "str | None" = None, whole: bool = False) -> list:
     """Intent:
         The fixes a falsified computation line offers under what its
         conditioning says, each the text of one option. `row` is the
@@ -529,11 +537,13 @@ def fixes(found: "dict | None", row: str, key: str,
         line whose loss is the code's, or not known to be inherent
         (`found` None where no conditioning was read), is not accepted
         alone: it offers fixing the code, and narrowing the claim's
-        domain knowingly by superseding `parent`.
+        domain knowingly by superseding `parent`, and, where `whole`
+        (`parent` is proven), accepting `parent` whole as a discovery.
     """
     found = found or {}
     if parent is not None and found.get("inherent") is not True:
         return ["fix the code",
+                *([whole_claim_option(key, parent)] if whole else []),
                 f"to narrow the domain knowingly, edit {parent}, then run: "
                 f"mathema accept {key} {command_word(parent)} --as superseded"]
     out = []

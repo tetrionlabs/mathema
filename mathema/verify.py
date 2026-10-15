@@ -736,7 +736,12 @@ def _initially_falsified_hint(key: str, probes: list,
             # missed the mathematics: what the conditioning at the
             # witness says, and the ways out
             from ._conditioning import fixes as conditioning_fixes
-            fixes = conditioning_fixes(found, str(p.name), key, parent)
+            owner = next((q for q in probes
+                          if parent is not None and q.name == parent), None)
+            fixes = conditioning_fixes(
+                found, str(p.name), key, parent,
+                whole=owner is not None and classify_verdict(
+                    owner.verdict) in ("proven", "derived"))
             words = (found or {}).get("words") or (
                 "no conditioning was read at its witness, so whether the "
                 "loss is inherent is not decided")
