@@ -430,6 +430,32 @@ def _another_claim_holds(claims: list, target: dict) -> bool:
     return False
 
 
+def computation_line_refusal(key: str, row: str, parent: str,
+                             found: "dict | None") -> str:
+    """Intent:
+        Why a falsified computation line `row` (the computation of the
+        claim `parent`) is not accepted alone, and the ways out. It is
+        accepted alone only where its recorded conditioning says the
+        loss is inherent; `found` is that record, None where none was
+        read at the witness (a raise, a NaN or an inf, not a miss of
+        the relation). A loss the conditioning does not explain is the
+        code's; one not known to be inherent counts as the code's.
+    """
+    from ._conditioning import command_word
+    cause = (found or {}).get("words") or (
+        "no conditioning was read at its witness, so whether the loss is "
+        "inherent is not decided")
+    whose = ("the code's" if (found or {}).get("inherent") is False
+             else "not known to be inherent, which counts as the code's")
+    return (f"{row} is the computation of {parent}, falsified: {cause}. A "
+            f"computation line is accepted alone only where its loss is "
+            f"inherent (no float64 computation could do better there); "
+            f"this loss is {whose}. The ways out: fix the code, and the "
+            f"recorded counterexample replays until the line holds; or "
+            f"narrow the claim's domain knowingly: edit {parent}, then run: "
+            f"mathema accept {key} {command_word(parent)} --as superseded")
+
+
 def plan_acceptances(root: str, key: str, requests: list,
                      by: str | None = None, note: str | None = None,
                      corrected: str | None = None) -> list:
@@ -829,6 +855,13 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                 "was wrong about the world, accept it as a discovery "
                 "(--as discovery), optionally stating what is true with "
                 "--corrected")
+        parent = (target.get("meta") or {}).get("mathema.companion_of")
+        from .gates import computation_line_of
+        if computation_line_of(target.get("meta")):
+            found = (target.get("meta") or {}).get("mathema.conditioning")
+            if not (found and found.get("inherent") is True):
+                raise AcceptanceError(computation_line_refusal(
+                    key, claim_name, parent, found))
         accepted = {"as": "discovery", "at": datetime.date.today().isoformat(),
                     "form": form}
         if by:
@@ -836,7 +869,6 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if note:
             accepted["note"] = note
         plan["accepted"] = accepted
-        parent = (target.get("meta") or {}).get("mathema.companion_of")
         plan["companion_of"] = parent
         if parent:
             # a float companion is no authored law: nothing declares it

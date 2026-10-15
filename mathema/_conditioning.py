@@ -465,15 +465,27 @@ def command_word(word: str) -> str:
     return f'"{escaped}"'
 
 
-def fixes(found: dict, row: str, key: str) -> list:
+def fixes(found: "dict | None", row: str, key: str,
+          parent: "str | None" = None) -> list:
     """Intent:
         The fixes a falsified computation line offers under what its
-        conditioning says, each the text of one option: the claim words
-        that keep the computation within reach, when there are any, and
-        the command that records the loss as a discovery of `row`, the
-        line's own name (`shift[float]` for a proof's computation line,
-        the claim's name where the claim is its own computation line).
+        conditioning says, each the text of one option. `row` is the
+        line's own name and `parent` the claim it is the computation of
+        (`shift[float]` of `shift`), None where the claim is its own
+        computation line. A loss the conditioning explains (or a claim
+        that is its own line) offers the claim words that keep the
+        computation within reach, when there are any, and the command
+        that records the loss as a discovery of `row`. A computation
+        line whose loss is the code's, or not known to be inherent
+        (`found` None where no conditioning was read), is not accepted
+        alone: it offers fixing the code, and narrowing the claim's
+        domain knowingly by superseding `parent`.
     """
+    found = found or {}
+    if parent is not None and found.get("inherent") is not True:
+        return ["fix the code",
+                f"to narrow the domain knowingly, edit {parent}, then run: "
+                f"mathema accept {key} {command_word(parent)} --as superseded"]
     out = []
     if found.get("narrow"):
         out.append("if inputs this large are out of scope, narrow the "

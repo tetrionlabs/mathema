@@ -37,6 +37,20 @@ _EXTREME = 1e10
 FLOAT_SUFFIX = "[float]"
 FLOAT_FAMILY = "is_numerically_stable"
 
+
+def computation_line_of(meta: "dict | None") -> "str | None":
+    """The claim a row is the computation line of (`shift` for
+    `shift[float]`), read from its meta, or None for any other row. An
+    empty-input line is tagged with the claim it belongs to as well, but
+    it is a line of its own family (`is_empty_safe`), not the
+    computation."""
+    meta = meta or {}
+    parent = meta.get("mathema.companion_of")
+    if parent and meta.get("mathema.family") in (None, FLOAT_FAMILY):
+        return parent
+    return None
+
+
 # the authored route that states the mathematics alone: adjudicated as
 # a derive claim, spawning no float companion
 MATH_ONLY_ROUTE = "derive:math_only"

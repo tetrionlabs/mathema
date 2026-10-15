@@ -727,14 +727,21 @@ def _initially_falsified_hint(key: str, probes: list,
                              ". Change the word in the claims file, or change f."))
             fresh.remove(p)
             continue
-        found = (getattr(p, "meta", None) or {}).get("mathema.conditioning")
-        if found:
-            # a computation line that missed the mathematics: what the
-            # conditioning at the witness says, and the ways out
+        meta = getattr(p, "meta", None) or {}
+        found = meta.get("mathema.conditioning")
+        from .gates import computation_line_of
+        parent = computation_line_of(meta)
+        if found or parent:
+            # a computation line, or a claim that is its own, that
+            # missed the mathematics: what the conditioning at the
+            # witness says, and the ways out
             from ._conditioning import fixes as conditioning_fixes
-            fixes = conditioning_fixes(found, str(p.name), key)
+            fixes = conditioning_fixes(found, str(p.name), key, parent)
+            words = (found or {}).get("words") or (
+                "no conditioning was read at its witness, so whether the "
+                "loss is inherent is not decided")
             lines.append(f"note {key}: {p.name} initially falsified: "
-                         f"{found['words']}:\n" + _indented(options(fixes)))
+                         f"{words}:\n" + _indented(options(fixes)))
             fresh.remove(p)
     if not fresh:
         return lines

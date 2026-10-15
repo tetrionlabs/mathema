@@ -262,7 +262,9 @@ def _conditioning_lines(p, key: str) -> list:
         return []
     from ._conditioning import fixes as conditioning_fixes
     from ._missing_words import options
-    fixes = conditioning_fixes(found, str(p.name), key)
+    from .gates import computation_line_of
+    fixes = conditioning_fixes(found, str(p.name), key,
+                               computation_line_of(p.meta))
     return [" " * 28 + found["words"],
             " " * 28 + "possible fixes:",
             *(" " * 30 + line for line in options(fixes).splitlines())]
