@@ -54,6 +54,36 @@ def test_a_floor_allows_a_fixed_gap_beside_a_relative_tolerance():
     assert floored.verdict == "holds", (floored.verdict, floored.note)
 
 
+def _offset(x: float) -> float:
+    return x + 1.5e-9
+
+
+def test_a_floor_adds_to_the_relative_part():
+    from mathema._tolerance import ToleranceKind
+    kind = ToleranceKind("rel", 1e-9, 1e-9)
+    # gap 1.5e-9 at 1.0: past the relative part (1e-9) and past the
+    # floor (1e-9) alone, within their sum (2e-9)
+    assert kind.allows(1.0, 1.0 + 1.5e-9)
+    assert not kind.allows(1.0, 1.0 + 2.5e-9)
+    # 1.0 + 1e-12 lies 1.00009e-12 from 1.0, past the floor alone and
+    # within it plus two ulps of 1.0 (4.4e-16)
+    ulps = ToleranceKind("ulp", 2, 1e-12)
+    assert ulps.allows(1.0, 1.0 + 1e-12)
+    assert not ulps.allows(1.0, 1.0 + 1.0006e-12)
+    assert ToleranceKind("abs", 1e-9, 1e-9).allows(0.0, 1.9e-9)
+
+
+def test_a_floor_adds_on_the_computation_row():
+    law = "for x in [1, 2], f =:= g"
+    rel = computation_row(_rows(_offset, law, {"rel": 1e-9}))
+    floor = computation_row(_rows(_offset, law, {"floor": 1e-9, "abs": 0}))
+    both = computation_row(_rows(_offset, law, {"rel": 1e-9,
+                                                "floor": 1e-9}))
+    assert rel.verdict == "falsified", rel.note
+    assert floor.verdict == "falsified", floor.note
+    assert both.verdict == "holds", (both.verdict, both.note)
+
+
 def test_units_in_the_last_place_count_the_rounding():
     law = "for x in [-10, 10], f =:= g"
     exact = _rows(_thirds, law, {"ulp": 0})

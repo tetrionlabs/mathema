@@ -10,9 +10,11 @@ tolerance may name its kind:
 - `{ulp: n}` allows `n` units in the last place of `max(|a|, |b|)`, `n`
   a whole number;
 
-each with an optional `floor: x`, an absolute allowance that applies
-whatever the kind: a gap within the floor is allowed too. A kind
-carries no other slack. Every value is a non-negative finite number.
+each with an optional `floor: x`, an absolute allowance added to the
+kind's own part, so the allowance is `bound + floor`: the relative
+plus absolute error of the standard rounding-error model. The floor
+applies in full, uncapped. A kind carries no other slack. Every value
+is a non-negative finite number.
 """
 from __future__ import annotations
 
@@ -40,17 +42,23 @@ class ToleranceKind:
             out["floor"] = self.floor
         return out
 
-    def allows(self, a: float, b: float) -> bool:
-        """Whether two finite values are within this tolerance."""
-        gap = abs(a - b)
-        if self.floor is not None and gap <= self.floor:
-            return True
+    def bound(self, a: float, b: float) -> float:
+        """The gap two finite values may differ by, in float64: the
+        kind's part (`x`, `x * max(|a|, |b|)`, or `n` ulps of
+        `max(|a|, |b|)`) plus the floor."""
         scale = max(abs(a), abs(b))
         if self.kind == "abs":
-            return gap <= self.value
-        if self.kind == "rel":
-            return gap <= self.value * scale
-        return gap <= self.value * math.ulp(scale)
+            part = self.value
+        elif self.kind == "rel":
+            part = self.value * scale
+        else:
+            part = self.value * math.ulp(scale)
+        return part + (self.floor or 0.0)
+
+    def allows(self, a: float, b: float) -> bool:
+        """Whether two finite values are within this tolerance:
+        `|a - b| <= bound + floor`, computed in float64."""
+        return abs(a - b) <= self.bound(a, b)
 
 
 def _number(value, what: str) -> float:
