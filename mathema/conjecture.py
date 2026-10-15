@@ -8063,7 +8063,7 @@ def _fill_value(bound):
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                      resolver, shared: bool, structured: bool,
-                     column_bounds: "dict | None" = None):
+                     column_bounds: "dict | None" = None, reach=None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -8072,6 +8072,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
         `column_bounds` holds a table's column bindings by column name.
+        `reach`, the claim's resolved pseudo-infinity range when one
+        applies, bounds the magnitude corners along unbounded ends.
     """
     from . import _floor
     from .domain import domain_contains
@@ -8100,7 +8102,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # the magnitude corners of the completed element range, after
         # the degenerate containers
         floor += _floor.corner_floor(
-            sequence_corners(record if record is not None else bound),
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
             length_free=not shared)
     elif form == "mat":
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
@@ -8112,8 +8115,9 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # a column the claim binds (`for df.r in [0, 1]^n`) meets the
         # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound),
-            {c: sequence_corners(_column_bound(b, None))
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
+            {c: sequence_corners(_column_bound(b, None), reach=reach)
              for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
@@ -10562,7 +10566,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # infinite endpoints to it, and the record says so with its
         # source; the derive stage never sees this, so a proof still
         # covers actual infinity (P1, P6)
-        cj_domain, _approximated = _operational_domain(cj_domain, pinf)
+        cj_domain, _approximated = _operational_domain(cj_domain, pinf,
+                                                       vectors=True)
         directions = [p for p, k in kinds.items() if k in _DIRECTION_KINDS]
         directions += sorted(set(cj.free_vars or ()) - set(directions))
         if unbounded_directions(directions, ctx.cj_domain):
@@ -10892,7 +10897,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                 resolver, shared, bool(param_structures.get(_p)),
                                 {key[len(_p) + 1:]: b for key, b in cj_domain.items()
                                  if key.startswith(_p + ".")
-                                 and key[len(_p) + 1:].isidentifier()})
+                                 and key[len(_p) + 1:].isidentifier()},
+                                reach=pinf)
         if made is not None:
             containers[_p] = made
 
@@ -10906,12 +10912,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     return True
         return False
     lap_floor = None
+    # a container's completed domain, its elements' unbounded ends at the
+    # resolved pseudo-infinity when one applies
+    capped_records = (ctx.record_domain or {}) if pinf is None else \
+        _operational_domain(ctx.record_domain or {}, pinf, vectors=True)[0]
+
     def sample_bound(p):
         # a container's elements are drawn from its completed domain, so
         # every spelling of one claim draws the same points; a scalar's
         # from the binding as written
         if p in containers and p not in ctx.implied:
-            return (ctx.record_domain or {}).get(p) or cj_domain.get(p)
+            return capped_records.get(p) or cj_domain.get(p)
         return cj_domain.get(p)
 
     longest_lap = max([*(lap.lap_size() for lap in (*language_laps.values(),
@@ -11332,7 +11343,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               or rng.randint(1, 8))
                     v = {c: _synth("sequence", rng,
                                    _column_bound(cj_domain.get(f"{p}.{c}"), column),
-                                   specials=specials, length=length)
+                                   specials=specials, length=length,
+                                   reach=pinf)
                          for c in table_columns[p]}
                     if p in containers:
                         v = containers[p].next(v, rng)
@@ -11379,7 +11391,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         specials=specials, extra=critical_hints.get(p),
                         extra_cycle=extra_cycles.get(p),
                         length=length,
-                        lap=language_laps.get(p) or missing_laps.get(p)))
+                        lap=language_laps.get(p) or missing_laps.get(p),
+                        reach=pinf))
                 if p in containers and isinstance(v, (list, tuple)) \
                         and trial != smallest_trial:
                     # the floor's degenerate containers first, then

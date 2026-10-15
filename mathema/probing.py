@@ -1896,23 +1896,28 @@ def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
 
 
-def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
+def _sequence_corner(rng: random.Random, n: int, bounds,
+                     reach=None) -> "list | None":
     """Intent:
         One sequence from the corners where float arithmetic breaks, or
         None when the elements' domain is not one real interval:
         entries that cancel at a large magnitude (`[M, -M, ...]`),
         entries at the range's stated ends, or a series one ulp from
-        constant. Every entry lies inside the element range.
+        constant. Every entry lies inside the element range, whose
+        unbounded ends are at `reach` (`(lo, hi)`, the claim's resolved
+        pseudo-infinity) when given, else at the number
+        representation's reach.
     """
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None:
         return None
     lo, hi = span
     from ._sampling import representation_reach
-    reach = representation_reach()
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     # entries at the range's own ends only where the claim states them;
-    # an unbounded side's float limit is the reach draws' business
-    stated = not (lo == -reach and hi == reach)
+    # an unbounded side's limit is the reach draws' business
+    stated = not (lo == lo_reach and hi == hi_reach)
     shapes = ["near-constant"] + (["edges"] if stated else [])
     if n >= 2 and lo < 0 < hi:
         shapes.append("cancel")
@@ -1939,7 +1944,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
           length: "int | None" = None,
-          lap: "_SpecialCycle | None" = None):
+          lap: "_SpecialCycle | None" = None,
+          reach=None):
+    # `reach`, the claim's resolved pseudo-infinity range when one
+    # applies, bounds a sequence's corner draws along unbounded ends.
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
@@ -1977,7 +1985,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # construction rather than by rejection
         n = length if length is not None else rng.randint(1, 8)
         if rng.random() < _SEQUENCE_CORNER_SHARE:
-            corner = _sequence_corner(rng, n, bounds)
+            corner = _sequence_corner(rng, n, bounds, reach)
             if corner is not None:
                 return corner
         if bounds is not None:
