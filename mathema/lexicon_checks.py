@@ -163,6 +163,13 @@ def check_stable_canonical(src: LexiconSource) -> list:
     return drifted
 
 
+def _claim_rows(probes: list) -> list:
+    """The rows of `probes` that state a claim: a computation row
+    (`mathema.companion_of`) is made by its claim's adjudication, never
+    declared on its own, as `verify` reads a record."""
+    return [p for p in probes if not (p.meta or {}).get("mathema.companion_of")]
+
+
 def check_same_verdict(src: LexiconSource) -> list:
     from .conjecture import check_conjectures, claim
     from .spec import canonical_claim_text
@@ -177,8 +184,8 @@ def check_same_verdict(src: LexiconSource) -> list:
             except Exception as exc:
                 diverged.append(f"{key}: canonical form will not reparse ({type(exc).__name__})")
                 continue
-            (before,) = check_conjectures(fn, [original], extensive=False)
-            (after,) = check_conjectures(fn, [restored], extensive=False)
+            (before,) = _claim_rows(check_conjectures(fn, [original], extensive=False))
+            (after,) = _claim_rows(check_conjectures(fn, [restored], extensive=False))
             if before.verdict != after.verdict:
                 diverged.append(f"{key}: {before.verdict} -> {after.verdict}\n    {law}"
                                 f"\n    {canonical}")
@@ -226,7 +233,7 @@ def verified_record_verdicts(src: LexiconSource) -> dict:
         # a function's record rows are repopulated together, as `verify`
         # does, so a gate reads the stated rows beside it
         first, rebuilt_all = {}, []
-        for p in check_conjectures(fn, laws):
+        for p in _claim_rows(check_conjectures(fn, laws)):
             row = {"name": p.name, "statement": p.statement,
                    "route": (p.route or "best").split(":", 1)[0]}
             if row["route"] not in ("derive", "probe"):
