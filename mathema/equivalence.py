@@ -357,8 +357,11 @@ def _read_elsewhere(facts) -> bool:
 
 def _family_verdict(case: _Case) -> Probe | None:
     """A registered `equivalence` family's own adjudication, when one
-    exists, accepts the claim, and does not decline. The family
-    returns a plain dict; this module owns Probe assembly."""
+    exists, accepts the claim, and does not decline. The family's route
+    is called as `(fn, facts, gfn, gfacts, domain=, tolerance=,
+    statement=)`, `tolerance` the claim's as parsed (a bare number, a
+    `_tolerance.ToleranceKind`, or None). The family returns a plain
+    dict; this module owns Probe assembly."""
     from .families import call_route, families
 
     family = families().get("equivalence")
@@ -844,12 +847,17 @@ class _Sampled:
 def _values_agree(case: _Case, fv, gv) -> bool:
     """Intent:
         Whether two finite values the functions returned at one point
-        agree under the claim's tolerance: within the declared absolute
-        tolerance, or within the default one plus a relative slack of
-        `EQUIV_REL_SLACK` times the larger magnitude (at least 1).
+        agree under the claim's tolerance: within a declared kind
+        (`_tolerance.ToleranceKind.allows`), within a declared bare
+        number read as an absolute allowance, or within the default one
+        plus a relative slack of `EQUIV_REL_SLACK` times the larger
+        magnitude (at least 1).
     """
+    from ._tolerance import ToleranceKind
     from .conjecture import DEFAULT_TOLERANCE
     tol = case.cj.tolerance
+    if isinstance(tol, ToleranceKind):
+        return tol.allows(fv, gv)
     if tol is None:
         scale = max(abs(fv), abs(gv), 1.0)
         return abs(fv - gv) <= DEFAULT_TOLERANCE + EQUIV_REL_SLACK * scale

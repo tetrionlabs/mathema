@@ -61,6 +61,7 @@ from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
                          relation_within)
 from ._exact_side import F_CALL, exact_sides, f_slot
+from ._tolerance import ToleranceKind, written_tolerance
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -1353,8 +1354,9 @@ class Conjecture:
     # past falsification stays caught forever (cdd.md step 6: re-verification
     # is also a regression check). Each pin: {"args": [...], "aux": {...}}
     # with exact values, not display strings.
-    tolerance: float | None = None
+    tolerance: float | ToleranceKind | None = None
     # how close counts as equal (declared-schema.md's `tolerance` field;
+    # an equivalence claim's may name its kind, `_tolerance.ToleranceKind`;
     # no spec-level default). Also what `ε`/`eps`/`epsilon` resolves to
     # inside a law's own text (grammar.py/symbolic.py), so
     # `abs(f(x) - g(x)) <= ε` reads exactly like the mathematical
@@ -1946,6 +1948,7 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # the name as its own placeholder value; lets the renderer
         # treat it as the function it is rather than refusing
         bound_funcs[unbound] = unbound
+    tolerance = _read_claim_tolerance(tolerance, rel, law)
     return Conjecture(name=name, lhs=lhs, rhs=rhs, relation=rel,
                       rhs_bound=rhs_bound,
                       source=source, route=route, grammar=grammar,
@@ -1956,6 +1959,30 @@ def _claim(law: str, name: str | None, source: str, route: str,
                       links=links, pseudo_infinity=pseudo_infinity,
                       param_pins=param_pins,
                       meta=dict(meta or {}), raw=law)
+
+
+def _read_claim_tolerance(tolerance, relation: str, law: str):
+    """Intent:
+        A claim's tolerance read (`_tolerance.read_tolerance`): a kind
+        (`{rel: 1e-12, floor: 1e-15}`) becomes a `ToleranceKind`, which
+        only an equivalence `f =:= g` takes; a bare number is kept as
+        written.
+
+    Raises:
+        InvalidConjecture: a mapping that is not one kind, or a kind on
+            a claim that is not `=:=`.
+    """
+    from ._tolerance import read_tolerance
+    try:
+        read = read_tolerance(tolerance)
+    except ValueError as e:
+        raise InvalidConjecture(f"{e}, in the claim {law.strip()!r}") from None
+    if isinstance(read, ToleranceKind) and relation != "=:=":
+        raise InvalidConjecture(
+            f"a tolerance kind ({read.written()}) applies to a function "
+            f"equivalence `f =:= g`; a value claim takes a bare number, in "
+            f"the claim {law.strip()!r}")
+    return read
 
 
 def _membership_bound(rhs: str):
@@ -5321,7 +5348,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probe.domain = {p2: domain_bound_to_json(b)
                             for p2, b in cj.domain.items()}
         probe.grammar = cj.grammar
-        probe.tolerance = cj.tolerance
+        probe.tolerance = written_tolerance(cj.tolerance)
         languages = _language_meta({**domain, **(cj.domain or {})})
         if languages:
             # what every `L[...]` binding resolved to, on the record,
