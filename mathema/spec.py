@@ -1786,7 +1786,9 @@ def validate_claims_file(data, rel_path: str) -> None:
         `claims` is a list of mappings; each claim states its law as
         text under `statement` (or `law`), names it at most once per
         key, and gives a readable `domain` and a non-negative
-        `tolerance` when it gives them. A field mathema does not read
+        `tolerance` (a number, or one kind with an optional floor,
+        `_tolerance.read_tolerance`, written back in its record order)
+        when it gives them. A field mathema does not read
         is refused: a near miss of a known one names that field, and
         any other names the fields that hold annotations.
 
@@ -1881,7 +1883,13 @@ def validate_claims_file(data, rel_path: str) -> None:
                 if auto is not None:
                     seen.add(auto)
             tol = c.get("tolerance")
-            if tol is not None:
+            if isinstance(tol, dict):
+                from ._tolerance import read_tolerance
+                try:
+                    c["tolerance"] = read_tolerance(tol).written()
+                except ValueError as e:
+                    fail(key, f"{label}: `tolerance`: {e}")
+            elif tol is not None:
                 try:
                     value = float(tol)
                 except (TypeError, ValueError):
@@ -2536,7 +2544,8 @@ def declare(cj) -> dict:
     if cj.domain:
         out["domain"] = {p: domain_bound_to_json(b) for p, b in cj.domain.items()}
     if cj.tolerance is not None:
-        out["tolerance"] = cj.tolerance
+        from ._tolerance import written_tolerance
+        out["tolerance"] = written_tolerance(cj.tolerance)
     if getattr(cj, "trials", None) is not None:
         out["trials"] = cj.trials
     if getattr(cj, "meta", None):

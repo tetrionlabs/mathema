@@ -64,7 +64,7 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `≥` | U+2265 | greater than or equal to | `>=` |
 | `≠` | U+2260 | not equal to | `!=` |
 | `≈` | U+2248 | approximately equal to, within a tolerance | `~=` |
-| `≡` | U+2261 | equivalent to, as a whole function | `=:=` |
+| `≡` | U+2261 | equivalent to, as a whole function, in its mathematics and its computation | `=:=` |
 | `⟹` | U+27F9 | implies | `=>` |
 | `·` | U+00B7 | times | `*` |
 | `×` | U+00D7 | times | `*` |
@@ -136,7 +136,7 @@ claims in them.
 | `f(x) == x` | equality |
 | `f(x) ≤ 1` | inequality, in either ASCII or Unicode |
 | `f(x) ~= x` | approximate equality, within a tolerance |
-| `f =:= g` | function equivalence: two implementations of the same mathematics |
+| `f =:= g` | function equivalence: two implementations of the same mathematics, whose computations agree within the claim's tolerance |
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
 | `for s in L[unicode], f(s) in L[unicode]` | membership: every output is a member of a language or a set, `∈` in Unicode |
@@ -162,7 +162,12 @@ tolerance of 1e-9, whichever is larger. So under `==` the computation
 is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
-it, with no relative tolerance on top.
+it, with no relative tolerance on top. On a function equivalence `f =:= g`
+the tolerance governs the computation line alone, since its mathematics
+line is exact, and it may also name its kind (`{abs: x}`, `{rel: x}` or
+`{ulp: n}`, each with an optional `floor: x`), as
+[Multi-function claims](multi-function-claims.md) describes; a value claim
+takes a bare number.
 
 Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
 tolerance directly: the declared value when there is one, and the 1e-9

@@ -51,7 +51,7 @@ are related mathematically.
 An executed value is read by one rule on every path that executes
 anything, the probe route, the `[float]` companion, the computation-safety
 families (`is_numerically_stable`, `is_representation_safe`,
-`is_missing_safe` and the rest) and the executed rung of `=:=` alike. A
+`is_missing_safe` and the rest) and the computation line of `=:=` alike. A
 raise, a NaN computed from inputs that are not missing, or an infinity
 returned for a finite input is no value, and no value fails every
 relation, `!=` included; two sides that overflow toward the same

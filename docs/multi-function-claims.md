@@ -61,40 +61,57 @@ The equivalence relation asks whether two implementations are the same
 mathematics, which is the question behind every rewrite, refactor and
 port: an agent's new version against the one it replaces, or another
 runtime's implementation against the Python reference. Between two
-Python functions it climbs a ladder, strongest rung first, and each
-rung may decline:
+Python functions the claim records two lines, as a value claim does,
+and it is falsified when either line is.
+
+The mathematics line is derive's, and it climbs a ladder, strongest
+rung first, where each rung may decline:
 
 1. **Identical canonical form.** Both functions lift to the same
    alpha-renamed shape, and the claim is proven by the form hash
    alone: two spellings of one computation.
 2. **Symbolic difference.** The two lifts, positionally aligned,
-   subtract to zero under the declared domain. A symbolic
-   falsification here must reproduce code-versus-code before it
-   stands, like every other disproof. Where both sides raise, this
-   rung proves the equivalence when they raise the same exception on
-   exactly the same region and their lifts agree everywhere else (for
-   a function of one parameter; with more, sampling decides).
+   subtract to zero under the declared domain. Where both sides raise,
+   this rung proves the equivalence when they raise the same exception
+   on exactly the same region and their lifts agree everywhere else
+   (for a function of one parameter). A disproof stands once both
+   functions, run at derive's witness and compared exactly, disagree
+   there, however small the difference, so `sqrt(x)` against
+   `sqrt(x) + 1e-12` is falsified on this line although no float
+   tolerance would notice the gap; a disproof that exact evaluation
+   does not confirm is `unknown`, with the flag that marks a likely
+   mathema bug.
 3. **Closed forms.** Where both bodies provably never raise, their
    closed forms are compared directly.
-4. **Code-versus-code sampling.** Both real functions run on the same
-   96 seeded draws from the declared domain, and at least 24 of them
-   must agree before the verdict is `holds`. Two results agree within
-   the claim's own [tolerance](grammar.md#how-close-counts-as-equal),
-   so an equivalence between a float and a fixed-point implementation
-   is stated, not guessed. A draw where both sides raise the same
-   exception agrees, and so does a draw where both sides overflow to
-   the same infinity. A NaN computed from non-missing inputs is no
-   value and agrees with nothing, another NaN included, and an infinity
-   disagrees with a value or with the opposite infinity: each is a
-   counterexample. A draw with a missing input, or where either side
-   returns something non-numeric, is not compared. Both kinds of
-   uncompared draw are counted in the record rather than dropped.
-   Evidence ceiling `holds`: sampling never proves.
+
+The computation line, the row `NAME[float]` under the claim, runs both
+real functions on the same 96 seeded draws from the declared domain,
+and at least 24 of them must agree before it `holds`. Two results agree
+within the claim's own [tolerance](grammar.md#how-close-counts-as-equal),
+so an equivalence between a float and a fixed-point implementation is
+stated, not guessed. A draw where both sides raise the same exception
+agrees, and so does a draw where both sides overflow to the same
+infinity. A NaN computed from non-missing inputs is no value and agrees
+with nothing, another NaN included, and an infinity disagrees with a
+value or with the opposite infinity: each is a counterexample. A draw
+with a missing input, or where either side returns something
+non-numeric, is not compared, and both kinds of uncompared draw are
+counted in the record rather than dropped. Sampling never proves, so
+the line's ceiling is `holds`.
+
+The two lines answer different questions, and they can disagree:
+`(x + 1e20) - 1e20` against `x` over `[0, 1]` is proven on the
+mathematics line and falsified on the computation, since in float64 the
+large sum swallows `x`. When derive cannot decide (a function with no
+source to read, a body it cannot lift, or a difference it cannot
+settle), there is no mathematics line, and the shared draws are the
+claim's only row, a computation line, exactly as the probe's row is for
+a value claim.
 
 `f =:= g` claims `f(x) == g(x)` at every point of the domain, so a
 point where one side raises and the other returns a value is a
-counterexample, and the executed raise is its witness. `x / x` and `1.0` agree everywhere
-except `x = 0`:
+counterexample, and the executed raise is its witness. `x / x` and
+`1.0` agree everywhere except `x = 0`, and both lines find it:
 
 <!-- example: ratio run -->
 ```python
@@ -108,13 +125,14 @@ def ratio(x: float) -> float:
 def one(x: float) -> float:
     return 1.0
 
-(p,) = mathema.claims.check(ratio, [mathema.claim("f =:= g", funcs={"g": one})])
-print(p.verdict, p.counterexample)
+for p in mathema.claims.check(ratio, [mathema.claim("f =:= g", funcs={"g": one})]):
+    print(p.name, p.verdict, p.counterexample)
 ```
 
 <!-- example: ratio output -->
 ```text
-falsified x = 0: f raised ZeroDivisionError, g returned 1
+f_equiv_g falsified x = 0: f raised ZeroDivisionError, g returned 1
+f_equiv_g[float] falsified x = 0: f raised ZeroDivisionError, g returned 1
 ```
 
 `=:=` compares behaviour, so a point where both sides raise the same
@@ -125,9 +143,23 @@ disagreement, and the executed pair is the witness: against a version
 that raises `ValueError` at zero, the claim is falsified with
 `x = 0: f raised ZeroDivisionError, g raised ValueError`. A complex
 result from one side counts as a raise, unless that side is annotated
-`complex` or the claim is over `C`. A declared tolerance is the whole allowance the two values get;
-with none declared, they may differ by 1e-9 plus 1e-9 times the
-larger magnitude.
+`complex` or the claim is over `C`.
+
+A declared tolerance applies to the computation line alone, where it is
+the whole allowance the two values get; with none declared, they may
+differ by 1e-9 plus 1e-9 times the larger magnitude. The tolerance may
+also name its kind, as `{abs: x}`, `{rel: x}` (a share of the larger
+magnitude) or `{ulp: n}` (units in the last place of the larger
+magnitude), each with an optional `floor: x` that allows a fixed gap
+beside it, and the record shows it as written. The mathematics line is
+exact whatever the tolerance, so `x + 1e-3 =:= x` with a tolerance of
+`1e-2` is falsified there while its computation holds. Agreement within
+a tolerance is a different claim, `f(x) ~= g(x)`, and accepting such a
+falsification as a discovery (`mathema accept KEY NAME --as discovery`)
+offers it at the computation's declared tolerance, or 1e-9 when none was
+declared, written only when it holds or is proven. Either way the whole claim retires with both its lines: the
+computation row alone is never accepted, since the computation is what
+runs.
 
 The record annotates both sides' structural complexity, so an
 equivalence between a one-liner and a loop reads as what it is.

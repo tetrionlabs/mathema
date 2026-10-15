@@ -182,12 +182,13 @@ def invert_conjecture(statement: str, claim_name: str) -> "tuple[str | None, str
 
 
 def _adjudicate_candidate(root: str, key: str, statement: str,
-                          route: "str | None"):
+                          route: "str | None", tolerance=None):
     """Intent:
         Dry-run one candidate corrected claim against the live
-        function: `(probe, None)` when it adjudicated, `(None,
-        reason)` when it could not run (function unresolvable,
-        statement rejected). Read-only; the plan stays a true preview.
+        function, under `tolerance` when one is given: `(probe, None)`
+        when it adjudicated, `(None, reason)` when it could not run
+        (function unresolvable, statement rejected). Read-only; the plan
+        stays a true preview.
     """
     from .conjecture import _resolve_func_ref, check_conjectures
     from .conjecture import claim as _claim
@@ -201,7 +202,8 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     if base_route not in ("probe", "derive"):
         base_route = "best"
     try:
-        cj = _claim(statement, name="corrected_candidate", route=base_route)
+        cj = _claim(statement, name="corrected_candidate", route=base_route,
+                    tolerance=tolerance)
         probes = check_conjectures(fn, [cj])
     except TimeoutError:
         raise
@@ -666,6 +668,116 @@ def _apply_rename(plan: dict, attestation: "dict | None") -> str:
     return f"reconciled: {old_key} renamed to {new_key} (by {who})"
 
 
+def _is_equivalence(row: "dict | None") -> bool:
+    """Whether a record row states a function equivalence `f =:= g`."""
+    if not row:
+        return False
+    try:
+        _lhs, relation, _rhs = split_relation(row.get("statement") or "")
+    except ValueError:
+        # a predicate row (`absent(f, x)`) has no relation of its own
+        return False
+    return relation == "=:="
+
+
+def _approximate_correction(root: str, key: str, row: dict) -> tuple:
+    """Intent:
+        The correction a falsified mathematics line of `f =:= g` offers,
+        as `(statement, tolerance, None)`: the same claim with `f(x) ~=
+        g(x)` in place of `f =:= g`, over f's parameters, at the
+        tolerance its computation compared under (a declared number, or
+        the 1e-9 absolute allowance of the default). `(None, None,
+        reason)` when none can be stated: a tolerance kind, which a
+        `~=` claim does not take, or a function or statement mathema
+        cannot read.
+    """
+    from ._tolerance import ToleranceKind, read_tolerance
+    from .conjecture import DEFAULT_TOLERANCE, _effective_facts, _resolve_func_ref
+    try:
+        declared = read_tolerance(row.get("tolerance"))
+    except ValueError as e:
+        return None, None, f"its tolerance does not read ({e})"
+    if isinstance(declared, ToleranceKind):
+        return None, None, (f"its computation compared under the tolerance "
+                            f"{declared.written()}, and a `~=` claim takes a "
+                            f"bare number, so no `f(x) ~= g(x)` correction "
+                            f"is offered")
+    try:
+        tolerance = DEFAULT_TOLERANCE if declared is None else float(declared)
+    except (TypeError, ValueError):
+        return None, None, f"its tolerance {declared!r} is not a number"
+    if not _is_equivalence(row):
+        return None, None, "the statement does not read as `f =:= g`"
+    lhs, relation, rhs = split_relation(row.get("statement") or "")
+    if not lhs.rstrip().endswith("f") \
+            or not rhs.strip().isidentifier():
+        return None, None, "the statement does not read as `f =:= g`"
+    try:
+        params = list(_effective_facts(_resolve_func_ref(key, root=root)).params)
+    except Exception as e:
+        return None, None, f"cannot read {key}'s parameters ({e})"
+    args = ", ".join(params)
+    prefix = lhs.rstrip()[:-1]
+    return (f"{prefix}f({args}) ~= {rhs.strip()}({args})", tolerance, None)
+
+
+def _equivalence_discovery(root: str, key: str, claims: list, target: dict,
+                           as_: str) -> "dict | None":
+    """Intent:
+        What a discovery on an `f =:= g` claim changes in its plan, or
+        None when `target` is no part of one or `as_` is not
+        `discovery`. Its computation row `NAME[float]` alone is never
+        accepted. The whole claim is a discovery when either line is
+        falsified, and retires with both rows: `{"base": "falsified",
+        "witness": the falsified line's witness, "moves_with": [its
+        computation row], "correction": (statement, tolerance, reason)
+        or None}`. The correction is offered where the mathematics line
+        is falsified and the computation holds
+        (`_approximate_correction`); a falsified computation offers
+        none, the replacement being the author's to state.
+
+    Raises:
+        AcceptanceError: a discovery on the computation row alone.
+    """
+    if as_ != "discovery":
+        return None
+    parent_name = (target.get("meta") or {}).get("mathema.companion_of")
+    if parent_name is not None:
+        parent = next((c for c in claims if c.get("name") == parent_name),
+                      None)
+        if _is_equivalence(parent):
+            raise AcceptanceError(
+                f"{target.get('name')} is the computation of {parent_name}, "
+                f"an equivalence, and the computation is what runs, so "
+                f"{parent_name} cannot stand where it fails: accept the "
+                f"whole claim as a discovery (mathema accept {key} "
+                f"{parent_name} --as discovery, keeping both lines), or "
+                f"replace it with a claim true of the running code "
+                f"(--corrected \"<law>\")")
+        return None
+    if not _is_equivalence(target):
+        return None
+    name = target.get("name")
+    computation = next(
+        (c for c in claims
+         if (c.get("meta") or {}).get("mathema.companion_of") == name), None)
+    main = classify_verdict(target.get("verdict") or "")
+    computed = classify_verdict((computation or {}).get("verdict") or "")
+    if main in ("falsified", "invalidated"):
+        witness = target.get("counterexample")
+    elif computed == "falsified":
+        witness = computation.get("counterexample")
+    else:
+        return None
+    correction = None
+    if main == "falsified" and str(target.get("route") or "").startswith(
+            "derive") and computed in ("holds", "proven"):
+        correction = _approximate_correction(root, key, target)
+    return {"base": "falsified", "witness": witness,
+            "moves_with": [computation] if computation else [],
+            "correction": correction}
+
+
 def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                     by: str | None = None, note: str | None = None,
                     corrected: str | None = None,
@@ -716,6 +828,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             "witness": target.get("counterexample"),
             "others_hold": _another_claim_holds(claims, target),
             "actions": []}
+    equivalence = _equivalence_discovery(root, key, claims, target, as_)
+    if equivalence is not None:
+        base = equivalence["base"]
+        plan["witness"] = equivalence["witness"]
+        plan["moves_with"] = equivalence["moves_with"]
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
         # level the row claims: the row's verdict becomes that
@@ -885,8 +1002,18 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         # VERIFIED here and now: the author's --corrected statement, or
         # a mechanically sound inverse, each adjudicated against the
         # live function before anything may be written
+        c_tolerance = None
+        offered = "its mechanical inverse"
         if corrected is not None:
             candidate, why_not, stated = corrected, None, True
+        elif equivalence is not None:
+            candidate, c_tolerance, why_not = (
+                equivalence["correction"] or (None, None, (
+                    "an equivalence has no mechanical inverse, and its "
+                    "computation does not hold, so no `~=` correction "
+                    "at its tolerance can")))
+            stated = False
+            offered = "its `~=` correction"
         else:
             candidate, why_not = invert_conjecture(
                 target.get("statement") or "", claim_name)
@@ -894,7 +1021,8 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         c_verdict = c_n = None
         if candidate:
             probe, err = _adjudicate_candidate(root, key, candidate,
-                                               target.get("route"))
+                                               target.get("route"),
+                                               tolerance=c_tolerance)
             if probe is None:
                 if stated:
                     raise AcceptanceError(
@@ -910,11 +1038,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                             f"(counterexample: {probe.counterexample}); a "
                             "correction that is wrong too is never written")
                     candidate, why_not = None, (
-                        "its mechanical inverse falsifies too "
+                        f"{offered} falsifies too "
                         f"(counterexample: {probe.counterexample})")
                 elif not stated and base_c not in ("proven", "holds"):
                     candidate, why_not = None, (
-                        f"its mechanical inverse comes out "
+                        f"{offered} comes out "
                         f"{probe.verdict!r}, not a holding verdict")
                 else:
                     c_verdict = probe.verdict
@@ -924,16 +1052,26 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             + (f" (superseded_by: {claim_name}_corrected)" if candidate
                else "")
             + ", keeping its counterexample as the witness")
+        for row in plan.get("moves_with") or ():
+            plan["actions"].append(
+                f"move its computation line {row.get('name')!r} "
+                f"({row.get('verdict')}) to the discoveries section with it")
         if candidate:
             plan["corrected_statement"] = candidate
             plan["corrected_name"] = f"{claim_name}_corrected"
             plan["corrected_verdict"] = c_verdict
+            if c_tolerance is not None:
+                plan["corrected_tolerance"] = c_tolerance
             if c_n:
                 plan["corrected_n"] = c_n
+            kind = ("stated" if stated else "approximate"
+                    if equivalence is not None else "inverted")
             plan["actions"].append(
-                f"declare the {'stated' if stated else 'inverted'} corrected "
-                f"claim {plan['corrected_name']!r}: {candidate!r}, "
-                f"checked now: {c_verdict}"
+                f"declare the {kind} corrected "
+                f"claim {plan['corrected_name']!r}: {candidate!r}"
+                + (f" with tolerance {c_tolerance:g}"
+                   if c_tolerance is not None else "")
+                + f", checked now: {c_verdict}"
                 + (f" over {c_n} trials" if c_n else ""))
         else:
             plan["actions"].append(
@@ -1064,6 +1202,14 @@ def _apply_attested(plan: dict, attestation) -> str:
         if plan.get("corrected_name"):
             target["superseded_by"] = plan["corrected_name"]
         entry.setdefault("discoveries", []).append(target)
+        for row in plan.get("moves_with") or ():
+            # a line of the claim retires with it, under the same
+            # acceptance
+            if row in claims:
+                claims.remove(row)
+                row.setdefault("acceptance_history", []).append(dict(event))
+                row["accepted"] = dict(plan["accepted"])
+                entry["discoveries"].append(row)
         if plan.get("corrected_statement"):
             meta = {"mathema.surface": "declared",
                     "mathema.discovered_from": target["name"],
@@ -1089,6 +1235,8 @@ def _apply_attested(plan: dict, attestation) -> str:
             }
             if plan.get("corrected_n"):
                 new_claim["n"] = plan["corrected_n"]
+            if plan.get("corrected_tolerance") is not None:
+                new_claim["tolerance"] = plan["corrected_tolerance"]
             claims.append(new_claim)
         entry["claims"] = claims
     if plan.get("declared_edits"):
@@ -1131,6 +1279,8 @@ def _discovery_lines(plan: dict) -> list:
     if parent:
         return [f"{moved}; as the float companion of {parent}, it stays "
                 f"retired while {parent} stands"]
+    for row in plan.get("moves_with") or ():
+        moved += f", with its computation line {row.get('name')}"
     edits = plan.get("declared_edits") or []
     if edits:
         moved += ", out of " + " and ".join(edits)
@@ -1143,9 +1293,12 @@ def _discovery_lines(plan: dict) -> list:
         if plan.get("corrected_n"):
             checked += f" over {plan['corrected_n']} trials"
         stub = corrected_stub(plan) or {}
+        tolerance = (f" with tolerance {stub['tolerance']:g}"
+                     if stub.get("tolerance") is not None else "")
         lines.append(f"the corrected claim takes its place: "
                      f"{stub.get('name')} [{stub.get('route')}]: "
-                     f"{stub.get('statement')}, checked now: {checked}")
+                     f"{stub.get('statement')}{tolerance}, checked now: "
+                     f"{checked}")
     elif not plan.get("others_hold"):
         lines.append('no corrected claim; pass --corrected "<law>" to state '
                      "what is true")
@@ -1206,15 +1359,19 @@ def corrected_stub(plan: dict) -> dict | None:
     """Intent:
         The declared-layer stanza for a discovery's corrected claim:
         its name, statement and route, the route reduced to the base
-        spelling a claims file takes (`probe`, `derive` or `best`).
+        spelling a claims file takes (`probe`, `derive` or `best`), and
+        its tolerance when the correction states one.
         None when the plan corrects no claim.
     """
     if not plan.get("corrected_statement"):
         return None
     route = (plan["claim"].get("route") or "best").split(":", 1)[0]
-    return {"name": plan["corrected_name"],
+    stub = {"name": plan["corrected_name"],
             "statement": plan["corrected_statement"],
             "route": route if route in ("probe", "derive") else "best"}
+    if plan.get("corrected_tolerance") is not None:
+        stub["tolerance"] = plan["corrected_tolerance"]
+    return stub
 
 
 def _carry_trust(c: dict, accepted: dict, history: list) -> None:
