@@ -451,6 +451,38 @@ def at_miss(fn, facts, point: dict, gap: float, reference: float,
             "inherent": verdict, "words": words, "narrow": narrow}
 
 
+#: the characters a word of a printed command carries unquoted in any
+#: POSIX shell; anything else (a companion's brackets, a space) is quoted
+_PLAIN_WORD = re.compile(r"[A-Za-z0-9_.,:/=+-]+")
+
+
+def command_word(word: str) -> str:
+    """A word of a printed command as a shell reads it back: as it is
+    when plain, else in double quotes (`"shift[float]"`)."""
+    if _PLAIN_WORD.fullmatch(word):
+        return word
+    escaped = re.sub(r'(["\\$`])', r"\\\1", word)
+    return f'"{escaped}"'
+
+
+def fixes(found: dict, row: str, key: str) -> list:
+    """Intent:
+        The fixes a falsified computation line offers under what its
+        conditioning says, each the text of one option: the claim words
+        that keep the computation within reach, when there are any, and
+        the command that records the loss as a discovery of `row`, the
+        line's own name (`shift[float]` for a proof's computation line,
+        the claim's name where the claim is its own computation line).
+    """
+    out = []
+    if found.get("narrow"):
+        out.append("if inputs this large are out of scope, narrow the "
+                   f"domain: {found['narrow']}")
+    out.append(f"if the loss is accepted, run: mathema accept {key} "
+               f"{command_word(str(row))} --as discovery")
+    return out
+
+
 def finding_words(key: str, point_text: str, found: dict) -> str:
     """The sentence a definition row's record carries for a loss its
     conditioning explains."""

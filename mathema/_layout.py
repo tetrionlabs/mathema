@@ -260,14 +260,9 @@ def _conditioning_lines(p, key: str) -> list:
     found = (p.meta or {}).get("mathema.conditioning")
     if not found:
         return []
+    from ._conditioning import fixes as conditioning_fixes
     from ._missing_words import options
-    fixes = []
-    if found.get("narrow"):
-        fixes.append("if inputs this large are out of scope, narrow the "
-                     f"domain: {found['narrow']}")
-    name = str(p.name).split("[", 1)[0]
-    fixes.append(f"if the loss is accepted, run: mathema accept {key} "
-                 f"{name} --as discovery")
+    fixes = conditioning_fixes(found, str(p.name), key)
     return [" " * 28 + found["words"],
             " " * 28 + "possible fixes:",
             *(" " * 30 + line for line in options(fixes).splitlines())]

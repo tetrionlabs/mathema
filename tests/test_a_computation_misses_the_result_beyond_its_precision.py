@@ -119,7 +119,7 @@ def test_the_remedies_narrow_the_domain_or_accept_the_discovery():
     assert "(i) if inputs this large are out of scope, narrow the domain: " \
            "for xs in [-1e8, 1e8]^2" in text, text
     assert "(ii) if the loss is accepted, run: mathema accept " in text
-    assert "shift --as discovery" in text
+    assert '"shift[float]" --as discovery' in text
 
 
 @pytest.fixture

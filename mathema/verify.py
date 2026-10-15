@@ -731,13 +731,8 @@ def _initially_falsified_hint(key: str, probes: list,
         if found:
             # a computation line that missed the mathematics: what the
             # conditioning at the witness says, and the ways out
-            claim_name = str(p.name).split("[", 1)[0]
-            fixes = []
-            if found.get("narrow"):
-                fixes.append("if inputs this large are out of scope, narrow "
-                             f"the domain: {found['narrow']}")
-            fixes.append(f"if the loss is accepted, run: mathema accept {key} "
-                         f"{claim_name} --as discovery")
+            from ._conditioning import fixes as conditioning_fixes
+            fixes = conditioning_fixes(found, str(p.name), key)
             lines.append(f"note {key}: {p.name} initially falsified: "
                          f"{found['words']}:\n" + _indented(options(fixes)))
             fresh.remove(p)
