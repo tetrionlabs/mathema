@@ -1799,17 +1799,19 @@ def _classify_bound(bounds) -> str:
 _SEQUENCE_CORNER_SHARE = 0.15
 
 
-def _element_range(bounds) -> "tuple[float, float] | None":
+def _element_range(bounds, reach=None) -> "tuple[float, float] | None":
     """Intent:
         The real interval a sequence's elements range over, `(lo, hi)`
-        with an unbounded end at the number representation's reach, or
-        None when the elements are not one real interval (an integer
-        lattice, a finite set, a union).
+        with an unbounded end at `reach` (`(lo, hi)`, the claim's
+        resolved pseudo-infinity) when given, else at the number
+        representation's reach, or None when the elements are not one
+        real interval (an integer lattice, a finite set, a union).
     """
     from ._sampling import _reach_ends, representation_reach
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     if bounds is None:
-        reach = representation_reach()
-        return -reach, reach
+        return lo_reach, hi_reach
     pieces = getattr(bounds, "pieces", None)
     if pieces is not None:
         def numeric(v) -> bool:
@@ -1824,18 +1826,18 @@ def _element_range(bounds) -> "tuple[float, float] | None":
             return None
         real = [p for p in pieces if not isinstance(p, frozenset)]
         if not real:
-            reach = representation_reach()
-            return -reach, reach
+            return lo_reach, hi_reach
         if len(real) != 1:
             return None
         bounds = real[0]
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
             and len(bounds) == 2:
         try:
-            lo, hi, _ul, _uh = _reach_ends(bounds)
+            lo, hi, unbounded_lo, unbounded_hi = _reach_ends(bounds)
         except (TypeError, ValueError):
             return None
-        return lo, hi
+        return (lo_reach if unbounded_lo else lo,
+                hi_reach if unbounded_hi else hi)
     return None
 
 
@@ -1861,11 +1863,12 @@ def _cancel_magnitudes(top: float) -> list:
     return out or [top]
 
 
-def sequence_corners(bounds, n: "int | None" = None) -> list:
+def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
     """Intent:
         The magnitude corners of a sequence whose elements range over
-        `bounds` (None the whole line, an unbounded end at the number
-        representation's reach), each a list: the pairs that cancel at
+        `bounds` (None the whole line, an unbounded end at `reach`, the
+        claim's resolved pseudo-infinity range, when given, else at the
+        number representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
         range's own limit, the range's opposite ends `[lo, hi]`, and
         the same-sign pair `[e, e]` at each end `e` past half the
@@ -1875,7 +1878,7 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         elements are not one real interval.
     """
     from ._sampling import representation_reach
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None or (n is not None and n < 2):
         return []
     lo, hi = span

@@ -842,6 +842,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return True
         return isinstance(e, (int, float)) and domain_contains(e, bound)
 
+    def _within_cap(e, bound):
+        # under a pseudo-infinity an element runs along its unbounded
+        # directions to the cap and no further; a declared finite end
+        # stays the claim's own, and a hole is judged by its slot
+        if isinstance(e, bool) or not isinstance(e, (int, float)) or e != e:
+            return True
+        from .probing import _element_range
+        span = _element_range(bound, (cap_lo, cap_hi))
+        return span is None or span[0] <= e <= span[1]
+
     from .domain import path_bindings_hold as _paths_hold
     # the parameters the claim binds paths into (`o.lines[*].qty`): a
     # path binding is a filter on the member
@@ -879,6 +889,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
             if bound is not None and not all(_element_ok(n, e, bound)
                                              for e in elements):
+                return False
+            if cap is not None and not all(_within_cap(e, bound)
+                                           for e in elements):
                 return False
         for n in names:
             bound = cj_domain.get(n)
@@ -1062,7 +1075,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         corners = [{n: _corner_value(n, edges[n][min(i, len(edges[n]) - 1)])
                     for n in names} for i in (0, 1)]
     # a sequence's magnitude corners (the cancelling pairs, the float
-    # limit pair), each at the first box corner of the other coordinates
+    # limit pair, both within a declared pseudo-infinity), each at the
+    # first box corner of the other coordinates
     from .probing import sequence_corners
 
     def _corner_sequence(name, pair):
@@ -1074,7 +1088,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return [pair[i % 2] for i in range(3)]
     for seq in [n for n in names if n in seq_names
                 and n not in mat_names and n not in table_names]:
-        for pair in sequence_corners(cj_domain.get(seq)):
+        for pair in sequence_corners(cj_domain.get(seq),
+                                     reach=(cap_lo, cap_hi) if cap is not None
+                                     else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
     # this dict is the point-runtime kit; `interfaces.runtime` states
