@@ -5890,6 +5890,20 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # probe claim.
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+
+            def probed_with(bound, cj=cj):
+                # the claim on the probe route under `let |inf| be bound`:
+                # its one line is the computation
+                again = check_conjectures(
+                    fn, [_dc_replace(_with_infinity(cj, bound), route="probe")],
+                    domain=domain, trials=trials,
+                    trials_downscale=trials_scale, facts=facts,
+                    extensive=extensive, known_premises=known_premises)
+                return next((p.verdict for p in again if p.name == cj.name),
+                            None)
+            for line in (probed, ctx.companion):
+                if line is not None and line.verdict == "falsified":
+                    _settle_infinity_offer(line, probed_with)
             if ctx.companion is None and probed.verdict == "holds" \
                     and _stands_in_for_derive(ctx):
                 # the probe stood in for derive on the mathematics: the
@@ -6305,6 +6319,22 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         if found:
             companion.meta = {**(companion.meta or {}),
                               "mathema.conditioning": found}
+
+            def chain_with(bound):
+                # the whole chain under `let |inf| be bound`: its folded
+                # computation line, or, where none is kept, the chain
+                # itself holding on the probe that stood in for derive
+                again = check_conjectures(
+                    fn, [_with_infinity(cj, bound)], domain=domain,
+                    trials=trials, trials_downscale=trials_scale,
+                    facts=facts, extensive=extensive, float_companions=True)
+                rows = {p.name: p for p in again}
+                line = rows.get(companion.name)
+                if line is not None:
+                    return line.verdict
+                return "holds" if rows.get(cj.name) is not None \
+                    and rows[cj.name].verdict == "holds" else "unknown"
+            _settle_infinity_offer(companion, chain_with)
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
     if empty_broken is not None:
@@ -8943,6 +8973,57 @@ def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
     return None
 
 
+#: set while a claim runs again under a `let |inf| be B` it was offered,
+#: so the offers that run makes are not run in turn
+_SETTLING_OFFER: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_settling_offer", default=False)
+
+
+def _with_infinity(cj, bound: float):
+    """`cj` with `let |inf| be bound` as its own pseudo-infinity."""
+    return _dc_replace(cj, pseudo_infinity=bound,
+                       resolved_pseudo_infinity=PseudoInfinity(bound, "claim"))
+
+
+def _computation_holds_with(rerun, bound: float) -> bool:
+    """Intent:
+        Whether a claim's computation line holds under `let |inf| be
+        bound`: `rerun(bound)` runs it and returns that line's verdict,
+        None when the run makes no such line. The run's calls are filed
+        in a batch of their own, so the enclosing check's policy
+        evidence is the check's own. False inside another such run.
+    """
+    from . import policy
+    if _SETTLING_OFFER.get():
+        return False
+    settling = _SETTLING_OFFER.set(True)
+    own_batch = policy._BATCH.set(policy.Batch())
+    filed_under = policy._CLAIM.get()
+    try:
+        return rerun(bound) == "holds"
+    finally:
+        policy._CLAIM.set(filed_under)
+        policy._BATCH.reset(own_batch)
+        _SETTLING_OFFER.reset(settling)
+
+
+def _settle_infinity_offer(row, rerun) -> None:
+    """Intent:
+        Keep the `let |inf| be B` a falsified computation line's
+        conditioning offers (`_conditioning.offered_infinity`) only when
+        the claim with that binding holds on its computation line
+        (`_computation_holds_with`); otherwise the record offers no
+        claim words.
+    """
+    found = (getattr(row, "meta", None) or {}).get("mathema.conditioning")
+    bound = _conditioning.offered_infinity(found)
+    if found is None or bound is None:
+        return
+    if _computation_holds_with(rerun, bound):
+        return
+    row.meta = {**row.meta, "mathema.conditioning": {**found, "narrow": None}}
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -8980,11 +9061,21 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                 _refused_by_own_guards_at(fn, facts, ctx.cj)
                 if ctx.exclude_own_guards else None)
     containers, holes = _admitted_container_points(ctx, facts)
-    companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
-                                 bound_funcs, assum=assumption,
-                                 budget=ctx.companion_budget,
-                                 missing=_admitted_scalar_points(ctx) + containers,
-                                 holes=holes, excluded=excluded)
+    missing = _admitted_scalar_points(ctx) + containers
+
+    def run(cj):
+        return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
+                                bound_funcs, assum=assumption,
+                                budget=ctx.companion_budget,
+                                missing=missing, holes=holes,
+                                excluded=excluded)
+    companion = run(ctx.cj)
+
+    def run_with(bound):
+        line = run(_with_infinity(ctx.cj, bound))
+        return line.verdict if line is not None else None
+    if companion is not None and companion.verdict == "falsified":
+        _settle_infinity_offer(companion, run_with)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
