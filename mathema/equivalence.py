@@ -1344,7 +1344,6 @@ class BodyEquivalence:
 
 def prove_bodies_equal(left: Document | str, right: Document | str,
                        domain: dict, *,
-                       tolerance: float | None = None,
                        siblings: dict | None = None) -> BodyEquivalence:
     """Whether two lifted bodies compute the same function on `domain`.
 
@@ -1357,7 +1356,7 @@ def prove_bodies_equal(left: Document | str, right: Document | str,
     `meta["mathema.domain"]` states each bound as it was read.
     `siblings` binds the other functions either body calls, as
     `sibling_scope` takes them. The answer is the mathematics line of
-    `f =:= g`, which is exact: `tolerance` does not change it.
+    `f =:= g`, which is exact, so it takes no tolerance.
 
     The derive rungs of `f =:= g` run on the engine's rendering of each
     body, under the extensive wall-clock cap: one canonical form, the
@@ -1405,7 +1404,7 @@ def prove_bodies_equal(left: Document | str, right: Document | str,
             "proven", "form",
             sketch=f"the two bodies have one canonical form "
                    f"({koine_hash(ldoc, docs)})", meta=stated)
-    case = _Case(cj=types.SimpleNamespace(name="bodies", tolerance=tolerance),
+    case = _Case(cj=types.SimpleNamespace(name="bodies", tolerance=None),
                  statement="", note="", cj_domain=bounds,
                  fn=materialised(ldoc, siblings), facts=lfacts,
                  gfn=materialised(rdoc, siblings), gfacts=rfacts,

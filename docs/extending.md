@@ -243,10 +243,10 @@ names to bounds (a claim's bound, its text such as `"(0, inf)"`, or a
 list `[lo, hi]` for a closed interval); the right body's parameters
 align by position, and `siblings=` binds the functions either body
 calls, as `sibling_scope` takes them. It answers for the mathematics
-line of `f =:= g` alone, which is exact: a falsification stands where
-the two bodies, executed at derive's witness and compared exactly,
-disagree, however small the gap, and since it samples nothing there is
-no computation line to report. The answer is a `BodyEquivalence`:
+line of `f =:= g` alone, which is exact and takes no tolerance: a
+falsification stands where the two bodies, executed at derive's witness
+and compared exactly, disagree, however small the gap, and since it
+samples nothing there is no computation line to report. The answer is a `BodyEquivalence`:
 
 | Field | What it holds |
 |---|---|
