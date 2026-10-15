@@ -433,7 +433,8 @@ def _another_claim_holds(claims: list, target: dict) -> bool:
 
 
 def computation_line_refusal(key: str, row: str, parent: str,
-                             found: "dict | None") -> str:
+                             found: "dict | None",
+                             whole: bool = False) -> str:
     """Intent:
         Why a falsified computation line `row` (the computation of the
         claim `parent`) is not accepted alone, and the ways out. It is
@@ -442,6 +443,8 @@ def computation_line_refusal(key: str, row: str, parent: str,
         read at the witness (a raise, a NaN or an inf, not a miss of
         the relation). A loss the conditioning does not explain is the
         code's; one not known to be inherent counts as the code's.
+        `whole` is whether `parent` is proven, so that it can be
+        accepted whole as a discovery with this line.
     """
     from ._conditioning import command_word
     cause = (found or {}).get("words") or (
@@ -449,11 +452,16 @@ def computation_line_refusal(key: str, row: str, parent: str,
         "inherent is not decided")
     whose = ("the code's" if (found or {}).get("inherent") is False
              else "not known to be inherent, which counts as the code's")
+    accept_whole = (f"accept the whole claim as a discovery, keeping both "
+                    f"lines, run: mathema accept {key} "
+                    f"{command_word(parent)} --as discovery; "
+                    if whole else "")
     return (f"{row} is the computation of {parent}, falsified: {cause}. A "
             f"computation line is accepted alone only where its loss is "
             f"inherent (no float64 computation could do better there); "
             f"this loss is {whose}. The ways out: fix the code, and the "
-            f"recorded counterexample replays until the line holds; or "
+            f"recorded counterexample replays until the line holds; "
+            f"{accept_whole}or "
             f"narrow the claim's domain knowingly: edit {parent}, then run: "
             f"mathema accept {key} {command_word(parent)} --as superseded")
 
@@ -721,23 +729,27 @@ def _approximate_correction(root: str, key: str, row: dict) -> tuple:
     return (f"{prefix}f({args}) ~= {rhs.strip()}({args})", tolerance, None)
 
 
-def _equivalence_discovery(root: str, key: str, claims: list, target: dict,
+def _whole_claim_discovery(root: str, key: str, claims: list, target: dict,
                            as_: str) -> "dict | None":
     """Intent:
-        What a discovery on an `f =:= g` claim changes in its plan, or
-        None when `target` is no part of one or `as_` is not
-        `discovery`. Its computation row `NAME[float]` alone is never
-        accepted. The whole claim is a discovery when either line is
-        falsified, and retires with both rows: `{"base": "falsified",
-        "witness": the falsified line's witness, "moves_with": [its
-        computation row], "correction": (statement, tolerance, reason)
-        or None}`. The correction is offered where the mathematics line
-        is falsified and the computation holds
+        What a discovery that retires a claim with its computation line
+        changes in its plan, or None when `target` is no such claim or
+        `as_` is not `discovery`. Two claims retire whole. An `f =:= g`
+        claim is a discovery when either of its lines is falsified, and
+        its computation row `NAME[float]` alone is never accepted. A
+        value claim whose own row is proven is a discovery when its
+        computation line is falsified. Either retires with both rows:
+        `{"base": "falsified", "witness": the falsified line's witness,
+        "moves_with": [its computation row], "correction": (statement,
+        tolerance, reason) or None, "equivalence": whether it states
+        `f =:= g`}`. The correction is offered where the mathematics
+        line of `f =:= g` is falsified and the computation holds
         (`_approximate_correction`); a falsified computation offers
         none, the replacement being the author's to state.
 
     Raises:
-        AcceptanceError: a discovery on the computation row alone.
+        AcceptanceError: a discovery on the computation row of an
+        `f =:= g` claim alone.
     """
     if as_ != "discovery":
         return None
@@ -755,14 +767,19 @@ def _equivalence_discovery(root: str, key: str, claims: list, target: dict,
                 f"replace it with a claim true of the running code "
                 f"(--corrected \"<law>\")")
         return None
-    if not _is_equivalence(target):
-        return None
     name = target.get("name")
-    computation = next(
-        (c for c in claims
-         if (c.get("meta") or {}).get("mathema.companion_of") == name), None)
+    computation = _computation_row(claims, name)
     main = classify_verdict(target.get("verdict") or "")
     computed = classify_verdict((computation or {}).get("verdict") or "")
+    if not _is_equivalence(target):
+        # a value claim retires whole where its mathematics is proven
+        # and its computation line falsified
+        if _proven_row(target) and computed == "falsified":
+            return {"base": "falsified",
+                    "witness": computation.get("counterexample"),
+                    "moves_with": [computation], "correction": None,
+                    "equivalence": False}
+        return None
     if main in ("falsified", "invalidated"):
         witness = target.get("counterexample")
     elif computed == "falsified":
@@ -775,7 +792,23 @@ def _equivalence_discovery(root: str, key: str, claims: list, target: dict,
         correction = _approximate_correction(root, key, target)
     return {"base": "falsified", "witness": witness,
             "moves_with": [computation] if computation else [],
-            "correction": correction}
+            "correction": correction, "equivalence": True}
+
+
+def _proven_row(row: "dict | None") -> bool:
+    """Whether a record row's own verdict is a proof."""
+    return classify_verdict((row or {}).get("verdict") or "") in (
+        "proven", "derived")
+
+
+def _computation_row(claims: list, name: "str | None") -> "dict | None":
+    """The computation line of the claim `name` among a record's claim
+    rows (`name[float]`, or the line a probe keeps), None when it has
+    none."""
+    from .gates import computation_line_of
+    return next((c for c in claims
+                 if name is not None
+                 and computation_line_of(c.get("meta")) == name), None)
 
 
 def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
@@ -828,11 +861,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             "witness": target.get("counterexample"),
             "others_hold": _another_claim_holds(claims, target),
             "actions": []}
-    equivalence = _equivalence_discovery(root, key, claims, target, as_)
-    if equivalence is not None:
-        base = equivalence["base"]
-        plan["witness"] = equivalence["witness"]
-        plan["moves_with"] = equivalence["moves_with"]
+    whole = _whole_claim_discovery(root, key, claims, target, as_)
+    if whole is not None:
+        base = whole["base"]
+        plan["witness"] = whole["witness"]
+        plan["moves_with"] = whole["moves_with"]
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
         # level the row claims: the row's verdict becomes that
@@ -977,8 +1010,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if computation_line_of(target.get("meta")):
             found = (target.get("meta") or {}).get("mathema.conditioning")
             if not (found and found.get("inherent") is True):
+                owner = next((c for c in claims if c.get("name") == parent),
+                             None)
                 raise AcceptanceError(computation_line_refusal(
-                    key, claim_name, parent, found))
+                    key, claim_name, parent, found,
+                    whole=_proven_row(owner)))
         accepted = {"as": "discovery", "at": datetime.date.today().isoformat(),
                     "form": form}
         if by:
@@ -1006,9 +1042,13 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         offered = "its mechanical inverse"
         if corrected is not None:
             candidate, why_not, stated = corrected, None, True
-        elif equivalence is not None:
+        elif whole is not None and not whole["equivalence"]:
+            candidate, why_not, stated = None, (
+                f"{claim_name} is proven, so no inverse of it can hold; "
+                f"what the running code does is the author's to state"), False
+        elif whole is not None:
             candidate, c_tolerance, why_not = (
-                equivalence["correction"] or (None, None, (
+                whole["correction"] or (None, None, (
                     "an equivalence has no mechanical inverse, and its "
                     "computation does not hold, so no `~=` correction "
                     "at its tolerance can")))
@@ -1065,7 +1105,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             if c_n:
                 plan["corrected_n"] = c_n
             kind = ("stated" if stated else "approximate"
-                    if equivalence is not None else "inverted")
+                    if whole is not None else "inverted")
             plan["actions"].append(
                 f"declare the {kind} corrected "
                 f"claim {plan['corrected_name']!r}: {candidate!r}"
@@ -1260,9 +1300,17 @@ _KIND_PHRASE = {"evidence": "evidence", "risk": "a risk",
 
 def _verdict_line(plan: dict) -> "str | None":
     """The verdict being accepted, with its witness when it was
-    falsified and its trial count when it holds."""
+    falsified, or its computation line's when a proven claim retires
+    with that falsified line, and its trial count when it holds."""
     verdict = plan.get("verdict") or ""
     base = classify_verdict(verdict)
+    falsified_line = next(
+        (r for r in plan.get("moves_with") or ()
+         if classify_verdict(r.get("verdict") or "") == "falsified"), None)
+    if base in ("proven", "derived") and falsified_line is not None \
+            and plan.get("witness"):
+        return (f"{base}; its computation line {falsified_line.get('name')} "
+                f"falsified at {plan['witness']}")
     if base in ("falsified", "invalidated") and plan.get("witness"):
         return f"{base} at {plan['witness']}"
     if base == "holds" and plan.get("n"):

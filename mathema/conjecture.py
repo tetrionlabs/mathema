@@ -5935,9 +5935,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     extensive=extensive, known_premises=known_premises)
                 return next((p.verdict for p in again if p.name == cj.name),
                             None)
-            for line in (probed, ctx.companion):
-                if line is not None and line.verdict == "falsified":
-                    _settle_infinity_offer(line, probed_with)
+            params = list(getattr(facts, "params", None) or ())
+            if probed.verdict == "falsified":
+                # the probe line itself: the claim's mathematics is not
+                # known at its witness beyond what the conditioning read
+                _settle_infinity_offer(probed, probed_with, params,
+                                       ctx.cj_domain)
+            if ctx.companion is not None \
+                    and ctx.companion.verdict == "falsified":
+                _settle_infinity_offer(ctx.companion, probed_with, params,
+                                       ctx.cj_domain,
+                                       witness=ctx.companion_witness)
             if ctx.companion is None and probed.verdict == "holds" \
                     and _stands_in_for_derive(ctx):
                 # the probe stood in for derive on the mathematics: the
@@ -6353,6 +6361,8 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
         if found:
             companion.meta = {**(companion.meta or {}),
                               "mathema.conditioning": found}
+        offered = ((broken.meta or {}).get(INFINITY_OFFER) or {}).get("bound")
+        if offered is not None:
 
             def chain_with(bound):
                 # the whole chain under `let |inf| be bound`: its folded
@@ -6368,7 +6378,12 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
                     return line.verdict
                 return "holds" if rows.get(cj.name) is not None \
                     and rows[cj.name].verdict == "holds" else "unknown"
-            _settle_infinity_offer(companion, chain_with)
+            # the failing link's own offer, kept where the whole chain
+            # holds under it
+            if _computation_holds_with(chain_with, offered):
+                companion.meta = {**(companion.meta or {}),
+                                  INFINITY_OFFER: dict(
+                                      broken.meta[INFINITY_OFFER])}
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
     if empty_broken is not None:
@@ -7099,6 +7114,8 @@ class _ClaimContext:
     # `companion` until the orchestration loop emits it
     companion_mode: "str | None" = None
     companion: "Probe | None" = None
+    # the point the staged companion's falsification names, {param: value}
+    companion_witness: "dict | None" = None
     # the caller's explicit trials, which bound the companion's points too
     companion_budget: "int | None" = None
     # each bound parameter's missing-value resolution, `{param:
@@ -8046,7 +8063,7 @@ def _fill_value(bound):
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                      resolver, shared: bool, structured: bool,
-                     column_bounds: "dict | None" = None):
+                     column_bounds: "dict | None" = None, reach=None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -8055,6 +8072,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
         `column_bounds` holds a table's column bindings by column name.
+        `reach`, the claim's resolved pseudo-infinity range when one
+        applies, bounds the magnitude corners along unbounded ends.
     """
     from . import _floor
     from .domain import domain_contains
@@ -8083,7 +8102,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # the magnitude corners of the completed element range, after
         # the degenerate containers
         floor += _floor.corner_floor(
-            sequence_corners(record if record is not None else bound),
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
             length_free=not shared)
     elif form == "mat":
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
@@ -8095,8 +8115,9 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # a column the claim binds (`for df.r in [0, 1]^n`) meets the
         # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound),
-            {c: sequence_corners(_column_bound(b, None))
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
+            {c: sequence_corners(_column_bound(b, None), reach=reach)
              for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
@@ -9041,21 +9062,97 @@ def _computation_holds_with(rerun, bound: float) -> bool:
         _SETTLING_OFFER.reset(settling)
 
 
-def _settle_infinity_offer(row, rerun) -> None:
+#: the most runs of a claim under `let |inf| be B` one offer makes
+_INFINITY_RERUNS = 10
+
+#: the record key an offered `let |inf| be B` is carried under
+INFINITY_OFFER = "mathema.infinity_offer"
+
+
+def _power_of_ten(exponent: int) -> float:
+    return float(f"1e{exponent}")
+
+
+def _settle_infinity_offer(row, rerun, names, cj_domain,
+                           witness: "dict | None" = None) -> None:
     """Intent:
-        Keep the `let |inf| be B` a falsified computation line's
-        conditioning offers (`_conditioning.offered_infinity`) only when
-        the claim with that binding holds on its computation line
-        (`_computation_holds_with`); otherwise the record offers no
-        claim words.
+        Offer `let |inf| be B` on a falsified line `row` where the claim
+        run under that binding (`rerun(B)`, through
+        `_computation_holds_with`) holds on the line. Only parameters
+        among `names` that run along an unbounded direction of
+        `cj_domain` are bounded by it, and B reaches every finite end
+        their domain states. The B the line's conditioning gives
+        (`_conditioning.infinity_candidate`) is tried first and kept
+        where it holds. With `witness`, the point the line was
+        falsified at, B is otherwise the largest power of ten below the
+        witness's magnitude along those directions at which the run
+        holds, found by bisection on the exponent; without it, only the
+        conditioning's B is tried. At most `_INFINITY_RERUNS` runs are
+        made, within the extensive wall-clock cap. The offer is written
+        to `row.meta[INFINITY_OFFER]` as `{"bound": B, "words": "let
+        |inf| be B"}`; nothing is written where no B holds.
     """
+    from . import _timeout as _timeout_mod
+    from .domain import unbounded_directions
+    if _SETTLING_OFFER.get():
+        return
     found = (getattr(row, "meta", None) or {}).get("mathema.conditioning")
-    bound = _conditioning.offered_infinity(found)
-    if found is None or bound is None:
+    unbounded = unbounded_directions(list(names), cj_domain or {})
+    floor = _conditioning.infinity_floor(unbounded, cj_domain or {})
+    if not unbounded or floor is None:
         return
-    if _computation_holds_with(rerun, bound):
+    lowest = max(0, math.ceil(math.log10(floor))) if floor > 0 else 0
+    highest = None
+    if witness is not None:
+        reach = max((abs(v) for n in unbounded
+                     for v in _conditioning._numbers(witness.get(n))),
+                    default=0.0)
+        if not math.isfinite(reach) or reach <= 0:
+            return
+        # the largest power of ten strictly below the witness's magnitude
+        highest = math.ceil(math.log10(reach)) - 1
+        if highest < lowest:
+            return
+    runs = [0]
+    best: list = [None]
+
+    def holds(exponent: int) -> bool:
+        runs[0] += 1
+        return _computation_holds_with(rerun, _power_of_ten(exponent))
+
+    def search() -> None:
+        nonlocal highest
+        given = _conditioning.infinity_candidate(found)
+        if given is not None:
+            exponent = round(math.log10(given))
+            if exponent >= lowest and (highest is None or exponent <= highest):
+                if holds(exponent):
+                    best[0] = exponent
+                    return
+                # a binding past one that fails reaches the same failure
+                highest = exponent - 1 if highest is None \
+                    else min(highest, exponent - 1)
+        if witness is None or highest is None:
+            return
+        lo, hi = lowest, highest
+        while lo <= hi and runs[0] < _INFINITY_RERUNS:
+            mid = (lo + hi) // 2
+            if holds(mid):
+                best[0], lo = mid, mid + 1
+            else:
+                hi = mid - 1
+    try:
+        _timeout_mod._with_timeout(search,
+                                   _timeout_mod.EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # a B found to hold before the cap is still one that holds
+        pass
+    if best[0] is None:
         return
-    row.meta = {**row.meta, "mathema.conditioning": {**found, "narrow": None}}
+    bound = _power_of_ten(best[0])
+    row.meta = {**(row.meta or {}),
+                INFINITY_OFFER: {"bound": bound,
+                                 "words": _conditioning.infinity_words(bound)}}
 
 
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
@@ -9097,19 +9194,24 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     containers, holes = _admitted_container_points(ctx, facts)
     missing = _admitted_scalar_points(ctx) + containers
 
-    def run(cj):
+    def run(cj, witness=None):
         return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
-                                excluded=excluded)
-    companion = run(ctx.cj)
+                                excluded=excluded, witness=witness)
+    found_at: dict = {}
+    companion = run(ctx.cj, found_at)
 
     def run_with(bound):
         line = run(_with_infinity(ctx.cj, bound))
         return line.verdict if line is not None else None
-    if companion is not None and companion.verdict == "falsified":
-        _settle_infinity_offer(companion, run_with)
+    if companion is not None and companion.verdict == "falsified" \
+            and found_at.get("point") is not None \
+            and "mathema.proof_contradicted" not in (companion.meta or {}):
+        point = found_at["point"]
+        _settle_infinity_offer(companion, run_with, list(point),
+                               ctx.cj_domain, witness=point)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
@@ -10464,7 +10566,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # infinite endpoints to it, and the record says so with its
         # source; the derive stage never sees this, so a proof still
         # covers actual infinity (P1, P6)
-        cj_domain, _approximated = _operational_domain(cj_domain, pinf)
+        cj_domain, _approximated = _operational_domain(cj_domain, pinf,
+                                                       vectors=True)
         directions = [p for p, k in kinds.items() if k in _DIRECTION_KINDS]
         directions += sorted(set(cj.free_vars or ()) - set(directions))
         if unbounded_directions(directions, ctx.cj_domain):
@@ -10794,7 +10897,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                 resolver, shared, bool(param_structures.get(_p)),
                                 {key[len(_p) + 1:]: b for key, b in cj_domain.items()
                                  if key.startswith(_p + ".")
-                                 and key[len(_p) + 1:].isidentifier()})
+                                 and key[len(_p) + 1:].isidentifier()},
+                                reach=pinf)
         if made is not None:
             containers[_p] = made
 
@@ -10808,12 +10912,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     return True
         return False
     lap_floor = None
+    # a container's completed domain, its elements' unbounded ends at the
+    # resolved pseudo-infinity when one applies
+    capped_records = (ctx.record_domain or {}) if pinf is None else \
+        _operational_domain(ctx.record_domain or {}, pinf, vectors=True)[0]
+
     def sample_bound(p):
         # a container's elements are drawn from its completed domain, so
         # every spelling of one claim draws the same points; a scalar's
         # from the binding as written
         if p in containers and p not in ctx.implied:
-            return (ctx.record_domain or {}).get(p) or cj_domain.get(p)
+            return capped_records.get(p) or cj_domain.get(p)
         return cj_domain.get(p)
 
     longest_lap = max([*(lap.lap_size() for lap in (*language_laps.values(),
@@ -11234,7 +11343,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               or rng.randint(1, 8))
                     v = {c: _synth("sequence", rng,
                                    _column_bound(cj_domain.get(f"{p}.{c}"), column),
-                                   specials=specials, length=length)
+                                   specials=specials, length=length,
+                                   reach=pinf)
                          for c in table_columns[p]}
                     if p in containers:
                         v = containers[p].next(v, rng)
@@ -11281,7 +11391,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         specials=specials, extra=critical_hints.get(p),
                         extra_cycle=extra_cycles.get(p),
                         length=length,
-                        lap=language_laps.get(p) or missing_laps.get(p)))
+                        lap=language_laps.get(p) or missing_laps.get(p),
+                        reach=pinf))
                 if p in containers and isinstance(v, (list, tuple)) \
                         and trial != smallest_trial:
                     # the floor's degenerate containers first, then
@@ -11705,6 +11816,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if ctx.companion_mode == "spawn":
                 if computation_cx is None:
                     computation_cx = f"{_point_text(args)}: {gave}"
+                    ctx.companion_witness = dict(zip(kinds, args))
             elif computation_finding is None:
                 computation_finding = (
                     f"the {_representation_word(cj_domain, facts)} computation "
@@ -11980,6 +12092,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                               f"{_sides(shown_l, shown_r)}")
                             computation_note = words
                             computation_meta = {"mathema.conditioning": found}
+                            ctx.companion_witness = dict(zip(kinds, args))
                     elif computation_finding is None:
                         computation_finding = (
                             f"{words} at {_point_text(args)}{aux_part}, where "

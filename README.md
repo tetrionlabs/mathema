@@ -158,11 +158,12 @@ mathema.Record(step) · source, no side effects · form 8ca9c721c4cf
                             f loses more than the conditioning explains (κ ≈ 0, error 1)
                             possible fixes:
                               (i) fix the code
-                              (ii) to narrow the domain knowingly, edit unit_step, then run: mathema accept step unit_step --as superseded
+                              (ii) to accept the whole claim as a discovery, keeping both lines, run: mathema accept step unit_step --as discovery
+                              (iii) to narrow the domain knowingly, edit unit_step, then run: mathema accept step unit_step --as superseded
     holds      policy       f(nan)   no missing policy stated; assumed propagates
 ```
 
-At `1e16` the spacing between doubles is 2, so `x + 1.0` rounds back to `x` and the function returns 0.0. A condition number near zero says the exact problem is well conditioned, so the precision was lost by the code and not by the inputs. That is why the record does not offer to accept the computation line on its own: the fixes it gives are to change the arithmetic, or to narrow the claim's domain knowingly and supersede it. [Guarantees](https://mathema.tetrionlabs.com/guarantees/#mathematics-and-computation) sets out what each line establishes.
+At `1e16` the spacing between doubles is 2, so `x + 1.0` rounds back to `x` and the function returns 0.0. A condition number near zero says the exact problem is well conditioned, so the precision was lost by the code and not by the inputs. That is why the record does not offer to accept the computation line on its own: the fixes it gives are to change the arithmetic, to accept the whole claim as a discovery (the proven mathematics and the failing computation retire together, with the witness), or to narrow the claim's domain knowingly and supersede it. [Guarantees](https://mathema.tetrionlabs.com/guarantees/#mathematics-and-computation) sets out what each line establishes.
 
 ### Library code
 

@@ -26,7 +26,8 @@ larger miss is the code's. `κ` is read from the computation's shape:
 The remedy for an inherent miss is a pseudo-infinity (`let |inf| be B`)
 that keeps the computation where `κ · u` stays below the relative
 allowance along the claim's unbounded directions, or else a narrower
-domain, or accepting the discovery.
+domain, or accepting the discovery. The binding bounds only the
+computation; a proof stays over the claim's full domain.
 """
 from __future__ import annotations
 
@@ -378,38 +379,21 @@ def _magnitude_bound(kappa: "float | None", scale: float) -> "float | None":
     return bound
 
 
-def _infinity_words(bound: float) -> str:
+def infinity_words(bound: float) -> str:
     """`let |inf| be B` as the claim grammar spells it."""
     from .records import PseudoInfinity
     return PseudoInfinity(bound, "claim").render()
 
 
-def _bounded_by_infinity(name: str, cj_domain: dict, bound: float) -> bool:
-    """Whether `let |inf| be bound` keeps parameter `name` (a number, or
-    a container's elements) within `[-bound, bound]`: its domain is
-    unbounded in some direction and every end it states is within
-    that range."""
-    from .domain import unbounded_directions
-    from .probing import _element_range
-    if not unbounded_directions([name], cj_domain):
-        return False
-    span = _element_range(cj_domain.get(name), (-bound, bound))
-    return span is not None and -bound <= span[0] and span[1] <= bound
-
-
 def narrowing(point: dict, cj_domain: dict, kappa: float, how: str,
               scale: float) -> "str | None":
     """Intent:
-        The claim words that keep `κ · u` below the relative allowance.
-        For a reduction or a lifted body, whose κ grows with the inputs'
-        magnitude, `B` is the power of ten below where the allowance is
-        met: when every parameter carrying that magnitude runs along an
-        unbounded direction of the claim's domain and states no end
-        beyond `B`, `let |inf| be B`, which bounds the computation alone
-        and leaves the domain as stated; otherwise those parameters
-        bounded to `[-B, B]`. For a
-        matrix, the premise `assuming cond(A) < B`. None when no
-        narrower bound would help.
+        The claim words that keep `κ · u` below the relative allowance:
+        for a reduction or a lifted body, whose κ grows with the inputs'
+        magnitude, the parameters carrying that magnitude bounded to
+        `[-B, B]` with `B` the power of ten below where the allowance is
+        met; for a matrix, the premise `assuming cond(A) < B`. None when
+        no narrower bound would help.
     """
     if kappa is None or kappa <= 0 or scale <= 0:
         return None
@@ -427,8 +411,6 @@ def narrowing(point: dict, cj_domain: dict, kappa: float, how: str,
             if any(abs(x) >= scale / 10 for x in _numbers(v))]
     if not wide:
         return None
-    if all(_bounded_by_infinity(p, cj_domain or {}, bound) for p in wide):
-        return _infinity_words(bound)
     parts = []
     for p in wide:
         dims = _dims_text((cj_domain or {}).get(p), point.get(p))
@@ -436,16 +418,37 @@ def narrowing(point: dict, cj_domain: dict, kappa: float, how: str,
     return "for " + ", ".join(parts)
 
 
-def offered_infinity(found: "dict | None") -> "float | None":
-    """The `B` of the `let |inf| be B` a conditioning record offers as
-    its claim words (`narrow`), None when it offers something else or
-    nothing."""
-    if not found or not found.get("narrow"):
+def infinity_candidate(found: "dict | None") -> "float | None":
+    """The `B` a conditioning record gives for `let |inf| be B`: the
+    power of ten below where `κ · u` meets the relative allowance, for
+    a loss whose κ grows with the inputs' magnitude and is read (no
+    matrix), where `narrowing` would bound the inputs to `[-B, B]`.
+    None when the record gives none."""
+    if not found or found.get("how") in (None, "matrix"):
         return None
-    bound = _magnitude_bound(found.get("kappa"), found.get("scale") or 0.0)
-    if bound is None or found["narrow"] != _infinity_words(bound):
+    if not (found.get("inherent") is True or (
+            found.get("inherent") is None and found.get("kappa") is not None)):
         return None
-    return bound
+    return _magnitude_bound(found.get("kappa"), found.get("scale") or 0.0)
+
+
+def infinity_floor(names: list, cj_domain: dict) -> "float | None":
+    """Intent:
+        The least magnitude a `let |inf| be B` must reach so that every
+        parameter in `names` keeps the ends its domain states: the
+        largest finite end among them, 0 where none is stated. None
+        when a parameter's values (a number, or a container's elements)
+        are not one real interval, where `|inf|` has no single range to
+        bound.
+    """
+    from .probing import _element_range
+    floor = 0.0
+    for name in names:
+        span = _element_range((cj_domain or {}).get(name), (0.0, 0.0))
+        if span is None:
+            return None
+        floor = max(floor, abs(span[0]), abs(span[1]))
+    return floor
 
 
 def at_miss(fn, facts, point: dict, gap: float, reference: float,
@@ -515,8 +518,22 @@ def command_word(word: str) -> str:
     return f'"{escaped}"'
 
 
+def whole_claim_option(key: str, parent: str) -> str:
+    """The option that accepts the claim `parent` whole as a discovery,
+    its row and its computation line together."""
+    return (f"to accept the whole claim as a discovery, keeping both "
+            f"lines, run: mathema accept {key} {command_word(parent)} "
+            f"--as discovery")
+
+
+def _infinity_option(offer: str) -> str:
+    return ("if inputs this large are out of scope, bound the computation "
+            f"alone (the claim keeps its domain): {offer}")
+
+
 def fixes(found: "dict | None", row: str, key: str,
-          parent: "str | None" = None) -> list:
+          parent: "str | None" = None, whole: bool = False,
+          offer: "str | None" = None) -> list:
     """Intent:
         The fixes a falsified computation line offers under what its
         conditioning says, each the text of one option. `row` is the
@@ -529,19 +546,22 @@ def fixes(found: "dict | None", row: str, key: str,
         line whose loss is the code's, or not known to be inherent
         (`found` None where no conditioning was read), is not accepted
         alone: it offers fixing the code, and narrowing the claim's
-        domain knowingly by superseding `parent`.
+        domain knowingly by superseding `parent`, and, where `whole`
+        (`parent` is proven), accepting `parent` whole as a discovery.
+        `offer` is the `let |inf| be B` a run of the claim under it
+        showed holding on this line, offered after fixing the code where
+        the loss is not inherent, and in place of the narrowing where
+        it is.
     """
     found = found or {}
+    bound = [_infinity_option(offer)] if offer else []
     if parent is not None and found.get("inherent") is not True:
-        return ["fix the code",
+        return ["fix the code", *bound,
+                *([whole_claim_option(key, parent)] if whole else []),
                 f"to narrow the domain knowingly, edit {parent}, then run: "
                 f"mathema accept {key} {command_word(parent)} --as superseded"]
-    out = []
-    if offered_infinity(found) is not None:
-        out.append("if inputs this large are out of scope, bound the "
-                   "computation alone (the claim keeps its domain): "
-                   f"{found['narrow']}")
-    elif found.get("narrow"):
+    out = list(bound)
+    if not bound and found.get("narrow"):
         out.append("if inputs this large are out of scope, narrow the "
                    f"domain: {found['narrow']}")
     out.append(f"if the loss is accepted, run: mathema accept {key} "

@@ -3138,7 +3138,7 @@ def _reach_piece(bound, lo_reach: float, hi_reach: float):
 
 
 def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
-                        bare=()):
+                        bare=(), vectors: bool = False):
     """Intent:
         The computation's reading of a claim's domain: every infinite
         interval end, including one inside a union of real pieces and the
@@ -3157,7 +3157,8 @@ def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
         the rewritten ends are finite, and the sampler draws an
         unbounded direction log-uniformly over the decades up to the
         reach (`_sampling._synth_scalar`). Integer and natural types
-        and vector spaces are not rewritten.
+        are not rewritten, and a vector space only with `vectors`, which
+        reads its elements' real range the way a scalar's is read.
     """
     from dataclasses import replace as _replace
     lo_reach, hi_reach = reach
@@ -3165,7 +3166,7 @@ def operational_domain(cj_domain: dict, reach: "tuple[float, float]",
     changes: list = []
     for p, bound in cj_domain.items():
         if isinstance(bound, Domain):
-            if bound.base_type != "R" or bound.dims:
+            if bound.base_type != "R" or (bound.dims and not vectors):
                 rewritten[p] = bound
             elif all(_sentinel_piece(piece) for piece in bound.pieces):
                 rewritten[p] = _replace(bound, pieces=(ReachInterval(

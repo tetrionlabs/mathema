@@ -382,7 +382,7 @@ number it returns is the one the mathematics says.
 | Spelling | What you learn | Usual fix |
 |---|---|---|
 | `is_numerically_stable` | the float64 result agrees with the exact value of the mathematics, within the claim tolerance (1e-9 plus 1e-7 times the magnitude by default), at every point tried in the working domain; stated with `mathema.f.accurate`, and the witness shows the exact and the float value | reorder or rescale the arithmetic that loses the value |
-| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | fix the code, narrow the domain, or state the claim with `route="derive:math_only"`; where the loss is inherent in the inputs along an unbounded direction, <code>let &#124;inf&#124; be B</code> bounds the computation alone |
+| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | fix the code, narrow the domain, or state the claim with `route="derive:math_only"`; where it fails along an unbounded direction, <code>let &#124;inf&#124; be B</code> is offered once a run under it holds, bounding the computation alone and never the proof |
 | `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower number representation (float32, say) | |
 | `is_representation_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
 
@@ -550,10 +550,11 @@ One more binding uses bars around the name. It sets an operational
 infinity, the finite magnitude that stands in for `oo` wherever the
 computation of a claim is exercised along an unbounded direction, and it
 exists because code running on doubles does not reach infinity while the
-mathematics it implements does. A proof is about the mathematics, so it
-is over ℝ whatever the binding says, with infinity as infinity, and the
-binding bounds only the computation, namely what a proof's `[float]`
-companion and the probe route execute. Past about `1.34e154`, `x ** 2`
+mathematics it implements does. The binding bounds only the computation,
+never the proof, which stays over the full domain: a proof is about the
+mathematics, so it is over ℝ whatever the binding says, with infinity as
+infinity, and the binding sets how far a proof's `[float]` companion and
+the probe route execute. Past about `1.34e154`, `x ** 2`
 raises `OverflowError`, and with no operational infinity declared the
 companion runs an unbounded direction out to float64's maximum
 (about `1.8e308`), where that
@@ -603,6 +604,10 @@ be 1e100` says that for this claim the computation is exercised out to
 companion holds; the proof is the same proof over ℝ it was without the
 binding, and the binding stays in the claim's statement, so a reader
 sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)).
+`mathema verify` offers such a binding under a computation line that
+fails along an unbounded direction, once a run of the claim under it
+holds: here that is `let |inf| be 1e+154`, the largest power of ten
+whose square is still a finite double.
 
 A claim can also state a half-line explicitly, `let |inf| be 1e12, for
 x in [0, oo], f(x) >= 0`, where the probe route and the companion stop

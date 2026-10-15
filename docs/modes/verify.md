@@ -273,9 +273,12 @@ sum cancels and drops `y0`, a result no float64 computation can deliver
 at inputs of that magnitude. The note says so, with the condition
 number at the witness, and gives the ways out. Since `xs` and `y0` run
 along unbounded directions, the first is `let |inf| be 1e+21`, which
-bounds only how far the computation runs, so the proof still covers
-every real input; mathema ran the claim with that binding before
-offering it, and its computation line holds. The second accepts the
+bounds only the computation and never the proof, so the proof still
+covers every real input; mathema ran the claim with that binding before
+offering it, and its computation line holds. A computation line failing
+along an unbounded direction is offered such a binding whenever a run
+under it holds, whatever the conditioning says, B being the largest
+power of ten that holds where the conditioning gives none. The second accepts the
 computation line alone as a discovery, which mathema allows because the
 loss is inherent in the inputs rather than the code's. The second
 proven claim in the count is `dependencies_current`, which `verify`

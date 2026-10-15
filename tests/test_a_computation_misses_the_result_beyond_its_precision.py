@@ -55,13 +55,14 @@ def test_a_cancelling_pair_falsifies_the_shift_on_an_unbound_list():
            "magnitude" in _kappa_note(p), p.note
     found = p.meta["mathema.conditioning"]
     assert found["inherent"] is True
-    # xs runs along an unbounded direction: no narrowing of the claim is
-    # offered, and `let |inf| be B` only where the claim under it holds
-    narrow = found["narrow"]
-    assert narrow is None or narrow.startswith("let |inf| be "), found
-    if narrow is not None:
+    assert found["narrow"].startswith("for xs in [-1e"), found
+    # xs runs along an unbounded direction: `let |inf| be B` is offered
+    # only where the claim under it holds
+    offer = (p.meta.get("mathema.infinity_offer") or {}).get("words")
+    assert offer is None or offer.startswith("let |inf| be "), p.meta
+    if offer is not None:
         (held,) = check_conjectures(running_total, [claim(
-            f"{narrow}, for xs in R^n, y0 in [-10, 10], {_SHIFT}",
+            f"{offer}, for xs in R^n, y0 in [-10, 10], {_SHIFT}",
             route="probe")])
         assert held.verdict == "holds", (held.verdict, held.counterexample)
 
