@@ -268,3 +268,12 @@ def test_a_difference_below_any_float_tolerance_is_falsified_exactly():
     assert answer.verdict == "falsified", answer
     assert answer.meta["mathema.corroboration"] == "reproduced"
     assert 0 <= answer.point["x"] <= 4
+
+
+def test_the_mathematics_line_takes_no_tolerance():
+    import inspect
+    assert list(inspect.signature(prove_bodies_equal).parameters) == [
+        "left", "right", "domain", "siblings"]
+    with pytest.raises(TypeError, match="tolerance"):
+        prove_bodies_equal(body(TWICE), body(SUM_WITH_ITSELF),
+                           {"x": [-4.0, 4.0]}, tolerance=1e-2)
