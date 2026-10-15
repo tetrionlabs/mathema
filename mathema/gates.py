@@ -1769,7 +1769,8 @@ def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None, missing=None,
-                     holes=None, excluded=None) -> "Probe | None":
+                     holes=None, excluded=None,
+                     witness: "dict | None" = None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1804,7 +1805,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         missing input is classified, never judged. `excluded`, when given,
         is a predicate over points that the claim's premises leave out
         beyond its relations (`assuming f is defined`): such a point is
-        never executed.
+        never executed. `witness`, when given, receives the executed
+        point a falsification names, under `"point"`.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1933,6 +1935,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                    if coverage is not None and coverage.at_discontinuities
                    else "probe")
     if sweep.fragile_point is not None:
+        if witness is not None:
+            witness["point"] = dict(sweep.fragile_point)
         pt = _fmt_point(sweep.fragile_point, deps["names"])
         remedy = ("narrow the domain, "
                   + ("" if not reach_text else

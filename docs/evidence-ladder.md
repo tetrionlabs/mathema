@@ -118,11 +118,21 @@ a docstring), which proves the mathematics alone, spawns no companion,
 and records the opt-out on the proof's row. Where the loss is inherent
 in the inputs instead (no float64 computation could do better at the
 witness), the companion may be accepted alone as a discovery with
-`mathema accept`, and along an unbounded direction the note offers
-`let |inf| be B`, which bounds only how far the computation runs and
-leaves the proof over the whole domain. mathema runs the claim with
-that binding first, and offers it only where its computation line then
-holds.
+`mathema accept`.
+
+Whenever the companion fails along an unbounded direction, as the one
+above does at `-1.8e308`, the note also offers `let |inf| be B`,
+whatever the conditioning says and whether the witness was a lost
+digit, an overflow, a `NaN` or a raise. The binding bounds only the
+computation and never the proof, which stays over the full domain.
+mathema runs the claim under the binding before offering it and offers
+it only where the computation line then holds: B is the condition
+number's own bound where it gives one and it holds, and otherwise the
+largest power of ten below the witness's magnitude at which the run
+holds, found by bisection on the exponent in at most ten runs, which
+are filed apart from the claim's own evidence. For `(x + 1) - x` over
+the reals that is `let |inf| be 1e+15`, since `x + 1.0` is exact below
+`2^53`; where no power of ten holds, nothing is offered.
 
 The companion is written to the verified record beside its parent, with
 `meta.mathema.companion_of` naming it. It is never part of the declared

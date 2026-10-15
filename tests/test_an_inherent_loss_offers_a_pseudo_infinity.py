@@ -11,7 +11,7 @@ direction for `|inf|` to bound, keeps the offer to narrow it."""
 import re
 
 import mathema
-from mathema.conjecture import check_conjectures, claim
+from mathema.conjecture import INFINITY_OFFER, check_conjectures, claim
 
 
 def running_total(xs: list, y0: float) -> float:
@@ -38,9 +38,10 @@ def _rows(fn, statement):
     return {p.name: p for p in rec.probes}, rec
 
 
-def _offer(found) -> str:
-    assert re.fullmatch(r"let \|inf\| be \S+", found["narrow"] or ""), found
-    return found["narrow"]
+def _offer(line) -> str:
+    words = ((line.meta or {}).get(INFINITY_OFFER) or {}).get("words")
+    assert re.fullmatch(r"let \|inf\| be \S+", words or ""), line.meta
+    return words
 
 
 def test_a_proofs_computation_line_offers_a_pseudo_infinity():
@@ -50,7 +51,7 @@ def test_a_proofs_computation_line_offers_a_pseudo_infinity():
     assert line.verdict == "falsified", line.note
     found = line.meta["mathema.conditioning"]
     assert found["inherent"] is True, found
-    offer = _offer(found)
+    offer = _offer(line)
     text = repr(rec)
     assert ("if inputs this large are out of scope, bound the computation "
             f"alone (the claim keeps its domain): {offer}") in text, text
@@ -62,13 +63,12 @@ def test_a_proofs_computation_line_offers_a_pseudo_infinity():
     assert bound["law[float]"].verdict == "holds", bound["law[float]"].sketch
 
 
-def _offered_only_where_it_holds(found, fn, statement, **kw):
-    """An unbounded direction offers no narrowing; it offers `let |inf|
-    be B` only where the claim with that binding holds."""
-    narrow = found["narrow"]
-    if narrow is None:
+def _offered_only_where_it_holds(line, fn, statement, **kw):
+    """An unbounded direction offers `let |inf| be B` only where the
+    claim with that binding holds."""
+    if INFINITY_OFFER not in (line.meta or {}):
         return
-    offer = _offer(found)
+    offer = _offer(line)
     (held,) = check_conjectures(fn, [claim(f"{offer}, {statement}",
                                            name="law", **kw)])
     assert held.verdict == "holds", (held.verdict, held.counterexample)
@@ -85,15 +85,15 @@ def test_a_probe_only_line_offers_a_pseudo_infinity_only_where_it_holds():
     assert "law[float]" not in rows
     found = line.meta["mathema.conditioning"]
     assert found["inherent"] is True, found
-    _offered_only_where_it_holds(found, walk_total, statement)
+    _offered_only_where_it_holds(line, walk_total, statement)
 
 
 def test_a_claim_on_the_probe_route_offers_it_only_where_it_holds():
     statement = f"for xs in R^n, y0 in [-10, 10], {_SHIFT}"
     (p,) = check_conjectures(running_total, [claim(statement, route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
-    _offered_only_where_it_holds(p.meta["mathema.conditioning"],
-                                 running_total, statement, route="probe")
+    assert p.meta["mathema.conditioning"]["inherent"] is True
+    _offered_only_where_it_holds(p, running_total, statement, route="probe")
 
 
 def test_a_probe_only_lines_offer_names_the_claim_itself(monkeypatch):
@@ -103,7 +103,7 @@ def test_a_probe_only_lines_offer_names_the_claim_itself(monkeypatch):
     monkeypatch.setattr(conjecture, "_computation_holds_with",
                         lambda rerun, bound: True)
     rows, rec = _rows(walk_total, f"for y0 in [-10, 10], {_SHIFT}")
-    offer = _offer(rows["law"].meta["mathema.conditioning"])
+    offer = _offer(rows["law"])
     text = repr(rec)
     assert ("if inputs this large are out of scope, bound the computation "
             f"alone (the claim keeps its domain): {offer}") in text, text
@@ -116,6 +116,7 @@ def test_a_bounded_wide_domain_still_offers_to_narrow_it():
                       f"for xs in [-1e16, 1e16]^2, y0 in {{1}}, {_SHIFT}")
     found = rows["law[float]"].meta["mathema.conditioning"]
     assert found["narrow"] == "for xs in [-1e8, 1e8]^2", found
+    assert INFINITY_OFFER not in rows["law[float]"].meta
     assert "|inf|" not in repr(rec).split("possible fixes:")[1].split(
         "policy")[0]
 
@@ -132,9 +133,12 @@ def test_an_offer_whose_computation_still_fails_is_not_made(monkeypatch):
 
     monkeypatch.setattr(conjecture, "_computation_holds_with", never)
     rows, rec = _rows(running_total, _SHIFT)
-    found = rows["law[float]"].meta["mathema.conditioning"]
+    line = rows["law[float]"]
+    found = line.meta["mathema.conditioning"]
     assert found["inherent"] is True
-    assert found["narrow"] is None, found
+    assert INFINITY_OFFER not in line.meta, line.meta
+    # the conditioning's narrowing of the domain is offered instead
+    assert found["narrow"].startswith("for xs in [-1e"), found
     assert "|inf|" not in repr(rec).split("possible fixes:")[1]
     assert '"law[float]" --as discovery' in repr(rec)
 
@@ -145,7 +149,7 @@ def test_a_chains_computation_line_offers_one_the_whole_chain_holds_under():
     assert rows["law"].verdict == "proven"
     line = rows["law[float]"]
     assert line.verdict == "falsified"
-    offer = _offer(line.meta["mathema.conditioning"])
+    offer = _offer(line)
     bound, _ = _rows(running_total, f"{offer}, {statement}")
     assert bound["law"].verdict == "proven"
     assert bound["law[float]"].verdict == "holds", bound["law[float]"].sketch

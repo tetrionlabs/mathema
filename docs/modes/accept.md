@@ -171,9 +171,10 @@ balances.running_total:
 `shifts_with_start` is proven; its `shifts_with_start[float]`
 companion is falsified at a cancelling pair of magnitude 1e300, where
 the float sum drops `y0` (the note gives the condition number at the
-witness and the ways out: a `let |inf|` binding that bounds the
-computation alone, or accepting the computation line as a discovery,
-which is open to it because the loss is inherent in the inputs). `nonneg_for_nonneg_steps` only holds: the probe agrees, but
+witness and the ways out: a `let |inf|` binding, which bounds only the
+computation and never the proof, so the proof stays over the full
+domain, or accepting the computation line as a discovery, which is open
+to it because the loss is inherent in the inputs). `nonneg_for_nonneg_steps` only holds: the probe agrees, but
 derive cannot settle the sign of the lifted sum.
 `never_overshoots_much` rests on it being proven, so it comes back
 `unknown` with the note `prerequisite nonneg_for_nonneg_steps is holds,

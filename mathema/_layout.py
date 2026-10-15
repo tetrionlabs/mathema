@@ -255,18 +255,25 @@ def _return_fixes(pol: dict) -> str:
 
 def _conditioning_lines(p, key: str, whole: bool = False) -> list:
     """What the conditioning says under a falsified computation line, and
-    the fixes it offers: a narrower domain where float64 can honour the
-    claim, or accepting the discovery. `whole` is whether the claim the
-    line is the computation of is proven, so it can be accepted whole."""
+    the fixes it offers: a `let |inf| be B` a run showed holding, a
+    narrower domain where float64 can honour the claim, or accepting the
+    discovery. `whole` is whether the claim the line is the computation
+    of is proven, so it can be accepted whole."""
+    from .conjecture import INFINITY_OFFER
     found = (p.meta or {}).get("mathema.conditioning")
-    if not found:
+    offer = ((p.meta or {}).get(INFINITY_OFFER) or {}).get("words")
+    if not found and not offer:
         return []
     from ._conditioning import fixes as conditioning_fixes
     from ._missing_words import options
     from .gates import computation_line_of
     fixes = conditioning_fixes(found, str(p.name), key,
-                               computation_line_of(p.meta), whole=whole)
-    return [" " * 28 + found["words"],
+                               computation_line_of(p.meta), whole=whole,
+                               offer=offer)
+    words = (found or {}).get("words") or (
+        "no conditioning was read at its witness, so whether the loss is "
+        "inherent is not decided")
+    return [" " * 28 + words,
             " " * 28 + "possible fixes:",
             *(" " * 30 + line for line in options(fixes).splitlines())]
 
