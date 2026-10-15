@@ -377,7 +377,7 @@ number it returns is the one the mathematics says.
 | Spelling | What you learn | Usual fix |
 |---|---|---|
 | `is_numerically_stable` | the float64 result agrees with the exact value of the mathematics, within the claim tolerance (1e-9 plus 1e-7 times the magnitude by default), at every point tried in the working domain; stated with `mathema.f.accurate`, and the witness shows the exact and the float value | reorder or rescale the arithmetic that loses the value |
-| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
+| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | fix the code, narrow the domain, or state the claim with `route="derive:math_only"`; where the loss is inherent in the inputs along an unbounded direction, <code>let &#124;inf&#124; be B</code> bounds the computation alone |
 | `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower number representation (float32, say) | |
 | `is_representation_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
 

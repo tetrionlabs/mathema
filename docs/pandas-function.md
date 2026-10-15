@@ -187,9 +187,11 @@ mathema.Record(sharpe) · source, no side effects · form 099872a2a5ee
                             conditioning unknown here: derive cannot read f, so
                                 whether this loss is inherent is not decided
                             possible fixes:
-                              if the loss is accepted, run: mathema accept
+                              (i) fix the code
+                              (ii) to narrow the domain knowingly, edit
+                                  leverage_invariant, then run: mathema accept
                                   returns.sharpe leverage_invariant --as
-                                  discovery
+                                  superseded
 ```
 
 The `mathematics` line is proven. The `computation` line runs the same
@@ -202,6 +204,9 @@ this is either inherent in the inputs (no float64 computation could do
 better there) or the code's own; the line says which when mathema can
 read the condition number at the witness, and says it cannot here, since
 the function's body is pandas rather than arithmetic derive can read.
+Undecided counts as the code's, so the record does not offer to accept
+the computation line on its own; the ways out it gives are fixing the
+code and narrowing the claim knowingly.
 The premise
 took the one-day series out, and mathema reads it exactly. The standard deviation of equal returns is 0 over the reals, so
 a constant series is outside the claim too, on both lines alike: mathema computes the premise's `std` exactly rather than
@@ -229,6 +234,32 @@ length: the relation holds for every length
 pandas.Series.mean mathema/compendium/pandas/series.claims.yaml
 pandas.Series.std mathema/compendium/pandas/series.claims.yaml
 ```
+
+Narrowing knowingly, the second way out the computation line gives,
+means here saying which series the claim is about. With
+`std(returns, ddof=1) > 1e-6` as the premise, the claim leaves out
+series this close to constant, and both lines come back:
+
+<!-- example: pandas run requires=pandas -->
+```python
+narrowed = mathema.check(sharpe, claims=[mathema.claim(
+    "for returns in [-0.1, 0.1]^n \\ {missing}, let s = mathema.f.scale_seq, "
+    "let c be [0.1, 10], assuming std(returns, ddof=1) > 1e-6, "
+    "f(s(returns, c)) ~= f(returns)",
+    name="leverage_invariant")])
+for row in narrowed.probes:
+    if row.name.startswith("leverage_invariant"):
+        print(row.name, row.verdict)
+```
+
+<!-- example: pandas output -->
+```text
+leverage_invariant proven
+leverage_invariant[float, pandas.Series] holds
+```
+
+In a claims file, that edit is followed by `mathema accept returns.sharpe
+leverage_invariant --as superseded`, as the record's second fix says.
 
 ## A claim that is false and stays false
 

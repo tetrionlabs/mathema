@@ -104,12 +104,22 @@ the unbounded claim is falsified, and its row names the stratum:
 mathematics sound, its computation numerically unstable
 (`implementation:numerical-instability`). Two claims, two
 verdicts, and the companion gates `mathema verify` like any other claim.
-The remedies are the ordinary ones: narrow the domain, declare the
-`|inf|` the code has to reach, fix the code, accept the companion as a
-discovery with `mathema accept`, or state the claim with
-`route="derive:math_only"` (`[derive:math_only]` in a docstring), which
-proves the mathematics alone, spawns no companion, and records the
-opt-out on the proof's row.
+Which remedies apply depends on what the condition number at the
+witness says. Here it says the loss is the code's: `(x + 1) - x` is a
+well-conditioned way to write `1`, and the precision goes in the
+arithmetic rather than in the inputs, so the companion is not accepted
+on its own. The ways out are to fix the code, to narrow the claim's
+domain knowingly (edit it, then accept it `--as superseded`), or to
+state the claim with `route="derive:math_only"` (`[derive:math_only]` in
+a docstring), which proves the mathematics alone, spawns no companion,
+and records the opt-out on the proof's row. Where the loss is inherent
+in the inputs instead (no float64 computation could do better at the
+witness), the companion may be accepted alone as a discovery with
+`mathema accept`, and along an unbounded direction the note offers
+`let |inf| be B`, which bounds only how far the computation runs and
+leaves the proof over the whole domain. mathema runs the claim with
+that binding first, and offers it only where its computation line then
+holds.
 
 The companion is written to the verified record beside its parent, with
 `meta.mathema.companion_of` naming it. It is never part of the declared

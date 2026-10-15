@@ -271,8 +271,13 @@ floating point (see
 The companion is falsified: at `xs = [1e300, -1e300, ...]` the float
 sum cancels and drops `y0`, a result no float64 computation can deliver
 at inputs of that magnitude. The note says so, with the condition
-number at the witness, and gives the ways out: narrow the domain to
-where float64 can honour the claim, or accept the discovery. The second
+number at the witness, and gives the ways out. Since `xs` and `y0` run
+along unbounded directions, the first is `let |inf| be 1e+21`, which
+bounds only how far the computation runs, so the proof still covers
+every real input; mathema ran the claim with that binding before
+offering it, and its computation line holds. The second accepts the
+computation line alone as a discovery, which mathema allows because the
+loss is inherent in the inputs rather than the code's. The second
 proven claim in the count is `dependencies_current`, which `verify`
 adds to every record:
 
@@ -280,8 +285,8 @@ adds to every record:
 ```
 $ mathema verify --root .
 note balances.running_total: shifts_with_start[float] initially falsified: ill-conditioned here (κ ≈ 5e287): no float64 computation can deliver this result at inputs of magnitude 1e300:
-  (i) if inputs this large are out of scope, narrow the domain: for xs in [-1e21, 1e21]^n
-  (ii) if the loss is accepted, run: mathema accept balances.running_total shifts_with_start --as discovery
+  (i) if inputs this large are out of scope, bound the computation alone (the claim keeps its domain): let |inf| be 1e+21
+  (ii) if the loss is accepted, run: mathema accept balances.running_total "shifts_with_start[float]" --as discovery
 FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
