@@ -139,6 +139,7 @@ FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
 ok   fees.late_fee: no baseline record; 1 proven, 2 holds, 0 falsified
 0 unchanged since the last run (not run again), 3 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 exit code 1
 ```
 
@@ -193,6 +194,7 @@ written.
 FAIL fees.discounted: fresh; 1 falsified claim(s)
 3 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 exit code 1
 ```
 
@@ -230,6 +232,7 @@ mathema verify --root .; echo "exit code $?"
 ok   fees.discounted: form changed; 2 proven (1 claim, 1 built-in), 3 holds, 0 falsified
 2 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 exit code 0
 ```
 

@@ -266,6 +266,7 @@ ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
 ok   billing.fees.settle: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
 0 unchanged since the last run (not run again), 3 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+4 intents to accept (1 package, 3 functions): mathema accept --intent
 {"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}
 ```
 

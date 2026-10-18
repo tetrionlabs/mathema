@@ -195,6 +195,7 @@ FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in),
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 Owning that gap is a decision. At a terminal, mathema prints the exact

@@ -2082,8 +2082,10 @@ def pending_intents(root: str = ".") -> list:
         Every stated intent in the project that waits on a person's
         acceptance, top down: the codebase README (`__project__`), then
         each package, then each module, then each function with a
-        record. The packages and modules are the ones that hold a
-        function with a record, and any already accepted. Each item
+        record whose source is in the project (a library function's
+        record is not the project's to document). The packages and
+        modules are the ones that hold such a function, and any
+        already accepted. Each item
         says its key, level, status (`new` or `stale`), text and where
         the text is written; a function also gives its signature and
         raised exceptions, and a stale item says what changed. Reading
@@ -2103,12 +2105,16 @@ def pending_intents(root: str = ".") -> list:
     for key, wrap in sorted(load_verified(root).items()):
         entry = (wrap or {}).get("entry") or {}
         fn = None if ":" in key else _resolve_func_ref(key, root=root)
-        if fn is not None:
+        if ":" not in key:
+            # a dotted key counts when it names a function whose source
+            # is in the project: a library function (a compendium
+            # record, a builtin) is not the project's to document, and
+            # a key that no longer resolves is a moved record
             try:
-                src = inspect.getsourcefile(fn)
+                src = inspect.getsourcefile(fn) if fn is not None else None
             except TypeError:
                 src = None
-            if src and not _in_project(root_abs, src):
+            if not _in_project(root_abs, src):
                 continue
             parts = (getattr(fn, "__module__", "") or "").split(".")
             scopes.update(".".join(parts[:i])

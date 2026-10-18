@@ -497,8 +497,36 @@ def _verify_and_print(args, keys: list, files: list) -> int:
         f"verified by this run: {GRAMMAR}"
         + (f"; not verified here (different grammar, needs its own tool): "
            f"{', '.join(other_grammars)}" if other_grammars else ""))
+    intents_line = _intents_to_accept_line(args.root)
+    if intents_line:
+        lines.append(intents_line)
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _intents_to_accept_line(root: str) -> "str | None":
+    """Intent:
+        One line counting the stated intents that wait on a person,
+        by level, and the command that walks them; None when there are
+        none. Information only, it never bears on the exit code.
+    """
+    from .acceptance import pending_intents
+    try:
+        items = pending_intents(root)
+    except Exception:
+        return None
+    if not items:
+        return None
+    counts: dict = {}
+    for item in items:
+        counts[item["level"]] = counts.get(item["level"], 0) + 1
+    plural = {"codebase": "codebases", "package": "packages",
+              "module": "modules", "function": "functions"}
+    parts = [f"{n} {level if n == 1 else plural[level]}"
+             for level, n in counts.items()]
+    total = len(items)
+    return (f"{total} intent{'s' if total != 1 else ''} to accept "
+            f"({', '.join(parts)}): mathema accept --intent")
 
 
 def _project_definitions() -> list:

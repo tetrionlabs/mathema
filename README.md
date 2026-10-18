@@ -246,6 +246,7 @@ FAIL pricing.discounted: dependency changed; 1 proven, 1 holds, 0 falsified, 1 i
 ok   rates.rate_for: form changed; 1 proven, 0 holds, 0 falsified
 0 unchanged since the last run (not run again), 2 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 exit 1
 ```
 

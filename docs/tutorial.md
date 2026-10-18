@@ -73,6 +73,7 @@ ok   funcs.midpoint: no baseline record; 2 proven (1 claim, 1 built-in), 3 holds
 FAIL funcs.settle: no baseline record; 1 proven, 2 holds, 2 falsified  <- 2 falsified claim(s)
 0 unchanged since the last run (not run again), 2 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 `midpoint` proves on the derive route. Each row also counts one
@@ -140,6 +141,7 @@ mathema verify --root .
 FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 `midpoint` is the one unchanged function: its form hash has not moved,
@@ -276,6 +278,7 @@ mathema verify --root .
 ```text
 2 unchanged since the last run (not run again), 0 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 `funcs.settle` is not checked again: each acceptance wrote its record
