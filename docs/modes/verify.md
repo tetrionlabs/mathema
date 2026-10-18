@@ -120,6 +120,12 @@ installed library too (once, and fresh from then on), which is what a
 premise resting on them reads. It adjudicates no other `math` function:
 see [Library claims](#library-claims-lazy-by-default-a-file-up-front).
 
+The last line counts the stated intents that no one has accepted yet,
+here `softmax`'s summary line, which sits at the `declared` rung until
+a person accepts it. It is information only and never changes the
+exit code; `mathema accept --intent` walks each one (see
+[Intent at every level](../mathema-docstring.md#intent-at-every-level)).
+
 Drop the normalization on purpose (`return exps` instead of dividing
 by the total):
 

@@ -2523,6 +2523,10 @@ def _accept_every_intent(args, by: "str | None") -> int:
                                ).strip().lower()
             except EOFError:
                 answer = "q"
+            if not sys.stdin.isatty():
+                # answers read from a pipe are echoed, so the transcript
+                # reads as the terminal session would
+                print(answer)
             if answer in ("y", "yes"):
                 print(f"written: "
                       f"{_accept_intent_item(root, current, by, args.note)}")

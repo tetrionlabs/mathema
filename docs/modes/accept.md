@@ -384,6 +384,9 @@ The key can also be a module (`mypkg.mod`) or the literal
 sections) accept the same way, bound to the intent text alone, and
 land in `.mathema/meta/intent.yaml`; the index reports each scope's
 rung and flags a stale acceptance when the text has moved on.
+With no key, `mathema accept --intent` walks every intent waiting to
+be accepted, top down, one prompt each (see
+[Intent at every level](../mathema-docstring.md#intent-at-every-level)).
 `--concepts a,b` accepts tags as documented; `--dismiss-concepts c`
 records a dismissal in `.mathema/meta/concepts.yaml` so the
 suggestion never repeats. All prompted, all CLI-only, like every
