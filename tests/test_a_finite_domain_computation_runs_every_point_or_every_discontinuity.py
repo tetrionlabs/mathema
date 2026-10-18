@@ -53,6 +53,7 @@ def test_the_float_line_falls_at_a_discontinuity_while_the_mathematics_is_proven
     assert _point(float_row.counterexample) in failing, float_row.counterexample
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_small_finite_domain_runs_every_point():
     law = ("for periods in [1, 30] subset Z, active in [0, 30] subset Z, "
            "assuming active <= periods, "
