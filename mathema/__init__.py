@@ -382,7 +382,7 @@ def _doc_only_facts(fn) -> Facts:
         form="doc:" + hashlib.sha256((doc or name).encode()).hexdigest()[:8],
         sigh=hashlib.sha256(sig_str.encode()).hexdigest()[:12],
         tier=0, tree=None,
-        doc_intent=parsed.summary or _intent_block_text(doc),
+        doc_intent=_intent_block_text(doc) or parsed.summary or None,
         doc_refs=parsed.refs,
         doc_hints=parsed.concept_hints,
         doc_notes=_parse_notes(doc),
