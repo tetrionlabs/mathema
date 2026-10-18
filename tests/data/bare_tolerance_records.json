@@ -33,18 +33,9 @@
     "verdict": "proven"
    },
    {
-    "counterexample": "x = 1e-06",
+    "counterexample": null,
     "meta": {
      "mathema.companion_of": "f_x_approx_x",
-     "mathema.conditioning": {
-      "error": 9.999990000286036e-07,
-      "how": "derivative",
-      "inherent": false,
-      "kappa": 0.999999000001,
-      "narrow": null,
-      "scale": 1e-06,
-      "words": "f loses more than the conditioning explains (\u03ba \u2248 1, error 1e-6)"
-     },
      "mathema.family": "is_numerically_stable",
      "mathema.missing": {
       "admitted": {
@@ -84,32 +75,32 @@
      },
      "mathema.surface": "declared"
     },
-    "n": 7,
+    "n": 43,
     "name": "f_x_approx_x[float]",
-    "note": "the float64 computation of f_x_approx_x ran at 7 points: every corner and 4 interior points",
+    "note": "the float64 computation of f_x_approx_x ran at 43 points: every corner and 40 interior points",
     "route": "probe",
     "tolerance": null,
-    "verdict": "falsified"
+    "verdict": "holds"
    },
    {
     "counterexample": null,
     "meta": {
      "mathema.policy": {
       "behaviour": "propagates",
-      "evidence": "confirmed on the 7 draws of f_x_approx_x[float]",
+      "evidence": "confirmed on the 43 draws of f_x_approx_x[float]",
       "exception": null,
       "kind": "missing",
       "member": null,
       "parameter": "x",
       "premise": "",
-      "reason": "default for a float, which may be nan; confirmed on the 7 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
       "source": "default"
      },
      "mathema.surface": "mathema"
     },
     "n": 1,
     "name": "missing[x]",
-    "note": "default for a float, which may be nan; confirmed on the 7 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
     "route": "probe:counterfactual",
     "tolerance": null,
     "verdict": "holds"
