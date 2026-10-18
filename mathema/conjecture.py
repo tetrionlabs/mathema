@@ -6683,13 +6683,24 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         return None
     if exact is None:
         return None
+    return _exact_relation(cj, exact[0], exact[1])
+
+
+def _exact_relation(cj, left, right) -> "bool | None":
+    """Intent:
+        The claim's relation between two exact sides, decided exactly:
+        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
+        unless the claim declares a tolerance, a tolerance kind as the
+        whole allowance at each pair compared. None when the relation
+        does not apply to the values.
+    """
     if isinstance(cj.tolerance, ToleranceKind):
         # a tolerance kind is the whole allowance at each pair compared,
         # the exact values decided exactly
-        return relation_within(exact[0], exact[1], cj.relation,
+        return relation_within(left, right, cj.relation,
                                cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
-        exact[0], exact[1], cj.relation, _exact_slack(cj),
+        left, right, cj.relation, _exact_slack(cj),
         exact_inequality=cj.tolerance is None, rel_tol=0.0)
 
 
@@ -8664,7 +8675,8 @@ def _provenance_meta(proof) -> dict:
                 "mathema.missing", "mathema.path_no_value",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
-                "mathema.corroboration_reason", "mathema.definitions"):
+                "mathema.corroboration_reason", "mathema.definitions",
+                "mathema.exact_witness", "mathema.sweep_inexact"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta

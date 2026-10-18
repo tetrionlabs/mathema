@@ -67,11 +67,16 @@ def test_a_small_finite_domain_runs_every_point():
 
 
 @pytest.mark.needs_full_proof_budget
-def test_an_exact_computation_stays_proven():
+def test_an_exact_computation_with_a_float_result_holds():
+    # the code computes ceil(100*active/periods) exactly, then divides it
+    # by 100 in float: every point agrees within the allowance, and no
+    # point has an exact value to prove the mathematics with
     rows = _rows(exposure_exact)
     main = [p for n, p in rows.items() if n.startswith("f_active")
             and not n.endswith("[float]")]
-    assert [p.verdict for p in main] == ["proven"], [(p.name, p.verdict) for p in main]
+    assert [(p.verdict, p.route) for p in main] == \
+        [("holds", "derive:brute_force")], [(p.name, p.verdict) for p in main]
+    assert "mathema.sweep_inexact" in main[0].meta, main[0].meta
 
 
 @pytest.mark.needs_full_proof_budget

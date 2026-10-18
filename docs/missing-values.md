@@ -383,8 +383,8 @@ print(mathema.check(fee_rate, claims=[mathema.claim(
 <!-- example: core output -->
 ```text
 mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
-  below_one  for tier in [0, 3] : int, fee_rate(tier) < 1   proven
-    proven     mathematics  for tier in [0, 3] ⊂ ℤ, fee_rate(tier) < 1
+  below_one  for tier in [0, 3] : int, fee_rate(tier) < 1   holds
+    holds      mathematics  for tier in [0, 3] ⊂ ℤ, fee_rate(tier) < 1
     proven     policy       absent(f) introduces   from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one
 ```
 

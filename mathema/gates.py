@@ -1111,7 +1111,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         finally:
             _reset()
 
+    def exact_as_written(point):
+        # the claim's sides at a point of the domain read as written:
+        # each float coordinate the decimal it stands for (`repr`), an
+        # integer coordinate an int, the function run on those values (a
+        # result holding no number, a string, kept as it is); a claim
+        # with no right side compares against 0, as the float evaluation
+        # does
+        from ._exact_side import exact_sides
+        written = {n: _written_exactly(v) for n, v in _typed(point).items()}
+        _reset()
+        try:
+            sides = exact_sides(code_l, code_r, {**base_env, **written},
+                                {"f": fn_call, **(bound_funcs or {})},
+                                exact_calls=True, opaque_results=True)
+        finally:
+            _reset()
+        if sides is not None and code_r is None:
+            return sides[0], 0
+        return sides
+
     evaluate.exact_at = exact_at  # type: ignore[attr-defined]
+    evaluate.exact_as_written = exact_as_written  # type: ignore[attr-defined]
     evaluate.last_miss = lambda: miss[0]  # type: ignore[attr-defined]
 
     def last_args():
@@ -1130,6 +1151,47 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
+
+
+def _written_exactly(value):
+    """Intent:
+        A coordinate of a declared finite domain as the number written:
+        a finite float the decimal it reads back as (`repr`, a Fraction),
+        an int one whose division stays exact (`_exact_side.ExactInt`),
+        the elements of a list, tuple, float array or table column the
+        same way; anything else (a bool, a string, a missing value, a
+        signed zero, an infinity) unchanged.
+    """
+    import math
+    from fractions import Fraction
+
+    from ._exact_side import ExactInt, _np
+    np = _np()
+    if isinstance(value, bool):
+        return value
+    if type(value) is int:
+        # an integer divides exactly: `n / 2` is the ratio
+        return ExactInt(value)
+    if isinstance(value, float):
+        if not math.isfinite(value) or (value == 0.0
+                                        and math.copysign(1.0, value) < 0):
+            return value
+        return Fraction(repr(value))
+    if np is not None and isinstance(value, np.floating):
+        return _written_exactly(float(value))
+    if np is not None and isinstance(value, np.ndarray) \
+            and value.dtype.kind == "f":
+        out = np.empty(value.shape, dtype=object)
+        for idx, v in np.ndenumerate(value):
+            out[idx] = _written_exactly(float(v))
+        return out
+    if isinstance(value, list):
+        return [_written_exactly(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_written_exactly(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _written_exactly(v) for k, v in value.items()}
+    return value
 
 
 def _fmt_point(point, names):

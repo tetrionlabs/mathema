@@ -67,10 +67,13 @@ def test_a_value_miss_at_the_literal_call_is_the_witness(route):
 
 
 @pytest.mark.parametrize("route", ("derive", "best"))
-@pytest.mark.parametrize("fn", [total, series_total])
-def test_a_fixed_input_that_holds_is_proven(fn, route):
+@pytest.mark.parametrize("fn,verdict", [(total, "proven"),
+                                        (series_total, "holds")])
+def test_a_fixed_input_that_holds_is_proven(fn, verdict, route):
+    # float(xs.sum()) is a float the code computed, with no exact value:
+    # its call holds and is not proven
     p = _one(fn, "f([]) == 0", route)
-    assert p.verdict == "proven", (p.verdict, p.note)
+    assert p.verdict == verdict, (p.verdict, p.note)
     assert "mathema.sampling" not in (p.meta or {}), p.meta
 
 

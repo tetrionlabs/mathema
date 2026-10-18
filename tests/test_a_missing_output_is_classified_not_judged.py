@@ -11,7 +11,7 @@ import pytest
 
 from mathema.conjecture import check_conjectures, claim
 from mathema.probing import classified, inputs_missing, relation_holds_elementwise
-from tests.test_missing_values_core import (PROVEN, add, assert_row,
+from tests.test_missing_values_core import (HOLDS, PROVEN, add, assert_row,
                                             double_or_missing, ident, sqrt_guarded,
                                             sqrt_plain, zero_if_missing)
 
@@ -98,7 +98,8 @@ def test_a_value_claim_with_no_judged_point_is_unknown():
 
 
 def test_a_dropped_hole_is_judged_on_the_value_returned():
-    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN)
+    # the replacement 0.0 is a float the code returned, with no exact value
+    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", HOLDS)
     probe, _ = assert_row(zero_if_missing, "for x in {0.5, nan}, f(x) == x", FALSIFIED)
     assert "nan" in probe.counterexample
 

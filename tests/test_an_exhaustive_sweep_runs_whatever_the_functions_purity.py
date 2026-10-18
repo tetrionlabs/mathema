@@ -37,6 +37,13 @@ def exposure_pure(active: int, periods: int) -> float:
     return math.floor(hits / periods * 100) / 100
 
 
+def exposure_percent_pure(active: int, periods: int) -> int:
+    if periods <= 0:
+        return 0
+    hits = len([day for day in range(periods) if day < active])
+    return math.floor(hits * 100 / periods)
+
+
 _DOMAIN = ("for active in [0, 50] : int, periods in [1, 50] : int, "
            "assuming active <= periods, ")
 
@@ -64,8 +71,19 @@ def test_a_clean_sweep_over_an_unexamined_function_holds_with_its_reason():
     assert "proven needs the function to be shown pure" in p.note
 
 
-def test_a_clean_sweep_over_a_pure_function_is_still_proven():
+def test_a_clean_sweep_over_a_pure_function_with_a_float_result_holds():
+    # pure, but the result is a float division: no point has an exact
+    # value, so the sweep holds for that reason and not for purity
     (p,) = check_conjectures(exposure_pure, [claim(
         _DOMAIN + "f(active, periods) <= active / periods")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.route == "derive:brute_force"
+    assert "shown pure" not in p.note, p.note
+    assert "cannot be computed exactly" in p.note, p.note
+
+
+def test_a_clean_sweep_over_a_pure_exact_function_is_still_proven():
+    (p,) = check_conjectures(exposure_percent_pure, [claim(
+        _DOMAIN + "f(active, periods) <= 100 * active / periods")])
     assert p.verdict == "proven", (p.verdict, p.note)
     assert p.route == "derive:brute_force"

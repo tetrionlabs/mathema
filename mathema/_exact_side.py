@@ -144,15 +144,43 @@ class _Inexact(Exception):
     """A callee run on exact values returned a value that is not exact."""
 
 
-def wrap(callee, exact_calls: bool = False):
+def holds_number(value) -> bool:
+    """Intent:
+        Whether `value` holds a number anywhere: an int, a float, a
+        complex, a Fraction or Decimal, a numpy number, or a list,
+        tuple, dict or array with one inside. A bool, a string, None or
+        any other object is not a number.
+    """
+    from decimal import Decimal
+    np = _np()
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return False
+    if isinstance(value, (int, float, complex, Fraction, Decimal)):
+        return True
+    if np is not None and isinstance(value, np.generic):
+        return holds_number(value.item())
+    if np is not None and isinstance(value, np.ndarray):
+        if value.dtype.kind in "iufc":
+            return True
+        return any(holds_number(v) for v in value.ravel().tolist())
+    if isinstance(value, (list, tuple)):
+        return any(holds_number(v) for v in value)
+    if isinstance(value, dict):
+        return any(holds_number(v) for v in value.values())
+    return False
+
+
+def wrap(callee, exact_calls: bool = False, opaque: bool = False):
     """`callee` called with the executed floats, its result read back
     exactly; with `exact_calls`, called with the exact values themselves,
     its result kept only when it is exact (a float result raises
-    `_Inexact`)."""
+    `_Inexact`). With `opaque`, a result holding no number (a string, a
+    bool, None) is kept as it is: it has no rounding to lose."""
     def call(*args, **kwargs):
         if exact_calls:
             result = callee(*args, **kwargs)
-            if _exact_value(result) is None:
+            if _exact_value(result) is None \
+                    and not (opaque and not holds_number(result)):
                 raise _Inexact(type(result).__name__)
             return result
         else:
@@ -429,7 +457,8 @@ def exact_literals(code, written: bool = True):
 
 
 def exact_sides(code_l, code_r, env: dict, callees: dict,
-                exact_calls: bool = False) -> "tuple | None":
+                exact_calls: bool = False,
+                opaque_results: bool = False) -> "tuple | None":
     """Intent:
         `(left, right)` evaluated exactly at the point `env` holds, the
         names in `callees` (the function under test and any function the
@@ -439,18 +468,21 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         (Fractions in place of floats) and the claim's literals are the
         numbers as written: the mathematics of the point. Without it the
         literals are the float readings of the computation, the way the
-        number representation reads them.
+        number representation reads them. With `opaque_results` a
+        callee's result holding no number (a string, a bool, None) is
+        exact as it is (`wrap`'s `opaque`).
     """
     from ._math_vocab import MATH_CONSTANTS
     callees = _aliased_callees(callees, (code_l, code_r))
     # a named constant (pi, e) keeps its float, which no exact side
     # survives
-    exact_env = {k: (wrap(callees[k], exact_calls) if k in callees
+    exact_env = {k: (wrap(callees[k], exact_calls, opaque_results)
+                     if k in callees
                      else v if k in MATH_CONSTANTS and v is MATH_CONSTANTS[k]
                      else to_exact(v))
                  for k, v in env.items() if k != "__builtins__"}
     for k, v in callees.items():
-        exact_env.setdefault(k, wrap(v, exact_calls))
+        exact_env.setdefault(k, wrap(v, exact_calls, opaque_results))
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
