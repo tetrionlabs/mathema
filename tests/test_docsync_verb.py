@@ -104,7 +104,8 @@ def test_docstring_intent_wins_in_the_materialized_entry(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     body = (tmp_path / ".mathema" / "declared"
             / "ypkg.mod.double.yaml").read_text()
-    assert "Doubles the input" in body      # the docstring's hand
+    # the docstring's hand, its Intent: block over its summary line
+    assert "Return exactly twice x." in body
     assert "planned: doubling utility" not in body.split("claims:")[0]
 
 
