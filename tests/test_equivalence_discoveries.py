@@ -97,8 +97,9 @@ def test_a_mathematics_falsification_offers_the_approximate_claim(tmp_path):
                            "discovery", by="lovelace")
     assert plan["corrected_statement"].startswith("let g = funcs.nudged, ")
     assert plan["corrected_statement"].endswith(", f(x) ~= g(x)")
-    # the computation compared under the default allowance, 1e-9 absolute
-    assert plan["corrected_tolerance"] == 1e-9
+    # the computation compared under the default, each side's allowance
+    # added, which above 1e-2 is exactly this kind
+    assert plan["corrected_tolerance"] == {"rel": 2e-7, "floor": 2e-9}
     assert classify_verdict(plan["corrected_verdict"]) in ("proven", "holds")
     apply_acceptance(plan)
     entry = _record(tmp_path, "funcs.keep")
@@ -107,7 +108,7 @@ def test_a_mathematics_falsification_offers_the_approximate_claim(tmp_path):
     assert all(not c["name"].startswith("same_root[")
                for c in entry["claims"])
     corrected = _row(entry, "same_root_corrected")
-    assert corrected["tolerance"] == 1e-9
+    assert corrected["tolerance"] == {"rel": 2e-7, "floor": 2e-9}
     assert corrected["statement"] == plan["corrected_statement"]
     # both retired rows carry the acceptance, so the record verifies
     again = _verify_all(tmp_path)
@@ -125,16 +126,23 @@ def test_the_correction_carries_a_declared_tolerance(tmp_path):
     assert classify_verdict(plan["corrected_verdict"]) in ("proven", "holds")
 
 
-def test_a_tolerance_kind_offers_no_approximate_claim(tmp_path):
+@pytest.mark.parametrize("kind, written", [
+    ({"rel": 1e-9}, "{rel: 1e-9}"),
+    ({"rel": 1e-9, "floor": 1e-12}, "{rel: 1e-9, floor: 1e-12}"),
+    ({"ulp": 10000000000}, "{ulp: 10000000000}")])
+def test_the_correction_carries_a_tolerance_kind(tmp_path, kind, written):
     _project(tmp_path, "funcs.big_plus", (
         "funcs.big_plus:\n  claims:\n    - name: shifted\n"
         "      statement: \"let g = funcs.identity, for x in [1e7, 1e8], "
-        "f =:= g\"\n      tolerance: {rel: 1e-9}\n"))
+        f"f =:= g\"\n      tolerance: {written}\n"))
     plan = plan_acceptance(str(tmp_path), "funcs.big_plus", "shifted",
                            "discovery")
-    assert "corrected_statement" not in plan
-    assert any("rel" in a and "~=" in a for a in plan["actions"]), \
-        plan["actions"]
+    assert plan["corrected_statement"].endswith(", f(x) ~= g(x)")
+    assert plan["corrected_tolerance"] == kind
+    assert classify_verdict(plan["corrected_verdict"]) in ("proven", "holds")
+    from mathema.acceptance import describe_acceptance
+    shown = "\n".join(describe_acceptance(plan))
+    assert f"with tolerance {written}" in shown, shown
 
 
 def test_the_computation_line_alone_is_never_accepted(tmp_path):
