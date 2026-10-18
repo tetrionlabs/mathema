@@ -65,10 +65,6 @@ EQUIV_SAMPLE_DRAWS = 96
 EQUIV_MIN_AGREEMENTS = 24
 #: the shared-draw seed, fixed so both sides see identical points
 EQUIV_SEED = 20260718
-#: the relative slack term beside the default tolerance; a declared
-#: tolerance is the whole allowance and gets none
-EQUIV_REL_SLACK = 1e-9
-
 #: verdicts a registered equivalence family may return
 _FAMILY_VERDICTS = frozenset({"proven", "holds", "falsified", "unknown",
                               "skipped"})
@@ -849,18 +845,24 @@ def _values_agree(case: _Case, fv, gv) -> bool:
         Whether two finite values the functions returned at one point
         agree under the claim's tolerance: within a declared kind
         (`_tolerance.ToleranceKind.allows`), within a declared bare
-        number read as an absolute allowance, or within the default one
-        plus a relative slack of `EQUIV_REL_SLACK` times the larger
-        magnitude (at least 1).
+        number read as an absolute allowance, or, with none declared,
+        within each side's computation allowance added:
+        `|a - b| <= 2 * _allowance.allowance(max(|a|, |b|))`, each
+        computed value allowed to miss the exact one by the rule every
+        other computation line uses.
+
+    Notes:
+        Both functions run at the same inputs and return numbers, so
+        the inputs' own round-off (`allowance`'s `input_scaled`, which
+        arrays carry) is 0 here.
     """
+    from ._allowance import allowance
     from ._tolerance import ToleranceKind
-    from .conjecture import DEFAULT_TOLERANCE
     tol = case.cj.tolerance
     if isinstance(tol, ToleranceKind):
         return tol.allows(fv, gv)
     if tol is None:
-        scale = max(abs(fv), abs(gv), 1.0)
-        return abs(fv - gv) <= DEFAULT_TOLERANCE + EQUIV_REL_SLACK * scale
+        return abs(fv - gv) <= 2 * allowance(max(abs(fv), abs(gv)))
     return abs(fv - gv) <= tol
 
 

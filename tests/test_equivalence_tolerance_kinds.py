@@ -163,3 +163,48 @@ def test_a_registered_family_receives_the_tolerance_as_the_claim_states_it():
     assert (kinds["tolerance"].kind, kinds["tolerance"].value,
             kinds["tolerance"].floor) == ("ulp", 4, None)
     assert bare["tolerance"] == 1e-4
+
+
+def _relative_miss(x: float) -> float:
+    return x * (1 + 1e-8)
+
+
+def _small_offset(x: float) -> float:
+    return x + 1e-9
+
+
+def test_the_default_allows_each_sides_computation_allowance():
+    # 0.6.1's allowance for one computed value is 1e-7 * m plus
+    # min(1e-9, 1e-7 * m); two computed values may each miss by it.
+    # A relative miss of 1e-8 near 1 is within that, falsified only on
+    # the exact mathematics line.
+    rows = _rows(_relative_miss, "for x in [1, 2], f =:= g", None)
+    assert computation_row(rows).verdict == "holds", \
+        computation_row(rows).note
+    assert claim_row(rows).verdict == "falsified"
+
+
+def test_the_default_is_stricter_than_a_fixed_gap_near_small_values():
+    # values near 1e-3 apart by 1e-9: twice the allowance there is
+    # 4e-7 * m, at most 8e-10, so the computation row falsifies
+    rows = _rows(_small_offset, "for x in [1e-3, 2e-3], f =:= g", None)
+    assert computation_row(rows).verdict == "falsified", \
+        computation_row(rows).note
+
+
+def test_the_default_agreement_is_twice_the_allowance():
+    import types
+
+    from mathema.equivalence import _Case, _values_agree
+    case = _Case.__new__(_Case)
+    case.cj = types.SimpleNamespace(tolerance=None)
+    # (a, b within, b beyond): 2 * (1e-7 * m + min(1e-9, 1e-7 * m)),
+    # or 2e-9 for m at most 1e-9
+    for a, inside, outside in [
+            (0.0, 0.9e-9, None),
+            (1e-3, 1e-3 + 3e-10, 1e-3 + 5e-10),
+            (1.0, 1.0 + 1.9e-7, 1.0 + 2.1e-7),
+            (1e300, 1e300 * (1 + 1.9e-7), 1e300 * (1 + 2.1e-7))]:
+        assert _values_agree(case, a, inside), (a, inside)
+        if outside is not None:
+            assert not _values_agree(case, a, outside), (a, outside)

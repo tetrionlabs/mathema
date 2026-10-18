@@ -146,8 +146,11 @@ result from one side counts as a raise, unless that side is annotated
 `complex` or the claim is over `C`.
 
 A declared tolerance applies to the computation line alone, where it is
-the whole allowance the two values get; with none declared, they may
-differ by 1e-9 plus 1e-9 times the larger magnitude. The tolerance may
+the whole allowance the two values get. With none declared, each
+value may miss the exact one by the allowance every computation line
+uses (1e-7 of its magnitude plus a small absolute part), and the two
+added together are what they may differ by: about 2e-7 times the larger
+magnitude. The tolerance may
 also name its kind, as `{abs: x}`, `{rel: x}` (a share of the larger
 magnitude) or `{ulp: n}` (units in the last place of the larger
 magnitude), each with an optional `floor: x` that allows a fixed gap
