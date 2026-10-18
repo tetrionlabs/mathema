@@ -670,6 +670,58 @@ acceptance retiring a claim), and a comment does not survive that; a
 `note:` is part of the claim and persists through every rewrite.
 `docsync` warns before it rewrites a file that has comments.
 
+A claim's `tolerance:` is how close counts as equal, as
+[How close counts as equal](grammar.md#how-close-counts-as-equal)
+describes: a bare number is an absolute allowance, and on `a ~= b` or
+`f =:= g` it may name its kind instead, `{abs: x}`, `{rel: x}` or
+`{ulp: n}`, each with an optional `floor: x` added to it. A rate spread
+over 365 days and gathered back again is the rate in exact arithmetic,
+and in float64 it is off by a rounding step, which a relative tolerance
+states at every magnitude the domain spans:
+
+<!-- example: tolerance-file file=rates.py -->
+```python
+def daily(rate: float) -> float:
+    """An annual rate spread over 365 days and gathered back."""
+    return rate / 365 * 365
+```
+
+<!-- example: tolerance-file file=claims/rates.claims.yaml -->
+```yaml
+rates.daily:
+  claims:
+    - name: round_trip
+      statement: "for rate in [1e-6, 50], f(rate) ~= rate"
+      tolerance: {rel: 1e-15, floor: 1e-18}
+```
+
+The record keeps the tolerance as written on both lines, and the
+claim's own row says how it read it:
+
+<!-- example: tolerance-file run -->
+```python
+import yaml
+
+import mathema
+import rates
+
+mathema.write_spec(rates.daily, root=".")
+with open(".mathema/verified/rates.daily.yaml") as fh:
+    entry = yaml.safe_load(fh)["rates.daily"]
+for row in entry["claims"]:
+    if row["name"].startswith("round_trip"):
+        print(row["name"], row["verdict"], row.get("tolerance"))
+        print(" ", row["note"])
+```
+
+<!-- example: tolerance-file output -->
+```text
+round_trip proven {'rel': 1e-15, 'floor': 1e-18}
+  read as abs(f(rate) - rate) <= 1e-15 * max(abs(f(rate)), abs(rate)) + 1e-18, the tolerance {rel: 1e-15, floor: 1e-18} (declared)
+round_trip[float] holds {'rel': 1e-15, 'floor': 1e-18}
+  the float64 computation of round_trip ran at 42 points: every corner and 40 interior points
+```
+
 ## Experiment before you declare
 
 Try a spelling before it reaches an authoring surface. Both of these

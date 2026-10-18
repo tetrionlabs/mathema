@@ -54,6 +54,36 @@ def test_a_floor_allows_a_fixed_gap_beside_a_relative_tolerance():
     assert floored.verdict == "holds", (floored.verdict, floored.note)
 
 
+def _offset(x: float) -> float:
+    return x + 1.5e-9
+
+
+def test_a_floor_adds_to_the_relative_part():
+    from mathema._tolerance import ToleranceKind
+    kind = ToleranceKind("rel", 1e-9, 1e-9)
+    # gap 1.5e-9 at 1.0: past the relative part (1e-9) and past the
+    # floor (1e-9) alone, within their sum (2e-9)
+    assert kind.allows(1.0, 1.0 + 1.5e-9)
+    assert not kind.allows(1.0, 1.0 + 2.5e-9)
+    # 1.0 + 1e-12 lies 1.00009e-12 from 1.0, past the floor alone and
+    # within it plus two ulps of 1.0 (4.4e-16)
+    ulps = ToleranceKind("ulp", 2, 1e-12)
+    assert ulps.allows(1.0, 1.0 + 1e-12)
+    assert not ulps.allows(1.0, 1.0 + 1.0006e-12)
+    assert ToleranceKind("abs", 1e-9, 1e-9).allows(0.0, 1.9e-9)
+
+
+def test_a_floor_adds_on_the_computation_row():
+    law = "for x in [1, 2], f =:= g"
+    rel = computation_row(_rows(_offset, law, {"rel": 1e-9}))
+    floor = computation_row(_rows(_offset, law, {"floor": 1e-9, "abs": 0}))
+    both = computation_row(_rows(_offset, law, {"rel": 1e-9,
+                                                "floor": 1e-9}))
+    assert rel.verdict == "falsified", rel.note
+    assert floor.verdict == "falsified", floor.note
+    assert both.verdict == "holds", (both.verdict, both.note)
+
+
 def test_units_in_the_last_place_count_the_rounding():
     law = "for x in [-10, 10], f =:= g"
     exact = _rows(_thirds, law, {"ulp": 0})
@@ -92,9 +122,9 @@ def test_a_tolerance_that_is_not_one_kind_is_refused(tolerance):
         claim("f =:= g", funcs={"g": _identity}, tolerance=tolerance)
 
 
-def test_a_tolerance_kind_on_a_value_claim_is_refused():
+def test_a_tolerance_kind_on_an_exact_value_claim_is_refused():
     with pytest.raises(InvalidConjecture, match="=:="):
-        claim("for x in [0, 1], f(x) ~= x", tolerance={"rel": 1e-9})
+        claim("for x in [0, 1], f(x) == x", tolerance={"rel": 1e-9})
 
 
 def test_a_claims_file_states_the_kind():
@@ -133,3 +163,48 @@ def test_a_registered_family_receives_the_tolerance_as_the_claim_states_it():
     assert (kinds["tolerance"].kind, kinds["tolerance"].value,
             kinds["tolerance"].floor) == ("ulp", 4, None)
     assert bare["tolerance"] == 1e-4
+
+
+def _relative_miss(x: float) -> float:
+    return x * (1 + 1e-8)
+
+
+def _small_offset(x: float) -> float:
+    return x + 1e-9
+
+
+def test_the_default_allows_each_sides_computation_allowance():
+    # 0.6.1's allowance for one computed value is 1e-7 * m plus
+    # min(1e-9, 1e-7 * m); two computed values may each miss by it.
+    # A relative miss of 1e-8 near 1 is within that, falsified only on
+    # the exact mathematics line.
+    rows = _rows(_relative_miss, "for x in [1, 2], f =:= g", None)
+    assert computation_row(rows).verdict == "holds", \
+        computation_row(rows).note
+    assert claim_row(rows).verdict == "falsified"
+
+
+def test_the_default_is_stricter_than_a_fixed_gap_near_small_values():
+    # values near 1e-3 apart by 1e-9: twice the allowance there is
+    # 4e-7 * m, at most 8e-10, so the computation row falsifies
+    rows = _rows(_small_offset, "for x in [1e-3, 2e-3], f =:= g", None)
+    assert computation_row(rows).verdict == "falsified", \
+        computation_row(rows).note
+
+
+def test_the_default_agreement_is_twice_the_allowance():
+    import types
+
+    from mathema.equivalence import _Case, _values_agree
+    case = _Case.__new__(_Case)
+    case.cj = types.SimpleNamespace(tolerance=None)
+    # (a, b within, b beyond): 2 * (1e-7 * m + min(1e-9, 1e-7 * m)),
+    # or 2e-9 for m at most 1e-9
+    for a, inside, outside in [
+            (0.0, 0.9e-9, None),
+            (1e-3, 1e-3 + 3e-10, 1e-3 + 5e-10),
+            (1.0, 1.0 + 1.9e-7, 1.0 + 2.1e-7),
+            (1e300, 1e300 * (1 + 1.9e-7), 1e300 * (1 + 2.1e-7))]:
+        assert _values_agree(case, a, inside), (a, inside)
+        if outside is not None:
+            assert not _values_agree(case, a, outside), (a, outside)

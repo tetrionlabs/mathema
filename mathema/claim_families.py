@@ -2290,7 +2290,9 @@ def _enum_spelling_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if a == b:
             return True
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            tol = cj.tolerance if cj.tolerance is not None else 1e-9
+            from ._tolerance import bare
+            tol = (bare(cj.tolerance, "is_representation_safe")
+                   if cj.tolerance is not None else 1e-9)
             return abs(float(a) - float(b)) <= tol
         return False
 
@@ -2356,7 +2358,9 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     values = _spelling_values(bounds)
     if not values:
         return None
-    tol = cj.tolerance if cj.tolerance is not None else 1e-9
+    from ._tolerance import bare
+    tol = (bare(cj.tolerance, "is_representation_safe")
+           if cj.tolerance is not None else 1e-9)
     # the return type f declares, read from its annotation
     import inspect
     import typing

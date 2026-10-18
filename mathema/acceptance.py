@@ -688,32 +688,41 @@ def _is_equivalence(row: "dict | None") -> bool:
     return relation == "=:="
 
 
+#: the `=:=` computation row's default (`equivalence._values_agree`,
+#: twice `_allowance.allowance`) as the kind a `~=` correction states:
+#: `2e-7 * m + 2e-9` for values of magnitude m of at least 1e-2, the
+#: default exactly there; below 1e-2 the default's absolute part
+#: shrinks with m (`4e-7 * m`, and 2e-9 at or below 1e-9) while this
+#: kind keeps its floor
+DEFAULT_CORRECTION_TOLERANCE = {"rel": 2e-7, "floor": 2e-9}
+
+
 def _approximate_correction(root: str, key: str, row: dict) -> tuple:
     """Intent:
         The correction a falsified mathematics line of `f =:= g` offers,
         as `(statement, tolerance, None)`: the same claim with `f(x) ~=
         g(x)` in place of `f =:= g`, over f's parameters, at the
-        tolerance its computation compared under (a declared number, or
-        the 1e-9 absolute allowance of the default). `(None, None,
-        reason)` when none can be stated: a tolerance kind, which a
-        `~=` claim does not take, or a function or statement mathema
-        cannot read.
+        tolerance its computation compared under, as a claim writes it:
+        a declared number or kind as written, or, with none declared,
+        `DEFAULT_CORRECTION_TOLERANCE`. `(None, None, reason)` when
+        none can be stated: a function or statement mathema cannot
+        read.
     """
-    from ._tolerance import ToleranceKind, read_tolerance
-    from .conjecture import DEFAULT_TOLERANCE, _effective_facts, _resolve_func_ref
+    from ._tolerance import read_tolerance, written_tolerance
+    from .conjecture import _effective_facts, _resolve_func_ref
     try:
         declared = read_tolerance(row.get("tolerance"))
     except ValueError as e:
         return None, None, f"its tolerance does not read ({e})"
-    if isinstance(declared, ToleranceKind):
-        return None, None, (f"its computation compared under the tolerance "
-                            f"{declared.written()}, and a `~=` claim takes a "
-                            f"bare number, so no `f(x) ~= g(x)` correction "
-                            f"is offered")
-    try:
-        tolerance = DEFAULT_TOLERANCE if declared is None else float(declared)
-    except (TypeError, ValueError):
-        return None, None, f"its tolerance {declared!r} is not a number"
+    if declared is None:
+        tolerance = dict(DEFAULT_CORRECTION_TOLERANCE)
+    elif isinstance(declared, (int, float)) \
+            and not isinstance(declared, bool):
+        tolerance = float(declared)
+    else:
+        tolerance = written_tolerance(declared)
+        if not isinstance(tolerance, dict):
+            return None, None, f"its tolerance {declared!r} is not a number"
     if not _is_equivalence(row):
         return None, None, "the statement does not read as `f =:= g`"
     lhs, relation, rhs = split_relation(row.get("statement") or "")
@@ -727,6 +736,16 @@ def _approximate_correction(root: str, key: str, row: dict) -> tuple:
     args = ", ".join(params)
     prefix = lhs.rstrip()[:-1]
     return (f"{prefix}f({args}) ~= {rhs.strip()}({args})", tolerance, None)
+
+
+def tolerance_words(tolerance) -> str:
+    """A tolerance for a line a person reads: a number as `:g` writes
+    it (`0.01`), a kind as a claims file writes it (`{rel: 2e-7,
+    floor: 2e-9}`)."""
+    from ._tolerance import read_tolerance
+    if isinstance(tolerance, dict):
+        return read_tolerance(tolerance).text()
+    return f"{tolerance:g}"
 
 
 def _whole_claim_discovery(root: str, key: str, claims: list, target: dict,
@@ -1109,7 +1128,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             plan["actions"].append(
                 f"declare the {kind} corrected "
                 f"claim {plan['corrected_name']!r}: {candidate!r}"
-                + (f" with tolerance {c_tolerance:g}"
+                + (f" with tolerance {tolerance_words(c_tolerance)}"
                    if c_tolerance is not None else "")
                 + f", checked now: {c_verdict}"
                 + (f" over {c_n} trials" if c_n else ""))
@@ -1341,7 +1360,7 @@ def _discovery_lines(plan: dict) -> list:
         if plan.get("corrected_n"):
             checked += f" over {plan['corrected_n']} trials"
         stub = corrected_stub(plan) or {}
-        tolerance = (f" with tolerance {stub['tolerance']:g}"
+        tolerance = (f" with tolerance {tolerance_words(stub['tolerance'])}"
                      if stub.get("tolerance") is not None else "")
         lines.append(f"the corrected claim takes its place: "
                      f"{stub.get('name')} [{stub.get('route')}]: "

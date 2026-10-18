@@ -164,10 +164,10 @@ is caught near zero, where the relative allowance shrinks below it. A claim sets
 and that value replaces the whole allowance: the two sides must agree within
 it, with no relative tolerance on top. On a function equivalence `f =:= g`
 the tolerance governs the computation line alone, since its mathematics
-line is exact, and it may also name its kind (`{abs: x}`, `{rel: x}` or
-`{ulp: n}`, each with an optional `floor: x`), as
-[Multi-function claims](multi-function-claims.md) describes; a value claim
-takes a bare number.
+line is exact, as [Multi-function claims](multi-function-claims.md)
+describes. A single `a ~= b`, and an `f =:= g`, may also name the
+tolerance's kind (see [Tolerance kinds](#tolerance-kinds) below), while
+every other relation takes a bare number.
 
 Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
 tolerance directly: the declared value when there is one, and the 1e-9
@@ -247,6 +247,146 @@ adds `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says the difference exists in exact arithmetic and floating point does not
 reproduce it. Any other unreproduced disproof is flagged as a probable
 engine bug.
+
+### Tolerance kinds
+
+A bare number is an absolute allowance, which is the wrong shape for a
+value that spans many orders of magnitude: an option deep out of the
+money prices at 1e-7 and the same function prices at 190 in the money,
+so `1e-9` is half a percent of the small price and a rounding error at
+the large one. On `a ~= b` (and on `f =:= g`) the tolerance may instead
+name its kind, in a claims file as `tolerance: {rel: 1e-9, floor: 1e-14}`
+or on `mathema.claim()` as `tolerance={"rel": 1e-9, "floor": 1e-14}`:
+
+| Kind | Allows |
+|---|---|
+| `{abs: x}` | `abs(a - b) <= x` |
+| `{rel: x}` | `abs(a - b) <= x * max(abs(a), abs(b))` |
+| `{ulp: n}` | `abs(a - b)` within `n` units in the last place of the float64 nearest `max(abs(a), abs(b))`, `n` a whole number |
+| `floor: x`, beside any of them | adds `x` to the kind's own allowance |
+
+The floor adds, so `{rel: 1e-9, floor: 1e-14}` allows `1e-9 * max(abs(a),
+abs(b)) + 1e-14`, which is the relative-plus-absolute error of the
+standard rounding-error model, and it applies in full. On the mathematics
+line the inequality is decided exactly, each number of the kind read as
+the decimal written; on the computation line it is computed in float64.
+A kind is not one number, so a claim that reads `ε` in its own text, a
+premise compared within the tolerance (`==`, `!=` or `~=` after
+`assuming`) and a chain of relations refuse it.
+
+The two call prices below are the same mathematics, one with its normal
+CDF from `erfc` and the other from `1 + erf`, which cancels for a far
+out-of-the-money call:
+
+<!-- example: kinds-price run slow -->
+```python
+import math
+
+import mathema
+
+
+def call_erfc(spot: float) -> float:
+    d1 = (math.log(spot / 100) + 0.03) / 0.2
+    d2 = d1 - 0.2
+    return (spot * math.erfc(-d1 / math.sqrt(2))
+            - 100 * math.exp(-0.01) * math.erfc(-d2 / math.sqrt(2))) / 2
+
+
+def call_erf(spot: float) -> float:
+    d1 = (math.log(spot / 100) + 0.03) / 0.2
+    d2 = d1 - 0.2
+    return (spot * (1 + math.erf(d1 / math.sqrt(2)))
+            - 100 * math.exp(-0.01) * (1 + math.erf(d2 / math.sqrt(2)))) / 2
+
+law = "for spot in [35, 290], f(spot) ~= g(spot)"
+for tolerance in [1e-9, {"rel": 1e-9}, {"rel": 1e-9, "floor": 1e-14}]:
+    rows = mathema.check(call_erfc, claims=[mathema.claim(
+        law, funcs={"g": call_erf}, tolerance=tolerance)]).probes
+    for p in rows:
+        if p.name.startswith("f_spot"):
+            print(f"{p.name:28} {p.verdict:9} {p.counterexample or ''}")
+print(rows[0].note)
+```
+
+<!-- example: kinds-price output -->
+```text
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  holds     
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  falsified spot = 35
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  holds     
+read as abs(f(spot) - g(spot)) <= 1e-9 * max(abs(f(spot)), abs(g(spot))) + 1e-14, the tolerance {rel: 1e-9, floor: 1e-14} (declared)
+```
+
+The mathematics is proven under all three. Under the bare `1e-9` the
+computation holds, though that allowance would also pass a price of
+`2e-7` that is off by half a percent; under `{rel: 1e-9}` it is falsified
+at `spot = 35`, where the `erf` form's cancellation leaves a gap of about
+`4e-15` on a price of `2e-7`, a relative error of `2e-8`; and the floor of
+`1e-14` covers that cancellation while the relative part still judges
+the large prices.
+
+`{ulp: n}` counts rounding steps, for an implementation that claims to
+agree with another to the last bit or close to it. `(x * 3) / 3` is
+exactly `x`, so the mathematics is proven, and in float64 it is off by
+at most one unit in the last place:
+
+<!-- example: kinds-ulp run -->
+```python
+import mathema
+
+
+def thirds(x: float) -> float:
+    return (x * 3) / 3
+
+for tolerance in [{"ulp": 0}, {"ulp": 1}]:
+    rows = mathema.check(thirds, claims=[mathema.claim(
+        "for x in [-10, 10], f(x) ~= x", tolerance=tolerance)]).probes
+    for p in rows[:2]:
+        print(f"{p.name:20} {p.verdict:9} {p.counterexample or ''}")
+print(rows[0].note)
+```
+
+<!-- example: kinds-ulp output -->
+```text
+f_x_approx_x         proven    
+f_x_approx_x[float]  falsified x = -5.858032318615711
+f_x_approx_x         proven    
+f_x_approx_x[float]  holds     
+read as abs(f(x) - x) <= 1 unit in the last place of the float64 nearest max(abs(f(x)), abs(x)), the tolerance {ulp: 1} (declared)
+```
+
+A proof does not express the float64 nearest a value, so under `{ulp:
+n}` the mathematics line is proven only where the two sides are equal,
+and otherwise the probe decides it, exactly, at each point it draws.
+
+A floor beside `abs` adds the two, which reads oddly on its own and is
+shown here only to make the arithmetic plain: an offset of `1.5e-9`
+misses `{abs: 1e-9}` and is within `{abs: 1e-9, floor: 1e-9}`:
+
+<!-- example: kinds-floor run -->
+```python
+import mathema
+
+
+def shifted(x: float) -> float:
+    return x + 1.5e-9
+
+for tolerance in [{"abs": 1e-9}, {"abs": 1e-9, "floor": 1e-9}]:
+    (p, *_) = mathema.check(shifted, claims=[mathema.claim(
+        "for x in [1, 2], f(x) ~= x", tolerance=tolerance)]).probes
+    print(f"{p.verdict:9} {p.counterexample or ''}")
+    print(f"  {p.note}")
+```
+
+<!-- example: kinds-floor output -->
+```text
+falsified x = 1.061633250837613
+  read as abs(f(x) - x) <= 1e-9, the tolerance {abs: 1e-9} (declared)
+proven    
+  read as abs(f(x) - x) <= 1e-9 + 1e-9, the tolerance {abs: 1e-9, floor: 1e-9} (declared)
+```
 
 ## Expressions
 

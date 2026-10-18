@@ -3034,6 +3034,49 @@ def _try_prove_within_epsilon(fn, facts, lhs_src: str, rhs_src: str,
                        meta=dict(within.meta))
 
 
+def _try_prove_within_kind(fn, facts, lhs_src: str, rhs_src: str, kind,
+                           **kwargs) -> ProofResult:
+    """Intent:
+        `lhs ~= rhs` under a tolerance kind, which is `abs(lhs - rhs) <=
+        bound + floor`: proven when the two sides are equal, or when the
+        difference is shown to be within the bound; disproven only when
+        it is shown to exceed it somewhere. The kind's numbers enter the
+        bound as literals, so they are the decimals the claim writes.
+        A `{ulp: n}` bound names the float64 nearest a value, which the
+        proof does not express: such a claim is proven only by equality,
+        and otherwise left to the probe, which decides it exactly at
+        each point.
+    """
+    reading = kind.reading(lhs_src, rhs_src)
+    equal = try_prove(fn, facts, lhs_src, rhs_src, "==", tolerance=None,
+                      **kwargs)
+    if equal.status == "proven":
+        return ProofResult("proven",
+                           sketch=f"{equal.sketch}; the two sides are equal, "
+                                  f"so within the tolerance {kind.text()}",
+                           meta=dict(equal.meta))
+    if kind.kind == "ulp":
+        return ProofResult(
+            "undecided",
+            sketch=f"read as {reading}: units in the last place of a "
+                   f"float64 are decided at points, not by a proof",
+            meta=dict(equal.meta))
+    if kind.kind == "abs":
+        bound = repr(float(kind.value))
+    else:
+        bound = (f"{float(kind.value)!r} * max(abs({lhs_src}), "
+                 f"abs({rhs_src}))")
+    if kind.floor is not None:
+        bound = f"{bound} + {float(kind.floor)!r}"
+    within = try_prove(fn, facts, f"abs(({lhs_src}) - ({rhs_src}))", bound,
+                       "<=", tolerance=None, **kwargs)
+    if within.status in ("proven", "disproven"):
+        return within
+    return ProofResult("undecided",
+                       sketch=f"read as {reading}: {within.sketch}",
+                       meta=dict(within.meta))
+
+
 #: the sketch's last words where the nlsat rung would have run next and
 #: z3 is not installed
 SMT_HINT = "install mathema[smt] to attempt a proof"
@@ -3050,7 +3093,18 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     of the functions it reads was read too: a statement the raise-region
     pass stops at could hide a raise in the domain, and a value claim is
     false wherever the code raises. `~=` is decided as `abs(lhs - rhs)
-    <= ε` (see `_try_prove_within_epsilon`)."""
+    <= ε` (see `_try_prove_within_epsilon`), or, under a tolerance kind,
+    as the bound the kind states (`_try_prove_within_kind`)."""
+    from .._tolerance import ToleranceKind, bare
+    if isinstance(tolerance, ToleranceKind):
+        if relation != "~=":
+            bare(tolerance, f"a {relation} proof")
+        return _try_prove_within_kind(
+            fn, facts, lhs_src, rhs_src, tolerance, domain=domain,
+            max_callee_depth=max_callee_depth, extensive=extensive,
+            _split_depth=_split_depth, funcs=funcs, assumption=assumption,
+            assume_defined=assume_defined,
+            exclude_own_guards=exclude_own_guards)
     if relation == "~=":
         return _try_prove_within_epsilon(
             fn, facts, lhs_src, rhs_src, domain=domain, tolerance=tolerance,
@@ -4121,8 +4175,9 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
 
     from ..conjecture import DEFAULT_TOLERANCE
     aux: dict = {}
-    eps_val = sympy.Float(tolerance if tolerance is not None
-                          else DEFAULT_TOLERANCE)
+    from .._tolerance import bare
+    eps_val = sympy.Float(bare(tolerance, "ε in a proof")
+                          if tolerance is not None else DEFAULT_TOLERANCE)
     aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
     if aux_funcs_lifted:
         aux[_AUX_FUNCS_KEY] = aux_funcs_lifted

@@ -174,6 +174,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # exact comparison, or the default rule against the exact side
     from ._allowance import (exact_side_at, largest_miss, reference_side,
                              relation_within)
+    from ._tolerance import bare as _bare
     declared = (cj.tolerance if cj.tolerance is not None
                 else 0.0 if exact else None)
     claim_side = reference_side(cj)
@@ -337,7 +338,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     base_env = {"f": _tag(fn_call, "f"), F_CALL: _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
-                **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
+                **{name: (_bare(cj.tolerance, f"{name} in the claim")
+                          if cj.tolerance is not None else 1e-9)
                    for name in eps_names},
                 **(_indexed.indexed_env() if indexed else {})}
     from .records import pseudo_infinity_range

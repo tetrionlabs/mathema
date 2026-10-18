@@ -865,8 +865,9 @@ def try_prove_seq(view: SeqLiftView, fn, lhs_src: str, rhs_src: str,
 
     aux: dict = {}
     from ..conjecture import DEFAULT_TOLERANCE
-    eps_val = sympy.Float(tolerance if tolerance is not None
-                          else DEFAULT_TOLERANCE)
+    from .._tolerance import bare
+    eps_val = sympy.Float(bare(tolerance, "ε in a sequence proof")
+                          if tolerance is not None else DEFAULT_TOLERANCE)
     aux["eps"] = aux["epsilon"] = aux["ε"] = eps_val
 
     def build(src: str):
