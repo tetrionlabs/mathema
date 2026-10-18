@@ -195,6 +195,7 @@ FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in),
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 Owning that gap is a decision. At a terminal, mathema prints the exact
@@ -383,6 +384,9 @@ The key can also be a module (`mypkg.mod`) or the literal
 sections) accept the same way, bound to the intent text alone, and
 land in `.mathema/meta/intent.yaml`; the index reports each scope's
 rung and flags a stale acceptance when the text has moved on.
+With no key, `mathema accept --intent` walks every intent waiting to
+be accepted, top down, one prompt each (see
+[Intent at every level](../mathema-docstring.md#intent-at-every-level)).
 `--concepts a,b` accepts tags as documented; `--dismiss-concepts c`
 records a dismissal in `.mathema/meta/concepts.yaml` so the
 suggestion never repeats. All prompted, all CLI-only, like every

@@ -111,6 +111,7 @@ $ mathema verify --root .
 ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no baseline record; 1 proven, 3 holds, 0 falsified
 1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 `softmax` calls `math.exp`, and the bundled [compendium](../claims-transfer.md)
@@ -118,6 +119,12 @@ states claims about it, so the sweep adjudicates those against the
 installed library too (once, and fresh from then on), which is what a
 premise resting on them reads. It adjudicates no other `math` function:
 see [Library claims](#library-claims-lazy-by-default-a-file-up-front).
+
+The last line counts the stated intents that no one has accepted yet,
+here `softmax`'s summary line, which sits at the `declared` rung until
+a person accepts it. It is information only and never changes the
+exit code; `mathema accept --intent` walks each one (see
+[Intent at every level](../mathema-docstring.md#intent-at-every-level)).
 
 Drop the normalization on purpose (`return exps` instead of dividing
 by the total):
@@ -150,6 +157,7 @@ $ mathema verify --root .
 FAIL functions.softmax: form changed; 1 proven, 2 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 `sums_to_one` now fails, and because it held before it is reported
@@ -183,6 +191,7 @@ $ mathema verify --root .
 ok   functions.softmax: form changed; 1 proven, 4 holds, 0 falsified
 1 unchanged since the last run (not run again), 1 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 Back to clean, and the baseline is refreshed; the next `verify` will
@@ -298,6 +307,7 @@ FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in),
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 2 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 The line also names a policy row the code contradicts: running_total
@@ -325,6 +335,7 @@ FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in),
        1 falsified claim(s)
 0 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 Strict mode (the default) still refuses the accepted risk, so a
@@ -341,6 +352,7 @@ FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in),
        1 accepted-risk claim(s)
 0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 ```
 
 See [`mathema accept`](accept.md).
@@ -381,6 +393,7 @@ FAIL balances.running_total: cannot resolve to a live function (declared in .mat
 FAIL ledger.running_total: no record yet, and its form hash matches the orphan record balances.running_total; nothing was checked or written for this key. If it moved, a human keeps its history with: mathema accept ledger.running_total --as reconciled --from balances.running_total; if it is a different function, remove the orphan record instead
 2 unchanged since the last run (not run again), 0 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 The rename carries the whole record (claims, acceptances and their

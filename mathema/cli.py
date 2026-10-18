@@ -497,8 +497,36 @@ def _verify_and_print(args, keys: list, files: list) -> int:
         f"verified by this run: {GRAMMAR}"
         + (f"; not verified here (different grammar, needs its own tool): "
            f"{', '.join(other_grammars)}" if other_grammars else ""))
+    intents_line = _intents_to_accept_line(args.root)
+    if intents_line:
+        lines.append(intents_line)
     print("\n".join(lines))
     return _verify_exit(args, result)
+
+
+def _intents_to_accept_line(root: str) -> "str | None":
+    """Intent:
+        One line counting the stated intents that wait on a person,
+        by level, and the command that walks them; None when there are
+        none. Information only, it never bears on the exit code.
+    """
+    from .acceptance import pending_intents
+    try:
+        items = pending_intents(root)
+    except Exception:
+        return None
+    if not items:
+        return None
+    counts: dict = {}
+    for item in items:
+        counts[item["level"]] = counts.get(item["level"], 0) + 1
+    plural = {"codebase": "codebases", "package": "packages",
+              "module": "modules", "function": "functions"}
+    parts = [f"{n} {level if n == 1 else plural[level]}"
+             for level, n in counts.items()]
+    total = len(items)
+    return (f"{total} intent{'s' if total != 1 else ''} to accept "
+            f"({', '.join(parts)}): mathema accept --intent")
 
 
 def _project_definitions() -> list:
@@ -2376,6 +2404,170 @@ def _accept_json(args, *, kind: str, plan: "dict | None" = None,
     return 0
 
 
+def _editor_command(path: str, line: int) -> "list | None":
+    """Intent:
+        The command that opens `path` at `line` in the editor named by
+        $EDITOR, as an argument list; None when no editor is set.
+    """
+    import os
+    import shlex
+    editor = os.environ.get("EDITOR", "").strip()
+    if not editor:
+        return None
+    return shlex.split(editor) + [f"+{line}", path]
+
+
+def _intent_item_lines(item: dict, root: str, position: str) -> list:
+    """Intent:
+        What accepting one pending intent writes, as printed lines: its
+        level, key and status, the text, where it is written, and for a
+        function the signature and raised exceptions it binds to; a
+        stale item also says what changed since it was accepted.
+    """
+    status = item["status"]
+    if status == "stale":
+        changed = ", ".join(item.get("changed") or []) or (
+            item.get("reason") or "the record")
+        since = (f" since {item['accepted_at']}"
+                 if item.get("accepted_at") else "")
+        status = f"stale: {changed} changed{since}"
+    lines = [f"{position} {item['level']} {item['key']} ({status})",
+             f"  intent: {item['text']}"]
+    if item["level"] == "function":
+        lines.append(f"  signature: {item.get('signature')}")
+        raises = ", ".join(item.get("raises") or []) or "none"
+        lines.append(f"  raises: {raises}")
+        if "raised exceptions" in (item.get("changed") or []):
+            was = ", ".join(item.get("accepted_raises") or []) or "none"
+            lines.append(f"  raises when accepted: {was}")
+    if item.get("file"):
+        lines.append(f"  source: {_shown_path(item['file'], root)}:"
+                     f"{item.get('line') or 1}")
+    return lines
+
+
+def _shown_path(path: str, root: str) -> str:
+    """Intent:
+        `path` relative to the project root when it lies inside it,
+        else as given.
+    """
+    import os
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(root))
+    return path if rel.startswith("..") else rel
+
+
+def _accept_intent_item(root: str, item: dict, by: "str | None",
+                        note: "str | None") -> str:
+    """Intent:
+        Write one pending intent's acceptance, through the same plan
+        and apply pair as `mathema accept KEY --intent` (so the human
+        check runs for each one). Returns the written line.
+    """
+    from .acceptance import (apply_intent_acceptance,
+                             apply_scope_intent_acceptance,
+                             plan_intent_acceptance,
+                             plan_scope_intent_acceptance)
+    if item["level"] == "function":
+        return apply_intent_acceptance(
+            plan_intent_acceptance(root, item["key"], by=by, note=note))
+    return apply_scope_intent_acceptance(
+        plan_scope_intent_acceptance(root, item["key"], by=by, note=note))
+
+
+def _accept_every_intent(args, by: "str | None") -> int:
+    """Intent:
+        `mathema accept --intent` with no key: every stated intent
+        that waits on a person, top down, each shown and answered
+        [y]es / [n]o / [e]dit / [q]uit; with `--yes`, the whole list
+        printed and then each item accepted. JSON mode lists the
+        pending intents and writes nothing.
+    """
+    import subprocess
+
+    from .acceptance import pending_intents, reread_intent
+    root = args.root
+    items = pending_intents(root)
+    if getattr(args, "format", "text") == "json":
+        return _accept_json(
+            args, kind="intents", applied=False,
+            plan={"actions": [f"accept the stated intent of {i['key']} "
+                              f"as documented" for i in items]},
+            extra={"intents": [
+                {**i, "file": (_shown_path(i["file"], root)
+                               if i.get("file") else None)}
+                for i in items]})
+    if not items:
+        print("no intents to accept: every stated intent is accepted "
+              "and current")
+        return 0
+    total = len(items)
+    print(f"{total} intent{'s' if total != 1 else ''} to accept"
+          + (f", by {by}" if by else ""))
+    print("  a function's acceptance binds to its signature, raised "
+          "exceptions and text;\n  a package, module or codebase "
+          "acceptance binds to its text")
+    if args.yes:
+        for n, item in enumerate(items, 1):
+            print("\n".join(_intent_item_lines(item, root, f"[{n}/{total}]")))
+        for item in items:
+            print(f"written: {_accept_intent_item(root, item, by, args.note)}")
+        return 0
+    accepted = skipped = 0
+    for n, item in enumerate(items, 1):
+        current: "dict | None" = item
+        while current is not None:
+            print("\n".join(_intent_item_lines(current, root,
+                                               f"[{n}/{total}]")))
+            try:
+                answer = input("accept? [y]es / [n]o / [e]dit / [q]uit "
+                               ).strip().lower()
+            except EOFError:
+                answer = "q"
+            if not sys.stdin.isatty():
+                # answers read from a pipe are echoed, so the transcript
+                # reads as the terminal session would
+                print(answer)
+            if answer in ("y", "yes"):
+                print(f"written: "
+                      f"{_accept_intent_item(root, current, by, args.note)}")
+                accepted += 1
+                break
+            if answer in ("n", "no"):
+                skipped += 1
+                break
+            if answer in ("q", "quit"):
+                print(f"{accepted} accepted, {skipped} skipped, "
+                      f"{total - accepted - skipped} not reached")
+                return 0
+            if answer not in ("e", "edit"):
+                continue
+            path, line = current.get("file"), current.get("line") or 1
+            if not path:
+                print("  no source file to open for this intent")
+                continue
+            command = _editor_command(path, line)
+            if command is None:
+                print(f"  no $EDITOR set; the intent is at "
+                      f"{_shown_path(path, root)}:{line}; edit it there, "
+                      f"then answer e to read it again")
+            else:
+                subprocess.call(command)
+            fresh = reread_intent(root, current)
+            if fresh is None:
+                print("  no intent to accept there now")
+                skipped += 1
+                break
+            if fresh.get("live_text"):
+                print(f"  the docstring now reads: {fresh['live_text']}")
+                print(f"  the record still holds the earlier text; run "
+                      f"`mathema verify {fresh['key']}`, then accept it")
+                skipped += 1
+                break
+            current = fresh
+    print(f"{accepted} accepted, {skipped} skipped")
+    return 0
+
+
 def _accept_context(args, by: str | None) -> int:
     """Intent:
         The context acceptances: --intent (declared -> documented, the
@@ -2389,6 +2581,12 @@ def _accept_context(args, by: str | None) -> int:
                              plan_scope_intent_acceptance)
 
     as_json = getattr(args, "format", "text") == "json"
+    if args.intent and not args.key:
+        if args.concepts or args.dismiss_concepts:
+            print("cannot accept: --concepts and --dismiss-concepts "
+                  "name one function; give its key")
+            return 2
+        return _accept_every_intent(args, by)
     if args.intent:
         import importlib
         is_scope = args.key == "__project__"
@@ -3454,8 +3652,10 @@ def main(argv: list[str] | None = None) -> int:
                          "diagnose its falsification as a discovery (prompted; "
                          "prints the exact write first)")
     pac.add_argument("key", nargs="?", default=None,
-                     help="function key (the record under .mathema/verified/); "
-                          "omit only with `--as reconciled --all`")
+                     help="function key (the record under .mathema/verified/), "
+                          "module, package or __project__; omit only with "
+                          "`--as reconciled --all`, or with --intent to "
+                          "walk every intent waiting to be accepted")
     pac.add_argument("claims", nargs="*", default=[], metavar="CLAIM",
                      help="claim names inside that record, accepted "
                           "together under one prompt (omit for "
@@ -3469,7 +3669,13 @@ def main(argv: list[str] | None = None) -> int:
                           "documented, the human rung; binds to the "
                           "signature, the raised-exception surface, and "
                           "the intent text (a body-only refactor keeps "
-                          "it, any of those changing re-opens it)")
+                          "it, any of those changing re-opens it). A "
+                          "module, package or __project__ key binds to "
+                          "the text. With no key: every stated intent "
+                          "not yet accepted, or accepted and since "
+                          "changed, top down, each answered y/n/e/q "
+                          "(--yes prints the list, then accepts each; "
+                          "--format json lists them and writes nothing)")
     pac.add_argument("--concepts", default=None, metavar="A,B",
                      help="accept concepts (tags) as documented, "
                           "comma-separated, lightweight, never gates")
