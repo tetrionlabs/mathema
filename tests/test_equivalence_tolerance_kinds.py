@@ -122,9 +122,9 @@ def test_a_tolerance_that_is_not_one_kind_is_refused(tolerance):
         claim("f =:= g", funcs={"g": _identity}, tolerance=tolerance)
 
 
-def test_a_tolerance_kind_on_a_value_claim_is_refused():
+def test_a_tolerance_kind_on_an_exact_value_claim_is_refused():
     with pytest.raises(InvalidConjecture, match="=:="):
-        claim("for x in [0, 1], f(x) ~= x", tolerance={"rel": 1e-9})
+        claim("for x in [0, 1], f(x) == x", tolerance={"rel": 1e-9})
 
 
 def test_a_claims_file_states_the_kind():

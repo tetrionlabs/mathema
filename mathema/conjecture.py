@@ -1356,7 +1356,8 @@ class Conjecture:
     # with exact values, not display strings.
     tolerance: float | ToleranceKind | None = None
     # how close counts as equal (declared-schema.md's `tolerance` field;
-    # an equivalence claim's may name its kind, `_tolerance.ToleranceKind`;
+    # an equivalence's or a single `~=`'s may name its kind,
+    # `_tolerance.ToleranceKind`;
     # no spec-level default). Also what `ε`/`eps`/`epsilon` resolves to
     # inside a law's own text (grammar.py/symbolic.py), so
     # `abs(f(x) - g(x)) <= ε` reads exactly like the mathematical
@@ -1948,7 +1949,8 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # the name as its own placeholder value; lets the renderer
         # treat it as the function it is rather than refusing
         bound_funcs[unbound] = unbound
-    tolerance = _read_claim_tolerance(tolerance, rel, law)
+    tolerance = _read_claim_tolerance(tolerance, rel, law, (lhs, rhs),
+                                      chained=bool(links))
     return Conjecture(name=name, lhs=lhs, rhs=rhs, relation=rel,
                       rhs_bound=rhs_bound,
                       source=source, route=route, grammar=grammar,
@@ -1961,27 +1963,51 @@ def _claim(law: str, name: str | None, source: str, route: str,
                       meta=dict(meta or {}), raw=law)
 
 
-def _read_claim_tolerance(tolerance, relation: str, law: str):
+def _read_claim_tolerance(tolerance, relation: str, law: str,
+                          sides: "tuple" = (), chained: bool = False):
     """Intent:
         A claim's tolerance read (`_tolerance.read_tolerance`): a kind
         (`{rel: 1e-12, floor: 1e-15}`) becomes a `ToleranceKind`, which
-        only an equivalence `f =:= g` takes; a bare number is kept as
-        written.
+        an equivalence `f =:= g` and a single approximate equality
+        `a ~= b` take; a bare number is kept as written. `sides` are
+        the claim's expressions, searched for `ε`.
 
     Raises:
-        InvalidConjecture: a mapping that is not one kind, or a kind on
-            a claim that is not `=:=`.
+        InvalidConjecture: a mapping that is not one kind; a kind on a
+            chain, on a claim that is neither `=:=` nor `~=`, or on a
+            claim whose text reads `ε` (`eps`, `epsilon`), the tolerance
+            as one number.
     """
     from ._tolerance import read_tolerance
     try:
         read = read_tolerance(tolerance)
     except ValueError as e:
         raise InvalidConjecture(f"{e}, in the claim {law.strip()!r}") from None
-    if isinstance(read, ToleranceKind) and relation != "=:=":
+    if not isinstance(read, ToleranceKind):
+        return read
+    if chained:
         raise InvalidConjecture(
-            f"a tolerance kind ({read.written()}) applies to a function "
-            f"equivalence `f =:= g`; a value claim takes a bare number, in "
-            f"the claim {law.strip()!r}")
+            f"a tolerance kind ({read.text()}) applies to a single "
+            f"`a ~= b` or `f =:= g`, not to a chain of relations, in the "
+            f"claim {law.strip()!r}")
+    if relation not in ("=:=", "~="):
+        raise InvalidConjecture(
+            f"a tolerance kind ({read.text()}) applies to a function "
+            f"equivalence `f =:= g` or an approximate equality `a ~= b`; "
+            f"a {relation} claim takes a bare number, in the claim "
+            f"{law.strip()!r}")
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        if any(isinstance(n, ast.Name) and n.id in ("eps", "epsilon", "ε")
+               for n in ast.walk(tree)):
+            raise InvalidConjecture(
+                f"{side.strip()!r} reads ε, the tolerance as one number, "
+                f"and the tolerance {read.text()} is a kind, not one "
+                f"number; write the bound out, or declare a bare "
+                f"number, in the claim {law.strip()!r}")
     return read
 
 
@@ -5216,13 +5242,13 @@ def _policy_gate(cj, fn, facts) -> bool:
 def _approx_reading(cj) -> "str | None":
     """How the record reads a `~=` claim, or None for any other: "read
     as abs(f(x) - x) <= ε, ε = 1e-9 (the default)", ε the declared
-    tolerance when there is one."""
+    tolerance when there is one; under a tolerance kind, the bound it
+    states and the kind as written ("read as abs(f(x) - x) <= 1e-7 *
+    max(abs(f(x)), abs(x)), the tolerance {rel: 1e-7} (declared)")."""
     if cj.relation != "~=" or cj.links or not cj.lhs or not cj.rhs:
         return None
     eps, why = ((cj.tolerance, "declared") if cj.tolerance is not None
                 else (1e-9, "the default"))
-    mantissa, _, exponent = f"{eps:g}".partition("e")
-    text = f"{mantissa}e{int(exponent)}" if exponent else mantissa
     rhs = cj.rhs.strip()
     try:
         node = ast.parse(rhs, mode="eval").body
@@ -5232,6 +5258,11 @@ def _approx_reading(cj) -> "str | None":
         bare = False
     if not bare:
         rhs = f"({rhs})"
+    if isinstance(eps, ToleranceKind):
+        return (f"read as {eps.reading(cj.lhs.strip(), rhs)}, the "
+                f"tolerance {eps.text()} ({why})")
+    mantissa, _, exponent = f"{eps:g}".partition("e")
+    text = f"{mantissa}e{int(exponent)}" if exponent else mantissa
     return (f"read as abs({cj.lhs.strip()} - {rhs}) <= ε, ε = {text} "
             f"({why})")
 
@@ -6647,6 +6678,11 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         return None
     if exact is None:
         return None
+    if isinstance(cj.tolerance, ToleranceKind):
+        # a tolerance kind is the whole allowance at each pair compared,
+        # the exact values decided exactly
+        return relation_within(exact[0], exact[1], cj.relation,
+                               cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
         exact[0], exact[1], cj.relation,
         cj.tolerance if cj.tolerance is not None else 0.0,
@@ -8695,9 +8731,11 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     derive = ctx.family.routes()["derive"]
     try:
+        from ._tolerance import bare as _bare_tolerance
         proof = families.call_route(derive, fn, facts, cj.lhs, cj.rhs,
                                     cj.relation, domain=ctx.cj_domain,
-                                    tolerance=cj.tolerance)
+                                    tolerance=_bare_tolerance(
+                                        cj.tolerance, "an examined family"))
     except TimeoutError:
         raise
     except Exception as exc:
@@ -9446,6 +9484,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             cj.name, statement, "skipped", route=None,
             note=f"{note}; {reserved}",
             meta={"mathema.derive_status": "unsupported"})
+        return None
+    if family_derive is not None and isinstance(cj.tolerance, ToleranceKind):
+        # a family's derive route reads the tolerance as one number
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; the {families.claim_base_name(cj.name)} "
+                 f"family's proof reads the tolerance as one number, and "
+                 f"{cj.tolerance.text()} is a kind, so the probe decides "
+                 f"it",
+            meta={"mathema.derive_status": "undecided"})
         return None
     if (family_derive is not None and cj.links
             and region_row_kind(cj.name) == "is_defined"):
@@ -11431,7 +11479,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # keeps the old fixed uniform(-5, 5); there's no bound
             # to respect for a name nobody ever gave one.
             if a_name in ("eps", "epsilon", "ε"):
-                env[a_name] = (cj.tolerance if cj.tolerance is not None
+                from ._tolerance import bare as _bare_tolerance
+                env[a_name] = (_bare_tolerance(cj.tolerance,
+                                               f"{a_name} in the claim")
+                               if cj.tolerance is not None
                                else DEFAULT_TOLERANCE)
             elif getattr(cj_domain.get(a_name), "dims", ()):
                 # a declared vector or matrix (`let b be R^n`): each
@@ -11615,12 +11666,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # 5.6) with the clamp remedy instead of the domain one. An
             # isolated pole passes the same nudge test, so the exact
             # mathematics at the point decides between the two.
-            slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
             boundary = False
             # a refusal by the function's own mathema guard is the guard
-            # doing its job at its own boundary, never a float wobble
+            # doing its job at its own boundary, never a float wobble;
+            # a tolerance kind gives no single width to nudge within, so
+            # under one the raise stands as an ordinary raise
             from .authoring import DomainError as _GuardRefusal
-            refused = isinstance(e, _GuardRefusal)
+            refused = isinstance(e, _GuardRefusal) \
+                or isinstance(cj.tolerance, ToleranceKind)
+            slack = (DEFAULT_TOLERANCE if cj.tolerance is None or refused
+                     else cj.tolerance)
             for direction in ((1.0, -1.0) if not refused else ()):
                 jenv = dict(env)
                 for p in kinds:

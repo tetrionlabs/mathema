@@ -120,11 +120,27 @@ def compile_premises(cj, assumption, kinds, extra) -> CompiledPremises:
 
     Raises:
         InvalidConjecture: a conjunct is not an expression the probe
-            evaluates.
+            evaluates, or compares within the claim's tolerance (`==`,
+            `!=`, `ε`) when that tolerance is a kind, not one number.
         KeyError: a conjunct's relation is not a comparison.
     """
-    from .conjecture import DEFAULT_TOLERANCE, _declared_rel_tol, _validate
+    from ._tolerance import ToleranceKind, ToleranceKindRefused, bare
+    from .conjecture import (DEFAULT_TOLERANCE, InvalidConjecture,
+                             _declared_rel_tol, _validate)
     from .probing import _close, values_differ
+    if isinstance(cj.tolerance, ToleranceKind):
+        # a premise compares within the claim's tolerance as one number
+        for acj in assumption:
+            if acj.relation in ("==", "!=") or (
+                    (_names(acj.lhs) | _names(acj.rhs or ""))
+                    & (_EPSILON_NAMES - set(kinds))):
+                try:
+                    bare(cj.tolerance, f"the premise `{acj.lhs} "
+                                       f"{acj.relation} {acj.rhs}`")
+                except ToleranceKindRefused as e:
+                    raise InvalidConjecture(
+                        f"{e}; state the premise as an ordering, or "
+                        f"declare a bare number") from None
     tol = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
     rel = _declared_rel_tol(cj)
     conjuncts: list = []
@@ -363,8 +379,11 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
             width = _constant(right)
             if width is None and isinstance(right, ast.Name) \
                     and right.id in _EPSILON_NAMES and right.id not in kinds:
+                from ._tolerance import bare
                 from .conjecture import DEFAULT_TOLERANCE
-                width = tolerance if tolerance is not None else DEFAULT_TOLERANCE
+                width = (bare(tolerance, f"the premise band `{acj.lhs} "
+                                         f"<= {acj.rhs}`")
+                         if tolerance is not None else DEFAULT_TOLERANCE)
             if band is not None and width is not None and float(width) > 0:
                 name, centre = band
                 out.setdefault(name, _band_draw(centre, float(width),

@@ -22,7 +22,10 @@ the inputs' round-off. When the exact result is 0, or within the fixed
 absolute part of 0 (a trace of -1e-16 over entries near 1, which float
 rounds as it rounds 0), the absolute part alone decides what "near
 zero" means. A declared tolerance is the whole allowance, an absolute
-difference that replaces both parts.
+difference that replaces both parts. A declared tolerance kind (`a ~=
+b` with `{rel: x}`, `_tolerance.ToleranceKind`) is the whole allowance
+too, at each pair of values compared: computed in float64 between
+floats, decided exactly where either value is an exact rational.
 """
 from __future__ import annotations
 
@@ -70,7 +73,9 @@ def allowance(reference, declared=None, input_scaled: float = 0.0):
         float range, so the comparison never overflows.
     """
     if declared is not None:
-        return declared
+        from ._tolerance import bare
+        return bare(declared, "the computation allowance against one "
+                              "exact value")
     ref = _magnitude(reference)
     absolute = ABSOLUTE + float(input_scaled)
     if ref is None or ref <= ABSOLUTE:
@@ -197,6 +202,9 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
         u = Fraction(u)
     if isinstance(v, decimal.Decimal):
         v = Fraction(v)
+    from ._tolerance import ToleranceKind
+    if isinstance(declared, ToleranceKind):
+        return _within_kind(u, v, relation, declared)
     reference = _reference_of(u, v, side) if scale is None else scale
     tol = allowance(reference, declared, input_scaled)
     if isinstance(u, complex) or isinstance(v, complex):
@@ -234,6 +242,37 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
     if relation == ">":
         return u > v
     return None
+
+
+def _within_kind(u, v, relation: str, kind) -> "bool | None":
+    """Intent:
+        `u ~= v` under a tolerance kind, at one pair of numbers: the
+        same infinity agrees, an infinity against anything else does
+        not, a pair holding an exact rational is decided exactly
+        (`ToleranceKind.allows_exactly`), and two floats (or complex
+        values, by their magnitudes) in float64 (`allows`).
+
+    Raises:
+        ToleranceKindRefused: a relation other than `~=`, which reads
+            the tolerance as one number.
+    """
+    from .probing import holds_inf, same_infinity
+    from ._tolerance import ToleranceKindRefused
+    if relation != "~=":
+        raise ToleranceKindRefused(
+            f"a {relation} comparison reads the tolerance as one number, "
+            f"and {kind.text()} is a kind, not one number")
+    if same_infinity(u, v):
+        return True
+    if holds_inf(u) or holds_inf(v):
+        return False
+    if isinstance(u, complex) or isinstance(v, complex):
+        return abs(u - v) <= kind.bound(abs(u), abs(v))
+    if any(isinstance(x, Fraction) for x in (u, v)) or any(
+            isinstance(x, int) and _magnitude(x).__class__ is Fraction
+            for x in (u, v)):
+        return kind.allows_exactly(u, v)
+    return kind.allows(u, v)
 
 
 def relation_within(lv, rv, relation: str, declared=None,
