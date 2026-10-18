@@ -104,7 +104,8 @@ class ToleranceKind:
         elif self.kind == "rel":
             bound = f"{number_text(self.value)} * {scale}"
         else:
-            bound = (f"{self.value} units in the last place of the "
+            unit = "unit" if self.value == 1 else "units"
+            bound = (f"{self.value} {unit} in the last place of the "
                      f"float64 nearest {scale}")
         if self.floor is not None:
             bound += f" + {number_text(self.floor)}"

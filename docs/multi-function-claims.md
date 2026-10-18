@@ -145,24 +145,60 @@ that raises `ValueError` at zero, the claim is falsified with
 result from one side counts as a raise, unless that side is annotated
 `complex` or the claim is over `C`.
 
-A declared tolerance applies to the computation line alone, where it is
-the whole allowance the two values get. With none declared, each
-value may miss the exact one by the allowance every computation line
-uses (1e-7 of its magnitude plus a small absolute part), and the two
-added together are what they may differ by: about 2e-7 times the larger
-magnitude. The tolerance may
-also name its kind, as `{abs: x}`, `{rel: x}` (a share of the larger
-magnitude) or `{ulp: n}` (units in the last place of the larger
-magnitude), each with an optional `floor: x` that allows a fixed gap
-beside it, and the record shows it as written. The mathematics line is
-exact whatever the tolerance, so `x + 1e-3 =:= x` with a tolerance of
-`1e-2` is falsified there while its computation holds. Agreement within
-a tolerance is a different claim, `f(x) ~= g(x)`, and accepting such a
-falsification as a discovery (`mathema accept KEY NAME --as discovery`)
-offers it at the computation's declared tolerance, or 1e-9 when none was
-declared, written only when it holds or is proven. Either way the whole claim retires with both its lines: the
-computation row alone is never accepted, since the computation is what
-runs.
+A tolerance applies to the computation line alone, since the
+mathematics line is exact whatever the tolerance: `x + 1e-3 =:= x` with
+a tolerance of `1e-2` is falsified there while its computation holds.
+With no tolerance declared, each of the two computed values may miss the
+exact one by the allowance every computation line uses (1e-7 of its
+magnitude plus a small absolute part, at most 1e-9), and the two are
+added, so they may differ by about `2e-7` times the larger magnitude
+plus `2e-9`; below magnitudes of 1e-2 the absolute part shrinks with the
+values, so two values near 1e-3 apart by 1e-9 disagree. To judge the
+computation by another rule, declare one: a bare number is an absolute
+allowance that replaces the default whole, and a kind (`{abs: x}`,
+`{rel: x}` or `{ulp: n}`, each with an optional `floor: x` that adds to
+it, as [Tolerance kinds](grammar.md#tolerance-kinds) describes) is
+judged at each pair of values. The record shows the tolerance as
+written. A rate that runs `1e-8` high is falsified on the mathematics
+line under every tolerance, and its computation line follows the rule
+declared:
+
+<!-- example: equiv-tolerance run -->
+```python
+import mathema
+
+
+def rate(x: float) -> float:
+    return x * (1 + 1e-8)
+
+
+def reference(x: float) -> float:
+    return x
+
+for tolerance in [None, 1e-9, {"rel": 1e-9}, {"rel": 1e-7}]:
+    rows = mathema.claims.check(rate, [mathema.claim(
+        "for x in [1, 2], f =:= g", funcs={"g": reference},
+        tolerance=tolerance)])
+    print(f"{str(tolerance):14}", [(p.name, p.verdict) for p in rows])
+```
+
+<!-- example: equiv-tolerance output -->
+```text
+None           [('f_equiv_g', 'falsified'), ('f_equiv_g[float]', 'holds')]
+1e-09          [('f_equiv_g', 'falsified'), ('f_equiv_g[float]', 'falsified')]
+{'rel': 1e-09} [('f_equiv_g', 'falsified'), ('f_equiv_g[float]', 'falsified')]
+{'rel': 1e-07} [('f_equiv_g', 'falsified'), ('f_equiv_g[float]', 'holds')]
+```
+
+Agreement within a tolerance is a different claim, `f(x) ~= g(x)`, and
+accepting such a falsification as a discovery (`mathema accept KEY NAME
+--as discovery`) offers it at the tolerance the computation compared
+under: a declared number or kind as written, or, with none declared,
+`{rel: 2e-7, floor: 2e-9}`, which is the default exactly for values of
+magnitude 1e-2 and above and slightly wider below. It is written only
+when it holds or is proven. Either way the whole claim retires with both
+its lines: the computation row alone is never accepted, since the
+computation is what runs.
 
 The record annotates both sides' structural complexity, so an
 equivalence between a one-liner and a loop reads as what it is.
