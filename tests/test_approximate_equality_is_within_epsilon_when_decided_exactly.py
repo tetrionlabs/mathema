@@ -215,3 +215,30 @@ def test_the_computation_line_leaves_the_other_relations_as_they_were(
     # at 1e-6 the allowance is 2e-13: a gap of 5e-10 is a miss under ==
     # and a strict ordering gets no allowance
     assert relation_within(1e-6 + 5e-10, 1e-6, relation) is (relation == ">")
+
+
+def _empty_line(fn, relation):
+    from mathema import check
+    record = check(fn, claims=[claim(_SEQUENCE, name="value"),
+                               claim(f"f([]) {relation} 0", name="empty")])
+    return {p.name: p for p in record.probes}
+
+
+def test_an_empty_policy_stated_with_approximate_equality_is_within_epsilon():
+    # loop_near([]) returns 5e-10, inside ε of the stated 0
+    probes = _empty_line(loop_near, "~=")
+    line = probes["is_empty_safe[xs]"]
+    assert line.verdict == "holds", (line.verdict, line.note)
+    assert probes["value"].verdict == "holds", probes["value"].note
+
+
+def test_an_empty_policy_past_epsilon_is_falsified():
+    probes = _empty_line(loop_over, "~=")
+    line = probes["is_empty_safe[xs]"]
+    assert line.verdict == "falsified", (line.verdict, line.note)
+
+
+def test_an_empty_policy_stated_with_equality_stays_exact():
+    probes = _empty_line(loop_near, "==")
+    line = probes["is_empty_safe[xs]"]
+    assert line.verdict == "falsified", (line.verdict, line.note)
