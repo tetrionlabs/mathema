@@ -6324,6 +6324,11 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         wall-clock cap, the sides compared exactly (within the claim's
         own declared tolerance, when it states one). True or False, or
         None when the evaluation cannot be carried out exactly.
+
+    Notes:
+        `a ~= b` is `abs(a - b) <= ε`, ε the declared tolerance, else
+        `DEFAULT_TOLERANCE`; every other relation is compared exactly
+        when no tolerance is declared.
     """
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
@@ -6340,9 +6345,17 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     if exact is None:
         return None
     return relation_holds_elementwise(
-        exact[0], exact[1], cj.relation,
-        cj.tolerance if cj.tolerance is not None else 0.0,
+        exact[0], exact[1], cj.relation, _exact_slack(cj),
         exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+
+def _exact_slack(cj) -> float:
+    """The absolute slack a claim's relation gets when it is decided
+    exactly: the declared tolerance; else ε (`DEFAULT_TOLERANCE`) for
+    `~=`, which is `abs(a - b) <= ε`, and 0 for every other relation."""
+    if cj.tolerance is not None:
+        return cj.tolerance
+    return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0
 
 
 def _inside_as_written(cj, env) -> bool:
@@ -6497,9 +6510,9 @@ def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
         results read as the exact values it returned, the claim's own
         literals and arithmetic exact, compared within the computation
         allowance (`_allowance.relation_within`; with `within` given,
-        within that absolute allowance alone, 0.0 for an exact
-        comparison). `ok` (the float verdict) comes back unchanged when
-        the sides cannot be computed exactly.
+        within that absolute allowance alone, `_exact_slack(cj)` for an
+        exact comparison). `ok` (the float verdict) comes back unchanged
+        when the sides cannot be computed exactly.
     """
     from ._allowance import relation_within
     from ._exact_side import exact_sides
@@ -11000,7 +11013,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if decided is True and _exactly_decided(
                         cj, code_l, code_r, env,
                         {"f": fn_call, **bound_funcs}, None,
-                        within=0.0, side=side) is not True:
+                        within=_exact_slack(cj), side=side) is not True:
                     # it passes only within the tolerance: the
                     # mathematics at the point decides
                     decided = _exact_verdict(cj, code_l, code_r, env,
