@@ -91,7 +91,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
-        tolerance is compared with none; `corners` are the domain's
+        tolerance is compared with none (`~=` within ε, which is what
+        it states); `corners` are the domain's
         corner points; `reach` is the magnitude an unbounded direction
         runs to; plus the free-variable `names`.
 
@@ -175,8 +176,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     from ._allowance import (exact_side_at, largest_miss, reference_side,
                              relation_within)
     from ._tolerance import bare as _bare
-    declared = (cj.tolerance if cj.tolerance is not None
-                else 0.0 if exact else None)
+    from .conjecture import _exact_slack
+    declared = _exact_slack(cj) if exact else cj.tolerance
     claim_side = reference_side(cj)
     # the gap and the result's magnitude at the last miss
     miss: list = [None]

@@ -113,7 +113,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[test]'
-      - run: python -m pytest -q
+      - run: python -m pytest -q -n 2
 
   lint:
     needs: validate
