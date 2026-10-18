@@ -23,6 +23,10 @@ absolute part of 0 (a trace of -1e-16 over entries near 1, which float
 rounds as it rounds 0), the absolute part alone decides what "near
 zero" means. A declared tolerance is the whole allowance, an absolute
 difference that replaces both parts.
+
+`a ~= b` is `abs(a - b) <= ε`, so with no declared tolerance its gap may
+reach ε (the 1e-9 default), or the allowance above where that is
+larger; a declared tolerance is ε and the whole allowance at once.
 """
 from __future__ import annotations
 
@@ -199,6 +203,11 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
         v = Fraction(v)
     reference = _reference_of(u, v, side) if scale is None else scale
     tol = allowance(reference, declared, input_scaled)
+    if relation == "~=" and declared is None:
+        # `abs(a - b) <= ε`: the gap may reach ε, or the allowance
+        # where that is larger
+        from .conjecture import DEFAULT_TOLERANCE
+        tol = max(tol, DEFAULT_TOLERANCE)
     if isinstance(u, complex) or isinstance(v, complex):
         if relation not in ("==", "~=", "!="):
             return None
@@ -242,7 +251,8 @@ def relation_within(lv, rv, relation: str, declared=None,
     """Intent:
         Whether `lv <relation> rv` holds on a computation line, the
         computed side allowed to miss the exact side (`side`, as
-        `reference_side` names it) by `allowance(...)` at every element.
+        `reference_side` names it) by `allowance(...)` at every element,
+        and `~=` with no declared tolerance by ε where that is larger.
         A NaN anywhere fails every relation. `==`, `~=` and `!=` over
         arrays are one fact about the whole value, so `!=` holds when
         some element differs and two values of different shapes are
