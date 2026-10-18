@@ -1913,3 +1913,282 @@ def scope_intent_status(root: str, key: str,
     now = hashlib.sha256(current_text.strip().encode()).hexdigest()[:12]
     return "documented" if now == (entry.get("accepted") or {}).get(
         "text_hash") else "stale"
+
+
+_CHANGED_WORDS = {"sig": "signature", "raises": "raised exceptions",
+                  "intent_hash": "intent text"}
+_LEVEL_ORDER = {"codebase": 0, "package": 1, "module": 2, "function": 3}
+
+
+def _in_project(root_abs: str, path: "str | None") -> bool:
+    """Intent:
+        Whether a source file belongs to the project at `root_abs`:
+        inside the root, and not inside an installed environment's
+        site-packages.
+    """
+    import os
+    if not path:
+        return False
+    path = os.path.abspath(path)
+    inside = os.path.commonpath([root_abs, path]) == root_abs
+    return inside and "site-packages" not in path.split(os.sep)
+
+
+def _marker_line(lines: list, start: int = 0,
+                 end: "int | None" = None) -> "int | None":
+    """Intent:
+        The 1-based number of the first line in `lines[start:end]`
+        that opens an intent: an `Intent:` line or an `# Intent`
+        style markdown heading. None when no line does.
+    """
+    import re
+    heading = re.compile(r"^#{1,4}\s*Intent\s*$", re.IGNORECASE)
+    for i in range(start, len(lines) if end is None else end):
+        text = lines[i].strip()
+        if text.lower() == "intent:" or heading.match(text):
+            return i + 1
+    return None
+
+
+def _file_lines(path: str) -> list:
+    """Intent:
+        The lines of a text file, empty when it cannot be read.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().splitlines()
+    except OSError:
+        return []
+
+
+def _scope_source(root: str, key: str) -> tuple:
+    """Intent:
+        Where a scope's stated intent is written, as `(path, line)`:
+        the top README for `__project__`; otherwise the module's own
+        source when its docstring states the intent, else the README.md
+        beside it. `(None, None)` when the scope does not resolve.
+    """
+    import importlib
+    import os
+
+    from .docstring import _read_module_intent
+    if key == "__project__":
+        path = os.path.join(root, "README.md")
+    else:
+        try:
+            module = importlib.import_module(key)
+        except Exception:
+            return None, None
+        src = getattr(module, "__file__", None)
+        if not src:
+            return None, None
+        path = src
+        if _read_module_intent(module) is None:
+            path = os.path.join(os.path.dirname(src), "README.md")
+    return path, _marker_line(_file_lines(path)) or 1
+
+
+def _scope_item(root: str, key: str, level: str) -> "dict | None":
+    """Intent:
+        A module, package or codebase intent that waits on a person:
+        stated and never accepted (`new`), or accepted and since
+        reworded (`stale`). None when nothing is stated or the
+        acceptance is current.
+    """
+    text = _current_scope_intent(root, key)
+    if not text:
+        return None
+    status = scope_intent_status(root, key, text)
+    if status == "documented":
+        return None
+    path, line = _scope_source(root, key)
+    item = {"key": key, "level": level,
+            "status": "stale" if status == "stale" else "new",
+            "text": text, "file": path, "line": line}
+    if status == "stale":
+        item["changed"] = [_CHANGED_WORDS["intent_hash"]]
+        accepted = (_scope_acceptances(root).get(key) or {}).get(
+            "accepted") or {}
+        item["accepted_at"] = accepted.get("at")
+    return item
+
+
+def _function_item(key: str, entry: dict, fn) -> "dict | None":
+    """Intent:
+        A function intent that waits on a person, read from its
+        record: a recorded intent with no acceptance (`new`), or an
+        acceptance whose signature, raised exceptions or text moved on
+        (`stale`, with what changed). None when there is no recorded
+        intent or the acceptance is current.
+    """
+    import inspect
+    text = (entry.get("intent") or "").strip()
+    if not text:
+        return None
+    accepted = entry.get("intent_accepted") or {}
+    changed: list = []
+    if accepted:
+        fresh = _intent_binding(entry)
+        changed = [_CHANGED_WORDS[what]
+                   for what in ("sig", "raises", "intent_hash")
+                   if accepted.get(what) != fresh[what]]
+        if not changed and not accepted.get("stale"):
+            return None
+    path = line = None
+    if fn is not None:
+        try:
+            path = inspect.getsourcefile(fn)
+            body, first = inspect.getsourcelines(fn)
+        except (OSError, TypeError):
+            path = None
+        if path:
+            lines = _file_lines(path)
+            line = (_marker_line(lines, first - 1, first - 1 + len(body))
+                    or first)
+    item = {"key": key, "level": "function",
+            "status": "stale" if accepted else "new", "text": text,
+            "signature": entry.get("signature"),
+            "raises": sorted(entry.get("raises") or []),
+            "file": path, "line": line}
+    if accepted:
+        item["changed"] = changed
+        item["accepted_at"] = accepted.get("at")
+        item["accepted_raises"] = sorted(accepted.get("raises") or [])
+        if accepted.get("stale_reason"):
+            item["reason"] = accepted["stale_reason"]
+    return item
+
+
+def _scope_acceptances(root: str) -> dict:
+    """Intent:
+        The scope-level acceptances on file, keyed by scope; empty
+        when none are recorded or the file cannot be read.
+    """
+    import os
+
+    import yaml
+    path = _scope_intent_path(root)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def pending_intents(root: str = ".") -> list:
+    """Intent:
+        Every stated intent in the project that waits on a person's
+        acceptance, top down: the codebase README (`__project__`), then
+        each package, then each module, then each function with a
+        record. The packages and modules are the ones that hold a
+        function with a record, and any already accepted. Each item
+        says its key, level, status (`new` or `stale`), text and where
+        the text is written; a function also gives its signature and
+        raised exceptions, and a stale item says what changed. Reading
+        only: nothing is written.
+    """
+    import importlib
+    import inspect
+    import os
+
+    from .conjecture import _resolve_func_ref
+    from .docstring import _read_module_intent
+    from .spec import load_verified
+
+    root_abs = os.path.abspath(root)
+    items: list = []
+    scopes: set = set()
+    for key, wrap in sorted(load_verified(root).items()):
+        entry = (wrap or {}).get("entry") or {}
+        fn = None if ":" in key else _resolve_func_ref(key, root=root)
+        if fn is not None:
+            try:
+                src = inspect.getsourcefile(fn)
+            except TypeError:
+                src = None
+            if src and not _in_project(root_abs, src):
+                continue
+            parts = (getattr(fn, "__module__", "") or "").split(".")
+            scopes.update(".".join(parts[:i])
+                          for i in range(1, len(parts) + 1) if parts[0])
+        item = _function_item(key, entry, fn)
+        if item is not None:
+            items.append(item)
+    on_file = _scope_acceptances(root)
+    scopes.update(k for k in on_file if k != "__project__")
+    for key in sorted(scopes):
+        try:
+            module = importlib.import_module(key)
+        except Exception:
+            continue
+        if not _in_project(root_abs, getattr(module, "__file__", None)):
+            continue
+        is_package = hasattr(module, "__path__")
+        if (not is_package and key not in on_file
+                and _read_module_intent(module) is None):
+            # a module with no docstring of its own reads its intent
+            # from the README beside it, which is its package's
+            continue
+        item = _scope_item(root, key, "package" if is_package else "module")
+        if item is not None:
+            items.append(item)
+    project = _scope_item(root, "__project__", "codebase")
+    if project is not None:
+        items.append(project)
+    items.sort(key=lambda i: (_LEVEL_ORDER[i["level"]],
+                              i["key"].count(".") if i["level"] == "package"
+                              else 0, i["key"]))
+    return items
+
+
+def reread_intent(root: str, item: dict) -> "dict | None":
+    """Intent:
+        The same intent read again after its source was edited: the
+        module (or the function's module) is reloaded from source and
+        the item rebuilt. For a function, whose acceptance binds to its
+        record, the item carries `live_text` when the docstring now
+        says something the record does not yet hold. None when the
+        intent is no longer stated, or is now accepted and current.
+    """
+    import importlib
+    import importlib.util
+    import inspect
+    import os
+    import sys
+
+    from .conjecture import _resolve_func_ref
+    from .spec import load_verified
+
+    def reload(name: str) -> None:
+        module = sys.modules.get(name)
+        src = getattr(module, "__file__", None)
+        if module is None or not src:
+            return
+        try:
+            os.remove(importlib.util.cache_from_source(src))
+        except (OSError, ValueError, NotImplementedError):
+            pass
+        importlib.invalidate_caches()
+        importlib.reload(module)
+
+    if item["level"] != "function":
+        if item["key"] != "__project__":
+            reload(item["key"])
+        return _scope_item(root, item["key"], item["level"])
+    fn = _resolve_func_ref(item["key"], root=root)
+    if fn is not None:
+        reload(fn.__module__)
+        fn = _resolve_func_ref(item["key"], root=root)
+    wrap = load_verified(root).get(item["key"]) or {}
+    fresh = _function_item(item["key"], wrap.get("entry") or {}, fn)
+    if fresh is None or fn is None:
+        return fresh
+    from .analysis import _intent_block_text
+    from .intent import parse_doc
+    doc = inspect.getdoc(fn) or ""
+    live = (_intent_block_text(doc) or parse_doc(doc).summary or "").strip()
+    if live and live != fresh["text"]:
+        fresh["live_text"] = live
+    return fresh
