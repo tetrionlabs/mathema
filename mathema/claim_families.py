@@ -50,6 +50,8 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
 from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
 from .runtime_types import SEQUENCE_KINDS
+from .runtime_types import annotated_container as _annotated_container
+from .runtime_types import as_annotated as _as_annotated
 from ._exits import exception_name
 from ._signatures import callable_signature
 
@@ -75,14 +77,42 @@ def _claim_target_param(name: str) -> str | None:
     return None
 
 
+def _held_at_none(fn, facts: Facts, domain: "dict | None") -> frozenset:
+    """Intent:
+        The parameters a probe holds at their `None` default instead of
+        drawing them: each with no annotation and a default of `None`
+        that the claim's domain does not bind. Such a parameter is
+        absent unless the claim says otherwise, and its type is not
+        known to draw from; an annotated one (`scale: Optional[float] =
+        None`) is drawn inside its type.
+    """
+    try:
+        sig = callable_signature(fn).parameters
+    except (TypeError, ValueError):
+        return frozenset()
+    held = set()
+    for p in facts.params:
+        spec = sig.get(p)
+        bound = (domain or {}).get(p)
+        if spec is None or spec.default is not None \
+                or spec.annotation is not spec.empty:
+            continue
+        if bound is not None and not getattr(bound, "bare", False):
+            continue
+        held.add(p)
+    return frozenset(held)
+
+
 def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
                         rng: random.Random) -> list:
     """One synthesized positional-argument list for every parameter of
     fn except target, in facts.params order; target itself is left
-    as None, filled in by the caller once per sample point."""
+    as None, filled in by the caller once per sample point. Each is
+    drawn by its kind, and a parameter `_held_at_none` holds is None."""
+    held = _held_at_none(fn, facts, domain)
     args: list = []
     for p in facts.params:
-        if p == target:
+        if p == target or p in held:
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
@@ -251,8 +281,9 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
     def cleared(at: dict, params, attempt: int) -> dict:
         return {**at, target: ordinary[attempt % len(ordinary)]}
 
+    held = _held_at_none(fn, facts, domain)
     presence = Presence({p: facts.param_kinds.get(p, "unknown") for p in facts.params
-                         if p != target}, dict(domain))
+                         if p != target and p not in held}, dict(domain))
     found = separate(call_at, point, (target,), cleared, presence)
     if found.moved is not None:
         _, again = call_at(found.moved)
@@ -3835,6 +3866,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     params = [p for p in facts.params if p not in kept]
     if not params:
         return None
+    # a complex parameter no binding names ranges over the whole plane,
+    # drawn and cornered as `for z in C` is
+    domain = {**(domain or {}),
+              **{p: "C" for p in params
+                 if facts.param_kinds.get(p) == "complex"
+                 and (domain or {}).get(p) is None}}
     bare = cj.relation == kind
     # an indexed row names one conjunct by number (`is_defined[2]`,
     # pinned `is_defined[2]@axis=1`); a row pinned to a call's
@@ -3935,11 +3972,14 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                               owner)
         overflow_safe = _compiled_links(links_o, params)
 
+    # the parameters held at their `None` default: absent, not missing
+    held = _held_at_none(fn, facts, domain)
+
     def admitted(point: dict) -> bool:
         if overflow_safe and satisfies(overflow_safe, point) is False:
             return False
         for p, v in point.items():
-            if is_missing(v):
+            if is_missing(v) and not (p in held and v is None):
                 return False
             if kind == "is_overflow_safe" and isinstance(v, float) \
                     and _math.isinf(v):
@@ -3990,13 +4030,14 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     containers = {p: _annotated_container(fn, p) for p in array_forms}
 
     def as_container(p: str, value):
-        made = containers.get(p)
-        return made(value) if made is not None else value
+        return _as_annotated(value, containers.get(p))
 
     def draw_one(p: str):
         from .matrices import _rand
         if p in call_pins:
             return call_pins[p]
+        if p in held:
+            return None
         if shapes.get(p) == "matrix":
             return _rand(rng.randint(2, 5), rng)
         if shapes.get(p) == "sequence":
@@ -4024,21 +4065,42 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return resolver.synth(p, sizes, lambda: rng.uniform(-10.0, 10.0),
                               rng)
 
-    def draw(corner: "tuple | None" = None) -> dict:
+    def draw(corner: "tuple | None" = None,
+             boundary: "tuple | None" = None) -> dict:
         # `corner`, `(param, pair)`: that array parameter holds the
         # pair's two values in turn, element after element, with at
-        # least two elements along each axis its shape leaves free
+        # least two elements along each axis its shape leaves free.
+        # `boundary`, `(param, shape)`: that marked parameter sits on
+        # its shape region's edge, sized by the trial's dimensions, so
+        # a name it shares sizes every parameter alike: a singular
+        # square matrix, its axes one dimension of at least two, or
+        # the empty vector, its dimension at zero for every parameter
+        # that dimension sizes
         lo = ({resolver.key(corner[0], a): 2
                for a in range(resolver.shapes[corner[0]].ndim)}
               if corner is not None and corner[0] in marked else {})
+        edge_keys = ([resolver.key(boundary[0], a)
+                      for a in range(resolver.shapes[boundary[0]].ndim)]
+                     if boundary is not None else [])
+        if boundary is not None and boundary[1] == "matrix":
+            lo = {**lo, **{k: 2 for k in edge_keys}}
         sizes = (resolver.draw_sizes(
             rng, lo=lo, hi={k: 5 for k in resolver.distinct_keys()})
             if resolver is not None else {})
+        if edge_keys and boundary[1] == "matrix":
+            for k in edge_keys[1:]:
+                sizes[k] = sizes[edge_keys[0]]
+        elif edge_keys:
+            sizes[edge_keys[0]] = 0
         point = {p: draw_marked(sizes, p) if p in marked else draw_one(p)
                  for p in params}
         if corner is not None:
             point[corner[0]] = corner_array(corner[0], corner[1], sizes)
-        placed = _placed(point, rng, keep=tuple(call_pins))
+        if edge_keys and boundary[1] == "matrix":
+            from .matrices import _synth_singular
+            point[boundary[0]] = _synth_singular(sizes[edge_keys[0]], rng)
+        held = (*call_pins, boundary[0]) if boundary is not None else tuple(call_pins)
+        placed = _placed(point, rng, keep=held)
         return point if placed is None else placed
 
     def corner_array(p: str, pair: list, sizes: dict):
@@ -4070,15 +4132,24 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if pinf is not None and not getattr(bound, "pieces", None) \
                     and _interval_ends(bound) is None:
                 bound = tuple(pinf)
-            for pair in sequence_corners(bound):
+            for pair in sequence_corners(
+                    bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
-        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`
+        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`;
+        # a parameter whose axes the dimension plan sizes meets it at
+        # the trial's sizes, so a dimension it shares by name stays
+        # shared (`draw`'s `boundary`)
         from .matrices import _synth_singular
         for p, shape in sorted(shapes.items()):
             for _ in range(3):
+                if p in marked and resolver is not None \
+                        and p in resolver.shapes \
+                        and resolver.shapes[p].ndim == (2 if shape == "matrix" else 1):
+                    yield draw(boundary=(p, shape))
+                    continue
                 yield {**draw(), p: (_synth_singular(rng.randint(2, 5), rng)
                                      if shape == "matrix" else [])}
 
@@ -4277,37 +4348,6 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     return weakest, checked, cx, None, meta
 
 
-#: the Python container a sequence annotation names, by the last dotted
-#: part of its constructor, lowercased; any other sequence is a list
-_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
-                         "frozenset": frozenset, "tuple": tuple}
-
-
-def _annotated_container(fn, param: str) -> "type | None":
-    """Intent:
-        The container type `param`'s annotation names when it is a set,
-        a frozenset or a tuple (`set`, `typing.Set[float]`,
-        `Optional[frozenset]`), so a sequence drawn as a list is passed
-        as a member of that type; None for any other annotation or none.
-    """
-    from .probing import _annotation_text
-    try:
-        spec = callable_signature(fn).parameters.get(param)
-    except (TypeError, ValueError):
-        return None
-    if spec is None:
-        return None
-    text = _annotation_text(spec).replace(" ", "").lower()
-    for wrapper in ("optional[", "typing.optional["):
-        if text.startswith(wrapper) and text.endswith("]"):
-            text = text[len(wrapper):-1]
-    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
-    if len(parts) != 1:
-        return None
-    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
-    return _ANNOTATED_CONTAINERS.get(head)
-
-
 def _has_axes(value, axes: int) -> bool:
     """Whether `value` is a non-empty nested list or tuple (or array)
     `axes` levels deep, with real numbers at the bottom."""
@@ -4399,8 +4439,10 @@ def _structured_draws(fn, facts, cj, domain: dict):
         (shared dimension names share one size, a fixed size stays
         fixed) and synthesised with its structure markers and
         structure premises; a vector sized the same way; a number
-        from its domain. A parameter with no shape and no domain is a
-        square matrix of a random size, as before any shape was known.
+        from its domain, an integer, flag, string or mapping as its own
+        kind. A parameter with no shape and no domain is a square matrix
+        of a random size, as before any shape was known, and one
+        `_held_at_none` holds is None.
     """
     from . import dimensions
     from .matrices import synth_for
@@ -4416,13 +4458,17 @@ def _structured_draws(fn, facts, cj, domain: dict):
 
     from .matrices import rank_edge
     drawn = [0]
+    held = _held_at_none(fn, facts, domain)
 
     def draw(rng: random.Random) -> list:
         drawn[0] += 1
         sizes = resolver.draw_sizes(rng, hi={k: 5 for k in
                                              resolver.distinct_keys()})
-        out = []
+        out: list = []
         for p in facts.params:
+            if p in held:
+                out.append(None)
+                continue
             shape = resolver.shapes.get(p)
             declared = p in shapes or getattr((domain or {}).get(p),
                                               "dims", ())
@@ -4452,9 +4498,16 @@ def _structured_draws(fn, facts, cj, domain: dict):
                 else:
                     out.append([rng.uniform(-5, 5) for _ in range(n)])
             else:
-                out.append(_synth("float", rng, (domain or {}).get(p)))
+                # a number, a flag, a string or a mapping drawn as its
+                # own kind; any other kind as a real number
+                own = kind if kind in _OWN_KIND_DRAWS else "float"
+                out.append(_synth(own, rng, (domain or {}).get(p)))
         return out
     return draw
+
+
+#: the parameter kinds a matrix property claim draws as themselves
+_OWN_KIND_DRAWS = frozenset({"int", "bool", "string", "complex", "dict"})
 
 
 def _matrix_output_probe(prop):
@@ -4483,12 +4536,18 @@ def _matrix_output_probe(prop):
         except SyntaxError:
             return None
         draw = _structured_draws(fn, facts, cj, domain)
+        held = _held_at_none(fn, facts, domain)
+        # the arguments a witness names: the ones the claim's expression
+        # reads, the rest taking f's defaults
+        read = {n.id for n in _ast.walk(_ast.parse(cj.lhs, mode="eval"))
+                if isinstance(n, _ast.Name)}
+        shown = tuple(p for p in facts.params if p in read) or tuple(facts.params)
         checked = 0
         for _ in range(trials):
             point = _placed(dict(zip(facts.params, draw(rng))), rng)
             if point is None or not _admitted(point):
                 continue
-            filled = [point[p] for p in facts.params]
+            witness = _fmt(tuple(point[p] for p in shown), shown)
             raised: list = []
             try:
                 value = _eval_matrix_expr(code, point, fn, raised=raised)
@@ -4496,10 +4555,11 @@ def _matrix_output_probe(prop):
                 continue
             except Exception:
                 # a raise at a missing input is classified, not judged
-                if raised and not any(is_missing(v) for v in filled):
+                if raised and not any(is_missing(v) for p, v in point.items()
+                                      if not (p in held and v is None)):
                     checked += 1
                     return ("falsified", checked,
-                            f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
+                            f"{witness}: f raised "
                             f"{exception_name(raised[0])}, no value", None)
                 continue
             got = prop.check(value)
@@ -4508,7 +4568,7 @@ def _matrix_output_probe(prop):
             checked += 1
             if got is not True:
                 return ("falsified", checked,
-                        f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
+                        f"{witness}: result is not "
                         f"{prop.name[3:]}", None)
         if checked == 0:
             return ("skipped", 0, None, None)
@@ -4632,16 +4692,19 @@ _OUTPUT_CHECKS = {
 
 def _output_predicate_probe(check):
     """A probe over a function's OUTPUT value: per trial synthesize every
-    argument by its kind (on the claim's equality premises), call f, and
+    argument by its kind (on the claim's equality premises), one
+    `_held_at_none` holds at None, call f, and
     test the returned value with `check` (True has the property, False
     does not with a witness, None undecided this round). A raise at a
     point without a missing argument is no output and falsifies."""
     def probe(fn, facts, cj, domain, rng, trials):
         from .domain import is_missing
+        held = _held_at_none(fn, facts, domain)
 
         def trial(_args):
-            point = _placed({p: _synth(facts.param_kinds.get(p, "scalar"),
-                                       rng, (domain or {}).get(p))
+            point = _placed({p: None if p in held else
+                             _synth(facts.param_kinds.get(p, "scalar"),
+                                    rng, (domain or {}).get(p))
                              for p in facts.params}, rng)
             if point is None:
                 return None
@@ -4650,7 +4713,8 @@ def _output_predicate_probe(check):
                 with _pinned_float_env():
                     out = fn(*filled)
             except Exception as exc:
-                if any(is_missing(v) for v in filled):
+                if any(is_missing(v) for p, v in point.items()
+                       if not (p in held and v is None)):
                     # a raise at a missing input is classified, not judged
                     return None
                 return (f"{_fmt(tuple(filled), tuple(facts.params))}: f raised "
@@ -4745,8 +4809,11 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
     empties = [p for p in facts.params
                if facts.param_kinds.get(p) in SEQUENCE_KINDS]
 
+    held = _held_at_none(fn, facts, domain)
+
     def _sample(force_empty=None):
         point = {p: ([] if p == force_empty
+                     else None if p in held
                      else _synth(facts.param_kinds.get(p, "scalar"), rng,
                                  (domain or {}).get(p)))
                  for p in facts.params}

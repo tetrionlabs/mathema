@@ -6795,7 +6795,7 @@ def _magnitude_corner(args) -> bool:
             return
         if isinstance(v, (int, float)):
             values.append(float(v))
-        elif isinstance(v, (list, tuple)):
+        elif isinstance(v, (list, tuple, set, frozenset)):
             for u in v:
                 collect(u)
         elif hasattr(v, "ravel"):
@@ -8089,12 +8089,13 @@ def _refill_caller(fn_call, pins: "dict | None" = None):
 
 
 def _nan_filled(value, fill: float):
-    """`value` with every nan in it replaced by `fill`: a float, a list
-    or tuple (nested), or a float numpy array; anything else as it is."""
+    """`value` with every nan in it replaced by `fill`: a float, a list,
+    tuple or set (nested), or a float numpy array; anything else as it
+    is."""
     import math
     if isinstance(value, float):
         return fill if math.isnan(value) else value
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return type(value)(_nan_filled(v, fill) for v in value)
     if hasattr(value, "dtype") and getattr(value.dtype, "kind", "") == "f":
         import numpy as np
@@ -8149,7 +8150,8 @@ def _fill_value(bound):
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                      resolver, shared: bool, structured: bool,
-                     column_bounds: "dict | None" = None, reach=None):
+                     column_bounds: "dict | None" = None, reach=None,
+                     distinct: bool = False):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -8160,6 +8162,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         `column_bounds` holds a table's column bindings by column name.
         `reach`, the claim's resolved pseudo-infinity range when one
         applies, bounds the magnitude corners along unbounded ends.
+        `distinct` gives a vector held as a set magnitude corners whose
+        entries differ (`probing.sequence_corners`).
     """
     from . import _floor
     from .domain import domain_contains
@@ -8189,7 +8193,7 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # the degenerate containers
         floor += _floor.corner_floor(
             sequence_corners(record if record is not None else bound,
-                             reach=reach),
+                             reach=reach, distinct=distinct),
             length_free=not shared)
     elif form == "mat":
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
@@ -8236,7 +8240,8 @@ def _lists_sentinel(bound) -> bool:
 
 
 def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
-                  record_domain: "dict | None" = None) -> dict:
+                  record_domain: "dict | None" = None,
+                  signature: "dict | None" = None) -> dict:
     """Intent:
         `{param: _SpecialCycle}` for every parameter whose domain admits
         a sentinel: a finite set's listed sentinels, and for a scalar
@@ -8245,7 +8250,9 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
         parameter's resolution (`None`, or its absence spellings, for
         absence; one value per member for the class), dispensed in
         order before any random draw. A vector's holes are drawn by the
-        gap draws, not here.
+        gap draws, not here. A mapping no binding names is drawn absent
+        once when its annotation admits that (`signature`, the
+        parameters' `types.missing_policy_from_signature`).
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, admitted,
@@ -8258,6 +8265,14 @@ def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
         if bound is None:
             bound = (record_domain or {}).get(p)
         if bound is None:
+            stated = (signature or {}).get(p)
+            if kind == "dict" and stated is not None and stated.absent:
+                values = realise_sentinel(ABSENT, stated.members, stated.absence)
+                if values:
+                    from ._sampling import WAIT
+                    out[p] = _SpecialCycle(rng, values=[],
+                                           first=[WAIT] * waiting + values)
+                    waiting += len(values)
             continue
         dom = _as_domain(bound)
         if dom.dims:
@@ -10972,8 +10987,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      if (lap := _language_lap(rng, cj_domain.get(p))) is not None}
     # a finite set's listed sentinels: each value they stand for is
     # drawn once, before any random draw
+    from .types import missing_policy_from_signature
     missing_laps = _missing_laps(rng, kinds, cj_domain, ctx.missing,
-                                 record_domain=ctx.record_domain)
+                                 record_domain=ctx.record_domain,
+                                 signature=missing_policy_from_signature(fn))
     from .probing import _SpecialCycle
     for _p in list(language_laps):
         if _p in missing_laps:
@@ -11007,7 +11024,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             axis_users.setdefault(resolver.key(_p, _axis), set()).add(_p)
     containers = {}
     import random as _random_mod
+
     from ._sampling import _RNG_SEED
+    from .runtime_types import annotated_container, as_annotated
+    # the set, frozenset or tuple a sequence parameter's annotation
+    # names: every draw of it, a recorded witness replayed included, is
+    # passed as a member of that type
+    annotated = {_p: made for _p, _k in kinds.items()
+                 if _k in SEQUENCE_KINDS
+                 and (made := annotated_container(fn, _p)) is not None}
     implied_rng = _random_mod.Random(_RNG_SEED + 1)
     for _p, _k in kinds.items():
         # a length is the floor's to choose only when no other parameter
@@ -11023,7 +11048,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                 {key[len(_p) + 1:]: b for key, b in cj_domain.items()
                                  if key.startswith(_p + ".")
                                  and key[len(_p) + 1:].isidentifier()},
-                                reach=pinf)
+                                reach=pinf,
+                                distinct=annotated.get(_p) in (set, frozenset))
         if made is not None:
             containers[_p] = made
 
@@ -11276,7 +11302,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return True
         if isinstance(v, dict):
             return False
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, (list, tuple, set, frozenset)):
             return any(in_a_slot(x) for x in v)
         if hasattr(v, "shape") or type(v).__module__.split(".")[0] in (
                 "pandas", "polars"):
@@ -11409,6 +11435,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # a fixed implementation must clear the exact point that
             # broke it before fresh evidence counts.
             for p, v in zip(kinds, pinned[trial]):
+                v = as_annotated(v, annotated.get(p))
                 env[p] = v
                 args.append(v)
         else:
@@ -11443,6 +11470,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               if key.startswith(p + ".")
                               and key[len(p) + 1:].isidentifier()}
                     v = _synth_dict(tree_keys, rng, specials, fields=fields)
+                    lap = missing_laps.get(p)
+                    if lap is not None and lap.guaranteed_remaining():
+                        # the absence the mapping's annotation admits,
+                        # drawn once before the ordinary mappings
+                        from ._sampling import WAIT
+                        absent = lap.next()
+                        if absent is not WAIT:
+                            v = absent
                     env[p] = v
                     args.append(v)
                     continue
@@ -11527,6 +11562,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # claim draws are the ones it drew without them
                     v = containers[p].next(list(v), implied_rng if p in ctx.implied
                                            else rng)
+                v = as_annotated(v, annotated.get(p))
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():
@@ -11534,7 +11570,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # the sample lies on the premise by construction
                 if p in literal_args:
                     continue
-                v = draw(rng, trial_sizes.get(resolver.key(p, 0)))
+                v = as_annotated(draw(rng, trial_sizes.get(resolver.key(p, 0))),
+                                  annotated.get(p))
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:

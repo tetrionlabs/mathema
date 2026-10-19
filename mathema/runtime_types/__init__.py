@@ -537,12 +537,16 @@ class _Realising:
     result as a plain value. Every attribute it does not define is the
     function's own (`__globals__`, `__code__`, `__defaults__`), and
     `__wrapped__` is the function, so signature and source readers see
-    the function itself."""
+    the function itself. A parameter annotated as a set, a frozenset or
+    a tuple is passed as one (`as_annotated`); a function whose only
+    such parameters are those has its result returned as it is."""
 
-    def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None):
+    def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None,
+                 containers: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
         self._enums = enums or {}
+        self._containers = containers or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -560,10 +564,76 @@ class _Realising:
         for name, cls in self._enums.items():
             if name in bound.arguments:
                 bound.arguments[name] = as_enum_member(bound.arguments[name], cls)
+        for name, container in self._containers.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_annotated(bound.arguments[name],
+                                                     container)
+        if not self._bindings and not self._enums:
+            return fn(*bound.args, **bound.kwargs)
         return observed_plain(fn(*bound.args, **bound.kwargs))
 
     def __repr__(self) -> str:
         return f"<realising {self._fn!r}>"
+
+
+#: the Python container a sequence annotation names, by the last dotted
+#: part of its constructor, lowercased; any other sequence is a list
+_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
+                         "frozenset": frozenset, "tuple": tuple}
+
+
+def annotated_container(fn, param: str) -> "type | None":
+    """Intent:
+        The container type `param`'s annotation names when it is a set,
+        a frozenset or a tuple (`set`, `typing.Set[float]`,
+        `Optional[frozenset]`), so a sequence drawn as a list is passed
+        as a member of that type; None for any other annotation or none.
+    """
+    from .._signatures import callable_signature
+    from ..probing import _annotation_text
+    try:
+        spec = callable_signature(fn).parameters.get(param)
+    except (TypeError, ValueError):
+        return None
+    if spec is None:
+        return None
+    text = _annotation_text(spec).replace(" ", "").lower()
+    for wrapper in ("optional[", "typing.optional["):
+        if text.startswith(wrapper) and text.endswith("]"):
+            text = text[len(wrapper):-1]
+    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
+    if len(parts) != 1:
+        return None
+    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
+    return _ANNOTATED_CONTAINERS.get(head)
+
+
+def annotated_containers(fn, facts) -> dict:
+    """`{param: container}` for each sequence parameter of `fn` whose
+    annotation names a set, a frozenset or a tuple
+    (`annotated_container`)."""
+    kinds = getattr(facts, "param_kinds", None) or {}
+    return {p: made for p, k in kinds.items()
+            if k in SEQUENCE_KINDS
+            and (made := annotated_container(fn, p)) is not None}
+
+
+def as_annotated(value, container: "type | None"):
+    """Intent:
+        `value`, a drawn list or tuple, as a member of `container` (a
+        set, a frozenset or a tuple, from `annotated_container`), so
+        the function is called inside its parameter's type; `value`
+        unchanged when `container` is None, when it is no list or tuple
+        (an absence, a value already of the type), or when its elements
+        cannot be held in a set.
+    """
+    if container is None or not isinstance(value, (list, tuple)) \
+            or type(value) is container:
+        return value
+    try:
+        return container(value)
+    except TypeError:
+        return value
 
 
 def calling(fn, facts):
@@ -573,7 +643,8 @@ def calling(fn, facts):
         `_exits.ExitRaised`. When a parameter has a runtime type other
         than a list, the call first realises each such parameter's
         drawn value through its adapter, and observes the result into
-        a plain value.
+        a plain value. A parameter annotated as a set, a frozenset or a
+        tuple is passed as one.
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
@@ -585,12 +656,13 @@ def calling(fn, facts):
         return exiting_as_raise(fn)
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
-    if not bindings and not enums:
+    containers = annotated_containers(fn, facts)
+    if not bindings and not enums and not containers:
         return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
         return exiting_as_raise(fn)
-    return exiting_as_raise(_Realising(fn, bindings, sig, enums))
+    return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers))
 
 
 def enum_parameters(fn) -> dict:

@@ -119,8 +119,8 @@ def test_size_enforced_witnesses_an_accepted_wrong_fixed_size():
     assert re.search(r"A is 3[123] by 15 where the shape fixes 30 by 15",
                      probe.counterexample or ""), probe.counterexample
     assert "30 by 15" in probe.statement, probe.statement
-    # the witness names distinct wrong sizes only, the smallest and the
-    # largest tried, never the same size twice, and both axes were tried
+    # the witness names distinct wrong sizes only, one per axis that
+    # accepted one, never the same size twice, and both axes were tried
     entries = probe.counterexample.split("; ")
     assert len(entries) == len(set(entries)) <= 2, entries
     assert all(re.fullmatch(r"A is \d+ by \d+ where the shape fixes 30 by 15", e)
