@@ -13,7 +13,12 @@ the wall-clock alarm) passes through unchanged.
 """
 from __future__ import annotations
 
+import ast
+import builtins
+import copy
 import functools
+import inspect
+import sys
 
 
 class ExitRaised(SystemExit, Exception):
@@ -111,3 +116,187 @@ def exiting_as_raise(fn):
     if isinstance(fn, _ExitsAsRaise) or not callable(fn):
         return fn
     return _ExitsAsRaise(fn)
+
+
+_SYS_EXIT = "sys.exit"
+
+
+def _import_bindings(fdef) -> dict:
+    """Intent:
+        The names a top-level statement of `fdef`'s body (one that runs
+        before every later top-level statement) binds by importing
+        `sys` or `sys.exit`, each mapped to `("sys" | "sys.exit", line
+        of the import)`.
+    """
+    out: dict = {}
+    for node in fdef.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "sys":
+                    out[alias.asname or "sys"] = ("sys", node.lineno)
+        elif isinstance(node, ast.ImportFrom) and node.module == "sys" \
+                and not node.level:
+            for alias in node.names:
+                if alias.name == "exit":
+                    out[alias.asname or "exit"] = (_SYS_EXIT, node.lineno)
+    return out
+
+
+def _own_scope(fdef):
+    """Intent:
+        Every node of `fdef`'s body that belongs to its own scope: the
+        walk stops at a nested function, lambda or class, whose names
+        are bound in a scope of their own.
+    """
+    stack = list(reversed(fdef.body))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.Lambda, ast.ClassDef)):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _locally_bound(fdef) -> set:
+    """Intent:
+        The names `fdef`'s own scope binds other than by a top-level
+        import of `sys` or `sys.exit`: its parameters, every name it
+        assigns, deletes or binds in a `for`, `with`, `except` or
+        walrus, every nested `def` or `class`, and every name any other
+        import binds (an import of `sys` inside a branch, loop or `try`
+        included).
+    """
+    args = fdef.args
+    out = {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+    out |= {a.arg for a in (args.vararg, args.kwarg) if a is not None}
+    top = {id(node) for node in fdef.body}
+    for node in _own_scope(fdef):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            out.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            out.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                spelled = (alias.name if isinstance(node, ast.Import)
+                           else f"{node.module}.{alias.name}")
+                if spelled not in ("sys", _SYS_EXIT) or id(node) not in top \
+                        or (isinstance(node, ast.ImportFrom) and node.level):
+                    out.add(bound)
+    return out
+
+
+_UNBOUND = object()
+
+
+def _namespace_value(fn, name: str):
+    """Intent:
+        The value `name` has where `fn`'s body reads it as a free name:
+        a closure cell, else `fn`'s module globals, else the builtins
+        those globals use; `_UNBOUND` when it has none there or `fn`
+        has no namespace to look in.
+    """
+    try:
+        fn = inspect.unwrap(fn)
+    except ValueError:
+        return _UNBOUND
+    fn = getattr(fn, "__func__", fn)
+    code = getattr(fn, "__code__", None)
+    closure = getattr(fn, "__closure__", None)
+    if code is not None and closure and name in code.co_freevars:
+        try:
+            return closure[code.co_freevars.index(name)].cell_contents
+        except ValueError:
+            return _UNBOUND
+    globs = getattr(fn, "__globals__", None)
+    if not isinstance(globs, dict):
+        return _UNBOUND
+    if name in globs:
+        return globs[name]
+    found = globs.get("__builtins__", builtins)
+    found = found if isinstance(found, dict) else vars(found)
+    return found.get(name, _UNBOUND)
+
+
+def _is_quitter(value) -> bool:
+    """Intent:
+        Whether `value` is the interpreter's `exit` or `quit` object,
+        which raises `SystemExit` with the code it is called with.
+    """
+    return type(value).__name__ == "Quitter" \
+        and type(value).__module__ == "_sitebuiltins"
+
+
+def exits_as_raises(fdef, fn):
+    """Intent:
+        `fdef` with every statement that only calls `sys.exit` (any
+        import spelling of it, as a module attribute or a name) or the
+        interpreter's `exit` or `quit`, with no argument or one
+        positional argument, replaced by `raise SystemExit(...)` with
+        the same argument and the call's source location. `fdef` itself
+        when there is no such statement; otherwise a rewritten copy,
+        and `fdef` is left unchanged.
+
+    Notes:
+        A name is read as `sys`, `sys.exit` or `exit`/`quit` only where
+        it resolves to that object: bound by a top-level import of
+        `sys` or `sys.exit` in `fdef`'s body on an earlier line and
+        bound nowhere else there, or not bound in `fdef`'s own scope
+        and found to be that object in `fn`'s closure, globals or
+        builtins. A call inside an
+        expression, a call with keywords or a starred argument, and a
+        call inside a nested function, lambda or class are left as they
+        are. The interpreter's `exit` closes standard input before it
+        raises; the rewrite reads only the raise.
+    """
+    imports = _import_bindings(fdef)
+    shadowed = _locally_bound(fdef)
+
+    def resolve(name: str, line: int):
+        if name in shadowed:
+            return _UNBOUND
+        if name in imports:
+            target, imported_at = imports[name]
+            if imported_at >= line:
+                return _UNBOUND
+            return sys if target == "sys" else sys.exit
+        return _namespace_value(fn, name)
+
+    def is_exit_call(call) -> bool:
+        if not isinstance(call, ast.Call) or call.keywords \
+                or len(call.args) > 1 \
+                or any(isinstance(a, ast.Starred) for a in call.args):
+            return False
+        func = call.func
+        if isinstance(func, ast.Name):
+            value = resolve(func.id, call.lineno)
+            return value is sys.exit or _is_quitter(value)
+        return isinstance(func, ast.Attribute) and func.attr == "exit" \
+            and isinstance(func.value, ast.Name) \
+            and resolve(func.value.id, call.lineno) is sys
+
+    def exit_statements(tree) -> set:
+        return {id(node) for node in _own_scope(tree)
+                if isinstance(node, ast.Expr) and is_exit_call(node.value)}
+
+    if not exit_statements(fdef):
+        return fdef
+    out = copy.deepcopy(fdef)
+    wanted = exit_statements(out)
+
+    class _Rewrite(ast.NodeTransformer):
+        def visit_Expr(self, node):
+            if id(node) not in wanted:
+                return node
+            call = node.value
+            exc = ast.copy_location(
+                ast.Call(func=ast.copy_location(
+                    ast.Name(id="SystemExit", ctx=ast.Load()), call.func),
+                    args=list(call.args), keywords=[]), call)
+            return ast.copy_location(ast.Raise(exc=exc, cause=None), node)
+
+    return ast.fix_missing_locations(_Rewrite().visit(out))

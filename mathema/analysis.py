@@ -1259,6 +1259,12 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
             hints.pop(p)
     apply_runtime_kinds(param_kinds, detected)
     form = identity.form_hash(fdef)
+    # every reader past this point (the guards below and each lifter
+    # reading `tree`) sees a statement `sys.exit(c)` as the
+    # `raise SystemExit(c)` it is; the form hash above and `source`
+    # stay those of the code as written
+    from ._exits import exits_as_raises
+    fdef = exits_as_raises(fdef, fn)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
