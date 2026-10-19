@@ -687,25 +687,27 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
     rejected, accepted_examples, checked = 0, [], 0
     for dim in shared:
         candidates = [p for p, dims in param_dims.items() if dim in dims]
-        for _ in range(_SHAPE_MISMATCH_TRIALS):
-            sizes = {n: rng.randint(1, 4) for n in names}
-            sizes.update(fixed or {})
-            bad_param = rng.choice(candidates)
-            bad_sizes = dict(sizes)
-            bad_sizes[dim] = sizes[dim] + 1 + rng.randint(0, 2)
-            args = {p: _synth_nested(dims, bad_sizes if p == bad_param else sizes, rng)
-                   for p, dims in param_dims.items()}
-            checked += 1
-            try:
-                result = _call(fn, sig, args)
-            except Exception:
-                rejected += 1
-                continue
-            if result is None:
-                rejected += 1
-                continue
-            accepted_examples.append(f"{bad_param}[{dim}]={bad_sizes[dim]} "
-                                     f"vs {dim}={sizes[dim]} elsewhere")
+        others = [n for n in names if n != dim]
+        for bad_param in candidates:
+            for sizes, wrong in _mismatch_cases(dim, names, fixed):
+                if wrong == 0 and not _admits_zero(param_dims[bad_param], dim):
+                    continue
+                bad_sizes = {**sizes, dim: wrong}
+                args = {p: _synth_nested(dims, bad_sizes if p == bad_param else sizes, rng)
+                        for p, dims in param_dims.items()}
+                checked += 1
+                try:
+                    result = _call(fn, sig, args)
+                except Exception:
+                    rejected += 1
+                    continue
+                if result is None:
+                    rejected += 1
+                    continue
+                rest = ", ".join(f"{n}={sizes[n]}" for n in others)
+                accepted_examples.append(f"{bad_param}[{dim}]={wrong} "
+                                         f"vs {dim}={sizes[dim]} elsewhere"
+                                         + (f" ({rest})" if rest else ""))
     if rejected == checked:
         return Probe("dimensions_enforced", stmt, "holds", n=checked)
     # one truth, no mode: a declared shared dim the code silently
@@ -714,6 +716,52 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                  counterexample="; ".join(accepted_examples[:3]),
                  note="silently accepting a shape mismatch violates the "
                       "declared shared dims")
+
+
+#: the sizes a dimension takes where every parameter agrees on it, in a
+#: mismatch case
+_MISMATCH_BASES = (1, 2, 3)
+
+
+def _mismatch_cases(dim: str, names: tuple,
+                    fixed: "dict | None" = None) -> list:
+    """Intent:
+        Every mismatch on the shared dimension `dim` the enforcement
+        probe tries, as `(sizes, wrong)`: `sizes` the dimensions every
+        other parameter is drawn at, `wrong` the size the mismatched
+        parameter takes along `dim` instead. `dim` agrees at 1, 2 and 3
+        (at its fixed size when a binding fixes it), and `wrong` is one,
+        two and three larger, one smaller, 1 (where numpy broadcasts)
+        and 0. Each other dimension is drawn apart from both sizes,
+        then each one alone, and all together, at the wrong size, so a
+        function that accepts a mismatch only where it equals another
+        dimension is met there.
+    """
+    fixed = fixed or {}
+    free = [n for n in names if n != dim and n not in fixed]
+    cases: list = []
+    for agreed in ((fixed[dim],) if dim in fixed else _MISMATCH_BASES):
+        wrongs = dict.fromkeys(w for w in (agreed + 1, agreed - 1, 1, 0,
+                                           agreed + 2, agreed + 3)
+                               if w >= 0 and w != agreed)
+        for wrong in wrongs:
+            apart = next(v for v in range(1, 6) if v not in (agreed, wrong))
+            others = [dict.fromkeys(free, apart)]
+            others += [{**dict.fromkeys(free, apart), n: wrong}
+                       for n in free if wrong >= 1]
+            if len(free) > 1 and wrong >= 1:
+                others.append(dict.fromkeys(free, wrong))
+            for other in others:
+                cases.append(({**other, **fixed, dim: agreed}, wrong))
+    return cases
+
+
+def _admits_zero(dims: tuple, dim) -> bool:
+    """Whether a parameter of `dims` can be drawn as nested lists with
+    the axis named `dim` at size 0 and its shape still read back: a
+    vector, or a matrix along its last axis only (a matrix with no rows
+    has lost its column count)."""
+    return all(d != dim for d in dims[:-1])
 
 
 def _returns_in_shape(fn, sig, param_dims: dict, names: tuple,
