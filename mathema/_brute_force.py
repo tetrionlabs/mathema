@@ -186,6 +186,17 @@ class _Scope:
                 "both": "the claim's binding with the function's finite "
                         "domain"}[self.kind]
 
+    def ran(self, n: int) -> str:
+        """The swept points as the subject of a sentence saying they
+        were run: `all 3 points were run` when the claim itself lists
+        them (its own line shows the set), else every point of the
+        region named by its source, `every point of the function's
+        finite domain (3 points) was run`."""
+        if self.kind == "claim":
+            return ("the one point was run" if n == 1
+                    else f"all {_points(n)} were run")
+        return f"every point of {self.where()} ({_points(n)}) was run"
+
     def quantifier(self, names: list, n: int) -> str:
         """The `∀` line of a proof over the swept points."""
         return f"∀ {', '.join(names)} in {self.where()} ({_points(n)})"
@@ -289,14 +300,14 @@ class _Precision:
             "allowance": self.allowance, "at": self.at,
             "representation": "float64"}}
 
-    def capped_words(self, where: str, n: int, point: str, call: str) -> str:
+    def capped_words(self, ran: str, point: str, call: str) -> str:
         """Intent:
             The sketch of a sweep proven within float64, stating the cap
-            for a reader downstream: every point of `where` (`n` points)
-            ran in float64 and the claim held at each, the largest delta
-            against its allowance, and the `point` (its `call`) that
-            could not be computed exactly, below which delta a
-            difference would not show.
+            for a reader downstream: the swept points (`ran`, `all 3
+            points were run`, `_Scope.ran`) ran in float64 and the claim
+            held at each, the largest delta against its allowance, and
+            the `point` (its `call`) that could not be computed exactly,
+            below which delta a difference would not show.
         """
         from .records import delta_text
         delta = delta_text(self.miss)
@@ -304,7 +315,7 @@ class _Precision:
         # float64's own resolution at these values
         below = (f"below {delta}" if self.miss else
                  "below float64's resolution at these values")
-        return (f"every point of {where} ({_points(n)}) was run in float64 "
+        return (f"{ran} in float64 "
                 f"and the claim held at each; the largest delta was {delta} "
                 f"against an allowance of {delta_text(self.allowance)}. The "
                 f"value at {point} could not be computed exactly ({call}), "
@@ -587,7 +598,7 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         return ProofResult(
             "proven",
             sketch=precision.capped_words(
-                scope.where(), checked, _fmt_point(inexact[0], names),
+                scope.ran(checked), _fmt_point(inexact[0], names),
                 _call_words(fn, facts, inexact[0])),
             quantifier=scope.quantifier(names, checked),
             meta=with_executed({"mathema.derive_route":
@@ -905,7 +916,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         return ProofResult(
             "proven",
             sketch=precision.capped_words(
-                scope.where(), total, _fmt_point(inexact[0], names),
+                scope.ran(total), _fmt_point(inexact[0], names),
                 _call_words(fn, facts, inexact[0])) + outside,
             quantifier=scope.quantifier(names, total),
             meta=with_executed({"mathema.derive_route":
@@ -1083,8 +1094,9 @@ def ground_proof(cj, fn, facts, bound_funcs):
         # exact reading, so the proof is capped at float64
         return ProofResult(
             "proven",
-            sketch=precision.capped_words("the claim's own call", 1, witness,
-                                          witness),
+            sketch=precision.capped_words(
+                f"every point of the claim's own call ({_points(1)}) was run",
+                witness, witness),
             meta=with_executed({"mathema.derive_route":
                                     "brute_force:within_float64",
                                 "mathema.sweep_inexact": {
