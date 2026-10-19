@@ -13,9 +13,8 @@ steps read as mathematics:
   2/10^9, the reading derive gives the literals of a claim;
 - `/` of two exact numbers is their ratio, `**` with a whole exponent
   is exact and with a fractional exponent an exact sympy power;
-- `float()` is the identity on an exact number, `round()` rounds the
-  rational exactly (half to even), `math.floor`, `math.ceil`,
-  `math.trunc` and `math.fabs` are exact;
+- `float()` is the identity on an exact number, `math.fabs` its
+  absolute value;
 - `math.sqrt`, `math.exp`, `math.log`, the trigonometric and
   hyperbolic functions and `math.pi`, `math.e`, `math.tau` give exact
   sympy values when their arguments are exact, a value the claim's
@@ -24,9 +23,37 @@ steps read as mathematics:
 Everything else runs as written. A float the body reads from outside
 (a module global, a closure, a value a library returns) is a double
 with no exact reading, and the twin's result is then inexact at that
-point, as `wrap` reports it. `int()`, `%`, `abs`, `sum`, `min` and
-`max` are exact on rationals as Python defines them and are left
-alone.
+point, as `wrap` reports it. `abs`, `sum`, `min` and `max` are exact
+on rationals as Python defines them and are left alone.
+
+No decision is taken on a number standing for a float. The twin holds
+an exact number where the computation held a rounded float, and a
+decision on it can go the other way: a loop adding 0.1 until it
+reaches 1 runs ten times exactly and eleven times in float. So a
+comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in`, `is`,
+`is not`) with such a number among its operands or inside one, its use
+as a subscript or as a key of a dict or set (a display, `dict.get`,
+`set.add`, `set()`, `dict()`, `hash`), the test of an `if`, `while`,
+conditional expression, comprehension condition, `and`, `or`, `not`,
+`bool`, `any`, `all` or `filter` on it, a `key=` of `sorted`, `min`,
+`max` or `list.sort` returning it, a search of a list holding it
+(`index`, `count`, `remove`), and `math.floor`, `math.ceil`,
+`math.trunc`, `int()`, `round`, `divmod`, `//` and `%` of it, each
+makes the point undecided (`NotExact`). Inside the body of a `try`
+whose handlers catch an arithmetic or math domain error (a bare
+`except`, `except Exception`, `except OverflowError`, ...), or of a
+`with` statement, so does any division, power, `float()` or `math`
+function of such a number, which could raise in the computation where
+the exact step does not (`10.0 ** 400` overflows); the same step on
+integers runs as the computation runs it first, raising the
+computation's own error. The same decisions on integers are taken as
+written: they are the computation's own (`n % d == 0`, a `range`
+loop). Identity against `None`, `True`, `False` or `...` is no
+decision on the number and is taken too. An `assert`'s test is left as
+written: the assert raises or not, and a raise leaves the point
+undecided. Comparisons and the other decisions on a number standing
+for a float are declined for now, whether or not the float and the
+exact number would decide alike.
 
 Every call the body makes is read too, so no function written in
 Python runs as written on an exact number. A Python function the body
@@ -48,8 +75,7 @@ the run that caught it is undecided all the same.
 A value the computation holds as a float is held by the twin as a
 Fraction or a sympy number, never a bare int: `float(3)` is
 `Fraction(3)`, `math.sqrt(4)` is `Fraction(2)`, `4 ** 0.5` and
-`2 ** 3.0` are Fractions, `7.5 // 2` is `Fraction(3)` (`//` and
-`divmod` are read for that), while an int the body or the claim wrote
+`2 ** 3.0` are Fractions, while an int the body or the claim wrote
 stays an int. A question about a number's type is then answered as
 the computation would: `isinstance(x, float)`, `type(x)`,
 `x.__class__` and `type(x) is float` say `float` of such a value and
@@ -122,6 +148,13 @@ _FLOORDIV, _CLASS = "__mathema_floordiv__", "__mathema_class__"
 #: marking a dict as a twin's globals
 _CALLEE, _NOT_EXACT = "__mathema_callee__", "__mathema_not_exact__"
 _TWIN_MARK = "__mathema_twin__"
+#: the names the rewritten body calls for a comparison's operand, a
+#: test, a key, a remainder, and the guard around a body whose errors a
+#: handler catches
+_OPERAND, _TEST, _KEY = "__mathema_operand__", "__mathema_test__", "__mathema_key__"
+_MEMBER = "__mathema_member__"
+_MOD, _GUARD = "__mathema_mod__", "__mathema_guard__"
+
 #: the most calls of other functions' twins nested inside one another
 #: before the point is left undecided
 _MAX_DEPTH = 64
@@ -141,8 +174,11 @@ class _State(threading.local):
     """The exact reading's state on this thread: `depth`, the calls of
     other functions' twins currently nested; `taint`, the reason of the
     first `NotExact` raised in the current run, kept even when the body
-    catches the exception."""
+    catches the exception; `guard`, the handlers catching an arithmetic
+    error (and `with` statements) the run is currently inside
+    (`_Guard`)."""
     depth = 0
+    guard = 0
     taint: "str | None" = None
 
 
@@ -297,7 +333,7 @@ def _build(fn) -> tuple:
         return None, (f"the body of {name} is not read exactly: {found[0]} "
                       f"depends on the number's Python type or text, not "
                       f"its mathematics")
-    node = _Exact(src).visit(node)
+    node = _Exact(src, fn.__globals__).visit(node)
     ast.fix_missing_locations(node)
     ast.increment_lineno(node, first - 1)
     module = ast.Module(body=[node], type_ignores=[])
@@ -620,6 +656,12 @@ def _globals_of(fn) -> "dict | None":
     env[_CLASS] = _class
     env[_CALLEE] = _callee
     env[_NOT_EXACT] = NotExact
+    env[_OPERAND] = _operand
+    env[_MEMBER] = _member
+    env[_TEST] = _test
+    env[_KEY] = _key
+    env[_MOD] = _mod
+    env[_GUARD] = _Guard
     env[_TWIN_MARK] = True
     return env
 
@@ -679,12 +721,13 @@ def _holds_stand_in(value, depth: int = 0) -> bool:
         the computation had a float (`_stands_for_float`): itself, or
         an element of a list, tuple, set or frozenset, a key or value
         of a dict, or an element of an object array, looked into up to
-        six levels deep.
+        six levels deep; a container nested deeper counts as holding
+        one.
     """
     if _stands_for_float(value):
         return True
     if depth >= 6:
-        return False
+        return isinstance(value, (list, tuple, set, frozenset, dict))
     if isinstance(value, (list, tuple, set, frozenset)):
         return any(_holds_stand_in(v, depth + 1) for v in value)
     if isinstance(value, dict):
@@ -750,12 +793,236 @@ def _opaque(func):
     return call
 
 
-def _builtin(func):
-    """A builtin, run as itself with any Python function among its
-    arguments read exactly."""
+def _operand(value):
+    """An operand of a comparison (`==`, `<`, `in`, `is`, ...), as it
+    is.
+
+    Raises:
+        NotExact: the operand is, or holds, a number standing for a
+            float (`_holds_stand_in`): the comparison could go the
+            other way from the computation's.
+    """
+    if _holds_stand_in(value):
+        _not_exact(f"a comparison on {value}, which stands for a float, "
+                   f"is not taken exactly")
+    return value
+
+
+def _member(container):
+    """The container of `in` or `not in`, as it is: of a dict or a dict's
+    view its keys or elements are compared, of a list, tuple, set or
+    array its elements (`_operand`), of a string or a range nothing
+    standing for a float.
+
+    Raises:
+        NotExact: the container holds a number standing for a float, or
+            is one whose elements cannot be looked at without consuming
+            them (an iterator, a generator, an object of another kind).
+    """
+    import collections.abc as abc
+    np = sys.modules.get("numpy")
+    if isinstance(container, (str, bytes, bytearray, range)):
+        return container
+    if isinstance(container, dict):
+        _operand(list(container))
+    elif isinstance(container, (abc.KeysView, abc.ValuesView,
+                                abc.ItemsView)):
+        _operand(list(container))
+    elif isinstance(container, (list, tuple, set, frozenset)) or (
+            np is not None and isinstance(container, np.ndarray)):
+        _operand(container)
+    else:
+        _not_exact(f"the elements of {type(container).__name__} cannot be "
+                   f"looked at before a membership test")
+    return container
+
+
+def _test(value):
+    """The value an `if`, `while`, conditional expression, condition of
+    a comprehension, `and`, `or` or `not` tests, as it is.
+
+    Raises:
+        NotExact: the value is a number standing for a float, or an
+            array holding one: its truth is a comparison with zero.
+    """
+    np = sys.modules.get("numpy")
+    if _stands_for_float(value) or (
+            np is not None and isinstance(value, np.ndarray)
+            and _holds_stand_in(value)):
+        _not_exact(f"a test of {value}, which stands for a float, is not "
+                   f"taken exactly")
+    return value
+
+
+def _key(value):
+    """A subscript, or a key of a dict or set, as it is.
+
+    Raises:
+        NotExact: the key is, or holds, a number standing for a float:
+            its hash and equality are decisions on it.
+    """
+    if _holds_stand_in(value):
+        _not_exact(f"{value}, which stands for a float, is not used as a "
+                   f"key exactly")
+    return value
+
+
+class _Guard:
+    """The body of a `try` whose handlers catch an arithmetic error, or
+    of a `with` statement: inside it a step on a number standing for a
+    float, which could raise in the computation (an overflow, a
+    division by a float rounded to zero) where the exact step does not,
+    leaves the point undecided (`_guarded_native`)."""
+
+    def __enter__(self):
+        _STATE.guard += 1
+        return self
+
+    def __exit__(self, *exc):
+        _STATE.guard -= 1
+        return False
+
+
+def _keyed_by(key):
+    """A `key=` of `sorted`, `min`, `max` or `list.sort`, read exactly,
+    whose results are compared: each is an operand (`_operand`)."""
+    key = _callee(key) if isinstance(key, types.FunctionType) else key
+
+    def keyed(value):
+        return _operand(key(value))
+    return keyed
+
+
+def _truths(func):
+    """`any` or `all`, testing each element (`_test`)."""
+    def call(iterable):
+        return func(_test(v) for v in iterable)
+    return call
+
+
+def _filter(function, iterable):
+    """`filter`, testing each value its function returns (`_test`)."""
+    if function is None:
+        return filter(_test, iterable)
+    function = _callee(function)
+    return filter(lambda v: _test(function(v)), iterable)
+
+
+def _keyed_result(func):
+    """`set`, `frozenset` or `dict`, its keys checked (`_key`)."""
     def call(*args, **kwargs):
         args, kwargs = _read_args(args, kwargs)
+        out = func(*args, **kwargs)
+        _key(list(out))
+        return out
+    return call
+
+
+def _int(*args, **kwargs):
+    """`int`, declining a number standing for a float (a truncation)."""
+    if args:
+        _decline(args[0])
+    return int(*args, **kwargs)
+
+
+def _bool(*args):
+    """`bool`, declining a number standing for a float (a test)."""
+    return bool(*(_test(a) for a in args))
+
+
+def _hash(value):
+    """`hash`, declining a value holding a number standing for a
+    float."""
+    return hash(_key(value))
+
+
+#: the builtins whose decisions on a number standing for a float are
+#: declined, as the twin calls them
+_DECIDING: dict = {id(int): _int, id(bool): _bool, id(hash): _hash,
+                   id(any): _truths(any), id(all): _truths(all),
+                   id(filter): _filter, id(set): _keyed_result(set),
+                   id(frozenset): _keyed_result(frozenset),
+                   id(dict): _keyed_result(dict)}
+#: the builtins comparing their elements by a `key=`
+_KEYED = frozenset(id(f) for f in (sorted, min, max))
+
+
+def _builtin(func):
+    """A builtin, run as itself with any Python function among its
+    arguments read exactly, its decisions on a number standing for a
+    float declined (`_DECIDING`, a `key=` of `sorted`, `min` or
+    `max`)."""
+    deciding = _DECIDING.get(id(func))
+    if deciding is not None:
+        return deciding
+    keyed = id(func) in _KEYED
+
+    def call(*args, **kwargs):
+        if keyed:
+            # the elements compared, gathered once: a number standing
+            # for a float may be compared by value, whose order is the
+            # mathematics, but not inside a tuple or list, whose order
+            # then decides what else comes first
+            items = list(args[0]) if len(args) == 1 else list(args)
+            _unordered_inside(items)
+            args = (items,) if len(args) == 1 else tuple(items)
+            if kwargs.get("key") is not None:
+                kwargs = {**kwargs, "key": _keyed_by(kwargs["key"])}
+        args, kwargs = _read_args(args, kwargs)
         return func(*args, **kwargs)
+    return call
+
+
+def _unordered_inside(items) -> None:
+    """Leave the point undecided when an element of `items` compared by
+    `sorted`, `min`, `max` or `list.sort` is a container holding a
+    number standing for a float."""
+    for item in items:
+        if not _stands_for_float(item) and _holds_stand_in(item):
+            _not_exact("an ordering of containers holding a number "
+                       "standing for a float is not taken exactly")
+
+
+#: the methods of a dict or set whose first argument is a key, and
+#: those that may add keys
+_KEY_METHODS = frozenset({"get", "pop", "setdefault", "__contains__",
+                          "__getitem__", "__delitem__", "__setitem__",
+                          "add", "discard", "remove"})
+_KEY_ADDING = frozenset({"update", "setdefault", "__setitem__", "add",
+                         "__ior__", "__or__", "union", "intersection",
+                         "difference", "symmetric_difference",
+                         "intersection_update", "difference_update",
+                         "symmetric_difference_update", "copy"})
+#: the methods of a list or tuple comparing its elements
+_SEARCHING = frozenset({"index", "count", "remove", "__contains__"})
+
+
+def _method(func):
+    """A builtin value's own method (`_BUILTIN_VALUES`), run as itself
+    with its decisions on a number standing for a float declined: a key
+    of a dict or set, a search of a list, a `key=` of `list.sort`."""
+    owner = func.__self__
+    name = func.__name__
+    keyed = isinstance(owner, (dict, set, frozenset))
+    searched = isinstance(owner, (list, tuple)) and name in _SEARCHING
+
+    def call(*args, **kwargs):
+        if keyed and name in _KEY_METHODS and args:
+            _key(args[0])
+        if searched:
+            _operand(args)
+            _operand(owner)
+        if name == "sort":
+            _unordered_inside(owner)
+            if kwargs.get("key") is not None:
+                kwargs = {**kwargs, "key": _keyed_by(kwargs["key"])}
+        args, kwargs = _read_args(args, kwargs)
+        out = func(*args, **kwargs)
+        if keyed and name in _KEY_ADDING:
+            _key(list(owner))
+            if isinstance(out, (dict, set, frozenset)):
+                _key(list(out))
+        return out
     return call
 
 
@@ -804,7 +1071,7 @@ def _callee(func):
         if _stands_for_float(owner):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
-            return _builtin(func)
+            return _method(func)
         return _opaque(func)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
@@ -835,10 +1102,167 @@ class _Exact(ast.NodeTransformer):
     operator, each `.__class__` read a call answering the type as the
     computation would, each call made through `_callee`, each `try`
     letting a `NotExact` through its handlers, annotations dropped so
-    they are not evaluated in the twin."""
+    they are not evaluated in the twin. Each decision is made through a
+    check declining a number standing for a float: a comparison's
+    operands (`_operand`, the container of `in` by `_member`, and none
+    for `is` against `None`, `True`, `False` or `...`), the value an
+    `if`, `while`, conditional expression,
+    comprehension condition, `and`, `or` or `not` tests (`_test`), a
+    subscript or a key of a dict or set display (`_key`), `%` (`_mod`),
+    and the body of a `try` whose handlers catch an arithmetic error,
+    or of a `with` statement (`_Guard`). An `assert`'s test is left as
+    written: it raises or not, and a raise leaves the point undecided."""
 
-    def __init__(self, src: str):
+    def __init__(self, src: str, env: "dict | None" = None):
         self.src = src
+        self.env = env or {}
+        # inside an assert's test, whose decisions are left as written
+        self.asserting = False
+
+    def _wrap(self, name: str, node):
+        return ast.copy_location(ast.Call(
+            func=ast.Name(name, ast.Load()), args=[node], keywords=[]), node)
+
+    def _decides(self) -> bool:
+        return not self.asserting
+
+    def visit_Assert(self, node):
+        self.asserting = True
+        node.test = self.visit(node.test)
+        self.asserting = False
+        if node.msg is not None:
+            node.msg = self.visit(node.msg)
+        return node
+
+    def visit_Compare(self, node):
+        self.generic_visit(node)
+        if not self._decides():
+            return node
+        sides = [node.left, *node.comparators]
+
+        def singleton(n) -> bool:
+            return isinstance(n, ast.Constant) and (
+                n.value is None or n.value is True or n.value is False
+                or n.value is Ellipsis)
+
+        def identity_only(i: int) -> bool:
+            # every operator beside operand i is `is`/`is not` against
+            # a singleton constant
+            pairs = []
+            if i > 0:
+                pairs.append((node.ops[i - 1], sides[i - 1]))
+            if i < len(node.ops):
+                pairs.append((node.ops[i], sides[i + 1]))
+            return all(isinstance(op, (ast.Is, ast.IsNot)) and singleton(o)
+                       for op, o in pairs)
+        def container_only(i: int) -> bool:
+            # operand i is only ever the container of `in`/`not in`
+            return i > 0 and isinstance(node.ops[i - 1], (ast.In, ast.NotIn)) \
+                and i == len(node.ops)
+
+        wrapped = [s if singleton(s) or identity_only(i)
+                   else self._wrap(_MEMBER, s) if container_only(i)
+                   else self._wrap(_OPERAND, s)
+                   for i, s in enumerate(sides)]
+        node.left, node.comparators = wrapped[0], wrapped[1:]
+        return node
+
+    def _tested(self, node):
+        return self._wrap(_TEST, node) if self._decides() else node
+
+    def visit_If(self, node):
+        self.generic_visit(node)
+        node.test = self._tested(node.test)
+        return node
+
+    visit_While = visit_If
+    visit_IfExp = visit_If
+
+    def visit_comprehension(self, node):
+        self.generic_visit(node)
+        node.ifs = [self._tested(t) for t in node.ifs]
+        return node
+
+    def visit_BoolOp(self, node):
+        self.generic_visit(node)
+        node.values = [*(self._tested(v) for v in node.values[:-1]),
+                       node.values[-1]]
+        return node
+
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Not):
+            node.operand = self._tested(node.operand)
+        return node
+
+    def _keyed(self, node):
+        return self._wrap(_KEY, node) if self._decides() else node
+
+    def visit_Subscript(self, node):
+        self.generic_visit(node)
+        if isinstance(node.slice, ast.Slice):
+            for part in ("lower", "upper", "step"):
+                value = getattr(node.slice, part)
+                if value is not None:
+                    setattr(node.slice, part, self._keyed(value))
+        else:
+            node.slice = self._keyed(node.slice)
+        return node
+
+    def visit_Dict(self, node):
+        self.generic_visit(node)
+        node.keys = [k if k is None else self._keyed(k) for k in node.keys]
+        return node
+
+    def visit_Set(self, node):
+        self.generic_visit(node)
+        node.elts = [self._keyed(e) for e in node.elts]
+        return node
+
+    def visit_DictComp(self, node):
+        self.generic_visit(node)
+        node.key = self._keyed(node.key)
+        return node
+
+    def visit_SetComp(self, node):
+        self.generic_visit(node)
+        node.elt = self._keyed(node.elt)
+        return node
+
+    def visit_Match(self, node):
+        self.generic_visit(node)
+        node.subject = self._wrap(_OPERAND, node.subject)
+        return node
+
+    def _guarded(self, body: list, at) -> list:
+        return [ast.copy_location(ast.With(
+            items=[ast.withitem(context_expr=ast.Call(
+                func=ast.Name(_GUARD, ast.Load()), args=[], keywords=[]),
+                optional_vars=None)],
+            body=body), at)]
+
+    def _catches_arithmetic(self, handler) -> bool:
+        """Whether `handler` could catch an arithmetic error or a math
+        domain error: a bare `except`, a class those errors derive from,
+        or a name the walk cannot resolve."""
+        if handler.type is None:
+            return True
+        kinds = (handler.type.elts if isinstance(handler.type, ast.Tuple)
+                 else [handler.type])
+        for kind in kinds:
+            cls = _resolve_in(kind, self.env)
+            if not isinstance(cls, type):
+                return True
+            if any(issubclass(e, cls) for e in _ARITHMETIC_ERRORS):
+                return True
+        return False
+
+    def visit_With(self, node):
+        self.generic_visit(node)
+        node.body = self._guarded(node.body, node)
+        return node
+
+    visit_AsyncWith = visit_With
 
     def visit_Call(self, node):
         self.generic_visit(node)
@@ -849,6 +1273,8 @@ class _Exact(ast.NodeTransformer):
 
     def visit_Try(self, node):
         self.generic_visit(node)
+        if any(self._catches_arithmetic(h) for h in node.handlers):
+            node.body = self._guarded(node.body, node)
         # `except NotExact: raise` ahead of the body's own handlers
         node.handlers.insert(0, ast.copy_location(ast.ExceptHandler(
             type=ast.Name(_NOT_EXACT, ast.Load()), name=None,
@@ -907,6 +1333,27 @@ class _Exact(ast.NodeTransformer):
     visit_AsyncFunctionDef = visit_FunctionDef
 
 
+#: the errors a float step raises where its exact step may not (or the
+#: other way): an overflow, a division by a float rounded to zero, a
+#: math domain error
+_ARITHMETIC_ERRORS = (OverflowError, ZeroDivisionError, FloatingPointError,
+                      ValueError)
+
+
+def _resolve_in(node, env: dict):
+    """The value an exception name in a handler refers to, through
+    `env` and the builtins (a dotted name through its module), or None
+    when it cannot be resolved."""
+    if isinstance(node, ast.Name):
+        if node.id in env:
+            return env[node.id]
+        return getattr(builtins, node.id, None)
+    if isinstance(node, ast.Attribute):
+        base = _resolve_in(node.value, env)
+        return None if base is None else getattr(base, node.attr, None)
+    return None
+
+
 def _operator_name(op) -> "str | None":
     if isinstance(op, ast.Div):
         return _DIV
@@ -914,6 +1361,8 @@ def _operator_name(op) -> "str | None":
         return _FLOORDIV
     if isinstance(op, ast.Pow):
         return _POW
+    if isinstance(op, ast.Mod):
+        return _MOD
     return None
 
 
@@ -996,8 +1445,31 @@ def _literal(text: str):
         return Fraction(text)
 
 
+def _decline(*operands) -> None:
+    """Leave the point undecided when any of `operands` stands for a
+    float (`_stands_for_float`): the decision a step makes on it (a
+    floor, a remainder, a rounding) could go the other way from the
+    computation's, whose float was rounded."""
+    for value in operands:
+        if _stands_for_float(value):
+            _not_exact(f"a decision on {value}, which stands for a float, "
+                       f"is not taken exactly")
+
+
+def _guarded_native(native, *operands) -> None:
+    """Under a handler that catches an arithmetic error (`_Guard`): leave
+    the point undecided when an operand stands for a float, and run the
+    step on integer operands as the computation does, so it raises the
+    computation's own error (an overflow) where the computation does."""
+    if not _STATE.guard:
+        return
+    _decline(*operands)
+    native(*operands)
+
+
 def _div(a, b):
     """`a / b`: the ratio of two exact numbers, else Python's division."""
+    _guarded_native(lambda x, y: x / y, a, b)
     if _is_rational(a) and _is_rational(b):
         return Fraction(a) / Fraction(b)
     if _exact(a) and _exact(b):
@@ -1009,40 +1481,36 @@ def _div(a, b):
 
 
 def _floordiv(a, b):
-    """`a // b`: Python's floor division of two exact numbers, an int
-    of two ints and otherwise a Fraction (the computation's `//` of a
-    float is a float), the exact floor of a sympy ratio, else Python's
-    `//`.
+    """`a // b`: Python's floor division, of two ints an int.
 
     Raises:
-        NotExact: sympy does not settle the floor.
+        NotExact: an operand stands for a float (`_decline`).
     """
-    if _is_rational(a) and _is_rational(b):
-        out = a // b
-        return out if isinstance(a, int) and isinstance(b, int) else Fraction(out)
-    if _exact(a) and _exact(b):
-        divisor = _sympify(b)
-        if divisor.is_zero:
-            raise ZeroDivisionError("integer division or modulo by zero")
-        floor = _sympy().floor(_sympify(a) / divisor)
-        if not floor.is_Integer:
-            _not_exact(f"the floor of {a} / {b} is not settled")
-        return Fraction(int(floor))
+    _decline(a, b)
     return a // b
 
 
+def _mod(a, b):
+    """`a % b`: Python's remainder, of two ints an int, and text
+    formatting as ever when `a` is a string.
+
+    Raises:
+        NotExact: an operand of a remainder stands for a float.
+    """
+    if isinstance(a, (str, bytes)):
+        return a % b
+    _decline(a, b)
+    return a % b
+
+
 def _divmod(a, b):
-    """`divmod(a, b)`: the quotient and remainder of two exact numbers,
-    both ints of two ints and otherwise both Fractions, else Python's
-    `divmod`."""
-    if _is_rational(a) and _is_rational(b):
-        q, r = divmod(a, b)
-        if isinstance(a, int) and isinstance(b, int):
-            return q, r
-        return Fraction(q), Fraction(r)
-    if _exact(a) and _exact(b):
-        q = _floordiv(a, b)
-        return q, _settled(_sympify(a) - _sympify(q) * _sympify(b))
+    """`divmod(a, b)`: Python's quotient and remainder, of two ints two
+    ints.
+
+    Raises:
+        NotExact: an operand stands for a float.
+    """
+    _decline(a, b)
     return divmod(a, b)
 
 
@@ -1053,6 +1521,7 @@ def _pow(a, b, mod=None):
     exact sympy power for a fractional exponent, else Python's power."""
     if mod is not None:
         return pow(a, b, mod)
+    _guarded_native(lambda x, y: x ** y, a, b)
     if _is_rational(a) and _is_rational(b):
         exponent = Fraction(b)
         if exponent.denominator == 1:
@@ -1098,6 +1567,9 @@ class ExactFloat(metaclass=_FloatMeta):
     def __new__(cls, x=0):
         if isinstance(x, bool):
             return Fraction(int(x))
+        if _STATE.guard and isinstance(x, int):
+            # an int past float range overflows as the computation's does
+            float(x)
         if _is_rational(x):
             return Fraction(x)
         if _symbolic_number(x):
@@ -1136,52 +1608,23 @@ def _class(value):
 
 
 def _round(x, ndigits=None):
-    """`round`: exact on a rational (Python's own, half to even), exact
-    on a sympy number by its floor, Python's `round` otherwise."""
-    if _symbolic_number(x):
-        return _round_symbolic(x, ndigits)
+    """`round`: Python's own, of an int an int.
+
+    Raises:
+        NotExact: `x` stands for a float.
+    """
+    _decline(x)
     return round(x) if ndigits is None else round(x, ndigits)
 
 
-def _round_symbolic(x, ndigits):
-    sympy = _sympy()
-    scale = sympy.Integer(10) ** (0 if ndigits is None else int(ndigits))
-    scaled = x * scale
-    floor = sympy.floor(scaled)
-    if not floor.is_Integer:
-        _not_exact(f"the floor of {scaled} is not settled")
-    tie = scaled - floor - sympy.Rational(1, 2)
-    if tie.is_zero is True:
-        rounded = floor if int(floor) % 2 == 0 else floor + 1
-    elif tie.is_positive is True:
-        rounded = floor + 1
-    elif tie.is_negative is True:
-        rounded = floor
-    else:
-        _not_exact(f"the rounding of {x} is not settled")
-    if ndigits is None:
-        return int(rounded)
-    return _settled(rounded / scale)
-
-
 def _whole(name: str, x):
-    """`math.floor`, `math.ceil` or `math.trunc` of an exact number."""
-    native = getattr(math, name)
-    if _is_rational(x):
-        return native(x)
-    if not _symbolic_number(x):
-        return native(x)
-    sympy = _sympy()
-    if name == "trunc":
-        negative = x.is_negative
-        if negative is None:
-            _not_exact(f"the sign of {x} is not settled")
-        out = sympy.ceiling(x) if negative else sympy.floor(x)
-    else:
-        out = (sympy.floor if name == "floor" else sympy.ceiling)(x)
-    if not out.is_Integer:
-        _not_exact(f"the {name} of {x} is not settled")
-    return int(out)
+    """`math.floor`, `math.ceil` or `math.trunc`, of an int the int.
+
+    Raises:
+        NotExact: `x` stands for a float.
+    """
+    _decline(x)
+    return getattr(math, name)(x)
 
 
 def _fabs(x):
@@ -1280,6 +1723,24 @@ _MATH_EXACT: dict = {
     "acosh": _transcendental("acosh", lambda s: s >= 1),
     "atanh": _transcendental("atanh", lambda s: (s > -1) & (s < 1)),
 }
+
+
+def _guarded_math(name: str, exact):
+    """The exact `math` function `exact`, which under a handler catching
+    an arithmetic error (`_Guard`) first declines an argument standing
+    for a float and runs `math`'s own on integer arguments, raising
+    where the computation raises (`_guarded_native`)."""
+    native = getattr(math, name, None)
+
+    def word(*args):
+        if native is not None:
+            _guarded_native(native, *args)
+        return exact(*args)
+    return word
+
+
+_MATH_EXACT = {name: (fn if name == "pow" else _guarded_math(name, fn))
+               for name, fn in _MATH_EXACT.items()}
 
 #: the `math` functions a body may bind by name (`from math import
 #: sqrt`), by identity, to their exact versions

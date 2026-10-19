@@ -7,7 +7,7 @@ question about a number's type as the computation would: `type(x)`,
 `float` of an exact number standing where the computation had a float,
 `int` of an int the claim or the body wrote. A value the computation
 holds as a float is held by the twin as a Fraction or a sympy number,
-never a bare int (`float(3)`, `math.sqrt(4)`, `7.5 // 2`), so a body
+never a bare int (`float(3)`, `math.sqrt(4)`), so a body
 that branches on the type takes the branch the computation took and a
 correct body proves exactly. A type reached by any path other than its
 bare builtin name (`builtins.float`, a module alias) and text turned
@@ -223,14 +223,26 @@ def test_a_body_branching_on_the_type_takes_the_computations_branch(fn, law):
     (rooted, "for x in {4, 9}, f(x) == x"),
     (powered, "for x in {4, 9}, f(x) == x"),
     (two_to, "for n in {1, 2, 3}, f(n) == 2 ** n"),
-    (floor_half, "for x in {5.5, 7.5}, f(x) == floor(x / 2)"),
-    (split, "for x in {5.5, 7.5}, f(x) == x"),
 ], ids=lambda v: getattr(v, "__name__", None))
 def test_a_whole_value_the_computation_had_as_a_float_is_still_a_float(fn, law):
     p = _check(fn, law)
     assert p.verdict == "proven", (fn.__name__, p.verdict, p.route, p.note,
                                    p.counterexample)
     assert p.route == "derive:brute_force", p.route
+    assert "mathema.exact_witness" not in p.meta, p.meta
+
+
+@pytest.mark.parametrize("fn,law", [
+    (floor_half, "for x in {5.5, 7.5}, f(x) == floor(x / 2)"),
+    (split, "for x in {5.5, 7.5}, f(x) == x"),
+], ids=lambda v: getattr(v, "__name__", None))
+def test_a_floor_of_a_float_is_declined_and_proven_within_float64(fn, law):
+    # `x // 2` and `divmod(x, 2)` of a value the computation held as a
+    # float are a decision the reading declines
+    p = _check(fn, law)
+    assert p.verdict == "proven", (fn.__name__, p.verdict, p.route, p.note,
+                                   p.counterexample)
+    assert p.route == "derive:brute_force:within_float64", p.route
     assert "mathema.exact_witness" not in p.meta, p.meta
 
 
@@ -250,18 +262,42 @@ def test_the_twin_answers_type_and_isinstance_alike():
 
 def test_the_twin_holds_a_float_the_computation_had_as_a_fraction():
     def every(n, x):
-        return (float(n), math.sqrt(x), x ** 0.5, 2 ** float(n), x // 2,
-                divmod(x, 2), round(x, 1), math.floor(x), round(x), n * 2)
+        return (float(n), math.sqrt(x), x ** 0.5, 2 ** float(n), n * 2)
     twin = exact_twin(every)
     assert twin is not None
     out = twin(ExactInt(3), Fraction(9))
-    assert out[:5] == (Fraction(3), Fraction(3), Fraction(3), Fraction(8),
-                       Fraction(4))
-    assert out[5] == (Fraction(4), Fraction(1))
-    assert out[6] == Fraction(9)
-    assert all(type(v) is Fraction for v in (*out[:5], *out[5], out[6])), out
+    assert out[:4] == (Fraction(3), Fraction(3), Fraction(3), Fraction(8))
+    assert all(type(v) is Fraction for v in out[:4]), out
     # an int stays an int where the computation's value is one
-    assert out[7:] == (9, 9, 6) and all(isinstance(v, int) for v in out[7:])
+    assert out[4] == 6 and isinstance(out[4], int)
+
+
+def test_the_twin_declines_a_floor_or_rounding_of_a_float():
+    from mathema._exact_body import NotExact
+
+    def floor_division(x):
+        return x // 2
+
+    def quotient_remainder(x):
+        return divmod(x, 2)
+
+    def rounding_to(x):
+        return round(x, 1)
+
+    def whole_below(x):
+        return math.floor(x)
+
+    def rounding(x):
+        return round(x)
+    for fn in (floor_division, quotient_remainder, rounding_to, whole_below,
+               rounding):
+        twin = exact_twin(fn)
+        assert twin is not None, fn.__name__
+        # on a value the computation held as a float, a decision
+        with pytest.raises(NotExact):
+            twin(Fraction(9))
+        # on an int, the computation's own
+        assert twin(9) == fn(9), fn.__name__
 
 
 @pytest.mark.parametrize("fn", [aliased, via_builtins, is_fraction, from_text,
