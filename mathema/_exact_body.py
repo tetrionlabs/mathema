@@ -24,9 +24,20 @@ steps read as mathematics:
 Everything else runs as written. A float the body reads from outside
 (a module global, a closure, a value a library returns) is a double
 with no exact reading, and the twin's result is then inexact at that
-point, as `wrap` reports it. `int()`, `//`, `%`, `abs`, `sum`, `min`
-and `max` are exact on rationals as Python defines them and are left
+point, as `wrap` reports it. `int()`, `%`, `abs`, `sum`, `min` and
+`max` are exact on rationals as Python defines them and are left
 alone.
+
+A value the computation holds as a float is held by the twin as a
+Fraction or a sympy number, never a bare int: `float(3)` is
+`Fraction(3)`, `math.sqrt(4)` is `Fraction(2)`, `4 ** 0.5` and
+`2 ** 3.0` are Fractions, `7.5 // 2` is `Fraction(3)` (`//` and
+`divmod` are read for that), while an int the body or the claim wrote
+stays an int. A question about a number's type is then answered as
+the computation would: `isinstance(x, float)`, `type(x)`,
+`x.__class__` and `type(x) is float` say `float` of such a value and
+`int` of an int, so a body branching on the type takes the branch the
+computation took.
 
 The reading is only used on a body it follows faithfully. An exact
 number stands in for a float, so a construct whose value depends on
@@ -34,19 +45,22 @@ the number's Python type or its text rather than its mathematics
 would send the exact run down a path the computation did not take,
 and a body holding one is refused on its syntax tree before it runs
 (`unfaithful`; `exact_callee` then raises `NotExact`, the point
-undecided). Refused: `type(...)`, `.__class__`, `is`/`is not` against
-a type, `str`/`repr`/`format`/`ascii`/`bin`/`hex`/`oct`/`id` calls,
-f-strings, `%` formatting with a string, `.format(...)`,
+undecided). Refused: a comparison (`is`, `is not`, `==`, `in`, ...)
+against a type reached by any path other than its bare builtin name
+(`builtins.float`, a module alias of `float`, an imported class: the
+twin cannot tell the real `float` from its exact one), `str`/`repr`/
+`format`/`ascii`/`bin`/`hex`/`oct`/`id` calls, f-strings, `%`
+formatting with a string, `.format(...)`,
 `__str__`/`__repr__`/`__format__`, `.hex()`, `float.fromhex`,
 `.as_integer_ratio()`, explicit `Fraction(...)` and `Decimal(...)`,
 `isinstance`/`issubclass` against `Fraction`, `Decimal`,
 `numbers.Rational` or a sympy class, `math.isclose`, `math.frexp`,
 `math.ldexp`, `math.ulp`, `math.nextafter`, and any use of the
 `struct` or `ctypes` modules, under any alias and whether imported at
-module level or inside the body. `isinstance(x, float)` is kept and
-answered as the computation would: true of an exact number standing in
-for a float. An `import math` inside the body reaches the exact `math`
-too. A body with no source to scan (built in, a lambda,
+module level or inside the body. Text turned back into a number
+(`float(f"{x:.2f}")`, `float(str(x))`, `Decimal(str(x))`) is refused
+with the text. An `import math` inside the body reaches the exact
+`math` too. A body with no source to scan (built in, a lambda,
 defined by `exec`) or a decorated function is refused the same way:
 nothing vouches for it.
 """
@@ -65,9 +79,11 @@ from fractions import Fraction
 
 __all__ = ["NotExact", "exact_callee", "exact_twin", "unfaithful"]
 
-#: the names the rewritten body calls for a literal, a division and a
-#: power, spelled so no body of its own uses them
+#: the names the rewritten body calls for a literal, a division, a
+#: floor division, a power and a `.__class__` read, spelled so no body
+#: of its own uses them
 _LITERAL, _DIV, _POW = "__mathema_literal__", "__mathema_div__", "__mathema_pow__"
+_FLOORDIV, _CLASS = "__mathema_floordiv__", "__mathema_class__"
 
 #: each function's reading, built once: `(twin, None)`, or `(None,
 #: reason)` for a body that cannot be read faithfully
@@ -236,12 +252,12 @@ def _build(fn) -> tuple:
 
 # --- the constructs the reading refuses ---------------------------------
 
-#: builtins whose value is a number's type or text
-_TEXT_CALLS = frozenset({"type", "str", "repr", "format", "ascii", "bin",
-                         "hex", "oct", "id"})
+#: builtins whose value is a number's text or identity
+_TEXT_CALLS = frozenset({"str", "repr", "format", "ascii", "bin", "hex",
+                         "oct", "id"})
 #: attributes whose value is a number's representation
-_TEXT_ATTRS = frozenset({"__class__", "hex", "fromhex", "as_integer_ratio",
-                         "format", "__str__", "__repr__", "__format__"})
+_TEXT_ATTRS = frozenset({"hex", "fromhex", "as_integer_ratio", "format",
+                         "__str__", "__repr__", "__format__"})
 _MISSING = object()
 
 
@@ -330,6 +346,24 @@ class _Scan(ast.NodeVisitor):
         value = self._resolve(node)
         return value is not _MISSING and isinstance(value, type)
 
+    def _type_nodes(self, node):
+        """The nodes of a comparison's side that name a type, looking
+        into a tuple, list or set written out (`(float, int)`)."""
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            for elt in node.elts:
+                yield from self._type_nodes(elt)
+        elif self._is_type(node):
+            yield node
+
+    def _builtin_type_name(self, node) -> bool:
+        """Whether `node` is the bare name of a builtin type, bound by
+        neither the module nor the body: the twin reads `float` as its
+        exact `float` and every other such name as the class itself, so
+        a comparison against it is answered as the computation's."""
+        return (isinstance(node, ast.Name)
+                and node.id not in self.imported and node.id not in self.env
+                and isinstance(getattr(builtins, node.id, None), type))
+
     def _refused_class(self, node) -> bool:
         value = self._resolve(node)
         if value is _MISSING or not isinstance(value, type):
@@ -364,9 +398,21 @@ class _Scan(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Compare(self, node):
-        if any(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops) \
-                and any(self._is_type(n) for n in (node.left, *node.comparators)):
-            self._refuse(node)
+        # a type compared by identity is answered only under its bare
+        # builtin name; compared by equality or membership, only the
+        # real `float` reached another way is indistinguishable from the
+        # twin's exact `float`
+        identity = any(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops)
+        for side in (node.left, *node.comparators):
+            for typed in self._type_nodes(side):
+                if self._builtin_type_name(typed):
+                    continue
+                if identity or self._resolve(typed) is float:
+                    self._refuse(node)
+                    break
+            else:
+                continue
+            break
         self.generic_visit(node)
 
     def visit_JoinedStr(self, node):
@@ -389,8 +435,8 @@ def _globals_of(fn) -> "dict | None":
     """
     env = dict(fn.__globals__)
     env["__builtins__"] = {**builtins.__dict__, "float": ExactFloat,
-                           "round": _round, "pow": _pow,
-                           "__import__": _import}
+                           "round": _round, "pow": _pow, "type": _type,
+                           "divmod": _divmod, "__import__": _import}
     for name, value in list(env.items()):
         if name == "__builtins__":
             continue
@@ -409,7 +455,9 @@ def _globals_of(fn) -> "dict | None":
             env[name] = value if exact is None else exact
     env[_LITERAL] = _literal
     env[_DIV] = _div
+    env[_FLOORDIV] = _floordiv
     env[_POW] = _pow
+    env[_CLASS] = _class
     return env
 
 
@@ -434,8 +482,10 @@ def _exact_global(value):
 
 class _Exact(ast.NodeTransformer):
     """The rewrite: each float literal a call reading its source text,
-    each `/` and `**` (and `/=`, `**=`) a call of the exact operator,
-    annotations dropped so they are not evaluated in the twin."""
+    each `/`, `//` and `**` (and `/=`, `//=`, `**=`) a call of the exact
+    operator, each `.__class__` read a call answering the type as the
+    computation would, annotations dropped so they are not evaluated in
+    the twin."""
 
     def __init__(self, src: str):
         self.src = src
@@ -470,6 +520,14 @@ class _Exact(ast.NodeTransformer):
         return ast.copy_location(
             ast.Assign(targets=[node.target], value=call), node)
 
+    def visit_Attribute(self, node):
+        self.generic_visit(node)
+        if node.attr != "__class__" or not isinstance(node.ctx, ast.Load):
+            return node
+        return ast.copy_location(ast.Call(
+            func=ast.Name(_CLASS, ast.Load()),
+            args=[node.value], keywords=[]), node)
+
     def visit_arg(self, node):
         node.annotation = None
         return node
@@ -485,6 +543,8 @@ class _Exact(ast.NodeTransformer):
 def _operator_name(op) -> "str | None":
     if isinstance(op, ast.Div):
         return _DIV
+    if isinstance(op, ast.FloorDiv):
+        return _FLOORDIV
     if isinstance(op, ast.Pow):
         return _POW
     return None
@@ -530,16 +590,16 @@ def _sympify(value):
 
 
 def _settled(value):
-    """A sympy result as the reading keeps it: an Integer as an int, a
-    Rational as a Fraction, any other finite number as itself.
+    """A sympy result of a step the computation returns a float from (a
+    root, a power, a transcendental value) as the reading keeps it: a
+    Rational, an Integer included, as a Fraction, any other finite
+    number as itself.
 
     Raises:
         NotExact: the result is not a finite number, or holds a float.
     """
     if not _symbolic_number(value):
         raise NotExact(f"{value} has no exact value")
-    if value.is_Integer:
-        return int(value)
     if value.is_Rational:
         return Fraction(int(value.p), int(value.q))
     return value
@@ -581,16 +641,55 @@ def _div(a, b):
     return a / b
 
 
+def _floordiv(a, b):
+    """`a // b`: Python's floor division of two exact numbers, an int
+    of two ints and otherwise a Fraction (the computation's `//` of a
+    float is a float), the exact floor of a sympy ratio, else Python's
+    `//`.
+
+    Raises:
+        NotExact: sympy does not settle the floor.
+    """
+    if _is_rational(a) and _is_rational(b):
+        out = a // b
+        return out if isinstance(a, int) and isinstance(b, int) else Fraction(out)
+    if _exact(a) and _exact(b):
+        divisor = _sympify(b)
+        if divisor.is_zero:
+            raise ZeroDivisionError("integer division or modulo by zero")
+        floor = _sympy().floor(_sympify(a) / divisor)
+        if not floor.is_Integer:
+            raise NotExact(f"the floor of {a} / {b} is not settled")
+        return Fraction(int(floor))
+    return a // b
+
+
+def _divmod(a, b):
+    """`divmod(a, b)`: the quotient and remainder of two exact numbers,
+    both ints of two ints and otherwise both Fractions, else Python's
+    `divmod`."""
+    if _is_rational(a) and _is_rational(b):
+        q, r = divmod(a, b)
+        if isinstance(a, int) and isinstance(b, int):
+            return q, r
+        return Fraction(q), Fraction(r)
+    if _exact(a) and _exact(b):
+        q = _floordiv(a, b)
+        return q, _settled(_sympify(a) - _sympify(q) * _sympify(b))
+    return divmod(a, b)
+
+
 def _pow(a, b, mod=None):
     """`a ** b`: exact for an exact base and a whole exponent (an int
-    base and a non-negative int exponent stay an int), an exact sympy
-    power for a fractional exponent, else Python's power."""
+    base and a non-negative int exponent stay an int; a Fraction in
+    either place gives a Fraction, as the computation's float does), an
+    exact sympy power for a fractional exponent, else Python's power."""
     if mod is not None:
         return pow(a, b, mod)
     if _is_rational(a) and _is_rational(b):
         exponent = Fraction(b)
         if exponent.denominator == 1:
-            if isinstance(a, int) and exponent >= 0:
+            if isinstance(a, int) and isinstance(b, int) and exponent >= 0:
                 return a ** int(exponent)
             return Fraction(a) ** int(exponent)
         if a == 0 and exponent < 0:
@@ -604,29 +703,69 @@ def _pow(a, b, mod=None):
     return a ** b
 
 
+def _stands_for_float(value) -> bool:
+    """An exact number standing where the computation had a float: a
+    Fraction or a sympy number (an int stands for an int)."""
+    return isinstance(value, Fraction) or _symbolic_number(value)
+
+
 class _FloatMeta(type):
     """`isinstance(x, float)` in the twin: a float, or an exact number
     standing where the computation had a float (a Fraction, a sympy
     number)."""
 
     def __instancecheck__(cls, obj):
-        return isinstance(obj, (float, Fraction)) or _symbolic_number(obj)
+        return isinstance(obj, float) or _stands_for_float(obj)
 
     def __subclasscheck__(cls, sub):
         return issubclass(sub, (float, Fraction))
 
 
 class ExactFloat(metaclass=_FloatMeta):
-    """`float` as the exact reading sees it: the identity on an exact
-    number (an int, a Fraction, a sympy number), Python's `float` on
-    anything else (a string, a float, a library's number)."""
+    """`float` as the exact reading sees it: an int (a bool included)
+    as the Fraction of the same value, the identity on a Fraction or a
+    sympy number, Python's `float` on anything else (a string, a float,
+    a library's number). Named `float`, as `type(x).__name__` reads it
+    in the computation."""
 
     def __new__(cls, x=0):
         if isinstance(x, bool):
-            return int(x)
-        if _exact(x):
+            return Fraction(int(x))
+        if _is_rational(x):
+            return Fraction(x)
+        if _symbolic_number(x):
             return x
         return float(x)
+
+
+ExactFloat.__name__ = ExactFloat.__qualname__ = "float"
+
+
+def _class_of(value, own):
+    """The type of a twin's value as the computation had it: `float`
+    (the exact `float`) of a number standing in for a float, `int` of
+    an int the claim wrote (`_exact_side.ExactInt`), else `own`, the
+    type the value reports itself."""
+    from ._exact_side import ExactInt
+    if _stands_for_float(value):
+        return ExactFloat
+    if own is ExactInt:
+        return int
+    return own
+
+
+def _type(*args):
+    """`type` as the twin reads it: of one value, its type as the
+    computation had it (`_class_of`); with three arguments, a class as
+    ever."""
+    if len(args) != 1:
+        return type(*args)
+    return _class_of(args[0], type(args[0]))
+
+
+def _class(value):
+    """`value.__class__` as the twin reads it (`_class_of`)."""
+    return _class_of(value, value.__class__)
 
 
 def _round(x, ndigits=None):

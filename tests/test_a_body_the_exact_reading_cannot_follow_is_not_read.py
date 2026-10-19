@@ -2,14 +2,16 @@
 # Copyright 2026 Tetrion Ltd
 """The exact reading of a body (`mathema._exact_body`) runs it on exact
 numbers standing in for the computation's floats. A construct whose
-value depends on a number's Python type or text rather than its
-mathematics (`type(x) is float`, `str(x)`, an f-string, `x.hex()`, an
-explicit `Fraction(...)`, `math.isclose`, ...) would send the exact run
-down a different path from the computation, so a body holding one is
-refused before it runs: the point is undecided, the sweep takes the
-inexact path (`mathema.sweep_inexact`, `mathema.sweep_precision`) and a
-correct function is never falsified on a path it did not take. Bodies
-free of such constructs keep their exact verdicts.
+value depends on a number's text rather than its mathematics (`str(x)`,
+an f-string, `x.hex()`, an explicit `Fraction(...)`, `math.isclose`,
+...) would send the exact run down a different path from the
+computation, so a body holding one is refused before it runs: the point
+is undecided, the sweep takes the inexact path (`mathema.sweep_inexact`,
+`mathema.sweep_precision`) and a correct function is never falsified on
+a path it did not take. A question about the number's type (`type(x)
+is float`, `x.__class__`, `isinstance(x, float)`) is answered as the
+computation would, and such a body keeps its exact verdict, as every
+body free of refused constructs does.
 
 Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
@@ -182,18 +184,19 @@ def off(x: float) -> float:
 
 
 def guarded(x: float) -> float:
-    # `isinstance(x, float)` is answered as the computation would
     _spin()
     if isinstance(x, float):
         return x * 0.5
     return x * 100.0
 
 
-REFUSED = [typed, by_class, is_not_type, via_str, via_repr, via_format,
-           via_fstring, via_percent, via_str_format, via_hex, via_ratio,
-           via_fraction, via_decimal, via_isclose, via_struct, via_id,
-           via_isinstance_rational, via_frexp, via_local_struct,
-           via_local_fraction]
+REFUSED = [via_str, via_repr, via_format, via_fstring, via_percent,
+           via_str_format, via_hex, via_ratio, via_fraction, via_decimal,
+           via_isclose, via_struct, via_id, via_isinstance_rational,
+           via_frexp, via_local_struct, via_local_fraction]
+
+#: bodies asking the number's type, answered as the computation would
+ANSWERED = [typed, by_class, is_not_type, guarded]
 
 #: the refused bodies a finite sweep runs: `id(x)` is a hidden read to
 #: the strict examination, which declines the sweep before any reading
@@ -210,13 +213,14 @@ def _check(fn, law):
 
 
 def test_the_reported_false_falsification_is_gone():
-    # the exact run on a Fraction standing in for 0.5 would take the
-    # `x * 100.0` branch and report 50 vs 1/4 in exact arithmetic
+    # `type(x)` of a Fraction standing in for 0.5 is `float` in the
+    # twin, so the exact run takes the `x * 0.5` branch the computation
+    # took and the claim is proven exactly
     p = _check(typed, _FLOATS)
-    assert p.verdict != "falsified", (p.verdict, p.route, p.counterexample)
-    assert p.route.startswith("derive:brute_force"), p.route
+    assert p.verdict == "proven", (p.verdict, p.route, p.counterexample)
+    assert p.route == "derive:brute_force", p.route
     assert "mathema.exact_witness" not in p.meta, p.meta
-    assert p.meta["mathema.sweep_inexact"]["first"] == "x = 0.5", p.meta
+    assert "mathema.sweep_inexact" not in p.meta, p.meta
 
 
 def test_the_reported_repro_over_integers_fails_by_execution_alone():
@@ -257,15 +261,15 @@ def test_the_refusal_is_found_on_the_syntax_tree(fn):
 
 
 def test_the_refusal_names_the_construct():
-    found = unfaithful(typed)
-    assert any("type(x) is float" in text for text in found), found
+    found = unfaithful(via_str)
+    assert any("str(x)" in text for text in found), found
 
 
 def test_the_derive_witness_reading_refuses_the_same_bodies():
     from mathema.analysis import effective_facts
     from mathema.gates import _point_evaluator
     cj = claim("for x in [1, 2], f(x) == x / 2")
-    deps = _point_evaluator(cj, typed, effective_facts(typed),
+    deps = _point_evaluator(cj, via_str, effective_facts(via_str),
                             dict(cj.domain), {})
     assert deps is not None
     assert deps["evaluate"].exact_as_written({"x": 1.0}) is None
@@ -280,8 +284,8 @@ def test_the_derive_witness_reading_refuses_the_same_bodies():
     (half, _FLOATS, "proven"),
     (root_sq, "for x in {2, 3, 5}, f(x) == x", "proven"),
     (off, "for x in {1, 2}, f(x) == x", "falsified"),
-    (guarded, _FLOATS, "proven"),
-])
+    *[(fn, _FLOATS, "proven") for fn in ANSWERED],
+], ids=lambda v: getattr(v, "__name__", None))
 def test_a_body_the_reading_follows_keeps_its_verdict(fn, law, verdict):
     p = _check(fn, law)
     assert p.verdict == verdict, (fn.__name__, p.verdict, p.route, p.note)

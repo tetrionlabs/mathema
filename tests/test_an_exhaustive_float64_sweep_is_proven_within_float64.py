@@ -91,7 +91,11 @@ def test_the_record_line_states_the_points_and_the_largest_delta():
 def test_the_note_states_the_cap_for_a_downstream_reader():
     p = _check(lib, "for x in {2, 3, 5}, f(x) == x")
     note = p.note or ""
-    assert "was run in float64 and the claim held at each" in note, note
+    # the claim line already shows the set, so the note counts the
+    # points rather than naming the claim's scope again
+    assert "all 3 points were run in float64 and the claim held at each" \
+        in note, note
+    assert "finite scope" not in note, note
     assert re.search(r"the largest delta was [0-9.]+e-16 against an "
                      r"allowance of [0-9.e+-]+", note), note
     assert "could not be computed exactly (lib(2))" in note, note
