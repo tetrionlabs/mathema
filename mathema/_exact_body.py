@@ -27,6 +27,26 @@ with no exact reading, and the twin's result is then inexact at that
 point, as `wrap` reports it. `int()`, `//`, `%`, `abs`, `sum`, `min`
 and `max` are exact on rationals as Python defines them and are left
 alone.
+
+The reading is only used on a body it follows faithfully. An exact
+number stands in for a float, so a construct whose value depends on
+the number's Python type or its text rather than its mathematics
+would send the exact run down a path the computation did not take,
+and a body holding one is refused on its syntax tree before it runs
+(`unfaithful`; `exact_callee` then raises `NotExact`, the point
+undecided). Refused: `type(...)`, `.__class__`, `is`/`is not` against
+a type, `str`/`repr`/`format`/`ascii`/`bin`/`hex`/`oct`/`id` calls,
+f-strings, `%` formatting with a string, `.format(...)`,
+`__str__`/`__repr__`/`__format__`, `.hex()`, `float.fromhex`,
+`.as_integer_ratio()`, explicit `Fraction(...)` and `Decimal(...)`,
+`isinstance`/`issubclass` against `Fraction`, `Decimal`,
+`numbers.Rational` or a sympy class, `math.isclose`, `math.frexp`,
+`math.ldexp`, `math.ulp`, `math.nextafter`, and any use of the
+`struct` or `ctypes` modules. `isinstance(x, float)` is kept and
+answered as the computation would: true of an exact number standing in
+for a float. A body with no source to scan (built in, a lambda,
+defined by `exec`) or a decorated function is refused the same way:
+nothing vouches for it.
 """
 from __future__ import annotations
 
@@ -41,14 +61,14 @@ import types
 import weakref
 from fractions import Fraction
 
-__all__ = ["NotExact", "exact_twin"]
+__all__ = ["NotExact", "exact_callee", "exact_twin", "unfaithful"]
 
 #: the names the rewritten body calls for a literal, a division and a
 #: power, spelled so no body of its own uses them
 _LITERAL, _DIV, _POW = "__mathema_literal__", "__mathema_div__", "__mathema_pow__"
 
-#: each function's twin, built once; `(None,)` for a body that cannot
-#: be read
+#: each function's reading, built once: `(twin, None)`, or `(None,
+#: reason)` for a body that cannot be read faithfully
 _TWINS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
@@ -62,10 +82,11 @@ def exact_twin(fn):
     """Intent:
         The exact twin of `fn`, a function of the same signature whose
         body is `fn`'s read exactly (the module docstring), or None when
-        the body cannot be read: `fn` is not a plain Python function,
-        has no source (built in, a lambda, defined by `exec`), is
-        decorated or wraps another function, or its rewritten body does
-        not compile. Built once per function.
+        the body cannot be read faithfully: `fn` is not a plain Python
+        function, has no source (built in, a lambda, defined by `exec`),
+        is decorated or wraps another function, holds a construct the
+        reading refuses (`unfaithful`), or its rewritten body does not
+        compile. Built once per function.
 
     Notes:
         The twin's globals are a copy of `fn`'s with `float`, `round`
@@ -74,19 +95,76 @@ def exact_twin(fn):
         and `fn`'s own name bound to the twin, so a recursive call is
         read exactly too. A closure's cells are copied in as globals.
     """
+    return _reading(fn)[0]
+
+
+def exact_callee(fn):
+    """Intent:
+        `fn` as the exact reading runs it: its exact twin, or, when no
+        faithful twin exists (`exact_twin` is None), a callable that
+        raises `NotExact` with the reason, so a point read through it is
+        undecided rather than read through a body the reading cannot
+        vouch for.
+    """
+    twin, reason = _reading(fn)
+    if twin is not None:
+        return twin
+
+    def refused(*args, **kwargs):
+        raise NotExact(reason)
+    return refused
+
+
+def unfaithful(fn) -> list:
+    """Intent:
+        The constructs in `fn`'s body the exact reading refuses (the
+        module docstring), each as its source text with its line, in
+        order; `[]` when there are none, or when the body has no source
+        to scan.
+    """
     fn = _plain(fn)
     if not isinstance(fn, types.FunctionType):
-        return None
+        return []
+    parsed = _parse(fn)
+    if parsed is None:
+        return []
+    src, node, _first = parsed
+    return _Scan(src, fn).found_in(node)
+
+
+def _reading(fn) -> tuple:
+    """`(twin, None)`, or `(None, reason)`: the exact twin of `fn` or
+    why there is none, cached per function."""
+    fn = _plain(fn)
+    if not isinstance(fn, types.FunctionType):
+        return None, f"{getattr(fn, '__name__', fn)!s} is not a Python function"
     try:
-        return _TWINS[fn][0]
+        return _TWINS[fn]
     except KeyError:
         pass
-    twin = _build(fn)
+    reading = _build(fn)
     try:
-        _TWINS[fn] = (twin,)
+        _TWINS[fn] = reading
     except TypeError:
         pass
-    return twin
+    return reading
+
+
+def _parse(fn):
+    """`(src, FunctionDef, first line)` of `fn`'s source, dedented, or
+    None when there is no source or it is not one plain `def`."""
+    try:
+        lines, first = inspect.getsourcelines(fn)
+    except (OSError, TypeError):
+        return None
+    src = textwrap.dedent("".join(lines))
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return None
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
+        return None
+    return src, tree.body[0], first
 
 
 def _plain(fn):
@@ -103,23 +181,25 @@ def _plain(fn):
     return fn
 
 
-def _build(fn):
+def _build(fn) -> tuple:
+    """`(twin, None)`, or `(None, reason)` when `fn` has no faithful
+    twin."""
+    name = fn.__qualname__
     if getattr(fn, "__wrapped__", None) is not None:
-        return None
-    try:
-        lines, first = inspect.getsourcelines(fn)
-    except (OSError, TypeError):
-        return None
-    src = textwrap.dedent("".join(lines))
-    try:
-        tree = ast.parse(src)
-    except (SyntaxError, ValueError):
-        return None
-    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
-        return None
-    node = tree.body[0]
-    if node.decorator_list or node.name != fn.__name__:
-        return None
+        return None, f"{name} wraps another function"
+    parsed = _parse(fn)
+    if parsed is None:
+        return None, f"the source of {name} cannot be read as one function"
+    src, node, first = parsed
+    if node.decorator_list:
+        return None, f"{name} is decorated"
+    if node.name != fn.__name__:
+        return None, f"the source of {name} defines another name"
+    found = _Scan(src, fn).found_in(node)
+    if found:
+        return None, (f"the body of {name} is not read exactly: {found[0]} "
+                      f"depends on the number's Python type or text, not "
+                      f"its mathematics")
     node = _Exact(src).visit(node)
     ast.fix_missing_locations(node)
     ast.increment_lineno(node, first - 1)
@@ -127,17 +207,17 @@ def _build(fn):
     try:
         compiled = compile(module, fn.__code__.co_filename, "exec")
     except (SyntaxError, ValueError, TypeError):
-        return None
+        return None, f"the exact reading of {name} does not compile"
     env = _globals_of(fn)
     if env is None:
-        return None
+        return None, f"a closure cell of {name} is empty"
     try:
         exec(compiled, env)
     except Exception:
-        return None
+        return None, f"the exact reading of {name} does not define"
     twin = env.get(node.name)
     if not isinstance(twin, types.FunctionType):
-        return None
+        return None, f"the exact reading of {name} does not define"
     if fn.__globals__.get(fn.__name__) is not fn:
         # the def bound its name in the copy; the body reads that name
         # as the module does
@@ -149,7 +229,126 @@ def _build(fn):
     twin.__module__ = fn.__module__
     twin.__doc__ = fn.__doc__
     twin.__annotations__ = dict(getattr(fn, "__annotations__", {}) or {})
-    return twin
+    return twin, None
+
+
+# --- the constructs the reading refuses ---------------------------------
+
+#: builtins whose value is a number's type or text
+_TEXT_CALLS = frozenset({"type", "str", "repr", "format", "ascii", "bin",
+                         "hex", "oct", "id"})
+#: attributes whose value is a number's representation
+_TEXT_ATTRS = frozenset({"__class__", "hex", "fromhex", "as_integer_ratio",
+                         "format", "__str__", "__repr__", "__format__"})
+_MISSING = object()
+
+
+def _refused_callables() -> frozenset:
+    """The ids of the callables (and classes) whose value depends on the
+    float representation, or that build an exact number the computation
+    never had."""
+    import decimal
+    import numbers
+    values = [Fraction, decimal.Decimal, numbers.Rational, math.isclose,
+              math.frexp, math.ldexp, math.nextafter, float.fromhex,
+              float.hex, float.as_integer_ratio]
+    if hasattr(math, "ulp"):
+        values.append(math.ulp)
+    return frozenset(id(v) for v in values)
+
+
+def _refused_modules() -> frozenset:
+    """The ids of the modules that read a float's bits."""
+    import ctypes
+    import struct
+    return frozenset(id(m) for m in (struct, ctypes))
+
+
+class _Scan(ast.NodeVisitor):
+    """The walk over a body that finds the constructs the reading
+    refuses, resolving names through the function's globals and the
+    builtins so an alias (`from fractions import Fraction as Q`,
+    `import struct as s`) is seen for what it is."""
+
+    def __init__(self, src: str, fn):
+        self.src = src
+        self.env = fn.__globals__
+        self.found: list = []
+        self.callables = _refused_callables()
+        self.modules = _refused_modules()
+
+    def found_in(self, node) -> list:
+        self.visit(node)
+        return self.found
+
+    def _refuse(self, node) -> None:
+        text = ast.get_source_segment(self.src, node) or type(node).__name__
+        self.found.append(f"`{text}` (line {getattr(node, 'lineno', '?')})")
+
+    def _resolve(self, node):
+        if isinstance(node, ast.Name):
+            value = self.env.get(node.id, _MISSING)
+            if value is _MISSING:
+                value = getattr(builtins, node.id, _MISSING)
+            return value
+        if isinstance(node, ast.Attribute):
+            base = self._resolve(node.value)
+            if base is _MISSING or not isinstance(base, (types.ModuleType, type)):
+                return _MISSING
+            return getattr(base, node.attr, _MISSING)
+        return _MISSING
+
+    def _is_type(self, node) -> bool:
+        value = self._resolve(node)
+        return value is not _MISSING and isinstance(value, type)
+
+    def _refused_class(self, node) -> bool:
+        value = self._resolve(node)
+        if value is _MISSING or not isinstance(value, type):
+            return False
+        if id(value) in self.callables:
+            return True
+        return any((getattr(c, "__module__", "") or "").split(".")[0] == "sympy"
+                   for c in value.__mro__)
+
+    def visit_Call(self, node):
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _TEXT_CALLS:
+            self._refuse(node)
+        elif isinstance(func, ast.Attribute) and func.attr in _TEXT_ATTRS:
+            self._refuse(node)
+        elif id(self._resolve(func)) in self.callables:
+            self._refuse(node)
+        elif isinstance(func, ast.Name) \
+                and func.id in ("isinstance", "issubclass") \
+                and len(node.args) == 2:
+            classes = (node.args[1].elts if isinstance(node.args[1], ast.Tuple)
+                       else [node.args[1]])
+            if any(self._refused_class(c) for c in classes):
+                self._refuse(node)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        if node.attr in _TEXT_ATTRS and isinstance(node.ctx, ast.Load):
+            self._refuse(node)
+        elif id(self._resolve(node.value)) in self.modules:
+            self._refuse(node)
+        self.generic_visit(node)
+
+    def visit_Compare(self, node):
+        if any(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops) \
+                and any(self._is_type(n) for n in (node.left, *node.comparators)):
+            self._refuse(node)
+        self.generic_visit(node)
+
+    def visit_JoinedStr(self, node):
+        self._refuse(node)
+
+    def visit_BinOp(self, node):
+        if isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant) \
+                and isinstance(node.left.value, (str, bytes)):
+            self._refuse(node)
+        self.generic_visit(node)
 
 
 def _globals_of(fn) -> "dict | None":

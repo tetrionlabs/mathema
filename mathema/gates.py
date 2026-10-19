@@ -337,22 +337,20 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
     # the function and the bound functions as the exact reading runs
-    # them: each body read exactly (`_exact_body.exact_twin`), the
-    # function itself where its body cannot be read
+    # them: each body read exactly (`_exact_body.exact_callee`), a body
+    # the reading cannot follow faithfully refusing the point
     exact_callees: list = [None]
 
     def _exact_callees() -> dict:
         if exact_callees[0] is None:
-            from ._exact_body import exact_twin
-            twin = exact_twin(fn)
-            f_exact = fn_call if twin is None else calling(twin, facts)
-            if as_arrays and twin is not None:
+            from ._exact_body import exact_callee
+            f_exact = calling(exact_callee(fn), facts)
+            if as_arrays:
                 f_exact = law_callable(f_exact)
             bound = {}
             for name, v in original_bound.items():
-                t = exact_twin(v)
-                bound[name] = ((bound_funcs or {}).get(name, v) if t is None
-                               else _bound_for_arrays(t) if as_arrays else t)
+                t = exact_callee(v)
+                bound[name] = _bound_for_arrays(t) if as_arrays else t
             exact_callees[0] = {"f": f_exact, **bound}
         return exact_callees[0]
     from .conjecture import _fill_value, _refill_caller
@@ -538,16 +536,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
             return False
-        if cj.relation in ("==", "~="):
+        if cj.relation in ("==", "~=", "!="):
             try:
-                return bool(lv == rv)
+                equal = bool(lv == rv)
             except Exception:
                 return None
-        if cj.relation == "!=":
-            try:
-                return not (lv == rv)
-            except Exception:
-                return None
+            from ._exact_side import holds_number
+            if holds_number(lv) and holds_number(rv):
+                # two numbers compared by their own equality (a Fraction
+                # or Decimal result): no allowance, no miss
+                precision[0] = (0.0, 0.0)
+            return equal if cj.relation != "!=" else not equal
         return None
 
     # the executed missing inputs both evaluators record, read by
