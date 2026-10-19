@@ -551,9 +551,16 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                     "mathema.witness_executed": True}, executed))
         checked += 1
         last = point
-        if not holds_number(value) or holds_nan(value):
-            # a missing value is tested by its kind, a value that is not
-            # a number by its own equality: both exact
+        if holds_nan(value):
+            # a missing value is tested by its kind, which is exact
+            continue
+        if not holds_number(value):
+            # a value that is not a number is a member by its own
+            # equality, kept when the body read exactly reaches the
+            # same value
+            exact = _exact_lhs(code, point, fn, bound)
+            if exact is None or exact != value:
+                inexact.append(point)
             continue
         precision.add((0.0, 0.0), where)
         # the float value agrees; the claim is decided at the point's
@@ -852,10 +859,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         judged.append(point)
         precision.add(evaluate.last_precision(),
                       lambda: _fmt_point(point, names))
-        if not holds_number(evaluate.sides()):
-            # sides with no number in them (a string, a bool, a missing
-            # value) were compared by their own equality, which is exact
-            continue
+        # sides with no number in them (a string, a bool, a missing
+        # value) are decided exactly too: the body read exactly may have
+        # reached them through a decision it does not take
         said, sides = _exactly_at(cj, evaluate, point)
         if said is None:
             inexact.append(point)
@@ -1054,8 +1060,7 @@ def ground_proof(cj, fn, facts, bound_funcs):
                                 "mathema.witness_executed": True},
                                executed_missing(deps)))
     computed = evaluate.sides()
-    said, sides = ((None, None) if not holds_number(computed)
-                   else _exactly_at(cj, evaluate, {}))
+    said, sides = _exactly_at(cj, evaluate, {})
     if said is False:
         found = _exact_witness_words(witness, sides, computed)
         return ProofResult(
@@ -1074,7 +1079,7 @@ def ground_proof(cj, fn, facts, bound_funcs):
                                         "holds within its allowance"}},
                                executed_missing(deps)))
     sketch = f"the claim holds at its own call, {witness}"
-    inexact = said is None and holds_number(computed)
+    inexact = said is None
     precision = _Precision()
     if inexact:
         precision.add(evaluate.last_precision(), witness)

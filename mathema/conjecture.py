@@ -5738,6 +5738,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             resolved += [
                 (name, wanted,
                  Probe(name, name, external[name]["verdict"],
+                       route=external[name].get("route"),
                        note=external[name].get("provenance", "")))
                 for name, wanted in refs if name in external]
             unmet = [(name, wanted, ref) for name, wanted, ref in resolved
@@ -5759,7 +5760,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 (external[name].get("provenance", name)
                  if name in external else name)
                 for name, _, ref in resolved if ref.verdict == "holds"]
-            within = [name for name, _, ref in resolved
+            within = [(external[name].get("provenance", name)
+                       if name in external else name)
+                      for name, _, ref in resolved
                       if (getattr(ref, "route", None) or "")
                       .endswith(":within_float64")]
             if empirical:
