@@ -28,6 +28,23 @@ point, as `wrap` reports it. `int()`, `%`, `abs`, `sum`, `min` and
 `max` are exact on rationals as Python defines them and are left
 alone.
 
+Every call the body makes is read too, so no function written in
+Python runs as written on an exact number. A Python function the body
+calls (by name, through a module, from a container, or handed to a
+builtin such as `map` or `sorted`) runs as its own exact twin: its
+source scanned with the same refusals, its body rewritten, its globals
+read the same way, built once and used however deep the calls go up to
+`_MAX_DEPTH` nested calls. A callee with no faithful twin makes the
+point undecided (`NotExact`): a function with no source, a lambda
+defined outside the body, a decorated function, a library function
+(the standard library's, or one installed in site-packages), a method
+on an object, a class other than a builtin or an exception, or any
+other callable object. A builtin runs as itself, as does a function a
+compiled module provides when no exact number is among its arguments;
+with one among them the point is undecided. A body that catches the
+`NotExact` of a step it took (`except Exception:`) does not hide it:
+the run that caught it is undecided all the same.
+
 A value the computation holds as a float is held by the twin as a
 Fraction or a sympy number, never a bare int: `float(3)` is
 `Fraction(3)`, `math.sqrt(4)` is `Fraction(2)`, `4 ** 0.5` and
@@ -82,13 +99,16 @@ from __future__ import annotations
 import ast
 import builtins
 import copy
+import functools
 import inspect
 import math
 import sys
 import textwrap
+import threading
 import types
 import weakref
 from fractions import Fraction
+from typing import NoReturn
 
 __all__ = ["NotExact", "exact_callee", "exact_twin", "unfaithful"]
 
@@ -97,6 +117,14 @@ __all__ = ["NotExact", "exact_callee", "exact_twin", "unfaithful"]
 #: of its own uses them
 _LITERAL, _DIV, _POW = "__mathema_literal__", "__mathema_div__", "__mathema_pow__"
 _FLOORDIV, _CLASS = "__mathema_floordiv__", "__mathema_class__"
+#: the name the rewritten body calls each callee through (`_callee`),
+#: the name `NotExact` is bound to in the twin's globals, and the key
+#: marking a dict as a twin's globals
+_CALLEE, _NOT_EXACT = "__mathema_callee__", "__mathema_not_exact__"
+_TWIN_MARK = "__mathema_twin__"
+#: the most calls of other functions' twins nested inside one another
+#: before the point is left undecided
+_MAX_DEPTH = 64
 
 #: each function's reading, built once: `(twin, None)`, or `(None,
 #: reason)` for a body that cannot be read faithfully
@@ -106,7 +134,27 @@ _TWINS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 class NotExact(Exception):
     """A step of the exact reading has no exact value: a floor or a
     rounding sympy cannot settle, a transcendental value that is not a
-    finite number."""
+    finite number, a callee the reading cannot follow."""
+
+
+class _State(threading.local):
+    """The exact reading's state on this thread: `depth`, the calls of
+    other functions' twins currently nested; `taint`, the reason of the
+    first `NotExact` raised in the current run, kept even when the body
+    catches the exception."""
+    depth = 0
+    taint: "str | None" = None
+
+
+_STATE = _State()
+
+
+def _not_exact(reason: str) -> NoReturn:
+    """Raise `NotExact` with `reason`, recording it as the run's taint
+    so a body that catches it is still undecided."""
+    if _STATE.taint is None:
+        _STATE.taint = reason
+    raise NotExact(reason)
 
 
 def exact_twin(fn):
@@ -135,15 +183,33 @@ def exact_callee(fn):
         faithful twin exists (`exact_twin` is None), a callable that
         raises `NotExact` with the reason, so a point read through it is
         undecided rather than read through a body the reading cannot
-        vouch for.
+        vouch for. A run during which any step raised `NotExact` raises
+        it, though the body caught it.
     """
     twin, reason = _reading(fn)
-    if twin is not None:
-        return twin
+    if twin is None:
+        def refused(*args, **kwargs):
+            raise NotExact(reason)
+        return refused
 
-    def refused(*args, **kwargs):
-        raise NotExact(reason)
-    return refused
+    @functools.wraps(twin)
+    def run(*args, **kwargs):
+        saved, _STATE.taint = _STATE.taint, None
+        try:
+            out = twin(*args, **kwargs)
+        except NotExact:
+            raise
+        except Exception:
+            if _STATE.taint is not None:
+                raise NotExact(_STATE.taint) from None
+            raise
+        finally:
+            taint = _STATE.taint
+            _STATE.taint = saved if saved is not None else taint
+        if taint is not None:
+            raise NotExact(taint)
+        return out
+    return run
 
 
 def unfaithful(fn) -> list:
@@ -523,8 +589,9 @@ def _globals_of(fn) -> "dict | None":
         The twin's globals: `fn`'s, copied, with the exact readings in
         place of `float`, `round`, `pow`, the `math` module and any of
         its functions bound by name, the helper names the rewritten
-        body calls, and the cells of `fn`'s closure as globals. None
-        when a closure cell is empty.
+        body calls, the cells of `fn`'s closure as globals, and the
+        mark (`_TWIN_MARK`) by which a function the twin defines is
+        known to be read already. None when a closure cell is empty.
     """
     env = dict(fn.__globals__)
     env["__builtins__"] = {**builtins.__dict__, "float": ExactFloat,
@@ -551,7 +618,196 @@ def _globals_of(fn) -> "dict | None":
     env[_FLOORDIV] = _floordiv
     env[_POW] = _pow
     env[_CLASS] = _class
+    env[_CALLEE] = _callee
+    env[_NOT_EXACT] = NotExact
+    env[_TWIN_MARK] = True
     return env
+
+
+# --- the calls the twin's body makes -----------------------------------
+
+#: the C callable types a module or a builtin type provides, run as
+#: themselves when no exact number is among their arguments
+_C_CALLABLES: tuple = (types.BuiltinFunctionType, types.MethodDescriptorType,
+                       types.WrapperDescriptorType, types.MethodWrapperType,
+                       types.ClassMethodDescriptorType)
+
+#: the builtin values whose own methods run as themselves (a string's
+#: `.format`, a list's `.append`, a dict's `.get`)
+_BUILTIN_VALUES: tuple = (str, bytes, bytearray, int, list, tuple, dict, set,
+                          frozenset)
+
+#: each Python function's call as the twin makes it, built once
+_HELPERS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _own(func) -> bool:
+    """A reading this module provides (`ExactFloat`, `_round`, an exact
+    `math` function), called as it is."""
+    return getattr(func, "__module__", None) == __name__
+
+
+def _library(fn) -> bool:
+    """Intent:
+        Whether the Python function `fn` belongs to a library rather
+        than the code under test: a module of the standard library, or
+        a file installed under `site-packages` or `dist-packages`.
+    """
+    module = (getattr(fn, "__module__", None) or "").split(".")[0]
+    if module in getattr(sys, "stdlib_module_names", ()):
+        return True
+    path = getattr(getattr(fn, "__code__", None), "co_filename", "") or ""
+    parts = path.replace("\\", "/").split("/")
+    return "site-packages" in parts or "dist-packages" in parts
+
+
+def _refuser(reason: str):
+    """A callable that leaves the point undecided with `reason`."""
+    def refused(*args, **kwargs):
+        _not_exact(reason)
+    return refused
+
+
+def _named(func) -> str:
+    return getattr(func, "__qualname__", None) or getattr(
+        func, "__name__", None) or type(func).__name__
+
+
+def _holds_stand_in(value, depth: int = 0) -> bool:
+    """Intent:
+        Whether `value` is, or holds, an exact number standing where
+        the computation had a float (`_stands_for_float`): itself, or
+        an element of a list, tuple, set or frozenset, a key or value
+        of a dict, or an element of an object array, looked into up to
+        six levels deep.
+    """
+    if _stands_for_float(value):
+        return True
+    if depth >= 6:
+        return False
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_holds_stand_in(v, depth + 1) for v in value)
+    if isinstance(value, dict):
+        return any(_holds_stand_in(k, depth + 1)
+                   or _holds_stand_in(v, depth + 1)
+                   for k, v in value.items())
+    np = sys.modules.get("numpy")
+    if np is not None and isinstance(value, np.ndarray) \
+            and value.dtype == object:
+        return any(_holds_stand_in(v, depth + 1) for v in value.ravel())
+    return False
+
+
+def _read_args(args: tuple, kwargs: dict) -> tuple:
+    """The arguments of a call the twin makes to a callable it does not
+    read: each Python function among them (a callback, `map`'s
+    function, `sorted`'s key) as the twin calls it (`_callee`)."""
+    def read(v):
+        return _callee(v) if isinstance(v, types.FunctionType) else v
+    return (tuple(read(a) for a in args),
+            {k: read(v) for k, v in kwargs.items()})
+
+
+def _helper(fn):
+    """Intent:
+        A Python function the twin's body calls, as the twin calls it:
+        its own exact twin, counted against `_MAX_DEPTH`, or a refuser
+        when it has no faithful twin. Built once per function.
+    """
+    try:
+        return _HELPERS[fn]
+    except (KeyError, TypeError):
+        pass
+    twin, reason = _reading(fn)
+    if twin is None:
+        call = _refuser(reason or f"{_named(fn)} is not read exactly")
+    else:
+        def call(*args, **kwargs):
+            if _STATE.depth >= _MAX_DEPTH:
+                _not_exact(f"the calls nest deeper than {_MAX_DEPTH}")
+            _STATE.depth += 1
+            try:
+                return twin(*args, **kwargs)
+            finally:
+                _STATE.depth -= 1
+    try:
+        _HELPERS[fn] = call
+    except TypeError:
+        pass
+    return call
+
+
+def _opaque(func):
+    """A callable the reading does not look into, run as itself when no
+    exact number standing for a float is among its arguments, else
+    leaving the point undecided."""
+    def call(*args, **kwargs):
+        if _holds_stand_in(args) or _holds_stand_in(kwargs):
+            _not_exact(f"{_named(func)} is called on an exact number it "
+                       f"does not read exactly")
+        args, kwargs = _read_args(args, kwargs)
+        return func(*args, **kwargs)
+    return call
+
+
+def _builtin(func):
+    """A builtin, run as itself with any Python function among its
+    arguments read exactly."""
+    def call(*args, **kwargs):
+        args, kwargs = _read_args(args, kwargs)
+        return func(*args, **kwargs)
+    return call
+
+
+def _callee(func):
+    """Intent:
+        `func` as the twin's body calls it: a reading of this module as
+        itself, a `math` function as its exact version, a function the
+        twin defined as itself (its code is already the reading), any
+        other Python function as its exact twin (`_helper`), a builtin
+        or a builtin class as itself (`_builtin`), a C function of a
+        module and an exception class as themselves while no exact
+        number is among their arguments (`_opaque`). A library
+        function, a bound method, any other class or callable object
+        leaves the point undecided when called.
+    """
+    if _own(func):
+        return func
+    try:
+        exact = _MATH_FUNCTIONS.get(id(func))
+    except TypeError:
+        exact = None
+    if exact is not None and _MATH_NATIVE.get(id(func)) is func:
+        return exact
+    name = _named(func)
+    if isinstance(func, types.FunctionType):
+        if func.__globals__.get(_TWIN_MARK) is True:
+            return func
+        if _library(func):
+            return _refuser(f"{name} is a library function the reading "
+                            f"does not follow")
+        return _helper(func)
+    if isinstance(func, types.MethodType):
+        return _refuser(f"{name} is a method on an object the reading "
+                        f"does not follow")
+    if isinstance(func, type):
+        if func.__module__ == "builtins":
+            return _builtin(func)
+        if issubclass(func, BaseException):
+            return _opaque(func)
+        return _refuser(f"{name} is a class the reading does not follow")
+    if isinstance(func, types.BuiltinFunctionType) \
+            and getattr(func, "__self__", None) is builtins:
+        return _builtin(func)
+    if isinstance(func, _C_CALLABLES):
+        owner = getattr(func, "__self__", None)
+        if _stands_for_float(owner):
+            return _refuser(f"{name} is a method of an exact number")
+        if isinstance(owner, _BUILTIN_VALUES):
+            return _builtin(func)
+        return _opaque(func)
+    return _refuser(f"{name} is a callable object the reading does not "
+                    f"follow")
 
 
 def _import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -577,11 +833,29 @@ class _Exact(ast.NodeTransformer):
     """The rewrite: each float literal a call reading its source text,
     each `/`, `//` and `**` (and `/=`, `//=`, `**=`) a call of the exact
     operator, each `.__class__` read a call answering the type as the
-    computation would, annotations dropped so they are not evaluated in
-    the twin."""
+    computation would, each call made through `_callee`, each `try`
+    letting a `NotExact` through its handlers, annotations dropped so
+    they are not evaluated in the twin."""
 
     def __init__(self, src: str):
         self.src = src
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        node.func = ast.copy_location(ast.Call(
+            func=ast.Name(_CALLEE, ast.Load()), args=[node.func],
+            keywords=[]), node.func)
+        return node
+
+    def visit_Try(self, node):
+        self.generic_visit(node)
+        # `except NotExact: raise` ahead of the body's own handlers
+        node.handlers.insert(0, ast.copy_location(ast.ExceptHandler(
+            type=ast.Name(_NOT_EXACT, ast.Load()), name=None,
+            body=[ast.Raise(exc=None, cause=None)]), node))
+        return node
+
+    visit_TryStar = visit_Try
 
     def visit_Constant(self, node):
         value = node.value
@@ -692,7 +966,7 @@ def _settled(value):
         NotExact: the result is not a finite number, or holds a float.
     """
     if not _symbolic_number(value):
-        raise NotExact(f"{value} has no exact value")
+        _not_exact(f"{value} has no exact value")
     if value.is_Rational:
         return Fraction(int(value.p), int(value.q))
     return value
@@ -709,7 +983,7 @@ def _truth(relational) -> bool:
         return True
     if relational is sympy.false or relational is False:
         return False
-    raise NotExact(f"sympy cannot decide {relational}")
+    _not_exact(f"sympy cannot decide {relational}")
 
 
 def _literal(text: str):
@@ -752,7 +1026,7 @@ def _floordiv(a, b):
             raise ZeroDivisionError("integer division or modulo by zero")
         floor = _sympy().floor(_sympify(a) / divisor)
         if not floor.is_Integer:
-            raise NotExact(f"the floor of {a} / {b} is not settled")
+            _not_exact(f"the floor of {a} / {b} is not settled")
         return Fraction(int(floor))
     return a // b
 
@@ -875,7 +1149,7 @@ def _round_symbolic(x, ndigits):
     scaled = x * scale
     floor = sympy.floor(scaled)
     if not floor.is_Integer:
-        raise NotExact(f"the floor of {scaled} is not settled")
+        _not_exact(f"the floor of {scaled} is not settled")
     tie = scaled - floor - sympy.Rational(1, 2)
     if tie.is_zero is True:
         rounded = floor if int(floor) % 2 == 0 else floor + 1
@@ -884,7 +1158,7 @@ def _round_symbolic(x, ndigits):
     elif tie.is_negative is True:
         rounded = floor
     else:
-        raise NotExact(f"the rounding of {x} is not settled")
+        _not_exact(f"the rounding of {x} is not settled")
     if ndigits is None:
         return int(rounded)
     return _settled(rounded / scale)
@@ -901,12 +1175,12 @@ def _whole(name: str, x):
     if name == "trunc":
         negative = x.is_negative
         if negative is None:
-            raise NotExact(f"the sign of {x} is not settled")
+            _not_exact(f"the sign of {x} is not settled")
         out = sympy.ceiling(x) if negative else sympy.floor(x)
     else:
         out = (sympy.floor if name == "floor" else sympy.ceiling)(x)
     if not out.is_Integer:
-        raise NotExact(f"the {name} of {x} is not settled")
+        _not_exact(f"the {name} of {x} is not settled")
     return int(out)
 
 
@@ -1012,6 +1286,9 @@ _MATH_EXACT: dict = {
 _MATH_FUNCTIONS: dict = {id(getattr(math, name)): fn
                          for name, fn in _MATH_EXACT.items()
                          if hasattr(math, name)}
+#: those `math` functions themselves, by the same ids
+_MATH_NATIVE: dict = {id(getattr(math, name)): getattr(math, name)
+                      for name in _MATH_EXACT if hasattr(math, name)}
 
 
 class _ExactMath:
