@@ -1307,7 +1307,10 @@ def _no_applicable_file_note(key: str, entry: dict, root: str) -> str:
 
     def states_key(f: dict) -> bool:
         path = f["source"]
-        if path.startswith(os.path.join("mathema", "compendium") + os.sep):
+        if f.get("path"):
+            # a package's file, named by its own absolute path
+            path = f["path"]
+        elif path.startswith(os.path.join("mathema", "compendium") + os.sep):
             from .compendium import _bundled_dir
             path = os.path.join(_bundled_dir(),
                                 os.path.relpath(path, os.path.join(
@@ -1641,6 +1644,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 f"note {lkey}: the project replaces the bundled "
                 f"row{'s' if len(rows) != 1 else ''} {', '.join(rows)} of "
                 f"{where}; the other bundled rows still apply")
+        present = {c.get("name") for c in info.get("entry", {})
+                   .get("claims") or [] if isinstance(c, dict)}
+        for conflict in info.get("conflicts") or []:
+            if conflict["name"] not in present:
+                sides = "; ".join(f"{r['statement']!r} ({r['source']})"
+                                  for r in conflict["rows"])
+                out.lines.append(
+                    f"note {lkey}: rows named {conflict['name']!r} conflict, "
+                    f"{sides}; neither is checked or used as a premise")
     for lkey in library:
         if lkey not in declared:
             info = library_claims[lkey]
