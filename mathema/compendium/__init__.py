@@ -772,7 +772,9 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
 
     Notes:
         Entry shapes: {"verdict", "provenance", "key"} satisfies a
-        premise at that level; {"ambiguous": [keys]} refuses a bare
+        premise at that level, with "route" when the row has one (a
+        route ending `:within_float64` caps what rests on it);
+        {"ambiguous": [keys]} refuses a bare
         name two compendium entries share; {"hint": text, "key",
         "claimed"} is a compendium row not settled here (only stated in
         a library claims file, or verified without a verdict:
@@ -823,6 +825,10 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
             resolved = {"verdict": verdict, "key": key,
                         "provenance": (f"{comp_tag}/{name}" if comp_tag
                                        else f"{key}/{name}")}
+            if row.get("route"):
+                # the route the row was decided by, so a proof capped at
+                # within_float64 caps what rests on it
+                resolved["route"] = row["route"]
             out[f"{key}.{name}"] = resolved
             if from_compendium:
                 put_bare(name, dict(resolved))

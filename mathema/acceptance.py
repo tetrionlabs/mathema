@@ -902,19 +902,29 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                   "skipped); anything else is either already evidence "
                   "or needs the ordinary flow")
         claimed = meta.get("mathema.compendium_claimed", "holds")
+        # a row claimed proven within float64 is adopted at that
+        # strength: its route caps whatever rests on it
+        capped = str(meta.get("mathema.compendium_route") or "")
+        capped = capped if capped.endswith(":within_float64") else ""
         written, versions = written_row(root, key, claim_name)
         plan["accepted"] = {"as": "trusted",
                             "at": datetime.date.today().isoformat(),
                             "level": claimed,
                             "source": meta.get("mathema.compendium", ""),
                             "statement": written, "versions": versions}
+        if capped:
+            plan["accepted"]["route"] = capped
+            plan["new_route"] = capped
         if by:
             plan["accepted"]["by"] = by
         if note:
             plan["accepted"]["note"] = note
         plan["new_verdict"] = claimed
         plan["actions"].append(
-            f"trust {claim_name} at its claimed level ({claimed}), on "
+            f"trust {claim_name} at its claimed level ({claimed}"
+            + (f", capped at within_float64 by its route {capped}"
+               if capped else "")
+            + "), on "
             f"the word of {meta.get('mathema.compendium') or 'its compendium entry'}; "
             f"when `mathema verify` checks this key again, a local "
             f"verdict replaces the testimony")
@@ -1255,6 +1265,8 @@ def _apply_attested(plan: dict, attestation) -> str:
         meta["mathema.previous_verdict"] = target.get("verdict")
         target["meta"] = meta
         target["verdict"] = plan["new_verdict"]
+    if plan.get("new_route"):
+        target["route"] = plan["new_route"]
     if (plan.get("accepted") or {}).get("as") == "discovery":
         claims = entry.get("claims") or []
         claims.remove(target)
