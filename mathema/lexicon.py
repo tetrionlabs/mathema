@@ -547,9 +547,7 @@ LEXICON: dict[str, str] = {
     # an integer-typed domain with finitely many points needs no
     # symbolic argument at all: every point is checked, so the verdict
     # is `proven` on route `derive:brute_force`, not the `holds` a
-    # sampling loop earns, when the function's value at every point is
-    # exact (a float it computed has no exact value, and the sweep then
-    # holds). A single-point domain is the extreme case,
+    # sampling loop earns. A single-point domain is the extreme case,
     # and the one where "check it" and "prove it" are the same act.
     "finite_domain_pinned": "for n in [30,30] subset Z, f(n) == 8",
     "finite_domain_small_range": "for n in [2,30] subset Z, f(n) >= 2",
@@ -1661,20 +1659,18 @@ def divisor_count(n: float) -> float:
     """How many positive divisors n has. A guarded fold over a range,
     which the symbolic lifter cannot close, so a claim about it over a
     FINITE integer domain is settled by visiting every point instead
-    ("finite_domain_pinned": 30 has eight divisors). The count is an
-    exact integer at every point, so the sweep proves it."""
+    ("finite_domain_pinned": 30 has eight divisors)."""
     total = 0
     for d in range(1, int(n) + 1):
         if int(n) % d == 0:
             total += 1
-    return total
+    return float(total)
 
 
 def half_down(n: float) -> float:
     """Floor of n/2, spelled with Python's floor division, which the
-    grammar normalizes to `floor(n/2)` ("floor_div_sugar"). The result
-    is an exact integer, so a sweep over a finite domain proves it."""
-    return int(n) // 2
+    grammar normalizes to `floor(n/2)` ("floor_div_sugar")."""
+    return float(int(n) // 2)
 
 
 def ceil_div(a: float, b: float) -> float:
