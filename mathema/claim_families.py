@@ -3837,6 +3837,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     params = [p for p in facts.params if p not in kept]
     if not params:
         return None
+    # a complex parameter no binding names ranges over the whole plane,
+    # drawn and cornered as `for z in C` is
+    domain = {**(domain or {}),
+              **{p: "C" for p in params
+                 if facts.param_kinds.get(p) == "complex"
+                 and (domain or {}).get(p) is None}}
     bare = cj.relation == kind
     # an indexed row names one conjunct by number (`is_defined[2]`,
     # pinned `is_defined[2]@axis=1`); a row pinned to a call's

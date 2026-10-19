@@ -1984,6 +1984,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         if value is not WAIT:
             return value
         waited = True
+    if kind == "complex" and bounds is None:
+        # a complex parameter no binding names ranges over the whole
+        # plane, drawn as `for z in C` draws it
+        return _sample_bare_named_set(rng, "C")
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
