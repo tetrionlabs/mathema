@@ -5,11 +5,17 @@ default allowance of 1e-9 on the probe route. A probe `holds` that the
 allowance absorbed says so in its note. When the derive route
 disproves the claim, the real code is executed at derive's witness and
 compared exactly: a violation there, however small, falsifies the
-claim with that witness. A disproof that holds only in exact
-arithmetic, where rounding makes the executed code satisfy the relation
-exactly, is `unknown` with the reason "exact arithmetic only"; a
-declared tolerance absorbs it outright."""
+claim with that witness. Where rounding makes the executed code satisfy
+the relation exactly, the body is read exactly at the witness: a
+literal `1e-20` is 1/10^20 and the claim is falsified on the
+mathematics, the computation holding within its allowance; a gap read
+from outside the body has no exact reading, and the disproof is then
+`unknown` with the reason "exact arithmetic only". A declared tolerance
+absorbs it outright."""
 from mathema.conjecture import check_conjectures, claim
+
+#: a float read from outside the body: no exact reading
+HAIR = 1e-20
 
 
 def just_above(x: float) -> float:
@@ -91,9 +97,19 @@ def rounded_away_below(x: float) -> float:
     return x - 1e-20
 
 
+def rounded_away_by_a_global(x: float) -> float:
+    return x + HAIR
+
+
+def rounded_away_below_by_a_global(x: float) -> float:
+    return x - HAIR
+
+
 def test_rounding_the_ordering_violation_away_is_exact_arithmetic_only():
-    for fn, law in ((rounded_away, "for x in [1, 2], f(x) <= x"),
-                    (rounded_away_below, "for x in [1, 2], f(x) >= x")):
+    # the gap comes from outside the body: nothing confirms it exactly
+    for fn, law in ((rounded_away_by_a_global, "for x in [1, 2], f(x) <= x"),
+                    (rounded_away_below_by_a_global,
+                     "for x in [1, 2], f(x) >= x")):
         for route in ("derive", "best"):
             p = _v(fn, law, route)
             assert p.verdict != "falsified", (law, route, p.verdict)
@@ -102,6 +118,20 @@ def test_rounding_the_ordering_violation_away_is_exact_arithmetic_only():
                 "exact arithmetic only", (law, route, p.meta)
             assert "mathema bug" not in (p.note or ""), (law, route, p.note)
             assert "floating point does not reproduce" in (p.note or "")
+
+
+def test_a_literal_violation_rounding_hides_is_falsified_on_the_mathematics():
+    for fn, law in ((rounded_away, "for x in [1, 2], f(x) <= x"),
+                    (rounded_away_below, "for x in [1, 2], f(x) >= x")):
+        for route in ("derive", "best"):
+            p = _v(fn, law, route)
+            assert p.verdict == "falsified", (law, route, p.verdict, p.note)
+            assert p.meta.get("mathema.corroboration") == "reproduced"
+            witness = p.meta["mathema.exact_witness"]
+            assert witness["reading"] == "mathematics", (law, witness)
+            assert witness["computation"] == "holds within its allowance", \
+                (law, witness)
+            assert "floating point does not reproduce" not in (p.note or "")
 
 
 def test_a_violation_the_code_reproduces_below_the_allowance_still_falsifies():

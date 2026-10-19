@@ -172,10 +172,10 @@ def test_a_finite_sweep_proves_a_gap_inside_epsilon():
     assert p.route == "derive:brute_force"
 
 
-def test_a_finite_sweep_over_a_float_result_holds_inside_epsilon():
-    # x + 5e-10 has no exact value at any point: the sweep holds
+def test_a_finite_sweep_proves_a_literal_gap_inside_epsilon():
+    # x + 5e-10 is read as x + 5/10^10: inside ε at every point
     p = _verdict(while_near, _FINITE, "best")
-    assert p.verdict == "holds", (p.verdict, p.counterexample, p.note)
+    assert p.verdict == "proven", (p.verdict, p.counterexample, p.note)
     assert p.route == "derive:brute_force"
 
 

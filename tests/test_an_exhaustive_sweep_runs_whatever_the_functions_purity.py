@@ -71,15 +71,14 @@ def test_a_clean_sweep_over_an_unexamined_function_holds_with_its_reason():
     assert "proven needs the function to be shown pure" in p.note
 
 
-def test_a_clean_sweep_over_a_pure_function_with_a_float_result_holds():
-    # pure, but the result is a float division: no point has an exact
-    # value, so the sweep holds for that reason and not for purity
+def test_a_clean_sweep_over_a_pure_function_is_still_proven():
+    # pure, and the body's divisions are read as ratios: every point has
+    # an exact value
     (p,) = check_conjectures(exposure_pure, [claim(
         _DOMAIN + "f(active, periods) <= active / periods")])
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "proven", (p.verdict, p.note)
     assert p.route == "derive:brute_force"
-    assert "shown pure" not in p.note, p.note
-    assert "cannot be computed exactly" in p.note, p.note
+    assert "mathema.sweep_inexact" not in p.meta, p.meta
 
 
 def test_a_clean_sweep_over_a_pure_exact_function_is_still_proven():

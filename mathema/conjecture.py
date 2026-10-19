@@ -6692,9 +6692,17 @@ def _exact_relation(cj, left, right) -> "bool | None":
         The claim's relation between two exact sides, decided exactly:
         `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
         unless the claim declares a tolerance, a tolerance kind as the
-        whole allowance at each pair compared. None when the relation
-        does not apply to the values.
+        whole allowance at each pair compared. A side sympy computed (a
+        root, a transcendental value of a body read exactly) is settled
+        symbolically (`_exact_side.decide_symbolic`), never under a
+        tolerance kind. None when the relation does not apply to the
+        values or sympy leaves it open.
     """
+    from ._exact_side import decide_symbolic, is_symbolic_side
+    if is_symbolic_side(left) or is_symbolic_side(right):
+        if isinstance(cj.tolerance, ToleranceKind):
+            return None
+        return decide_symbolic(cj.relation, left, right, _exact_slack(cj))
     if isinstance(cj.tolerance, ToleranceKind):
         # a tolerance kind is the whole allowance at each pair compared,
         # the exact values decided exactly

@@ -326,10 +326,30 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # runtime type and its result is read back as an array
     as_arrays = bool(seq_names or table_names) and _numpy() is not None
     fn_call = calling(fn, facts)
+    original_bound = dict(bound_funcs or {})
     if as_arrays:
         fn_call = law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    # the function and the bound functions as the exact reading runs
+    # them: each body read exactly (`_exact_body.exact_twin`), the
+    # function itself where its body cannot be read
+    exact_callees: list = [None]
+
+    def _exact_callees() -> dict:
+        if exact_callees[0] is None:
+            from ._exact_body import exact_twin
+            twin = exact_twin(fn)
+            f_exact = fn_call if twin is None else calling(twin, facts)
+            if as_arrays and twin is not None:
+                f_exact = law_callable(f_exact)
+            bound = {}
+            for name, v in original_bound.items():
+                t = exact_twin(v)
+                bound[name] = ((bound_funcs or {}).get(name, v) if t is None
+                               else _bound_for_arrays(t) if as_arrays else t)
+            exact_callees[0] = {"f": f_exact, **bound}
+        return exact_callees[0]
     from .conjecture import _fill_value, _refill_caller
     executed.refill_at = _refill_caller(fn_call)
     executed.fills = {p: fill for p in kinds
@@ -1114,16 +1134,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def exact_as_written(point):
         # the claim's sides at a point of the domain read as written:
         # each float coordinate the decimal it stands for (`repr`), an
-        # integer coordinate an int, the function run on those values (a
-        # result holding no number, a string, kept as it is); a claim
-        # with no right side compares against 0, as the float evaluation
-        # does
+        # integer coordinate an int, the function and the bound
+        # functions run on those values with their bodies read exactly
+        # (`_exact_callees`; a result holding no number, a string, kept
+        # as it is); a claim with no right side compares against 0, as
+        # the float evaluation does
         from ._exact_side import exact_sides
         written = {n: _written_exactly(v) for n, v in _typed(point).items()}
         _reset()
         try:
             sides = exact_sides(code_l, code_r, {**base_env, **written},
-                                {"f": fn_call, **(bound_funcs or {})},
+                                _exact_callees(),
                                 exact_calls=True, opaque_results=True)
         finally:
             _reset()

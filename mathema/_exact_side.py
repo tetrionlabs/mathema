@@ -15,10 +15,12 @@ evaluation.
 """
 from __future__ import annotations
 
+import sys
 from fractions import Fraction
 
 #: what a successful exact evaluation returns per side: an int, a
-#: Fraction, a bool, or a list of them
+#: Fraction, a bool, or a list of them (or an exact sympy number, see
+#: `symbolic_number`)
 EXACT_TYPES = (int, Fraction, bool)
 
 
@@ -157,6 +159,9 @@ def holds_number(value) -> bool:
         return False
     if isinstance(value, (int, float, complex, Fraction, Decimal)):
         return True
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(value, sympy.Basic):
+        return bool(value.is_number)
     if np is not None and isinstance(value, np.generic):
         return holds_number(value.item())
     if np is not None and isinstance(value, np.ndarray):
@@ -192,13 +197,125 @@ def wrap(callee, exact_calls: bool = False, opaque: bool = False):
 
 def _is_exact(value) -> bool:
     from ._exact_witness import Algebraic
-    return isinstance(value, (*EXACT_TYPES, Algebraic))
+    return isinstance(value, (*EXACT_TYPES, Algebraic)) or symbolic_number(value)
+
+
+def symbolic_number(value) -> bool:
+    """Intent:
+        Whether `value` is an exact sympy number: a finite number
+        holding no float (`sqrt(2)`, `pi`, `exp(1/3)`, a Rational), the
+        value a root or a transcendental step of a body read exactly
+        gives (`_exact_body`). False when sympy has not been imported:
+        no value is one then.
+    """
+    sympy = sys.modules.get("sympy")
+    if sympy is None or not isinstance(value, sympy.Basic):
+        return False
+    return (bool(value.is_number) and value.is_finite is True
+            and not value.has(sympy.Float))
+
+
+def from_symbolic(value):
+    """An exact sympy number as the exact sides carry it: an Integer as
+    an int, a Rational as a Fraction, any other number as itself."""
+    if value.is_Integer:
+        return int(value)
+    if value.is_Rational:
+        return Fraction(int(value.p), int(value.q))
+    return value
+
+
+def is_symbolic_side(value) -> bool:
+    """Whether an exact side is, or holds, a sympy number."""
+    if isinstance(value, (list, tuple)):
+        return any(is_symbolic_side(v) for v in value)
+    return symbolic_number(value)
+
+
+def _sympify_exact(value):
+    """An exact scalar side as a sympy number, or None when it is not
+    one (a bool, a list, a value that is not a number)."""
+    import sympy
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, Fraction)):
+        q = Fraction(value)
+        return sympy.Rational(q.numerator, q.denominator)
+    if symbolic_number(value):
+        return value
+    return None
+
+
+def decide_symbolic(relation: str, left, right, slack) -> "bool | None":
+    """Intent:
+        The claim's relation between two exact scalar sides, one of them
+        at least a sympy number, settled by sympy under the fast
+        wall-clock cap: `==` and `!=` by whether the difference is zero
+        (its assumptions, then `simplify`, then `equals`), `~=` and a
+        declared tolerance by whether `abs(difference)` is within
+        `slack` (read as the exact value of the number it is), an
+        ordering by the sign of the difference. None when sympy leaves
+        the question open, a side is not a scalar number, or the cap
+        fires: the point is then undecided, never proven or falsified.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    a, b = _sympify_exact(left), _sympify_exact(right)
+    if a is None or b is None:
+        return None
+    gap = Fraction(slack) if slack else Fraction(0)
+    eps = sympy.Rational(gap.numerator, gap.denominator)
+
+    def zero(d) -> "bool | None":
+        z = d.is_zero
+        if z is None:
+            d = sympy.simplify(d)
+            z = d.is_zero
+        if z is None:
+            z = d.equals(0)
+        return None if z is None else bool(z)
+
+    def nonpositive(d) -> "bool | None":
+        s = d.is_nonpositive
+        if s is None:
+            s = sympy.simplify(d).is_nonpositive
+        return None if s is None else bool(s)
+
+    def negative(d) -> "bool | None":
+        s = d.is_negative
+        if s is None:
+            s = sympy.simplify(d).is_negative
+        return None if s is None else bool(s)
+
+    def decide() -> "bool | None":
+        d = a - b
+        if relation in ("==", "~=", "!="):
+            held = zero(d) if eps == 0 else nonpositive(sympy.Abs(d) - eps)
+            if held is None:
+                return None
+            return held if relation != "!=" else not held
+        if relation == "<=":
+            return nonpositive(d - eps)
+        if relation == ">=":
+            return nonpositive(-d - eps)
+        if relation == "<":
+            return negative(d)
+        if relation == ">":
+            return negative(-d)
+        return None
+    try:
+        return _with_timeout(decide, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (TypeError, ValueError, ArithmeticError):
+        return None
 
 
 def _exact_value(value, rounded_roots: bool = False):
-    """`value` as a plain exact value (an int, Fraction or bool, or a
-    nested list of them), or None when any part is inexact. With
-    `rounded_roots`, a square root of an exact rational
+    """`value` as a plain exact value (an int, Fraction or bool, an exact
+    sympy number, or a nested list of them), or None when any part is
+    inexact. With `rounded_roots`, a square root of an exact rational
     (`_linalg_eval._Root`, rounded once to a float or, beyond float
     range, to 60 significant digits) is read as that rounded value, a
     reading close enough for a computation line's tolerance."""
@@ -210,6 +327,8 @@ def _exact_value(value, rounded_roots: bool = False):
         value = value.item()
     if isinstance(value, _Root):
         return Fraction(value) if rounded_roots else None  # type: ignore[call-overload]
+    if symbolic_number(value):
+        return from_symbolic(value)
     if _is_exact(value):
         return value
     if isinstance(value, (list, tuple)):

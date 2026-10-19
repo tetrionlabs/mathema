@@ -300,15 +300,19 @@ def _exact_lhs(code, point: dict, fn, bound: dict):
         cap. None when the value is not exact there or the cap fires.
     """
     from ._exact_side import exact_sides
+    from ._exact_body import exact_twin
     from ._math_vocab import MATH_CONSTANTS
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .conjecture import _SAFE_FUNCS
     from .gates import _written_exactly
     env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
            **{n: _written_exactly(v) for n, v in point.items()}}
+    # each body read exactly, the function itself where it cannot be
+    callees = {"f": exact_twin(fn) or fn,
+               **{n: exact_twin(v) or v for n, v in bound.items()}}
     try:
         sides = _with_timeout(
-            lambda: exact_sides(code, None, env, {"f": fn, **bound},
+            lambda: exact_sides(code, None, env, callees,
                                 exact_calls=True, opaque_results=True),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:

@@ -239,10 +239,15 @@ derive  falsified x = 0.06163325083761284
 ```
 
 A declared tolerance is part of the claim, so it stays in force on both
-routes. A derive disproof that the executed code does not reproduce even
-compared exactly comes back `unknown` with
-`mathema.corroboration: "uncorroborated"`. When the exact comparison ran at
-the point where the exact difference is, as for `x + 1e-20`, the record
+routes. Where the executed code rounds the difference away, the body is
+read exactly at derive's witness: a literal is the decimal written, so
+`x + 1e-20` is `x + 1/10^20` and the claim is falsified on the
+mathematics, the record noting that the float computation holds within
+its allowance. A derive disproof that neither the executed code nor the
+exact reading reproduces (the gap comes from a float the body reads
+from outside, a module constant or a library's value) comes back
+`unknown` with `mathema.corroboration: "uncorroborated"`; when the exact
+comparison ran at the point where the exact difference is, the record
 adds `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says the difference exists in exact arithmetic and floating point does not
 reproduce it. Any other unreproduced disproof is flagged as a probable

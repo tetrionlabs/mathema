@@ -151,8 +151,8 @@ def test_s5_a_guarded_float_companion_holds_and_the_guard_raises():
 
 
 def test_s6_a_listed_none_raising_valueerror_is_classified():
-    # sqrt(0.25) is a float the code computed, with no exact value: holds
-    probe, _ = assert_row(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0", HOLDS,
+    # sqrt(0.25) is read exactly as 1/2
+    probe, _ = assert_row(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0", PROVEN,
                           behaves={"x": {"None": "raises"}})
     assert probe.meta["mathema.missing"]["executed"]["x"]["None"] == "raised ValueError"
 
@@ -177,9 +177,9 @@ def test_s9_a_replaced_hole_holds_on_both_halves():
     assert any(set(tried(c).get("x", [])) >= {"None", "nan"} for c in companions)
 
 
-def test_s10_a_replaced_absence_holds_by_execution_alone():
-    # float(x) and 0.0 are floats the code returned, with no exact value
-    assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", HOLDS,
+def test_s10_a_replaced_absence_is_proven_by_execution_alone():
+    # float(x) is the identity on the exact 1/4, and 0.0 is the exact 0
+    assert_row(zero_if_missing, "for x in {0.25, None}, f(x) >= 0", PROVEN,
                executed={"x": ["None"]}, companions_none=True,
                behaves={"x": {"None": "drops"}})
 
@@ -220,9 +220,9 @@ def test_p2_the_one_member_raises_the_stated_exception():
                executed={"x": ["nan"]})
 
 
-def test_p3_a_replacement_policy_holds():
-    # the replacement 0.0 is a float the code returned, with no exact value
-    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", HOLDS,
+def test_p3_a_replacement_policy_is_proven():
+    # the replacement 0.0 is read as the exact 0 written
+    assert_row(zero_if_missing, "for x in {missing}, f(x) == 0", PROVEN,
                executed={"x": ["nan"]}, behaves={"x": {"nan": "drops"}})
 
 

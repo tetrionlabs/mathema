@@ -8,11 +8,13 @@ computation's allowance belongs to the computation line, so a gap the
 allowance absorbs never reaches a proof.
 
 - A point whose exact value misses while the float result passes
-  within the allowance falsifies the claim with that exact witness.
-- A point the function cannot be evaluated at exactly (a float literal
-  in its body makes every result a rounded float) leaves the sweep
-  unable to prove: every point agreed in the computation, so the claim
-  holds, never proven.
+  within the allowance falsifies the claim with that exact witness; a
+  float literal in the body is read as the decimal written, so a gap
+  of `2e-9` is an exact miss.
+- A point the function cannot be evaluated at exactly (a float it
+  reads from outside its body, a module global, has no exact reading)
+  leaves the sweep unable to prove: every point agreed in the
+  computation, so the claim holds, never proven.
 - A function that satisfies the claim exactly at every point is still
   proven.
 
@@ -21,6 +23,11 @@ sweep decides the claim."""
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
+
+#: floats a body reads from outside: no exact reading
+NUDGE = 2e-9
+OFFSET = 5e-10
+TINY = 1e-17
 
 
 def drift_float(x: float) -> float:
@@ -42,6 +49,27 @@ def constant_float(xs: list) -> float:
     while i < 3:
         i += 1
     return 5e-10
+
+
+def drift_global(x: float) -> float:
+    i = 0
+    while i < 3:
+        i += 1
+    return x + NUDGE
+
+
+def offset_global(n: int) -> float:
+    i = 0
+    while i < 3:
+        i += 1
+    return n + OFFSET
+
+
+def constant_global(xs: list) -> float:
+    i = 0
+    while i < 3:
+        i += 1
+    return OFFSET
 
 
 def constant_zero(xs: list) -> int:
@@ -111,11 +139,11 @@ def _check(fn, law):
 
 
 @pytest.mark.parametrize("fn,law", [
-    (drift_float, "for x in {1, 2}, f(x) == x"),
-    (drift_float, "for x in {1, 2}, f(x) ~= x"),
-    (offset_float, "for n in {0, 1, 2, 3}, f(n) == n"),
-    (offset_float, "for n in [0, 3] subset Z, f(n) == n"),
-    (constant_float, "f([]) == 0"),
+    (drift_global, "for x in {1, 2}, f(x) == x"),
+    (drift_global, "for x in {1, 2}, f(x) ~= x"),
+    (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
+    (offset_global, "for n in [0, 3] subset Z, f(n) == n"),
+    (constant_global, "f([]) == 0"),
 ])
 def test_a_body_with_no_exact_value_is_not_proven(fn, law):
     p = _check(fn, law)
@@ -123,8 +151,26 @@ def test_a_body_with_no_exact_value_is_not_proven(fn, law):
     assert p.route == "derive:brute_force", p.route
 
 
+@pytest.mark.parametrize("fn,law", [
+    (drift_float, "for x in {1, 2}, f(x) == x"),
+    (drift_float, "for x in {1, 2}, f(x) ~= x"),
+    (offset_float, "for n in {0, 1, 2, 3}, f(n) == n"),
+    (offset_float, "for n in [0, 3] subset Z, f(n) == n"),
+    (constant_float, "f([]) == 0"),
+])
+def test_a_literal_gap_inside_the_allowance_is_an_exact_miss(fn, law):
+    # 2e-9 is 2/10^9 and 5e-10 is 5/10^10 as written: the floats agree
+    # within the allowance, and the mathematics is false
+    p = _check(fn, law)
+    assert p.verdict == "falsified", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force", p.route
+    witness = p.meta["mathema.exact_witness"]
+    assert witness["reading"] == "mathematics", witness
+    assert witness["computation"] == "holds within its allowance", witness
+
+
 def test_the_record_names_the_point_with_no_exact_value():
-    p = _check(drift_float, "for x in {1, 2}, f(x) == x")
+    p = _check(drift_global, "for x in {1, 2}, f(x) == x")
     inexact = p.meta["mathema.sweep_inexact"]
     assert inexact["points"] == 2, inexact
     assert inexact["first"] == "x = 1", inexact
@@ -177,9 +223,21 @@ def test_a_membership_sweep_with_no_exact_value_is_not_proven():
         i = 0
         while i < 3:
             i += 1
-        return x + 1e-17
+        return x + TINY
     p = _check(nudged, "for x in {1, 2}, f(x) in {1, 2}")
     assert p.verdict == "holds", (p.verdict, p.route, p.sketch)
+
+
+def test_a_membership_sweep_reads_a_literal_exactly():
+    # 1 + 1e-17 is the float 1.0, and 1 + 1/10^17 exactly, not a member
+    def nudged(x: float) -> float:
+        i = 0
+        while i < 3:
+            i += 1
+        return x + 1e-17
+    p = _check(nudged, "for x in {1, 2}, f(x) in {1, 2}")
+    assert p.verdict == "falsified", (p.verdict, p.route, p.sketch)
+    assert p.route == "derive:brute_force", p.route
 
 
 def test_approximate_equality_within_epsilon_is_proven():

@@ -48,7 +48,15 @@ def fold_below_float_resolution(x: list, alpha: float) -> float:
     return y + y / 100000000000000000
 
 
+#: a float read from outside the body: no exact reading
+TINY = 1e-17
+
+
 def nudged(x: float) -> float:
+    return x + TINY
+
+
+def nudged_by_a_literal(x: float) -> float:
     return x + 1e-17
 
 
@@ -119,7 +127,18 @@ def test_a_fold_below_float_resolution_is_falsified_on_the_mathematics():
 
 
 def test_a_disproof_no_exact_evaluation_confirms_stays_uncorroborated():
-    # a float literal leaves no exact value, and the floats agree
+    # a float read from outside the body leaves no exact value, and the
+    # floats agree
     p = _check(nudged, "for x in [1, 2], f(x) == x")
     assert p.verdict != "falsified", (p.verdict, p.route, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
+
+
+def test_a_literal_in_the_body_is_read_as_written_at_the_witness():
+    # 1e-17 is 1/10^17 as written: the body read exactly makes the claim
+    # false at the drawn point, while the floats agree
+    p = _check(nudged_by_a_literal, "for x in [1, 2], f(x) == x")
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+    witness = p.meta["mathema.exact_witness"]
+    assert witness["reading"] == "mathematics", witness
+    assert witness["computation"] == "holds within its allowance", witness

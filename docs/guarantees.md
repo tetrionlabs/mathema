@@ -127,9 +127,12 @@ domain (`is_pole_safe`, `is_numerically_stable`), or a raising guard on
 a missing value the domain admits (`is_missing_safe`), is checked by
 calling the function at the point the structure names. A raise there,
 or a non-finite result at a pole, is the witness; a call that behaves
-leaves the disproof uncorroborated. Where the difference is known to
-exist in exact arithmetic and the code, run where it is, rounds it away
-(an irrational pole, a gap below float resolution), the record adds
+leaves the disproof uncorroborated. Where the code, run where the
+difference is, rounds it away, the body is read exactly there (its
+literals as written, its divisions as ratios, a root as sympy holds
+it), and a difference that reading confirms is the witness. Where no
+exact reading confirms it (an irrational pole, a gap below float
+resolution that comes from a float outside the body), the record adds
 `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says so instead of naming an engine bug. A falsification is
 therefore equally strong whichever route found it, because it always
