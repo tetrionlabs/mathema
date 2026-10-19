@@ -13,6 +13,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = textwrap.dedent("""
     import json
 
@@ -44,6 +46,7 @@ def _rows_under(seed: str) -> list:
 
 
 def test_shape_verdicts_and_witnesses_are_identical_under_every_seed():
+    pytest.importorskip("numpy")
     runs = {seed: _rows_under(seed) for seed in _SEEDS}
     first = runs[_SEEDS[0]]
     for seed, rows in runs.items():

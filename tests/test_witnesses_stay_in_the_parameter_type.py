@@ -11,12 +11,13 @@ import math
 import re
 import sys
 
-import numpy as np
 import pytest
 
 from mathema import enforce_dimensions
 from mathema.conjecture import check_conjectures, claim
 from mathema.types import Mat, Vec
+
+np = pytest.importorskip("numpy")
 
 
 def ticker_exchange(symbol: str) -> str:
