@@ -124,9 +124,10 @@ def _array_list(value) -> list:
 
 
 def _cells(value) -> "list | None":
-    """A 1-D container's elements as Python values, or None."""
+    """A 1-D container's elements as Python values, or None. A set's
+    elements are taken in its iteration order."""
     module = type(value).__module__.split(".")[0]
-    if isinstance(value, (list, tuple)) and not any(
+    if isinstance(value, (list, tuple, set, frozenset)) and not any(
             isinstance(v, (list, tuple)) for v in value):
         return list(value)
     if module == "pandas" and type(value).__name__ == "Series":
@@ -487,8 +488,9 @@ def repeats(first: tuple, second: tuple) -> bool:
 def filled(value, members, fill):
     """Intent:
         `value` with every hole slot whose member is in `members` holding
-        `fill` instead: a scalar hole, the elements of a list, an array, a
-        Series, the rows of a matrix, the cells of a table. Anything else
+        `fill` instead: a scalar hole, the elements of a list, a tuple, a
+        set, an array, a Series, the rows of a matrix, the cells of a
+        table, each kept in its own container type. Anything else
         is returned as it is.
     """
     members = set(members)
@@ -528,7 +530,7 @@ def filled(value, members, fill):
         return type(value)(out, dtype=value.dtype, name=value.name)
     if module == "polars":
         return type(value)(value.name, out, dtype=value.dtype)
-    return type(value)(out) if isinstance(value, tuple) else out
+    return type(value)(out) if isinstance(value, (tuple, set, frozenset)) else out
 
 
 def _same_output(a, b) -> bool:

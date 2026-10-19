@@ -1014,7 +1014,8 @@ def missing_class(value) -> "str | None":
     from .domain import absence_word, is_missing
     if absence_word(value) is not None:
         return "absent"
-    if isinstance(value, (list, tuple, dict, str)) or _is_matrix_value(value):
+    if isinstance(value, (list, tuple, set, frozenset, dict, str)) \
+            or _is_matrix_value(value):
         return None
     try:
         return "hole" if is_missing(value) else None
@@ -1035,7 +1036,7 @@ def inputs_missing(args) -> bool:
             return True
         if isinstance(v, dict):
             return any(holds(x) for x in v.values())
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, (list, tuple, set, frozenset)):
             return any(holds(x) for x in v)
         if _is_matrix_value(v) or type(v).__module__.split(".")[0] in ("pandas",
                                                                        "polars"):
@@ -1863,7 +1864,8 @@ def _cancel_magnitudes(top: float) -> list:
     return out or [top]
 
 
-def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
+def sequence_corners(bounds, n: "int | None" = None, reach=None,
+                     distinct: bool = False) -> list:
     """Intent:
         The magnitude corners of a sequence whose elements range over
         `bounds` (None the whole line, an unbounded end at `reach`, the
@@ -1875,7 +1877,11 @@ def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
         representation's reach, where the sum of the pair overflows;
         every entry inside the range. With `n`, each pair is repeated
         to length `n`, and none is given below 2. Empty when the
-        elements are not one real interval.
+        elements are not one real interval. With `distinct`, for a
+        container holding each value once (a set), the same-sign pair
+        is `[e, e']`, `e'` the next double from `e` toward the range's
+        other end, so the set still holds two entries past half the
+        reach; a range holding one double gives no such pair.
     """
     from ._sampling import representation_reach
     span = _element_range(bounds, reach)
@@ -1890,7 +1896,12 @@ def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
     half = representation_reach() / 2
     for end in (hi, lo):
         if abs(end) > half and [end, end] not in pairs:
-            pairs.append([end, end])
+            if not distinct:
+                pairs.append([end, end])
+                continue
+            inner = math.nextafter(end, lo if end == hi else hi)
+            if lo <= inner <= hi and inner != end and abs(inner) > half:
+                pairs.append([end, inner])
     if n is None:
         return pairs
     return [[pair[i % 2] for i in range(n)] for pair in pairs]

@@ -387,6 +387,24 @@ def _numpy_dtype_scalar(hint) -> "str | None":
     return None
 
 
+def _sequence_slots() -> dict:
+    """`{type: slot name}` for the built-in sequence and set types whose
+    elements are slots: a list, a tuple, a set and a frozenset, and the
+    abstract set types an annotation may name for a set."""
+    import collections.abc as abc
+    return {list: "list", tuple: "tuple", set: "set", frozenset: "frozenset",
+            abc.Set: "set", abc.MutableSet: "set"}
+
+
+#: the slot name of each built-in sequence or set type
+_SEQUENCE_SLOTS = _sequence_slots()
+
+#: the slot name of each set type's source spelling, lowercased
+_SEQUENCE_SLOT_NAMES = {"abstractset": "set", "mutableset": "set",
+                        "collections.abc.set": "set",
+                        "collections.abc.mutableset": "set"}
+
+
 def _policy_of_hint(hint, detection):
     """The missing-value defaults of one live annotation."""
     from .domain import NO_ANNOTATION, MissingDefaults
@@ -413,13 +431,13 @@ def _policy_of_hint(hint, detection):
                                resolve_missing(name), name,
                                absence=resolve_absence(name) or ("None",))
     origin = typing.get_origin(inner) or inner
-    if origin in (list, tuple):
+    container = _SEQUENCE_SLOTS.get(origin)
+    if container is not None:
         element = _element_policy(typing.get_args(inner))
         if element is not None:
             scalar, members = element
-            return MissingDefaults(optional, members,
-                                   f"{origin.__name__}[{scalar}]")
-        return MissingDefaults(optional, resolve_missing("list"), origin.__name__)
+            return MissingDefaults(optional, members, f"{container}[{scalar}]")
+        return MissingDefaults(optional, resolve_missing("list"), container)
     scalar = _scalar_slot_type(inner)
     if scalar is not None:
         return MissingDefaults(optional, resolve_missing(scalar), scalar)
@@ -442,8 +460,9 @@ def _policy_of_text(text: str):
     head = base.split("[", 1)[0]
     if head in ("float", "int", "bool", "str", "complex"):
         return MissingDefaults(optional, resolve_missing(head), head)
-    if head in ("list", "tuple"):
-        inner = base[len(head) + 1:-1] if "[" in base else ""
+    inner = base[len(head) + 1:-1] if "[" in base else ""
+    head = _SEQUENCE_SLOT_NAMES.get(head, head)
+    if head in ("list", "tuple", "set", "frozenset"):
         if inner in ("float", "int", "bool", "str", "complex"):
             return MissingDefaults(optional, resolve_missing(inner),
                                    f"{head}[{inner}]")
@@ -463,7 +482,8 @@ def missing_policy_from_signature(fn) -> dict:
         runtime type whose definition row states an absence) and the
         members of the hole class on its slots. A `float` slot holds
         `nan`, a datetime `NaT`, an `int`, `bool`, `str` or a class
-        nothing; a `list` element `null` and `nan`, `list[float]` `nan`,
+        nothing; a `list`, `tuple`, `set` or `frozenset` element `null`
+        and `nan`, `list[float]` `nan`,
         `list[int]` nothing; a runtime type (`numpy.ndarray`,
         `pandas.Series`, a registered adapter) the members its adapter
         and the definition rows give. A bound marker (`Probability`)

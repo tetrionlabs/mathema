@@ -50,6 +50,8 @@ from .hazards import (_SAFE_RANGE as _SAFE_RANGE,
 from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_probe, _pole_safety,
                       _poles_by_var, _synth, call_arguments)
 from .runtime_types import SEQUENCE_KINDS
+from .runtime_types import annotated_container as _annotated_container
+from .runtime_types import as_annotated as _as_annotated
 from ._exits import exception_name
 from ._signatures import callable_signature
 
@@ -3990,8 +3992,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     containers = {p: _annotated_container(fn, p) for p in array_forms}
 
     def as_container(p: str, value):
-        made = containers.get(p)
-        return made(value) if made is not None else value
+        return _as_annotated(value, containers.get(p))
 
     def draw_one(p: str):
         from .matrices import _rand
@@ -4070,7 +4071,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if pinf is not None and not getattr(bound, "pieces", None) \
                     and _interval_ends(bound) is None:
                 bound = tuple(pinf)
-            for pair in sequence_corners(bound):
+            for pair in sequence_corners(
+                    bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
 
     def shape_boundaries():
@@ -4275,37 +4277,6 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if weakest == "skipped":
         weakest = verdict
     return weakest, checked, cx, None, meta
-
-
-#: the Python container a sequence annotation names, by the last dotted
-#: part of its constructor, lowercased; any other sequence is a list
-_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
-                         "frozenset": frozenset, "tuple": tuple}
-
-
-def _annotated_container(fn, param: str) -> "type | None":
-    """Intent:
-        The container type `param`'s annotation names when it is a set,
-        a frozenset or a tuple (`set`, `typing.Set[float]`,
-        `Optional[frozenset]`), so a sequence drawn as a list is passed
-        as a member of that type; None for any other annotation or none.
-    """
-    from .probing import _annotation_text
-    try:
-        spec = callable_signature(fn).parameters.get(param)
-    except (TypeError, ValueError):
-        return None
-    if spec is None:
-        return None
-    text = _annotation_text(spec).replace(" ", "").lower()
-    for wrapper in ("optional[", "typing.optional["):
-        if text.startswith(wrapper) and text.endswith("]"):
-            text = text[len(wrapper):-1]
-    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
-    if len(parts) != 1:
-        return None
-    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
-    return _ANNOTATED_CONTAINERS.get(head)
 
 
 def _has_axes(value, axes: int) -> bool:
