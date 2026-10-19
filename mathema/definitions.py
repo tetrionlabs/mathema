@@ -586,17 +586,14 @@ _LIBRARY_CACHE: dict = {}
 
 def _library_claims(root: "str | None", load) -> dict:
     """`load(root)`, read again only when a claims file under `root`
-    (or a bundled one) has changed since the last read. Inside a run
-    scope it is read once for the run."""
+    (or a bundled one, or an installed package's) has changed since the
+    last read. Inside a run scope it is read once for the run."""
     from . import _run_scope
-    from .compendium import _bundled_dir
-    from .spec import claims_file_paths
+    from .compendium import claims_sources
     kept = _run_scope.kept("library_claims")
     if kept is not None and ("rowbook", root) in kept:
         return kept[("rowbook", root)]
-    paths = claims_file_paths(_bundled_dir())
-    if root is not None:
-        paths += claims_file_paths(root, exclude=(_bundled_dir(),))
+    paths = [path for path, _kind, _package in claims_sources(root)]
     stamp = []
     for path in paths:
         try:

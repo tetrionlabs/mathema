@@ -10,7 +10,7 @@ reference: [that page](api.md) covers what you use to write and check
 claims. The surface here is narrower in audience and wider in what it
 exposes.
 
-## The five entry-point groups
+## The entry-point groups
 
 | Group | What it registers | Discovered by |
 |---|---|---|
@@ -23,6 +23,7 @@ exposes.
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for an object it does not handle | `mathema.languages` |
 | `mathema.language_refinements` | a refinement key inside `L[...]` (`len`, `depth`), the entry point's name being the key | `mathema.languages` |
 | `mathema.lexicon` | worked claims (rows, sections, tags, example functions) that join mathema's lexicon | `mathema.lexicon` |
+| `mathema.compendium` | directories of compendium files: claims about a library's functions, read beside the ones mathema bundles | `mathema.compendium` |
 
 A claim family answers "can this be proven." A capability answers "how
 should this be shown." They are separate mechanisms with separate
@@ -189,6 +190,121 @@ row, and lands on every pinned verdict and witness), and
 example function is rendered and round-tripped as that function
 completes it, so `for n in N` against `n: int` stays `N`, the form its
 record states; a row without one renders the unannotated default.
+
+## Registered compendium files
+
+A [compendium file](claims-transfer.md#in-the-compendium) states claims
+about a library's functions. mathema bundles some and a project writes
+its own; a package ships them through the `mathema.compendium` group, so
+the claims about a library travel with a package rather than by copying
+files into each project. An entry is a callable that takes no arguments
+and returns a directory of compendium files, or a list of directories;
+it is called when mathema first reads the compendium, so the package
+decides then what it offers.
+
+A package `acme_rows` ships claims about its own `scale` function in
+`acme_rows/claims/acme.claims.yaml`, beside a function returning that
+directory:
+
+<!-- example: package-rows file=site-packages/acme_rows/__init__.py -->
+```python
+from pathlib import Path
+
+
+def scale(x: float) -> float:
+    """Twice x."""
+    return 2 * x
+
+
+def compendium_dirs():
+    """The directories of compendium files this package ships."""
+    return [Path(__file__).parent / "claims"]
+```
+
+<!-- example: package-rows file=site-packages/acme_rows/claims/acme.claims.yaml -->
+```yaml
+compendium: acme_rows
+versions: ">=1.0,<2"
+
+acme_rows.scale:
+  claims:
+    - name: doubles
+      statement: "for x in [-100, 100], f(x) == 2 * x"
+```
+
+and declares the entry point in its `pyproject.toml`:
+
+```toml
+[project]
+name = "acme_rows"
+version = "1.0"
+
+[project.entry-points."mathema.compendium"]
+acme_rows = "acme_rows:compendium_dirs"
+```
+
+Installing the package writes the declaration into the distribution's
+metadata, which is where mathema reads it:
+
+<!-- example: package-rows file=site-packages/acme_rows-1.0.dist-info/entry_points.txt -->
+```ini
+[mathema.compendium]
+acme_rows = acme_rows:compendium_dirs
+```
+
+<!-- example: package-rows file=site-packages/acme_rows-1.0.dist-info/METADATA -->
+```text
+Metadata-Version: 2.1
+Name: acme_rows
+Version: 1.0
+```
+
+In a project with the package installed, the row loads with the
+bundled ones, and its provenance names the distribution and the file:
+
+<!-- example: package-rows run -->
+```python
+import sys
+sys.path.insert(0, "site-packages")  # where the package is installed
+
+from mathema.compendium import load_library_claims
+
+info = load_library_claims(".")["acme_rows.scale"]
+for row in info["entry"]["claims"]:
+    meta = row["meta"]
+    print(row["name"], "from", meta["mathema.compendium_source"])
+    print("  tag:", meta["mathema.compendium"])
+    print("  package:", meta["mathema.compendium_package"])
+```
+
+<!-- example: package-rows output -->
+```text
+doubles from acme_rows/claims/acme.claims.yaml (from acme_rows 1.0)
+  tag: compendium:acme_rows-1.0 (from acme_rows 1.0)
+  package: acme_rows 1.0
+```
+
+The files load in order: the bundled ones, then each package's, sorted
+by distribution name, then the project's. A file applies only when its
+library is installed at a version inside its `versions:` range, as a
+bundled file does. A package's row adds to a function's rows by name. A
+row with the name of an earlier row (a bundled one, or another
+package's) and the same statement adds nothing; one with a different
+statement is a conflict, and neither row is used: both stay out of the
+function's rows, so out of every premise, guard and definition, and
+`mathema compendium status` lists the conflict with both statements and
+the file each comes from. A project's own row of that name replaces
+both, as a project row replaces its bundled namesake.
+
+A package's row is testimony, like a project's: `mathema verify`
+adjudicates it against the installed library when the project calls
+the function, and it gates the run like any other row. A `definition`
+row from a package is evidence, not an axiom, until it is verified or
+accepted (`mathema accept KEY ROW --as trusted`), and a package file's
+`defines:` entries are not applied. `mathema compendium export` leaves
+out the rows a package ships for the installed version, with a note
+naming the package. An entry that fails to import, raises, or names
+something that is not a directory is skipped with a warning.
 
 ## Injected facts
 

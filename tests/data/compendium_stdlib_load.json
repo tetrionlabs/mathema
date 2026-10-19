@@ -1,0 +1,304 @@
+{
+ "bundled": {
+  "math.exp": {
+   "bundled": true,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "exp_positive",
+      "source": "compendium",
+      "statement": "for x in [-700, 700], f(x) > 0"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "is_overflow_safe",
+      "note": "Exponential; raises OverflowError above roughly x = 709.78.",
+      "source": "compendium",
+      "statement": "x <= 709.782712893384"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "exp_overflow_raises",
+      "source": "compendium",
+      "statement": "for x in (709.782712893384, oo), raises(f(x), OverflowError)"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/math.claims.yaml",
+   "versions": "*"
+  },
+  "math.log": {
+   "bundled": true,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "log_monotone",
+      "note": "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf).",
+      "source": "compendium",
+      "statement": "for x in (0, inf], d(f(x), x) > 0"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/math.claims.yaml",
+   "versions": "*"
+  },
+  "math.sqrt": {
+   "bundled": true,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "sqrt_nonneg",
+      "note": "Square root; raises ValueError for x < 0 and never returns a complex result.",
+      "source": "compendium",
+      "statement": "for x in [0, inf], f(x) >= 0"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "nan_propagates",
+      "note": "sqrt(nan) is nan.",
+      "source": "compendium",
+      "statement": "missing(f, x) propagates"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "none_raises",
+      "note": "sqrt(None) raises TypeError.",
+      "source": "compendium",
+      "statement": "absent(f, x) raises(TypeError)"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/math.claims.yaml",
+   "versions": "*"
+  },
+  "statistics.mean": {
+   "bundled": true,
+   "compendium": "statistics",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:statistics",
+       "mathema.compendium_source": "mathema/compendium/statistics.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "empty_raises",
+      "note": "The empty input is refused with statistics.StatisticsError.",
+      "source": "compendium",
+      "statement": "raises(f([]), StatisticsError)"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/statistics.claims.yaml",
+   "versions": "*"
+  }
+ },
+ "project": {
+  "math.exp": {
+   "bundled": true,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "exp_positive",
+      "source": "compendium",
+      "statement": "for x in [-700, 700], f(x) > 0"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "is_overflow_safe",
+      "note": "Exponential; raises OverflowError above roughly x = 709.78.",
+      "source": "compendium",
+      "statement": "x <= 709.782712893384"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "exp_overflow_raises",
+      "source": "compendium",
+      "statement": "for x in (709.782712893384, oo), raises(f(x), OverflowError)"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/math.claims.yaml",
+   "versions": "*"
+  },
+  "math.fabs": {
+   "bundled": false,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "claims/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "nonneg",
+      "source": "compendium",
+      "statement": "for x in [-10, 10], f(x) >= 0"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "claims/math.claims.yaml",
+   "versions": "*"
+  },
+  "math.log": {
+   "bundled": true,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "log_monotone",
+      "note": "Natural logarithm; raises ValueError at x <= 0 (math.log(0) does not return -inf).",
+      "source": "compendium",
+      "statement": "for x in (0, inf], d(f(x), x) > 0"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/math.claims.yaml",
+   "versions": "*"
+  },
+  "math.sqrt": {
+   "bundled": false,
+   "compendium": "math",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "claims/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "sqrt_nonneg",
+      "note": "the project's own reading",
+      "source": "compendium",
+      "statement": "for x in [0, 100], f(x) >= 0"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "nan_propagates",
+      "note": "sqrt(nan) is nan.",
+      "source": "compendium",
+      "statement": "missing(f, x) propagates"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "mathema/compendium/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "none_raises",
+      "note": "sqrt(None) raises TypeError.",
+      "source": "compendium",
+      "statement": "absent(f, x) raises(TypeError)"
+     },
+     {
+      "meta": {
+       "mathema.compendium": "compendium:math",
+       "mathema.compendium_source": "claims/math.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "sqrt_le_square",
+      "source": "compendium",
+      "statement": "for x in [1, 100], f(x) <= x"
+     }
+    ]
+   },
+   "replaced": [
+    {
+     "rows": [
+      "sqrt_nonneg"
+     ],
+     "source": "mathema/compendium/math.claims.yaml"
+    }
+   ],
+   "source": "claims/math.claims.yaml",
+   "versions": "*"
+  },
+  "statistics.mean": {
+   "bundled": true,
+   "compendium": "statistics",
+   "entry": {
+    "claims": [
+     {
+      "meta": {
+       "mathema.compendium": "compendium:statistics",
+       "mathema.compendium_source": "mathema/compendium/statistics.claims.yaml",
+       "mathema.compendium_versions": "*"
+      },
+      "name": "empty_raises",
+      "note": "The empty input is refused with statistics.StatisticsError.",
+      "source": "compendium",
+      "statement": "raises(f([]), StatisticsError)"
+     }
+    ]
+   },
+   "replaced": [],
+   "source": "mathema/compendium/statistics.claims.yaml",
+   "versions": "*"
+  }
+ }
+}

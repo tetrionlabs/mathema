@@ -191,8 +191,20 @@ mathema compendium status --root .
 ```
 
 Your file is listed beside the bundled ones as `project`, and `ediff1d` has
-left the `no claims` line. A key in your file that a bundled file also
-states shadows the bundled entry for that function.
+left the `no claims` line. A row in your file with the name of a bundled
+row replaces that row, and the other bundled rows for the function still
+apply.
+
+An installed package can ship compendium files too, through the
+`mathema.compendium` entry point ([Extending mathema](extending.md#registered-compendium-files)
+shows the declaration). Its files are listed beside the bundled ones as
+`package <name> <version>`, and its rows load after the bundled rows and
+before yours, each naming the distribution it came from. A package row
+adds to a function's rows; one with the name of a bundled row, or of
+another package's, that says something different is a conflict:
+neither row is used, and `mathema compendium status` lists both
+statements and where each comes from. Like every compendium row, a
+package's is testimony until `mathema verify` adjudicates it here.
 
 ## 5. When a row cannot be settled here
 
