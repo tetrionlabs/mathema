@@ -40,8 +40,8 @@ from importlib.metadata import entry_points
 
 from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
                         abstract_of, plain)
-from ._adapters import (BUILTIN_ADAPTERS, KINDS, Detection, ListAdapter,
-                        RuntimeTypeAdapter)
+from ._adapters import (BUILTIN_ADAPTERS, KINDS, BodyUses, Detection,
+                        ListAdapter, RuntimeTypeAdapter)
 from ._missing import (Definition, absence_defined, definitions, members,
                        resolve_absence, resolve_missing, set_definitions,
                        spellings)
@@ -869,6 +869,175 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
     return out
 
 
+def _body_uses(fdef, params: list) -> dict:
+    """Intent:
+        Each parameter's uses in the body as `(form, name)` pairs, the
+        vocabulary `BodyUses.supports` reads: `("attr", name)` for an
+        attribute read off it, `("call", name)` for a method called on
+        it, `("keyed", name)` for one called with a string first
+        argument, `("@", "")` for an operand of `@`.
+    """
+    pset = set(params)
+    found: dict = {}
+    called = {id(n.func) for n in ast.walk(fdef) if isinstance(n, ast.Call)}
+
+    def note(p, use):
+        if p in pset and use not in found.setdefault(p, []):
+            found[p].append(use)
+
+    for node in ast.walk(fdef):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name):
+            first = node.args[0] if node.args else None
+            keyed = isinstance(first, ast.Constant) \
+                and isinstance(first.value, str)
+            note(node.func.value.id,
+                 ("keyed" if keyed else "call", node.func.attr))
+        elif isinstance(node, ast.Attribute) and isinstance(node.value,
+                                                            ast.Name) \
+                and id(node) not in called:
+            note(node.value.id, ("attr", node.attr))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                        ast.MatMult):
+            for side in (node.left, node.right):
+                if isinstance(side, ast.Name):
+                    note(side.id, ("@", ""))
+    return found
+
+
+def _typed_use(use: tuple, declared: list) -> bool:
+    """Intent:
+        Whether a body use says anything about a runtime type: one a
+        list does not support (`.T`, `@`, a vector method or attribute)
+        or one some adapter's `USES` declares. Any other attribute
+        (`x.weight` on an object of the caller's own) is not.
+    """
+    form, name = use
+    if form == "@" or name == "T" or name in _VECTOR_METHODS \
+            or name in _VECTOR_ATTRS:
+        return True
+    return any(uses.supports(use) for uses in declared)
+
+
+#: the kinds a body usage asks for, in order of preference
+_USAGE_KINDS = {"vector": ("vec",), "table": ("table",),
+                "matrix": ("mat", "table")}
+#: the usage a hint states for a promoted kind
+_KIND_USAGE = {"vec": "vector", "mat": "matrix", "table": "table"}
+
+
+def _library_choice(candidates: list, usage: "str | None"):
+    """Intent:
+        The one adapter of a library a body's uses select: the only
+        candidate, else the only one carrying the first kind the usage
+        asks for that any candidate carries; None when the library's
+        candidates stay tied.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    for kind in _USAGE_KINDS.get(usage or "", ()):
+        carrying = [a for a in candidates if kind in a.kinds]
+        if len(carrying) == 1:
+            return carrying[0]
+        if carrying:
+            return None
+    return None
+
+
+def _promoted_kind(found, usage: "str | None") -> str:
+    """Intent:
+        The kind a promoted parameter is drawn with: the adapter's only
+        kind, else the first kind the body's usage asks for that the
+        adapter carries, else `vec`.
+    """
+    if len(found.kinds) == 1:
+        return next(iter(found.kinds))
+    for kind in _USAGE_KINDS.get(usage or "", ()):
+        if kind in found.kinds:
+            return kind
+    return "vec"
+
+
+def promotions(fn, fdef, params: list, param_kinds: dict,
+               detected: dict) -> tuple:
+    """Intent:
+        The parameters the body's uses draw as a runtime type, and the
+        ones whose uses leave the type open, `(promoted, ambiguous)`.
+        A parameter qualifies as `usage_hints` reads one: no runtime
+        type named, no annotation naming a type, not an `int`, `bool`,
+        `string` or `complex` kind, in a module importing a library
+        with a runtime type adapter. Its typed uses (`_typed_use`) are
+        matched against each adapter's `USES` whose library the module
+        imports; an adapter matches when it supports every one of them.
+        A library whose adapters match selects one (`_library_choice`).
+        `promoted` is `{param: Detection}` when exactly one library
+        selects an adapter, its evidence `the body uses it as <the
+        adapter's described type>`. `ambiguous` is `{param: hint}`
+        when two or more do, the hint (`usage_hints`'s keys, plus
+        `types`, the runtime types in detection order) naming each.
+
+    Notes:
+        A parameter with no typed use, or whose uses no imported
+        library's adapter supports in full, is in neither.
+    """
+    scope = module_scope(fn)
+    imported = module_imports(scope)
+    if not imported or fdef is None:
+        return {}, {}
+    declared = [(a, a.USES) for a in adapters().values()
+                if isinstance(getattr(a, "USES", None), BodyUses)]
+    numpy_aliases = {alias for lib, alias in imported.items()
+                     if lib == "numpy"} | {
+        n for n, v in scope.items()
+        if inspect.ismodule(v) and v.__name__ == "numpy"}
+    usages = _usages(fdef, params, numpy_aliases)
+    annotated = _annotated(fdef)
+    promoted: dict = {}
+    ambiguous: dict = {}
+    for p, uses in _body_uses(fdef, params).items():
+        if p in detected or p in annotated \
+                or param_kinds.get(p) in ("int", "bool", "string", "complex"):
+            continue
+        typed = [u for u in uses if _typed_use(u, [d for _a, d in declared])]
+        if not typed:
+            continue
+        usage = (usages.get(p) or (None,))[0]
+        by_library: dict = {}
+        for found, body_uses in declared:
+            lib = found.name.split(".", 1)[0]
+            if lib in imported and all(body_uses.supports(u) for u in typed):
+                by_library.setdefault(lib, []).append(found)
+        chosen = [c for c in (_library_choice(cands, usage)
+                              for cands in by_library.values())
+                  if c is not None]
+        if len(chosen) == 1:
+            found = chosen[0]
+            described = found.USES.described or f"a {found.name}"
+            promoted[p] = Detection(found.name, _promoted_kind(found, usage),
+                                    f"the body uses it as {described}")
+        elif len(chosen) > 1:
+            libs = [c.name.split(".", 1)[0] for c in chosen]
+            spelled = [f"{p}: {imported[lib]}.{c.name.split('.', 1)[1]}"
+                       for lib, c in zip(libs, chosen)]
+            stated = usage or _KIND_USAGE[_promoted_kind(chosen[0], usage)]
+            both = "both" if len(chosen) == 2 else "each"
+            ambiguous[p] = {
+                "usage": stated, "strong": True,
+                "type": chosen[0].name, "types": [c.name for c in chosen],
+                "text": f"{p} is used as a {stated}; this module imports "
+                        f"{_listed(libs, 'and')}, whose types {both} "
+                        f"support that use: to sample it as one, annotate: "
+                        f"{_listed(spelled, 'or')}"}
+    return promoted, ambiguous
+
+
+def _listed(items: list, word: str) -> str:
+    """`a`, `a and b`, `a, b and c` (with `word` in place of `and`)."""
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} {word} {items[-1]}"
+
+
 def strong_hints(facts) -> list:
     """The hint texts a record's notes carry, one per parameter whose
     body use a list does not support."""
@@ -884,6 +1053,6 @@ __all__ = [
     "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",
     "installed", "library_version", "module_imports", "observe",
-    "observed_plain", "plain", "realise", "realised_parameters",
-    "strong_hints", "usage_hints",
+    "observed_plain", "plain", "promotions", "realise",
+    "realised_parameters", "strong_hints", "usage_hints", "BodyUses",
 ]

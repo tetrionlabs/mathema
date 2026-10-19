@@ -1857,8 +1857,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             from ._partiality import NO_VALUE
             fails = ("has no value" if exc == NO_VALUE
                      else f"raises {exc or 'an exception'}")
+            # the counterexample states what the executed call did when
+            # the sketch cannot: the value it returned where it has no
+            # value, and the exit code of an exit
             shown = (_returned_words(target, arg_exprs, witness)
-                     if exc == NO_VALUE and target is not None else "")
+                     if exc in (NO_VALUE, "SystemExit")
+                     and target is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "

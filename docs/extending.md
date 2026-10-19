@@ -33,6 +33,47 @@ Discovery is fail-soft everywhere. A provider that raises on import is
 skipped with a warning, and mathema falls back to its own behaviour.
 Your extension being broken or absent never crashes someone's run.
 
+## Runtime type adapters
+
+An adapter registered under `mathema.runtime_types` follows the
+`mathema.runtime_types.RuntimeTypeAdapter` protocol, described with
+its `name`, `kinds`, `requires`, `detect`, `realise` and `observe` in
+[runtime types](runtime-types.md#adding-a-runtime-type). Besides
+`ALIASES`, it may state `USES`, a `BodyUses` naming the uses of a
+parameter its type supports and a list does not:
+
+```python
+from mathema.runtime_types import BodyUses
+
+
+class TorchTensorAdapter:
+    name = "torch.Tensor"
+    kinds = frozenset({"vec", "mat"})
+    requires = ("torch",)
+    ALIASES = {"th": "torch"}
+    USES = BodyUses(
+        attributes=frozenset({"T", "shape", "device"}),
+        methods=frozenset({"mean", "sum", "numel", "detach"}),
+        matmul=True,
+        described="a torch tensor")
+    ...
+```
+
+`attributes` are names read off the parameter (`x.shape`), `methods`
+names called on it (`x.mean()`), `keyed` methods called with a column
+name as the first argument (`df.groupby("k")`), and `matmul` says the
+type can be an operand of `@`. `described` is how the record names the
+type: `the body uses it as a torch tensor`.
+
+An unannotated parameter is drawn as the adapter's type when every use
+the body makes of it that says anything about a runtime type is one
+the adapter declares, the function's module imports the adapter's
+library, and no other imported library's adapter supports the same
+uses; with two such libraries it is drawn as a list and the hint names
+both. Declare only names your type has and a list lacks: a name a list
+also has (`index`, `copy`, `sort`) would draw a list-using function as
+your type. An adapter without `USES` is never chosen this way.
+
 ## Target resolvers
 
 A fourth group, `mathema.target_resolvers`, turns a tagged

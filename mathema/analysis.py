@@ -1234,8 +1234,8 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
             continue
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
-    from .runtime_types import (detect_parameters, undrawable_parameters,
-                                usage_hints)
+    from .runtime_types import (detect_parameters, promotions,
+                                undrawable_parameters, usage_hints)
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
     undrawable = undrawable_parameters(fn, detected)
@@ -1247,18 +1247,27 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
     hints = {p: h for p, h in usage_hints(fn, fdef, params, param_kinds,
                                           detected).items()
              if p not in undrawable}
-    # a parameter the body uses as a numpy array, which a list does not
-    # support, is drawn as one: the hint becomes the runtime type
-    from .runtime_types import Detection
-    for p, hint in list(hints.items()):
-        if hint.get("strong") and hint.get("type") == "numpy.ndarray" \
-                and p not in detected:
-            kind = "mat" if hint.get("usage") == "matrix" else "vec"
-            detected[p] = (Detection("numpy.ndarray", kind,
-                                     "the body uses it as a numpy array"),)
-            hints.pop(p)
+    # a parameter the body uses in a way only one imported library's
+    # runtime type supports is drawn as that type, and the record says
+    # why; uses two imported libraries both support leave it undrawn as
+    # either, with a hint naming each
+    promoted, ambiguous = promotions(fn, fdef, params, param_kinds,
+                                     detected)
+    for p, detection in promoted.items():
+        if p not in undrawable:
+            detected[p] = (detection,)
+            hints.pop(p, None)
+    for p, hint in ambiguous.items():
+        if p not in undrawable:
+            hints[p] = hint
     apply_runtime_kinds(param_kinds, detected)
     form = identity.form_hash(fdef)
+    # every reader past this point (the guards below and each lifter
+    # reading `tree`) sees a statement `sys.exit(c)` as the
+    # `raise SystemExit(c)` it is; the form hash above and `source`
+    # stay those of the code as written
+    from ._exits import exits_as_raises
+    fdef = exits_as_raises(fdef, fn)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
