@@ -211,8 +211,8 @@ def test_a_float_literal_derive_disproves_is_read_as_written():
 ])
 def test_a_float_from_outside_the_body_has_no_exact_reading(fn, law):
     p = _check(fn, law)
-    assert p.verdict != "proven", (p.verdict, p.route, p.sketch, p.note)
-    assert p.route == "derive:brute_force", p.route
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force:within_float64", p.route
     inexact = p.meta["mathema.sweep_inexact"]
     assert inexact["points"] == 2, inexact
     assert "mathema.exact_witness" not in p.meta, p.meta
@@ -225,8 +225,8 @@ def test_an_exhaustive_inexact_sweep_records_its_precision():
     precision = p.meta["mathema.sweep_precision"]
     assert precision["points"] == 2, precision
     assert precision["representation"] == "float64", precision
-    assert 0 < precision["largest_miss"] < 1e-15, precision
-    assert precision["largest_miss"] < precision["allowance"], precision
+    assert 0 < precision["largest_delta"] < 1e-15, precision
+    assert precision["largest_delta"] < precision["allowance"], precision
     assert precision["at"] == "x = 3", precision
 
 

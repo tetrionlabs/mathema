@@ -13,8 +13,10 @@ allowance absorbs never reaches a proof.
   of `2e-9` is an exact miss.
 - A point the function cannot be evaluated at exactly (a float it
   reads from outside its body, a module global, has no exact reading)
-  leaves the sweep unable to prove: every point agreed in the
-  computation, so the claim holds, never proven.
+  caps the proof at float64: every point ran and agreed in the
+  computation, so the claim is proven on
+  `derive:brute_force:within_float64`, the record stating the largest
+  delta, never an exact proof.
 - A function that satisfies the claim exactly at every point is still
   proven.
 
@@ -145,10 +147,11 @@ def _check(fn, law):
     (offset_global, "for n in [0, 3] subset Z, f(n) == n"),
     (constant_global, "f([]) == 0"),
 ])
-def test_a_body_with_no_exact_value_is_not_proven(fn, law):
+def test_a_body_with_no_exact_value_is_proven_within_float64(fn, law):
     p = _check(fn, law)
-    assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
-    assert p.route == "derive:brute_force", p.route
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force:within_float64", p.route
+    assert "mathema.sweep_precision" in p.meta, p.meta
 
 
 @pytest.mark.parametrize("fn,law", [
@@ -218,14 +221,15 @@ def test_a_membership_sweep_reads_the_value_exactly():
     assert p.route == "derive:brute_force", p.route
 
 
-def test_a_membership_sweep_with_no_exact_value_is_not_proven():
+def test_a_membership_sweep_with_no_exact_value_is_proven_within_float64():
     def nudged(x: float) -> float:
         i = 0
         while i < 3:
             i += 1
         return x + TINY
     p = _check(nudged, "for x in {1, 2}, f(x) in {1, 2}")
-    assert p.verdict == "holds", (p.verdict, p.route, p.sketch)
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch)
+    assert p.route == "derive:brute_force:within_float64", p.route
 
 
 def test_a_membership_sweep_reads_a_literal_exactly():

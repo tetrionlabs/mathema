@@ -42,9 +42,11 @@ f-strings, `%` formatting with a string, `.format(...)`,
 `isinstance`/`issubclass` against `Fraction`, `Decimal`,
 `numbers.Rational` or a sympy class, `math.isclose`, `math.frexp`,
 `math.ldexp`, `math.ulp`, `math.nextafter`, and any use of the
-`struct` or `ctypes` modules. `isinstance(x, float)` is kept and
+`struct` or `ctypes` modules, under any alias and whether imported at
+module level or inside the body. `isinstance(x, float)` is kept and
 answered as the computation would: true of an exact number standing in
-for a float. A body with no source to scan (built in, a lambda,
+for a float. An `import math` inside the body reaches the exact `math`
+too. A body with no source to scan (built in, a lambda,
 defined by `exec`) or a decorated function is refused the same way:
 nothing vouches for it.
 """
@@ -273,6 +275,8 @@ class _Scan(ast.NodeVisitor):
     def __init__(self, src: str, fn):
         self.src = src
         self.env = fn.__globals__
+        # what the body's own `import` statements bind, by name
+        self.imported: dict = {}
         self.found: list = []
         self.callables = _refused_callables()
         self.modules = _refused_modules()
@@ -285,9 +289,33 @@ class _Scan(ast.NodeVisitor):
         text = ast.get_source_segment(self.src, node) or type(node).__name__
         self.found.append(f"`{text}` (line {getattr(node, 'lineno', '?')})")
 
+    def visit_Import(self, node):
+        import importlib
+        for alias in node.names:
+            try:
+                module = importlib.import_module(alias.name.split(".")[0])
+            except Exception:
+                continue
+            self.imported[alias.asname or alias.name.split(".")[0]] = module
+
+    def visit_ImportFrom(self, node):
+        import importlib
+        if node.level or not node.module:
+            return
+        try:
+            module = importlib.import_module(node.module)
+        except Exception:
+            return
+        for alias in node.names:
+            value = getattr(module, alias.name, _MISSING)
+            if value is not _MISSING:
+                self.imported[alias.asname or alias.name] = value
+
     def _resolve(self, node):
         if isinstance(node, ast.Name):
-            value = self.env.get(node.id, _MISSING)
+            value = self.imported.get(node.id, _MISSING)
+            if value is _MISSING:
+                value = self.env.get(node.id, _MISSING)
             if value is _MISSING:
                 value = getattr(builtins, node.id, _MISSING)
             return value
@@ -361,7 +389,8 @@ def _globals_of(fn) -> "dict | None":
     """
     env = dict(fn.__globals__)
     env["__builtins__"] = {**builtins.__dict__, "float": ExactFloat,
-                           "round": _round, "pow": _pow}
+                           "round": _round, "pow": _pow,
+                           "__import__": _import}
     for name, value in list(env.items()):
         if name == "__builtins__":
             continue
@@ -382,6 +411,14 @@ def _globals_of(fn) -> "dict | None":
     env[_DIV] = _div
     env[_POW] = _pow
     return env
+
+
+def _import(name, globals=None, locals=None, fromlist=(), level=0):
+    """`__import__` as the twin's body sees it: an `import math` (or
+    `from math import sqrt`) inside the body reaches the exact `math`
+    the globals already hold, every other module itself."""
+    module = builtins.__import__(name, globals, locals, fromlist, level)
+    return _MATH if module is math else module
 
 
 def _exact_global(value):

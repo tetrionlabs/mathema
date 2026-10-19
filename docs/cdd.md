@@ -89,7 +89,8 @@ the function unadjudicable. Everything before the colon is the base
 family; the fold into supported/refuted/blocked/undecided uses only the
 base, so a subroute never changes what a verdict counts as, it only
 says more precisely why. The `route` field follows the same convention
-(`derive:extensive`, `probe:semi_analytical`, `derive:brute_force`
+(`derive:extensive`, `probe:semi_analytical`, `derive:brute_force`,
+`derive:brute_force:within_float64`
 name the mechanism that actually decided).
 
 Verdicts are pedantic and exact: nothing is called proven that isn't,

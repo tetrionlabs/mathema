@@ -153,6 +153,19 @@ def via_frexp(x: float) -> float:
     return math.ldexp(m, e - 1)
 
 
+def via_local_struct(x: float) -> float:
+    _spin()
+    import struct as s
+    (y,) = s.unpack("d", s.pack("d", x))
+    return y * 0.5
+
+
+def via_local_fraction(x: float) -> float:
+    _spin()
+    from fractions import Fraction as Q
+    return Q(x) / 2
+
+
 def half(x: float) -> float:
     _spin()
     return x * 0.5
@@ -179,7 +192,8 @@ def guarded(x: float) -> float:
 REFUSED = [typed, by_class, is_not_type, via_str, via_repr, via_format,
            via_fstring, via_percent, via_str_format, via_hex, via_ratio,
            via_fraction, via_decimal, via_isclose, via_struct, via_id,
-           via_isinstance_rational, via_frexp]
+           via_isinstance_rational, via_frexp, via_local_struct,
+           via_local_fraction]
 
 #: the refused bodies a finite sweep runs: `id(x)` is a hidden read to
 #: the strict examination, which declines the sweep before any reading

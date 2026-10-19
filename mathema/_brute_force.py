@@ -178,13 +178,17 @@ class _Scope:
         """The subject a holding claim is then named by."""
         return "it" if self.kind == "claim" else "the claim"
 
+    def where(self) -> str:
+        """The swept region named by its source: `the claim's finite
+        scope`, `the function's finite domain`, or the two together."""
+        return {"claim": "the claim's finite scope",
+                "function": "the function's finite domain",
+                "both": "the claim's binding with the function's finite "
+                        "domain"}[self.kind]
+
     def quantifier(self, names: list, n: int) -> str:
         """The `∀` line of a proof over the swept points."""
-        where = {"claim": "the claim's finite scope",
-                 "function": "the function's finite domain",
-                 "both": "the claim's binding with the function's finite "
-                         "domain"}[self.kind]
-        return f"∀ {', '.join(names)} in {where} ({_points(n)})"
+        return f"∀ {', '.join(names)} in {self.where()} ({_points(n)})"
 
 
 def _holds_at(total: int, judged: list, scope: _Scope) -> str:
@@ -254,11 +258,11 @@ def _exactly_at(cj, evaluate, point: dict) -> tuple:
 
 class _Precision:
     """How far the floats of an exhaustive sweep missed the relation:
-    the largest miss over the points compared and the allowance applied
+    the largest delta over the points compared and the allowance applied
     at that point (`gates` evaluate's `last_precision`, from
     `_allowance.float_miss`), as the `mathema.sweep_precision` record:
-    `points` compared, `largest_miss`, `allowance`, `at` (the point of
-    the largest miss) and `representation` (`float64`)."""
+    `points` compared, `largest_delta`, `allowance`, `at` (the point of
+    the largest delta) and `representation` (`float64`)."""
 
     def __init__(self):
         self.points = 0
@@ -281,9 +285,43 @@ class _Precision:
         if self.points == 0:
             return {}
         return {"mathema.sweep_precision": {
-            "points": self.points, "largest_miss": self.miss,
+            "points": self.points, "largest_delta": self.miss,
             "allowance": self.allowance, "at": self.at,
             "representation": "float64"}}
+
+    def capped_words(self, where: str, n: int, point: str, call: str) -> str:
+        """Intent:
+            The sketch of a sweep proven within float64, stating the cap
+            for a reader downstream: every point of `where` (`n` points)
+            ran in float64 and the claim held at each, the largest delta
+            against its allowance, and the `point` (its `call`) that
+            could not be computed exactly, below which delta a
+            difference would not show.
+        """
+        from .records import delta_text
+        delta = delta_text(self.miss)
+        # with no delta shown, what would not show is anything below
+        # float64's own resolution at these values
+        below = (f"below {delta}" if self.miss else
+                 "below float64's resolution at these values")
+        return (f"every point of {where} ({_points(n)}) was run in float64 "
+                f"and the claim held at each; the largest delta was {delta} "
+                f"against an allowance of {delta_text(self.allowance)}. The "
+                f"value at {point} could not be computed exactly ({call}), "
+                f"so this proof is capped at within_float64: a difference "
+                f"{below} would not show")
+
+
+def _call_words(fn, facts, point: dict) -> str:
+    """The call at a point as written, `lib(2)`, each argument by its
+    parameter's order."""
+    from .probing import _fmt_coordinate, _fmt_value
+
+    def shown(v):
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    name = getattr(facts, "name", None) or getattr(fn, "__name__", "f")
+    args = [shown(point[p]) for p in facts.params if p in point]
+    return f"{name}({', '.join(args)})"
 
 
 def _exact_text(value) -> str:
@@ -543,14 +581,18 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                         "holds within its allowance"}},
                                executed))
     if inexact:
+        # every point ran and the float value is a member at each; a
+        # point with no exact value caps the proof at float64
+        scope = _Scope(cj, names)
         return ProofResult(
-            "undecided",
-            sketch=(f"{_Scope(cj, names).has(checked)}, and at every one the "
-                    f"float value {is_in}; proven needs the claim decided "
-                    f"exactly at every point, and "
-                    f"{_inexact_words(inexact, names)}"),
-            meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True, **_tried(grid),
+            "proven",
+            sketch=precision.capped_words(
+                scope.where(), checked, _fmt_point(inexact[0], names),
+                _call_words(fn, facts, inexact[0])),
+            quantifier=scope.quantifier(names, checked),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                **_tried(grid),
                                 "mathema.sweep_inexact": {
                                     "points": len(inexact),
                                     "first": _fmt_point(inexact[0], names)},
@@ -857,15 +899,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                                 **counted, **no_exact},
                                executed_missing(deps)))
     if inexact:
+        # every point ran and the claim held at each in float64; a point
+        # with no exact value caps the proof at float64
+        scope = _Scope(cj, names)
         return ProofResult(
-            "undecided",
-            sketch=(f"{_holds_at(total, judged, _Scope(cj, names))}{outside}, "
-                    f"within the computation allowance; proven needs the "
-                    f"claim decided exactly at every point, and "
-                    f"{_inexact_words(inexact, names)}"),
-            meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True, **_tried(grid),
-                                **counted, **no_exact},
+            "proven",
+            sketch=precision.capped_words(
+                scope.where(), total, _fmt_point(inexact[0], names),
+                _call_words(fn, facts, inexact[0])) + outside,
+            quantifier=scope.quantifier(names, total),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                **_tried(grid), **counted, **no_exact},
                                executed_missing(deps)))
     return ProofResult(
         "proven",
@@ -1018,27 +1063,33 @@ def ground_proof(cj, fn, facts, bound_funcs):
                                         "holds within its allowance"}},
                                executed_missing(deps)))
     sketch = f"the claim holds at its own call, {witness}"
-    if said is None and holds_number(computed):
-        precision = _Precision()
+    inexact = said is None and holds_number(computed)
+    precision = _Precision()
+    if inexact:
         precision.add(evaluate.last_precision(), witness)
-        return ProofResult(
-            "undecided",
-            sketch=(f"{sketch}, within the computation allowance; proven "
-                    f"needs the claim decided exactly there, and its value "
-                    f"cannot be computed exactly"),
-            meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True,
-                                "mathema.sweep_inexact": {
-                                    "points": 1, "first": witness},
-                                **precision.meta()},
-                               executed_missing(deps)))
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:
         return ProofResult(
             "undecided",
             sketch=(f"{sketch}; proven needs the function to be shown "
                     f"pure, and one call says nothing about the next"),
             meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True},
+                                "mathema.sweep_holds": True,
+                                **({"mathema.sweep_inexact": {
+                                        "points": 1, "first": witness},
+                                    **precision.meta()} if inexact else {})},
+                               executed_missing(deps)))
+    if inexact:
+        # the call ran and the claim held in float64; its value has no
+        # exact reading, so the proof is capped at float64
+        return ProofResult(
+            "proven",
+            sketch=precision.capped_words("the claim's own call", 1, witness,
+                                          witness),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                "mathema.sweep_inexact": {
+                                    "points": 1, "first": witness},
+                                **precision.meta()},
                                executed_missing(deps)))
     return ProofResult(
         "proven", sketch=sketch,

@@ -70,13 +70,12 @@ def test_a_small_finite_domain_runs_every_point():
 def test_an_exact_computation_with_an_explicit_fraction_is_not_read_exactly():
     # the body builds a `Fraction(...)` the computation never had, a
     # construct the exact reading refuses, so every point agrees within
-    # the allowance and none is decided exactly; the sweep is complete
-    # and the claim is never falsified
+    # the allowance and none is decided exactly: proven within float64
     rows = _rows(exposure_exact)
     main = [p for n, p in rows.items() if n.startswith("f_active")
             and not n.endswith("[float]")]
-    assert [p.verdict for p in main] != ["falsified"], [(p.name, p.verdict) for p in main]
-    assert main[0].route.startswith("derive:brute_force"), main[0].route
+    assert [p.verdict for p in main] == ["proven"], [(p.name, p.verdict) for p in main]
+    assert main[0].route == "derive:brute_force:within_float64", main[0].route
     assert "mathema.sweep_inexact" in main[0].meta, main[0].meta
     assert "mathema.sweep_precision" in main[0].meta, main[0].meta
 

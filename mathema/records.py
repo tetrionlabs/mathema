@@ -447,3 +447,26 @@ def claim_statement(cj) -> str:
     else:
         body = statement_text(cj.relation, cj.lhs, cj.rhs)
     return prefix + body
+
+
+def delta_text(value) -> str:
+    """A delta or an allowance as the record shows it: two significant
+    digits (`2.2e-16`, `1e-09`), `0` for none."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "0" if value is None else str(value)
+    return "0" if value == 0 else f"{value:.2g}"
+
+
+def within_float64_words(meta: "dict | None") -> str:
+    """Intent:
+        The measurement a proof capped at within_float64 carries, as the
+        record line shows it: `all 3 points in float64, largest delta
+        2.2e-16`, from `mathema.sweep_precision`; empty when the record
+        has none.
+    """
+    found = (meta or {}).get("mathema.sweep_precision") or {}
+    if not found:
+        return ""
+    n = found.get("points")
+    return (f"all {n} point{'s' if n != 1 else ''} in float64, largest delta "
+            f"{delta_text(found.get('largest_delta'))}")
