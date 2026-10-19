@@ -173,14 +173,17 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return None
     # the computation allowance (`_allowance`): a declared tolerance, an
     # exact comparison, or the default rule against the exact side
-    from ._allowance import (exact_side_at, largest_miss, reference_side,
-                             relation_within)
+    from ._allowance import (exact_side_at, float_miss, largest_miss,
+                             reference_side, relation_within)
     from ._tolerance import bare as _bare
     from .conjecture import _exact_slack
     declared = _exact_slack(cj) if exact else cj.tolerance
     claim_side = reference_side(cj)
     # the gap and the result's magnitude at the last miss
     miss: list = [None]
+    # how far the float sides missed the relation at the last point
+    # compared, and the allowance applied there (`_allowance.float_miss`)
+    precision: list = [None]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -193,6 +196,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                side, exact_inequality=cj.tolerance is None)
         if held is False:
             miss[0] = largest_miss(lv, rv, side)
+        precision[0] = float_miss(lv, rv, cj.relation, declared,
+                                  input_scaled, side)
         return held
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
@@ -458,6 +463,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def evaluate(point):
         _reset()
+        precision[0] = None
         try:
             lv, rv = _values(point)
         except Exception as e:
@@ -1155,6 +1161,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.exact_at = exact_at  # type: ignore[attr-defined]
     evaluate.exact_as_written = exact_as_written  # type: ignore[attr-defined]
     evaluate.last_miss = lambda: miss[0]  # type: ignore[attr-defined]
+    # `(miss, allowance)` of the float comparison at the last point
+    # evaluated, None where no numbers were compared
+    evaluate.last_precision = lambda: precision[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point

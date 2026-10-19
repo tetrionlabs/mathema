@@ -8685,7 +8685,8 @@ def _provenance_meta(proof) -> dict:
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
-                "mathema.exact_witness", "mathema.sweep_inexact"):
+                "mathema.exact_witness", "mathema.sweep_inexact",
+                "mathema.sweep_precision"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta

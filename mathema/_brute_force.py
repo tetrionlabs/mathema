@@ -252,6 +252,40 @@ def _exactly_at(cj, evaluate, point: dict) -> tuple:
     return held, (sides if held is not None else None)
 
 
+class _Precision:
+    """How far the floats of an exhaustive sweep missed the relation:
+    the largest miss over the points compared and the allowance applied
+    at that point (`gates` evaluate's `last_precision`, from
+    `_allowance.float_miss`), as the `mathema.sweep_precision` record:
+    `points` compared, `largest_miss`, `allowance`, `at` (the point of
+    the largest miss) and `representation` (`float64`)."""
+
+    def __init__(self):
+        self.points = 0
+        self.miss = None
+        self.allowance = None
+        self.at = None
+
+    def add(self, measured, where) -> None:
+        """Count a point's `(miss, allowance)`, `where` its text or a
+        callable giving it; None (no numbers compared) counts nothing."""
+        if measured is None:
+            return
+        gap, allowance = measured
+        self.points += 1
+        if self.miss is None or gap > self.miss:
+            self.miss, self.allowance = gap, allowance
+            self.at = where() if callable(where) else where
+
+    def meta(self) -> dict:
+        if self.points == 0:
+            return {}
+        return {"mathema.sweep_precision": {
+            "points": self.points, "largest_miss": self.miss,
+            "allowance": self.allowance, "at": self.at,
+            "representation": "float64"}}
+
+
 def _exact_text(value) -> str:
     """An exact value as text: an integer or a ratio (`1/2`), a list
     of them in brackets, a bool as itself."""
@@ -427,6 +461,9 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
     # way from its float value
     inexact: list = []
     exact_miss = None
+    # a float value is a member by exact equality: the floats miss by
+    # nothing, under no allowance
+    precision = _Precision()
     executed, f_call = ExecutedMissing(), LastCall()
     from .probing import parameter_defaults
     f_call.defaults = parameter_defaults(fn)
@@ -468,6 +505,7 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
             # a missing value is tested by its kind, a value that is not
             # a number by its own equality: both exact
             continue
+        precision.add((0.0, 0.0), where)
         # the float value agrees; the claim is decided at the point's
         # exact value
         exact = _exact_lhs(code, point, fn, bound)
@@ -514,7 +552,8 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                 "mathema.sweep_holds": True, **_tried(grid),
                                 "mathema.sweep_inexact": {
                                     "points": len(inexact),
-                                    "first": _fmt_point(inexact[0], names)}},
+                                    "first": _fmt_point(inexact[0], names)},
+                                **precision.meta()},
                                executed))
     return ProofResult(
         "proven",
@@ -708,6 +747,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # agrees within its allowance
     inexact: list = []
     exact_miss = None
+    # how far the floats missed over the points compared
+    precision = _Precision()
     for point in (plan.points if plan is not None else
                   (dict(zip(names, combo))
                    for combo in itertools.product(*(grid[n] for n in names)))):
@@ -755,6 +796,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                     executed_missing(deps)))
         checked += 1
         judged.append(point)
+        precision.add(evaluate.last_precision(),
+                      lambda: _fmt_point(point, names))
         if not holds_number(evaluate.sides()):
             # sides with no number in them (a string, a bool, a missing
             # value) were compared by their own equality, which is exact
@@ -800,8 +843,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                    f"{plan.coverage.words(checked)}",
             meta={"mathema.sweep_partial": plan.coverage.words(checked)})
     no_exact = ({"mathema.sweep_inexact": {
-        "points": len(inexact), "first": _fmt_point(inexact[0], names)}}
-        if inexact else {})
+        "points": len(inexact), "first": _fmt_point(inexact[0], names)},
+        **precision.meta()} if inexact else {})
     if unexamined is not None:
         return ProofResult(
             "undecided",
@@ -975,6 +1018,8 @@ def ground_proof(cj, fn, facts, bound_funcs):
                                executed_missing(deps)))
     sketch = f"the claim holds at its own call, {witness}"
     if said is None and holds_number(computed):
+        precision = _Precision()
+        precision.add(evaluate.last_precision(), witness)
         return ProofResult(
             "undecided",
             sketch=(f"{sketch}, within the computation allowance; proven "
@@ -983,7 +1028,8 @@ def ground_proof(cj, fn, facts, bound_funcs):
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.sweep_holds": True,
                                 "mathema.sweep_inexact": {
-                                    "points": 1, "first": witness}},
+                                    "points": 1, "first": witness},
+                                **precision.meta()},
                                executed_missing(deps)))
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:
         return ProofResult(

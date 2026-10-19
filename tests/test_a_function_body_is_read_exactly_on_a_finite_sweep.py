@@ -10,7 +10,8 @@ sympy decides. A body that correctly computes the claim then proves it
 at every point, whatever its return type says; one that misses by a
 literal the float allowance absorbs is falsified with the exact
 witness. A float the body reads from outside (a global, a numpy value)
-has no exact reading.
+has no exact reading, and the sweep records how far the floats missed
+and the allowance that absorbed it.
 
 Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
@@ -216,3 +217,20 @@ def test_a_float_from_outside_the_body_has_no_exact_reading(fn, law):
     assert inexact["points"] == 2, inexact
     assert "mathema.exact_witness" not in p.meta, p.meta
 
+
+def test_an_exhaustive_inexact_sweep_records_its_precision():
+    # 3 * 0.1 is 0.30000000000000004 in float: the sweep holds within
+    # the allowance, and says by how much the floats missed
+    p = _check(tenth_by_global, "for x in {1, 3}, f(x) == x / 10")
+    precision = p.meta["mathema.sweep_precision"]
+    assert precision["points"] == 2, precision
+    assert precision["representation"] == "float64", precision
+    assert 0 < precision["largest_miss"] < 1e-15, precision
+    assert precision["largest_miss"] < precision["allowance"], precision
+    assert precision["at"] == "x = 3", precision
+
+
+def test_an_exact_sweep_records_no_precision():
+    p = _check(half, "for x in {1, 2, 3}, f(x) == x / 2")
+    assert "mathema.sweep_precision" not in p.meta, p.meta
+    assert "mathema.sweep_inexact" not in p.meta, p.meta

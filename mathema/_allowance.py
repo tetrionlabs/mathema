@@ -347,6 +347,76 @@ def relation_within(lv, rv, relation: str, declared=None,
     return held
 
 
+def float_miss(lv, rv, relation: str, declared=None,
+               input_scaled: float = 0.0, side: "int | None" = None
+               ) -> "tuple | None":
+    """Intent:
+        `(miss, allowance)`, both floats, for two computed sides: how
+        far they miss the relation as floats (`abs(lv - rv)` for `==`
+        and `~=`, the amount an ordering `<=`/`>=` is violated by, 0
+        where it holds outright) and the allowance applied there
+        (`allowance`, ε for `~=` where that is larger; 0 for `<`, `>`
+        and `!=`, which take none); over arrays the largest miss and
+        its allowance. None when a side is not a finite real number (a
+        string, None, a NaN, an infinity, a complex value) or the
+        declared tolerance is a tolerance kind.
+    """
+    from ._tolerance import ToleranceKind
+    from .probing import _is_matrix_value, holds_inf, holds_nan, plain_value
+    if isinstance(declared, ToleranceKind):
+        return None
+    lv, rv = plain_value(lv), plain_value(rv)
+    arrays = _is_matrix_value(lv) or _is_matrix_value(rv)
+    scale = _array_scale(lv, rv, side) if arrays else None
+    best: list = [None]
+
+    def leaf(u, v) -> bool:
+        if holds_nan(u) or holds_nan(v) or holds_inf(u) or holds_inf(v):
+            return False
+        if _magnitude(u) is None or _magnitude(v) is None \
+                or isinstance(u, complex) or isinstance(v, complex):
+            return False
+        if isinstance(u, decimal.Decimal):
+            u = Fraction(u)
+        if isinstance(v, decimal.Decimal):
+            v = Fraction(v)
+        if relation in ("<", ">", "!="):
+            gap, tol = Fraction(0), Fraction(0)
+        else:
+            reference = _reference_of(u, v, side) if scale is None else scale
+            tol = allowance(reference, declared, input_scaled)
+            if relation == "~=" and declared is None:
+                from .conjecture import DEFAULT_TOLERANCE
+                tol = max(tol, DEFAULT_TOLERANCE)
+            diff = Fraction(u) - Fraction(v)
+            gap = (abs(diff) if relation in ("==", "~=") else
+                   max(Fraction(0), diff) if relation == "<=" else
+                   max(Fraction(0), -diff))
+        try:
+            measured = (float(gap), float(tol))
+        except OverflowError:
+            measured = (float("inf"), float("inf"))
+        if best[0] is None or measured[0] > best[0][0]:
+            best[0] = measured
+        return True
+
+    def walk(x, y) -> bool:
+        xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if xs and ys:
+            return len(x) == len(y) and all(walk(a, b) for a, b in zip(x, y))
+        if xs:
+            return all(walk(a, y) for a in x)
+        if ys:
+            return all(walk(x, b) for b in y)
+        return leaf(x, y)
+
+    try:
+        complete = walk(lv, rv)
+    except (TypeError, ValueError):
+        return None
+    return best[0] if complete else None
+
+
 def _exactly_equal(lv, rv) -> bool:
     """Whether two values (numbers, or nested lists of them) are equal
     exactly, element by element; different shapes are unequal."""
