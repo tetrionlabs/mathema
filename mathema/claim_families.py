@@ -4031,21 +4031,42 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return resolver.synth(p, sizes, lambda: rng.uniform(-10.0, 10.0),
                               rng)
 
-    def draw(corner: "tuple | None" = None) -> dict:
+    def draw(corner: "tuple | None" = None,
+             boundary: "tuple | None" = None) -> dict:
         # `corner`, `(param, pair)`: that array parameter holds the
         # pair's two values in turn, element after element, with at
-        # least two elements along each axis its shape leaves free
+        # least two elements along each axis its shape leaves free.
+        # `boundary`, `(param, shape)`: that marked parameter sits on
+        # its shape region's edge, sized by the trial's dimensions, so
+        # a name it shares sizes every parameter alike: a singular
+        # square matrix, its axes one dimension of at least two, or
+        # the empty vector, its dimension at zero for every parameter
+        # that dimension sizes
         lo = ({resolver.key(corner[0], a): 2
                for a in range(resolver.shapes[corner[0]].ndim)}
               if corner is not None and corner[0] in marked else {})
+        edge_keys = ([resolver.key(boundary[0], a)
+                      for a in range(resolver.shapes[boundary[0]].ndim)]
+                     if boundary is not None else [])
+        if boundary is not None and boundary[1] == "matrix":
+            lo = {**lo, **{k: 2 for k in edge_keys}}
         sizes = (resolver.draw_sizes(
             rng, lo=lo, hi={k: 5 for k in resolver.distinct_keys()})
             if resolver is not None else {})
+        if edge_keys and boundary[1] == "matrix":
+            for k in edge_keys[1:]:
+                sizes[k] = sizes[edge_keys[0]]
+        elif edge_keys:
+            sizes[edge_keys[0]] = 0
         point = {p: draw_marked(sizes, p) if p in marked else draw_one(p)
                  for p in params}
         if corner is not None:
             point[corner[0]] = corner_array(corner[0], corner[1], sizes)
-        placed = _placed(point, rng, keep=tuple(call_pins))
+        if edge_keys and boundary[1] == "matrix":
+            from .matrices import _synth_singular
+            point[boundary[0]] = _synth_singular(sizes[edge_keys[0]], rng)
+        held = (*call_pins, boundary[0]) if boundary is not None else tuple(call_pins)
+        placed = _placed(point, rng, keep=held)
         return point if placed is None else placed
 
     def corner_array(p: str, pair: list, sizes: dict):
@@ -4083,10 +4104,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
-        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`
+        # `det(a) != 0`'s boundary, the empty sequence below `dim(a) >= 1`;
+        # a parameter whose axes the dimension plan sizes meets it at
+        # the trial's sizes, so a dimension it shares by name stays
+        # shared (`draw`'s `boundary`)
         from .matrices import _synth_singular
         for p, shape in sorted(shapes.items()):
             for _ in range(3):
+                if p in marked and resolver is not None \
+                        and p in resolver.shapes \
+                        and resolver.shapes[p].ndim == (2 if shape == "matrix" else 1):
+                    yield draw(boundary=(p, shape))
+                    continue
                 yield {**draw(), p: (_synth_singular(rng.randint(2, 5), rng)
                                      if shape == "matrix" else [])}
 
