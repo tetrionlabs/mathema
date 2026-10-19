@@ -12230,7 +12230,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     reduces=bool(corner_row or _conditioning.claim_reduces(cj)),
                     exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
                                                  bound_funcs)
-                              if mathematics is True else None))
+                              if mathematics is True else None),
+                    sides=(compare_l, compare_r))
                 f_call.calls = made
                 if found["kappa"] is None and mathematics is None:
                     found = None
