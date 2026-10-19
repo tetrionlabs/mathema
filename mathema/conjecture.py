@@ -5931,7 +5931,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
                 if grounded is not None and (derived is None
-                                             or derived.verdict != "proven"):
+                                             or derived.verdict not in
+                                             ("proven", "falsified")):
                     # a ground claim that holds at its own call and no
                     # symbolic proof covers: the call decides it
                     ctx.companion = None
@@ -9583,6 +9584,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                      sketch=family_proof.sketch, note=note,
                      condition=family_proof.quantifier, route="derive",
                      meta=_provenance_meta(family_proof))
+    if family_proof is not None and family_proof.status == "disproven" \
+            and cj.relation in _COMPARISON_RELATIONS \
+            and not family_proof.meta.get("mathema.witness_executed"):
+        # a value claim's disproof needs an executed witness whatever
+        # the claim is named: it is decided as the same claim under any
+        # other name is, by the ordinary derive route and its
+        # corroboration
+        family_proof = None
     if family_proof is not None and family_proof.status == "disproven":
         return Probe(cj.name, statement, "falsified", route="derive",
                      sketch=family_proof.sketch,
@@ -10009,10 +10018,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                              counterexample=swept.counterexample, note=note,
                              meta=_provenance_meta(swept))
             if swept.meta.get("mathema.sweep_holds"):
+                # the disproof nothing reproduced stays flagged on the
+                # sweep that holds
+                flagged = {k: v for k, v in (gated.meta or {}).items()
+                           if k.startswith("mathema.corroboration")}
                 return Probe(cj.name, statement, "holds",
                              route="derive:brute_force", sketch=swept.sketch,
-                             note=f"{note + '; ' if note else ''}{swept.sketch}",
-                             meta=_provenance_meta(swept))
+                             note=f"{gated.note + '; ' if gated.note else ''}"
+                                  f"{swept.sketch}",
+                             meta={**_provenance_meta(swept), **flagged})
         # an unknown is superseded by real empirical evidence like any
         # other, stash the flagged report and fall through to the
         # probe stage; the uncorroborated meta rides on the stash so
