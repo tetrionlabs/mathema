@@ -63,6 +63,19 @@ with the text. An `import math` inside the body reaches the exact
 `math` too. A body with no source to scan (built in, a lambda,
 defined by `exec`) or a decorated function is refused the same way:
 nothing vouches for it.
+
+Text whose only reach is an exception's message is not refused: an
+f-string, `"..." % x`, `"...".format(...)`, `str(...)` or `repr(...)`
+written directly as an argument of the exception constructed by a
+`raise` statement (`raise ValueError(f"negative: {x}")`, the callee
+resolving to a class deriving from `BaseException`), or as the message
+of an `assert`. The twin raises where the computation raises, with the
+stand-in's own text in the message, and the message is never compared.
+The text is refused as ever when it is wrapped in anything else on the
+way to the exception (`raise ValueError("bad: " + f"{x}")`, `raise
+make_error(f"{x}")`, `raise ValueError(float(f"{x:.2f}"))`), or when
+the body holds a `try` or `with` statement, under which it could catch
+its own exception and read the message back.
 """
 from __future__ import annotations
 
@@ -259,6 +272,10 @@ _TEXT_CALLS = frozenset({"str", "repr", "format", "ascii", "bin", "hex",
 _TEXT_ATTRS = frozenset({"hex", "fromhex", "as_integer_ratio", "format",
                          "__str__", "__repr__", "__format__"})
 _MISSING = object()
+#: the statements under which a body could catch an exception it raised
+#: itself and read its message back
+_CATCHING: tuple = (ast.Try, getattr(ast, "TryStar", ast.Try), ast.With,
+                    ast.AsyncWith)
 
 
 def _refused_callables() -> frozenset:
@@ -296,8 +313,16 @@ class _Scan(ast.NodeVisitor):
         self.found: list = []
         self.callables = _refused_callables()
         self.modules = _refused_modules()
+        # the ids of the text constructs whose only reach is an
+        # exception's message (`_message_text`)
+        self.message_text: set = set()
+        # whether the body holds a `try` or `with` statement, under
+        # which an exception it raises could be caught and its message
+        # read back by the body itself
+        self.catching = False
 
     def found_in(self, node) -> list:
+        self.catching = any(isinstance(n, _CATCHING) for n in ast.walk(node))
         self.visit(node)
         return self.found
 
@@ -373,9 +398,69 @@ class _Scan(ast.NodeVisitor):
         return any((getattr(c, "__module__", "") or "").split(".")[0] == "sympy"
                    for c in value.__mro__)
 
+    def _is_text(self, node) -> bool:
+        """Whether `node` is a text construct of the kinds an exception
+        message may hold: an f-string, `"..." % x`, `"...".format(...)`,
+        `str(...)` or `repr(...)` (the builtins, under their own
+        names)."""
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp):
+            return (isinstance(node.op, ast.Mod)
+                    and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str))
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                return (func.attr == "format"
+                        and isinstance(func.value, ast.Constant)
+                        and isinstance(func.value.value, str))
+            if isinstance(func, ast.Name):
+                return self._resolve(func) in (str, repr)
+        return False
+
+    def _message_text(self, call) -> None:
+        """Mark the text constructs among the arguments of `call`, the
+        constructor of an exception about to be raised, as reaching
+        nothing but that exception's message, so the walk does not
+        refuse them. `call` must resolve to a class deriving from
+        `BaseException`; a call of anything else, or any text in a body
+        that could catch its own exception (`catching`), is left to the
+        walk and refused as ever."""
+        if self.catching or not isinstance(call, ast.Call):
+            return
+        cls = self._resolve(call.func)
+        if cls is _MISSING or not isinstance(cls, type) \
+                or not issubclass(cls, BaseException):
+            return
+        for arg in (*call.args, *(kw.value for kw in call.keywords)):
+            if self._is_text(arg):
+                self.message_text.add(id(arg))
+                if isinstance(arg, ast.Call):
+                    self.message_text.add(id(arg.func))
+
+    def visit_Raise(self, node):
+        # `raise E(...)`: text in the arguments becomes the message of
+        # the exception raised, which the body never reads back
+        if node.exc is not None:
+            self._message_text(node.exc)
+        self.generic_visit(node)
+
+    def visit_Assert(self, node):
+        # `assert test, msg`: the message is read only when the assert
+        # fails, as the message of the AssertionError raised
+        if node.msg is not None and not self.catching \
+                and self._is_text(node.msg):
+            self.message_text.add(id(node.msg))
+            if isinstance(node.msg, ast.Call):
+                self.message_text.add(id(node.msg.func))
+        self.generic_visit(node)
+
     def visit_Call(self, node):
         func = node.func
-        if isinstance(func, ast.Name) and func.id in _TEXT_CALLS:
+        if id(node) in self.message_text:
+            pass
+        elif isinstance(func, ast.Name) and func.id in _TEXT_CALLS:
             self._refuse(node)
         elif isinstance(func, ast.Attribute) and func.attr in _TEXT_ATTRS:
             self._refuse(node)
@@ -391,7 +476,9 @@ class _Scan(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
-        if node.attr in _TEXT_ATTRS and isinstance(node.ctx, ast.Load):
+        if id(node) in self.message_text:
+            pass
+        elif node.attr in _TEXT_ATTRS and isinstance(node.ctx, ast.Load):
             self._refuse(node)
         elif id(self._resolve(node.value)) in self.modules:
             self._refuse(node)
@@ -416,10 +503,16 @@ class _Scan(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_JoinedStr(self, node):
+        if id(node) in self.message_text:
+            # the values formatted are still scanned
+            self.generic_visit(node)
+            return
         self._refuse(node)
 
     def visit_BinOp(self, node):
-        if isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant) \
+        if id(node) in self.message_text:
+            pass
+        elif isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant) \
                 and isinstance(node.left.value, (str, bytes)):
             self._refuse(node)
         self.generic_visit(node)
