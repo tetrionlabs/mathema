@@ -2124,7 +2124,13 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
     language_bound = getattr(bound, "base_type", None) == "L"
     if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
-    guarded = _guards(facts.tree, facts.params).get(target) in ("raise", "assert")
+    # with no body there is no guard to read: an accidental-type raise
+    # is then neither a declared rejection nor a crash, and the run is
+    # unknown with the reason
+    unread = facts.tree is None
+    guarded = (not unread
+               and _guards(facts.tree, facts.params).get(target) in ("raise", "assert"))
+    unreadable: dict = {}
 
     def crash_on(args, value):
         try:
@@ -2191,6 +2197,25 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
         exc = crash_on(args, value)
         if exc is None:
             return True
+        if unread:
+            if "said" in unreadable:
+                return None
+            if side is not None:
+                inside_now = side == "inside"
+                value = _shrink_in_language(
+                    value, lambda s: (crash_on(args, s) is not None
+                                      and bool(domain_contains(s, bound)) == inside_now),
+                    bound)
+                shown = f"{_witness_value(value)} ({side} {names})"
+            elif members is None:
+                shown = repr(shrink(value, lambda s: crash_on(args, s) is not None))
+            else:
+                shown = repr(value)
+            unreadable["said"] = (
+                f"{target} = {shown} raised {exc}, and {facts.name} has no "
+                f"Python source to read whether a validating guard raises "
+                f"it or it is an unguarded crash")
+            return None
         if side is None and members is not None:
             return (f"{target} = {value!r}, a member of its set, raised {exc}, "
                     f"an unguarded crash, not a declared rejection")
@@ -2211,6 +2236,8 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
                                          max(trials, len(corpus)), trial)
+    if unreadable and verdict != "falsified":
+        return ("unknown", checked, unreadable["said"])
     if sampled is not None:
         return verdict, checked, cx, {"mathema.sampled": sampled}
     return verdict, checked, cx
