@@ -82,10 +82,10 @@ def _clean():
 
 
 def _package(tmp_path, monkeypatch, name="rowpack", version="1.3",
-             rows=PACKAGE_ROWS, file="math.claims.yaml"):
+             rows=PACKAGE_ROWS, file="math.claims.yaml", site=None):
     """A throwaway distribution on the path: its metadata, its
     `mathema.compendium` entry point, and the claims file it ships."""
-    site = tmp_path / "site"
+    site = site or tmp_path / "site"
     _write(site / name / "__init__.py", ENTRY)
     _write(site / name / "claims" / file, rows)
     info = site / f"{name}-{version}.dist-info"
@@ -128,6 +128,26 @@ def test_package_rows_load_between_the_bundled_and_the_project_rows(
     sqrt = loaded["math.sqrt"]
     assert _names(sqrt) == ["nan_propagates", "none_raises", "sqrt_le_x"]
     assert sqrt["bundled"] is False
+
+
+def test_a_package_installed_in_the_projects_own_environment_loads(
+        tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    _package(tmp_path, monkeypatch,
+             site=root / ".venv" / "lib" / "site-packages")
+    fabs = load_library_claims(str(root))["math.fabs"]
+    (row,) = fabs["entry"]["claims"]
+    assert row["meta"][ROW_PACKAGE] == "rowpack 1.3"
+
+
+def test_a_package_directory_the_project_tree_reads_is_the_projects(
+        tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    _package(tmp_path, monkeypatch, site=root)
+    fabs = load_library_claims(str(root))["math.fabs"]
+    (row,) = fabs["entry"]["claims"]
+    assert ROW_PACKAGE not in row["meta"]
+    assert row["meta"][ROW_SOURCE] == "rowpack/claims/math.claims.yaml"
 
 
 def test_a_project_row_replaces_its_package_namesake(tmp_path, monkeypatch):

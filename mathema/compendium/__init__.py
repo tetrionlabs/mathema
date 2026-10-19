@@ -553,33 +553,29 @@ def _package_display(path: str, source: PackageSource) -> str:
     return f"{os.path.relpath(real, base)} (from {source.label})"
 
 
-def _inside(path: str, root: str) -> bool:
-    """Whether the directory `path` lies inside the directory `root`."""
-    real, base = os.path.realpath(path), os.path.realpath(root)
-    return real == base or real.startswith(base + os.sep)
-
-
 def claims_sources(root: "str | None") -> list:
     """Intent:
         Every compendium candidate file in load order, as `(path,
         origin, package)`: the bundled files (`"bundled"`), then each
         installed package's (`"package"`, with its `PackageSource`),
         then the project tree's (`"project"`), the latter two only when
-        `root` is given. A package directory inside the project tree is
-        read as the project's.
+        `root` is given. A package's file the project tree's discovery
+        also reads (a package directory inside the tree, outside the
+        directories discovery skips, such as `.venv`) is read once, as
+        the project's.
     """
     from ..spec import claims_file_paths
     bundled = _bundled_dir()
     out: list = [(p, "bundled", None) for p in claims_file_paths(bundled)]
     if root is None:
         return out
+    project = claims_file_paths(root, exclude=(bundled,))
+    read = {os.path.realpath(p) for p in project}
     for source in package_sources():
-        if _inside(source.directory, root):
-            continue
         out += [(p, "package", source)
-                for p in claims_file_paths(source.directory)]
-    out += [(p, "project", None)
-            for p in claims_file_paths(root, exclude=(bundled,))]
+                for p in claims_file_paths(source.directory)
+                if os.path.realpath(p) not in read]
+    out += [(p, "project", None) for p in project]
     return out
 
 
