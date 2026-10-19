@@ -32,6 +32,41 @@ class Detection:
     evidence: str
 
 
+@dataclass(frozen=True)
+class BodyUses:
+    """The uses of a parameter in a function body that a runtime type
+    supports and a list does not, by which an unannotated parameter is
+    drawn as that type: the `attributes` read off it (`x.iloc`), the
+    `methods` called on it (`x.mean()`), the `keyed` methods called on
+    it with a column name as the first argument (`df.groupby("k")`),
+    and `matmul` when it can be an operand of `@`. `described` names
+    the type in the record's evidence (`"a pandas DataFrame"` gives
+    `the body uses it as a pandas DataFrame`)."""
+    attributes: frozenset = frozenset()
+    methods: frozenset = frozenset()
+    keyed: frozenset = frozenset()
+    matmul: bool = False
+    described: str = ""
+
+    def supports(self, use: tuple) -> bool:
+        """Intent:
+            Whether the type supports one body use, `(form, name)`:
+            `("attr", name)` an attribute read (any declared name, a
+            method read without a call included), `("call", name)` a
+            method call (a method or a keyed method), `("keyed", name)`
+            a method call whose first argument is a string (a keyed
+            method only), `("@", "")` an operand of `@`.
+        """
+        form, name = use
+        if form == "attr":
+            return name in self.attributes | self.methods | self.keyed
+        if form == "call":
+            return name in self.methods | self.keyed
+        if form == "keyed":
+            return name in self.keyed
+        return form == "@" and self.matmul
+
+
 @runtime_checkable
 class RuntimeTypeAdapter(Protocol):
     """What a runtime type adapter provides.
@@ -46,7 +81,10 @@ class RuntimeTypeAdapter(Protocol):
     or returns `NotMine` for an object that is not its runtime type.
     An adapter may also state `ALIASES`, the module aliases its
     library is usually imported under (`{"pd": "pandas"}`), through
-    which an annotation's source text is read.
+    which an annotation's source text is read, and `USES`, a
+    `BodyUses` naming the uses of an unannotated parameter only its
+    type supports, by which such a parameter is drawn as its type in a
+    module that imports its library.
     """
     name: str
     kinds: frozenset
@@ -232,6 +270,14 @@ class NumpyAdapter:
     SPELLINGS = {"nan": (lambda: math.nan, _is_nan)}
     MISSING_MEMBERS = ("nan",)
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter only an array supports
+    USES = BodyUses(
+        attributes=frozenset({"T", "shape", "ndim", "size", "dtype"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "cumsum",
+            "cumprod", "round", "clip", "argmax", "argmin", "any", "all",
+            "dot", "astype", "reshape", "flatten", "ravel", "tolist"}),
+        matmul=True, described="a numpy array")
 
     def detect(self, annotation):
         text = _annotation_text(annotation)
@@ -303,6 +349,22 @@ class PandasSeriesAdapter:
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a Series supports and a
+    #: list does not
+    USES = BodyUses(
+        attributes=frozenset({"iloc", "loc", "values", "shape", "ndim",
+                              "size", "dtype", "T", "str", "dt"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "median",
+            "cumsum", "cumprod", "cummax", "cummin", "pct_change",
+            "dropna", "fillna", "rolling", "expanding", "ewm", "shift",
+            "diff", "quantile", "skew", "kurt", "kurtosis", "abs", "clip",
+            "round", "to_numpy", "tolist", "argmax", "argmin", "idxmax",
+            "idxmin", "any", "all", "dot", "nunique", "unique",
+            "value_counts", "rank", "sem", "cov", "corr", "isna", "notna",
+            "isnull", "notnull", "astype", "apply", "resample", "groupby",
+            "map"}),
+        matmul=True, described="a pandas Series")
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "Series", "vec")
@@ -332,6 +394,22 @@ class PandasDataFrameAdapter:
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a DataFrame supports and a
+    #: list does not; a keyed method takes a column name
+    USES = BodyUses(
+        attributes=frozenset({"iloc", "loc", "values", "columns", "shape",
+                              "ndim", "size", "dtypes", "T"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "median",
+            "cumsum", "cumprod", "cummax", "cummin", "pct_change",
+            "dropna", "fillna", "rolling", "expanding", "ewm", "shift",
+            "diff", "quantile", "skew", "kurt", "kurtosis", "abs", "clip",
+            "round", "to_numpy", "idxmax", "idxmin", "any", "all", "dot",
+            "nunique", "value_counts", "rank", "sem", "cov", "corr",
+            "isna", "notna", "isnull", "notnull", "astype", "apply",
+            "resample"}),
+        keyed=frozenset({"groupby", "sort_values", "set_index"}),
+        matmul=True, described="a pandas DataFrame")
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "DataFrame", "table")
@@ -412,6 +490,19 @@ class PolarsSeriesAdapter:
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a polars Series supports
+    #: and a list does not
+    USES = BodyUses(
+        attributes=frozenset({"shape", "dtype"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "product", "min", "max", "median",
+            "cum_sum", "cum_prod", "cum_max", "cum_min", "pct_change",
+            "drop_nulls", "fill_null", "fill_nan", "shift", "diff",
+            "quantile", "skew", "kurtosis", "abs", "clip", "round",
+            "to_numpy", "to_list", "arg_max", "arg_min", "any", "all",
+            "dot", "n_unique", "unique", "value_counts", "rank", "is_null",
+            "is_not_null", "is_nan", "cast", "len"}),
+        matmul=True, described="a polars Series")
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "Series", "vec")
@@ -444,6 +535,17 @@ class PolarsDataFrameAdapter:
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a polars DataFrame supports
+    #: and a list does not; a keyed method takes a column name
+    USES = BodyUses(
+        attributes=frozenset({"columns", "shape", "height", "width",
+                              "schema", "dtypes"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "min", "max", "median",
+            "to_numpy", "null_count", "describe", "with_columns", "head",
+            "tail"}),
+        keyed=frozenset({"group_by", "select", "drop", "get_column"}),
+        described="a polars DataFrame")
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "DataFrame", "table")

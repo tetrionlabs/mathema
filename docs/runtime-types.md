@@ -102,13 +102,46 @@ sampling note says what they were realised as (`as pandas.Series`).
 When the body uses a parameter as a vector, a matrix or a table (a
 method such as `.mean()` or `.std()`, `np.mean(x)`, `.T`, `@`,
 indexing, a column read by name) but the signature names no runtime
-type, how it is drawn depends on the use. A use only a numpy array
-supports (`.T`, `@`, `.shape`, a numpy function called on it), in a
-module that imports numpy, draws it as an ndarray, and the record says
-so ("the body uses it as a numpy array"). Any other such use draws it
-as a list, and in a module that imports numpy, pandas, polars or a
-library with a registered adapter the record names the runtime type
-to annotate:
+type, how it is drawn depends on the use. Each runtime type adapter
+declares the uses its type supports and a list does not: attributes
+(`.iloc`, `.columns`, `.shape`), methods (`.mean()`, `.dropna()`),
+methods called with a column name (`df.groupby("k")`), and `@`. When
+every such use in the body is one the types of exactly one library the
+module imports support, the parameter is drawn as that library's type,
+and the record says so ("the body uses it as a pandas DataFrame"). A
+library's Series and DataFrame both supporting the uses, the body's
+usage decides: a column read or a keyed method makes it the DataFrame,
+a vector use the Series. A use no imported library's type supports
+draws it as a list, and so do uses the types of two imported libraries
+both support; the record then names the runtime type to annotate, and
+in the second case each of them:
+
+<!-- example: rt-promote run inline requires=polars -->
+```python
+import numpy as np
+import pandas as pd
+import mathema
+
+
+def first_row_share(df):
+    totals = df.groupby("k")["v"].sum()
+    first = df.iloc[0]
+    return first["v"] / totals[first["k"]]
+
+
+def spread(xs):
+    return xs.max() - xs.min()
+
+
+mathema.analyze(first_row_share).runtime_types["df"][0].evidence  # 'the body uses it as a pandas DataFrame'
+mathema.analyze(spread).runtime_hints["xs"]["text"]  # 'xs is used as a vector; this module imports pandas and numpy, whose types both support that use: to sample it as one, annotate: xs: pd.Series or xs: np.ndarray'
+```
+
+In a module that imports pandas alone, `spread`'s `xs` is drawn as a
+pandas Series; with numpy alone, as an ndarray. When the body's uses
+are ones a list also serves (indexing, `np.mean(x)`), or ones no
+imported library's type supports, the hint names the runtime type of
+the library the module imports:
 
 <!-- illustration -->
 ```text
@@ -464,5 +497,9 @@ a plain number, or returns `NotMine`. An adapter may also state
 (`{"pd": "pandas"}` for the pandas adapters): an annotation's source
 text is read through them, and the hint for an undeclared parameter
 names the adapter's runtime type in a module that imports its library.
+It may state `USES`, a `mathema.runtime_types.BodyUses`, the body uses
+its type supports and a list does not, by which an unannotated
+parameter is drawn as its type ([The hint](#the-hint);
+[extending mathema](extending.md#runtime-type-adapters)).
 A built-in adapter wins a name clash, and an adapter that fails to
 load is skipped with a warning.

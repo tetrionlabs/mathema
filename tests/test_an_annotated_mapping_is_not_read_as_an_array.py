@@ -4,7 +4,8 @@
 when its module imports numpy or pandas and the body reads an attribute
 an array or a table also has (`order.values()`): the annotation decides
 the runtime type, never the attribute name. An unannotated parameter
-used as `x.values` in a numpy module is still read as an array."""
+used as `x.shape` in a numpy module is still read as an array; one used
+as `x.values`, which an array does not have, is not."""
 import os
 import sys
 
@@ -79,6 +80,13 @@ def test_an_annotated_list_calling_index_is_drawn_as_a_list():
                                               p.note)
 
 
-def test_an_unannotated_values_read_in_a_numpy_module_is_an_array():
-    facts = analyze_source(orders_numpy.unannotated_values)
+def test_an_unannotated_shape_read_in_a_numpy_module_is_an_array():
+    facts = analyze_source(orders_numpy.unannotated_shape)
     assert realised_parameters(facts)["x"].adapter == "numpy.ndarray"
+
+
+def test_an_unannotated_values_read_in_a_numpy_module_is_not_an_array():
+    # an array has no `.values`, so the use draws it as no array
+    facts = analyze_source(orders_numpy.unannotated_values)
+    assert "x" not in facts.runtime_types, facts.runtime_types
+    assert facts.runtime_hints["x"]["strong"]
