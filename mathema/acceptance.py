@@ -185,10 +185,13 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
                           route: "str | None", tolerance=None):
     """Intent:
         Dry-run one candidate corrected claim against the live
-        function, under `tolerance` when one is given: `(probe, None)`
-        when it adjudicated, `(None, reason)` when it could not run
-        (function unresolvable, statement rejected). Read-only; the plan
-        stays a true preview.
+        function, under `tolerance` when one is given, every line of it
+        (the claim's row and its computation row, `NAME[float]`):
+        `(probe, None)` when it adjudicated, the probe being the first
+        line that falsifies, else the first that neither holds nor is
+        proven, else the claim's own row; `(None, reason)` when it
+        could not run (function unresolvable, statement rejected).
+        Read-only; the plan stays a true preview.
     """
     from .conjecture import _resolve_func_ref, check_conjectures
     from .conjecture import claim as _claim
@@ -204,13 +207,20 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     try:
         cj = _claim(statement, name="corrected_candidate", route=base_route,
                     tolerance=tolerance)
-        probes = check_conjectures(fn, [cj])
+        probes = check_conjectures(fn, [cj], float_companions=True)
     except TimeoutError:
         raise
     except Exception as e:
         return None, f"the candidate could not be checked ({e})"
     if not probes:
         return None, "the candidate could not be checked"
+    bases = [classify_verdict(p.verdict) for p in probes]
+    for probe, base in zip(probes, bases):
+        if base == "falsified":
+            return probe, None
+    for probe, base in zip(probes, bases):
+        if base not in ("proven", "holds"):
+            return probe, None
     return probes[0], None
 
 
@@ -1100,19 +1110,22 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                 candidate, why_not = None, err
             else:
                 base_c = classify_verdict(probe.verdict)
+                line = (f" on its computation line {probe.name}"
+                        if "[" in (probe.name or "") else "")
                 if base_c == "falsified":
                     if stated:
                         raise AcceptanceError(
-                            f"--corrected {candidate!r} itself falsifies "
-                            f"(counterexample: {probe.counterexample}); a "
-                            "correction that is wrong too is never written")
+                            f"--corrected {candidate!r} itself falsifies"
+                            f"{line} (counterexample: "
+                            f"{probe.counterexample}); a correction that "
+                            "is wrong too is never written")
                     candidate, why_not = None, (
-                        f"{offered} falsifies too "
+                        f"{offered} falsifies too{line} "
                         f"(counterexample: {probe.counterexample})")
                 elif not stated and base_c not in ("proven", "holds"):
                     candidate, why_not = None, (
                         f"{offered} comes out "
-                        f"{probe.verdict!r}, not a holding verdict")
+                        f"{probe.verdict!r}{line}, not a holding verdict")
                 else:
                     c_verdict = probe.verdict
                     c_n = getattr(probe, "n", None)
