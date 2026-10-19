@@ -240,6 +240,13 @@ class Record:
                 # the statement it qualifies, with what a missing value
                 # of each parameter means
                 line = f"  {mark} {p.name}: {p.statement}"
+                if (p.route or "").endswith(":within_float64"):
+                    # every point run in float64: the count and the
+                    # largest delta beside the statement
+                    from .records import within_float64_words
+                    said = within_float64_words(p.meta)
+                    if said:
+                        line += f"  ({said})"
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"

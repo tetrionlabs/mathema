@@ -102,12 +102,14 @@ def label(s: Optional[str]) -> str:
 
 
 def test_s6_a_raise_at_the_listed_absence_is_recorded():
+    # sqrt(0.25) is read exactly as 1/2
     probe = run(sqrt_guarded, "for x in {0.25, None}, f(x) >= 0")
     assert probe.verdict == "proven", (probe.verdict, probe.note)
     assert probe.meta["mathema.missing"]["executed"]["x"] == {"None": "raised ValueError"}
 
 
 def test_s10_a_replaced_absence_is_proven():
+    # float(x) is the identity on the exact 1/4, and 0.0 is the exact 0
     assert run(zero_if_missing, "for x in {0.25, None}, f(x) >= 0").verdict == "proven"
 
 
@@ -117,6 +119,7 @@ def test_p2_every_member_raises_the_stated_exception():
 
 
 def test_p3_a_replacement_policy_is_proven():
+    # the replacement 0.0 is read as the exact 0 written
     assert run(zero_if_missing, "for x in {missing}, f(x) == 0").verdict == "proven"
 
 

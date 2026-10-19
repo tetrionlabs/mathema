@@ -5759,8 +5759,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 (external[name].get("provenance", name)
                  if name in external else name)
                 for name, _, ref in resolved if ref.verdict == "holds"]
+            within = [name for name, _, ref in resolved
+                      if (getattr(ref, "route", None) or "")
+                      .endswith(":within_float64")]
             if empirical:
                 verdict_cap = ("holds", ", ".join(empirical))
+            elif within:
+                # a proof capped at float64 caps what rests on it
+                verdict_cap = ("within_float64", ", ".join(within))
             discharged = lemmas
             assumption = None
         elif assumption is not None:
@@ -5823,12 +5829,23 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # whichever route reached it. Stated in the note and in
                 # meta, never applied silently.
                 capped_to, ref_name = _cap
-                probe.verdict = capped_to
-                probe.note = (f"{probe.note}; rests on {ref_name}, whose own "
-                              f"evidence is empirical (holds), capped to "
-                              f"{capped_to}").lstrip("; ")
-                probe.meta = {**(probe.meta or {}),
-                              "mathema.capped_by": ref_name}
+                if capped_to == "within_float64":
+                    if not (probe.route or "").endswith(":within_float64"):
+                        probe.route = f"{probe.route or 'derive'}:within_float64"
+                        probe.note = (f"{probe.note}; rests on {ref_name}, "
+                                      f"whose proof is capped at "
+                                      f"within_float64 (every point run in "
+                                      f"float64), so this proof is capped "
+                                      f"there too").lstrip("; ")
+                        probe.meta = {**(probe.meta or {}),
+                                      "mathema.capped_by": ref_name}
+                else:
+                    probe.verdict = capped_to
+                    probe.note = (f"{probe.note}; rests on {ref_name}, whose "
+                                  f"own evidence is empirical (holds), capped "
+                                  f"to {capped_to}").lstrip("; ")
+                    probe.meta = {**(probe.meta or {}),
+                                  "mathema.capped_by": ref_name}
             return probe
         if cj.route not in ("derive", "best", "probe", "examine"):
             out.append(_stamped(Probe(
@@ -5931,7 +5948,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
                 if grounded is not None and (derived is None
-                                             or derived.verdict != "proven"):
+                                             or derived.verdict not in
+                                             ("proven", "falsified")):
                     # a ground claim that holds at its own call and no
                     # symbolic proof covers: the call decides it
                     ctx.companion = None
@@ -6683,13 +6701,32 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         return None
     if exact is None:
         return None
+    return _exact_relation(cj, exact[0], exact[1])
+
+
+def _exact_relation(cj, left, right) -> "bool | None":
+    """Intent:
+        The claim's relation between two exact sides, decided exactly:
+        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
+        unless the claim declares a tolerance, a tolerance kind as the
+        whole allowance at each pair compared. A side sympy computed (a
+        root, a transcendental value of a body read exactly) is settled
+        symbolically (`_exact_side.decide_symbolic`), never under a
+        tolerance kind. None when the relation does not apply to the
+        values or sympy leaves it open.
+    """
+    from ._exact_side import decide_symbolic, is_symbolic_side
+    if is_symbolic_side(left) or is_symbolic_side(right):
+        if isinstance(cj.tolerance, ToleranceKind):
+            return None
+        return decide_symbolic(cj.relation, left, right, _exact_slack(cj))
     if isinstance(cj.tolerance, ToleranceKind):
         # a tolerance kind is the whole allowance at each pair compared,
         # the exact values decided exactly
-        return relation_within(exact[0], exact[1], cj.relation,
+        return relation_within(left, right, cj.relation,
                                cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
-        exact[0], exact[1], cj.relation, _exact_slack(cj),
+        left, right, cj.relation, _exact_slack(cj),
         exact_inequality=cj.tolerance is None, rel_tol=0.0)
 
 
@@ -8664,7 +8701,9 @@ def _provenance_meta(proof) -> dict:
                 "mathema.missing", "mathema.path_no_value",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
-                "mathema.corroboration_reason", "mathema.definitions"):
+                "mathema.corroboration_reason", "mathema.definitions",
+                "mathema.exact_witness", "mathema.sweep_inexact",
+                "mathema.sweep_precision"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -9571,6 +9610,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                      sketch=family_proof.sketch, note=note,
                      condition=family_proof.quantifier, route="derive",
                      meta=_provenance_meta(family_proof))
+    if family_proof is not None and family_proof.status == "disproven" \
+            and cj.relation in _COMPARISON_RELATIONS \
+            and not family_proof.meta.get("mathema.witness_executed"):
+        # a value claim's disproof needs an executed witness whatever
+        # the claim is named: it is decided as the same claim under any
+        # other name is, by the ordinary derive route and its
+        # corroboration
+        family_proof = None
     if family_proof is not None and family_proof.status == "disproven":
         return Probe(cj.name, statement, "falsified", route="derive",
                      sketch=family_proof.sketch,
@@ -9909,12 +9956,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # a language's own strategy decided it, named by the
             # mechanism it states
             route = f"derive:{mechanism or 'language'}"
-        elif mechanism == "brute_force":
+        elif mechanism is not None and mechanism.startswith("brute_force"):
             # a different kind of evidence from the wider symbolic
             # mechanisms, not a wider version of them: every point of a
             # finite region was visited. It gets its own subroute so a
-            # reader can tell the two apart at a glance.
-            route = "derive:brute_force"
+            # reader can tell the two apart at a glance;
+            # `brute_force:within_float64` names a sweep some point of
+            # which was decided in float64 only, and its sketch states
+            # the cap in the note
+            route = f"derive:{mechanism}"
+            if mechanism.endswith(":within_float64"):
+                note = f"{note}; {proof.sketch}".lstrip("; ")
         else:
             route = ("derive:extensive"
                     if mechanism is not None and mechanism != "domain_split"
@@ -9929,7 +9981,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
-        if route != "derive:brute_force":
+        if not route.startswith("derive:brute_force"):
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
                                             assumption or [], statement, note)
             if listed is not None:
@@ -9939,7 +9991,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # a derive proof is exact arithmetic; the computation is the
         # float companion's claim. A proof by executing every point of a
         # finite set already is the computation, and spawns none
-        if route != "derive:brute_force":
+        if not route.startswith("derive:brute_force"):
             _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
                                    assumption or [])
         return proven
@@ -9985,10 +10037,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         swept = _brute_force_fallback()
         if swept is not None:
             if swept.status == "proven":
+                mechanism = swept.meta.get("mathema.derive_route",
+                                           "brute_force")
+                capped = mechanism.endswith(":within_float64")
                 proven = Probe(cj.name, statement, "proven",
-                               sketch=swept.sketch, note=note,
+                               sketch=swept.sketch,
+                               note=(f"{note}; {swept.sketch}".lstrip("; ")
+                                     if capped else note),
                                condition=swept.quantifier,
-                               route="derive:brute_force",
+                               route=f"derive:{mechanism}",
                                meta=_provenance_meta(swept))
                 return proven
             if swept.status == "disproven":
@@ -9997,10 +10054,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                              counterexample=swept.counterexample, note=note,
                              meta=_provenance_meta(swept))
             if swept.meta.get("mathema.sweep_holds"):
+                # the disproof nothing reproduced stays flagged on the
+                # sweep that holds
+                flagged = {k: v for k, v in (gated.meta or {}).items()
+                           if k.startswith("mathema.corroboration")}
                 return Probe(cj.name, statement, "holds",
                              route="derive:brute_force", sketch=swept.sketch,
-                             note=f"{note + '; ' if note else ''}{swept.sketch}",
-                             meta=_provenance_meta(swept))
+                             note=f"{gated.note + '; ' if gated.note else ''}"
+                                  f"{swept.sketch}",
+                             meta={**_provenance_meta(swept), **flagged})
         # an unknown is superseded by real empirical evidence like any
         # other, stash the flagged report and fall through to the
         # probe stage; the uncorroborated meta rides on the stash so
@@ -10170,9 +10232,11 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
             f"routes attempted, {trail}; derive:brute_force: {verdict}")
         meta.update({k: v for k, v in (fallen.meta or {}).items()
                      if k.startswith("mathema.derive_") or k == "mathema.timeout"})
-        meta["mathema.derive_route"] = "brute_force"
+        meta["mathema.derive_route"] = proof.meta.get("mathema.derive_route",
+                                                      "brute_force")
+    mechanism = proof.meta.get("mathema.derive_route", "brute_force")
     return Probe(cj.name, ctx.statement, verdict,
-                 route="probe" if route == "probe" else "derive:brute_force",
+                 route="probe" if route == "probe" else f"derive:{mechanism}",
                  sketch=None if route == "probe" else proof.sketch,
                  note=note, meta=meta)
 
@@ -12308,6 +12372,10 @@ EVIDENCE_LADDER = (
     # and a mathematics-only proof with no float companion
     ("derive", "examine", "derive:brute_force", "derive:math_only"),
     ("derive:extensive",),
+    # every point of a finite region run in float64, some point with no
+    # exact value: nothing untried, a difference below the stated delta
+    # unseen
+    ("derive:brute_force:within_float64",),
     # A reserved, not-yet-built "numerical" evidence tier belongs here,
     # between derive:extensive and the informed-probing rung below,
     # a real numerical-methods engine (finite-difference/bisection with

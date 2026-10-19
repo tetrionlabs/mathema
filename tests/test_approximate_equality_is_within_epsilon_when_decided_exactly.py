@@ -59,6 +59,14 @@ def while_near(x: float) -> float:
     return x + 5e-10
 
 
+def while_near_exact(x: float) -> float:
+    # the exact gap x / 4000, at most 5e-10 over [0, 2e-6]
+    i = 0
+    while i < 3:
+        i += 1
+    return x + x / 4000
+
+
 def while_over(x: float) -> float:
     i = 0
     while i < 3:
@@ -159,6 +167,13 @@ _FINITE = "for x in {0, 1e-06, 2e-06}, f(x) ~= x"
 
 
 def test_a_finite_sweep_proves_a_gap_inside_epsilon():
+    p = _verdict(while_near_exact, _FINITE, "best")
+    assert p.verdict == "proven", (p.verdict, p.counterexample, p.note)
+    assert p.route == "derive:brute_force"
+
+
+def test_a_finite_sweep_proves_a_literal_gap_inside_epsilon():
+    # x + 5e-10 is read as x + 5/10^10: inside ε at every point
     p = _verdict(while_near, _FINITE, "best")
     assert p.verdict == "proven", (p.verdict, p.counterexample, p.note)
     assert p.route == "derive:brute_force"

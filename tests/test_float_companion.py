@@ -115,7 +115,10 @@ def test_an_integer_domain_reaches_the_code_as_an_int():
     # range(n) raises TypeError on a float; the domain says n is an
     # integer, so every executed point, corners included, is an int
     probes, _ = _check(count_up, "for n in {2, 3, 4}, f(n) == n")
-    assert probes["law"].verdict == "proven"
+    # no TypeError at any point; the total's literals 0.0 and 1.0 are
+    # read exactly, so the sweep proves
+    assert (probes["law"].verdict, probes["law"].route) == \
+        ("proven", "derive:brute_force"), probes["law"].note
     # every point of the finite set was executed: no companion
     assert "law[float]" not in probes
     probes, _ = _check(count_up, "for n in [2, 10] ⊂ Z, f(n) == n")

@@ -459,6 +459,9 @@ def _detail(p, count_words) -> str:
         gaps = [c for c in (p.note or "").split("; ") if _WITHIN.search(c)]
         return "; ".join([count_words(p.n, (p.meta or {}).get("mathema.drawn")),
                           *gaps])
+    if verdict == "proven" and (p.route or "").endswith(":within_float64"):
+        from .records import within_float64_words
+        return within_float64_words(p.meta)
     if verdict == "falsified" and p.counterexample:
         return f"counterexample {p.counterexample}"
     if verdict in ("unknown", "skipped") and p.note:

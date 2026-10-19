@@ -10,6 +10,14 @@ the claim at each is not sampling, it is a complete argument over the
 whole region the author declared, so it earns `proven` rather than
 `holds`.
 
+A proof is about the mathematics, so each point is decided exactly:
+the function run on the point's exact value (the number as written),
+the claim's literals exact, `==` as equality and `~=` within ε. The
+float computation's allowance belongs to the computation line, so a
+point where the float result passes within it while the exact value
+misses is a falsification, and a point where the function gives no
+exact value (a float it computed) leaves the sweep at holds.
+
 That distinction is the entire point of this module, and it rests on
 three things being true at once: the domain is genuinely finite (an
 integer-typed interval or a discrete set, never a real interval), the
@@ -28,6 +36,7 @@ from __future__ import annotations
 
 import itertools
 
+from ._exact_side import holds_number
 from ._exits import call, exception_name
 from .domain import _as_domain, _set_sentinels, finite_members
 from .probing import ExecutedMissing, LastCall, executed_missing, with_executed
@@ -169,13 +178,17 @@ class _Scope:
         """The subject a holding claim is then named by."""
         return "it" if self.kind == "claim" else "the claim"
 
+    def where(self) -> str:
+        """The swept region named by its source: `the claim's finite
+        scope`, `the function's finite domain`, or the two together."""
+        return {"claim": "the claim's finite scope",
+                "function": "the function's finite domain",
+                "both": "the claim's binding with the function's finite "
+                        "domain"}[self.kind]
+
     def quantifier(self, names: list, n: int) -> str:
         """The `∀` line of a proof over the swept points."""
-        where = {"claim": "the claim's finite scope",
-                 "function": "the function's finite domain",
-                 "both": "the claim's binding with the function's finite "
-                         "domain"}[self.kind]
-        return f"∀ {', '.join(names)} in {where} ({_points(n)})"
+        return f"∀ {', '.join(names)} in {self.where()} ({_points(n)})"
 
 
 def _holds_at(total: int, judged: list, scope: _Scope) -> str:
@@ -215,15 +228,256 @@ def _raised_at(fn, facts, point: dict) -> "str | None":
     return None
 
 
+def _exactly_at(cj, evaluate, point: dict) -> tuple:
+    """Intent:
+        `(holds, sides)`: the claim at `point` decided in exact
+        arithmetic (`conjecture._exact_relation`), its coordinates read
+        as written and the function run on those exact values
+        (`evaluate.exact_as_written`), under the fast wall-clock cap.
+        `(None, None)` when a side has no exact value there (a float
+        the function computed, a square root, a value that is not a
+        number) or the cap fires.
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _exact_relation
+    written = getattr(evaluate, "exact_as_written", None)
+    if written is None:
+        return None, None
+    try:
+        sides = _with_timeout(lambda: written(point), FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None, None
+    if sides is None:
+        return None, None
+    try:
+        held = _exact_relation(cj, sides[0], sides[1])
+    except (TypeError, ValueError, ArithmeticError):
+        return None, None
+    return held, (sides if held is not None else None)
+
+
+class _Precision:
+    """How far the floats of an exhaustive sweep missed the relation:
+    the largest delta over the points compared and the allowance applied
+    at that point (`gates` evaluate's `last_precision`, from
+    `_allowance.float_miss`), as the `mathema.sweep_precision` record:
+    `points` compared, `largest_delta`, `allowance`, `at` (the point of
+    the largest delta) and `representation` (`float64`)."""
+
+    def __init__(self):
+        self.points = 0
+        self.miss = None
+        self.allowance = None
+        self.at = None
+
+    def add(self, measured, where) -> None:
+        """Count a point's `(miss, allowance)`, `where` its text or a
+        callable giving it; None (no numbers compared) counts nothing."""
+        if measured is None:
+            return
+        gap, allowance = measured
+        self.points += 1
+        if self.miss is None or gap > self.miss:
+            self.miss, self.allowance = gap, allowance
+            self.at = where() if callable(where) else where
+
+    def meta(self) -> dict:
+        if self.points == 0:
+            return {}
+        return {"mathema.sweep_precision": {
+            "points": self.points, "largest_delta": self.miss,
+            "allowance": self.allowance, "at": self.at,
+            "representation": "float64"}}
+
+    def capped_words(self, where: str, n: int, point: str, call: str) -> str:
+        """Intent:
+            The sketch of a sweep proven within float64, stating the cap
+            for a reader downstream: every point of `where` (`n` points)
+            ran in float64 and the claim held at each, the largest delta
+            against its allowance, and the `point` (its `call`) that
+            could not be computed exactly, below which delta a
+            difference would not show.
+        """
+        from .records import delta_text
+        delta = delta_text(self.miss)
+        # with no delta shown, what would not show is anything below
+        # float64's own resolution at these values
+        below = (f"below {delta}" if self.miss else
+                 "below float64's resolution at these values")
+        return (f"every point of {where} ({_points(n)}) was run in float64 "
+                f"and the claim held at each; the largest delta was {delta} "
+                f"against an allowance of {delta_text(self.allowance)}. The "
+                f"value at {point} could not be computed exactly ({call}), "
+                f"so this proof is capped at within_float64: a difference "
+                f"{below} would not show")
+
+
+def _call_words(fn, facts, point: dict) -> str:
+    """The call at a point as written, `lib(2)`, each argument by its
+    parameter's order."""
+    from .probing import _fmt_coordinate, _fmt_value
+
+    def shown(v):
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    name = getattr(facts, "name", None) or getattr(fn, "__name__", "f")
+    args = [shown(point[p]) for p in facts.params if p in point]
+    return f"{name}({', '.join(args)})"
+
+
+def _exact_text(value) -> str:
+    """An exact value as text: an integer or a ratio (`1/2`), a list
+    of them in brackets, a bool as itself."""
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_exact_text(v) for v in value) + "]"
+    return str(value)
+
+
+def _exact_witness_words(at: str, sides, computed) -> dict:
+    """Intent:
+        The record of a point where the claim is false in exact
+        arithmetic: `at` (the point), `reading` (`mathematics`: the
+        function run on the point's exact values), `exact` (the two
+        sides exactly, `20000001/40000000 vs 1/2`) and `computed` (the
+        two sides the float computation gave there).
+    """
+    from .probing import _fmt_coordinate, _fmt_value
+
+    def shown(v):
+        # every digit a float holds: the two sides may differ in the
+        # last of them
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    left, right = computed if computed is not None else (None, None)
+    return {"at": at, "reading": "mathematics",
+            "exact": f"{_exact_text(sides[0])} vs {_exact_text(sides[1])}",
+            "computed": f"{shown(left)} vs {shown(right)}"}
+
+
+def _inexact_words(inexact: list, names: list) -> str:
+    """Where the claim could not be decided exactly, in words: `at x =
+    1 the function's value cannot be computed exactly`, with a count of
+    the other such points."""
+    from .gates import _fmt_point
+    first = _fmt_point(inexact[0], names)
+    others = len(inexact) - 1
+    more = ("" if others == 0 else
+            f" (nor at {others} other point{'s' if others != 1 else ''})")
+    return f"at {first} the claim's value cannot be computed exactly{more}"
+
+
+def _exact_lhs(code, point: dict, fn, bound: dict):
+    """Intent:
+        The membership claim's left side at `point` in exact arithmetic:
+        the point's coordinates read as written, f and the claim's bound
+        functions run on those exact values, under the fast wall-clock
+        cap. None when the value is not exact there or the cap fires.
+    """
+    from ._exact_side import exact_sides
+    from ._exact_body import exact_callee
+    from ._math_vocab import MATH_CONSTANTS
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _SAFE_FUNCS
+    from .gates import _written_exactly
+    env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
+           **{n: _written_exactly(v) for n, v in point.items()}}
+    # each body read exactly; a body the reading cannot follow
+    # faithfully refuses the point
+    callees = {"f": exact_callee(fn),
+               **{n: exact_callee(v) for n, v in bound.items()}}
+    try:
+        sides = _with_timeout(
+            lambda: exact_sides(code, None, env, callees,
+                                exact_calls=True, opaque_results=True),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    return None if sides is None else sides[0]
+
+
+def _exact_member(value, bound) -> "bool | None":
+    """Intent:
+        Whether the exact `value` (an int or Fraction, or a nested list
+        of them for a space) is a member of the domain `bound`, each
+        listed member and interval end read as written: a finite set
+        by equality, an interval by its ends, a `Z` or `N` type by
+        integrality (and sign), an excluded value never. None when the
+        membership cannot be decided exactly (a value that is not a
+        real number, a complex, language or string domain, a piece that
+        is not a set or an interval).
+    """
+    import dataclasses
+    import math
+    from fractions import Fraction
+
+    from ._exact_witness import Undecided, in_bound
+    from .domain import _as_domain, _sentinel_piece
+    dom = _as_domain(bound)
+    if dom.dims:
+        leaves: list = []
+
+        def collect(v):
+            if isinstance(v, (list, tuple)):
+                for u in v:
+                    collect(u)
+            else:
+                leaves.append(v)
+        collect(value)
+        element = dataclasses.replace(dom, dims=())
+        said = [_exact_member(v, element) for v in leaves]
+        return None if any(s is None for s in said) else all(said)
+    if dom.base_type not in ("R", "Z", "N"):
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, Fraction)):
+        return None
+    q = Fraction(value)
+
+    def written(m):
+        if isinstance(m, bool) or not isinstance(m, (int, float)):
+            return None
+        if isinstance(m, float):
+            return Fraction(repr(m)) if math.isfinite(m) else None
+        return Fraction(m)
+    if any(written(m) == q for m in dom.excluded):
+        return False
+    if dom.base_type in ("Z", "N") and q.denominator != 1:
+        return False
+    if dom.base_type == "N" and q < 0:
+        return False
+    if not dom.pieces:
+        return True
+    pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
+    if not pieces:
+        return None
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            if any(isinstance(m, complex) for m in piece):
+                return None
+            if any(written(m) == q for m in piece):
+                return True
+        elif isinstance(piece, tuple) and len(piece) == 2:
+            try:
+                if in_bound(q, piece):
+                    return True
+            except Undecided:
+                return None
+        else:
+            return None
+    return False
+
+
 def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                       resolution: "dict | None"):
     """Intent:
         The sweep of a membership claim (`f(x) in {missing}`) over a
         finite domain: the value at every point is tested against the
-        right-hand side, a missing value by its kind. `proven` when each
-        point agrees with the relation, `disproven` at the first that
-        does not, None when the domain is not finite or a point's value
-        cannot be computed.
+        right-hand side, a missing value by its kind, a number by its
+        float value and then by its exact value (`_exact_lhs`,
+        `_exact_member`). `proven` when each point agrees with the
+        relation exactly, `disproven` at the first that does not in
+        floats, or else at the first whose exact value answers the
+        other way (`mathema.exact_witness`); `undecided` with
+        `mathema.sweep_holds` and `mathema.sweep_inexact` when the
+        floats agree but some value has no exact reading; None when the
+        domain is not finite or a point's value cannot be computed.
     """
     from .conjecture import _SAFE_FUNCS, _membership_member
     from ._math_vocab import MATH_CONSTANTS
@@ -238,8 +492,17 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
         code = compile(cj.lhs, "<membership>", "eval")
     except SyntaxError:
         return None
+    from .probing import holds_nan
     wanted = cj.relation == "in"
     checked = 0
+    # the points whose value could not be computed exactly, and the
+    # first point whose exact value answers the membership the other
+    # way from its float value
+    inexact: list = []
+    exact_miss = None
+    # a float value is a member by exact equality: the floats miss by
+    # nothing, under no allowance
+    precision = _Precision()
     executed, f_call = ExecutedMissing(), LastCall()
     from .probing import parameter_defaults
     f_call.defaults = parameter_defaults(fn)
@@ -277,9 +540,64 @@ def _membership_proof(cj, fn, facts, cj_domain, bound_funcs, budget: int,
                                     "mathema.witness_executed": True}, executed))
         checked += 1
         last = point
+        if not holds_number(value) or holds_nan(value):
+            # a missing value is tested by its kind, a value that is not
+            # a number by its own equality: both exact
+            continue
+        precision.add((0.0, 0.0), where)
+        # the float value agrees; the claim is decided at the point's
+        # exact value
+        exact = _exact_lhs(code, point, fn, bound)
+        member = None if exact is None else _exact_member(exact, cj.rhs_bound)
+        if member is None:
+            inexact.append(point)
+        elif member != wanted and exact_miss is None:
+            exact_miss = (point, exact, value)
     if checked == 0:
         return None
     is_in = _membership_words(cj.rhs, wanted)
+    if exact_miss is not None:
+        point, exact, value = exact_miss
+        where = _fmt_point(point, names)
+        exact_is = (f"{_exact_text(exact)} is {'not ' if wanted else ''}"
+                    f"in {cj.rhs}")
+        return ProofResult(
+            "disproven",
+            sketch=(f"at {where} the value is {_exact_text(exact)} in exact "
+                    f"arithmetic, which is {'not ' if wanted else ''}in "
+                    f"{cj.rhs}; the float computation's value {value!r} "
+                    f"{is_in}"),
+            counterexample=(f"{where}: {value!r} {is_in} in float, but "
+                            f"false here in exact arithmetic ({exact_is})"),
+            witness=dict(point),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid),
+                                "mathema.witness_executed": True,
+                                "mathema.exact_witness": {
+                                    "at": where, "reading": "mathematics",
+                                    "exact": exact_is,
+                                    "computed": f"{value!r} {is_in}",
+                                    "computation":
+                                        "holds within its allowance"}},
+                               executed))
+    if inexact:
+        # every point ran and the float value is a member at each; a
+        # point with no exact value caps the proof at float64
+        scope = _Scope(cj, names)
+        return ProofResult(
+            "proven",
+            sketch=precision.capped_words(
+                scope.where(), checked, _fmt_point(inexact[0], names),
+                _call_words(fn, facts, inexact[0])),
+            quantifier=scope.quantifier(names, checked),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                **_tried(grid),
+                                "mathema.sweep_inexact": {
+                                    "points": len(inexact),
+                                    "first": _fmt_point(inexact[0], names)},
+                                **precision.meta()},
+                               executed))
     return ProofResult(
         "proven",
         sketch=(f"at the only point, {_point_words(last)}, f({names[0]}) {is_in}"
@@ -384,8 +702,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         small enough to visit entirely, or `None` when the claim is not
         a candidate for this route at all.
 
-        `proven` when every admitted point satisfies the claim,
-        `disproven` with the witnessing point when one does not.
+        `proven` when every admitted point satisfies the claim exactly:
+        the float evaluation agrees there, and so does the claim decided
+        in exact arithmetic (`_exactly_at`: the point read as written,
+        the function run on its exact values), unless neither side holds
+        a number. `disproven` with the witnessing point when the float
+        evaluation fails at one, or when one is false in exact
+        arithmetic while the float computation agrees there within its
+        allowance (`mathema.exact_witness` records it). `undecided` with
+        `mathema.sweep_holds` and `mathema.sweep_inexact` when every
+        point agrees in floats but some point has no exact value, a
+        float the function computed for one: the computation holds,
+        and nothing proves the mathematics.
 
     Raises:
         Nothing. A claim this route cannot decide comes back `None` and
@@ -457,6 +785,13 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     checked = 0
     total = 0
     judged: list = []
+    # the points the claim could not be decided at exactly, and the
+    # first point it is false at exactly while the float computation
+    # agrees within its allowance
+    inexact: list = []
+    exact_miss = None
+    # how far the floats missed over the points compared
+    precision = _Precision()
     for point in (plan.points if plan is not None else
                   (dict(zip(names, combo))
                    for combo in itertools.product(*(grid[n] for n in names)))):
@@ -475,6 +810,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             return None
         if verdict is False:
             raised = _raised_at(fn, facts, point)
+            also: dict = ({"mathema.exact_witness": {
+                **exact_miss[2], "computation":
+                    f"fails at {_fmt_point(point, names)}"}}
+                    if exact_miss is not None else {})
             return ProofResult(
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
@@ -491,7 +830,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 meta=with_executed(
                     {"mathema.derive_route": "brute_force",
                      "mathema.witness_executed": True, **_tried(grid),
-                     **counted,
+                     **counted, **also,
                      # a value a listed sentinel stands for is only
                      # reproduced by calling with that same value
                      **({"mathema.witness_executed": True}
@@ -500,6 +839,40 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                     executed_missing(deps)))
         checked += 1
         judged.append(point)
+        precision.add(evaluate.last_precision(),
+                      lambda: _fmt_point(point, names))
+        if not holds_number(evaluate.sides()):
+            # sides with no number in them (a string, a bool, a missing
+            # value) were compared by their own equality, which is exact
+            continue
+        said, sides = _exactly_at(cj, evaluate, point)
+        if said is None:
+            inexact.append(point)
+        elif said is False and exact_miss is None:
+            exact_miss = (point, sides, _exact_witness_words(
+                _fmt_point(point, names), sides, evaluate.sides()))
+    if exact_miss is not None:
+        point, _sides, witness = exact_miss
+        where = ("found by checking every point of a finite domain"
+                 if plan is None else
+                 f"found among the points run {plan.coverage.words(checked)}")
+        return ProofResult(
+            "disproven",
+            sketch=(f"the claim is false at {witness['at']} in exact "
+                    f"arithmetic ({witness['exact']}), {where}; the float "
+                    f"computation agrees at every point run, within its "
+                    f"allowance"),
+            counterexample=(f"{witness['at']}: {witness['computed']}, within "
+                            f"the float tolerance but false here in exact "
+                            f"arithmetic ({witness['exact']})"),
+            witness=dict(point),
+            meta=with_executed(
+                {"mathema.derive_route": "brute_force",
+                 "mathema.witness_executed": True, **_tried(grid),
+                 **counted,
+                 "mathema.exact_witness": {
+                     **witness, "computation": "holds within its allowance"}},
+                executed_missing(deps)))
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
         # clean pass over no points proves nothing while looking like a
@@ -512,6 +885,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             sketch=f"the domain sweep ran part of the domain "
                    f"{plan.coverage.words(checked)}",
             meta={"mathema.sweep_partial": plan.coverage.words(checked)})
+    no_exact = ({"mathema.sweep_inexact": {
+        "points": len(inexact), "first": _fmt_point(inexact[0], names)},
+        **precision.meta()} if inexact else {})
     if unexamined is not None:
         return ProofResult(
             "undecided",
@@ -520,7 +896,21 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                     f"pure: {unexamined}"),
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.sweep_holds": True, **_tried(grid),
-                                **counted},
+                                **counted, **no_exact},
+                               executed_missing(deps)))
+    if inexact:
+        # every point ran and the claim held at each in float64; a point
+        # with no exact value caps the proof at float64
+        scope = _Scope(cj, names)
+        return ProofResult(
+            "proven",
+            sketch=precision.capped_words(
+                scope.where(), total, _fmt_point(inexact[0], names),
+                _call_words(fn, facts, inexact[0])) + outside,
+            quantifier=scope.quantifier(names, total),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                **_tried(grid), **counted, **no_exact},
                                executed_missing(deps)))
     return ProofResult(
         "proven",
@@ -601,9 +991,12 @@ def ground_proof(cj, fn, facts, bound_funcs):
         and calls f only at literal arguments (`f(nan) == 0`, `f([]) ==
         0`): the claim evaluated once, at its own calls. `disproven`
         when it fails there, the calls as the witness (`x = nan: raised
-        ValueError`, `xs = []: 0.0 vs 1`); `proven` when it holds and
+        ValueError`, `xs = []: 0.0 vs 1`), or when it is false there in
+        exact arithmetic while the float computation agrees
+        (`mathema.exact_witness`); `proven` when it holds exactly and
         the function is shown pure; `undecided` with
-        `mathema.sweep_holds` when it holds but purity is not shown.
+        `mathema.sweep_holds` when it holds but purity is not shown, or
+        when its value has no exact reading (`mathema.sweep_inexact`).
         None when the claim is not ground or the evaluation cannot
         decide it.
 
@@ -649,14 +1042,54 @@ def ground_proof(cj, fn, facts, bound_funcs):
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.witness_executed": True},
                                executed_missing(deps)))
+    computed = evaluate.sides()
+    said, sides = ((None, None) if not holds_number(computed)
+                   else _exactly_at(cj, evaluate, {}))
+    if said is False:
+        found = _exact_witness_words(witness, sides, computed)
+        return ProofResult(
+            "disproven",
+            sketch=(f"the claim is false at its own call, {witness}, in "
+                    f"exact arithmetic ({found['exact']}); the float "
+                    f"computation agrees there within its allowance"),
+            counterexample=(f"{witness}: {found['computed']}, within the "
+                            f"float tolerance but false here in exact "
+                            f"arithmetic ({found['exact']})"),
+            witness={},
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.witness_executed": True,
+                                "mathema.exact_witness": {
+                                    **found, "computation":
+                                        "holds within its allowance"}},
+                               executed_missing(deps)))
     sketch = f"the claim holds at its own call, {witness}"
+    inexact = said is None and holds_number(computed)
+    precision = _Precision()
+    if inexact:
+        precision.add(evaluate.last_precision(), witness)
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:
         return ProofResult(
             "undecided",
             sketch=(f"{sketch}; proven needs the function to be shown "
                     f"pure, and one call says nothing about the next"),
             meta=with_executed({"mathema.derive_route": "brute_force",
-                                "mathema.sweep_holds": True},
+                                "mathema.sweep_holds": True,
+                                **({"mathema.sweep_inexact": {
+                                        "points": 1, "first": witness},
+                                    **precision.meta()} if inexact else {})},
+                               executed_missing(deps)))
+    if inexact:
+        # the call ran and the claim held in float64; its value has no
+        # exact reading, so the proof is capped at float64
+        return ProofResult(
+            "proven",
+            sketch=precision.capped_words("the claim's own call", 1, witness,
+                                          witness),
+            meta=with_executed({"mathema.derive_route":
+                                    "brute_force:within_float64",
+                                "mathema.sweep_inexact": {
+                                    "points": 1, "first": witness},
+                                **precision.meta()},
                                executed_missing(deps)))
     return ProofResult(
         "proven", sketch=sketch,
@@ -706,10 +1139,12 @@ def _sweep_plan(cj, fn, facts, names, grid, deps):
     trial = points[::max(1, len(points) // 5)][:5]
     started = time.perf_counter()
     for pt in trial:
+        # a point's cost is its float evaluation and its exact one
         try:
             deps["evaluate"](pt)
         except Exception:
             pass
+        _exactly_at(cj, deps["evaluate"], pt)
     per_point = (time.perf_counter() - started) / max(1, len(trial))
     if per_point * len(points) <= _SWEEP_SECONDS:
         return None
