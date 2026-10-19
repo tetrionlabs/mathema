@@ -22,8 +22,10 @@ definiteness), which have no cheap pure-Python form and decline
 runtime dependency of mathema, only a fast path when present. A value
 that is a single Python number is read the same way in both cases:
 `is_finite` holds when it is neither an infinity nor a NaN (for a
-complex number, both parts), and `is_real` holds for an int or a float
-and not for a complex.
+complex number, both parts), and a bool is a finite real number.
+`is_real` reads the value, not its type: a complex number with a zero
+imaginary part is real, and a vector or matrix is real when every
+entry is.
 
 The hierarchy `level` names, cheapest first, is the taxonomy the whole
 feature is organised around:
@@ -37,6 +39,7 @@ feature is organised around:
 from __future__ import annotations
 
 import cmath
+import math
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -88,9 +91,9 @@ _TOL = 1e-9
 
 
 def _number(v) -> bool:
-    """Whether `v` is a Python number: an int, a float or a complex,
-    a bool excluded."""
-    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+    """Whether `v` is a Python number: an int (a bool included), a
+    float or a complex."""
+    return isinstance(v, (int, float, complex))
 
 
 def _entries(m) -> "list | None":
@@ -112,7 +115,10 @@ def _entries(m) -> "list | None":
 def _check_finite(m) -> "bool | None":
     """Whether every entry of `m` is finite. A single Python number is
     finite when it is neither an infinity nor a NaN, a complex one
-    when both its real and imaginary parts are; an int always is."""
+    when both its real and imaginary parts are; an int (a bool
+    included) always is. Without numpy, a vector or matrix of real
+    Python numbers is read entry by entry, and one holding a complex
+    entry is undecided, as it is with numpy."""
     if _number(m):
         return True if isinstance(m, int) else cmath.isfinite(m)
     np = _numpy()
@@ -122,36 +128,39 @@ def _check_finite(m) -> "bool | None":
         except (ValueError, TypeError):
             return None
         return bool(np.isfinite(arr).all())
-    rows = _as_rows(m)
-    if rows is None:
-        # a 1-D numeric sequence is still finite-checkable
-        if isinstance(m, (list, tuple)) and m and all(
-                not isinstance(v, bool) and isinstance(v, (int, float))
-                for v in m):
-            return all(v == v and abs(v) != float("inf") for v in m)
+    entries = _entries(m)
+    if entries is None or any(isinstance(v, complex) for v in entries):
         return None
-    return all(v == v and abs(v) != float("inf") for row in rows for v in row)
+    return all(isinstance(v, int) or math.isfinite(v) for v in entries)
 
 
 def _check_real(m) -> "bool | None":
-    """Whether `m` holds no complex entry. A single Python number is
-    real when it is an int or a float and not when it is a complex
-    (`1 + 0j` included, as numpy's complex dtype reads it); a vector
-    or matrix of Python numbers is real when none of its entries is a
-    complex."""
+    """Whether every entry of `m` is a real number, read by value: an
+    int (a bool included) or a float is real, and a complex number is
+    real when its imaginary part is zero (`1 + 0j` is, `1 + 2j` and
+    `complex(0, nan)` are not). A vector or matrix is real when every
+    entry is."""
     if _number(m):
-        return not isinstance(m, complex)
+        return _real_value(m)
     np = _numpy()
     if np is not None:
         try:
             arr = np.asarray(m)
         except (ValueError, TypeError):
             return None
-        return not np.iscomplexobj(arr)
+        if not np.iscomplexobj(arr):
+            return True
+        return bool((arr.imag == 0).all())
     entries = _entries(m)
     if entries is None:
         return None
-    return not any(isinstance(v, complex) for v in entries)
+    return all(_real_value(v) for v in entries)
+
+
+def _real_value(v) -> bool:
+    """Whether the Python number `v` is real: not a complex, or a
+    complex with a zero imaginary part."""
+    return not isinstance(v, complex) or v.imag == 0
 
 
 def _pairwise(m, rel) -> "bool | None":
