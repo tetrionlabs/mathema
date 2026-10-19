@@ -646,13 +646,6 @@ _TYPE_PROBE_TRIALS = 32   # default sample count for a Shape-derived probe,
                          # battery of algebraic laws needing broad coverage
 
 
-_SHAPE_MISMATCH_TRIALS = 3   # per shared dim, domain_enforced-sized, not the
-                            # full adaptive battery: this checks one specific
-                            # guard, the same scale as domain_enforced's own
-                            # fixed n=2 boundary check, not a law needing
-                            # broad coverage
-
-
 def _call(fn, sig, args: dict):
     return fn(**args) if all(p in sig.parameters for p in args) \
         else fn(*[args[p] for p in sig.parameters if p in args])
@@ -764,6 +757,19 @@ def _admits_zero(dims: tuple, dim) -> bool:
     return all(d != dim for d in dims[:-1])
 
 
+def _wrong_sizes(fixed: int, last_axis: bool) -> list:
+    """Intent:
+        The wrong sizes `size_enforced` tries on an axis a marker fixes
+        at `fixed`: one, two and three larger, one smaller, 1 (where
+        numpy broadcasts) and 0. Zero only on a vector or a matrix's
+        last axis, where nested lists keep the shape it has (a matrix
+        with no rows has lost its column count).
+    """
+    sizes = (fixed + 1, fixed + 2, fixed + 3, fixed - 1, 1, 0)
+    return [w for w in dict.fromkeys(sizes)
+            if w != fixed and w >= (0 if last_axis else 1)]
+
+
 def _returns_in_shape(fn, sig, param_dims: dict, names: tuple,
                       rng: random.Random, fixed: "dict | None") -> bool:
     """Whether one call at consistent, in-shape arguments returns: the
@@ -794,8 +800,9 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                          rng: random.Random, marker_dims: dict,
                          fixed: "dict | None" = None) -> Probe | None:
     """Does the real function reject a value of the wrong FIXED size (a
-    parameter marked `Mat(30, 15)` called with one axis a little
-    larger), the fixed-size counterpart of `_dimensions_enforced_probe`.
+    parameter marked `Mat(30, 15)` called with one axis larger, smaller,
+    at 1 or at 0, `_wrong_sizes`), the fixed-size counterpart of
+    `_dimensions_enforced_probe`.
     Only a size a MARKER states (`marker_dims`, the signature's own
     shapes) is asked about: a size stated only by a claim's binding is
     the declared `excluded_outside_domain(p)` claim's question. Every
@@ -816,18 +823,18 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                      note="no evaluable inputs: no call at consistent "
                           "shapes returned")
     rejected, checked = 0, 0
-    # the wrong sizes each parameter accepted, distinct, so the witness
-    # shows the smallest and the largest tried
+    # the wrong sizes each parameter accepted, per axis
     accepted: dict = {}
     for p, axes in targets.items():
+        dims = param_dims[p]
         for axis in axes:
-            for _ in range(_SHAPE_MISMATCH_TRIALS):
+            for wrong in _wrong_sizes(dims[axis], axis == len(dims) - 1):
                 sizes = {n: rng.randint(1, 4) for n in names}
                 sizes.update(fixed or {})
-                bumped = tuple(d + 1 + rng.randint(0, 2) if k == axis else d
-                               for k, d in enumerate(param_dims[p]))
-                args = {q: _synth_nested(bumped if q == p else dims, sizes, rng)
-                        for q, dims in param_dims.items()}
+                bumped = tuple(wrong if k == axis else d
+                               for k, d in enumerate(dims))
+                args = {q: _synth_nested(bumped if q == p else q_dims, sizes, rng)
+                        for q, q_dims in param_dims.items()}
                 checked += 1
                 try:
                     result = _call(fn, sig, args)
@@ -839,16 +846,18 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                     continue
                 tried = tuple(sizes[d] if isinstance(d, str) else d
                               for d in bumped)
-                accepted.setdefault(p, set()).add(tried)
+                accepted.setdefault((p, axis), []).append(tried)
     if rejected == checked:
         return Probe("size_enforced", stmt, "holds", n=checked)
+    # one witness per axis that accepted a wrong size: the size farthest
+    # from the fixed one, the larger on a tie
     examples = []
-    for p, sizes_tried in accepted.items():
-        ordered = sorted(sizes_tried)
-        for tried in dict.fromkeys((ordered[0], ordered[-1])):
-            examples.append(
-                f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
-                f"where the shape fixes {expected(param_dims[p])}")
+    for (p, axis), sizes_tried in accepted.items():
+        want = param_dims[p][axis]
+        tried = max(sizes_tried, key=lambda t: (abs(t[axis] - want), t[axis]))
+        examples.append(
+            f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
+            f"where the shape fixes {expected(param_dims[p])}")
     return Probe("size_enforced", stmt, "falsified", n=checked,
                  counterexample="; ".join(examples),
                  note="silently accepting a wrong fixed size violates the "

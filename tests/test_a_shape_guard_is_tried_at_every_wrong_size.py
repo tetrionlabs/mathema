@@ -95,3 +95,62 @@ def test_every_parameter_is_tried_up_down_at_one_and_at_the_other_dimension():
     assert any(w == k for w, n, k in w_wrong), _TRIED
     # the matrix carrying n is the wrong one as well, not only the vector
     assert any(n == 1 and w > 1 for w, n, _k in w_wrong), _TRIED
+
+
+# --- a fixed size ------------------------------------------------------
+
+def head_sum(v: Vec(3)) -> float:
+    if len(v) > 3:
+        raise ValueError("at most three entries")
+    return float(sum(v))
+
+
+def first_two(v: Vec(3)) -> float:
+    if len(v) > 3:
+        raise ValueError("at most three entries")
+    return float(v[0] + v[1])
+
+
+@pytest.mark.parametrize("fn, smallest", [(head_sum, 0), (first_two, 2)],
+                         ids=lambda v: getattr(v, "__name__", str(v)))
+def test_a_fixed_size_accepted_smaller_is_found(fn, smallest):
+    row = _row(fn, "size_enforced")
+    assert row.verdict == "falsified", (row.verdict, row.n, row.note)
+    m = re.search(r"v has length (\d+) where the shape fixes length 3",
+                  row.counterexample or "")
+    assert m and int(m.group(1)) < 3, row.counterexample
+    assert f"v has length {smallest} " in row.counterexample, \
+        row.counterexample
+
+
+def exact_three(v: Vec(3)) -> float:
+    if len(v) != 3:
+        raise ValueError("exactly three entries")
+    return float(sum(v))
+
+
+def test_a_function_that_refuses_every_wrong_fixed_size_holds():
+    row = _row(exact_three, "size_enforced")
+    assert row.verdict == "holds", (row.verdict, row.counterexample)
+
+
+_SIZES: list = []
+
+
+def recording_grid(A: Mat(4, 3)) -> float:
+    _SIZES.append((len(A), len(A[0]) if A else None))
+    if len(A) != 4 or any(len(r) != 3 for r in A):
+        raise ValueError("expected 4 by 3")
+    return 0.0
+
+
+def test_each_fixed_axis_is_tried_larger_smaller_and_at_zero():
+    _SIZES.clear()
+    row = _row(recording_grid, "size_enforced")
+    assert row.verdict == "holds", (row.verdict, row.counterexample)
+    rows = {r for r, c in _SIZES if c == 3}
+    cols = {c for r, c in _SIZES if r == 4}
+    assert {5, 3, 1} <= rows, sorted(rows)
+    assert {4, 2, 1, 0} <= cols, sorted(cols)
+    # a matrix with no rows has no column count to keep: never drawn
+    assert (0, None) not in _SIZES, _SIZES
