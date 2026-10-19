@@ -19,7 +19,11 @@ place. The checks are numpy-fast when numpy is importable and fall
 back to pure Python otherwise, except the spectral ones (eigenvalues,
 definiteness), which have no cheap pure-Python form and decline
 (`None`) rather than compute an unsound answer. numpy is not a
-runtime dependency of mathema, only a fast path when present.
+runtime dependency of mathema, only a fast path when present. A value
+that is a single Python number is read the same way in both cases:
+`is_finite` holds when it is neither an infinity nor a NaN (for a
+complex number, both parts), and `is_real` holds for an int or a float
+and not for a complex.
 
 The hierarchy `level` names, cheapest first, is the taxonomy the whole
 feature is organised around:
@@ -32,6 +36,7 @@ feature is organised around:
 """
 from __future__ import annotations
 
+import cmath
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -82,7 +87,34 @@ def _square(rows: list) -> bool:
 _TOL = 1e-9
 
 
+def _number(v) -> bool:
+    """Whether `v` is a Python number: an int, a float or a complex,
+    a bool excluded."""
+    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+
+
+def _entries(m) -> "list | None":
+    """The entries of a non-empty vector, or of a rectangular matrix
+    with at least one column, whose entries are all Python numbers;
+    None for any other value."""
+    if not isinstance(m, (list, tuple)) or not m:
+        return None
+    if all(isinstance(row, (list, tuple)) for row in m):
+        width = len(m[0])
+        if not width or any(len(row) != width for row in m):
+            return None
+        flat = [v for row in m for v in row]
+    else:
+        flat = list(m)
+    return flat if all(_number(v) for v in flat) else None
+
+
 def _check_finite(m) -> "bool | None":
+    """Whether every entry of `m` is finite. A single Python number is
+    finite when it is neither an infinity nor a NaN, a complex one
+    when both its real and imaginary parts are; an int always is."""
+    if _number(m):
+        return True if isinstance(m, int) else cmath.isfinite(m)
     np = _numpy()
     if np is not None:
         try:
@@ -102,9 +134,13 @@ def _check_finite(m) -> "bool | None":
 
 
 def _check_real(m) -> "bool | None":
-    # in Python a float/int is already real; the property is meaningful
-    # against complex entries, which _as_rows rejects, so a rectangular
-    # numeric matrix is real by construction and a complex one is not
+    """Whether `m` holds no complex entry. A single Python number is
+    real when it is an int or a float and not when it is a complex
+    (`1 + 0j` included, as numpy's complex dtype reads it); a vector
+    or matrix of Python numbers is real when none of its entries is a
+    complex."""
+    if _number(m):
+        return not isinstance(m, complex)
     np = _numpy()
     if np is not None:
         try:
@@ -112,8 +148,10 @@ def _check_real(m) -> "bool | None":
         except (ValueError, TypeError):
             return None
         return not np.iscomplexobj(arr)
-    rows = _as_rows(m)
-    return None if rows is None else True
+    entries = _entries(m)
+    if entries is None:
+        return None
+    return not any(isinstance(v, complex) for v in entries)
 
 
 def _pairwise(m, rel) -> "bool | None":
