@@ -42,7 +42,7 @@ from dataclasses import replace as _dc_replace
 
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import effective_facts, hydrated
+from .analysis import SourceUnavailable, effective_facts, hydrated
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -4903,9 +4903,19 @@ def _effective_facts(fn, facts=None):
         else `analysis.effective_facts(fn)` (the callable's injected
         `__mathema_facts__` when it carries them, else analysis of its
         source). Facts carrying a KOINE document and no syntax tree are
-        read through the document either way.
+        read through the document either way. A callable with neither
+        (a builtin, a function defined through `exec` or `python -c`, a
+        method a dataclass generates) gets the documentation-only facts
+        `mathema.check` reads it by, its parameter kinds taken from its
+        signature, so both entries adjudicate it alike.
     """
-    return hydrated(facts) if facts is not None else effective_facts(fn)
+    if facts is not None:
+        return hydrated(facts)
+    try:
+        return effective_facts(fn)
+    except SourceUnavailable:
+        from . import _doc_only_facts
+        return _doc_only_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):
