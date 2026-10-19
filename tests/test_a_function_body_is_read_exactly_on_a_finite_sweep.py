@@ -4,7 +4,9 @@
 body read exactly: a float literal is the decimal written (`0.5` is
 1/2, `2e-9` is 2/10^9), `int / int` is a ratio, `float()` is the
 identity on an exact number, `int()`, `//`, `%`, `round`, `math.floor`
-and `math.ceil` are exact, and a square root, a power with a fractional
+and `math.ceil` of an integer are exact (of a number standing for a
+float they are a decision the reading declines, and the sweep is
+proven within float64), and a square root, a power with a fractional
 exponent or `math.pi` becomes an exact sympy value whose comparison
 sympy decides. A body that correctly computes the claim then proves it
 at every point, whatever its return type says; one that misses by a
@@ -128,16 +130,28 @@ def _check(fn, law):
     (half, "for x in {1, 2, 3}, f(x) == x / 2"),
     (quarter, "for x in [0, 8] subset Z, f(x) == x / 4"),
     (half_down, "for x in [0, 9] subset Z, f(x) == floor(x / 2)"),
-    (half_trunc, "for x in {1, 3, 5}, f(x) == floor(x / 2)"),
     (shifted, "for n in {0, 1, 2}, f(n) == n + 0.25"),
     (shifted, "for n in {0, 1, 2}, f(n) == n + 1/4"),
-    (nearest, "for x in {0.5, 1.5, 2.5, 3.5}, f(x) % 2 == 0"),
-    (cents, "for x in {0.125, 0.625}, f(x) == x - 0.005"),
 ])
 def test_a_body_of_literals_and_exact_operations_is_proven(fn, law):
     p = _check(fn, law)
     assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
     assert p.route == "derive:brute_force", p.route
+
+
+@pytest.mark.parametrize("fn,law", [
+    (half_trunc, "for x in {1, 3, 5}, f(x) == floor(x / 2)"),
+    (nearest, "for x in {0.5, 1.5, 2.5, 3.5}, f(x) % 2 == 0"),
+    (cents, "for x in {0.125, 0.625}, f(x) == x - 0.005"),
+])
+def test_a_rounding_of_a_number_standing_for_a_float_is_proven_within_float64(
+        fn, law):
+    # `int(x / 2)`, `round(x)` and `round(x, 2)` decide on a value the
+    # computation held as a float: the reading declines the decision
+    p = _check(fn, law)
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force:within_float64", p.route
+    assert "mathema.exact_witness" not in p.meta, p.meta
 
 
 @pytest.mark.parametrize("fn,law", [

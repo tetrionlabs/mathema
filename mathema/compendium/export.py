@@ -10,8 +10,11 @@ a claims file in the compendium shape (`compendium: <library>`,
 downstream project drops into its own claims directory. Each row
 carries the verdict it reached here as its claimed level
 (`meta: {mathema.compendium_claimed: holds}`) and the `note:` its
-claims file states; a consumer still verifies or accepts it, since a
-compendium row is testimony until then.
+claims file states; a row proven within float64 also carries the
+route that proved it (`mathema.compendium_route:
+derive:brute_force:within_float64`), the strength it is claimed at. A
+consumer still verifies or accepts it, since a compendium row is
+testimony until then.
 """
 from __future__ import annotations
 
@@ -155,8 +158,9 @@ def export_compendium(library: str, root: str = ".",
         `spec.write_yaml` writes: `compendium`, `versions`, then one
         entry per verified `<library>.*` key holding its proven and
         held rows, each stamped with the verdict it reached as
-        `mathema.compendium_claimed`, and the `note:` the claims file
-        that states the row gives it.
+        `mathema.compendium_claimed`, a row proven within float64 also
+        with the route that proved it as `mathema.compendium_route`, and
+        the `note:` the claims file that states the row gives it.
 
     Notes:
         `versions` is `export_range`. At or above the library's supported
@@ -220,6 +224,9 @@ def export_compendium(library: str, root: str = ".",
             if stated.get("note"):
                 row["note"] = str(stated["note"])
             row["meta"] = {"mathema.compendium_claimed": c["verdict"]}
+            decided_by = str(c.get("route") or "")
+            if decided_by.endswith(":within_float64"):
+                row["meta"]["mathema.compendium_route"] = decided_by
             rows.append(row)
         if rows:
             body: dict = {}

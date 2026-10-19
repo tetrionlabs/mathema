@@ -163,11 +163,18 @@ def test_the_scan_finds_nothing_to_refuse_in_such_a_body(fn):
 @pytest.mark.parametrize("fn", ALLOWED, ids=lambda f: f.__name__)
 def test_the_twin_raises_where_the_computation_raises(fn):
     from fractions import Fraction
+
+    from mathema._exact_body import NotExact
     twin = exact_twin(fn)
-    assert twin(Fraction(3)) == Fraction(3, 2)
+    assert twin(3) == Fraction(3, 2)
     with pytest.raises(ValueError if fn is not asserts_fstring
                        else AssertionError):
-        twin(Fraction(-1))
+        twin(-1)
+    if fn is not asserts_fstring:
+        # `x < 0` on a value the computation held as a float is a
+        # decision the reading declines
+        with pytest.raises(NotExact):
+            twin(Fraction(-1))
 
 
 @pytest.mark.parametrize("fn", [raises_fstring, raises_percent, raises_format,

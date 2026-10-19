@@ -592,7 +592,8 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         literals are the float readings of the computation, the way the
         number representation reads them. With `opaque_results` a
         callee's result holding no number (a string, a bool, None) is
-        exact as it is (`wrap`'s `opaque`).
+        exact as it is (`wrap`'s `opaque`), and so is a side holding no
+        number.
     """
     from ._math_vocab import MATH_CONSTANTS
     callees = _aliased_callees(callees, (code_l, code_r))
@@ -619,8 +620,12 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         return None
     # a rounded root is close enough for a computation line, never for
     # the mathematics
-    left = _exact_value(left, not exact_calls)
-    right = _exact_value(right, not exact_calls) if code_r is not None else None
+    def read(side):
+        if opaque_results and not holds_number(side):
+            return side
+        return _exact_value(side, not exact_calls)
+    left = read(left)
+    right = read(right) if code_r is not None else None
     if left is None or (code_r is not None and right is None):
         return None
     return left, right
