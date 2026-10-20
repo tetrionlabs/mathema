@@ -5,7 +5,7 @@
 # develop, the integration branch, and reach main with the next release.
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     target-branch: "develop"
     schedule:
