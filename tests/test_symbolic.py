@@ -145,9 +145,12 @@ def test_not_equal_stays_undecided_when_genuinely_mixed_sign():
     # outside, neither provably nonzero nor provably identically
     # equal, must stay honestly undecided, never guess.
     results = check_conjectures(cube, [claim("f(x) != x^2", route="derive")])
-    # derive honestly can't settle it symbolically, and the shared
-    # specials then witness the equality at x = 0 (0 == 0), which
-    # falsifies the != claim outright
+    # derive honestly can't settle it symbolically, so on the derive
+    # route the claim stays unknown
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route the shared specials then witness the equality
+    # at x = 0 (0 == 0), which falsifies the != claim outright
+    results = check_conjectures(cube, [claim("f(x) != x^2")])
     assert results[0].verdict == "falsified"
 
 
@@ -582,8 +585,12 @@ def test_callee_branch_declines_for_a_computed_call_site_argument():
     # guess at the image of [1, 5] under x + 1.0.
     results = check_conjectures(
         caller_computed, [claim("for x in [1, 5], f(x) == x + 2", route="derive")])
-    # declines to guess symbolically; the true claim then holds
-    # empirically via the probe fallback
+    # declines to guess symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route the true claim then holds empirically via the
+    # probe fallback
+    results = check_conjectures(
+        caller_computed, [claim("for x in [1, 5], f(x) == x + 2")])
     assert results[0].verdict == "holds"
 
 
@@ -623,9 +630,13 @@ def test_ternary_bare_boolean_name_stays_unresolved_when_domain_is_ambiguous():
     results = check_conjectures(
         pick, [claim("for flag in {True, False}, x in [0, 1], y in [0, 1], "
                      "f(flag, x, y) == x", route="derive")])
-    # the ambiguous domain can't pin the branch symbolically, and the
-    # claim is genuinely false at flag=False (f returns y), which
-    # sampling then witnesses
+    # the ambiguous domain can't pin the branch symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # the claim is genuinely false at flag=False (f returns y), which
+    # sampling witnesses on the default route
+    results = check_conjectures(
+        pick, [claim("for flag in {True, False}, x in [0, 1], y in [0, 1], "
+                     "f(flag, x, y) == x")])
     assert results[0].verdict == "falsified"
 
 
@@ -637,9 +648,14 @@ def test_ternary_bare_boolean_name_ignores_a_stale_domain_after_reassignment():
     results = check_conjectures(
         reassigns_flag, [claim("for flag in {True}, x in [0, 1], y in [0, 1], "
                                "f(flag, x, y) == x", route="derive")])
-    # resolving off the stale domain would prove something false; the
-    # honest decline then lets sampling expose that falsity for real
-    # (flag reassigned to False, f returns y != x)
+    # resolving off the stale domain would prove something false; derive
+    # declines instead
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route the honest decline lets sampling expose that
+    # falsity for real (flag reassigned to False, f returns y != x)
+    results = check_conjectures(
+        reassigns_flag, [claim("for flag in {True}, x in [0, 1], y in [0, 1], "
+                               "f(flag, x, y) == x")])
     assert results[0].verdict == "falsified"
 
 
@@ -662,8 +678,12 @@ def test_ternary_proves_the_else_side():
 def test_ternary_straddling_the_condition_stays_undecided_not_a_guess():
     results = check_conjectures(
         clamp_ternary, [claim("for x in [-5, 5], f(x) >= 0", route="derive")])
-    # the straddling condition stays symbolically unresolved, and the
-    # claim is false on [-5, 0) anyway (1/x < 0), which sampling shows
+    # the straddling condition stays symbolically unresolved
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # the claim is false on [-5, 0) anyway (1/x < 0), which sampling
+    # shows on the default route
+    results = check_conjectures(
+        clamp_ternary, [claim("for x in [-5, 5], f(x) >= 0")])
     assert results[0].verdict == "falsified"
 
 
@@ -674,8 +694,11 @@ def test_ternary_with_unsupported_condition_still_refuses_cleanly():
         return 0.0 if flag else x
 
     results = check_conjectures(flagged, [claim("f(flag, x) >= 0", route="derive")])
-    # refuses to misinterpret the bare-name condition; the unbounded
-    # claim is then false at flag=False with negative x
+    # refuses to misinterpret the bare-name condition
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route the unbounded claim is then false at
+    # flag=False with negative x
+    results = check_conjectures(flagged, [claim("f(flag, x) >= 0")])
     assert results[0].verdict == "falsified"
 
 
@@ -706,8 +729,12 @@ def test_affine_local_branch_resolves_the_other_side_too():
 def test_affine_local_branch_straddling_domain_stays_undecided():
     results = check_conjectures(
         denom_local, [claim("for x in [-5, 5], y in [-5, 5], f(x, y) >= 0", route="derive")])
-    # symbolically straddling, and genuinely false (x=1, y=-2 gives
-    # x/(x+y) = -1), which the probe fallback witnesses
+    # symbolically straddling
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # genuinely false (x=1, y=-2 gives x/(x+y) = -1), which the probe
+    # fallback witnesses on the default route
+    results = check_conjectures(
+        denom_local, [claim("for x in [-5, 5], y in [-5, 5], f(x, y) >= 0")])
     assert results[0].verdict == "falsified"
 
 
@@ -716,10 +743,13 @@ def test_affine_local_branch_with_no_domain_lifts_piecewise_but_stays_honest():
     # lifts, the sign question remains genuinely open on x/(x + y)),
     # and the actionable domain hint survives in the sketch
     results = check_conjectures(denom_local, [claim("f(x, y) >= 0", route="derive")])
-    assert results[0].verdict == "falsified"
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     trail = results[0].meta["mathema.routes_attempted"]
     assert "routes attempted" in trail and "derive: undecided" in trail
     assert "needs a domain specific enough" in results[0].note
+    # on the default route the extensive ladder finds the false point
+    results = check_conjectures(denom_local, [claim("f(x, y) >= 0")])
+    assert results[0].verdict == "falsified"
 
 
 def sign_from_diff(a: float, b: float) -> float:
@@ -983,9 +1013,12 @@ def test_dot_claim_wrong_argument_order_is_skipped_not_guessed():
     # unliftable rather than assuming commutativity silently.
     results = check_conjectures(
         dot_ab, [claim("f(a, b) == f(b, a)", route="derive")])
-    # never assumed commutative symbolically; sampling then hits two
-    # sequences of different lengths, where the swapped call raises,
-    # a real counterexample for the unquantified claim
+    # never assumed commutative symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route sampling then hits two sequences of different
+    # lengths, where the swapped call raises, a real counterexample for
+    # the unquantified claim
+    results = check_conjectures(dot_ab, [claim("f(a, b) == f(b, a)")])
     assert results[0].verdict == "falsified"
 
 
@@ -1291,16 +1324,22 @@ def test_fold_claim_wrong_argument_count_is_skipped_not_an_error():
 
 
 def test_fold_claim_non_bare_first_argument_is_skipped():
-    # the fold lift declines the sliced argument, and probing evaluates
-    # the slice for real: a single element leaves x[1:] empty, where
-    # ema raises, a witness at length 1
+    # the fold lift declines the sliced argument
     results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route probing evaluates the slice for real: a
+    # single element leaves x[1:] empty, where ema raises, a witness at
+    # length 1
+    results = check_conjectures(ema, [claim("f(x[1:], 1.0) == x[-1]")])
     assert results[0].verdict == "falsified"
     assert results[0].counterexample.startswith("x = [")
     # from two elements on, with alpha = 1.0 the average collapses to
     # the last element, so the claim holds empirically
     results = check_conjectures(ema, [claim(
         "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(ema, [claim(
+        "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]")])
     assert results[0].verdict == "holds"
 
 
@@ -1397,8 +1436,12 @@ def test_fold_claim_on_unrecognized_loop_stays_unliftable():
 
     results = check_conjectures(
         looped, [claim("f(xs) * 2 == f(xs) * 2", route="derive")])
-    # the loop shape stays unliftable; the tautology then holds
-    # empirically, with the derive diagnosis kept in the note
+    # the loop shape stays unliftable, the derive diagnosis in the note
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "not derivable" in results[0].note
+    # on the default route the tautology then holds empirically, with
+    # the derive diagnosis kept in the note
+    results = check_conjectures(looped, [claim("f(xs) * 2 == f(xs) * 2")])
     assert results[0].verdict == "holds"
     assert "not derivable" in results[0].note
 
@@ -1583,6 +1626,9 @@ def test_opaque_none_return_proves():
 def test_opaque_none_vs_real_value_falsifies():
     results = check_conjectures(
         opt_value, [claim("for x in [1, 5], f(x) == None", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(
+        opt_value, [claim("for x in [1, 5], f(x) == None")])
     assert results[0].verdict == "falsified"
 
 
@@ -1691,8 +1737,12 @@ def test_two_independently_built_arrays_decline_not_crash():
     assert lift(two_independent_arrays, facts) is None
     results = check_conjectures(
         two_independent_arrays, [claim("f(n, m)[i] == 0", route="derive")])
-    # declines symbolically (no crash); sampling then catches the
-    # function raising on its own sampled inputs
+    # declines symbolically (no crash)
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route sampling then catches the function raising
+    # on its own sampled inputs
+    results = check_conjectures(
+        two_independent_arrays, [claim("f(n, m)[i] == 0")])
     assert results[0].verdict == "falsified"
 
 
@@ -1701,12 +1751,18 @@ def test_reduction_over_a_local_array_declines_not_crash():
     assert lift(array_sum_reduction, facts) is None
     results = check_conjectures(
         array_sum_reduction, [claim("f(a, n) == a", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(array_sum_reduction, [claim("f(a, n) == a")])
     assert results[0].verdict == "falsified"   # raises on sampled inputs
 
 
 def test_unindexed_array_valued_claim_is_unliftable_not_a_crash():
     results = check_conjectures(
         sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n) == 0", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "indexed" in results[0].note
+    results = check_conjectures(
+        sine_wave, [claim("for n in [2, 50] ⊂ Z, f(amp, freq, n) == 0")])
     assert results[0].verdict == "falsified"   # raises on sampled inputs
     assert "indexed" in results[0].note
 
@@ -1869,9 +1925,14 @@ def voltage_divider_named(vin: float, r1: float, r2: float) -> float:
 def test_raises_with_no_explicit_raise_gets_a_specific_message():
     results = check_conjectures(
         implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)", route="derive")])
-    # derive can't prove an implicit arithmetic raise; the pinned point
-    # then genuinely divides by zero, so the raises claim holds
-    # empirically, with the structural diagnosis kept in the note
+    # derive can't prove an implicit arithmetic raise, and says why
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "no explicit raise" in results[0].note
+    # on the default route the pinned point then genuinely divides by
+    # zero, so the raises claim holds empirically, with the structural
+    # diagnosis kept in the note
+    results = check_conjectures(
+        implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)")])
     assert results[0].verdict == "holds"
     assert "no explicit raise" in results[0].note
 
@@ -1882,11 +1943,17 @@ def test_raises_needs_domain_on_the_guards_own_parameter_not_just_a_literal_call
     # declared parameter domains, before call-site substitution.
     results = check_conjectures(
         explicit_guard, [claim("raises(f(a, b, 0), ValueError)", route="derive")])
-    # not settled symbolically; most samples return rather than raise,
-    # falsifying the unquantified raises claim for real
-    assert results[0].verdict == "falsified"
+    # not settled symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "needs a domain" in results[0].note
     assert "'a'" not in results[0].note  # names the parameter, not quoted oddly
+    # on the default route most samples return rather than raise,
+    # falsifying the unquantified raises claim for real
+    results = check_conjectures(
+        explicit_guard, [claim("raises(f(a, b, 0), ValueError)")])
+    assert results[0].verdict == "falsified"
+    assert "needs a domain" in results[0].note
+    assert "'a'" not in results[0].note
     results_with_domain = check_conjectures(
         explicit_guard, [claim("for a in [0, 0], raises(f(a, b, c), ValueError)", route="derive")])
     assert results_with_domain[0].verdict == "proven"
@@ -1906,8 +1973,14 @@ def test_inline_expression_branch_condition_declines_cleanly_when_domain_too_wid
     results = check_conjectures(
         voltage_divider, [claim("for r1 in [-10, 10], r2 in [0.1, 1000], "
                                 "raises(f(vin, r1, r2), ValueError)", route="derive")])
-    # too wide to settle symbolically, and most of the domain returns
-    # normally, so the raises claim is falsified empirically
+    # too wide to settle symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "needs a domain" in results[0].note
+    # on the default route most of the domain returns normally, so the
+    # raises claim is falsified empirically
+    results = check_conjectures(
+        voltage_divider, [claim("for r1 in [-10, 10], r2 in [0.1, 1000], "
+                                "raises(f(vin, r1, r2), ValueError)")])
     assert results[0].verdict == "falsified"
     assert "needs a domain" in results[0].note
 
@@ -2001,6 +2074,9 @@ def test_compound_balance_non_affine_update_declines_not_crashes():
     assert lift_sum(compound_balance_non_affine_update, facts) is None
     results = check_conjectures(
         compound_balance_non_affine_update, [claim("f(P, r, n) == P", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(
+        compound_balance_non_affine_update, [claim("f(P, r, n) == P")])
     assert results[0].verdict == "falsified"   # raises on sampled inputs
 
 
@@ -2064,10 +2140,15 @@ def test_integrate_bounds_via_evaluation_bar_proves_gaussian_normalizes():
 # --- derive_status meta tag: undecided vs. unliftable, structured -----------
 
 def test_skipped_derive_claim_tags_unliftable_status_in_meta():
-    # the structured why-derive-couldn't tag survives onto the record
-    # even though probing then adjudicated the claim
+    # the structured why-derive-couldn't tag is on the derive route's
+    # record, and survives onto the record when probing then adjudicates
+    # the claim on the default route
     results = check_conjectures(
         implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert results[0].meta["mathema.derive_status"] == "unliftable"
+    results = check_conjectures(
+        implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)")])
     assert results[0].verdict == "holds"
     assert results[0].meta["mathema.derive_status"] == "unliftable"
 
@@ -2076,5 +2157,7 @@ def test_skipped_derive_claim_tags_undecided_status_in_meta():
     def cube_product(x: float) -> float:
         return x * x * x
     results = check_conjectures(cube_product, [claim("let y be [-5, 5], f(x) <= f(y)", route="derive")])
-    assert results[0].verdict == "falsified"   # x^3 <= y^3 is just false
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert results[0].meta["mathema.derive_status"] == "undecided"
+    results = check_conjectures(cube_product, [claim("let y be [-5, 5], f(x) <= f(y)")])
+    assert results[0].verdict == "falsified"   # x^3 <= y^3 is just false

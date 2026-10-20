@@ -17,7 +17,8 @@ shows the two side by side.
 Lifting is honest, not clever: it never guesses at a closed form.
 Anything not covered below is `underivable` on the derive route
 (the record's note names the likely reason), never a false `proven`,
-and the claim falls through to the probe route. Probe-route claims
+and a claim on the default route falls through to the probe route (one
+pinned to `route: derive` stays `unknown`). Probe-route claims
 remain viable regardless of any of this, see [CDD in one page](cdd.md).
 
 ## What's liftable
@@ -979,8 +980,9 @@ conditions are each verified, never a "probably".
 
 The certificate text in the sketch is the reader's audit trail: a
 `proven` never rests on an unnamed mechanism, and anything a
-certificate cannot close falls through to the empirical route rather
-than being asserted.
+certificate cannot close falls through to the empirical route on the
+default route (and stays `unknown` on `route: derive`) rather than
+being asserted.
 
 ## What's not built at all
 

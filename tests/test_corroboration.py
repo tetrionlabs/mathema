@@ -13,7 +13,8 @@ from mathema.conjecture import claim, check_conjectures
 
 
 def _v(fn, law, **kw):
-    return check_conjectures(fn, [claim(law, route="derive", **kw)])[0]
+    kw.setdefault("route", "derive")
+    return check_conjectures(fn, [claim(law, **kw)])[0]
 
 
 def _pair(fn, law, **kw):
@@ -39,7 +40,7 @@ def test_a_disproof_reproduced_via_the_seed_is_semi_analytical():
     # exactly probe:semi_analytical, pinned, not a permissive set
     def sqm1(x):
         return x * x - 1.0
-    p = _v(sqm1, "for x in [-2, 2], f(x) >= 0")
+    p = _v(sqm1, "for x in [-2, 2], f(x) >= 0", route="best")
     assert p.verdict == "falsified"
     assert p.route == "probe:semi_analytical"
 
@@ -63,7 +64,7 @@ def test_uncorroborated_disproof_downgrades_and_probe_supersedes(monkeypatch):
 
     def sq(x):
         return x * x
-    p = _v(sq, "for x in [-5, 5], f(x) >= 0")   # true everywhere
+    p = _v(sq, "for x in [-5, 5], f(x) >= 0", route="best")   # true everywhere
     assert p.verdict == "holds"    # empirical truth supersedes the unknown
     assert p.counterexample is None
     assert p.meta.get("mathema.corroboration") == "uncorroborated"

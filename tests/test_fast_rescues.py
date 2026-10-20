@@ -11,8 +11,8 @@ import math
 from mathema.claims import check_conjectures, claim
 
 
-def _v(fn, law):
-    return check_conjectures(fn, [claim(law, route="derive")])[0]
+def _v(fn, law, route="derive"):
+    return check_conjectures(fn, [claim(law, route=route)])[0]
 
 
 def qm_am(a, b):
@@ -42,6 +42,8 @@ def test_squaring_declines_when_a_side_is_not_provably_nonnegative():
     def root_minus_x(x):
         return math.sqrt(x) - x
     p = _v(root_minus_x, "for x in [0, 4], f(x) >= 0")
+    assert p.verdict != "proven"
+    p = _v(root_minus_x, "for x in [0, 4], f(x) >= 0", route="best")
     assert p.verdict == "falsified"
 
 

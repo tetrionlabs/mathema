@@ -359,9 +359,11 @@ results = mathema.claims.check_conjectures(
 ```
 
 Either way, a decided proof comes back `proven`, or `falsified` with
-a witness. A claim the derive route cannot decide falls back to
-probing rather than stopping at `unknown`, so it can still come back
-`holds`, and `Probe.route` then names `probe`, the mechanism that
+a witness. A claim pinned to `route="derive"` that the derive route
+cannot decide stops at `unknown`, on the derive route, with the reason
+in its note: nothing runs the code for it. A claim on the default
+route (`best`) falls back to probing instead, so it can still come
+back `holds`, and `Probe.route` then names `probe`, the mechanism that
 actually decided. The derive diagnosis stays on the record, and covers
 two different things: a genuinely unliftable function, or one the
 derive route lifted fine but the specific claim stayed undecided.

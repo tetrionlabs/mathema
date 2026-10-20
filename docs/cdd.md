@@ -59,11 +59,12 @@ names.
   with a witness the real function reproduced, and never a false
   `proven`. A symbolic disproof with no point to execute (a derivative
   or limit claim, say) stays `unknown`. When the body will not lift, or the proof
-  cannot close, the claim falls through to the probe route with the
-  reason the derive attempt stopped kept in the record; a matrix
-  identity is sampled over matrices of its declared shape, and stays
-  `unknown` only where it cannot be sampled or was declared
-  `route: derive`. Only available
+  cannot close, a claim on the default route (`best`) falls through to
+  the probe route with the reason the derive attempt stopped kept in
+  the record; a matrix identity is sampled over matrices of its
+  declared shape, and stays `unknown` only where it cannot be sampled.
+  A claim declared `route: derive` is decided by derive alone and stays
+  `unknown`, with that reason, when derive cannot settle it. Only available
   for a real subset of functions; see
   [The derive route](derive-route.md).
 

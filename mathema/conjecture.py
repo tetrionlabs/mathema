@@ -673,19 +673,15 @@ def _derivative_outside_the_family_forms(cj, facts, *,
         (`d(f(x), x) >= 1`, `d(f(x), x) > 0`, `0 <= d(f(x), x)`): the
         probe evaluates `d` only in those spellings, and this one is not
         among them; when `unliftable` (derive could not lift the body)
-        it says so too. A claim in a family's spelling on the derive
-        route is told the probe is not run for it. None for a claim whose
-        only form the probe lacks is not `d`, one binding its own `d`, or
-        one written in a family's spelling on another route.
+        it says so too. None for a claim whose only form the probe lacks
+        is not `d`, one binding its own `d`, or one written in a family's
+        spelling.
     """
     if routes.unsupported_forms("probe", cj) != ["d"] or "d" in (cj.funcs or {}):
         return None
     if any(_states_derivative_form(cj, base, param, facts)
            for base in _DERIVATIVE_FAMILY_FORMS for param in facts.params):
-        if cj.route != "derive":
-            return None
-        return ("the claim asks for the derive route alone, so the probe "
-                "the shape claims use for this spelling is not run")
+        return None
     why = ("the probe decides a derivative claim only as the shape claims "
            "state it (a first derivative compared with 0 by <= or >=, a "
            "second derivative compared with 0 by ==, <= or >=), and "
@@ -6365,9 +6361,23 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     if float_companions:
                         out.extend(_stamped(line, cj, canonical=False) for line in lines)
                     continue
-                # route == "best" and the derive stage couldn't settle it:
-                # fall through to the probe stage, same as an ordinary
-                # probe claim.
+            if cj.route == "derive":
+                # derive alone: what derive could not settle stays
+                # unknown with its reason, and nothing runs the code
+                alone, lines = _with_empty_input_lines(
+                    _derive_alone(ctx), ctx, fn, facts, float_companions,
+                    conjectures)
+                out.append(stamp(alone, _cap=verdict_cap))
+                if ctx.companion is not None:
+                    _emit_companion(out, _stamped(ctx.companion, cj_record,
+                                                  written=cj.domain or {}),
+                                    alone.name)
+                if float_companions:
+                    out.extend(_stamped(line, cj, canonical=False) for line in lines)
+                continue
+            # route "best" or "examine" and the derive stage couldn't
+            # settle it: fall through to the probe stage, same as an
+            # ordinary probe claim.
             from .runtime_types._receivers import ReceiverRefused
             try:
                 probed = _arbitrate_empirical_fallback(
@@ -7629,12 +7639,13 @@ class _ClaimContext:
     # f's raise regions by construction (their negations feed the
     # decision machinery), probe skips raising samples as
     # outside-the-quantifier
-    # set by _adjudicate_derive when a route="derive" attempt came back
-    # undecided/unliftable: the unknown Probe it WOULD have reported,
-    # kept while the claim falls through to the probe stage, empirical
-    # evidence (holds or falsified) supersedes an unknown, and this
-    # fallback is what the loop reports when probe couldn't adjudicate
-    # either
+    # set by _adjudicate_derive when a derive attempt came back
+    # undecided/unliftable: the unknown Probe it WOULD have reported.
+    # On route "best" it is kept while the claim falls through to the
+    # probe stage, empirical evidence (holds or falsified) supersedes an
+    # unknown, and this fallback is what the loop reports when probe
+    # couldn't adjudicate either; on route "derive" it is the claim's
+    # row (`_derive_alone`)
 
     # whether a derive proof spawns its float companion: "spawn",
     # "math_only" (the claim opted out with route derive:math_only), or
@@ -10425,9 +10436,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # the registered family declined and there is no ordinary
             # derive route for this predicate: the claim's own verdict
             # is unknown, but empirical evidence supersedes an unknown;
-            # stash the would-be report (feeds the cross-route trail)
-            # and fall to the probe stage, on derive OR best (the
-            # predicate families all have probe routes).
+            # stash the would-be report (feeds the cross-route trail),
+            # which route "best" takes to the probe stage (the predicate
+            # families all have probe routes) and route "derive" reports.
             ctx.derive_undecided = Probe(
                 cj.name, statement, "unknown", route="derive",
                 note=f"{note}; the built-in claim {cj.relation} could not "
@@ -10737,15 +10748,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"{swept.sketch}",
                              meta={**_provenance_meta(swept), **flagged})
         # an unknown is superseded by real empirical evidence like any
-        # other, stash the flagged report and fall through to the
-        # probe stage; the uncorroborated meta rides on the stash so
-        # the engine-bug signal survives whichever route wins
+        # other on route "best": stash the flagged report and fall
+        # through to the probe stage (route "derive" reports the stash);
+        # the uncorroborated meta rides on the stash so the engine-bug
+        # signal survives whichever route wins
         ctx.derive_undecided = gated
         return None
-    # undecided/unliftable. A route="derive" claim stays
-    # skipped, never downgraded to probing: it promises
-    # proof-strength evidence, and strict mode should
-    # surface the gap, not paper over it. `proof.status`
+    # undecided/unliftable. `proof.status`
     # (one of "undecided"/"unliftable") is also tagged in
     # `meta`, structured rather than only free text,
     # "genuinely unliftable" and "liftable but undecided"
@@ -10765,31 +10774,18 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # route coverage needs to tell them apart the same
         # way it already tells unliftable from undecided.
         skip_meta["mathema.timeout"] = proof.meta["mathema.timeout"]
-    # genuinely undecided/unliftable, on derive OR best: the claim's
-    # own verdict is "unknown" (its epistemic state never moved), but
-    # an unknown is superseded by real empirical evidence either way;
-    # stash the would-be report (the cross-route trail and, for
-    # route="derive", the fallback if probing can't decide either) and
-    # fall through to the probe stage. Meta says which kind of
-    # couldn't-decide this was.
+    # genuinely undecided/unliftable: the claim's own verdict is
+    # "unknown" (its epistemic state never moved). Stash the report:
+    # on route "best" empirical evidence from the probe stage
+    # supersedes it, on route "derive" it is the claim's row
+    # (`_derive_alone`). Meta says which kind of couldn't-decide this
+    # was.
     ctx.derive_undecided = Probe(
         cj.name, statement, "unknown", route="derive",
         sketch=proof.sketch,
         note=note + "; derive could not decide it",
         meta=skip_meta)
     ctx.derive_intermediates = getattr(proof, "intermediates", None)
-    return None
-    # route == "best": fall through to the probe stage rather
-    # than reporting skipped, a proof attempt that couldn't
-    # decide is not the same as a claim nobody ever tried to
-    # check empirically. The reported route is plain "probe",
-    # same as a claim that was always probe-only: why it fell
-    # back isn't carried onto the output record (a caller can
-    # run diagnostics on the function directly if they need
-    # that). "probe:semi_analytical" is reserved for when the
-    # probe itself was informed by critical-point sampling
-    # (probing.py's own battery), which this fallback path
-    # doesn't do.
     return None
 
 
@@ -10853,6 +10849,32 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                  stratum=_machine_failure_stratum(raised[-1], where),
                  meta={"mathema.corroboration": "reproduced",
                        "mathema.recursion_depth": dict(info)})
+
+
+def _derive_alone(ctx: "_ClaimContext") -> "Probe":
+    """Intent:
+        The row of a route="derive" claim derive did not settle: unknown
+        on the derive route, the derive attempt's own report when one
+        was kept (`ctx.derive_undecided`), its reason in the note, and a
+        note that the probe did not run. `mathema.routes_attempted`
+        names the derive attempt alone.
+    """
+    cj = ctx.cj
+    fallen = ctx.derive_undecided
+    if fallen is None:
+        fallen = Probe(cj.name, ctx.statement, "unknown", route="derive",
+                       note=f"{ctx.note}; derive could not decide it".lstrip("; "),
+                       meta={"mathema.derive_status": "undecided"})
+    note = fallen.note or ""
+    if fallen.sketch and fallen.sketch not in note:
+        note = f"{note} ({fallen.sketch})" if note.endswith(
+            "derive could not decide it") else f"{note}; {fallen.sketch}"
+    fallen.note = (f"{note}; the claim asks for the derive route alone, so "
+                   f"the probe did not run").lstrip("; ")
+    fallen.meta = {**(fallen.meta or {}),
+                   "mathema.routes_attempted":
+                       f"routes attempted, {_derive_attempt_label(fallen)}"}
+    return fallen
 
 
 def _ground_proof_of(ctx: "_ClaimContext", fn, facts):

@@ -56,8 +56,8 @@ def float_count(n: float) -> float:
     return s
 
 
-def _verdict(fn, law):
-    (p,) = check_conjectures(fn, [claim(law, route="derive")])
+def _verdict(fn, law, route="derive"):
+    (p,) = check_conjectures(fn, [claim(law, route=route)])
     return p
 
 
@@ -97,6 +97,9 @@ def test_a_nonnegative_trip_count_still_proves(fn, law):
 
 def test_a_float_trip_count_raises_so_the_claim_is_false():
     p = _verdict(float_count, "for n in [1, 20], f(n) == n")
+    assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.sketch, p.note)
+    assert "TypeError" in (p.sketch or "") + (p.note or "")
+    p = _verdict(float_count, "for n in [1, 20], f(n) == n", route="best")
     assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
     assert "TypeError" in (p.sketch or "") + (p.note or "")
 

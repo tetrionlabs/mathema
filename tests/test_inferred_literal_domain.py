@@ -47,10 +47,15 @@ def test_no_literal_argument_still_stays_undecided_as_before():
     results = check_conjectures(
         price_with_discount,
         [claim("raises(f(50, code), ValueError)", route="derive")])
-    # nothing to infer for the bare-name argument, exactly as before,
-    # the probe fallback then finds most sampled codes do NOT raise,
-    # falsifying the unquantified raises claim; the inference note
-    # still names price and not code
+    # nothing to infer for the bare-name argument, exactly as before;
+    # the inference note names price and not code
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "price=50" in results[0].note
+    assert "code=" not in results[0].note
+    # on the default route the probe fallback then finds most sampled
+    # codes do NOT raise, falsifying the unquantified raises claim
+    results = check_conjectures(
+        price_with_discount, [claim("raises(f(50, code), ValueError)")])
     assert results[0].verdict == "falsified"
     assert "price=50" in results[0].note
     assert "code=" not in results[0].note
@@ -73,11 +78,19 @@ def test_explicit_domain_wins_over_an_inferred_one():
     # back proven. Under the explicit domain derive reads code in
     # [1, 5], never reaches the guard, and disproves the raise; that
     # disproof has no executed witness (the literal call f(50, 0) does
-    # raise), so it is reported uncorroborated rather than falsified,
-    # and the probe route, which runs the call, holds.
+    # raise), so it is reported uncorroborated rather than falsified:
+    # unknown on the derive route, and on the default route the probe,
+    # which runs the call, holds.
     (p,) = check_conjectures(
         price_with_discount,
         [claim("for code in [1, 5], raises(f(50, 0), ValueError)", route="derive")])
+    assert p.verdict != "proven"
+    assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert "code=" not in p.note
+    (p,) = check_conjectures(
+        price_with_discount,
+        [claim("for code in [1, 5], raises(f(50, 0), ValueError)")])
     assert p.verdict != "proven"
     assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
     assert p.verdict == "holds" and p.route == "probe"

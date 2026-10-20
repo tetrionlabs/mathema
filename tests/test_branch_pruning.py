@@ -87,13 +87,18 @@ def test_no_domain_gets_empirical_adjudication_after_derive_declines():
         strength_to_distance,
         [claim('for r in [0, 1], scale in {"info", "nope"}, f(r, scale) >= 0',
                route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(
+        strength_to_distance,
+        [claim('for r in [0, 1], scale in {"info", "nope"}, f(r, scale) >= 0')])
     assert results[0].verdict == "falsified"
     assert "raised" in results[0].counterexample
     assert "'nope'" in results[0].counterexample
 
     # with no domain at all a string parameter has no honest sampling
     # story: the probe skips naming it, and derive, which cannot pin a
-    # branch either, rests on unknown with the same fix in its note
+    # branch either, rests on unknown naming the parameter that needs a
+    # domain
     results = check_conjectures(
         strength_to_distance, [claim("f(r, scale) >= 0", route="probe")])
     assert results[0].verdict == "skipped"
@@ -101,7 +106,7 @@ def test_no_domain_gets_empirical_adjudication_after_derive_declines():
     results = check_conjectures(
         strength_to_distance, [claim("f(r, scale) >= 0", route="derive")])
     assert results[0].verdict == "unknown"
-    assert "declare its values" in results[0].note
+    assert "needs a domain specific enough for scale" in results[0].note
 
 
 def test_an_unbound_claim_reads_the_working_domain_the_guard_leaves():
@@ -133,8 +138,13 @@ def test_ordinary_claim_names_both_params_for_a_two_param_guard():
     # the note.
     results = check_conjectures(
         guard_on_equal_params, [claim("f(x1, x2) >= -100", route="derive")])
-    assert results[0].verdict == "falsified"
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "needs a domain specific enough for x1, x2" in results[0].note
+    # on the default route the claim is falsified (the extensive ladder
+    # or the probe finds x1 - x2 < -100)
+    results = check_conjectures(
+        guard_on_equal_params, [claim("f(x1, x2) >= -100")])
+    assert results[0].verdict == "falsified"
 
 
 def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_blocked():
@@ -151,11 +161,13 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
 
     results = check_conjectures(
         divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0", route="derive")])
-    # the structural diagnosis stays (in the note, since probing then
-    # adjudicates the, true, claim empirically: 1/y > 0 on [1, 5])
-    assert results[0].verdict == "holds"
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
+    # on the default route the extensive ladder settles the (true) claim
+    results = check_conjectures(
+        divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0")])
+    assert results[0].verdict in ("proven", "holds")
 
 
 def test_nonaffine_guard_still_prunes_when_the_interval_settles_it():
@@ -215,6 +227,10 @@ def test_raises_claim_falsified_when_pinned_branch_actually_returns():
         strength_to_distance,
         [claim('for r in [0, 1], scale in {"info"}, raises(f(r, scale))',
               route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(
+        strength_to_distance,
+        [claim('for r in [0, 1], scale in {"info"}, raises(f(r, scale))')])
     assert results[0].verdict == "falsified"
 
 
@@ -279,9 +295,13 @@ def test_param_vs_param_guard_with_disagreeing_branches_stays_undecided():
     results = check_conjectures(
         spiked,
         [claim("for x1 in [0, 3], x2 in [0, 3], f(x1, x2) == x1 - x2", route="derive")])
-    # the derive route honestly can't settle the diagonal, and the
-    # claim IS false there (f(x, x) = 1.0 while x - x = 0), which the
-    # probe's shared-special samples then witness
+    # the derive route honestly can't settle the diagonal
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # the claim IS false there (f(x, x) = 1.0 while x - x = 0), which the
+    # probe's shared-special samples witness on the default route
+    results = check_conjectures(
+        spiked,
+        [claim("for x1 in [0, 3], x2 in [0, 3], f(x1, x2) == x1 - x2")])
     assert results[0].verdict == "falsified"
 
 
@@ -328,12 +348,16 @@ def test_boolop_condition_with_no_domain_stays_unliftable():
     results = check_conjectures(
         dispatch_on_both_flags,
         [claim("f(x, x_discrete, y_discrete) >= 0", route="derive")])
-    # derive stays blocked without a domain; the probe fallback then
-    # supplies (weak, sampling-limited) empirical evidence
-    assert results[0].verdict in ("holds", "falsified")
+    # derive stays blocked without a domain
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     trail = results[0].meta["mathema.routes_attempted"]
     assert "routes attempted" in trail
     assert "derive: underivable" in trail
+    # the probe supplies (weak, sampling-limited) empirical evidence
+    results = check_conjectures(
+        dispatch_on_both_flags,
+        [claim("f(x, x_discrete, y_discrete) >= 0", route="probe")])
+    assert results[0].verdict in ("holds", "falsified")
 
 
 def test_wrong_formula_for_boolop_pinned_branch_is_falsified():

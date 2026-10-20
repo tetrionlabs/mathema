@@ -309,6 +309,9 @@ def adjudicate(ctx: EquivalenceContext, fn,
 
     state = _LadderState()
     for name, rung in RUNGS:
+        if name == "sampled" and cj.route == "derive":
+            # a claim on the derive route is decided by derive alone
+            continue
         probe = rung(case, state)
         if probe is None:
             continue
@@ -1239,7 +1242,8 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
     """Nothing decided. The route reports the strongest mechanism that
     actually produced information: derive when a proof attempt
     returned a result, probe when points executed, None when no
-    mechanism engaged at all."""
+    mechanism engaged at all. A claim on the derive route ran no
+    sampled rung, and the note says so."""
     meta = state.sampling_meta or dict(case.annotations)
     sampling = meta.get("mathema.equivalence.sampling") or {}
     checked = sampling.get("checked", 0)
@@ -1252,12 +1256,18 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
         route = "probe"
     else:
         route = None
+    if case.cj.route == "derive":
+        said = ("neither the canonical forms nor the symbolic difference "
+                "could settle equivalence; the claim asks for the derive "
+                "route alone, so the probe did not run")
+    else:
+        said = (f"neither the canonical forms, the symbolic difference, "
+                f"nor sampling ({checked} evaluable points) could settle "
+                f"equivalence")
     return Probe(case.cj.name, case.statement, "unknown", route=route,
                  sketch=(state.proof.sketch if state.proof is not None
                          else None),
-                 note=f"{case.note}; neither the canonical forms, the "
-                      f"symbolic difference, nor sampling ({checked} "
-                      f"evaluable points) could settle equivalence"
+                 note=f"{case.note}; {said}"
                       + (f"; {state.raise_note}" if state.raise_note
                          else ""),
                  meta=meta)

@@ -135,8 +135,12 @@ def test_unliftable_bound_function_names_itself():
         return total
 
     r = _verdict(halve, "f(x) == g(x)", funcs={"g": whiley}, route="derive")
-    # derive names the blocking function; the probe fallback then calls
-    # both for real, and the identity is simply false
+    # derive names the blocking function
+    assert (r.verdict, r.route) == ("unknown", "derive")
+    assert "bound function g" in (r.note or "")
+    # on the default route the probe fallback then calls both for real,
+    # and the identity is simply false
+    r = _verdict(halve, "f(x) == g(x)", funcs={"g": whiley})
     assert r.verdict == "falsified"
     assert "bound function g" in (r.note or "")
 
