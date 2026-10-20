@@ -113,6 +113,7 @@ import sympy
 from sympy.printing.str import StrPrinter
 
 from ._float_text import exact_float_text
+from ._representation_words import NUMBER_REPRESENTATIONS
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
@@ -928,11 +929,7 @@ def _parse_pseudo_infinity(form: str, rhs: str) -> float:
 # either as an ordinary free-variable binding, so the future meaning stays
 # free.
 _BASE_SET_NAMES = frozenset({"R", "Z", "N", "C"})
-_RESERVED_REPRESENTATIONS = frozenset({
-    "i8", "i16", "i32", "i64", "i128",
-    "u8", "u16", "u32", "u64", "u128",
-    "f16", "f32", "f64", "bigint", "f64int",
-})
+_RESERVED_REPRESENTATIONS = frozenset(NUMBER_REPRESENTATIONS)
 
 
 _SECTION_KEYWORDS = frozenset({"let", "for", "be", "in", "assuming"})

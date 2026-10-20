@@ -120,6 +120,7 @@ def test_a_sharpe_ratio_has_no_value_where_the_returns_do_not_vary():
     assert "std(returns, ddof=1) == 0" in p.sketch, p.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_negation_and_reversal_read_on_the_vector_itself():
     base = ("for returns in [-0.1, 0.1]^n, "
             "assuming std(returns, ddof=1) > 0, ")

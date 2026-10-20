@@ -42,6 +42,7 @@ import os
 import subprocess
 
 from .grammar import split_relation
+from .identity import same_form
 from .routes import safety_predicates
 from .spec import classify_verdict, write_yaml
 
@@ -609,7 +610,7 @@ def plan_rename(root: str, new_key: str, old_key: str,
     entry = doc[old_key]
     recorded = (entry.get("identity") or {}).get("form")
     live = analyze(fn).form
-    matches = recorded == live
+    matches = same_form(recorded, live)
     actions = [f"rename the record {old_key} to {new_key}, carrying its "
                f"claims, acceptance history, lineage and sign-offs",
                f"remove {os.path.relpath(old_path, root)}",
@@ -1677,7 +1678,8 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
                 continue
             _carry_trust(c, accepted, history)
             continue
-        if accepted.get("form") != fresh_form and not accepted.get("stale"):
+        if not same_form(accepted.get("form"), fresh_form) \
+                and not accepted.get("stale"):
             accepted["stale"] = True
             history.append({"at": datetime.date.today().isoformat(),
                             "event": "stale",

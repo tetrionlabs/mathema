@@ -47,7 +47,7 @@ print(mathema.check(ema, claims=[]))
 
 <!-- example: ema output -->
 ```text
-mathema.Record(ema) · source, no side effects · form b96b0b96677f
+mathema.Record(ema) · source, no side effects · form py:b96b0b96677f
   bounded  for x in ([0.0, 1.0] | {missing})^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   holds
     holds      computation  for x in ([0.0, 1.0])^n : float, alpha in [0.0, 1.0] : float, f(x, alpha) <= 1   742 entries across 162 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[])

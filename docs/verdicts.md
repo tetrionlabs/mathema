@@ -58,7 +58,7 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 
 <!-- example: reading output -->
 ```text
-mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
+mathema.Record(clamp_discount) · source, no side effects · form py:bc9fa73b5bd1
   in_unit  for rate in R|missing, 0 <= f(rate) <= 1   falsified at f(nan)
     proven     mathematics  for rate in R, 0 <= f(rate) <= 1
     holds      computation  for rate in R, 0 <= f(rate) <= 1   43 draws

@@ -452,6 +452,20 @@ def provenance(facts) -> dict | None:
     return out
 
 
+def _namespaced_hashes(provenance: dict) -> "dict | None":
+    """Intent:
+        `provenance`'s `body_hashes`, each hash read by
+        `identity.namespaced_form` (a bare Python form as `py:<sha>`);
+        None when it states none.
+    """
+    from ..identity import namespaced_form
+    hashes = provenance.get("body_hashes")
+    if not isinstance(hashes, dict):
+        return hashes
+    return {name: namespaced_form(h) if isinstance(h, str) else h
+            for name, h in hashes.items()}
+
+
 def provenance_change(now: dict | None, was: dict | None) -> str | None:
     """Intent:
         What moved between two body provenances (`provenance(facts)`
@@ -466,7 +480,7 @@ def provenance_change(now: dict | None, was: dict | None) -> str | None:
     if not now and not was:
         return None
     if now.get("koine_hash") != was.get("koine_hash") \
-            or now.get("body_hashes") != was.get("body_hashes"):
+            or _namespaced_hashes(now) != _namespaced_hashes(was):
         return "body"
     if now.get("frontend") != was.get("frontend"):
         return "frontend"

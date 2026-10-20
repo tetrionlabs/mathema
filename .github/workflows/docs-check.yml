@@ -37,6 +37,9 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[docs]'
+      # the house-style prose check over every tracked text file, the
+      # same step the tests workflow's lint job runs
+      - run: python mathema/_devtools/check_prose.py
       # the mathema-language reference, imported under /language/reference/
       # by docs_hooks/language_reference.py, is always part of the check.
       # The repository is public, so the workflow's own token reads it;

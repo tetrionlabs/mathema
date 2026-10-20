@@ -52,6 +52,18 @@ def test_an_i64_extreme_reads_as_the_exact_integer():
     assert {p.at for p in points} == {str(-2**63), "-1", "0", "1", str(2**63 - 1)}
 
 
+def test_a_128_bit_parameter_s_extremes_are_its_range_ends():
+    assert sorted(_extremes(None, facts_from_koine(_document("i128")))) == [
+        -2**127, -1, 0, 1, 2**127 - 1]
+    assert sorted(_extremes(None, facts_from_koine(_document("u128")))) == [0, 1, 2**128 - 1]
+
+
+def test_an_f16_parameter_overflows_at_half_precision_s_maximum():
+    values = _extremes(None, facts_from_koine(_document("f16", kind="scalar")))
+    assert 65504.0 in values and -65504.0 in values
+    assert sys.float_info.max not in values
+
+
 def test_an_unsigned_parameter_s_extremes_stay_in_its_range():
     assert sorted(_extremes(None, facts_from_koine(_document("u8")))) == [0, 1, 255]
 
