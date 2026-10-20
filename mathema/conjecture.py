@@ -5239,14 +5239,50 @@ def _policy_gate(cj, fn, facts) -> bool:
     return cj.lhs not in params
 
 
+def _compared_by_equality(cj) -> bool:
+    """Intent:
+        Whether a side of a comparison holds strings or booleans, which
+        `probing.values_agree` compares by equality whatever the
+        tolerance: a string or boolean constant, a parameter bound to a
+        finite set of them, or a column of one read by attribute or by
+        item (`df.side`, `df["side"]`) whose binding is such a set.
+    """
+    domain = getattr(cj, "domain", None) or {}
+
+    def strings_or_booleans(text: str) -> bool:
+        try:
+            node = ast.parse(text.strip(), mode="eval").body
+        except SyntaxError:
+            return False
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, (str, bool))
+        key = None
+        if isinstance(node, ast.Name):
+            key = node.id
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            key = f"{node.value.id}.{node.attr}"
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+                and isinstance(node.slice, ast.Constant) \
+                and isinstance(node.slice.value, str):
+            key = f"{node.value.id}.{node.slice.value}"
+        return key is not None and _set_element(domain.get(key)) is not None
+    return strings_or_booleans(cj.lhs) or strings_or_booleans(cj.rhs)
+
+
 def _approx_reading(cj) -> "str | None":
     """How the record reads a `~=` claim, or None for any other: "read
     as abs(f(x) - x) <= ε, ε = 1e-9 (the default)", ε the declared
     tolerance when there is one; under a tolerance kind, the bound it
     states and the kind as written ("read as abs(f(x) - x) <= 1e-7 *
-    max(abs(f(x)), abs(x)), the tolerance {rel: 1e-7} (declared)")."""
+    max(abs(f(x)), abs(x)), the tolerance {rel: 1e-7} (declared)"); a
+    side holding strings or booleans (`_compared_by_equality`) is read
+    as compared by equality, element by element."""
     if cj.relation != "~=" or cj.links or not cj.lhs or not cj.rhs:
         return None
+    if _compared_by_equality(cj):
+        return (f"read as {cj.lhs.strip()} == {cj.rhs.strip()} element by "
+                f"element, strings and booleans compared by equality (a "
+                f"tolerance does not apply to them)")
     eps, why = ((cj.tolerance, "declared") if cj.tolerance is not None
                 else (1e-9, "the default"))
     rhs = cj.rhs.strip()
