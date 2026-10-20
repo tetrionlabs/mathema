@@ -66,11 +66,12 @@ type can be an operand of `@`. `described` is how the record names the
 type: `the body uses it as a torch tensor`.
 
 An unannotated parameter is drawn as the adapter's type when every use
-the body makes of it that says anything about a runtime type is one
-the adapter declares, the function's module imports the adapter's
-library, and no other imported library's adapter supports the same
-uses; with two such libraries it is drawn as a list and the hint names
-both. Declare only names your type has and a list lacks: a name a list
+the body makes of it (apart from what every Python object has, such as
+`.__class__`) is one the adapter declares, the function's module
+imports the adapter's library, and no other imported library's adapter
+supports the same uses. An attribute or method the adapter does not
+declare rules it out, and the hint names that use; with two matching
+libraries the parameter is drawn as a list and the hint names both. Declare only names your type has and a list lacks: a name a list
 also has (`index`, `copy`, `sort`) would draw a list-using function as
 your type. An adapter without `USES` is never chosen this way.
 

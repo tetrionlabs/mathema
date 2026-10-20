@@ -50,7 +50,7 @@
 [x] docs/evidence-ladder.md:companion            run output
 [x] docs/existing-codebase.md:codebase           file file file run output run output run output run output run output run output file file run output run output  (requires)
 [x] docs/extending.md:package-rows               file file file file run output
-[ ] docs/extending.md:607
+[ ] docs/extending.md:608
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
@@ -125,7 +125,7 @@
 [x] docs/runtime-types.md:rt-table               run verdicts verdicts verdicts run  (requires)
 [x] docs/runtime-types.md:rt-proofs              run verdicts verdicts verdicts run output  (requires)
 [x] docs/runtime-types.md:rt-drawdown            run verdicts run output verdicts  (requires)
-[-] docs/runtime-types.md:147
+[-] docs/runtime-types.md:152
 [x] docs/security.md:let-warning                 file session session
 [h] docs/start.md:59
 [h] docs/start.md:90
