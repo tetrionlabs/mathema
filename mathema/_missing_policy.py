@@ -941,8 +941,8 @@ def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
         missing input present comes from another argument (an empty
         input) and says nothing about the missing inputs, so it is read
         at another draw of the other arguments where f gives a value
-        with them present, else is `INCONCLUSIVE`; one owned by some of
-        the missing parameters is filed under their keys alone.
+        with them present, else is `INCONCLUSIVE`; one some missing
+        input owns is read as any other call is.
 
     Notes:
         `call_at(point)` calls f at the arguments by name and returns
@@ -958,12 +958,6 @@ def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
             output, raised = call_at(point)
         elif not empty.owners:
             return [Reading(point, output, raised, INCONCLUSIVE)]
-        elif set(empty.owners) != set(missing):
-            keys = keys_of(point, paths)
-            return [Reading(point, output, raised, None,
-                            [k for k in keys if k[0] in empty.owners]),
-                    Reading(point, output, raised, INCONCLUSIVE,
-                            [k for k in keys if k[0] not in empty.owners])]
     found = blame(call_at, point, raised, fills, presence, paths)
     if found.moved is not None:
         point = found.moved
