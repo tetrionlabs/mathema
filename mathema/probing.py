@@ -1822,8 +1822,13 @@ def _element_range(bounds, reach=None) -> "tuple[float, float] | None":
         if getattr(bounds, "base_type", "R") != "R" or any(
                 numeric(v) for v in (getattr(bounds, "excluded", None) or ())):
             return None
+        from .domain import is_sentinel
         sets = [p for p in pieces if isinstance(p, frozenset)]
         if any(numeric(v) for p in sets for v in p):
+            return None
+        if any(v is not None and not is_sentinel(v)
+               for p in sets for v in p):
+            # a finite set of strings or booleans is no real range
             return None
         real = [p for p in pieces if not isinstance(p, frozenset)]
         if not real:
