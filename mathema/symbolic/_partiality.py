@@ -388,6 +388,15 @@ _OPAQUE_OUT: contextvars.ContextVar = contextvars.ContextVar(
 _READ_CHECK: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_read_check", default=None)
 
+# the callees whose raise regions the walk is reading, outermost first
+_CALLEE_PATH: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_callee_path", default=frozenset())
+
+# the class a method under the walk is defined on, and the name of its
+# self parameter
+_SELF_OF: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_self_of", default=(None, None))
+
 # the names of the parameters the walk's domain binds to C
 _COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_complex_names", default=frozenset())
@@ -423,6 +432,109 @@ def _lemma_applies(condition, args: list) -> bool:
         return True
     complex_arg = any(_complex_typed(a) for a in args)
     return complex_arg if applies_to == "complex" else not complex_arg
+
+
+def _inlined_callee(node: ast.Call, scope: dict) -> tuple:
+    """Intent:
+        `(callee, self_call)` for a call the lift inlines
+        (`_base._try_inline_callee`): a bare name naming a plain Python
+        function, a call through modules to a project function
+        (`_base._module_function`), or a sibling method through the
+        method's own self (`self_call` "instance" or "static"); `(None,
+        None)` for any other call.
+    """
+    import inspect
+
+    from ._base import _module_function
+    func = node.func
+    if isinstance(func, ast.Name):
+        callee = scope.get(func.id)
+        return (callee, None) if inspect.isfunction(callee) else (None, None)
+    if not isinstance(func, ast.Attribute):
+        return None, None
+    cls, me = _SELF_OF.get()
+    if cls is not None and isinstance(func.value, ast.Name) \
+            and func.value.id == me:
+        member = vars(cls).get(func.attr)
+        if isinstance(member, staticmethod):
+            return member.__func__, "static"
+        return (member, "instance") if inspect.isfunction(member) \
+            else (None, None)
+    return _module_function(func, scope), None
+
+
+def _callee_guards(node: ast.Call, env: dict, path_cond, out: list,
+                   scope: dict, miss) -> None:
+    """Intent:
+        Append the raise regions of a callee the lift inlines, over the
+        caller's own symbols: the callee's implicit regions
+        (`partiality_walk`) and its explicit raise branches
+        (`lift_piecewise`), each with the callee's parameters replaced
+        by the call's arguments and conditioned on the path reaching
+        the call. A callee whose regions cannot be stated at this call
+        (no source, a region the walk stops before, an argument that
+        does not lift, a keyword or bundled parameter) is reported to
+        `miss` instead.
+    """
+    callee, self_call = _inlined_callee(node, scope)
+    if callee is None or id(callee) in _CALLEE_PATH.get():
+        return
+    name = ast.unparse(node.func)
+    from ..analysis import effective_facts
+    try:
+        cfacts = effective_facts(callee)
+    except Exception:
+        miss(f"a call to {name}, whose source is not read")
+        return
+    if cfacts.tree is None:
+        miss(f"a call to {name}, whose source is not read")
+        return
+    token = _CALLEE_PATH.set(_CALLEE_PATH.get() | {id(callee)})
+    try:
+        inner, unread = partiality_walk(callee, cfacts)
+        inner = list(inner)
+        if any(isinstance(n, ast.Raise) for n in ast.walk(cfacts.tree)):
+            from ._conditioned import lift_piecewise
+            pw = (lift_piecewise(callee, cfacts)
+                  if cfacts.branch_count and not cfacts.loops
+                  and not cfacts.recursion else None)
+            if pw is None:
+                unread = unread or "its explicit raises do not lift"
+            else:
+                inner += list(pw.raise_guards or [])
+        params, aggregate = _bind_params(callee, cfacts)
+    except TimeoutError:
+        raise
+    except Exception:
+        miss(f"a call to {name}, whose raise region is not read")
+        return
+    finally:
+        _CALLEE_PATH.reset(token)
+    if unread:
+        miss(f"a call to {name}, whose raise region is not read in full "
+             f"({unread})")
+    sig = list(cfacts.params)
+    if self_call == "instance":
+        sig = sig[1:]
+    if node.keywords or len(node.args) != len(sig) \
+            or any(aggregate.get(p) is not None for p in sig):
+        if inner:
+            miss(f"a call to {name}, whose raise region is not stated at "
+                 f"this call")
+        return
+    try:
+        args = [_expr_to_sympy(a, dict(env)) for a in node.args]
+    except NotSymbolic:
+        args = None
+    if args is None or any(isinstance(a, tuple) for a in args):
+        if inner:
+            miss(f"a call to {name}, whose arguments do not lift")
+        return
+    subs = {params[p]: a for p, a in zip(sig, args)}
+    for cond, exc_name in inner:
+        region = cond.subs(subs, simultaneous=True)
+        if region is not sympy.false:
+            out.append((sympy.And(path_cond, region), exc_name))
 
 
 def _may_fail(node: ast.AST, scope: dict) -> bool:
@@ -523,6 +635,7 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                 continue
             if region is not sympy.false:
                 out.append((sympy.And(path_cond, region), exc_name))
+        _callee_guards(node, env, path_cond, out, scope, miss)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         _power_guards(node, env, path_cond, out, miss)
     if isinstance(node, ast.BinOp) \
@@ -637,6 +750,19 @@ def _integer_bound(bound) -> bool:
         return bool((bound_assumptions(bound) or {}).get("integer"))
     except Exception:
         return False
+
+
+def _self_of(fn, facts) -> tuple:
+    """Intent:
+        `(class, self parameter)` for a method whose first parameter is
+        `self` and whose enclosing class resolves, else `(None, None)`.
+    """
+    from ._base import _enclosing_class
+    params = list(getattr(facts, "params", ()) or ())
+    if not params or params[0] != "self":
+        return None, None
+    cls = _enclosing_class(fn)
+    return (cls, "self") if cls is not None else (None, None)
 
 
 def partiality_guards(fn, facts) -> list:
@@ -959,6 +1085,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         _reads.read_checker(fn, facts, scope) if opaque_out is not None
         else None)
     int_token = _INT_SYMS.set(int_syms)
+    self_token = _SELF_OF.set(_self_of(fn, facts))
     names_token = _COMPLEX_NAMES.set(frozenset(
         name for name, bound in (domain or {}).items()
         if bound == "C" or getattr(bound, "base_type", None) == "C"))
@@ -966,6 +1093,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
     finally:
         _COMPLEX_NAMES.reset(names_token)
+        _SELF_OF.reset(self_token)
         _INT_SYMS.reset(int_token)
         _OPAQUE_OUT.reset(opaque_token)
         _READ_CHECK.reset(read_token)
