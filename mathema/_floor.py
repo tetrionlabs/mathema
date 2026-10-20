@@ -203,22 +203,52 @@ def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
     return items
 
 
-def table_floor(holes: list, absent: bool = False) -> list:
+def table_floor(holes: list, absent: bool = False,
+                column_holes: "dict | None" = None) -> list:
     """Intent:
         The floor of a table parameter, as functions of the trial's
-        random draw `base` (a dict of equal-length column lists).
+        random draw `base` (a dict of equal-length column lists): a
+        hole first in every column, a column of holes, two holes in
+        one column. `column_holes` names, for a column whose binding
+        admits fewer, the holes that column admits; a hole goes only
+        into the columns admitting it, and an item no column admits
+        is skipped.
     """
+    from .domain import member_of
+    admitted = {c: {member_of(h) for h in hs}
+                for c, hs in (column_holes or {}).items()}
+
+    def admits(c, *hs) -> bool:
+        return c not in admitted or all(member_of(h) in admitted[c] for h in hs)
+
+    def first(base, *hs):
+        return next((c for c in base if admits(c, *hs)), None)
+
+    def every(base, h):
+        if not base or first(base, h) is None:
+            return None
+        return {c: ([h, *col[1:]] if admits(c, h) else list(col))
+                for c, col in base.items()}
+
+    def whole(base, h):
+        target = first(base, h) if base else None
+        if target is None:
+            return None
+        return {c: ([h] * len(col) if c == target else list(col))
+                for c, col in base.items()}
+
+    def pair(base, h, g):
+        target = first(base, h, g) if base else None
+        if target is None or len(next(iter(base.values()))) < 2:
+            return None
+        return {c: ([h, g, *col[2:]] if c == target else list(col))
+                for c, col in base.items()}
     items: list = []
     for h in holes:
-        items.append(lambda base, h=h: {c: [h, *col[1:]] for c, col in base.items()}
-                     if base else None)
-        items.append(lambda base, h=h: {c: ([h] * len(col) if k == 0 else list(col))
-                                        for k, (c, col) in enumerate(base.items())}
-                     if base else None)
+        items.append(lambda base, h=h: every(base, h))
+        items.append(lambda base, h=h: whole(base, h))
     for h, g in _pairs(holes):
-        items.append(lambda base, h=h, g=g: {c: ([h, g, *col[2:]] if k == 0 else list(col))
-                                             for k, (c, col) in enumerate(base.items())}
-                     if base and len(next(iter(base.values()))) > 1 else None)
+        items.append(lambda base, h=h, g=g: pair(base, h, g))
     if absent:
         items.append(lambda base: _ABSENT)
     return items
@@ -263,11 +293,14 @@ class ContainerDraws:
     """Intent:
         One container parameter's draws: the floor's items in order, one
         per trial, then random draws carrying holes at `HOLE_RATE`.
-        `shape` is `"vec"`, `"mat"` or `"table"`.
+        `shape` is `"vec"`, `"mat"` or `"table"`; a table's column named
+        in `column_holes` carries only the holes listed for it.
     """
 
-    def __init__(self, shape: str, floor: list, holes: list):
+    def __init__(self, shape: str, floor: list, holes: list,
+                 column_holes: "dict | None" = None):
         self.shape, self.floor, self.holes = shape, list(floor), list(holes)
+        self.column_holes = dict(column_holes or {})
         self.turn = 0
 
     def remaining(self) -> int:
@@ -290,6 +323,7 @@ class ContainerDraws:
         if isinstance(base, dict):
             out = {}
             for c, col in base.items():
-                out[c], self.turn = gapped(col, self.holes, rng, self.turn)
+                out[c], self.turn = gapped(col, self.column_holes.get(c, self.holes),
+                                           rng, self.turn)
             return out
         return base
