@@ -9,7 +9,7 @@ where. A literal that only takes part in a comparison, or that a clamp
 absorbs, leaves every result a value."""
 import math
 
-import numpy
+import pytest
 
 from mathema.conjecture import check_conjectures, claim
 from mathema.symbolic._partiality import NO_VALUE, partiality_walk
@@ -33,6 +33,7 @@ def negative_inf_below(x: float) -> float:
 
 
 def numpy_nan_above(x: float) -> float:
+    import numpy
     return x if x <= 2 else numpy.nan
 
 
@@ -106,7 +107,7 @@ def test_a_negative_infinity_branch_falsifies():
 
 
 def test_every_spelling_of_nan_is_a_no_value_region():
-    for fn in (numpy_nan_above, float_text_nan_above, module_nan_above,
+    for fn in (float_text_nan_above, module_nan_above,
                nan_through_a_name):
         guards, _unread = partiality_walk(fn, effective_facts(fn))
         assert any(exc == NO_VALUE for _cond, exc in guards), fn.__name__
@@ -137,3 +138,12 @@ def test_arithmetic_of_literals_with_no_float_value_is_no_value():
         assert any(exc == NO_VALUE for _cond, exc in guards), fn.__name__
         p = _verdict(fn)
         assert p.verdict == "falsified", (fn.__name__, p.route, p.sketch)
+
+
+def test_numpy_nan_is_a_no_value_region():
+    pytest.importorskip("numpy")
+    guards, _unread = partiality_walk(numpy_nan_above,
+                                      effective_facts(numpy_nan_above))
+    assert any(exc == NO_VALUE for _cond, exc in guards)
+    p = _verdict(numpy_nan_above)
+    assert p.verdict == "falsified", (p.route, p.note)
