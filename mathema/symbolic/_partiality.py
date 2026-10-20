@@ -671,6 +671,8 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             if region is not sympy.false:
                 out.append((sympy.And(path_cond, region), exc_name))
         _callee_guards(node, env, path_cond, out, scope, miss)
+    if _real_only_on_complex(node, env, scope):
+        out.append((path_cond, "TypeError"))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         _power_guards(node, env, path_cond, out, miss)
     if isinstance(node, ast.BinOp) \
@@ -694,6 +696,80 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             # whose definedness the call's own check reports
             child = child.value
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
+
+
+#: builtins that raise TypeError on a complex argument
+_REAL_ONLY_BUILTINS = frozenset({"float", "int", "round", "divmod"})
+
+#: builtins that raise TypeError ordering a complex argument against
+#: another argument
+_ORDERING_BUILTINS = frozenset({"min", "max"})
+
+
+def _holds_complex(value) -> bool:
+    """Intent:
+        Whether a lifted value is a Python complex number: it reads a
+        complex-typed parameter (`_complex_typed`'s symbols) or the
+        imaginary unit outside a call whose result is real (`abs`, the
+        real and imaginary parts, the argument), since arithmetic with a
+        complex operand returns a complex.
+    """
+    if isinstance(value, tuple):
+        return any(_holds_complex(v) for v in value)
+    if not isinstance(value, sympy.Basic):
+        return False
+    if isinstance(value, (sympy.Abs, sympy.re, sympy.im, sympy.arg)):
+        return False
+    if value is sympy.I:
+        return True
+    if isinstance(value, sympy.Symbol):
+        return _complex_typed(value)
+    return any(_holds_complex(a) for a in value.args)
+
+
+def _real_only_on_complex(node: ast.AST, env: dict, scope: dict) -> bool:
+    """Intent:
+        Whether one node applies an operation Python defines only for
+        real numbers to a complex-typed value, and so raises TypeError
+        whatever the value: a math-module function, int, float, round,
+        divmod, min or max of two or more arguments, the `%` and `//`
+        operators, and an ordering comparison (`<`, `<=`, `>`, `>=`).
+        The derive lifter refuses the same operations
+        (`_base._accepts_complex`).
+    """
+    import builtins as _builtins
+
+    def typed(sub) -> bool:
+        try:
+            value = _expr_to_sympy(sub, dict(env))
+        except NotSymbolic:
+            return False
+        except TimeoutError:
+            raise
+        except Exception:
+            return False
+        return _holds_complex(value)
+
+    if isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                  (ast.Mod, ast.FloorDiv)):
+        return typed(node.left) or typed(node.right)
+    if isinstance(node, ast.Compare):
+        if any(isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
+               for op in node.ops):
+            return any(typed(sub) for sub in [node.left, *node.comparators])
+        return False
+    if not isinstance(node, ast.Call) or node.keywords:
+        return False
+    target, _keys = _call_target(node, scope)
+    if target is None:
+        return False
+    real_only = getattr(target, "__module__", None) == "math" or any(
+        target is getattr(_builtins, name) for name in _REAL_ONLY_BUILTINS)
+    ordering = len(node.args) >= 2 and any(
+        target is getattr(_builtins, name) for name in _ORDERING_BUILTINS)
+    if not (real_only or ordering):
+        return False
+    return any(typed(a) for a in node.args)
 
 
 def _power_guards(node: ast.BinOp, env: dict, path_cond, out: list,
