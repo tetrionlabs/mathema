@@ -253,11 +253,12 @@ def test_derive_timeout_tag_appears_on_a_real_timed_out_claim(monkeypatch):
     def identity(x: float) -> float:
         return math.lgamma(x)
 
-    # a d(...) law keeps the probe route out (it can't evaluate a
-    # derivative), and polygamma has no plain-math lambdify mapping so
-    # the lifted-numeric fallback declines too, the timed-out derive
-    # attempt is the whole story
-    cj = claim("for x in [2, 10], d(f(x), x) >= 0", route="derive")
+    # a d(...) law against a bound other than 0 keeps the probe route
+    # out (the probe evaluates a derivative only in a sign statement a
+    # built-in claim makes), and polygamma has no plain-math lambdify
+    # mapping so the lifted-numeric fallback declines too, the timed-out
+    # derive attempt is the whole story
+    cj = claim("for x in [2, 10], d(f(x), x) >= 0.25", route="derive")
     record = build_issue_record(identity, [cj])
     probe = record["claims"][0]
     assert probe["verdict"] == "unknown"
