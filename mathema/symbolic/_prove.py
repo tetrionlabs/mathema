@@ -2599,6 +2599,15 @@ def _piece_outside_premise(fn, facts, sub_domain: dict,
                                      claim_terms.get("assumption"))
     if emptied is not None:
         return f"no {emptied} there satisfies the premise"
+    for lhs_src, rel, rhs_src in claim_terms.get("assumption") or ():
+        premise = _premise_relation(lhs_src, rel, rhs_src, facts.params)
+        free = list(getattr(premise, "free_symbols", ()))
+        if premise is None or len(free) != 1 \
+                or sub_domain.get(str(free[0])) is None:
+            continue
+        if _holds_throughout(sympy.Not(premise), sub_domain):
+            return (f"no {free[0]} there satisfies "
+                    f"{lhs_src} {rel} {rhs_src}")
     if not claim_terms.get("assume_defined"):
         return None
     try:
@@ -2611,6 +2620,79 @@ def _piece_outside_premise(fn, facts, sub_domain: dict,
         if _holds_throughout(cond, sub_domain):
             return f"f raises {exc} at every point there"
     return None
+
+
+def _premise_relation(lhs_src, rel, rhs_src, params):
+    """One premise `lhs rel rhs` as a sympy relation over real symbols
+    for `params`, or None when it does not read as one."""
+    ops = {">=": sympy.Ge, ">": sympy.Gt, "<=": sympy.Le, "<": sympy.Lt,
+           "==": sympy.Eq, "!=": sympy.Ne}
+    if rel not in ops:
+        return None
+    names = {p: sympy.Symbol(p, real=True) for p in params}
+    try:
+        lhs = sympy.sympify(str(lhs_src), locals=names)
+        rhs = sympy.sympify(str(rhs_src), locals=names)
+        relation = ops[rel](lhs, rhs)
+    except Exception:
+        return None
+    if not isinstance(relation, (sympy.core.relational.Relational,
+                                 sympy.logic.boolalg.BooleanAtom)) \
+            or not relation.free_symbols <= set(names.values()):
+        return None
+    return relation
+
+
+def _named_point(text, params) -> dict:
+    """The coordinates a counterexample text names (`x = 21/8, y = 1`)
+    for `params`, as floats; those that do not read as a number are
+    left out."""
+    import re
+    out: dict = {}
+    for name, value in re.findall(r"\b(\w+)\s*=\s*([^,:;]+)", text or ""):
+        if name not in params or name in out:
+            continue
+        try:
+            out[name] = float(sympy.sympify(value.strip()))
+        except Exception:
+            continue
+    return out
+
+
+def _premise_refuses(fn, facts, point: dict, claim_terms: dict) -> bool:
+    """Intent:
+        Whether a counterexample point lies outside the claim's premise:
+        a premise relation false there, or, under `assuming
+        is_defined(f)`, one of f's own raise branches holding there.
+        A premise that cannot be evaluated at the point refuses nothing.
+    """
+    names = {p: sympy.Symbol(p, real=True) for p in facts.params}
+    at = {names[p]: sympy.nsimplify(v) for p, v in point.items()
+          if p in names and isinstance(v, (int, float))}
+
+    def false_at(relation) -> bool:
+        if relation is None or not relation.free_symbols <= set(at):
+            return False
+        try:
+            return relation.subs(at) is sympy.false
+        except Exception:
+            return False
+    for lhs_src, rel, rhs_src in claim_terms.get("assumption") or ():
+        if false_at(_premise_relation(lhs_src, rel, rhs_src, facts.params)):
+            return True
+    if claim_terms.get("assume_defined"):
+        try:
+            pw = lift_piecewise(fn, facts)
+        except TimeoutError:
+            raise
+        except Exception:
+            return False
+        for cond, _exc in (getattr(pw, "raise_guards", None) or []):
+            cond = cond.subs({s: names[str(s)] for s in cond.free_symbols
+                              if str(s) in names})
+            if cond.free_symbols <= set(at) and false_at(sympy.Not(cond)):
+                return True
+    return False
 
 
 def _holds_throughout(cond, domain: dict) -> bool:
@@ -2709,10 +2791,17 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                 witness = dict(result.witness or {})
                 if p not in witness:
                     # the piece fixed or narrowed p, so the sub-proof's
-                    # witness may not name it; a point of the piece does
-                    point = _piece_point(piece)
+                    # witness may not name it: the point its
+                    # counterexample names, else a point of the piece
+                    named = _named_point(result.counterexample,
+                                         facts.params).get(p)
+                    point = named if named is not None \
+                        else _piece_point(piece)
                     if point is not None:
                         witness[p] = point
+                if _premise_refuses(fn, facts, witness, claim_terms):
+                    # a counterexample lies inside the claim's premise
+                    return None
                 return replace(result, sketch=f"on the sub-domain {p} in "
                                f"{piece_text}: {result.sketch}",
                                witness=witness or result.witness)
