@@ -5,7 +5,9 @@ judges it by its value: `Decimal('5.5')` lies in `[0, 10]`, and
 `Decimal('3')` is an integer. An endpoint written `0.3` is the number
 3/10 to an exact number, so `Decimal('0.3')` lies in `[0, 0.3]` while
 `Decimal('0.30000000000000001')` does not. A numpy scalar is the number
-it holds. A domain that is not numeric (strings, a language) keeps
+it holds. A signalling NaN is a NaN, judged as `Decimal('NaN')` and
+`float('nan')` are. An infinity of any type is in no bounded interval.
+A domain that is not numeric (strings, a language) keeps
 judging the value as the object it is.
 """
 from decimal import Decimal
@@ -68,3 +70,34 @@ def test_an_exact_number_is_not_a_string():
 
 def test_a_bool_stays_outside_every_numeric_domain():
     assert domain_contains(True, (0, 10)) is False
+
+
+def test_a_signalling_nan_is_a_nan():
+    from mathema.domain import parse_binding
+    for text in ("[0, 1]", "{0.5}", "R", "Z"):
+        bound = parse_binding("x in " + text)[1]
+        expected = domain_contains(Decimal("NaN"), bound)
+        assert domain_contains(Decimal("sNaN"), bound) is expected
+        assert domain_contains(float("nan"), bound) is expected
+    for bound in [(0, 1), Interval(0, 1, True, True)]:
+        assert domain_contains(Decimal("sNaN"), bound) \
+            is domain_contains(float("nan"), bound)
+
+
+@pytest.mark.parametrize("value", [Decimal("Infinity"), Decimal("-Infinity")])
+def test_an_infinite_decimal_is_in_no_bounded_interval(value):
+    assert domain_contains(value, (0, 10)) is False
+    assert domain_contains(value, (-10, 0)) is False
+
+
+@pytest.mark.parametrize("value, members, expected", [
+    (Decimal("0.5"), frozenset({0.5, 2.0}), True),
+    (Fraction(1, 2), frozenset({0.5, 2.0}), True),
+    (Decimal("0.1"), frozenset({0.1}), True),
+    (Decimal("0.10000000000000001"), frozenset({0.1}), False),
+    (Fraction(3, 10), frozenset({0.3}), True),
+    (Decimal("2"), frozenset({2}), True),
+    (Decimal("2.5"), frozenset({2}), False),
+])
+def test_an_exact_number_in_a_set_is_judged_by_its_value(value, members, expected):
+    assert domain_contains(value, members) is expected

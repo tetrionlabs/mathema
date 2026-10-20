@@ -555,10 +555,12 @@ def is_missing(value) -> bool:
     sentinels, IEEE-754 NaN (self-inequality catches a Python `float`, a
     numpy `float64`, and a pandas float uniformly, all three being
     ordinary IEEE-754 under the hood, with no import of any of them
-    needed), or one of a small, extensible set of known missing-
+    needed), a `Decimal` NaN, quiet or signalling, or one of a small, extensible set of known missing-
     sentinel type names checked by name alone. This is the slot
     reading: a `None` held in a slot is the `null` hole."""
     if value is None or isinstance(value, _Sentinel):
+        return True
+    if _decimal_nan(value):
         return True
     try:
         if value != value:
@@ -574,6 +576,13 @@ def is_absent(value) -> bool:
     return value is None or (isinstance(value, _Sentinel) and value.kind == "absent")
 
 
+def _decimal_nan(value) -> bool:
+    """Whether `value` is a `Decimal` NaN, quiet or signalling: a
+    signalling one raises on comparison, so it is asked directly."""
+    import decimal
+    return isinstance(value, decimal.Decimal) and value.is_nan()
+
+
 def member_of(value) -> "str | None":
     """The member word a missing slot value is (`nan`, `NA`, `NaT`, and
     `null` for a `None` held in a slot), the sentinel's own word for a
@@ -585,6 +594,8 @@ def member_of(value) -> "str | None":
     name = _MEMBER_TYPE_NAMES.get(type(value).__name__)
     if name is not None:
         return name
+    if _decimal_nan(value):
+        return "nan"
     try:
         if value != value:
             return "nan"
@@ -1703,6 +1714,8 @@ def plain_number(value):
     if isinstance(value, numbers.Integral):
         return int(value)
     if isinstance(value, decimal.Decimal):
+        if value.is_nan():
+            return math.nan
         if not value.is_finite():
             return float(value)
         exact = fractions.Fraction(value)
