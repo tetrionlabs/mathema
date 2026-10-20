@@ -49,6 +49,7 @@ import copy
 
 import sympy
 
+from . import _reads
 from ._base import NotSymbolic, _bind_params, _expr_to_sympy, strip_docstring
 
 #: the exception-name slot of a guard whose region has no value without
@@ -381,6 +382,12 @@ _COMPLEX_OUT: contextvars.ContextVar = contextvars.ContextVar(
 _OPAQUE_OUT: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_opaque_calls", default=None)
 
+# the definedness walk's reader of subscripts and attribute reads
+# (`_reads.read_checker`), when a caller asked for the calls whose
+# definedness is not known
+_READ_CHECK: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_read_check", default=None)
+
 # the names of the parameters the walk's domain binds to C
 _COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_complex_names", default=frozenset())
@@ -418,6 +425,23 @@ def _lemma_applies(condition, args: list) -> bool:
     return complex_arg if applies_to == "complex" else not complex_arg
 
 
+def _may_fail(node: ast.AST, scope: dict) -> bool:
+    """Intent:
+        Whether one node is an operation that can fail on some input: a
+        division, a modulo or a power, a call with a partiality lemma
+        or whose definedness is not known, or, on the definedness walk,
+        a subscript or attribute read that can raise.
+    """
+    if isinstance(node, ast.BinOp):
+        return isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow))
+    if isinstance(node, ast.Call):
+        return bool(_lemmas_for_call(node, scope)) or _opaque_call(node, scope)
+    read_check = _READ_CHECK.get()
+    return read_check is not None \
+        and isinstance(node, (ast.Subscript, ast.Attribute)) \
+        and isinstance(node.ctx, ast.Load) and read_check(node) is not None
+
+
 def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
                     scope: dict, missed: "list | None" = None,
                     int_syms: frozenset = frozenset()) -> None:
@@ -445,13 +469,10 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         if missed is not None:
             missed.append(f"line {getattr(node, 'lineno', '?')}: {what}")
 
+    read_check = _READ_CHECK.get()
+
     def has_partial(sub: ast.AST) -> bool:
-        return any(isinstance(n, ast.BinOp)
-                   and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod,
-                                         ast.Pow))
-                   or isinstance(n, ast.Call) and (
-                       _lemmas_for_call(n, scope) or _opaque_call(n, scope))
-                   for n in ast.walk(sub))
+        return any(_may_fail(n, scope) for n in ast.walk(sub))
 
     if isinstance(node, ast.IfExp):
         from ._conditioned import _condition_to_sympy
@@ -474,6 +495,12 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         if any(has_partial(v) for v in node.values[1:]):
             miss("and/or operand")
         return
+    if isinstance(node, (ast.Subscript, ast.Attribute)) \
+            and isinstance(node.ctx, ast.Load):
+        opaque = _OPAQUE_OUT.get()
+        how = read_check(node) if read_check is not None else None
+        if opaque is not None and how is not None:
+            opaque.append(f"line {getattr(node, 'lineno', '?')}: {how}")
     if isinstance(node, ast.Call):
         opaque = _OPAQUE_OUT.get()
         if opaque is not None and _opaque_call(node, scope):
@@ -513,6 +540,11 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             # a divisor that is zero at every point (`x - x`)
             out.append((path_cond, "ZeroDivisionError"))
     for child in ast.iter_child_nodes(node):
+        if isinstance(node, ast.Call) and child is node.func \
+                and isinstance(child, ast.Attribute):
+            # the method a call names is read with the call itself,
+            # whose definedness the call's own check reports
+            child = child.value
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
 
 
@@ -896,11 +928,24 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                     # so it does not lift inside the body; a range
                     # index reads as a nonnegative integer symbol
                     body_env = {**env, **_range_index(stmt, env)}
+                    walked: set = set()
                     for node in ast.walk(stmt):
                         if isinstance(node, (ast.Assign, ast.AugAssign)):
                             _guards_in_expr(node.value, body_env, body_cond,
                                             guards, scope, missed,
                                             int_syms)
+                            walked |= {id(n) for n in ast.walk(node.value)}
+                    # any other operation in the body that can fail (a
+                    # condition, a returned value, an expression
+                    # statement) has no region read here
+                    for node in (n for part in stmt.body + stmt.orelse
+                                 for n in ast.walk(part)):
+                        if id(node) not in walked and _may_fail(node, scope):
+                            missed.append(
+                                f"line {getattr(node, 'lineno', '?')}: "
+                                f"{ast.unparse(node)} inside a loop body, "
+                                f"whose raise region is not read")
+                            break
             elif isinstance(stmt, ast.Pass):
                 continue
             elif isinstance(stmt, ast.Expr):
@@ -910,6 +955,9 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                 return
     token = _COMPLEX_OUT.set(complex_out)
     opaque_token = _OPAQUE_OUT.set(opaque_out)
+    read_token = _READ_CHECK.set(
+        _reads.read_checker(fn, facts, scope) if opaque_out is not None
+        else None)
     int_token = _INT_SYMS.set(int_syms)
     names_token = _COMPLEX_NAMES.set(frozenset(
         name for name, bound in (domain or {}).items()
@@ -920,6 +968,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         _COMPLEX_NAMES.reset(names_token)
         _INT_SYMS.reset(int_token)
         _OPAQUE_OUT.reset(opaque_token)
+        _READ_CHECK.reset(read_token)
         _COMPLEX_OUT.reset(token)
     if missed_out is not None:
         missed_out.extend(missed)

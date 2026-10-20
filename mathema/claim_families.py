@@ -4230,9 +4230,37 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     for off in _WITNESS_OFFSETS + (1e-6, -1e-6, 10.0, -10.0):
                         yield {**base, p: float(root) + off}
 
+    def emptied():
+        # the inputs a subscript or a field read fails on: the empty
+        # sequence, string and mapping, and a mapping without each key
+        # the body reads
+        from .probing import _synth_dict
+        from .symbolic._base import _dict_key_tree
+        for p in params:
+            if p in call_pins or p in held or p in marked or p in shapes:
+                continue
+            p_kind = facts.param_kinds.get(p)
+            if array_forms.get(p) == "mat":
+                # a matrix keeps at least one row: the row is empty
+                yield {**draw(), p: [[]]}
+            elif p_kind in SEQUENCE_KINDS:
+                yield {**draw(), p: as_container(p, [])}
+            elif p_kind == "string":
+                yield {**draw(), p: ""}
+            elif p_kind == "dict":
+                yield {**draw(), p: {}}
+                keys = (_dict_key_tree(facts.tree, p)
+                        if facts.tree is not None else {})
+                for key in keys:
+                    without = _synth_dict(keys, rng)
+                    without.pop(key, None)
+                    yield {**draw(), p: without}
+
     def candidates():
         yield from corners()
         yield from array_corners()
+        if kind == "is_defined":
+            yield from emptied()
         if bare and kind == "is_overflow_safe":
             yield from extremes()
         if not bare:
