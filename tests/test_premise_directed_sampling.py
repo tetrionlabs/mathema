@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """An equality premise random draws would essentially never satisfy is
-sampled directly: `dim(a) == 0` draws the empty sequence, `dim(a) == k`
-draws length k, `det(a) == 0` draws singular matrices, and `x == c`
-draws c. A premise nothing can construct still skips with "no sampled
-point satisfied the assuming clause"."""
+sampled directly: `dim(a) == k` draws length k, `det(a) == 0` draws
+singular matrices, and `x == c` draws c. `dim(a) == 0` is never drawn:
+`R^n` means n >= 1 and the empty input is judged by its own policy rows
+(`raises(f([]), E)`, is_empty_safe), so a claim premised on it finds no
+point and skips with "no sampled point satisfied the assuming clause",
+as a premise nothing can construct does."""
 import random
 
 import pytest
@@ -24,11 +26,17 @@ def _declared(fn, statement):
     return p
 
 
-def test_an_empty_sequence_premise_draws_the_empty_sequence():
+def test_an_empty_sequence_premise_is_outside_r_n():
     (p,) = check_conjectures(head, [claim(
         "for xs in R^n, assuming dim(xs) == 0, raises(f(xs), IndexError)",
         route="probe")])
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "skipped", (p.verdict, p.note)
+    assert "no sampled point satisfied the assuming clause" in p.note, p.note
+
+
+def test_the_empty_input_is_stated_as_its_own_policy_row():
+    (p,) = check_conjectures(head, [claim("raises(f([]), IndexError)")])
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 
 def test_a_length_premise_draws_that_length():
@@ -40,9 +48,12 @@ def test_a_length_premise_draws_that_length():
 
 def test_statistics_mean_raises_on_the_empty_sequence():
     import statistics
+    p = _declared(statistics.mean, "raises(f([]), StatisticsError)")
+    assert p.verdict == "holds", (p.verdict, p.note)
     p = _declared(statistics.mean, "for data in R^n, assuming dim(data) == 0, "
                                    "raises(f(data), StatisticsError)")
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "no sampled point satisfied the assuming clause" in p.note, p.note
 
 
 def test_numpy_inv_raises_on_a_singular_matrix():

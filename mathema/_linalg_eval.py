@@ -64,17 +64,18 @@ _HOLED: list = []
 
 
 def _holed(array, holes: dict):
-    """`array` carrying the hole values its missing positions were drawn
-    as (`None`, `pd.NA`), `{position: value}`, so the function receives
-    them as drawn when the array goes back to a plain list; the array
-    itself holds NaN there."""
+    """`array` carrying the values positions were drawn as where the
+    float array holds something else, `{position: value}`: a hole drawn
+    as `None` or `pd.NA` (held as NaN), an int (held as the float
+    nearest it), so the function receives them as drawn when the array
+    goes back to a plain list."""
     if not holes:
         return array
     if not _HOLED:
         np = _np()
 
         class HoledArray(np.ndarray):  # type: ignore[name-defined]
-            """A float array with the hole values it stands for."""
+            """A float array with the values positions were drawn as."""
             hole_values: dict = {}
 
         _HOLED.append(HoledArray)
@@ -151,7 +152,9 @@ def as_array(value):
     """Intent:
         A drawn value as the claim evaluates it: a vector or matrix of
         numbers (a list, nested lists, an array) as a float numpy
-        array with NaN at each missing position, its positions still
+        array with NaN at each missing position (a complex array when an
+        entry is complex, an object array holding each number exactly
+        when one is too large for a float), its positions still
         named when the list names them (`runtime_types.Labelled`), a
         dict of columns as a `Table` (a column of strings or booleans
         as an object array), anything else unchanged.
@@ -175,17 +178,68 @@ def as_array(value):
         def kept(v):
             # a hole drawn as something other than a float NaN
             return is_missing(v) and not isinstance(v, float)
-        if all(isinstance(r, (list, tuple)) for r in value):
+
+        def whole(v):
+            # an int, which the float array holds only as a float
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        def beyond(v):
+            # an exact number too large for a float
+            if isinstance(v, bool) or is_missing(v):
+                return False
+            try:
+                float(v)
+            except OverflowError:
+                return True
+            except (TypeError, ValueError):
+                return False
+            return False
+        nested = all(isinstance(r, (list, tuple)) for r in value)
+        flat = [v for r in value for v in r] if nested else list(value)
+        if any(isinstance(v, complex) for v in flat):
+            # a complex vector or matrix: a complex array, NaN at each
+            # missing position
+            complex_rows = ([[complex(math.nan, 0.0) if is_missing(v)
+                              else complex(v) for v in r] for r in value]
+                            if nested else
+                            [complex(math.nan, 0.0) if is_missing(v)
+                             else complex(v) for v in value])
+            return _holed(np.array(complex_rows, dtype=complex),
+                          ({(i, j): v for i, r in enumerate(value)
+                            for j, v in enumerate(r) if kept(v)}
+                           if nested else
+                           {(k,): v for k, v in enumerate(value) if kept(v)}))
+        if any(beyond(v) for v in flat):
+            # held exactly, entry by entry, as an object array
+            rows = ([[math.nan if is_missing(v) else v for v in r]
+                     for r in value] if nested
+                    else [math.nan if is_missing(v) else v for v in value])
+            exact = np.empty(np.shape(rows), dtype=object)
+            exact[...] = rows
+            return _holed(exact, ({(i, j): v for i, r in enumerate(value)
+                                   for j, v in enumerate(r) if kept(v)}
+                                  if nested else
+                                  {(k,): v for k, v in enumerate(value)
+                                   if kept(v)}))
+        if nested:
+            cells = {(i, j): v for i, r in enumerate(value)
+                     for j, v in enumerate(r)}
+            held = {k: v for k, v in cells.items() if kept(v)} or {
+                k: v for k, v in cells.items() if whole(v)}
             return _holed(np.array([[math.nan if is_missing(v) else float(v)
                                      for v in r] for r in value], dtype=float),
-                          {(i, j): v for i, r in enumerate(value)
-                           for j, v in enumerate(r) if kept(v)})
+                          held)
         holes = {(k,): v for k, v in enumerate(value) if kept(v)}
         array = np.array([math.nan if is_missing(v) else float(v)
                           for v in value], dtype=float)
         if holes:
             return _holed(array, holes)
-        return _labelled(array, getattr(value, "labels", ()))
+        labels = getattr(value, "labels", ())
+        if labels:
+            return _labelled(array, labels)
+        # with no hole and no names, the ints go back to the function as
+        # the ints they were drawn as
+        return _holed(array, {(k,): v for k, v in enumerate(value) if whole(v)})
     return value
 
 

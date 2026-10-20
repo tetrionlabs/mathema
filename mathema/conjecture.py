@@ -4288,9 +4288,16 @@ def _instance_bundles(fn, facts) -> dict:
     """
     import dataclasses as _dc
 
-    from .symbolic._base import (_attr_keys_used, _dataclass_field_names,
-                                 _enclosing_class)
+    from .runtime_types._receivers import method_receiver, receiver_fields
+    from .symbolic._base import _dataclass_field_names
     out: dict = {}
+    receiver = method_receiver(fn)
+    if receiver is not None and facts.params and facts.params[0] == receiver[0]:
+        # a method's receiver: an instance of its class, drawn by the
+        # fields it is known to hold, a dataclass's even without source
+        fields = receiver_fields(receiver[1], facts.tree, receiver[0])
+        if fields is not None:
+            out[receiver[0]] = (receiver[1], list(fields))
     if facts.tree is None:
         return out
     try:
@@ -4304,17 +4311,6 @@ def _instance_bundles(fn, facts) -> dict:
             fields = _dataclass_field_names(ann)
             if fields:
                 out[p] = (ann, fields)
-            continue
-        if p == facts.params[0] and p in ("self", "cls"):
-            cls = _enclosing_class(fn)
-            if cls is not None and _dc.is_dataclass(cls):
-                fields = _dataclass_field_names(cls)
-                if fields:
-                    out[p] = (cls, fields)
-            elif cls is not None:
-                read = _attr_keys_used(facts.tree, p)
-                if read:
-                    out[p] = (cls, read)
     return out
 
 
@@ -6723,6 +6719,12 @@ def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
             continue
         if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
             continue
+        if p in ("self", "cls") and facts.params and p == facts.params[0]:
+            return (f"no evaluable inputs: {p} is the receiver, an instance "
+                    f"of {cls}, which mathema has no way to draw (the body "
+                    f"does not show the fields it holds); check the method "
+                    f"bound to an instance ({cls}(...).{getattr(fn, '__name__', 'f')}), "
+                    f"or bind {p} in the claim (for {p} in L[...])")
         return (f"no evaluable inputs: {p} is annotated {cls}, a class "
                 f"mathema has no way to draw; supply {cls} through a "
                 f"runtime type adapter, or bind {p} in the claim "
@@ -7600,6 +7602,10 @@ class _ClaimContext:
     # working domain, so derive excludes them and the probe skips (and
     # counts) the draws they refuse
     exclude_own_guards: bool = False
+    # an unbound method's receiver, `{name: probing.Instances}`: the
+    # instances of its class the routes that run the code draw it as,
+    # kept apart from `cj_domain`, which the mathematics reads
+    receiver: dict = field(default_factory=dict)
     guard_refused: int = 0
     # draws a path binding rejected because the path reached no value
     # (an index past the end, a field holding None) the bound does not
@@ -7998,6 +8004,29 @@ def _validate_claim(cj, statement: str, note: str, facts,
                + "/".join(sorted({facts.param_kinds[p]
                                   for p in annotation_inferred}))
                + " annotation")
+    # a complex annotation completes an unbound parameter to the
+    # complex plane, as an int annotation does to the integers
+    complex_inferred = sorted(p for p in facts.params
+                              if facts.param_kinds.get(p) == "complex"
+                              and p in read and p not in cj_domain)
+    if complex_inferred:
+        cj_domain = {**{p: "C" for p in complex_inferred}, **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in C" for p in complex_inferred)
+               + " from its own complex annotation")
+    element_inferred = _element_inferred(fn, facts, read, cj_domain)
+    if element_inferred:
+        cj_domain = {**{p: b for p, (b, _w, _t) in element_inferred.items()},
+                     **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in {words} from its own {text} annotation"
+                           for p, (_b, words, text)
+                           in sorted(element_inferred.items())))
+    receiver = _receiver_instances(fn, facts, cj_domain)
+    receiver_draw = {receiver[0]: receiver[1]} if receiver is not None else {}
+    if receiver is not None:
+        note = (f"{note}; {receiver[0]} drawn as an instance of "
+                f"{receiver[1].cls.__name__}")
     literal_inferred = {p: b for p, (b, cat, _d) in stated.items()
                         if cat == "stated_values"}
     if literal_inferred:
@@ -8176,7 +8205,8 @@ def _validate_claim(cj, statement: str, note: str, facts,
     if cj.relation in ("<=", ">=", "<", ">"):
         complex_typed = sorted(
             p for p, bound in cj_domain.items()
-            if bound == "C" or getattr(bound, "base_type", None) == "C")
+            if (bound == "C" or getattr(bound, "base_type", None) == "C")
+            and p not in complex_inferred)
         if complex_typed:
             # mirrors the derive route's refusal of ordering over
             # opaque values: ordering was never meaningful to claim
@@ -8280,7 +8310,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          cj_domain=cj_domain, extra=frozenset(cj.funcs),
                          missing={**implied_resolution, **resolution},
                          record_domain={**implied, **completed},
-                         implied=frozenset(implied))
+                         implied=frozenset(implied), receiver=receiver_draw)
 
 
 def _admitted_scalar_points(ctx) -> list:
@@ -9065,20 +9095,85 @@ def _as_domain_or_none(bound):
     return None if bound is None else _as_domain(bound)
 
 
+def _receiver_instances(fn, facts, cj_domain: dict):
+    """Intent:
+        `(name, probing.Instances)` for an unbound method's receiver
+        the claim does not bind itself: the instances of its class every
+        route draws it as, each field inside the claim's binding of it
+        (`for self.rate in [0, 1]`); None for any other function, or a
+        receiver mathema has no way to draw.
+    """
+    from .probing import Instances
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0] \
+            or receiver[0] in cj_domain:
+        return None
+    bundle = _instance_bundles(fn, facts).get(receiver[0])
+    if bundle is None:
+        return None
+    cls, fields = bundle
+    kinds = tuple((f, _field_kind(cls, f)) for f in fields)
+    bounds = tuple((f, cj_domain.get(f"{receiver[0]}.{f}")) for f in fields)
+    return receiver[0], Instances(cls, kinds, bounds)
+
+
+def _element_inferred(fn, facts, read, cj_domain: dict) -> dict:
+    """Intent:
+        `{param: (element domain, words, annotation text)}` for each
+        sequence parameter the claim reads and nothing binds whose
+        annotation states the type of its elements as `int`, `bool` or
+        `str` (`list[int]`, `NDArray[np.int64]`): the integers, the two
+        bools or the type of strings, an element range drawn at an
+        independent length, as an `int`, `bool` or `str` annotation
+        completes a scalar. `words` renders it (`Z^n`).
+    """
+    from .domain import Domain
+    from .runtime_types import SEQUENCE_KINDS, annotated_element
+    from .types import missing_policy_from_signature
+    out: dict = {}
+    candidates = [p for p in facts.params
+                  if facts.param_kinds.get(p) in SEQUENCE_KINDS
+                  and p in read and p not in cj_domain]
+    if not candidates:
+        return out
+    policy = missing_policy_from_signature(fn)
+    for p in candidates:
+        element = annotated_element(fn, p)
+        if element == "int":
+            bound, words = "Z", "Z^n"
+        elif element == "bool":
+            bound, words = frozenset({False, True}), "{False, True}^n"
+        elif element == "str":
+            bound = Domain(base_type="S", explicit_type=True, clause=True)
+            words = "S^n"
+        else:
+            continue
+        defaults = policy.get(p)
+        text = defaults.slot_type if defaults is not None else element
+        out[p] = (bound, words, text)
+    return out
+
+
 def _int_completed(bound, kind: "str | None"):
     """Intent:
         A real binding that states no type, completed to the integers
         when its parameter is annotated `int` (`[0, 10]` on `n: int` is
-        `[0, 10] : int`); any other binding unchanged. A type the claim
-        states wins.
+        `[0, 10] : int`), or when it bounds the elements of a sequence
+        whose annotation states int elements (`[0, 1]^n` on `xs:
+        list[int]`, `kind` then the slot type `list[int]`, is `[0, 1]^n
+        : int`); any other binding unchanged. A type the claim states
+        wins.
     """
     from dataclasses import replace
 
     from .domain import _as_domain
-    if kind != "int" or bound is None or isinstance(bound, (str, frozenset)):
+    elements = isinstance(kind, str) and kind.endswith("[int]")
+    if not (kind == "int" or elements) or bound is None \
+            or isinstance(bound, (str, frozenset)):
         return bound
     dom = _as_domain(bound)
-    if dom.explicit_type or dom.base_type != "R" or dom.dims \
+    if dom.explicit_type or dom.base_type != "R" or (dom.dims and not elements) \
             or not dom.pieces \
             or any(isinstance(piece, frozenset) for piece in dom.pieces):
         return bound
@@ -9146,6 +9241,10 @@ def _complete_missing(cj, fn) -> tuple:
             if defaults.slot_type == "int" and stated.base_type == "R":
                 notes.append(f"the claim widens the type of {p} from int "
                              f"to the reals")
+            elif defaults.slot_type.endswith("[int]") and stated.dims \
+                    and stated.base_type == "R":
+                notes.append(f"the claim widens the type of {p}'s elements "
+                             f"from int to the reals")
             elif defaults.slot_type == "float" and stated.base_type in ("Z", "N"):
                 notes.append(f"the claim narrows the type of {p} from float "
                              f"to the integers")
@@ -9805,7 +9904,8 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     missing = _admitted_scalar_points(ctx) + containers
 
     def run(cj, witness=None):
-        return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
+        return _float_companion(proven, cj, fn, facts,
+                                {**ctx.cj_domain, **ctx.receiver},
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
@@ -10213,7 +10313,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               counterexample=dproof.counterexample,
                               note=note, meta=_provenance_meta(dproof))
             return _corroboration_gate(falsified, dproof, cj, fn, facts,
-                                       cj_domain, _bound_callables(cj),
+                                       {**cj_domain, **ctx.receiver},
+                                       _bound_callables(cj),
                                        assum=assumption or [])
         if dproof is not None and dproof.sketch:
             definitions_hint = dproof.sketch
@@ -10544,7 +10645,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # a symbolic decider can be wrong, only trust the disproof
         # once it reproduces against the REAL function
         gated = _corroboration_gate(falsified, proof, cj, fn, facts,
-                                    cj_domain, bound_funcs,
+                                    {**cj_domain, **ctx.receiver}, bound_funcs,
                                     assum=assumption or [])
         if gated.verdict == "falsified" and ctx.exclude_own_guards \
                 and _refused_by_own_guard(fn, proof.witness
@@ -11294,7 +11395,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
-                facts, family_cj, cj_domain, setup.rng, setup.budget)
+                facts, family_cj, {**cj_domain, **ctx.receiver}, setup.rng,
+                setup.budget)
         premise_unmet = (guard is not None and guard.admitted == 0
                          and guard.rejected > 0)
         if algo_result is not None:
@@ -11570,13 +11672,20 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     import random as _random_mod
 
     from ._sampling import _RNG_SEED
-    from .runtime_types import annotated_container, as_annotated
+    from .probing import bound_element_type
+    from .runtime_types import annotated_container, as_annotated, as_element_type
     # the set, frozenset or tuple a sequence parameter's annotation
-    # names: every draw of it, a recorded witness replayed included, is
-    # passed as a member of that type
-    annotated = {_p: made for _p, _k in kinds.items()
-                 if _k in SEQUENCE_KINDS
-                 and (made := annotated_container(fn, _p)) is not None}
+    # names, and the type of its elements: every draw of it, a recorded
+    # witness replayed included, is passed as a member of that type
+    containers_of = {_p: made for _p, _k in kinds.items()
+                     if _k in SEQUENCE_KINDS
+                     and (made := annotated_container(fn, _p)) is not None}
+
+    def as_typed(value, p):
+        typed = as_annotated(value, containers_of.get(p))
+        if kinds.get(p) not in SEQUENCE_KINDS:
+            return typed
+        return as_element_type(typed, bound_element_type(sample_bound(p)))
     implied_rng = _random_mod.Random(_RNG_SEED + 1)
     for _p, _k in kinds.items():
         # a length is the floor's to choose only when no other parameter
@@ -11593,7 +11702,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                  if key.startswith(_p + ".")
                                  and key[len(_p) + 1:].isidentifier()},
                                 reach=pinf,
-                                distinct=annotated.get(_p) in (set, frozenset))
+                                distinct=containers_of.get(_p) in (set, frozenset))
         if made is not None:
             containers[_p] = made
 
@@ -12000,7 +12109,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # a fixed implementation must clear the exact point that
             # broke it before fresh evidence counts.
             for p, v in zip(kinds, pinned[trial]):
-                v = as_annotated(v, annotated.get(p))
+                v = as_typed(v, p)
                 env[p] = v
                 args.append(v)
         else:
@@ -12127,7 +12236,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # claim draws are the ones it drew without them
                     v = containers[p].next(list(v), implied_rng if p in ctx.implied
                                            else rng)
-                v = as_annotated(v, annotated.get(p))
+                v = as_typed(v, p)
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():
@@ -12135,8 +12244,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # the sample lies on the premise by construction
                 if p in literal_args:
                     continue
-                v = as_annotated(draw(rng, trial_sizes.get(resolver.key(p, 0))),
-                                  annotated.get(p))
+                v = as_typed(draw(rng, trial_sizes.get(resolver.key(p, 0))), p)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:

@@ -1364,6 +1364,10 @@ class ComplexResult(ArithmeticError):
 
 
 def _complex_text(value) -> str:
+    """A complex value as a witness writes it: a number as `a+bj`, a
+    vector or matrix of them entry by entry."""
+    if hasattr(value, "tolist") and getattr(value, "ndim", 0):
+        return _fmt_value(value.tolist())
     try:
         return _fmt_value(complex(value))
     except (TypeError, ValueError):
@@ -1410,6 +1414,28 @@ def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
                    for a in annotations)
 
 
+def _exact_shortfall(np, lv, rv, relation: str) -> float:
+    """Intent:
+        `ordering_shortfall` over arrays holding a number too large for
+        a float: each difference taken exactly, the largest positive one
+        that a float holds, 0.0 when there is none.
+    """
+    try:
+        diffs = (np.asarray(lv, dtype=object)
+                 - np.asarray(rv, dtype=object)).ravel().tolist()
+    except (ValueError, TypeError):
+        return 0.0
+    out = 0.0
+    for d in diffs:
+        try:
+            gap = float(d if relation == "<=" else -d)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if math.isfinite(gap) and gap > out:
+            out = gap
+    return out
+
+
 def ordering_shortfall(lv, rv, relation: str) -> float:
     """Intent:
         By how much `lv <relation> rv` fails when compared exactly, for
@@ -1444,6 +1470,8 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
     try:
         gaps = sign * (np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
         finite = gaps[np.isfinite(gaps)]
+    except OverflowError:
+        return _exact_shortfall(np, lv, rv, relation)
     except (ValueError, TypeError):
         return 0.0
     if finite.size == 0:
@@ -1781,6 +1809,8 @@ def _classify_bound(bounds) -> str:
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
         return "language" if bounds.base_type == "L" else "domain"
+    if isinstance(bounds, Instances):
+        return "instances"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -1970,6 +2000,9 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if isinstance(bounds, Instances):
+        # a method's receiver: an instance of its class
+        return bounds.draw(rng, specials)
     if _classify_bound(bounds) == "language":
         # a language bound is the parameter's own domain whatever kind
         # the body suggested (a mapping read, an iteration): the author
@@ -2065,6 +2098,90 @@ def _synth(kind: str, rng: random.Random, bounds=None,
             return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
+
+
+@dataclass(frozen=True, eq=False)
+class Instances:
+    """Intent:
+        The instances of `cls` a method's receiver ranges over: each
+        field of `fields`, `((name, kind), ...)`, drawn as its kind
+        (`int` or `float`) inside its bound in `bounds`, `((name,
+        bound), ...)`, None for the whole line. A dataclass is
+        constructed; any other class is built field by field without
+        running its `__init__`.
+    """
+    cls: type
+    fields: tuple
+    bounds: tuple = ()
+
+    @property
+    def instances_of(self) -> type:
+        """The class whose instances these are."""
+        return self.cls
+
+    def draw(self, rng: random.Random, specials=None):
+        import dataclasses
+        bounds = dict(self.bounds)
+        values = {f: _synth(kind, rng, bounds.get(f), specials=specials)
+                  for f, kind in self.fields}
+        if dataclasses.is_dataclass(self.cls):
+            return self.cls(**values)
+        inst: object = object.__new__(self.cls)
+        for f, v in values.items():
+            setattr(inst, f, v)
+        return inst
+
+
+def bound_element_type(bound) -> "str | None":
+    """Intent:
+        The type a bound holds its members as, when it is not the
+        reals: `int` for the integers, the naturals, an integer-typed
+        domain or a finite set of ints, `bool` for a finite set of
+        bools; None otherwise.
+    """
+    from .domain import is_sentinel
+    if bound in ("Z", "N"):
+        return "int"
+    if isinstance(bound, Domain):
+        if bound.base_type in ("Z", "N"):
+            return "int"
+        if bound.base_type != "R" or not bound.pieces \
+                or not all(isinstance(p, frozenset) for p in bound.pieces):
+            return None
+        bound = frozenset(v for p in bound.pieces for v in p)
+    if isinstance(bound, frozenset):
+        members = [v for v in bound if not is_sentinel(v) and v is not None]
+        if members and all(isinstance(v, bool) for v in members):
+            return "bool"
+        if members and all(isinstance(v, int) and not isinstance(v, bool)
+                           for v in members):
+            return "int"
+    return None
+
+
+def _element_typed_bound(fn, param: str, bound):
+    """Intent:
+        The bound a sequence parameter's elements are drawn from, held
+        to the element type its annotation states: with no bound, the
+        integers, the two bools or the type of strings for `int`,
+        `bool` or `str` elements; a real binding that states no type,
+        completed to the integers for `int` elements (`[0, 1]^n` on
+        `list[int]`); any other bound as it is.
+    """
+    from .runtime_types import annotated_element
+    element = annotated_element(fn, param)
+    if bound is None:
+        if element == "int":
+            return "Z"
+        if element == "bool":
+            return frozenset({False, True})
+        if element == "str":
+            return Domain(base_type="S", explicit_type=True, clause=True)
+        return None
+    if element == "int":
+        from .conjecture import _int_completed
+        return _int_completed(bound, "list[int]")
+    return bound
 
 
 def _annotation_text(param) -> str:
@@ -2831,6 +2948,8 @@ def probe(fn, facts, domain: dict | None = None,
     except _dims.DimensionConflict:
         resolver = None
 
+    from .runtime_types import as_element_type
+
     def value_for(p, k, sizes):
         param = signature.get(p)
         if (param is not None and p not in domain
@@ -2858,14 +2977,19 @@ def probe(fn, facts, domain: dict | None = None,
         length = None
         if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
             length = sizes.get(resolver.key(p, 0))
-        drawn = _synth(k, rng, domain.get(p), specials=specials,
+        bound = (_element_typed_bound(fn, p, domain.get(p))
+                 if k in SEQUENCE_KINDS else domain.get(p))
+        drawn = _synth(k, rng, bound, specials=specials,
                        extra=critical_hints.get(p),
                        extra_cycle=extra_cycles.get(p), length=length)
         if inputs_missing([drawn]):
             # the smoke call asks whether f can be called with a value;
             # a claim's own missing points are its own to execute
-            return _synth(k, rng, None, specials=specials, length=length)
-        return drawn
+            drawn = _synth(k, rng, _element_typed_bound(fn, p, None)
+                           if k in SEQUENCE_KINDS else None,
+                           specials=specials, length=length)
+        return as_element_type(drawn, bound_element_type(bound)) \
+            if k in SEQUENCE_KINDS else drawn
 
     def args_for() -> "tuple[list, dict]":
         sizes = resolver.draw_sizes(rng) if resolver is not None else {}

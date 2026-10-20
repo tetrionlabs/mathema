@@ -129,3 +129,55 @@ def receiver_form(key: str):
     fn.__annotations__ = {RECEIVER: cls}
     fn.__signature__ = sig  # type: ignore[attr-defined]
     return fn
+
+
+# --- the receiver of a user class's method -------------------------------
+
+def method_receiver(fn) -> "tuple[str, type] | None":
+    """Intent:
+        `(name, class)` for the receiver an unbound method of a class
+        takes first: its first parameter, named `self` or `cls` and not
+        annotated, when the function's qualified name places it in a
+        class its module binds. None for any other function, a method
+        already bound to an instance included.
+    """
+    from ..symbolic._base import _enclosing_class
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return None
+    if not params or params[0].name not in ("self", "cls") \
+            or params[0].annotation is not inspect.Parameter.empty:
+        return None
+    cls = _enclosing_class(fn)
+    return (params[0].name, cls) if cls is not None else None
+
+
+def receiver_fields(cls, tree, name: str) -> "tuple | None":
+    """Intent:
+        The fields an instance of `cls` is drawn with when it stands for
+        a method's receiver `name`: a dataclass's declared fields, each
+        an int or a float; for any other class the fields the body reads
+        (`self.rate`); none when the body never names the receiver.
+        None when no draw is known: a dataclass with a field of another
+        type, a body that names the receiver only otherwise (a method
+        call, passing it on), or no body to read.
+    """
+    import ast
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        if not dataclasses.fields(cls):
+            return ()
+        from ..symbolic._base import _dataclass_field_names
+        numeric = _dataclass_field_names(cls)
+        return tuple(numeric) if numeric else None
+    if tree is None:
+        return None
+    from ..symbolic._base import _attr_keys_used
+    read = _attr_keys_used(tree, name)
+    if read:
+        return tuple(read)
+    body = [n for stmt in getattr(tree, "body", []) for n in ast.walk(stmt)]
+    if not any(isinstance(n, ast.Name) and n.id == name for n in body):
+        return ()
+    return None

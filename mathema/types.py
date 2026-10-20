@@ -363,6 +363,8 @@ def _element_policy(args) -> "tuple[str, tuple] | None":
     """`(slot type suffix, members)` a container's element type states,
     `list[float]` its floats' `nan`, or None when it states none."""
     from .runtime_types import resolve_missing
+    # `tuple[int, ...]` states its elements once, then the ellipsis
+    args = tuple(a for a in args if a is not Ellipsis)
     if not args:
         return None
     optional, inner = _optional_parts(args[-1] if len(args) > 1 else args[0])
