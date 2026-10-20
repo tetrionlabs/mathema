@@ -52,7 +52,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .analysis import Facts, SourceUnavailable, _parse_notes, effective_facts
+from .analysis import (Facts, SourceUnavailable, _intent_block_text,
+                       _parse_notes, effective_facts)
 from .analysis import analyze_source as analyze_source
 # aliased on import: the bare name `claims` is already the conjecture-module
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
@@ -239,6 +240,13 @@ class Record:
                 # the statement it qualifies, with what a missing value
                 # of each parameter means
                 line = f"  {mark} {p.name}: {p.statement}"
+                if (p.route or "").endswith(":within_float64"):
+                    # every point run in float64: the count and the
+                    # largest delta beside the statement
+                    from .records import within_float64_words
+                    said = within_float64_words(p.meta)
+                    if said:
+                        line += f"  ({said})"
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
@@ -381,7 +389,7 @@ def _doc_only_facts(fn) -> Facts:
         form="doc:" + hashlib.sha256((doc or name).encode()).hexdigest()[:8],
         sigh=hashlib.sha256(sig_str.encode()).hexdigest()[:12],
         tier=0, tree=None,
-        doc_intent=parsed.summary or None,
+        doc_intent=_intent_block_text(doc) or parsed.summary or None,
         doc_refs=parsed.refs,
         doc_hints=parsed.concept_hints,
         doc_notes=_parse_notes(doc),

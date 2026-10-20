@@ -1,0 +1,1990 @@
+[
+ {
+  "law": "for x in [0, 1], f(x) ~= x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "f_x_approx_x[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-9 (the default)",
+    "route": "derive",
+    "tolerance": null,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_x_approx_x",
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 43,
+    "name": "f_x_approx_x[float]",
+    "note": "the float64 computation of f_x_approx_x ran at 43 points: every corner and 40 interior points",
+    "route": "probe",
+    "tolerance": null,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 43 draws of f_x_approx_x[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for x in [0, 1], f(x) ~= x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "f_x_approx_x[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-7 (declared)",
+    "route": "derive",
+    "tolerance": 1e-07,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_x_approx_x",
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 43,
+    "name": "f_x_approx_x[float]",
+    "note": "the float64 computation of f_x_approx_x ran at 43 points: every corner and 40 interior points",
+    "route": "probe",
+    "tolerance": 1e-07,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 43 draws of f_x_approx_x[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-07
+ },
+ {
+  "law": "for x in [0, 1], f(x) ~= x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": "x = 0.06163325083761284",
+    "meta": {
+     "mathema.corroboration": "reproduced",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-13 (declared)",
+    "route": "probe:semi_analytical",
+    "tolerance": 1e-13,
+    "verdict": "falsified"
+   }
+  ],
+  "tolerance": 1e-13
+ },
+ {
+  "law": "for x in [0, 1], f(x) ~= x",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 33,
+      "score": 8.0,
+      "stars": 3
+     },
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,1)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=33",
+     "mathema.surface": "declared"
+    },
+    "n": 33,
+    "name": "f_x_approx_x",
+    "note": "at x = nan f gave nan back; read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-7 (declared)",
+    "route": "probe",
+    "tolerance": 1e-07,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 33 draws of f_x_approx_x",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 33 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 33 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-07
+ },
+ {
+  "law": "for x in [0, 0.5], f(x) ~= sin(x)",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "x = 0.5: 0.4791666666666667 vs 0.479425538604203",
+    "meta": {
+     "mathema.conditioning": {
+      "error": 0.000539962761036883,
+      "how": "derivative",
+      "inherent": false,
+      "kappa": 0.9130434782608695,
+      "narrow": null,
+      "scale": 0.5,
+      "words": "f loses more than the conditioning explains (\u03ba \u2248 0.913, error 5e-4)"
+     },
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 2,
+      "score": 4.0,
+      "stars": 2
+     },
+     "mathema.counterexample_args": [
+      0.5
+     ],
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,0.5)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3]\u2295crit{-1.41421, 1.41421, 0}, seed=20260718, n=2",
+     "mathema.surface": "declared"
+    },
+    "n": 2,
+    "name": "f_x_approx_sin_x",
+    "note": "f loses more than the conditioning explains (\u03ba \u2248 0.913, error 5e-4); read as abs(f(x) - sin(x)) <= \u03b5, \u03b5 = 1e-9 (the default)",
+    "route": "probe:semi_analytical",
+    "tolerance": null,
+    "verdict": "falsified"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for x in [0, 0.1], f(x) ~= sin(x)",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 129,
+      "score": 10.0,
+      "stars": 4
+     },
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,0.1)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3]\u2295crit{-1.41421, 1.41421, 0}, seed=20260718, n=129",
+     "mathema.surface": "declared"
+    },
+    "n": 129,
+    "name": "f_x_approx_sin_x",
+    "note": "at x = nan f gave nan back; read as abs(f(x) - sin(x)) <= \u03b5, \u03b5 = 0.0001 (declared)",
+    "route": "probe:semi_analytical",
+    "tolerance": 0.0001,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 129 draws of f_x_approx_sin_x",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 129 draws of f_x_approx_sin_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.sin3 --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 129 draws of f_x_approx_sin_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.sin3 --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 0.0001
+ },
+ {
+  "law": "for x in [0, 10], f(x) ~= x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "f_x_approx_x[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-5 (declared)",
+    "route": "derive",
+    "tolerance": 1e-05,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_x_approx_x",
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 43,
+    "name": "f_x_approx_x[float]",
+    "note": "the float64 computation of f_x_approx_x ran at 43 points: every corner and 40 interior points",
+    "route": "probe",
+    "tolerance": 1e-05,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 43 draws of f_x_approx_x[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of f_x_approx_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-05
+ },
+ {
+  "law": "for x in [0, 10], f(x) ~= x",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "x = 0: 1e-06 vs 0.0",
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 1,
+      "score": 3.0,
+      "stars": 1
+     },
+     "mathema.counterexample_args": [
+      0.0
+     ],
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,10)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=1",
+     "mathema.surface": "declared"
+    },
+    "n": 1,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-7 (declared)",
+    "route": "probe",
+    "tolerance": 1e-07,
+    "verdict": "falsified"
+   }
+  ],
+  "tolerance": 1e-07
+ },
+ {
+  "law": "for x in [0, 10], f(x) == x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 33,
+      "score": 8.0,
+      "stars": 3
+     },
+     "mathema.derive_status": "undecided",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.routes_attempted": "routes attempted, derive: undecided (x + 1/1000000 \u2260 x: the difference 1/1000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (1e-05), so not a disproof of this claim); probe: holds",
+     "mathema.sampling": "x~U(0,10)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=33",
+     "mathema.surface": "declared"
+    },
+    "n": 33,
+    "name": "f_x_eq_x",
+    "note": "derive could not decide it (x + 1/1000000 \u2260 x: the difference 1/1000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (1e-05), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
+    "route": "probe",
+    "tolerance": 1e-05,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 33 draws of f_x_eq_x",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 33 draws of f_x_eq_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 2,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 33 draws of f_x_eq_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-05
+ },
+ {
+  "law": "for x in [1, 1e6], f(x) ~= x",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "x = 1e+06: 1000000.0001000001 vs 1000000.0, within the float tolerance but false here in exact arithmetic",
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 1
+      },
+      "max_stars": 5,
+      "n": 2,
+      "score": 3.0,
+      "stars": 1
+     },
+     "mathema.counterexample_args": [
+      1000000.0
+     ],
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(1,1e+06)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=2",
+     "mathema.surface": "declared"
+    },
+    "n": 2,
+    "name": "f_x_approx_x",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-9 (the default)",
+    "route": "probe",
+    "tolerance": null,
+    "verdict": "falsified"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for x in [1, 1e6], f(x) == x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 1
+      },
+      "max_stars": 5,
+      "n": 161,
+      "score": 9.3,
+      "stars": 4
+     },
+     "mathema.derive_status": "undecided",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.routes_attempted": "routes attempted, derive: undecided (10000000001*x/10000000000 \u2260 x: the difference x/10000000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (0.001), so not a disproof of this claim); probe: holds",
+     "mathema.sampling": "x~U(1,1e+06)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=161",
+     "mathema.surface": "declared"
+    },
+    "n": 161,
+    "name": "f_x_eq_x",
+    "note": "derive could not decide it (10000000001*x/10000000000 \u2260 x: the difference x/10000000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (0.001), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
+    "route": "probe",
+    "tolerance": 0.001,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 161 draws of f_x_eq_x",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 161 draws of f_x_eq_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 2,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 161 draws of f_x_eq_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 0.001
+ },
+ {
+  "law": "for x in [-2, 2], f(x) <= 4",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "f_x_le_4[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_le_4",
+    "note": "",
+    "route": "derive",
+    "tolerance": 1e-09,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_x_le_4",
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 43,
+    "name": "f_x_le_4[float]",
+    "note": "the float64 computation of f_x_le_4 ran at 43 points: every corner and 40 interior points",
+    "route": "probe",
+    "tolerance": 1e-09,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 43 draws of f_x_le_4[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of f_x_le_4[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of f_x_le_4[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-09
+ },
+ {
+  "law": "for x in [-2, 2], f(x) >= 0",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 129,
+      "score": 10.0,
+      "stars": 4
+     },
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(-2,2)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3]\u2295crit{0}, seed=20260718, n=129",
+     "mathema.surface": "declared"
+    },
+    "n": 129,
+    "name": "f_x_ge_0",
+    "note": "at x = nan f gave nan back",
+    "route": "probe:semi_analytical",
+    "tolerance": 0.001,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 129 draws of f_x_ge_0",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 129 draws of f_x_ge_0. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 129 draws of f_x_ge_0. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 0.001
+ },
+ {
+  "law": "for x in [0, 1], f(x) ~= x",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 33,
+      "score": 8.0,
+      "stars": 3
+     },
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,1)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=33",
+     "mathema.surface": "declared"
+    },
+    "n": 33,
+    "name": "f_x_approx_x",
+    "note": "at x = nan f gave nan back; read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-8 (declared)",
+    "route": "probe",
+    "tolerance": 1e-08,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 33 draws of f_x_approx_x",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 33 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.cancelling --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 33 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.cancelling --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-08
+ },
+ {
+  "law": "for x in [0, 1], f(x) == x",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "f_x_eq_x[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_x_eq_x",
+    "note": "",
+    "route": "derive",
+    "tolerance": null,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": "x = 1e-06",
+    "meta": {
+     "mathema.companion_of": "f_x_eq_x",
+     "mathema.conditioning": {
+      "error": 0.0016222000122069861,
+      "how": "mathematics",
+      "inherent": false,
+      "kappa": 1.0,
+      "narrow": null,
+      "scale": 1e-06,
+      "words": "f loses more than the conditioning explains (\u03ba \u2248 1, error 0.00162)"
+     },
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 7,
+    "name": "f_x_eq_x[float]",
+    "note": "the float64 computation of f_x_eq_x ran at 7 points: every corner and 4 interior points",
+    "route": "probe",
+    "tolerance": null,
+    "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 7 draws of f_x_eq_x[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 7 draws of f_x_eq_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.cancelling --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 7 draws of f_x_eq_x[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.cancelling --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for x in [0, 1], abs(f(x) - x * x) <= \u03b5",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.float_companion": "abs_f_x_x_x_le[float]",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "abs_f_x_x_x_le",
+    "note": "",
+    "route": "derive",
+    "tolerance": null,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "abs_f_x_x_x_le",
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 43,
+    "name": "abs_f_x_x_x_le[float]",
+    "note": "the float64 computation of abs_f_x_x_x_le ran at 43 points: every corner and 40 interior points",
+    "route": "probe",
+    "tolerance": null,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 43 draws of abs_f_x_x_x_le[float]",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 43 draws of abs_f_x_x_x_le[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 43 draws of abs_f_x_x_x_le[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for x in [0, 1], abs(f(x) - x * x) <= \u03b5",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 129,
+      "score": 10.0,
+      "stars": 4
+     },
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "x": {
+        "nan": "propagates"
+       }
+      },
+      "executed": {
+       "x": {
+        "nan": "nan in, nan out (propagates)"
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "x": {
+        "nan": "at x = nan f gave nan back"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,1)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3]\u2295crit{0}, seed=20260718, n=129",
+     "mathema.surface": "declared"
+    },
+    "n": 129,
+    "name": "abs_f_x_x_x_le",
+    "note": "at x = nan f gave nan back",
+    "route": "probe:semi_analytical",
+    "tolerance": 1e-06,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 129 draws of abs_f_x_x_x_le",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on the 129 draws of abs_f_x_x_x_le. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on the 129 draws of abs_f_x_x_x_le. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-06
+ },
+ {
+  "law": "for x in [0, 3], assuming x ~= 2, f(x) ~= 4",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "x = 1.9991232665016752: 3.996493834668328 vs 4",
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 0,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 1,
+      "score": 3.0,
+      "stars": 1
+     },
+     "mathema.counterexample_args": [
+      1.9991232665016752
+     ],
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      },
+      "tried": {
+       "x": [
+        "nan"
+       ]
+      }
+     },
+     "mathema.sampling": "x~U(0,3)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3]\u2295crit{0}, seed=20260718, n=1",
+     "mathema.surface": "declared"
+    },
+    "n": 1,
+    "name": "f_x_approx_4",
+    "note": "read as abs(f(x) - 4) <= \u03b5, \u03b5 = 0.001 (declared)",
+    "route": "probe",
+    "tolerance": 0.001,
+    "verdict": "falsified"
+   }
+  ],
+  "tolerance": 0.001
+ },
+ {
+  "law": "for x in [0, 1], f =:= g",
+  "route": null,
+  "rows": [
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.equivalence.complexity": {
+      "f": 1,
+      "g": 1
+     },
+     "mathema.equivalence.rung": "form",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 0,
+    "name": "f_equiv_g",
+    "note": "",
+    "route": "derive",
+    "tolerance": 0.0001,
+    "verdict": "proven"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_equiv_g",
+     "mathema.equivalence.rung": "sampled",
+     "mathema.equivalence.sampling": {
+      "checked": 96,
+      "draws": 96,
+      "seed": 20260718
+     },
+     "mathema.family": "is_numerically_stable",
+     "mathema.missing": {
+      "admitted": {
+       "x": {
+        "absent": false,
+        "missing": [
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for x (float) means nan",
+      "origin": {
+       "x": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 96,
+    "name": "f_equiv_g[float]",
+    "note": "the float64 computation of f_equiv_g ran both functions at 96 shared points, and they agree within tolerance at every one (sampling, never proof)",
+    "route": "probe",
+    "tolerance": 0.0001,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 0.0001
+ },
+ {
+  "law": "for xs in R^n, f(xs) ~= sum(xs)",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "xs = [1.7976931348623157e+308, 1.7976931348623157e+308]: f returned inf, and an infinity for a finite input is no value",
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 1,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 11,
+      "score": 5.0,
+      "stars": 2
+     },
+     "mathema.counterexample_args": [
+      [
+       1.7976931348623157e+308,
+       1.7976931348623157e+308
+      ]
+     ],
+     "mathema.drawn": {
+      "entries": 29,
+      "form": "vec",
+      "largest": [
+       6,
+       1
+      ],
+      "smallest": [
+       1,
+       1
+      ]
+     },
+     "mathema.missing": {
+      "admitted": {
+       "xs": {
+        "absent": false,
+        "missing": [
+         "null",
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "xs": {
+        "nan": "propagates",
+        "null": "raises"
+       }
+      },
+      "executed": {
+       "xs": {
+        "nan": "nan slot in, nan out (propagates)",
+        "null": "raised TypeError"
+       }
+      },
+      "means": "missing for xs (list) means null or nan",
+      "origin": {
+       "xs": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "xs": {
+        "nan": "at xs = [nan] f gave nan back",
+        "null": "at xs = [null] f raised TypeError"
+       }
+      }
+     },
+     "mathema.sampling": "xs~Seq(len\u2208[1,6]; elem~U(-10,10); holes {null, nan} at p=.15, degenerate lap first), seed=20260718, n=11",
+     "mathema.surface": "declared"
+    },
+    "n": 11,
+    "name": "f_xs_approx_sum_xs",
+    "note": "at xs = [null] f raised TypeError; at xs = [nan] f gave nan back; read as abs(f(xs) - sum(xs)) <= \u03b5, \u03b5 = 1e-9 (the default)",
+    "route": "probe",
+    "tolerance": null,
+    "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_xs_approx_sum_xs",
+     "mathema.family": "is_empty_safe",
+     "mathema.missing": {
+      "admitted": {
+       "xs": {
+        "absent": false,
+        "missing": [
+         "null",
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for xs (list) means null or nan",
+      "origin": {
+       "xs": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 1,
+    "name": "is_empty_safe[xs]",
+    "note": "xs = []: f(xs) returns 0",
+    "route": "probe:algorithmic",
+    "tolerance": null,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": "f([null]) raises TypeError; f([1.0]) returns 1.0",
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 11 draws of f_xs_approx_sum_xs",
+      "exception": null,
+      "kind": "missing",
+      "member": "null",
+      "next": "(i) if the raise is intended, state: missing(f, xs, null) raises(TypeError)\n(ii) if not, make f skip or fill the null slot\n(iii) to accept it as a discovery, run: mathema accept tests._bare_tolerance_sample.total missing[xs, null] --as discovery --corrected \"missing(f, xs, null) raises(TypeError)\"",
+      "parameter": "xs",
+      "premise": "",
+      "reason": "mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 6,
+    "name": "missing[xs, null]",
+    "note": "mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError. (i) if the raise is intended, state: missing(f, xs, null) raises(TypeError)\n(ii) if not, make f skip or fill the null slot\n(iii) to accept it as a discovery, run: mathema accept tests._bare_tolerance_sample.total missing[xs, null] --as discovery --corrected \"missing(f, xs, null) raises(TypeError)\"",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 11 draws of f_xs_approx_sum_xs",
+      "exception": null,
+      "kind": "missing",
+      "member": "nan",
+      "parameter": "xs",
+      "premise": "",
+      "reason": "default for a list slot that may be nan; confirmed on the 11 draws of f_xs_approx_sum_xs. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.total --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 6,
+    "name": "missing[xs, nan]",
+    "note": "default for a list slot that may be nan; confirmed on the 11 draws of f_xs_approx_sum_xs. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.total --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": null
+ },
+ {
+  "law": "for xs in R^n, f(xs) ~= sum(xs)",
+  "route": "probe",
+  "rows": [
+   {
+    "counterexample": "xs = [1.7976931348623157e+308, 1.7976931348623157e+308]: f returned inf, and an infinity for a finite input is no value",
+    "meta": {
+     "mathema.confidence": {
+      "factors": {
+       "branches": 0,
+       "float_extremes": 0,
+       "loops": 1,
+       "params": 0,
+       "wide_domain": 0
+      },
+      "max_stars": 5,
+      "n": 11,
+      "score": 5.0,
+      "stars": 2
+     },
+     "mathema.counterexample_args": [
+      [
+       1.7976931348623157e+308,
+       1.7976931348623157e+308
+      ]
+     ],
+     "mathema.drawn": {
+      "entries": 29,
+      "form": "vec",
+      "largest": [
+       6,
+       1
+      ],
+      "smallest": [
+       1,
+       1
+      ]
+     },
+     "mathema.missing": {
+      "admitted": {
+       "xs": {
+        "absent": false,
+        "missing": [
+         "null",
+         "nan"
+        ]
+       }
+      },
+      "behaviour": {
+       "xs": {
+        "nan": "propagates",
+        "null": "raises"
+       }
+      },
+      "executed": {
+       "xs": {
+        "nan": "nan slot in, nan out (propagates)",
+        "null": "raised TypeError"
+       }
+      },
+      "means": "missing for xs (list) means null or nan",
+      "origin": {
+       "xs": {
+        "missing": "type"
+       }
+      },
+      "said": {
+       "xs": {
+        "nan": "at xs = [nan] f gave nan back",
+        "null": "at xs = [null] f raised TypeError"
+       }
+      }
+     },
+     "mathema.sampling": "xs~Seq(len\u2208[1,6]; elem~U(-10,10); holes {null, nan} at p=.15, degenerate lap first), seed=20260718, n=11",
+     "mathema.surface": "declared"
+    },
+    "n": 11,
+    "name": "f_xs_approx_sum_xs",
+    "note": "at xs = [null] f raised TypeError; at xs = [nan] f gave nan back; read as abs(f(xs) - sum(xs)) <= \u03b5, \u03b5 = 1e-6 (declared)",
+    "route": "probe",
+    "tolerance": 1e-06,
+    "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.companion_of": "f_xs_approx_sum_xs",
+     "mathema.family": "is_empty_safe",
+     "mathema.missing": {
+      "admitted": {
+       "xs": {
+        "absent": false,
+        "missing": [
+         "null",
+         "nan"
+        ]
+       }
+      },
+      "means": "missing for xs (list) means null or nan",
+      "origin": {
+       "xs": {
+        "missing": "type"
+       }
+      }
+     },
+     "mathema.surface": "declared"
+    },
+    "n": 1,
+    "name": "is_empty_safe[xs]",
+    "note": "xs = []: f(xs) returns 0",
+    "route": "probe:algorithmic",
+    "tolerance": 1e-06,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": "f([null]) raises TypeError; f([1.0]) returns 1.0",
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 11 draws of f_xs_approx_sum_xs",
+      "exception": null,
+      "kind": "missing",
+      "member": "null",
+      "next": "(i) if the raise is intended, state: missing(f, xs, null) raises(TypeError)\n(ii) if not, make f skip or fill the null slot\n(iii) to accept it as a discovery, run: mathema accept tests._bare_tolerance_sample.total missing[xs, null] --as discovery --corrected \"missing(f, xs, null) raises(TypeError)\"",
+      "parameter": "xs",
+      "premise": "",
+      "reason": "mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 6,
+    "name": "missing[xs, null]",
+    "note": "mathema's default word for a list slot that may be null, not a claim of yours; f raises instead: a null slot in, TypeError. (i) if the raise is intended, state: missing(f, xs, null) raises(TypeError)\n(ii) if not, make f skip or fill the null slot\n(iii) to accept it as a discovery, run: mathema accept tests._bare_tolerance_sample.total missing[xs, null] --as discovery --corrected \"missing(f, xs, null) raises(TypeError)\"",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on the 11 draws of f_xs_approx_sum_xs",
+      "exception": null,
+      "kind": "missing",
+      "member": "nan",
+      "parameter": "xs",
+      "premise": "",
+      "reason": "default for a list slot that may be nan; confirmed on the 11 draws of f_xs_approx_sum_xs. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.total --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 6,
+    "name": "missing[xs, nan]",
+    "note": "default for a list slot that may be nan; confirmed on the 11 draws of f_xs_approx_sum_xs. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.total --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
+   }
+  ],
+  "tolerance": 1e-06
+ }
+]

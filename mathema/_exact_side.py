@@ -15,16 +15,76 @@ evaluation.
 """
 from __future__ import annotations
 
+import sys
 from fractions import Fraction
 
 #: what a successful exact evaluation returns per side: an int, a
-#: Fraction, a bool, or a list of them
+#: Fraction, a bool, or a list of them (or an exact sympy number, see
+#: `symbolic_number`)
 EXACT_TYPES = (int, Fraction, bool)
 
 
 #: numpy not looked for yet; `_NUMPY` holds the module or None after
 #: the one lookup, since the interpreter does not cache a failed import
 _UNLOOKED = object()
+
+#: the name a claim's call `f(...)` is compiled to when one of the
+#: function's own parameters is named `f`: a bare `f` then reads the
+#: parameter and the call reaches the function under this name
+F_CALL = "__f__"
+
+
+def alias_f_calls(tree, params):
+    """Intent:
+        `tree` (a parsed claim side) with each call `f(...)` renamed to
+        `F_CALL` when one of `params` is named `f`, so a bare `f` reads
+        the parameter and the call still reaches the function under
+        test; renamed in place and returned.
+    """
+    import ast
+    if "f" not in params:
+        return tree
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "f":
+            node.func.id = F_CALL
+    return tree
+
+
+def calls_f_by_alias(*codes) -> bool:
+    """Intent:
+        Whether any of `codes` (compiled claim sides, `None` skipped)
+        calls the function under test through `F_CALL`, nested code
+        objects included.
+    """
+    import types
+    for code in codes:
+        if code is None:
+            continue
+        if F_CALL in code.co_names or calls_f_by_alias(
+                *(c for c in code.co_consts if isinstance(c, types.CodeType))):
+            return True
+    return False
+
+
+def f_slot(*codes) -> str:
+    """Intent:
+        The name `codes` call the function under test by: `F_CALL` when
+        they read a bare `f` as a parameter, `f` otherwise.
+    """
+    return F_CALL if calls_f_by_alias(*codes) else "f"
+
+
+def _aliased_callees(callees: dict, codes) -> dict:
+    """Intent:
+        `callees` as `codes` call them: the function under test under
+        `F_CALL` rather than `f` when the claim reads a bare `f` as a
+        parameter, so the parameter's value keeps the name `f`.
+    """
+    if "f" not in callees or not calls_f_by_alias(*codes):
+        return callees
+    return {**{k: v for k, v in callees.items() if k != "f"},
+            F_CALL: callees["f"]}
 _NUMPY: object = _UNLOOKED
 
 
@@ -86,15 +146,46 @@ class _Inexact(Exception):
     """A callee run on exact values returned a value that is not exact."""
 
 
-def wrap(callee, exact_calls: bool = False):
+def holds_number(value) -> bool:
+    """Intent:
+        Whether `value` holds a number anywhere: an int, a float, a
+        complex, a Fraction or Decimal, a numpy number, or a list,
+        tuple, dict or array with one inside. A bool, a string, None or
+        any other object is not a number.
+    """
+    from decimal import Decimal
+    np = _np()
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return False
+    if isinstance(value, (int, float, complex, Fraction, Decimal)):
+        return True
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(value, sympy.Basic):
+        return bool(value.is_number)
+    if np is not None and isinstance(value, np.generic):
+        return holds_number(value.item())
+    if np is not None and isinstance(value, np.ndarray):
+        if value.dtype.kind in "iufc":
+            return True
+        return any(holds_number(v) for v in value.ravel().tolist())
+    if isinstance(value, (list, tuple)):
+        return any(holds_number(v) for v in value)
+    if isinstance(value, dict):
+        return any(holds_number(v) for v in value.values())
+    return False
+
+
+def wrap(callee, exact_calls: bool = False, opaque: bool = False):
     """`callee` called with the executed floats, its result read back
     exactly; with `exact_calls`, called with the exact values themselves,
     its result kept only when it is exact (a float result raises
-    `_Inexact`)."""
+    `_Inexact`). With `opaque`, a result holding no number (a string, a
+    bool, None) is kept as it is: it has no rounding to lose."""
     def call(*args, **kwargs):
         if exact_calls:
             result = callee(*args, **kwargs)
-            if _exact_value(result) is None:
+            if _exact_value(result) is None \
+                    and not (opaque and not holds_number(result)):
                 raise _Inexact(type(result).__name__)
             return result
         else:
@@ -106,13 +197,125 @@ def wrap(callee, exact_calls: bool = False):
 
 def _is_exact(value) -> bool:
     from ._exact_witness import Algebraic
-    return isinstance(value, (*EXACT_TYPES, Algebraic))
+    return isinstance(value, (*EXACT_TYPES, Algebraic)) or symbolic_number(value)
+
+
+def symbolic_number(value) -> bool:
+    """Intent:
+        Whether `value` is an exact sympy number: a finite number
+        holding no float (`sqrt(2)`, `pi`, `exp(1/3)`, a Rational), the
+        value a root or a transcendental step of a body read exactly
+        gives (`_exact_body`). False when sympy has not been imported:
+        no value is one then.
+    """
+    sympy = sys.modules.get("sympy")
+    if sympy is None or not isinstance(value, sympy.Basic):
+        return False
+    return (bool(value.is_number) and value.is_finite is True
+            and not value.has(sympy.Float))
+
+
+def from_symbolic(value):
+    """An exact sympy number as the exact sides carry it: an Integer as
+    an int, a Rational as a Fraction, any other number as itself."""
+    if value.is_Integer:
+        return int(value)
+    if value.is_Rational:
+        return Fraction(int(value.p), int(value.q))
+    return value
+
+
+def is_symbolic_side(value) -> bool:
+    """Whether an exact side is, or holds, a sympy number."""
+    if isinstance(value, (list, tuple)):
+        return any(is_symbolic_side(v) for v in value)
+    return symbolic_number(value)
+
+
+def _sympify_exact(value):
+    """An exact scalar side as a sympy number, or None when it is not
+    one (a bool, a list, a value that is not a number)."""
+    import sympy
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, Fraction)):
+        q = Fraction(value)
+        return sympy.Rational(q.numerator, q.denominator)
+    if symbolic_number(value):
+        return value
+    return None
+
+
+def decide_symbolic(relation: str, left, right, slack) -> "bool | None":
+    """Intent:
+        The claim's relation between two exact scalar sides, one of them
+        at least a sympy number, settled by sympy under the fast
+        wall-clock cap: `==` and `!=` by whether the difference is zero
+        (its assumptions, then `simplify`, then `equals`), `~=` and a
+        declared tolerance by whether `abs(difference)` is within
+        `slack` (read as the exact value of the number it is), an
+        ordering by the sign of the difference. None when sympy leaves
+        the question open, a side is not a scalar number, or the cap
+        fires: the point is then undecided, never proven or falsified.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    a, b = _sympify_exact(left), _sympify_exact(right)
+    if a is None or b is None:
+        return None
+    gap = Fraction(slack) if slack else Fraction(0)
+    eps = sympy.Rational(gap.numerator, gap.denominator)
+
+    def zero(d) -> "bool | None":
+        z = d.is_zero
+        if z is None:
+            d = sympy.simplify(d)
+            z = d.is_zero
+        if z is None:
+            z = d.equals(0)
+        return None if z is None else bool(z)
+
+    def nonpositive(d) -> "bool | None":
+        s = d.is_nonpositive
+        if s is None:
+            s = sympy.simplify(d).is_nonpositive
+        return None if s is None else bool(s)
+
+    def negative(d) -> "bool | None":
+        s = d.is_negative
+        if s is None:
+            s = sympy.simplify(d).is_negative
+        return None if s is None else bool(s)
+
+    def decide() -> "bool | None":
+        d = a - b
+        if relation in ("==", "~=", "!="):
+            held = zero(d) if eps == 0 else nonpositive(sympy.Abs(d) - eps)
+            if held is None:
+                return None
+            return held if relation != "!=" else not held
+        if relation == "<=":
+            return nonpositive(d - eps)
+        if relation == ">=":
+            return nonpositive(-d - eps)
+        if relation == "<":
+            return negative(d)
+        if relation == ">":
+            return negative(-d)
+        return None
+    try:
+        return _with_timeout(decide, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except (TypeError, ValueError, ArithmeticError):
+        return None
 
 
 def _exact_value(value, rounded_roots: bool = False):
-    """`value` as a plain exact value (an int, Fraction or bool, or a
-    nested list of them), or None when any part is inexact. With
-    `rounded_roots`, a square root of an exact rational
+    """`value` as a plain exact value (an int, Fraction or bool, an exact
+    sympy number, or a nested list of them), or None when any part is
+    inexact. With `rounded_roots`, a square root of an exact rational
     (`_linalg_eval._Root`, rounded once to a float or, beyond float
     range, to 60 significant digits) is read as that rounded value, a
     reading close enough for a computation line's tolerance."""
@@ -124,6 +327,8 @@ def _exact_value(value, rounded_roots: bool = False):
         value = value.item()
     if isinstance(value, _Root):
         return Fraction(value) if rounded_roots else None  # type: ignore[call-overload]
+    if symbolic_number(value):
+        return from_symbolic(value)
     if _is_exact(value):
         return value
     if isinstance(value, (list, tuple)):
@@ -371,7 +576,9 @@ def exact_literals(code, written: bool = True):
 
 
 def exact_sides(code_l, code_r, env: dict, callees: dict,
-                exact_calls: bool = False) -> "tuple | None":
+                exact_calls: bool = False,
+                opaque_results: bool = False,
+                computed_env: "dict | None" = None) -> "tuple | None":
     """Intent:
         `(left, right)` evaluated exactly at the point `env` holds, the
         names in `callees` (the function under test and any function the
@@ -381,17 +588,56 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         (Fractions in place of floats) and the claim's literals are the
         numbers as written: the mathematics of the point. Without it the
         literals are the float readings of the computation, the way the
-        number representation reads them.
+        number representation reads them. With `opaque_results` a
+        callee's result holding no number (a string, a bool, None) is
+        exact as it is (`wrap`'s `opaque`), and so is a side holding no
+        number.
+
+    Notes:
+        With `exact_calls`, the claim is first evaluated as the
+        computation evaluates it, on `computed_env` (the point's floats;
+        by default `env`'s values as the computation holds them,
+        `_exact_body._as_computed`), so each call of a function read
+        exactly (`_exact_body.exact_callee`) is checked against the
+        computation's own call in the same order (`_exact_body.paired`);
+        a side is None when the exact evaluation does not make every
+        call the computation made.
     """
+    callees = _aliased_callees(callees, (code_l, code_r))
+    if not exact_calls:
+        return _exact_sides(code_l, code_r, env, callees, False,
+                            opaque_results)
+    from ._exact_body import _as_computed, paired
+
+    def computation():
+        floats = ({k: _as_computed(v) for k, v in env.items()}
+                  if computed_env is None else dict(computed_env))
+        floats.update(callees)
+        floats["__builtins__"] = {}
+        eval(code_l, floats)
+        if code_r is not None:
+            eval(code_r, floats)
+    with paired(computation) as session:
+        sides = _exact_sides(code_l, code_r, env, callees, True,
+                             opaque_results)
+        if sides is not None and not session.complete():
+            return None
+        return sides
+
+
+def _exact_sides(code_l, code_r, env: dict, callees: dict,
+                 exact_calls: bool, opaque_results: bool) -> "tuple | None":
+    """`exact_sides` evaluated, its callees already aliased."""
     from ._math_vocab import MATH_CONSTANTS
     # a named constant (pi, e) keeps its float, which no exact side
     # survives
-    exact_env = {k: (wrap(callees[k], exact_calls) if k in callees
+    exact_env = {k: (wrap(callees[k], exact_calls, opaque_results)
+                     if k in callees
                      else v if k in MATH_CONSTANTS and v is MATH_CONSTANTS[k]
                      else to_exact(v))
                  for k, v in env.items() if k != "__builtins__"}
     for k, v in callees.items():
-        exact_env.setdefault(k, wrap(v, exact_calls))
+        exact_env.setdefault(k, wrap(v, exact_calls, opaque_results))
     exact_env.update(exact_words({k: v for k, v in env.items()
                                   if k not in callees}))
     exact_env["__exact__"] = _literal
@@ -406,8 +652,12 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         return None
     # a rounded root is close enough for a computation line, never for
     # the mathematics
-    left = _exact_value(left, not exact_calls)
-    right = _exact_value(right, not exact_calls) if code_r is not None else None
+    def read(side):
+        if opaque_results and not holds_number(side):
+            return side
+        return _exact_value(side, not exact_calls)
+    left = read(left)
+    right = read(right) if code_r is not None else None
     if left is None or (code_r is not None and right is None):
         return None
     return left, right
@@ -422,6 +672,7 @@ def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
         float sides at the same infinity then do not agree: the value
         they stand for is finite.
     """
+    callees = _aliased_callees(callees, (code_l, code_r))
     exact_env = {k: (wrap(callees[k]) if k in callees else to_exact(v))
                  for k, v in env.items() if k != "__builtins__"}
     for k, v in callees.items():

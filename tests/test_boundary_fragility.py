@@ -4,7 +4,9 @@
 value claim's domain falsifies it, even where the same inputs nudged
 within epsilon evaluate cleanly. That sub-epsilon case is named in the
 counterexample with the clamp remedy and stratum 5.6, the same way the
-is_numerically_stable axis reports it."""
+is_numerically_stable axis reports it, when the function read exactly
+has a value there; a raise the exact function makes too is the
+mathematics failing, with the domain remedy."""
 import math
 
 import pytest
@@ -28,17 +30,18 @@ def hard_edge(x: float) -> float:
     return x
 
 
-def test_sub_epsilon_boundary_raise_falsifies_with_the_clamp_remedy():
+def test_a_knife_edge_raise_the_exact_function_makes_names_the_mathematics():
     # the degenerate domain pins every sample to the knife edge itself:
-    # each call raises there, and each nudge within epsilon escapes,
-    # so the raise is sub-epsilon, yet still a raise in the domain
+    # each call raises there and each nudge within epsilon escapes, but
+    # x = 1 is inside the explicit raise branch read exactly (1 <= 1), so
+    # the mathematics fails there and the domain remedy is the one named
     (p,) = check_conjectures(
         knife_edge, [claim("for x in [1, 1], f(x) == 0", route="probe",
                            tolerance=1e-6)])
     assert p.verdict == "falsified"
-    assert "floating-point boundary" in p.counterexample
-    assert "clamp" in p.counterexample
-    assert p.stratum["cause"] == "implementation:sub-epsilon-boundary"
+    assert "floating-point boundary" not in p.counterexample
+    assert "narrow the claim's domain" in p.counterexample
+    assert p.stratum["mathematics"] == "unsound"
     assert p.meta["mathema.counterexample_args"] == [1.0]
     with pytest.raises(ValueError):
         knife_edge(*p.meta["mathema.counterexample_args"])
@@ -66,14 +69,33 @@ def test_a_raise_at_a_closed_endpoint_falsifies_on_the_probe_route(fn, law):
     assert "mathema.boundary_fragility" not in p.meta
 
 
-def test_a_suggested_value_claim_still_falsifies_the_same_fragility():
-    # the raise is not an accuracy failure (is_numerically_stable reads
-    # accuracy only); the suggested idempotence claim meets it
+def _pieces_contain(domain: dict, value: float) -> bool:
+    for piece in domain["x"]["pieces"]:
+        if "lo" not in piece:
+            continue
+        above = (value >= piece["lo"] if piece["closed_lo"]
+                 else value > piece["lo"])
+        below = (value <= piece["hi"] if piece["closed_hi"]
+                 else value < piece["hi"])
+        if above and below:
+            return True
+    return False
+
+
+def test_a_suggested_value_claim_is_bound_outside_the_raising_band():
+    # the raise region read exactly is both ends of the band, x*x in
+    # [1, 1.0000000000000002], so the suggested idempotence claim is
+    # bound to the rest of the line and the raise is stated as its own
+    # raises row at x = -1 and x = 1
     rec = mathema.check(knife_edge)
     ns = next(p for p in rec.probes if p.name == "idempotent")
-    assert ns.verdict == "falsified"
-    assert "clamp" in ns.counterexample
-    assert "floating-point boundary" in ns.counterexample
+    assert ns.verdict in ("holds", "proven"), (ns.verdict, ns.counterexample)
+    assert not _pieces_contain(ns.domain, 1.0)
+    assert not _pieces_contain(ns.domain, -1.0)
+    raises = next(p for p in rec.probes if p.name == "raises[x]")
+    assert raises.verdict in ("holds", "proven")
+    assert _pieces_contain(raises.domain, 1.0)
+    assert _pieces_contain(raises.domain, -1.0)
 
 
 def test_a_real_raise_region_is_never_absorbed():

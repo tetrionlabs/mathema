@@ -97,6 +97,7 @@ ok   math.exp: library claims from mathema/compendium/math.claims.yaml; no basel
 ok   functions.softmax: no baseline record; 1 proven, 4 holds, 0 falsified
 0 unchanged since the last run (not run again), 2 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 A change then drops the normalization (`return exps`) and declares a
@@ -141,6 +142,7 @@ mathema review HEAD
 FAIL functions.softmax: form changed; 1 proven, 5 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
 1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.
 
 functions.softmax

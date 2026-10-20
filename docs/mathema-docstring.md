@@ -427,9 +427,12 @@ same posture as `mathema describe --issue`.
 
 `Intent:` is the load-bearing marker, and it isn't only a per-function
 one: a module docstring can carry its own `Intent:` block (or its
-first line stands in), and a project README can state codebase-level
-intent under an `## Intent` heading or an `Intent:` block.
-`docstring.intent_context(fn)` reports all three levels, each tagged
+first line stands in), a package states its intent in its
+`__init__.py` docstring the same way (or, when that is silent, in a
+README.md in the package's directory), and a project README can state
+codebase-level intent under an `## Intent` heading or an `Intent:`
+block. `docstring.intent_context(fn)` reports all four levels, under
+the keys `function`, `module`, `package` and `readme`, each tagged
 with the SHAPE the intent was authored in: `explicit` for the
 paragraph following an `Intent:` marker (or a marked README section),
 `implicit` when the first paragraph stands in. Shape is not rung:
@@ -440,8 +443,164 @@ record; intent is its own function-level section of the record, never
 a claim. `docstring_sync()`'s checklist shows the hierarchy as an
 unscored context line.
 Context is reported, never inherited: a function with no intent of its
-own is still a gap, whatever its module or README says; the point is
-to see where intent is missing, not to paper over it.
+own is still a gap, whatever its module, package or README says; the
+point is to see where intent is missing, not to paper over it.
+
+## Intent at every level
+
+A small shop codebase states its intent at each level it can. The
+project README says what the codebase is for:
+
+<!-- example: levels file=README.md -->
+```markdown
+# shop
+
+## Intent
+
+Prices a basket of goods for a small online shop.
+```
+
+the `shop` package says what it does in its `__init__.py`, and its
+`prices` module and the `discounted` function each say theirs in their
+own docstring:
+
+<!-- example: levels file=shop/__init__.py -->
+```python
+"""Pricing for the shop.
+
+Intent:
+    Turns list prices into what a customer pays.
+"""
+```
+
+<!-- example: levels file=shop/prices.py -->
+```python
+"""Discount rules.
+
+Intent:
+    Applies a percentage discount to a list price.
+"""
+
+
+def discounted(price: float, pct: float) -> float:
+    """Price after a percentage discount.
+
+    Intent:
+        The list price reduced by pct percent, never below zero.
+    """
+    if not 0 <= pct <= 100:
+        raise ValueError("pct must be between 0 and 100")
+    return max(0.0, price * (1 - pct / 100))
+```
+
+The `units` package has an empty `__init__.py`, so its intent lives in
+a README.md in the package's directory, and its one function states
+its intent only in a summary line:
+
+<!-- example: levels file=units/__init__.py -->
+```python
+```
+
+<!-- example: levels file=units/README.md -->
+```markdown
+# units
+
+Intent:
+    Converts between the currencies the shop sells in.
+```
+
+<!-- example: levels file=units/convert.py -->
+```python
+def to_cents(amount: float) -> int:
+    """Whole cents in an amount."""
+    return round(amount * 100)
+```
+
+Once both functions have a record, `mathema verify` ends with one line
+counting the intents no one has accepted yet. The line is information
+and never changes the exit code:
+
+<!-- example: levels run -->
+```python
+import mathema
+from shop.prices import discounted
+from units.convert import to_cents
+
+mathema.write_spec(discounted)
+mathema.write_spec(to_cents)
+```
+
+<!-- example: levels session -->
+```
+$ mathema verify --root .
+2 unchanged since the last run (not run again), 0 checked, 0 problem(s)
+grammars detected: (none); verified by this run: mathema
+6 intents to accept (1 codebase, 2 packages, 1 module, 2 functions): mathema accept --intent
+```
+
+`mathema accept --intent` with no key walks them top down, the
+codebase first, then packages, modules and functions, showing what
+each acceptance binds to (for a function, its signature and raised
+exceptions as well as the text) and asking `[y]es / [n]o / [e]dit /
+[q]uit` for each. `e` opens the file at the intent in `$EDITOR` (or
+prints the path and line when no editor is set) and reads it again
+before asking; a function's acceptance binds to its record, so after
+editing a function's intent you run `mathema verify` and accept it
+then. The answers here come from a pipe so the page can show the whole
+session:
+
+<!-- example: levels session -->
+```
+$ printf 'y\ny\nn\ny\ny\nq\n' | mathema accept --intent --by "Ada Lovelace"
+6 intents to accept, by Ada Lovelace
+  a function's acceptance binds to its signature, raised exceptions and text;
+  a package, module or codebase acceptance binds to its text
+[1/6] codebase __project__ (new)
+  intent: Prices a basket of goods for a small online shop.
+  source: README.md:3
+accept? [y]es / [n]o / [e]dit / [q]uit y
+written: accepted the stated intent of __project__ as documented
+[2/6] package shop (new)
+  intent: Turns list prices into what a customer pays.
+  source: shop/__init__.py:3
+accept? [y]es / [n]o / [e]dit / [q]uit y
+written: accepted the stated intent of shop as documented
+[3/6] package units (new)
+  intent: Converts between the currencies the shop sells in.
+  source: units/README.md:3
+accept? [y]es / [n]o / [e]dit / [q]uit n
+[4/6] module shop.prices (new)
+  intent: Applies a percentage discount to a list price.
+  source: shop/prices.py:3
+accept? [y]es / [n]o / [e]dit / [q]uit y
+written: accepted the stated intent of shop.prices as documented
+[5/6] function shop.prices.discounted (new)
+  intent: The list price reduced by pct percent, never below zero.
+  signature: (price: float, pct: float) -> float
+  raises: ValueError
+  source: shop/prices.py:11
+accept? [y]es / [n]o / [e]dit / [q]uit y
+written: accepted intent of shop.prices.discounted as documented
+[6/6] function units.convert.to_cents (new)
+  intent: Whole cents in an amount.
+  signature: (amount: float) -> int
+  raises: none
+  source: units/convert.py:1
+accept? [y]es / [n]o / [e]dit / [q]uit q
+4 accepted, 1 skipped, 1 not reached
+```
+
+Each `y` is the same act as accepting that one key, so it goes through
+the same human check (the PIN, when one is set) and records who
+accepted it. The walk lists an intent that was accepted and has since
+moved on as well, marked stale with what changed: the text, or for a
+function its signature or raised exceptions. `--yes` prints the whole
+list first and then accepts every item on it, each still its own
+recorded act, and `--format json` lists the pending intents and
+writes nothing. One key accepts one intent, as before:
+`mathema accept shop.prices.discounted --intent` for a function,
+`mathema accept units --intent` for a package or module, and
+`mathema accept __project__ --intent` for the codebase README.
 
 
 ## Evidence rungs and the docsync verb

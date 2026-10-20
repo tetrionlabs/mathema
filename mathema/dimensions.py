@@ -165,7 +165,12 @@ class DimResolver:
         cols = {self.key(p, 1) for p, s in self.shapes.items()
                 if s.ndim == 2}
         out: dict = {}
-        for k in self.distinct_keys():
+        # each key in the order it first appears across the parameters,
+        # so the rng's draws land on the same keys in every process
+        ordered = dict.fromkeys(self.key(p, a)
+                                for p, shape in self.shapes.items()
+                                for a in range(shape.ndim))
+        for k in ordered:
             if isinstance(k, str) and k.isdigit():
                 # a fixed numeric dimension (`R^2`) is exactly that size
                 out[k] = int(k)

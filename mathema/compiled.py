@@ -25,6 +25,7 @@ from typing import Callable
 import sympy
 
 from ._sampling import _RNG_SEED, _synth_scalar
+from ._tolerance import ToleranceKind, bare
 
 __all__ = ["CompiledForm", "compile_form", "numeric_check"]
 _NUMERIC_TRIALS = 60
@@ -119,7 +120,7 @@ def compile_form(expr, names=None, provenance=(), validity="",
 
 
 def numeric_check(lhs: CompiledForm, rhs: CompiledForm, relation: str,
-                  domain: dict, tolerance: float = 1e-9,
+                  domain: dict, tolerance: "float | ToleranceKind" = 1e-9,
                   admits=None, trials: int = _NUMERIC_TRIALS):
     """Intent:
         Sample the two compiled sides over the declared domain and
@@ -135,7 +136,8 @@ def numeric_check(lhs: CompiledForm, rhs: CompiledForm, relation: str,
     Notes:
         Strict relations get no tolerance credit and equality gets the
         claim's own tolerance, matching the probe loop's comparison
-        rules exactly. `admits`, when given, filters candidate points
+        rules exactly; a `~=` claim's tolerance kind is its allowance
+        at each pair, in float64. `admits`, when given, filters candidate points
         (an `assuming` surface).
     """
     names = sorted(set(lhs.names) | set(rhs.names))
@@ -163,6 +165,11 @@ def numeric_check(lhs: CompiledForm, rhs: CompiledForm, relation: str,
                    and v == v and abs(v) != float("inf") for v in (lv, rv)):
             continue
         tol = tolerance
+        if isinstance(tol, ToleranceKind):
+            if relation != "~=":
+                bare(tol, f"a sampled {relation} comparison")
+            # a kind's allowance at this pair, in float64
+            tol = tol.bound(lv, rv)
         if "quad" in (lhs.backend, rhs.backend):
             # numeric integration carries its own error: a quad-backed
             # comparison only counts a failure past a magnitude-scaled

@@ -115,7 +115,10 @@ def test_an_integer_domain_reaches_the_code_as_an_int():
     # range(n) raises TypeError on a float; the domain says n is an
     # integer, so every executed point, corners included, is an int
     probes, _ = _check(count_up, "for n in {2, 3, 4}, f(n) == n")
-    assert probes["law"].verdict == "proven"
+    # no TypeError at any point; the total's literals 0.0 and 1.0 are
+    # read exactly, so the sweep proves
+    assert (probes["law"].verdict, probes["law"].route) == \
+        ("proven", "derive:brute_force"), probes["law"].note
     # every point of the finite set was executed: no companion
     assert "law[float]" not in probes
     probes, _ = _check(count_up, "for n in [2, 10] ⊂ Z, f(n) == n")
@@ -214,6 +217,23 @@ def test_a_chain_proof_spawns_one_companion_folded_from_its_links():
     assert probes["law[float]"].verdict == "holds"
 
 
+def test_a_chain_companion_carries_the_conditioning_of_its_failing_link():
+    # link 2 (f(x) <= 1) holds at 1e300, where f gives 0.0; link 1
+    # (0.5 <= f(x)) fails there, so the folded line's conditioning is
+    # link 1's: the code's loss, not the inputs'
+    probes, _ = _check(plus_one_minus, "for x in [0, 1e300], 0.5 <= f(x) <= 1")
+    comp = probes["law[float]"]
+    assert comp.verdict == "falsified"
+    found = comp.meta["mathema.conditioning"]
+    assert found["inherent"] is False, found
+    assert found["words"].startswith(
+        "f loses more than the conditioning explains"), found
+    links = mathema.check(plus_one_minus, claims=[claim(
+        "for x in [0, 1e300], 0.5 <= f(x)", name="link", route="derive")])
+    alone = {p.name: p for p in links.probes}["link[float]"]
+    assert found == alone.meta["mathema.conditioning"]
+
+
 _STORE_FIXTURE = '''\
 def plus_one_minus(x: float) -> float:
     """One, computed the long way round.
@@ -225,11 +245,11 @@ def plus_one_minus(x: float) -> float:
 '''
 
 
-def test_the_companion_round_trips_through_the_store_and_retires(
+def test_a_code_fault_companion_round_trips_through_the_store_and_is_not_accepted_alone(
         tmp_path, monkeypatch):
     import yaml
 
-    from mathema.acceptance import apply_acceptance, plan_acceptance
+    from mathema.acceptance import plan_acceptance
     from mathema.verify import verify_project
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     (tmp_path / "floatfix.py").write_text(_STORE_FIXTURE)
@@ -249,17 +269,63 @@ def test_the_companion_round_trips_through_the_store_and_retires(
     first = verify_project(root=str(tmp_path), all=True)
     assert any("falsified" in p for p in first.problems)
     assert names().count("one[float]") == 1
-    plan = plan_acceptance(str(tmp_path), "floatfix.plus_one_minus",
-                           "one[float]", "discovery", by="turing")
-    assert any("float companion of 'one'" in a for a in plan["actions"])
+    # (x + 1) - x loses more than its conditioning explains: the code's
+    # loss, so the computation line is not accepted alone
+    from mathema.acceptance import AcceptanceError
+    with pytest.raises(AcceptanceError, match="this loss is the code's"):
+        plan_acceptance(str(tmp_path), "floatfix.plus_one_minus",
+                        "one[float]", "discovery", by="turing")
+    assert names().count("one[float]") == 1
+    again = verify_project(root=str(tmp_path), all=True)
+    assert any("falsified" in p for p in again.problems)
+
+
+_INHERENT_FIXTURE = '''\
+def running_total(xs: list, y0: float) -> float:
+    r"""A balance after adding every step to a start.
+
+    Claims:
+        shift [derive]: for xs in [-1e16, 1e16]^2 \\ {missing}, y0 in {1}, f(xs, y0) == f(xs, 0) + y0
+    """
+    total = y0
+    for v in xs:
+        total = v + total
+    return total
+'''
+
+
+def test_an_inherent_companion_is_accepted_alone_and_retires(
+        tmp_path, monkeypatch):
+    import yaml
+
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    from mathema.verify import verify_project
+    pytest.importorskip("numpy")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "ledgerfix.py").write_text(_INHERENT_FIXTURE)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = __import__("ledgerfix")
+    mathema.write_spec(mod.running_total, root=str(tmp_path))
+    path = tmp_path / ".mathema" / "verified" / "ledgerfix.running_total.yaml"
+
+    def names():
+        entry = yaml.safe_load(path.open())["ledgerfix.running_total"]
+        return [c["name"] for c in entry["claims"]]
+
+    first = verify_project(root=str(tmp_path), all=True)
+    assert any("falsified" in p for p in first.problems)
+    assert names().count("shift[float]") == 1
+    plan = plan_acceptance(str(tmp_path), "ledgerfix.running_total",
+                           "shift[float]", "discovery", by="turing")
+    assert any("float companion of 'shift'" in a for a in plan["actions"])
     assert any("records where the computation fails the proven law" in a
                for a in plan["actions"])
     apply_acceptance(plan)
     after = verify_project(root=str(tmp_path), all=True)
     assert after.problems == []
-    assert not any("one[float]" in line for line in after.lines
+    assert not any("shift[float]" in line for line in after.lines
                    if line.startswith("note"))
-    assert "one" in names() and "one[float]" not in names()
+    assert "shift" in names() and "shift[float]" not in names()
 
 
 def test_a_docstring_claim_can_opt_out_with_math_only():

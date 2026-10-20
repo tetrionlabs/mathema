@@ -60,7 +60,8 @@ from .domain import operational_domain as _operational_domain
 from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
                          relation_within)
-from ._exact_side import exact_sides
+from ._exact_side import F_CALL, exact_sides, f_slot
+from ._tolerance import ToleranceKind, written_tolerance
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -1353,8 +1354,10 @@ class Conjecture:
     # past falsification stays caught forever (cdd.md step 6: re-verification
     # is also a regression check). Each pin: {"args": [...], "aux": {...}}
     # with exact values, not display strings.
-    tolerance: float | None = None
+    tolerance: float | ToleranceKind | None = None
     # how close counts as equal (declared-schema.md's `tolerance` field;
+    # an equivalence's or a single `~=`'s may name its kind,
+    # `_tolerance.ToleranceKind`;
     # no spec-level default). Also what `ε`/`eps`/`epsilon` resolves to
     # inside a law's own text (grammar.py/symbolic.py), so
     # `abs(f(x) - g(x)) <= ε` reads exactly like the mathematical
@@ -1946,6 +1949,8 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # the name as its own placeholder value; lets the renderer
         # treat it as the function it is rather than refusing
         bound_funcs[unbound] = unbound
+    tolerance = _read_claim_tolerance(tolerance, rel, law, (lhs, rhs),
+                                      chained=bool(links))
     return Conjecture(name=name, lhs=lhs, rhs=rhs, relation=rel,
                       rhs_bound=rhs_bound,
                       source=source, route=route, grammar=grammar,
@@ -1956,6 +1961,54 @@ def _claim(law: str, name: str | None, source: str, route: str,
                       links=links, pseudo_infinity=pseudo_infinity,
                       param_pins=param_pins,
                       meta=dict(meta or {}), raw=law)
+
+
+def _read_claim_tolerance(tolerance, relation: str, law: str,
+                          sides: "tuple" = (), chained: bool = False):
+    """Intent:
+        A claim's tolerance read (`_tolerance.read_tolerance`): a kind
+        (`{rel: 1e-12, floor: 1e-15}`) becomes a `ToleranceKind`, which
+        an equivalence `f =:= g` and a single approximate equality
+        `a ~= b` take; a bare number is kept as written. `sides` are
+        the claim's expressions, searched for `ε`.
+
+    Raises:
+        InvalidConjecture: a mapping that is not one kind; a kind on a
+            chain, on a claim that is neither `=:=` nor `~=`, or on a
+            claim whose text reads `ε` (`eps`, `epsilon`), the tolerance
+            as one number.
+    """
+    from ._tolerance import read_tolerance
+    try:
+        read = read_tolerance(tolerance)
+    except ValueError as e:
+        raise InvalidConjecture(f"{e}, in the claim {law.strip()!r}") from None
+    if not isinstance(read, ToleranceKind):
+        return read
+    if chained:
+        raise InvalidConjecture(
+            f"a tolerance kind ({read.text()}) applies to a single "
+            f"`a ~= b` or `f =:= g`, not to a chain of relations, in the "
+            f"claim {law.strip()!r}")
+    if relation not in ("=:=", "~="):
+        raise InvalidConjecture(
+            f"a tolerance kind ({read.text()}) applies to a function "
+            f"equivalence `f =:= g` or an approximate equality `a ~= b`; "
+            f"a {relation} claim takes a bare number, in the claim "
+            f"{law.strip()!r}")
+    for side in sides:
+        try:
+            tree = ast.parse(side or "", mode="eval")
+        except SyntaxError:
+            continue
+        if any(isinstance(n, ast.Name) and n.id in ("eps", "epsilon", "ε")
+               for n in ast.walk(tree)):
+            raise InvalidConjecture(
+                f"{side.strip()!r} reads ε, the tolerance as one number, "
+                f"and the tolerance {read.text()} is a kind, not one "
+                f"number; write the bound out, or declare a bare "
+                f"number, in the claim {law.strip()!r}")
+    return read
 
 
 def _membership_bound(rhs: str):
@@ -2827,30 +2880,42 @@ def _definedness_guards(fn, facts, working: bool = False,
     return guards, gaps
 
 
+# claims never judged over the working domain: `raises` and
+# `excluded_outside_domain` ask about the inputs the guards refuse, over
+# the whole domain, and the state and repeatability families are read
+# from the source without calling f
+_WHOLE_DOMAIN_RELATIONS = frozenset(
+    ("raises", "excluded_outside_domain", "is_repeatable")
+    + tuple(families.GROUPS["stateless"]))
+
+
 def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     """Intent:
         What a family claim's working domain is, for the record: each
         parameter whose domain the function's own guards narrow, mapped
         to the narrowed domain as text, and `guards` listing the
         conditions a conditional raise cuts. Empty for a value claim
-        (its explicit domain is never narrowed) and where no guard
-        narrows anything.
+        (its explicit domain is never narrowed), where no guard
+        narrows anything, and for a claim never judged over the working
+        domain (`_WHOLE_DOMAIN_RELATIONS`).
     """
     import sympy
 
     from .domain import bound_to_sympy_set
-    if facts is None:
+    if facts is None or cj.relation in _WHOLE_DOMAIN_RELATIONS:
         return {}
+    enforced_texts = _enforced_working_texts(fn, facts, cj, domain)
     if cj.relation not in routes.examine_predicates():
         # a value claim: only a parameter it binds no domain for
         if not _reads_working_domain(fn, facts, cj, domain):
-            return {}
+            return enforced_texts
         unbound = {p: found[1] for p in facts.params
                    if domain.get(p) is None
                    and (found := _unbound_working_bound(fn, facts, p))}
         cuts = guard_cut_texts(fn, facts) or [
             str(c) for c in _own_guard_conditions(fn, facts)]
         cuts += _finite_guard_texts(facts, domain)
+        unbound = {**enforced_texts, **unbound}
         if cuts:
             unbound["guards"] = cuts
         return unbound
@@ -2865,9 +2930,13 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
     for p, values in finite_guard_sets(facts).items():
         if domain.get(p) is None:
             out[p] = _render_bound(values)
+    read = _names_in_claim(cj)
     for p in facts.params:
         bound = domain.get(p)
         if bound is None:
+            if p in read and p not in out \
+                    and (found := _unbound_working_bound(fn, facts, p)):
+                out[p] = found[1]
             continue
         try:
             here = bound_to_sympy_set(bound)
@@ -2893,8 +2962,36 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
                 continue
         if narrowed != here:
             out[p] = _set_text(narrowed)
+    for p, text in enforced_texts.items():
+        out.setdefault(p, text)
     if out and (cuts or listed_texts):
         out["guards"] = list(cuts) + listed_texts
+    return out
+
+
+def _enforced_working_texts(fn, facts, cj, domain: dict) -> dict:
+    """Intent:
+        The working domain of each parameter `@enforce_domain` guards
+        that the claim reads and binds no domain for, as text: the
+        enforced domain, cut by f's own conditional raises where they
+        read that parameter too. Empty when the call binds a domain of
+        its own for the parameter.
+    """
+    from .domain import render_domain_bound
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    if not enforced:
+        return {}
+    read = _names_in_claim(cj)
+    if cj.relation in routes.examine_predicates() \
+            and (cj.lhs or "").strip() == "f" and "f" not in facts.params:
+        read |= set(facts.params)
+    out: dict = {}
+    for p, bound in enforced.items():
+        if p not in read or p in (cj.domain or {}) \
+                or domain.get(p) is not bound:
+            continue
+        found = _unbound_working_bound(fn, facts, p)
+        out[p] = found[1] if found else render_domain_bound(bound)
     return out
 
 
@@ -2926,62 +3023,41 @@ def _always_raises(stmts) -> bool:
 
 def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
     """Intent:
-        Whether a family claim's working domain is empty: f's own guards
+        Whether a claim's working domain is empty: f's own guards
         refuse every input its annotations and binding admit. The
         stateless families (is_state_safe, is_deterministic,
         is_reproducible) are examined from the source alone and are
-        never read over a domain. Read from
+        never read over a domain. A value claim is read over the
+        working domain only for the parameters it binds no domain for,
+        so only those parameters can empty it; a raise inside a domain
+        it states is a counterexample instead. Read from
         the body (no `return` anywhere and every path ends in a `raise`,
-        or a guard cut or `enforce_domain` that leaves no point of a
-        parameter's domain) and corroborated by calls at points of the
-        domain, each of which must be refused by f's own guard.
+        or the region the admitted domains, `enforce_domain` and every
+        raise condition leave, over all parameters at once, shown to
+        hold no point) and corroborated by calls at points of the
+        domain, each of which must be refused by f's own guard. A
+        region whose emptiness is not shown is not empty.
     """
     import inspect
 
-    import sympy
-
-    from .domain import bound_to_sympy_set, without_sentinels
-    if cj.relation not in routes.examine_predicates() or facts is None \
-            or facts.tree is None or not facts.params:
+    from ._guard_region import region_is_empty
+    from .domain import without_sentinels
+    if facts is None or facts.tree is None or not facts.params:
+        return False
+    value_claim = cj.relation not in routes.examine_predicates()
+    if value_claim and not _reads_working_domain(fn, facts, cj, domain):
         return False
     if cj.relation in families.GROUPS["stateless"]:
         # state and repeatability are read from the source, never by
         # calling f, and say nothing about which inputs f accepts
         return False
+    empty = _body_always_raises(facts) or region_is_empty(
+        _working_region(fn, facts, cj, domain, value_claim))
+    if not empty:
+        return False
     # the numbers each parameter admits, its holes and absence aside
     domain = {p: without_sentinels(b) if b is not None else None
               for p, b in domain.items()}
-    func = next((n for n in ast.walk(facts.tree)
-                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
-    if func is None:
-        return False
-    returns = any(isinstance(n, ast.Return) for n in ast.walk(func))
-    empty = not returns and _always_raises(func.body)
-    if not empty:
-        enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
-        cuts = guard_cut_texts(fn, facts)
-        for p in facts.params:
-            bound = domain.get(p)
-            try:
-                here = bound_to_sympy_set(bound) if bound is not None \
-                    else sympy.S.Reals
-                if p in enforced:
-                    here = here & bound_to_sympy_set(enforced[p])
-            except Exception:
-                continue
-            sym = sympy.Symbol(p, real=True)
-            for text in cuts:
-                try:
-                    cond = sympy.sympify(text, locals={p: sym})
-                    if getattr(cond, "free_symbols", None) == {sym}:
-                        here = here - cond.as_set()
-                except Exception:
-                    continue
-            if here is sympy.S.EmptySet:
-                empty = True
-                break
-    if not empty:
-        return False
     # corroborated: f's own guard refuses a call at each point tried
     from .claim_families import _interval_ends
     points = []
@@ -3006,6 +3082,41 @@ def _working_domain_empty(fn, facts, cj, domain: dict) -> bool:
             continue
         return False
     return True
+
+
+def _working_region(fn, facts, cj, domain: dict, value_claim: bool):
+    """Intent:
+        The working domain as one sympy boolean over the real
+        parameters: each parameter's admitted interval (the claim's or
+        the call's binding, cut to what `@enforce_domain` admits), and
+        outside every one of f's own raise conditions. A value claim
+        reads only the parameters it binds no domain for. A domain that
+        has no reading as a real set contributes no constraint, so the
+        region only ever admits more points than the working domain.
+    """
+    import sympy
+
+    from .domain import bound_to_sympy_set, without_sentinels
+    conds = _own_guard_conditions(fn, facts)
+    symbol_of = {str(sym): sym for cond in conds
+                 for sym in getattr(cond, "free_symbols", ())}
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    bound = _bound_by_claim(fn, cj, domain) if value_claim else set()
+    box = []
+    for p in facts.params:
+        if p in bound:
+            continue
+        sym = symbol_of.get(p) or sympy.Symbol(p, real=True)
+        here = domain.get(p)
+        for b in ((here,) if here is not None and here is not enforced.get(p)
+                  else ()) + ((enforced[p],) if p in enforced else ()):
+            try:
+                # the numbers the bound admits, its holes and absence aside
+                box.append(bound_to_sympy_set(without_sentinels(b))
+                           .as_relational(sym))
+            except Exception:
+                continue
+    return sympy.And(*box, sympy.Not(sympy.Or(*conds)))
 
 
 def _point_of(text: "str | None") -> dict:
@@ -3055,8 +3166,13 @@ def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
     """Intent:
         Whether a value claim is read over the working domain f's own
         raise branches leave: it binds no domain (in the claim or the
-        call) for any parameter those branches read.
+        call) for any parameter those branches read. A raise branch
+        true at every input, and a body that raises before any return,
+        read every parameter. The domain `@enforce_domain` states is f's
+        own guard, not a binding.
     """
+    import sympy
+
     from .hazards import finite_guard_sets
     if cj.relation in routes.examine_predicates() or cj.relation == "raises":
         return False
@@ -3064,8 +3180,36 @@ def _reads_working_domain(fn, facts, cj, domain: "dict | None") -> bool:
     read = {str(sym) for cond in conds
             for sym in getattr(cond, "free_symbols", ())}
     read |= set(finite_guard_sets(facts))
-    bound = set(cj.domain or {}) | set(domain or {})
-    return bool(read) and not (read & bound)
+    if any(cond is sympy.true for cond in conds) \
+            or _body_always_raises(facts):
+        # a guard raising on every input, or a body that raises before
+        # any return, refuses whatever each parameter is
+        read |= set(facts.params)
+    return bool(read) and not (read & _bound_by_claim(fn, cj, domain))
+
+
+def _bound_by_claim(fn, cj, domain: "dict | None") -> set:
+    """Intent:
+        The parameters a claim or its call binds a domain for. A
+        parameter whose domain is the one `@enforce_domain` states is
+        not bound by the claim: that domain is one of f's own guards.
+    """
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    return set(cj.domain or {}) | {
+        p for p, b in (domain or {}).items()
+        if p not in enforced or b is not enforced[p]}
+
+
+def _body_always_raises(facts) -> bool:
+    """Whether f's own body holds no `return` and every path through it
+    ends in a `raise`: f refuses every input."""
+    func = next((n for n in ast.walk(facts.tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None) if facts is not None and facts.tree is not None else None
+    if func is None:
+        return False
+    returns = any(isinstance(n, ast.Return) for n in ast.walk(func))
+    return not returns and _always_raises(func.body)
 
 
 def _unbound_working_bound(fn, facts, p: str):
@@ -3151,8 +3295,15 @@ def guard_cut_texts(fn, facts) -> list:
         pw = lift_piecewise(fn, facts)
     except Exception:
         return []
+    import sympy
     out: list = []
     for cond, _exc in (getattr(pw, "raise_guards", None) or []):
+        if cond is sympy.true:
+            # a guard true at every input is named by its own source
+            for text in _constant_guard_sources(fn, facts):
+                if text not in out:
+                    out.append(text)
+            continue
         pieces = list(cond.args) if hasattr(cond, "args") and \
             type(cond).__name__ == "Or" else [cond]
         for piece in pieces:
@@ -3161,6 +3312,36 @@ def guard_cut_texts(fn, facts) -> list:
                     else str(piece))
             if text not in out:
                 out.append(text)
+    return out
+
+
+def _constant_guard_sources(fn, facts) -> list:
+    """Intent:
+        The source text of each `if` test in f's body whose branch
+        always raises and whose condition holds at every input (`x < 0
+        or x >= 0`, `abs(x) >= 0`): the guard named by its condition as
+        written, where its lifted form has collapsed to True.
+    """
+    import sympy
+
+    from .symbolic._base import _bind_params, _expr_to_sympy
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return []
+    out: list = []
+    for node in ast.walk(facts.tree):
+        if not (isinstance(node, ast.If) and _always_raises(node.body)):
+            continue
+        try:
+            value = _expr_to_sympy(node.test, dict(params))
+        except Exception:
+            continue
+        if isinstance(value, tuple) or getattr(value, "free_symbols", None):
+            continue
+        if value is sympy.true or (getattr(value, "is_number", False)
+                                   and value != 0):
+            out.append(ast.unparse(node.test))
     return out
 
 
@@ -3514,6 +3695,78 @@ def _outside_definedness(fn, facts, cj):
     return outside
 
 
+def _refused_by_own_guards_at(fn, facts, cj):
+    """Intent:
+        A predicate over a claim's points: True where some call to f in
+        the claim, executed at the point, is refused by one of f's own
+        guards (`deliberate_raise`). A call whose arguments do not read
+        as numbers at the point is not refused here: the claim's own
+        evaluation runs it and judges what it does.
+    """
+    import sympy
+
+    from .symbolic._base import NotSymbolic, _bind_params, _expr_to_sympy
+    try:
+        params, _aggregate = _bind_params(fn, facts)
+    except Exception:
+        return None
+    calls: list = []
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            return None
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "f"
+                    and len(node.args) == len(facts.params)
+                    and not node.keywords):
+                continue
+            try:
+                args = [_expr_to_sympy(arg, dict(params)) for arg in node.args]
+            except NotSymbolic:
+                continue
+            if any(isinstance(a, tuple) for a in args):
+                continue
+            calls.append(args)
+    if not calls:
+        return None
+
+    def refused(point: dict) -> bool:
+        values = {}
+        for name, sym in params.items():
+            value = point.get(name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not math.isfinite(value):
+                continue
+            values[sym] = sympy.Rational(value)
+        for args in calls:
+            call: "dict | None" = {}
+            for p, arg in zip(facts.params, args):
+                try:
+                    exact = arg.subs(values) if hasattr(arg, "subs") else arg
+                    if getattr(exact, "free_symbols", None):
+                        raise ValueError(p)
+                    value = float(exact)
+                except Exception:
+                    call = None
+                    break
+                call[p] = (int(value) if facts.param_kinds.get(p) == "int"
+                           and value.is_integer() else value)
+            if call is None:
+                continue
+            try:
+                _call_by_name(fn, call)
+            except Exception as exc:
+                if deliberate_raise(exc, fn):
+                    return True
+        return False
+    return refused
+
+
 def _calling_scope() -> dict:
     """Intent:
         The merged local variables of every non-mathema frame on the
@@ -3776,6 +4029,13 @@ def _validate(src: str, param_names: set[str],
                 # _MATH_ATTRS rather than being sampled randomly
                 if node.id not in callable_names and node.id not in MATH_CONSTANTS:
                     aux.add(node.id)
+    if "f" in param_names:
+        # a parameter named f: the bare name reads the parameter, and
+        # each call f(...) reaches the function under test as F_CALL
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id == "f":
+                node.func.id = F_CALL
     code = compile(_exact_products(tree), "<conjecture>", "eval")
     from ._exact_side import register_source
     register_source(code, src, tree)
@@ -4982,13 +5242,13 @@ def _policy_gate(cj, fn, facts) -> bool:
 def _approx_reading(cj) -> "str | None":
     """How the record reads a `~=` claim, or None for any other: "read
     as abs(f(x) - x) <= ε, ε = 1e-9 (the default)", ε the declared
-    tolerance when there is one."""
+    tolerance when there is one; under a tolerance kind, the bound it
+    states and the kind as written ("read as abs(f(x) - x) <= 1e-7 *
+    max(abs(f(x)), abs(x)), the tolerance {rel: 1e-7} (declared)")."""
     if cj.relation != "~=" or cj.links or not cj.lhs or not cj.rhs:
         return None
     eps, why = ((cj.tolerance, "declared") if cj.tolerance is not None
                 else (1e-9, "the default"))
-    mantissa, _, exponent = f"{eps:g}".partition("e")
-    text = f"{mantissa}e{int(exponent)}" if exponent else mantissa
     rhs = cj.rhs.strip()
     try:
         node = ast.parse(rhs, mode="eval").body
@@ -4998,6 +5258,11 @@ def _approx_reading(cj) -> "str | None":
         bare = False
     if not bare:
         rhs = f"({rhs})"
+    if isinstance(eps, ToleranceKind):
+        return (f"read as {eps.reading(cj.lhs.strip(), rhs)}, the "
+                f"tolerance {eps.text()} ({why})")
+    mantissa, _, exponent = f"{eps:g}".partition("e")
+    text = f"{mantissa}e{int(exponent)}" if exponent else mantissa
     return (f"read as abs({cj.lhs.strip()} - {rhs}) <= ε, ε = {text} "
             f"({why})")
 
@@ -5114,7 +5379,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probe.domain = {p2: domain_bound_to_json(b)
                             for p2, b in cj.domain.items()}
         probe.grammar = cj.grammar
-        probe.tolerance = cj.tolerance
+        probe.tolerance = written_tolerance(cj.tolerance)
         languages = _language_meta({**domain, **(cj.domain or {})})
         if languages:
             # what every `L[...]` binding resolved to, on the record,
@@ -5174,17 +5439,29 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         f"{families.current_family_name(accepted)}")
                 if said not in (probe.note or ""):
                     probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
-        if probe.verdict != "falsified" and _working_domain_empty(
-                fn, facts, cj, {**domain, **(cj.domain or {})}):
+        value_claim = cj.relation not in routes.examine_predicates()
+        no_valid_domain = (probe.verdict != "falsified" or value_claim) \
+            and _working_domain_empty(fn, facts, cj,
+                                      {**domain, **(cj.domain or {})})
+        if no_valid_domain:
             # every input f admits is refused by its own guards: there is
-            # nothing to judge, and no verdict over nothing
+            # nothing to judge, and no verdict over nothing; a value
+            # claim's witness there is a refused input, not a
+            # counterexample
             probe.verdict = "unknown"
             probe.route = None
             probe.sketch = None
+            probe.counterexample = None
+            probe.stratum = None
             probe.note = ("no valid domain: f's own guards refuse every "
                           "input its annotations and binding admit")
         working = _working_domain_record(fn, facts, cj,
                                          {**domain, **(cj.domain or {})})
+        if working and probe.verdict == "falsified" \
+                and _refused_by_own_guard(fn, _point_of(probe.counterexample)):
+            # the witness is an input f's own guards refuse: the row was
+            # judged over its own domain, not the working domain
+            working = {}
         if working:
             probe.meta = {**(probe.meta or {}),
                           "mathema.working_domain": working}
@@ -5196,9 +5473,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                            f"{' or '.join(working['guards'])}"
                            if working.get("guards") else
                            ": f's own guard rejects the rest"))
+            elif no_valid_domain:
+                said = (f"f's own guard raises where "
+                        f"{' or '.join(working.get('guards') or [])}")
             else:
                 said = (f"the working domain is the domain left by f's "
-                        f"guards ({' or '.join(working.get('guards') or [])})")
+                        f"guards: f's own guard raises where "
+                        f"{' or '.join(working.get('guards') or [])}")
             if said not in (probe.note or ""):
                 probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.source:
@@ -5457,6 +5738,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             resolved += [
                 (name, wanted,
                  Probe(name, name, external[name]["verdict"],
+                       route=external[name].get("route"),
                        note=external[name].get("provenance", "")))
                 for name, wanted in refs if name in external]
             unmet = [(name, wanted, ref) for name, wanted, ref in resolved
@@ -5478,8 +5760,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 (external[name].get("provenance", name)
                  if name in external else name)
                 for name, _, ref in resolved if ref.verdict == "holds"]
+            within = [(external[name].get("provenance", name)
+                       if name in external else name)
+                      for name, _, ref in resolved
+                      if (getattr(ref, "route", None) or "")
+                      .endswith(":within_float64")]
             if empirical:
                 verdict_cap = ("holds", ", ".join(empirical))
+            elif within:
+                # a proof capped at float64 caps what rests on it
+                verdict_cap = ("within_float64", ", ".join(within))
             discharged = lemmas
             assumption = None
         elif assumption is not None:
@@ -5542,12 +5832,23 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # whichever route reached it. Stated in the note and in
                 # meta, never applied silently.
                 capped_to, ref_name = _cap
-                probe.verdict = capped_to
-                probe.note = (f"{probe.note}; rests on {ref_name}, whose own "
-                              f"evidence is empirical (holds), capped to "
-                              f"{capped_to}").lstrip("; ")
-                probe.meta = {**(probe.meta or {}),
-                              "mathema.capped_by": ref_name}
+                if capped_to == "within_float64":
+                    if not (probe.route or "").endswith(":within_float64"):
+                        probe.route = f"{probe.route or 'derive'}:within_float64"
+                        probe.note = (f"{probe.note}; rests on {ref_name}, "
+                                      f"whose proof is capped at "
+                                      f"within_float64 (every point run in "
+                                      f"float64), so this proof is capped "
+                                      f"there too").lstrip("; ")
+                        probe.meta = {**(probe.meta or {}),
+                                      "mathema.capped_by": ref_name}
+                else:
+                    probe.verdict = capped_to
+                    probe.note = (f"{probe.note}; rests on {ref_name}, whose "
+                                  f"own evidence is empirical (holds), capped "
+                                  f"to {capped_to}").lstrip("; ")
+                    probe.meta = {**(probe.meta or {}),
+                                  "mathema.capped_by": ref_name}
             return probe
         if cj.route not in ("derive", "best", "probe", "examine"):
             out.append(_stamped(Probe(
@@ -5596,11 +5897,18 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if cj.relation == "=:=":
             # function equivalence has its own ladder (form hash ->
             # symbolic difference -> code-vs-code sampling); neither
-            # generic stage applies
-            out.append(stamp(_adjudicate_equivalence(ctx, fn, facts)))
+            # generic stage applies. A mathematics line derive decided
+            # comes with its computation row, `<name>[float]`
+            main, computation = _adjudicate_equivalence(ctx, fn, facts)
+            main = stamp(main)
+            out.append(main)
+            if computation is not None:
+                _emit_companion(out, _stamped(computation, cj_record,
+                                              written=cj.domain or {}),
+                                main.name)
             continue
         if getattr(ctx.family, "examined_only", False) and not (
-                cj.relation == families.claim_base_name(cj.name)
+                cj.relation == getattr(ctx.family, "_base_name", None)
                 or (cj.relation == "==" and (cj.lhs or "").replace(" ", "")
                     == (cj.rhs or "").replace(" ", ""))):
             # a claim that shares the family's name and states something
@@ -5643,7 +5951,8 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     ctx, fn, facts,
                     extensive or cj.route in ("best", "examine"))
                 if grounded is not None and (derived is None
-                                             or derived.verdict != "proven"):
+                                             or derived.verdict not in
+                                             ("proven", "falsified")):
                     # a ground claim that holds at its own call and no
                     # symbolic proof covers: the call decides it
                     ctx.companion = None
@@ -5667,6 +5976,28 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # probe claim.
             probed = _arbitrate_empirical_fallback(
                 _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+
+            def probed_with(bound, cj=cj):
+                # the claim on the probe route under `let |inf| be bound`:
+                # its one line is the computation
+                again = check_conjectures(
+                    fn, [_dc_replace(_with_infinity(cj, bound), route="probe")],
+                    domain=domain, trials=trials,
+                    trials_downscale=trials_scale, facts=facts,
+                    extensive=extensive, known_premises=known_premises)
+                return next((p.verdict for p in again if p.name == cj.name),
+                            None)
+            params = list(getattr(facts, "params", None) or ())
+            if probed.verdict == "falsified":
+                # the probe line itself: the claim's mathematics is not
+                # known at its witness beyond what the conditioning read
+                _settle_infinity_offer(probed, probed_with, params,
+                                       ctx.cj_domain)
+            if ctx.companion is not None \
+                    and ctx.companion.verdict == "falsified":
+                _settle_infinity_offer(ctx.companion, probed_with, params,
+                                       ctx.cj_domain,
+                                       witness=ctx.companion_witness)
             if ctx.companion is None and probed.verdict == "holds" \
                     and _stands_in_for_derive(ctx):
                 # the probe stood in for derive on the mathematics: the
@@ -6076,6 +6407,35 @@ def _adjudicate_chain(cj, fn, facts, domain, trials, trials_scale,
     broken = next((p for p in companions if p.verdict == "falsified"), None)
     if broken is not None:
         companion.stratum = broken.stratum
+        # the folded line is falsified at the first failing link, so what
+        # the conditioning says at that link's witness is its own
+        found = (broken.meta or {}).get("mathema.conditioning")
+        if found:
+            companion.meta = {**(companion.meta or {}),
+                              "mathema.conditioning": found}
+        offered = ((broken.meta or {}).get(INFINITY_OFFER) or {}).get("bound")
+        if offered is not None:
+
+            def chain_with(bound):
+                # the whole chain under `let |inf| be bound`: its folded
+                # computation line, or, where none is kept, the chain
+                # itself holding on the probe that stood in for derive
+                again = check_conjectures(
+                    fn, [_with_infinity(cj, bound)], domain=domain,
+                    trials=trials, trials_downscale=trials_scale,
+                    facts=facts, extensive=extensive, float_companions=True)
+                rows = {p.name: p for p in again}
+                line = rows.get(companion.name)
+                if line is not None:
+                    return line.verdict
+                return "holds" if rows.get(cj.name) is not None \
+                    and rows[cj.name].verdict == "holds" else "unknown"
+            # the failing link's own offer, kept where the whole chain
+            # holds under it
+            if _computation_holds_with(chain_with, offered):
+                companion.meta = {**(companion.meta or {}),
+                                  INFINITY_OFFER: dict(
+                                      broken.meta[INFINITY_OFFER])}
     combined.meta = {**(combined.meta or {}),
                      "mathema.float_companion": companion.name}
     if empty_broken is not None:
@@ -6318,12 +6678,19 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
 
 def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     """Intent:
-        The claim at the point `env` in exact arithmetic: f and the
-        claim's bound functions run on the point's exact values
-        (`_exact_side.exact_sides` with `exact_calls`) under the fast
-        wall-clock cap, the sides compared exactly (within the claim's
+        The claim at the point `env` in exact arithmetic: `fn` and the
+        claim's `bound_funcs`, the functions as the exact reading runs
+        them (`_exact_body.exact_callee`, each body read exactly and
+        checked against its own float run), called on the point's exact
+        values (`_exact_side.exact_sides` with `exact_calls`) under the
+        fast wall-clock cap, the sides compared exactly (within the claim's
         own declared tolerance, when it states one). True or False, or
         None when the evaluation cannot be carried out exactly.
+
+    Notes:
+        `a ~= b` is `abs(a - b) <= ε`, ε the declared tolerance, else
+        `DEFAULT_TOLERANCE`; every other relation is compared exactly
+        when no tolerance is declared.
     """
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
@@ -6339,10 +6706,42 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         return None
     if exact is None:
         return None
+    return _exact_relation(cj, exact[0], exact[1])
+
+
+def _exact_relation(cj, left, right) -> "bool | None":
+    """Intent:
+        The claim's relation between two exact sides, decided exactly:
+        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
+        unless the claim declares a tolerance, a tolerance kind as the
+        whole allowance at each pair compared. A side sympy computed (a
+        root, a transcendental value of a body read exactly) is settled
+        symbolically (`_exact_side.decide_symbolic`), never under a
+        tolerance kind. None when the relation does not apply to the
+        values or sympy leaves it open.
+    """
+    from ._exact_side import decide_symbolic, is_symbolic_side
+    if is_symbolic_side(left) or is_symbolic_side(right):
+        if isinstance(cj.tolerance, ToleranceKind):
+            return None
+        return decide_symbolic(cj.relation, left, right, _exact_slack(cj))
+    if isinstance(cj.tolerance, ToleranceKind):
+        # a tolerance kind is the whole allowance at each pair compared,
+        # the exact values decided exactly
+        return relation_within(left, right, cj.relation,
+                               cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
-        exact[0], exact[1], cj.relation,
-        cj.tolerance if cj.tolerance is not None else 0.0,
+        left, right, cj.relation, _exact_slack(cj),
         exact_inequality=cj.tolerance is None, rel_tol=0.0)
+
+
+def _exact_slack(cj) -> float:
+    """The absolute slack a claim's relation gets when it is decided
+    exactly: the declared tolerance; else ε (`DEFAULT_TOLERANCE`) for
+    `~=`, which is `abs(a - b) <= ε`, and 0 for every other relation."""
+    if cj.tolerance is not None:
+        return cj.tolerance
+    return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0
 
 
 def _inside_as_written(cj, env) -> bool:
@@ -6419,8 +6818,9 @@ def _magnitude_corner(args) -> bool:
 
 def _exact_point_sides(code_l, code_r, env, fn, bound_funcs):
     """A function of a point (`{param: exact value}`) evaluating the
-    claim's sides with f run on those exact numbers, under the fast cap;
-    None where it cannot."""
+    claim's sides with `fn` and `bound_funcs` (the functions as the exact
+    reading runs them, `_exact_body.exact_callee`) called on those exact
+    numbers, under the fast cap; None where it cannot."""
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
 
@@ -6497,9 +6897,9 @@ def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
         results read as the exact values it returned, the claim's own
         literals and arithmetic exact, compared within the computation
         allowance (`_allowance.relation_within`; with `within` given,
-        within that absolute allowance alone, 0.0 for an exact
-        comparison). `ok` (the float verdict) comes back unchanged when
-        the sides cannot be computed exactly.
+        within that absolute allowance alone, `_exact_slack(cj)` for an
+        exact comparison). `ok` (the float verdict) comes back unchanged
+        when the sides cannot be computed exactly.
     """
     from ._allowance import relation_within
     from ._exact_side import exact_sides
@@ -6806,6 +7206,8 @@ class _ClaimContext:
     # `companion` until the orchestration loop emits it
     companion_mode: "str | None" = None
     companion: "Probe | None" = None
+    # the point the staged companion's falsification names, {param: value}
+    companion_witness: "dict | None" = None
     # the caller's explicit trials, which bound the companion's points too
     companion_budget: "int | None" = None
     # each bound parameter's missing-value resolution, `{param:
@@ -7150,8 +7552,13 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # claim reads is a coordinate; one it fills with a literal, or
     # leaves at its default, has nothing to infer
     read = _names_in_claim(cj)
+    # a predicate over the whole function (`is_defined(f)`) reads every
+    # parameter, so a guard to a set leaves its set for each of them
+    whole = (cj.relation in routes.examine_predicates()
+             and (cj.lhs or "").strip() == "f" and "f" not in facts.params)
     stated = {p: fact for p, fact in parameter_domain_facts(fn, facts).items()
-              if p not in cj_domain and p in read}
+              if p not in cj_domain
+              and (p in read or (whole and fact[1] == "guard"))}
     annotation_inferred = {p: b for p, (b, cat, _d) in stated.items() if cat == "int"}
     if annotation_inferred:
         cj_domain = {**annotation_inferred, **cj_domain}
@@ -7212,10 +7619,15 @@ def _validate_claim(cj, statement: str, note: str, facts,
     # domain f's own guards leave (decision A); the record states it. A
     # raises claim asks about the inputs the guards refuse, so it keeps
     # the whole domain
-    if cj.relation not in (*routes.examine_predicates(), "raises",
-                           "excluded_outside_domain"):
+    if cj.relation not in ("raises", "excluded_outside_domain"):
+        enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
         for p in facts.params:
-            if p in read and p not in cj_domain:
+            # a parameter `@enforce_domain` guards and nothing else binds
+            # ranges over the enforced domain, which its other guards cut
+            # further
+            unbound = p not in cj_domain or (
+                p in enforced and cj_domain[p] is enforced[p])
+            if p in read and unbound:
                 found = _unbound_working_bound(fn, facts, p)
                 if found is not None and found[0] is not None:
                     cj_domain[p] = found[0]
@@ -7743,7 +8155,7 @@ def _fill_value(bound):
 
 def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                      resolver, shared: bool, structured: bool,
-                     column_bounds: "dict | None" = None):
+                     column_bounds: "dict | None" = None, reach=None):
     """Intent:
         The `_floor.ContainerDraws` of one vector, matrix or table
         parameter: its floor (the degenerate containers, every admitted
@@ -7752,6 +8164,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         for a parameter that is not a container, or one drawn from a
         language or with a structure a floor item would break.
         `column_bounds` holds a table's column bindings by column name.
+        `reach`, the claim's resolved pseudo-infinity range when one
+        applies, bounds the magnitude corners along unbounded ends.
     """
     from . import _floor
     from .domain import domain_contains
@@ -7780,7 +8194,8 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # the magnitude corners of the completed element range, after
         # the degenerate containers
         floor += _floor.corner_floor(
-            sequence_corners(record if record is not None else bound),
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
             length_free=not shared)
     elif form == "mat":
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
@@ -7792,8 +8207,9 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         # a column the claim binds (`for df.r in [0, 1]^n`) meets the
         # corners of its own binding instead
         floor += _floor.table_corner_floor(
-            sequence_corners(record if record is not None else bound),
-            {c: sequence_corners(_column_bound(b, None))
+            sequence_corners(record if record is not None else bound,
+                             reach=reach),
+            {c: sequence_corners(_column_bound(b, None), reach=reach)
              for c, b in (column_bounds or {}).items()})
     return _floor.ContainerDraws(form, floor, holes)
 
@@ -8291,7 +8707,9 @@ def _provenance_meta(proof) -> dict:
                 "mathema.missing", "mathema.path_no_value",
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
-                "mathema.corroboration_reason", "mathema.definitions"):
+                "mathema.corroboration_reason", "mathema.definitions",
+                "mathema.exact_witness", "mathema.sweep_inexact",
+                "mathema.sweep_precision"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
     return meta
@@ -8371,9 +8789,11 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     derive = ctx.family.routes()["derive"]
     try:
+        from ._tolerance import bare as _bare_tolerance
         proof = families.call_route(derive, fn, facts, cj.lhs, cj.rhs,
                                     cj.relation, domain=ctx.cj_domain,
-                                    tolerance=cj.tolerance)
+                                    tolerance=_bare_tolerance(
+                                        cj.tolerance, "an examined family"))
     except TimeoutError:
         raise
     except Exception as exc:
@@ -8704,6 +9124,133 @@ def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
     return None
 
 
+#: set while a claim runs again under a `let |inf| be B` it was offered,
+#: so the offers that run makes are not run in turn
+_SETTLING_OFFER: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_settling_offer", default=False)
+
+
+def _with_infinity(cj, bound: float):
+    """`cj` with `let |inf| be bound` as its own pseudo-infinity."""
+    return _dc_replace(cj, pseudo_infinity=bound,
+                       resolved_pseudo_infinity=PseudoInfinity(bound, "claim"))
+
+
+def _computation_holds_with(rerun, bound: float) -> bool:
+    """Intent:
+        Whether a claim's computation line holds under `let |inf| be
+        bound`: `rerun(bound)` runs it and returns that line's verdict,
+        None when the run makes no such line. The run's calls are filed
+        in a batch of their own, so the enclosing check's policy
+        evidence is the check's own. False inside another such run.
+    """
+    from . import policy
+    if _SETTLING_OFFER.get():
+        return False
+    settling = _SETTLING_OFFER.set(True)
+    own_batch = policy._BATCH.set(policy.Batch())
+    filed_under = policy._CLAIM.get()
+    try:
+        return rerun(bound) == "holds"
+    finally:
+        policy._CLAIM.set(filed_under)
+        policy._BATCH.reset(own_batch)
+        _SETTLING_OFFER.reset(settling)
+
+
+#: the most runs of a claim under `let |inf| be B` one offer makes
+_INFINITY_RERUNS = 10
+
+#: the record key an offered `let |inf| be B` is carried under
+INFINITY_OFFER = "mathema.infinity_offer"
+
+
+def _power_of_ten(exponent: int) -> float:
+    return float(f"1e{exponent}")
+
+
+def _settle_infinity_offer(row, rerun, names, cj_domain,
+                           witness: "dict | None" = None) -> None:
+    """Intent:
+        Offer `let |inf| be B` on a falsified line `row` where the claim
+        run under that binding (`rerun(B)`, through
+        `_computation_holds_with`) holds on the line. Only parameters
+        among `names` that run along an unbounded direction of
+        `cj_domain` are bounded by it, and B reaches every finite end
+        their domain states. The B the line's conditioning gives
+        (`_conditioning.infinity_candidate`) is tried first and kept
+        where it holds. With `witness`, the point the line was
+        falsified at, B is otherwise the largest power of ten below the
+        witness's magnitude along those directions at which the run
+        holds, found by bisection on the exponent; without it, only the
+        conditioning's B is tried. At most `_INFINITY_RERUNS` runs are
+        made, within the extensive wall-clock cap. The offer is written
+        to `row.meta[INFINITY_OFFER]` as `{"bound": B, "words": "let
+        |inf| be B"}`; nothing is written where no B holds.
+    """
+    from . import _timeout as _timeout_mod
+    from .domain import unbounded_directions
+    if _SETTLING_OFFER.get():
+        return
+    found = (getattr(row, "meta", None) or {}).get("mathema.conditioning")
+    unbounded = unbounded_directions(list(names), cj_domain or {})
+    floor = _conditioning.infinity_floor(unbounded, cj_domain or {})
+    if not unbounded or floor is None:
+        return
+    lowest = max(0, math.ceil(math.log10(floor))) if floor > 0 else 0
+    highest = None
+    if witness is not None:
+        reach = max((abs(v) for n in unbounded
+                     for v in _conditioning._numbers(witness.get(n))),
+                    default=0.0)
+        if not math.isfinite(reach) or reach <= 0:
+            return
+        # the largest power of ten strictly below the witness's magnitude
+        highest = math.ceil(math.log10(reach)) - 1
+        if highest < lowest:
+            return
+    runs = [0]
+    best: list = [None]
+
+    def holds(exponent: int) -> bool:
+        runs[0] += 1
+        return _computation_holds_with(rerun, _power_of_ten(exponent))
+
+    def search() -> None:
+        nonlocal highest
+        given = _conditioning.infinity_candidate(found)
+        if given is not None:
+            exponent = round(math.log10(given))
+            if exponent >= lowest and (highest is None or exponent <= highest):
+                if holds(exponent):
+                    best[0] = exponent
+                    return
+                # a binding past one that fails reaches the same failure
+                highest = exponent - 1 if highest is None \
+                    else min(highest, exponent - 1)
+        if witness is None or highest is None:
+            return
+        lo, hi = lowest, highest
+        while lo <= hi and runs[0] < _INFINITY_RERUNS:
+            mid = (lo + hi) // 2
+            if holds(mid):
+                best[0], lo = mid, mid + 1
+            else:
+                hi = mid - 1
+    try:
+        _timeout_mod._with_timeout(search,
+                                   _timeout_mod.EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # a B found to hold before the cap is still one that holds
+        pass
+    if best[0] is None:
+        return
+    bound = _power_of_ten(best[0])
+    row.meta = {**(row.meta or {}),
+                INFINITY_OFFER: {"bound": bound,
+                                 "words": _conditioning.infinity_words(bound)}}
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -8735,13 +9282,32 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            "none (a built-in claim decides this claim)"}
         return
     excluded = (_outside_definedness(fn, facts, ctx.cj)
-                if ctx.assume_defined else None)
+                if ctx.assume_defined else
+                # a claim read over the working domain never executes an
+                # input f's own guards refuse
+                _refused_by_own_guards_at(fn, facts, ctx.cj)
+                if ctx.exclude_own_guards else None)
     containers, holes = _admitted_container_points(ctx, facts)
-    companion = _float_companion(proven, ctx.cj, fn, facts, ctx.cj_domain,
-                                 bound_funcs, assum=assumption,
-                                 budget=ctx.companion_budget,
-                                 missing=_admitted_scalar_points(ctx) + containers,
-                                 holes=holes, excluded=excluded)
+    missing = _admitted_scalar_points(ctx) + containers
+
+    def run(cj, witness=None):
+        return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
+                                bound_funcs, assum=assumption,
+                                budget=ctx.companion_budget,
+                                missing=missing, holes=holes,
+                                excluded=excluded, witness=witness)
+    found_at: dict = {}
+    companion = run(ctx.cj, found_at)
+
+    def run_with(bound):
+        line = run(_with_infinity(ctx.cj, bound))
+        return line.verdict if line is not None else None
+    if companion is not None and companion.verdict == "falsified" \
+            and found_at.get("point") is not None \
+            and "mathema.proof_contradicted" not in (companion.meta or {}):
+        point = found_at["point"]
+        _settle_infinity_offer(companion, run_with, list(point),
+                               ctx.cj_domain, witness=point)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
@@ -8977,6 +9543,16 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {reserved}",
             meta={"mathema.derive_status": "unsupported"})
         return None
+    if family_derive is not None and isinstance(cj.tolerance, ToleranceKind):
+        # a family's derive route reads the tolerance as one number
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; the {families.claim_base_name(cj.name)} "
+                 f"family's proof reads the tolerance as one number, and "
+                 f"{cj.tolerance.text()} is a kind, so the probe decides "
+                 f"it",
+            meta={"mathema.derive_status": "undecided"})
+        return None
     if (family_derive is not None and cj.links
             and region_row_kind(cj.name) == "is_defined"):
         family_proof = _chained_definedness_proof(
@@ -9040,6 +9616,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                      sketch=family_proof.sketch, note=note,
                      condition=family_proof.quantifier, route="derive",
                      meta=_provenance_meta(family_proof))
+    if family_proof is not None and family_proof.status == "disproven" \
+            and cj.relation in _COMPARISON_RELATIONS \
+            and not family_proof.meta.get("mathema.witness_executed"):
+        # a value claim's disproof needs an executed witness whatever
+        # the claim is named: it is decided as the same claim under any
+        # other name is, by the ordinary derive route and its
+        # corroboration
+        family_proof = None
     if family_proof is not None and family_proof.status == "disproven":
         return Probe(cj.name, statement, "falsified", route="derive",
                      sketch=family_proof.sketch,
@@ -9378,12 +9962,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # a language's own strategy decided it, named by the
             # mechanism it states
             route = f"derive:{mechanism or 'language'}"
-        elif mechanism == "brute_force":
+        elif mechanism is not None and mechanism.startswith("brute_force"):
             # a different kind of evidence from the wider symbolic
             # mechanisms, not a wider version of them: every point of a
             # finite region was visited. It gets its own subroute so a
-            # reader can tell the two apart at a glance.
-            route = "derive:brute_force"
+            # reader can tell the two apart at a glance;
+            # `brute_force:within_float64` names a sweep some point of
+            # which was decided in float64 only, and its sketch states
+            # the cap in the note
+            route = f"derive:{mechanism}"
+            if mechanism.endswith(":within_float64"):
+                note = f"{note}; {proof.sketch}".lstrip("; ")
         else:
             route = ("derive:extensive"
                     if mechanism is not None and mechanism != "domain_split"
@@ -9398,7 +9987,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
-        if route != "derive:brute_force":
+        if not route.startswith("derive:brute_force"):
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
                                             assumption or [], statement, note)
             if listed is not None:
@@ -9408,7 +9997,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # a derive proof is exact arithmetic; the computation is the
         # float companion's claim. A proof by executing every point of a
         # finite set already is the computation, and spawns none
-        if route != "derive:brute_force":
+        if not route.startswith("derive:brute_force"):
             _spawn_float_companion(ctx, proven, fn, facts, bound_funcs,
                                    assumption or [])
         return proven
@@ -9454,10 +10043,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         swept = _brute_force_fallback()
         if swept is not None:
             if swept.status == "proven":
+                mechanism = swept.meta.get("mathema.derive_route",
+                                           "brute_force")
+                capped = mechanism.endswith(":within_float64")
                 proven = Probe(cj.name, statement, "proven",
-                               sketch=swept.sketch, note=note,
+                               sketch=swept.sketch,
+                               note=(f"{note}; {swept.sketch}".lstrip("; ")
+                                     if capped else note),
                                condition=swept.quantifier,
-                               route="derive:brute_force",
+                               route=f"derive:{mechanism}",
                                meta=_provenance_meta(swept))
                 return proven
             if swept.status == "disproven":
@@ -9466,10 +10060,15 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                              counterexample=swept.counterexample, note=note,
                              meta=_provenance_meta(swept))
             if swept.meta.get("mathema.sweep_holds"):
+                # the disproof nothing reproduced stays flagged on the
+                # sweep that holds
+                flagged = {k: v for k, v in (gated.meta or {}).items()
+                           if k.startswith("mathema.corroboration")}
                 return Probe(cj.name, statement, "holds",
                              route="derive:brute_force", sketch=swept.sketch,
-                             note=f"{note + '; ' if note else ''}{swept.sketch}",
-                             meta=_provenance_meta(swept))
+                             note=f"{gated.note + '; ' if gated.note else ''}"
+                                  f"{swept.sketch}",
+                             meta={**_provenance_meta(swept), **flagged})
         # an unknown is superseded by real empirical evidence like any
         # other, stash the flagged report and fall through to the
         # probe stage; the uncorroborated meta rides on the stash so
@@ -9639,15 +10238,19 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
             f"routes attempted, {trail}; derive:brute_force: {verdict}")
         meta.update({k: v for k, v in (fallen.meta or {}).items()
                      if k.startswith("mathema.derive_") or k == "mathema.timeout"})
-        meta["mathema.derive_route"] = "brute_force"
+        meta["mathema.derive_route"] = proof.meta.get("mathema.derive_route",
+                                                      "brute_force")
+    mechanism = proof.meta.get("mathema.derive_route", "brute_force")
     return Probe(cj.name, ctx.statement, verdict,
-                 route="probe" if route == "probe" else "derive:brute_force",
+                 route="probe" if route == "probe" else f"derive:{mechanism}",
                  sketch=None if route == "probe" else proof.sketch,
                  note=note, meta=meta)
 
 
-def _adjudicate_equivalence(ctx: "_ClaimContext", fn, facts) -> "Probe":
-    """The `f =:= g` ladder, in its own module; see equivalence.py."""
+def _adjudicate_equivalence(ctx: "_ClaimContext", fn,
+                            facts) -> "tuple[Probe, Probe | None]":
+    """The `f =:= g` ladder, in its own module, as `(claim row,
+    computation row)`; see equivalence.py."""
     from .equivalence import adjudicate
     return adjudicate(ctx, fn, facts)
 
@@ -9850,6 +10453,77 @@ def _machine_failure_stratum(exc, witness: str) -> dict | None:
     return None
 
 
+def _exactly_raises_at(fn, facts, args, kwargs) -> "bool | None":
+    """Intent:
+        Whether f, read in exact arithmetic, has no value at the point it
+        was called with (`args`, `kwargs`, its float arguments read as
+        the exact rationals they hold): True when one of its raise
+        regions (`_definedness_guards`, the implicit ones such as a zero
+        divisor and its explicit raise branches) holds there, False when
+        the region list is complete and every region is decided false
+        there, None when it cannot be read (a region that does not lift
+        or does not settle, a non-numeric argument, the fast wall-clock
+        cap).
+    """
+    import inspect
+    from fractions import Fraction
+
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        bound = inspect.signature(fn).bind(*args, **(kwargs or {}))
+    except (TypeError, ValueError):
+        return None
+    point: dict = {}
+    for name, value in bound.arguments.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or value != value or value in (float("inf"), float("-inf")):
+            return None
+        point[name] = sympy.Rational(Fraction(value))
+
+    def decided(cond) -> "bool | None":
+        if cond is sympy.true or cond is sympy.false:
+            return bool(cond)
+        if isinstance(cond, sympy.Not):
+            inner = decided(cond.args[0])
+            return None if inner is None else not inner
+        if isinstance(cond, (sympy.And, sympy.Or)):
+            parts = [decided(a) for a in cond.args]
+            stop = isinstance(cond, sympy.Or)
+            if stop in parts:
+                return stop
+            return None if None in parts else not stop
+        if isinstance(cond, sympy.core.relational.Relational):
+            settled = cond.func(sympy.simplify(cond.lhs - cond.rhs), 0)
+            if settled is sympy.true or settled is sympy.false:
+                return bool(settled)
+        return None
+
+    def read() -> "bool | None":
+        guards, gaps = _definedness_guards(fn, facts)
+        complete = not gaps
+        for cond, _exc in guards:
+            subs = {s: point[s.name] for s in cond.free_symbols
+                    if s.name in point}
+            if len(subs) != len(cond.free_symbols):
+                complete = False
+                continue
+            holds = decided(cond.subs(subs))
+            if holds is True:
+                return True
+            if holds is None:
+                complete = False
+        return False if complete else None
+
+    try:
+        return _with_timeout(read, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except Exception:
+        return None
+
+
 def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
                       sampling) -> "Probe":
     """Intent:
@@ -9936,7 +10610,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
     inner = calling(fn, facts)
     if array_params:
         inner = _linalg_eval.law_callable(inner)
-    base = {"f": inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
+    base = {"f": inner, F_CALL: inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
             **MATH_CONSTANTS, **bound}
     from .claim_families import _OUTSIDE_DOMAIN_FAMILIES
     ignore = (frozenset({cj.lhs.strip()})
@@ -10023,7 +10697,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # infinite endpoints to it, and the record says so with its
         # source; the derive stage never sees this, so a proof still
         # covers actual infinity (P1, P6)
-        cj_domain, _approximated = _operational_domain(cj_domain, pinf)
+        cj_domain, _approximated = _operational_domain(cj_domain, pinf,
+                                                       vectors=True)
         directions = [p for p, k in kinds.items() if k in _DIRECTION_KINDS]
         directions += sorted(set(cj.free_vars or ()) - set(directions))
         if unbounded_directions(directions, ctx.cj_domain):
@@ -10285,12 +10960,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     setup = sampling()
     rng, specials = setup.rng, setup.specials
     from .probing import claim_sampling_budget
-    risk, budget = claim_sampling_budget(setup, facts, cj_domain)
+    risk, budget = claim_sampling_budget(
+        setup, facts, cj_domain,
+        bound={p: cj_domain[p] for p in (cj.domain or {}) if p in cj_domain})
     if getattr(cj, "trials", None) is not None:
         # the claim's own trials, which may exceed the usual limit
         budget = cj.trials
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    # whether a draw evaluated this pass sat on an analytically
+    # discovered critical point (`SamplingSetup.earned_route`)
+    drew_critical = False
     from .probing import _language_lap
     # a language-bound parameter's first draws are one lap over its
     # language's hazards
@@ -10348,7 +11028,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                 resolver, shared, bool(param_structures.get(_p)),
                                 {key[len(_p) + 1:]: b for key, b in cj_domain.items()
                                  if key.startswith(_p + ".")
-                                 and key[len(_p) + 1:].isidentifier()})
+                                 and key[len(_p) + 1:].isidentifier()},
+                                reach=pinf)
         if made is not None:
             containers[_p] = made
 
@@ -10362,12 +11043,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     return True
         return False
     lap_floor = None
+    # a container's completed domain, its elements' unbounded ends at the
+    # resolved pseudo-infinity when one applies
+    capped_records = (ctx.record_domain or {}) if pinf is None else \
+        _operational_domain(ctx.record_domain or {}, pinf, vectors=True)[0]
+
     def sample_bound(p):
         # a container's elements are drawn from its completed domain, so
         # every spelling of one claim draws the same points; a scalar's
         # from the binding as written
         if p in containers and p not in ctx.implied:
-            return (ctx.record_domain or {}).get(p) or cj_domain.get(p)
+            return capped_records.get(p) or cj_domain.get(p)
         return cj_domain.get(p)
 
     longest_lap = max([*(lap.lap_size() for lap in (*language_laps.values(),
@@ -10437,6 +11123,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                         literal_args)
                if c not in pinned]
     call_raised = [None]   # the LABEL of the callee that raised, or None
+    # the callee that last raised, with the arguments it was called with
+    call_raised_at: list = [None]
     call_nan = [None]      # the LABEL of the first callee to return a NaN
     # the first callee to return a hole of another member (`pd.NA`, `NaT`,
     # a Decimal NaN), as `(label, member)`
@@ -10501,6 +11189,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 value = _exits.call(callee, *a, **k)
             except Exception:
                 call_raised[0] = label
+                call_raised_at[0] = (callee, a, k)
                 raise
             if complex_raises and is_complex_value(value):
                 call_raised[0] = label
@@ -10539,10 +11228,28 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts)
+    original_bound = dict(bound_funcs or {})
     if as_arrays:
         fn_call = _linalg_eval.law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    # f and the bound functions as the exact reading runs them, each
+    # body read exactly and checked against its own float run
+    # (`_exact_body.exact_callee`), built at the first exact evaluation
+    exact_readings: list = []
+
+    def _exact_calls() -> tuple:
+        if not exact_readings:
+            from ._exact_body import exact_callee
+            f_exact = calling(exact_callee(fn), facts)
+            bound_exact = {name: exact_callee(v)
+                           for name, v in original_bound.items()}
+            if as_arrays:
+                f_exact = _linalg_eval.law_callable(f_exact)
+                bound_exact = {name: _bound_for_arrays(v)
+                               for name, v in bound_exact.items()}
+            exact_readings.append((f_exact, bound_exact))
+        return exact_readings[0]
     executed_record.refill_at = _refill_caller(fn_call, call_pins)
     executed_record.fills = {
         p: fill for p in kinds
@@ -10660,7 +11367,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         plain_f = _tagged(fn_call, "f", inject=call_pins)
         try:
             for fill in (1.0, 2.0, 0.9):
-                env_filled = {**env, "f": lambda *a, _fill=fill, **k:
+                env_filled = {**env, f_slot(code_l, code_r):
+                              lambda *a, _fill=fill, **k:
                               _nan_filled(plain_f(*a, **k), _fill)}
                 try:
                     lf = eval(code_l, {"__builtins__": {}}, env_filled)
@@ -10716,8 +11424,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # MATH_CONSTANTS before the per-trial parameter assignment
         # below, so a parameter named `e`/`pi` overrides the constant
         # (precedence identical to the derive route)
-        env = {"f": fn_tagged, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
-               **MATH_CONSTANTS, **bound_tagged}
+        env = {"f": fn_tagged, F_CALL: fn_tagged, **_SAFE_FUNCS,
+               **_linalg_eval.FUNCTIONS, **MATH_CONSTANTS, **bound_tagged}
         args = []
         if trial < len(pinned):
             # a counterexample already on record replays before any
@@ -10784,7 +11492,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                               or rng.randint(1, 8))
                     v = {c: _synth("sequence", rng,
                                    _column_bound(cj_domain.get(f"{p}.{c}"), column),
-                                   specials=specials, length=length)
+                                   specials=specials, length=length,
+                                   reach=pinf)
                          for c in table_columns[p]}
                     if p in containers:
                         v = containers[p].next(v, rng)
@@ -10831,7 +11540,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                         specials=specials, extra=critical_hints.get(p),
                         extra_cycle=extra_cycles.get(p),
                         length=length,
-                        lap=language_laps.get(p) or missing_laps.get(p)))
+                        lap=language_laps.get(p) or missing_laps.get(p),
+                        reach=pinf))
                 if p in containers and isinstance(v, (list, tuple)) \
                         and trial != smallest_trial:
                     # the floor's degenerate containers first, then
@@ -10870,7 +11580,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # keeps the old fixed uniform(-5, 5); there's no bound
             # to respect for a name nobody ever gave one.
             if a_name in ("eps", "epsilon", "ε"):
-                env[a_name] = (cj.tolerance if cj.tolerance is not None
+                from ._tolerance import bare as _bare_tolerance
+                env[a_name] = (_bare_tolerance(cj.tolerance,
+                                               f"{a_name} in the claim")
+                               if cj.tolerance is not None
                                else DEFAULT_TOLERANCE)
             elif getattr(cj_domain.get(a_name), "dims", ()):
                 # a declared vector or matrix (`let b be R^n`): each
@@ -10914,6 +11627,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[a_name] = rng.uniform(-5, 5)
             if not _premises.admits(assum_eval, {**env, **premise_words}):
                 continue
+        if not drew_critical and setup.is_critical_draw(
+                {p: env.get(p) for p in kinds}):
+            drew_critical = True
         for p in sequence_params:
             if isinstance(env.get(p), (list, tuple)) or (
                     _linalg_eval.is_array(env.get(p)) and env[p].ndim >= 1):
@@ -11000,11 +11716,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if decided is True and _exactly_decided(
                         cj, code_l, code_r, env,
                         {"f": fn_call, **bound_funcs}, None,
-                        within=0.0, side=side) is not True:
+                        within=_exact_slack(cj), side=side) is not True:
                     # it passes only within the tolerance: the
                     # mathematics at the point decides
                     decided = _exact_verdict(cj, code_l, code_r, env,
-                                             fn_call, bound_funcs)
+                                             *_exact_calls())
                     if decided is None:
                         call_raised[0] = call_nan[0] = call_inf[0] = None
                         call_hole[0] = None
@@ -11048,13 +11764,19 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # falsifies like any other; when every input nudged within
             # the tolerance evaluates AND satisfies the claim, the
             # counterexample names it as sub-epsilon fragility (stratum
-            # 5.6) with the clamp remedy instead of the domain one.
-            slack = cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
+            # 5.6) with the clamp remedy instead of the domain one. An
+            # isolated pole passes the same nudge test, so the exact
+            # mathematics at the point decides between the two.
             boundary = False
             # a refusal by the function's own mathema guard is the guard
-            # doing its job at its own boundary, never a float wobble
+            # doing its job at its own boundary, never a float wobble;
+            # a tolerance kind gives no single width to nudge within, so
+            # under one the raise stands as an ordinary raise
             from .authoring import DomainError as _GuardRefusal
-            refused = isinstance(e, _GuardRefusal)
+            refused = isinstance(e, _GuardRefusal) \
+                or isinstance(cj.tolerance, ToleranceKind)
+            slack = (DEFAULT_TOLERANCE if cj.tolerance is None or refused
+                     else cj.tolerance)
             for direction in ((1.0, -1.0) if not refused else ()):
                 jenv = dict(env)
                 for p in kinds:
@@ -11078,20 +11800,32 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if jok:
                     boundary = True
                     break
-            if boundary:
+            # the exact mathematics at the raising call: True at a pole
+            # (a raise region of f holds there), False where f has a
+            # value, None when it cannot be read
+            exact_raise = None
+            if boundary and call_raised[0] == "f" \
+                    and call_raised_at[0] is not None:
+                _callee, call_args, call_kwargs = call_raised_at[0]
+                exact_raise = _exactly_raises_at(fn, facts, call_args,
+                                                 call_kwargs)
+            if boundary and exact_raise is not True:
                 checked += 1
                 cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)} at a "
                       f"floating-point boundary (the same inputs nudged "
                       f"within ε evaluate cleanly), a clamp at the raising "
-                      f"operation's argument would remove the instability")
-                # nudged inputs evaluating cleanly IS the maths-sound
-                # evidence: the failure lives in the number
-                # representation's last ulp
-                cx_stratum = {"mathematics": "sound",
-                              "blame": "implementation",
+                      f"operation's argument would remove the instability"
+                      + ("" if exact_raise is False else
+                         " if the exact mathematics has a value there"))
+                cx_stratum = {"blame": "implementation",
                               "cause": "implementation:sub-epsilon-boundary",
                               "representation": "f64",
                               "witness": _point_text(args)}
+                if exact_raise is False:
+                    # f has a value at the exact point and the nudged
+                    # inputs satisfy the claim: the failure lives in the
+                    # number representation's last ulp
+                    cx_stratum = {"mathematics": "sound", **cx_stratum}
                 break
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
@@ -11154,7 +11888,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = (f"{_point_text(args)}: raised {_exits.exception_name(e)}, narrow "
                   "the claim's domain to where every call returns, or state "
                   "the raising region as its own raises(...) claim")
-            cx_stratum = _machine_failure_stratum(e, _point_text(args))
+            cx_stratum = ({"mathematics": "unsound", "blame": "claim",
+                           "witness": _point_text(args)}
+                          if exact_raise is True else
+                          _machine_failure_stratum(e, _point_text(args)))
             break
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
@@ -11216,8 +11953,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
-                                      bound_funcs):
+                and _exactly_holds_at(cj, code_l, code_r, env,
+                                      *_exact_calls()):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the
@@ -11235,6 +11972,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if ctx.companion_mode == "spawn":
                 if computation_cx is None:
                     computation_cx = f"{_point_text(args)}: {gave}"
+                    ctx.companion_witness = dict(zip(kinds, args))
             elif computation_finding is None:
                 computation_finding = (
                     f"the {_representation_word(cj_domain, facts)} computation "
@@ -11402,8 +12140,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # exact arithmetic: false there falsifies, true there holds
             # with the gap printed, and a draw that cannot be evaluated
             # exactly is inconclusive and not counted
-            exact_ok = _exact_verdict(cj, code_l, code_r, env, fn_call,
-                                      bound_funcs)
+            exact_ok = _exact_verdict(cj, code_l, code_r, env,
+                                      *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             if exact_ok is None:
                 checked -= 1
@@ -11448,8 +12186,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # violating it makes the claim false there. The calls these
             # readings make are not the draw's own
             made = list(f_call.calls)
-            mathematics = _exact_verdict(cj, code_l, code_r, env, fn_call,
-                                         bound_funcs)
+            mathematics = _exact_verdict(cj, code_l, code_r, env,
+                                         *_exact_calls())
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
         aux_part = ("; " + ", ".join(
@@ -11474,8 +12212,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     reference, cj_domain,
                     mathematics=True if corner_row else mathematics,
                     reduces=bool(corner_row or _conditioning.claim_reduces(cj)),
-                    exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
-                                                 bound_funcs)
+                    exact_at=(_exact_point_sides(code_l, code_r, env,
+                                                 *_exact_calls())
                               if mathematics is True else None))
                 f_call.calls = made
                 if found["kappa"] is None and mathematics is None:
@@ -11510,6 +12248,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                               f"{_sides(shown_l, shown_r)}")
                             computation_note = words
                             computation_meta = {"mathema.conditioning": found}
+                            ctx.companion_witness = dict(zip(kinds, args))
                     elif computation_finding is None:
                         computation_finding = (
                             f"{words} at {_point_text(args)}{aux_part}, where "
@@ -11580,6 +12319,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if steps:
                 note = (f"{note}; the witness was shrunk inside the language "
                         f"in {steps} step{'s' if steps != 1 else ''}").lstrip("; ")
+    probe_route = setup.earned_route(drew_critical)
     if cx is not None:
         return Probe(cj.name, statement, "falsified", n=checked, route=probe_route,
                      counterexample=cx, note=note, stratum=cx_stratum,
@@ -11656,6 +12396,10 @@ EVIDENCE_LADDER = (
     # and a mathematics-only proof with no float companion
     ("derive", "examine", "derive:brute_force", "derive:math_only"),
     ("derive:extensive",),
+    # every point of a finite region run in float64, some point with no
+    # exact value: nothing untried, a difference below the stated delta
+    # unseen
+    ("derive:brute_force:within_float64",),
     # A reserved, not-yet-built "numerical" evidence tier belongs here,
     # between derive:extensive and the informed-probing rung below,
     # a real numerical-methods engine (finite-difference/bisection with

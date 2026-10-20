@@ -210,6 +210,70 @@ that needs a body to lift finds `tree=None` and declines, saying so.
 since the proxy's source file is not where the function it stands for
 is written.
 
+## Lifted bodies
+
+A resolver that lifts a foreign function's body hands the engine a
+document, carried in the `koine` field of the `Facts` it injects, as a
+document or as its text. Two calls on the surface take such documents
+as they stand.
+
+`sibling_scope(fn, siblings)` binds the other functions of the program
+a lifted body calls. `fn` is the proxy (or its `Facts`); `siblings`
+maps the locator the body calls each one by to that function, as its
+document or as a callable. The result is the scope the body is read
+in, with each called function under the name the engine's rendering
+gives it; set it on the proxy and derive reads through the calls:
+
+```python
+from mathema.interfaces.extension import sibling_scope
+
+proxy.__mathema_scope__ = sibling_scope(proxy, {"src/shapes#scaled": scaled_doc})
+```
+
+A document is bound as the engine's rendering of it, with its own calls
+bound from the same mapping; a callable is bound as given. A call whose
+locator is not in the mapping stays unbound, and derive declines to read
+through it rather than guessing.
+
+`prove_bodies_equal(left, right, domain)` asks whether two lifted
+bodies compute the same function on a domain, which is how an
+equivalence family can record `proven` for a pair whose sides were
+lifted by different frontends. `domain` maps the left body's parameter
+names to bounds (a claim's bound, its text such as `"(0, inf)"`, or a
+list `[lo, hi]` for a closed interval); the right body's parameters
+align by position, and `siblings=` binds the functions either body
+calls, as `sibling_scope` takes them. It answers for the mathematics
+line of `f =:= g` alone, which is exact and takes no tolerance: a
+falsification stands where the two bodies, executed at derive's witness
+and compared exactly, disagree, however small the gap, and since it
+samples nothing there is no computation line to report. The answer is a `BodyEquivalence`:
+
+| Field | What it holds |
+|---|---|
+| `verdict` | `proven`, `falsified` or `unknown` |
+| `rung` | the rung that reached it: `form`, `symbolic`, `closed-forms`, or `None` |
+| `sketch` | the derivation, or why it stopped |
+| `witness`, `point` | for `falsified`: what each body did at the executed point, and the point by parameter name |
+| `meta` | `mathema.domain` (each bound as read), `mathema.corroboration`, and `mathema.timeout` when the cap fired |
+
+```python
+from mathema.interfaces.extension import prove_bodies_equal
+
+answer = prove_bodies_equal(left_doc, right_doc, {"x": [-4, 4]})
+if answer.verdict == "proven":
+    ...  # record proven, naming answer.rung
+```
+
+Only the derive rungs run, under the extensive wall-clock cap; nothing
+is sampled, which stays the family's own work. A falsification stands
+only at a point both bodies were executed at; a disproof that no
+executed point reproduces is `unknown`, flagged as a likely engine bug.
+Two bodies that both raise at a point agree there when they raise the
+same exception. When the documents name different languages the bodies
+run in different runtimes, so their exception names are not compared:
+a raise on one side matches any raise on the other, and the regions
+where each side raises must still coincide.
+
 ## The extension surface
 
 Everything a provider may import lives in
@@ -234,6 +298,8 @@ Everything a provider may import lives in
 | `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
+| `body_scope` | `sibling_scope` |
+| `body_equivalence` | `prove_bodies_equal`, `BodyEquivalence` |
 
 `evidence_rank` ranks a route or an intent class, strongest lowest. A
 compendium definition row's route, `axiom`, ranks with trusted testimony,

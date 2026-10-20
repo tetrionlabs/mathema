@@ -853,9 +853,14 @@ def _piece_bounds(piece):
     return None
 
 
-def _in_safe_range(lo: float, hi: float, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl) -> bool:
-    lo_ok = lo > safe_lo or (lo == safe_lo and safe_lo_incl)
-    hi_ok = hi < safe_hi or (hi == safe_hi and safe_hi_incl)
+def _in_safe_range(lo: float, hi: float, safe_lo, safe_lo_incl, safe_hi,
+                   safe_hi_incl, closed_lo: bool = True,
+                   closed_hi: bool = True) -> bool:
+    """Whether the piece from lo to hi lies inside the safe range: an
+    end the safe range excludes may be met only by an open end of the
+    piece, which excludes it too."""
+    lo_ok = lo > safe_lo or (lo == safe_lo and (safe_lo_incl or not closed_lo))
+    hi_ok = hi < safe_hi or (hi == safe_hi and (safe_hi_incl or not closed_hi))
     return lo_ok and hi_ok
 
 
@@ -904,8 +909,11 @@ def _range_piece_verdict(name: str, piece) -> str:
     if bounds is None:
         return "undecided"
     lo, hi = bounds
-    return ("proven" if _in_safe_range(lo, hi, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl)
-           else "falsified")
+    return ("proven" if _in_safe_range(
+                lo, hi, safe_lo, safe_lo_incl, safe_hi, safe_hi_incl,
+                getattr(piece, "closed_lo", True),
+                getattr(piece, "closed_hi", True))
+            else "falsified")
 
 
 def _combine_piece_verdicts(verdicts: list) -> str:
@@ -2282,7 +2290,9 @@ def _enum_spelling_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if a == b:
             return True
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            tol = cj.tolerance if cj.tolerance is not None else 1e-9
+            from ._tolerance import bare
+            tol = (bare(cj.tolerance, "is_representation_safe")
+                   if cj.tolerance is not None else 1e-9)
             return abs(float(a) - float(b)) <= tol
         return False
 
@@ -2348,7 +2358,9 @@ def _representation_probe(fn, facts, cj, domain: dict, rng: random.Random,
     values = _spelling_values(bounds)
     if not values:
         return None
-    tol = cj.tolerance if cj.tolerance is not None else 1e-9
+    from ._tolerance import bare
+    tol = (bare(cj.tolerance, "is_representation_safe")
+           if cj.tolerance is not None else 1e-9)
     # the return type f declares, read from its annotation
     import inspect
     import typing
@@ -3109,11 +3121,52 @@ def _every_link_holds(rels: list, domain: dict) -> bool:
         if not params or not all(name in domain for name in params):
             return False
         try:
-            if _relational_truth_over_domain(rel, domain, params) is not True:
-                return False
+            if _relational_truth_over_domain(rel, domain, params) is True:
+                continue
         except Exception:
             return False
+        if not _holds_on_open_interval(rel, domain):
+            return False
     return True
+
+
+def _holds_on_open_interval(rel, domain: dict) -> bool:
+    """Intent:
+        Whether a relation in one parameter holds at every point of that
+        parameter's interval read with its open ends excluded: `ratio > 0`
+        holds on `(0, 10]` though not on `[0, 10]`. False when the
+        relation reads more than one parameter, the bound is not an
+        interval with an open end, or the containment is not settled
+        within the fast wall-clock cap.
+    """
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    free = list(rel.free_symbols)
+    if len(free) != 1:
+        return False
+    bound = domain.get(str(free[0]))
+    closed_lo = getattr(bound, "closed_lo", True)
+    closed_hi = getattr(bound, "closed_hi", True)
+    if closed_lo and closed_hi:
+        return False
+    try:
+        lo, hi = float(bound[0]), float(bound[1])
+    except (TypeError, ValueError, IndexError):
+        return False
+
+    def contained():
+        ends = [_sympy.Float(e) if math.isfinite(e)
+                else (_sympy.oo if e > 0 else -_sympy.oo) for e in (lo, hi)]
+        box = _sympy.Interval(ends[0], ends[1], not closed_lo, not closed_hi)
+        real = _sympy.Symbol(str(free[0]), real=True)
+        return bool(box.is_subset(rel.subs(free[0], real).as_set()))
+    try:
+        return _with_timeout(contained, FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False
+    except Exception:
+        return False
 
 
 def _certified_undefined_point(computed_rels: list, facts,
@@ -3843,14 +3896,43 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return satisfies(compiled, point)
 
     shapes = _region_shapes(links, params, domain)
+    # the parameters a `Vec`/`Mat` marker or the claim's space binding
+    # (`R^n`, `[a, b]^(n,n)`) shapes, drawn at their declared axes with
+    # shared dimension names sized alike
+    from . import dimensions as _dimensions
+    from .types import shapes_from_signature
+    markers = shapes_from_signature(fn)
+    marked = [p for p in params
+              if p not in call_pins
+              and (getattr(markers.get(p), "dims", ())
+                   or getattr((domain or {}).get(p), "dims", ()))]
+    resolver = None
+    if marked:
+        try:
+            resolver = _dimensions.resolve(facts, markers,
+                                           claim_domain=domain)
+        except _dimensions.DimensionConflict:
+            resolver = _dimensions.resolve(facts, markers)
+    # only a real number has a magnitude reach and corners
+    from .probing import _bound_is_complex as _complex_bound
+    numeric = [p for p in params
+               if p not in marked
+               and facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "table",
+                                                    "dict")
+               and (facts.param_kinds.get(p, "unknown")
+                    in _WITNESS_SCALAR_KINDS
+                    or _interval_ends((domain or {}).get(p)) is not None
+                    or _complex_bound((domain or {}).get(p)))]
+    unreached = {p: "array" for p in params if p not in numeric}
     reach, reach_note = ({}, None)
     overflow_safe: list = []
     overflow_texts: list = []
     if kind == "is_defined":
         links_o, overflow_texts, owner = _overflow_safe_rows(fn, cj)
         reach, reach_note = _is_defined_reach(fn, cj, params, domain,
-                                              shapes, links_o,
-                                              overflow_texts, owner)
+                                              {**unreached, **shapes},
+                                              links_o, overflow_texts,
+                                              owner)
         overflow_safe = _compiled_links(links_o, params)
 
     def admitted(point: dict) -> bool:
@@ -3885,6 +3967,32 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return False
         return True
 
+    # the form each unshaped array parameter is drawn in: a table as a
+    # dict of equal-length columns (realised into its runtime type by
+    # the caller), a list of lists where the parameter's type is a
+    # matrix, else a sequence in the container its annotation names
+    from .conjecture import _table_columns
+    array_forms: dict = {}
+    for p in params:
+        if p in marked or p in call_pins or p in shapes:
+            continue
+        p_kind = facts.param_kinds.get(p, "unknown")
+        detected = (getattr(facts, "runtime_types", None) or {}).get(p) or ()
+        if p_kind == "table":
+            array_forms[p] = "table"
+        elif p_kind == "mat" or (p_kind in SEQUENCE_KINDS and detected
+                                 and detected[0].kind == "mat"):
+            array_forms[p] = "mat"
+        elif p_kind in SEQUENCE_KINDS:
+            array_forms[p] = "vec"
+    columns = {p: _table_columns(p, cj, facts)
+               for p, form in array_forms.items() if form == "table"}
+    containers = {p: _annotated_container(fn, p) for p in array_forms}
+
+    def as_container(p: str, value):
+        made = containers.get(p)
+        return made(value) if made is not None else value
+
     def draw_one(p: str):
         from .matrices import _rand
         if p in call_pins:
@@ -3894,13 +4002,76 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if shapes.get(p) == "sequence":
             return [rng.uniform(-10.0, 10.0)
                     for _ in range(rng.randint(1, 6))]
-        return _synth(facts.param_kinds.get(p, "unknown"), rng,
-                      (domain or {}).get(p))
+        form = array_forms.get(p)
+        if form == "table":
+            n = rng.randint(1, 6)
+            return {c: _synth("sequence", rng, None, length=n)
+                    for c in columns[p]}
+        if form == "mat":
+            rows, cols = rng.randint(1, 5), rng.randint(1, 5)
+            return [[rng.uniform(-10.0, 10.0) for _ in range(cols)]
+                    for _ in range(rows)]
+        value = _synth(facts.param_kinds.get(p, "unknown"), rng,
+                       (domain or {}).get(p))
+        return as_container(p, value) if form == "vec" else value
 
-    def draw() -> dict:
-        point = {p: draw_one(p) for p in params}
+    def draw_marked(sizes: dict, p: str):
+        bound = (domain or {}).get(p)
+        if getattr(bound, "pieces", None):
+            # a declared element bound (`[a, b]^n`) holds every element
+            return resolver.synth(p, sizes,
+                                  lambda: _synth("float", rng, bound), rng)
+        return resolver.synth(p, sizes, lambda: rng.uniform(-10.0, 10.0),
+                              rng)
+
+    def draw(corner: "tuple | None" = None) -> dict:
+        # `corner`, `(param, pair)`: that array parameter holds the
+        # pair's two values in turn, element after element, with at
+        # least two elements along each axis its shape leaves free
+        lo = ({resolver.key(corner[0], a): 2
+               for a in range(resolver.shapes[corner[0]].ndim)}
+              if corner is not None and corner[0] in marked else {})
+        sizes = (resolver.draw_sizes(
+            rng, lo=lo, hi={k: 5 for k in resolver.distinct_keys()})
+            if resolver is not None else {})
+        point = {p: draw_marked(sizes, p) if p in marked else draw_one(p)
+                 for p in params}
+        if corner is not None:
+            point[corner[0]] = corner_array(corner[0], corner[1], sizes)
         placed = _placed(point, rng, keep=tuple(call_pins))
         return point if placed is None else placed
+
+    def corner_array(p: str, pair: list, sizes: dict):
+        import itertools
+        if p in marked:
+            cycle = itertools.cycle(pair)
+            return resolver.synth(p, sizes, lambda: next(cycle), rng)
+        line = [pair[i % 2] for i in range(3)]
+        form = array_forms[p]
+        if form == "table":
+            return {c: list(line) for c in columns[p]}
+        if form == "mat":
+            return [[pair[(i + j) % 2] for j in range(2)] for i in range(2)]
+        return as_container(p, line)
+
+    def array_corners():
+        # every array parameter meets the magnitude corners of its
+        # element range (`probing.sequence_corners`): the pairs that
+        # cancel at a large magnitude and the same-sign pair at each
+        # end past half the representation's reach, the other
+        # parameters drawn as usual
+        from .probing import sequence_corners
+        from .records import operational_range
+        pinf = operational_range(cj)
+        for p in params:
+            if p not in marked and p not in array_forms:
+                continue
+            bound = (domain or {}).get(p)
+            if pinf is not None and not getattr(bound, "pieces", None) \
+                    and _interval_ends(bound) is None:
+                bound = tuple(pinf)
+            for pair in sequence_corners(bound):
+                yield draw((p, pair))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
@@ -3915,7 +4086,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         from .probing import _bound_is_complex
         from .representations import PY_COMPLEX128
         for p in params:
-            if p in call_pins:
+            if p in call_pins or p in marked:
                 continue
             if _bound_is_complex((domain or {}).get(p)):
                 # the plane's far points on both axes, at the reach
@@ -3926,11 +4097,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                           complex(0.0, -r), complex(0.0, r)):
                     yield {**draw(), p: v}
                 continue
+            if p not in numeric:
+                continue
             ends = reach.get(p) or _interval_ends((domain or {}).get(p))
             if ends is None:
                 continue
             lo, hi = ends
-            for v in (lo, hi, (lo + hi) / 2):
+            mid = (lo + hi) / 2
+            if facts.param_kinds.get(p) == "int":
+                # an integer parameter's corners are the whole numbers
+                # at and between its ends
+                lo, hi, mid = math.ceil(lo), math.floor(hi), math.floor(mid)
+            for v in (lo, hi, mid):
                 yield {**draw(), p: v}
 
     def extremes():
@@ -3941,7 +4119,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         pinf = operational_range(cj)
         for p in params:
             if p in call_pins or shapes.get(p) is not None \
-                    or facts.param_kinds.get(p) in (*SEQUENCE_KINDS, "string"):
+                    or p not in numeric:
                 continue
             for v in _extreme_candidates((domain or {}).get(p),
                                          pseudo_infinity=pinf):
@@ -3983,6 +4161,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     def candidates():
         yield from corners()
+        yield from array_corners()
         if bare and kind == "is_overflow_safe":
             yield from extremes()
         if not bare:
@@ -4096,6 +4275,37 @@ def _is_defined_probe(fn, facts, cj, domain: dict, rng: random.Random,
     if weakest == "skipped":
         weakest = verdict
     return weakest, checked, cx, None, meta
+
+
+#: the Python container a sequence annotation names, by the last dotted
+#: part of its constructor, lowercased; any other sequence is a list
+_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
+                         "frozenset": frozenset, "tuple": tuple}
+
+
+def _annotated_container(fn, param: str) -> "type | None":
+    """Intent:
+        The container type `param`'s annotation names when it is a set,
+        a frozenset or a tuple (`set`, `typing.Set[float]`,
+        `Optional[frozenset]`), so a sequence drawn as a list is passed
+        as a member of that type; None for any other annotation or none.
+    """
+    from .probing import _annotation_text
+    try:
+        spec = callable_signature(fn).parameters.get(param)
+    except (TypeError, ValueError):
+        return None
+    if spec is None:
+        return None
+    text = _annotation_text(spec).replace(" ", "").lower()
+    for wrapper in ("optional[", "typing.optional["):
+        if text.startswith(wrapper) and text.endswith("]"):
+            text = text[len(wrapper):-1]
+    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
+    if len(parts) != 1:
+        return None
+    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
+    return _ANNOTATED_CONTAINERS.get(head)
 
 
 def _has_axes(value, axes: int) -> bool:
@@ -4260,18 +4470,25 @@ def _matrix_output_probe(prop):
     evaluable value has the property, falsifies with the witnessing
     arguments when one does not, skips when the property could not be
     decided on any value (a spectral check with no numpy, or no point
-    inside the premises)."""
+    inside the premises). A result that is not a number, nor a vector
+    or matrix of numbers, leaves `is_finite` and `is_real` undecided:
+    unless another point falsifies, the probe answers unknown with the
+    first such point and `matrices.NOT_A_NUMBER`."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
         from .domain import is_missing
         from ._premises import PremiseRejected
+        from ._exact_side import alias_f_calls
         try:
-            code = compile(_ast.parse(cj.lhs, mode="eval"), "<claim>", "eval")
+            code = compile(alias_f_calls(_ast.parse(cj.lhs, mode="eval"),
+                                         facts.params), "<claim>", "eval")
         except SyntaxError:
             return None
+        from .matrices import NOT_A_NUMBER, is_numeric
         draw = _structured_draws(fn, facts, cj, domain)
         checked = 0
+        not_a_number = None
         for _ in range(trials):
             point = _placed(dict(zip(facts.params, draw(rng))), rng)
             if point is None or not _admitted(point):
@@ -4292,12 +4509,18 @@ def _matrix_output_probe(prop):
                 continue
             got = prop.check(value)
             if got is None:
+                if prop.level == "finite" and not_a_number is None \
+                        and not is_numeric(value):
+                    not_a_number = (f"{_fmt(tuple(filled), tuple(facts.params))}: "
+                                    f"{NOT_A_NUMBER}")
                 continue
             checked += 1
             if got is not True:
                 return ("falsified", checked,
                         f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
                         f"{prop.name[3:]}", None)
+        if not_a_number is not None:
+            return ("unknown", checked, not_a_number, None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
@@ -4359,7 +4582,10 @@ def _eval_matrix_expr(code, env: dict, fn, raised: "list | None" = None):
             except Exception as exc:
                 raised.append(exc)
                 raise
-    names = {"f": call, **lae.FUNCTIONS,
+    from ._exact_side import F_CALL
+    # a parameter named f in `env` takes the name f; the call reaches
+    # the function as F_CALL then
+    names = {"f": call, F_CALL: call, **lae.FUNCTIONS,
              **{k: lae.as_array(v) for k, v in env.items()}}
     with _pinned_float_env():
         value = eval(code, {"__builtins__": {}}, names)

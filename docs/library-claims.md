@@ -106,6 +106,7 @@ ok   risk.value_at_risk: no baseline record; 1 proven, 3 holds, 0 falsified
 ok   risk.volatility: no baseline record; 1 proven, 2 holds, 0 falsified
 0 unchanged since the last run (not run again), 6 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+3 intents to accept (3 functions): mathema accept --intent
 ```
 
 Each library row now has a record of its own under `.mathema/verified/`,

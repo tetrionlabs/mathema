@@ -304,6 +304,17 @@ def _read_block(doc: str, header: str) -> list[str] | None:
     return out
 
 
+def _intent_block_text(doc: str) -> str | None:
+    """Intent:
+        The `Intent:` block's prose joined into one string, or `None`
+        when the docstring has no such block or the block is empty.
+    """
+    lines = _read_block(doc, "intent:")
+    if not lines:
+        return None
+    return " ".join(line.strip() for line in lines).strip() or None
+
+
 def _parse_concepts_marker(doc: str) -> list:
     """Intent:
         The declared `Concepts:`/`Tags:` marker's tokens (both
@@ -396,6 +407,10 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
             iterated.add(node.iter.id)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id in {"len", "sum", "min", "max", "sorted", "enumerate", "reversed"}:
+            # `max(a, b)` and `min(a, b)` compare their arguments as
+            # values; only the one-argument form iterates its argument
+            if node.func.id in {"min", "max"} and len(node.args) != 1:
+                continue
             for call_arg in node.args:
                 if isinstance(call_arg, ast.Name):
                     iterated.add(call_arg.id)
@@ -1271,7 +1286,8 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
         sigh=identity.sig_hash(fn),
         tree=fdef,
         guards=_guards(fdef, params),
-        doc_intent=doc.summary or None,
+        doc_intent=(_intent_block_text(docstring_text or "") or doc.summary
+                    or None),
         doc_intent_source=("documented" if _read_block(docstring_text or "", "intent:") is not None
                            else "declared" if doc.summary else None),
         doc_refs=doc.refs,

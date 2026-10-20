@@ -179,9 +179,10 @@ def stated_policies(fn, siblings, target: str) -> list:
     """Intent:
         The claims beside a value claim that state what f does with an
         empty `target`: a literal call with `[]` there, `f([]) in
-        {missing}`, `raises(f([]), E)`, `f([]) == v`, as
-        `[(kind, operand, text)]` with kind "missing", "raises" or
-        "value"; f may be spelled by its own name.
+        {missing}`, `raises(f([]), E)`, `f([]) == v`, `f([]) ~= v`, as
+        `[(kind, operand, text, relation, tolerance)]` with kind
+        "missing", "raises" or "value", and the claim's relation and
+        declared tolerance; f may be spelled by its own name.
     """
     from ._signatures import callable_signature
     try:
@@ -205,17 +206,20 @@ def stated_policies(fn, siblings, target: str) -> list:
         text = f"{cj.lhs} {cj.relation} {cj.rhs}"
         if cj.relation == "in" and re.search(r"\b(missing|None|null|nan|NA)\b",
                                              rhs):
-            out.append(("missing", rhs, text))
+            out.append(("missing", rhs, text, cj.relation, cj.tolerance))
         elif cj.relation == "raises" and rhs:
-            out.append(("raises", rhs, f"raises({cj.lhs}, {rhs})"))
+            out.append(("raises", rhs, f"raises({cj.lhs}, {rhs})",
+                        cj.relation, cj.tolerance))
         elif cj.relation in ("==", "~="):
-            out.append(("value", rhs, text))
+            out.append(("value", rhs, text, cj.relation, cj.tolerance))
     return out
 
 
 def _matches(policy, raised, result) -> bool:
-    """Whether what f did at the empty input is what `policy` states."""
-    kind, operand, _text = policy
+    """Whether what f did at the empty input is what `policy` states:
+    the value it names exactly under `==`, within ε under `~=`
+    (`abs(result - v) <= ε`, the computation line's reading)."""
+    kind, operand, _text, relation, tolerance = policy
     if kind == "raises":
         return raised is not None and any(
             cls.__name__ == operand.split(".")[-1]
@@ -226,6 +230,10 @@ def _matches(policy, raised, result) -> bool:
         return _no_value(result)
     try:
         expected = float(ast.literal_eval(operand))
+        if relation == "~=":
+            from ._allowance import relation_within
+            return relation_within(float(result), expected, "~=",
+                                   tolerance, side=1) is True
         return float(result) == expected
     except (ValueError, SyntaxError, TypeError):
         return False

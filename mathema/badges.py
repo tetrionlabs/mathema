@@ -77,6 +77,9 @@ _EXTENT_BITS: dict[str, float] = {
 # so less residual entropy, than random sampling); a WITNESSED falsification
 # is knowledge (an uncorroborated disproof is already `unknown`, scoring 0)
 _PROVEN_STRENGTH = 1.0
+# every point of a finite region run in float64 with some point decided
+# there only: nothing untried, a difference below the stated delta unseen
+_WITHIN_FLOAT64_STRENGTH = 0.95
 _FALSIFIED_STRENGTH = 0.85
 _HOLDS_STRENGTH: dict[str, float] = {
     "examine": 0.90, "derive": 0.90, "probe:semi_analytical": 0.85,
@@ -135,6 +138,8 @@ def _strength(verdict: str, route: str, n: "int | None" = None) -> float:
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
+        if (route or "").endswith(":within_float64"):
+            return _WITHIN_FLOAT64_STRENGTH
         return _PROVEN_STRENGTH
     if v == "falsified":
         return _FALSIFIED_STRENGTH
@@ -861,8 +866,8 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             credits = soft if holding else []
         else:                                        # the shape / relation group
             credits = ["shape"]
-        if route == "derive:brute_force" and classify_verdict(verdict) == \
-                "proven":
+        if (route or "").startswith("derive:brute_force") \
+                and classify_verdict(verdict) == "proven":
             # a proof visiting every point of the function's own finite
             # domain settles what that parameter accepts
             credits = credits + finite_soft
@@ -983,18 +988,23 @@ def _population(targets, root: str) -> dict:
         defined under `targets`, or, rootwide (no targets), every
         function the declared/verified store knows. One population feeds
         all three scores and the centrality graph, so they line up.
+        The targets and keys are imported with `root` on `sys.path`, so a
+        worker process finds the same population as the parent.
     """
+    from .targets import _root_on_path
     if targets:
         from .audit import discover
-        return dict(discover(list(targets)))
+        with _root_on_path(root):
+            return dict(discover(list(targets)))
     from .conjecture import _resolve_func_ref
     from .spec import load_declared, load_verified
     keys = sorted(set(load_declared(root)) | set(load_verified(root)))
     out = {}
-    for key in keys:
-        fn = _resolve_func_ref(key)
-        if fn is not None:
-            out[key] = fn
+    with _root_on_path(root):
+        for key in keys:
+            fn = _resolve_func_ref(key)
+            if fn is not None:
+                out[key] = fn
     return out
 
 

@@ -64,7 +64,7 @@ symbol, and a claim pasted out of a PDF is a common way to meet one.
 | `≥` | U+2265 | greater than or equal to | `>=` |
 | `≠` | U+2260 | not equal to | `!=` |
 | `≈` | U+2248 | approximately equal to, within a tolerance | `~=` |
-| `≡` | U+2261 | equivalent to, as a whole function | `=:=` |
+| `≡` | U+2261 | equivalent to, as a whole function, in its mathematics and its computation | `=:=` |
 | `⟹` | U+27F9 | implies | `=>` |
 | `·` | U+00B7 | times | `*` |
 | `×` | U+00D7 | times | `*` |
@@ -136,7 +136,7 @@ claims in them.
 | `f(x) == x` | equality |
 | `f(x) ≤ 1` | inequality, in either ASCII or Unicode |
 | `f(x) ~= x` | approximate equality, within a tolerance |
-| `f =:= g` | function equivalence: two implementations of the same mathematics |
+| `f =:= g` | function equivalence: two implementations of the same mathematics, whose computations agree within the claim's tolerance |
 | `f equiv g` | the word alias for the same relation |
 | `for a in [0.1,10], b in [0.1,10], 2/(1/a+1/b) <= f(a,b) <= (a+b)/2` | a chained comparison, both bounds in one claim |
 | `for s in L[unicode], f(s) in L[unicode]` | membership: every output is a member of a language or a set, `∈` in Unicode |
@@ -162,7 +162,12 @@ tolerance of 1e-9, whichever is larger. So under `==` the computation
 is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
-it, with no relative tolerance on top.
+it, with no relative tolerance on top. On a function equivalence `f =:= g`
+the tolerance governs the computation line alone, since its mathematics
+line is exact, as [Multi-function claims](multi-function-claims.md)
+describes. A single `a ~= b`, and an `f =:= g`, may also name the
+tolerance's kind (see [Tolerance kinds](#tolerance-kinds) below), while
+every other relation takes a bare number.
 
 Inside the claim text, `ε` (also `eps`, `epsilon` or `\epsilon`) names that
 tolerance directly: the declared value when there is one, and the 1e-9
@@ -230,18 +235,163 @@ for route in ["probe", "derive"]:
 probe   holds
         fails by 1e-10 at x = 0, within the default tolerance (1e-09)
 derive  falsified x = 0.06163325083761284
-        reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
+        reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```
 
 A declared tolerance is part of the claim, so it stays in force on both
-routes. A derive disproof that the executed code does not reproduce even
-compared exactly comes back `unknown` with
-`mathema.corroboration: "uncorroborated"`. When the exact comparison ran at
-the point where the exact difference is, as for `x + 1e-20`, the record
+routes. Where the executed code rounds the difference away, the body is
+read exactly at derive's witness: a literal is the decimal written, so
+`x + 1e-20` is `x + 1/10^20` and the claim is falsified on the
+mathematics, the record noting that the float computation holds within
+its allowance. A derive disproof that neither the executed code nor the
+exact reading reproduces (the gap comes from a float the body reads
+from outside, a module constant or a library's value) comes back
+`unknown` with `mathema.corroboration: "uncorroborated"`; when the exact
+comparison ran at the point where the exact difference is, the record
 adds `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says the difference exists in exact arithmetic and floating point does not
 reproduce it. Any other unreproduced disproof is flagged as a probable
 engine bug.
+
+### Tolerance kinds
+
+A bare number is an absolute allowance, which is the wrong shape for a
+value that spans many orders of magnitude: an option deep out of the
+money prices at 1e-7 and the same function prices at 190 in the money,
+so `1e-9` is half a percent of the small price and a rounding error at
+the large one. On `a ~= b` (and on `f =:= g`) the tolerance may instead
+name its kind, in a claims file as `tolerance: {rel: 1e-9, floor: 1e-14}`
+or on `mathema.claim()` as `tolerance={"rel": 1e-9, "floor": 1e-14}`:
+
+| Kind | Allows |
+|---|---|
+| `{abs: x}` | `abs(a - b) <= x` |
+| `{rel: x}` | `abs(a - b) <= x * max(abs(a), abs(b))` |
+| `{ulp: n}` | `abs(a - b)` within `n` units in the last place of the float64 nearest `max(abs(a), abs(b))`, `n` a whole number |
+| `floor: x`, beside any of them | adds `x` to the kind's own allowance |
+
+The floor adds, so `{rel: 1e-9, floor: 1e-14}` allows `1e-9 * max(abs(a),
+abs(b)) + 1e-14`, which is the relative-plus-absolute error of the
+standard rounding-error model, and it applies in full. On the mathematics
+line the inequality is decided exactly, each number of the kind read as
+the decimal written; on the computation line it is computed in float64.
+A kind is not one number, so a claim that reads `ε` in its own text, a
+premise compared within the tolerance (`==`, `!=` or `~=` after
+`assuming`) and a chain of relations refuse it.
+
+The two call prices below are the same mathematics, one with its normal
+CDF from `erfc` and the other from `1 + erf`, which cancels for a far
+out-of-the-money call:
+
+<!-- example: kinds-price run slow -->
+```python
+import math
+
+import mathema
+
+
+def call_erfc(spot: float) -> float:
+    d1 = (math.log(spot / 100) + 0.03) / 0.2
+    d2 = d1 - 0.2
+    return (spot * math.erfc(-d1 / math.sqrt(2))
+            - 100 * math.exp(-0.01) * math.erfc(-d2 / math.sqrt(2))) / 2
+
+
+def call_erf(spot: float) -> float:
+    d1 = (math.log(spot / 100) + 0.03) / 0.2
+    d2 = d1 - 0.2
+    return (spot * (1 + math.erf(d1 / math.sqrt(2)))
+            - 100 * math.exp(-0.01) * (1 + math.erf(d2 / math.sqrt(2)))) / 2
+
+law = "for spot in [35, 290], f(spot) ~= g(spot)"
+for tolerance in [1e-9, {"rel": 1e-9}, {"rel": 1e-9, "floor": 1e-14}]:
+    rows = mathema.check(call_erfc, claims=[mathema.claim(
+        law, funcs={"g": call_erf}, tolerance=tolerance)]).probes
+    for p in rows:
+        if p.name.startswith("f_spot"):
+            print(f"{p.name:28} {p.verdict:9} {p.counterexample or ''}")
+print(rows[0].note)
+```
+
+<!-- example: kinds-price output -->
+```text
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  holds     
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  falsified spot = 35
+f_spot_approx_g_spot         proven    
+f_spot_approx_g_spot[float]  holds     
+read as abs(f(spot) - g(spot)) <= 1e-9 * max(abs(f(spot)), abs(g(spot))) + 1e-14, the tolerance {rel: 1e-9, floor: 1e-14} (declared)
+```
+
+The mathematics is proven under all three. Under the bare `1e-9` the
+computation holds, though that allowance would also pass a price of
+`2e-7` that is off by half a percent; under `{rel: 1e-9}` it is falsified
+at `spot = 35`, where the `erf` form's cancellation leaves a gap of about
+`4e-15` on a price of `2e-7`, a relative error of `2e-8`; and the floor of
+`1e-14` covers that cancellation while the relative part still judges
+the large prices.
+
+`{ulp: n}` counts rounding steps, for an implementation that claims to
+agree with another to the last bit or close to it. `(x * 3) / 3` is
+exactly `x`, so the mathematics is proven, and in float64 it is off by
+at most one unit in the last place:
+
+<!-- example: kinds-ulp run -->
+```python
+import mathema
+
+
+def thirds(x: float) -> float:
+    return (x * 3) / 3
+
+for tolerance in [{"ulp": 0}, {"ulp": 1}]:
+    rows = mathema.check(thirds, claims=[mathema.claim(
+        "for x in [-10, 10], f(x) ~= x", tolerance=tolerance)]).probes
+    for p in rows[:2]:
+        print(f"{p.name:20} {p.verdict:9} {p.counterexample or ''}")
+print(rows[0].note)
+```
+
+<!-- example: kinds-ulp output -->
+```text
+f_x_approx_x         proven    
+f_x_approx_x[float]  falsified x = -5.858032318615711
+f_x_approx_x         proven    
+f_x_approx_x[float]  holds     
+read as abs(f(x) - x) <= 1 unit in the last place of the float64 nearest max(abs(f(x)), abs(x)), the tolerance {ulp: 1} (declared)
+```
+
+A proof does not express the float64 nearest a value, so under `{ulp:
+n}` the mathematics line is proven only where the two sides are equal,
+and otherwise the probe decides it, exactly, at each point it draws.
+
+A floor beside `abs` adds the two, which reads oddly on its own and is
+shown here only to make the arithmetic plain: an offset of `1.5e-9`
+misses `{abs: 1e-9}` and is within `{abs: 1e-9, floor: 1e-9}`:
+
+<!-- example: kinds-floor run -->
+```python
+import mathema
+
+
+def shifted(x: float) -> float:
+    return x + 1.5e-9
+
+for tolerance in [{"abs": 1e-9}, {"abs": 1e-9, "floor": 1e-9}]:
+    (p, *_) = mathema.check(shifted, claims=[mathema.claim(
+        "for x in [1, 2], f(x) ~= x", tolerance=tolerance)]).probes
+    print(f"{p.verdict:9} {p.counterexample or ''}")
+    print(f"  {p.note}")
+```
+
+<!-- example: kinds-floor output -->
+```text
+falsified x = 1.061633250837613
+  read as abs(f(x) - x) <= 1e-9, the tolerance {abs: 1e-9} (declared)
+proven    
+  read as abs(f(x) - x) <= 1e-9 + 1e-9, the tolerance {abs: 1e-9, floor: 1e-9} (declared)
+```
 
 ## Expressions
 
@@ -377,7 +527,7 @@ number it returns is the one the mathematics says.
 | Spelling | What you learn | Usual fix |
 |---|---|---|
 | `is_numerically_stable` | the float64 result agrees with the exact value of the mathematics, within the claim tolerance (1e-9 plus 1e-7 times the magnitude by default), at every point tried in the working domain; stated with `mathema.f.accurate`, and the witness shows the exact and the float value | reorder or rescale the arithmetic that loses the value |
-| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | narrow the domain, fix the code, or state the claim with `route="derive:math_only"` |
+| `<name>[float]` | the companion every proof spawns: the proven relation run in float64 at the domain's corners and inside it, falsified with a witness where the computation loses what the mathematics proves (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)) | fix the code, narrow the domain, or state the claim with `route="derive:math_only"`; where it fails along an unbounded direction, <code>let &#124;inf&#124; be B</code> is offered once a run under it holds, bounding the computation alone and never the proof |
 | `is_precision_safe(f)` | reserved for a later release: the answer stays right in a narrower number representation (float32, say) | |
 | `is_representation_consistent(f)` | reserved for a later release: the same answer across the computations the bracketed descriptor names | |
 
@@ -545,10 +695,11 @@ One more binding uses bars around the name. It sets an operational
 infinity, the finite magnitude that stands in for `oo` wherever the
 computation of a claim is exercised along an unbounded direction, and it
 exists because code running on doubles does not reach infinity while the
-mathematics it implements does. A proof is about the mathematics, so it
-is over ℝ whatever the binding says, with infinity as infinity, and the
-binding bounds only the computation, namely what a proof's `[float]`
-companion and the probe route execute. Past about `1.34e154`, `x ** 2`
+mathematics it implements does. The binding bounds only the computation,
+never the proof, which stays over the full domain: a proof is about the
+mathematics, so it is over ℝ whatever the binding says, with infinity as
+infinity, and the binding sets how far a proof's `[float]` companion and
+the probe route execute. Past about `1.34e154`, `x ** 2`
 raises `OverflowError`, and with no operational infinity declared the
 companion runs an unbounded direction out to float64's maximum
 (about `1.8e308`), where that
@@ -598,6 +749,10 @@ be 1e100` says that for this claim the computation is exercised out to
 companion holds; the proof is the same proof over ℝ it was without the
 binding, and the binding stays in the claim's statement, so a reader
 sees what bounded the computation (see [the evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)).
+`mathema verify` offers such a binding under a computation line that
+fails along an unbounded direction, once a run of the claim under it
+holds: here that is `let |inf| be 1e+154`, the largest power of ten
+whose square is still a finite double.
 
 A claim can also state a half-line explicitly, `let |inf| be 1e12, for
 x in [0, oo], f(x) >= 0`, where the probe route and the companion stop

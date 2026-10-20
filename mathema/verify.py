@@ -727,19 +727,28 @@ def _initially_falsified_hint(key: str, probes: list,
                              ". Change the word in the claims file, or change f."))
             fresh.remove(p)
             continue
-        found = (getattr(p, "meta", None) or {}).get("mathema.conditioning")
-        if found:
-            # a computation line that missed the mathematics: what the
-            # conditioning at the witness says, and the ways out
-            claim_name = str(p.name).split("[", 1)[0]
-            fixes = []
-            if found.get("narrow"):
-                fixes.append("if inputs this large are out of scope, narrow "
-                             f"the domain: {found['narrow']}")
-            fixes.append(f"if the loss is accepted, run: mathema accept {key} "
-                         f"{claim_name} --as discovery")
+        meta = getattr(p, "meta", None) or {}
+        found = meta.get("mathema.conditioning")
+        from .gates import computation_line_of
+        parent = computation_line_of(meta)
+        if found or parent:
+            # a computation line, or a claim that is its own, that
+            # missed the mathematics: what the conditioning at the
+            # witness says, and the ways out
+            from ._conditioning import fixes as conditioning_fixes
+            owner = next((q for q in probes
+                          if parent is not None and q.name == parent), None)
+            from .conjecture import INFINITY_OFFER
+            fixes = conditioning_fixes(
+                found, str(p.name), key, parent,
+                whole=owner is not None and classify_verdict(
+                    owner.verdict) in ("proven", "derived"),
+                offer=(meta.get(INFINITY_OFFER) or {}).get("words"))
+            words = (found or {}).get("words") or (
+                "no conditioning was read at its witness, so whether the "
+                "loss is inherent is not decided")
             lines.append(f"note {key}: {p.name} initially falsified: "
-                         f"{found['words']}:\n" + _indented(options(fixes)))
+                         f"{words}:\n" + _indented(options(fixes)))
             fresh.remove(p)
     if not fresh:
         return lines

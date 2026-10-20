@@ -63,7 +63,8 @@ def test_stated_intent_is_declared_until_accepted(tmp_path):
     r = _run(tmp_path, env, "verify", "--root", str(tmp_path))
     assert r.returncode == 0, r.stdout + r.stderr
     entry = _record(tmp_path)
-    assert entry["intent"] == "Prices the thing."
+    # the Intent: block is the recorded intent over the summary line
+    assert entry["intent"] == "Twice x, always."
     # an explicit Intent: block no longer auto-earns "documented"
     assert (entry.get("meta") or {}).get(
         "mathema.intent_provenance") == "declared"

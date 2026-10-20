@@ -870,6 +870,35 @@ def _condition_to_sympy(test: ast.AST, env: dict):
     return None
 
 
+def _exact_raise_guard(cond):
+    """Intent:
+        A raise path's condition rewritten so it holds on exactly the
+        same points: over one real parameter, its solution set stated
+        as interval relations, each end closed exactly where the set
+        contains it; otherwise the condition as built.
+
+    Notes:
+        A solution set sympy cannot state as intervals (a
+        `ConditionSet`), a timeout, or any failure leaves the condition
+        as built, which is exact by construction.
+    """
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    free = getattr(cond, "free_symbols", set())
+    if len(free) != 1:
+        return cond
+    (sym,) = free
+    if not sym.is_real:
+        return cond
+    try:
+        exact = _with_timeout(
+            lambda: cond.as_set().as_relational(sym), FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return cond
+    if exact.has(sympy.ConditionSet) or exact.free_symbols - {sym}:
+        return cond
+    return exact
+
+
 def lift_piecewise(fn, facts) -> "ConditionedLift | None":
     """Intent:
         The whole branched function as one sympy `Piecewise`, every
@@ -1004,14 +1033,7 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
             expr = sympy.piecewise_fold(expr)
         except Exception:
             pass
-    guards = []
-    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    for cond, name in raise_guards:
-        try:
-            guards.append((_with_timeout(lambda c=cond: sympy.simplify(c),
-                                         FAST_TIMEOUT_SECONDS), name))
-        except Exception:
-            guards.append((cond, name))
+    guards = [(_exact_raise_guard(cond), name) for cond, name in raise_guards]
     return ConditionedLift(kind="value", expr=expr, params=params,
                            sig_params=list(facts.params), aggregate=aggregate,
                            opaque=OpaqueRegistry(), raise_guards=guards)

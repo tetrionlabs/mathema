@@ -467,10 +467,14 @@ file.
 
 The equivalence relation (`f =:= g`, and the call-form law
 `f(x) == g(x)`) accepts any callable for `g`, so the other
-implementation need not be Python. When either side of `f =:= g` was
-read by a frontend other than the Python one, the claim is answered
-by the equivalence family, a claim family registered under the name
-`equivalence`, or `skipped` with the reason `equivalence across
+implementation need not be Python. Between two Python functions
+`f =:= g` records a mathematics line, derive's exact comparison of the
+two bodies, and a computation line, both functions run at shared draws
+under the claim's tolerance (see
+[Multi-function claims](multi-function-claims.md)). When either side of
+`f =:= g` was read by a frontend other than the Python one, the claim
+is answered by the equivalence family, a claim family registered under
+the name `equivalence`, or `skipped` with the reason `equivalence across
 runtimes needs the equivalence family` when no family gives a
 verdict. The built-in ladder compares two Python forms and never runs
 on such a pair.

@@ -56,6 +56,15 @@ def test_a_cancelling_pair_falsifies_the_shift_on_an_unbound_list():
     found = p.meta["mathema.conditioning"]
     assert found["inherent"] is True
     assert found["narrow"].startswith("for xs in [-1e"), found
+    # xs runs along an unbounded direction: `let |inf| be B` is offered
+    # only where the claim under it holds
+    offer = (p.meta.get("mathema.infinity_offer") or {}).get("words")
+    assert offer is None or offer.startswith("let |inf| be "), p.meta
+    if offer is not None:
+        (held,) = check_conjectures(running_total, [claim(
+            f"{offer}, for xs in R^n, y0 in [-10, 10], {_SHIFT}",
+            route="probe")])
+        assert held.verdict == "holds", (held.verdict, held.counterexample)
 
 
 def test_the_bounded_box_and_the_unbound_list_agree():
@@ -119,7 +128,7 @@ def test_the_remedies_narrow_the_domain_or_accept_the_discovery():
     assert "(i) if inputs this large are out of scope, narrow the domain: " \
            "for xs in [-1e8, 1e8]^2" in text, text
     assert "(ii) if the loss is accepted, run: mathema accept " in text
-    assert "shift --as discovery" in text
+    assert '"shift[float]" --as discovery' in text
 
 
 @pytest.fixture

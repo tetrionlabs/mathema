@@ -656,14 +656,20 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
 
         policies = _policies_from_declared_claims(fn, key, root)
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def _check(args, kwargs):
+            """The arguments bound to `fn`'s parameters, raising
+            `DomainError` at the first outside its domain."""
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             for name, value in bound.arguments.items():
                 problem = _violation(name, value)
                 if problem is not None:
                     raise DomainError(f"{fn.__name__}(): {name}{problem}")
+            return bound
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound = _check(args, kwargs)
             if policies:
                 # a policy that says f raises on a missing or absent input
                 # rejects it here; drops and propagates are checked on the
@@ -680,6 +686,10 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
+        if not policies:
+            # the check the wrapper makes before calling `fn`, which then
+            # returns as it is
+            wrapper.__mathema_domain_check__ = _check
         _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
         return wrapper
     return decorator
@@ -1173,6 +1183,10 @@ def enforce_structure(key: str | None = None, root: str = "."):
     `PositiveDefinite` marker also enforces symmetry. A property the
     registry cannot decide for an argument (a spectral check with no
     numpy) is skipped rather than raising, never a false rejection.
+    `Finite` and `Real` are the exception: an argument that is not a
+    number, nor a vector or matrix of numbers (None, a string, a list
+    holding None), does not have the declared structure and raises,
+    with or without numpy.
 
     Like `@enforce_domain`, it makes the function REJECT inputs the
     claim was never about and auto-declares the matching
@@ -1217,10 +1231,16 @@ def enforce_structure(key: str | None = None, root: str = "."):
                     continue
                 value = bound.arguments[param]
                 for prop in sorted(props):
-                    if _mtx.PROPERTIES[prop].check(value) is False:
+                    got = _mtx.PROPERTIES[prop].check(value)
+                    numberless = (got is None
+                                  and _mtx.PROPERTIES[prop].level == "finite"
+                                  and not _mtx.is_numeric(value))
+                    if got is False or numberless:
                         raise ValueError(
                             f"{fn.__name__}: {param} is not "
-                            f"{prop} ({prop[3:].replace('_', ' ')})")
+                            f"{prop} ({prop[3:].replace('_', ' ')})"
+                            + (", the value is not a number"
+                               if numberless else ""))
             return fn(*args, **kwargs)
 
         # auto-declare the matching predicate claims, as enforce_domain

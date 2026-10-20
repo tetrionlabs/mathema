@@ -6,9 +6,16 @@ exact arithmetic but by less than the probe's default allowance, the
 real code is executed at derive's witness and compared exactly: if the
 executed values differ, the claim is falsified with that witness. If
 floating-point rounding makes the executed values exactly equal, the
-claim is not falsified. `~=` asks for approximate equality, so it keeps
-the allowance, and a declared tolerance is part of the claim."""
+body is read exactly at the witness: a literal `1e-20` is 1/10^20, so
+the claim is falsified on the mathematics while the computation holds
+within its allowance; a float the body reads from outside has no exact
+reading, and the claim is then not falsified. `~=` asks for approximate
+equality, so it keeps the allowance, and a declared tolerance is part
+of the claim."""
 from mathema.conjecture import check_conjectures, claim
+
+#: a float read from outside the body: no exact reading
+HAIR = 1e-20
 
 
 def just_above(x: float) -> float:
@@ -17,6 +24,10 @@ def just_above(x: float) -> float:
 
 def rounded_away(x: float) -> float:
     return x + 1e-20
+
+
+def rounded_away_by_a_global(x: float) -> float:
+    return x + HAIR
 
 
 def scaled_by_a_hair(x: float) -> float:
@@ -55,8 +66,18 @@ def test_a_difference_that_varies_with_x_is_rechecked_too():
 
 
 def test_rounding_that_makes_the_code_exactly_equal_does_not_falsify():
-    p = _v(rounded_away, "for x in [1, 2], f(x) == x", "derive")
+    # the gap comes from outside the body: nothing confirms it exactly
+    p = _v(rounded_away_by_a_global, "for x in [1, 2], f(x) == x", "derive")
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_a_literal_gap_rounding_makes_equal_is_falsified_on_the_mathematics():
+    p = _v(rounded_away, "for x in [1, 2], f(x) == x", "derive")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") == "reproduced"
+    witness = p.meta["mathema.exact_witness"]
+    assert witness["reading"] == "mathematics", witness
+    assert witness["computation"] == "holds within its allowance", witness
 
 
 def test_approximate_equality_keeps_its_allowance():
@@ -76,7 +97,7 @@ def test_a_declared_tolerance_on_equality_stays_part_of_the_claim():
 
 def test_rounding_to_exact_equality_is_labelled_exact_arithmetic_only():
     for route in ("derive", "best"):
-        p = _v(rounded_away, "for x in [1, 2], f(x) == x", route)
+        p = _v(rounded_away_by_a_global, "for x in [1, 2], f(x) == x", route)
         assert p.meta.get("mathema.corroboration") == "uncorroborated"
         assert p.meta.get("mathema.corroboration_reason") == \
             "exact arithmetic only", (route, p.meta)

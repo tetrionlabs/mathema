@@ -8,6 +8,7 @@ different kinds, disagree. Two sides at the same infinity are one
 extended-real point and agree; an infinity against a value, and
 opposite infinities, disagree. A missing input is not compared."""
 from mathema.conjecture import check_conjectures, claim
+from tests._equivalence_rows import claim_row
 
 
 def huge(x: float) -> float:
@@ -45,8 +46,8 @@ def largest(x: float) -> float:
 
 
 def _eq(f, g, domain):
-    (p,) = check_conjectures(f, [claim(f"for {domain}, f =:= g",
-                                       funcs={"g": g})])
+    p = claim_row(check_conjectures(f, [claim(f"for {domain}, f =:= g",
+                                              funcs={"g": g})]))
     return p
 
 

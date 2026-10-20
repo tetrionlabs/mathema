@@ -540,9 +540,11 @@ CODE_TABLE: dict[str, dict] = {
         "derive_unlock": _NOT_APPLICABLE,
         "meaning": "proven exactly in real arithmetic, numerically "
                    "unstable in the declared domain",
-        "hint": "narrow the domain, cap infinity with a pseudo "
-                "infinity binding, widen the tolerance to accept the "
-                "risk, or clamp the fragile operation"},
+        "hint": "where the loss is inherent in the inputs, bound the "
+                "computation with a pseudo infinity binding along an "
+                "unbounded direction, or narrow a bounded domain; where "
+                "it is the code's, reorder or clamp the fragile "
+                "operation; or widen the tolerance to accept the risk"},
     "implementation:sub-epsilon-boundary": {
         "derive_unlock": _NOT_APPLICABLE,
         "meaning": "a raise at a floating-point boundary; the same "

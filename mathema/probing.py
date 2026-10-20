@@ -294,8 +294,8 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
-        bounds = domain.get(p)
-        if not isinstance(bounds, tuple):
+        bounds = _numeric_span(domain.get(p))
+        if bounds is None:
             continue
         lo, hi = bounds
         if math.isinf(lo) or math.isinf(hi) or (hi - lo) > policy.wide_span:
@@ -314,6 +314,32 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     if language is not None:
         risk["language"] = language
     return risk
+
+
+def _real_pair(pair) -> bool:
+    """Whether both ends of a two-ended bound are real numbers."""
+    return all(isinstance(b, (int, float)) and not isinstance(b, bool)
+               for b in pair)
+
+
+def _numeric_span(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The `(lo, hi)` a parameter's bound spans on the real line: the
+        bound itself for an interval, the hull of the interval pieces
+        for a real-valued `Domain` (`for x in R` reaches the float
+        range's ends), `None` for any other shape, a complex rectangle
+        included.
+    """
+    if isinstance(bounds, tuple) and len(bounds) == 2:
+        return bounds if _real_pair(bounds) else None
+    if isinstance(bounds, Domain) and bounds.base_type != "L":
+        spans = [b for b in bounds.pieces
+                 if isinstance(b, (tuple, list)) and len(b) == 2]
+        if any(not _real_pair(b) for b in spans):
+            return None
+        if spans:
+            return (min(lo for lo, _hi in spans), max(hi for _lo, hi in spans))
+    return None
 
 
 def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
@@ -1773,17 +1799,19 @@ def _classify_bound(bounds) -> str:
 _SEQUENCE_CORNER_SHARE = 0.15
 
 
-def _element_range(bounds) -> "tuple[float, float] | None":
+def _element_range(bounds, reach=None) -> "tuple[float, float] | None":
     """Intent:
         The real interval a sequence's elements range over, `(lo, hi)`
-        with an unbounded end at the number representation's reach, or
-        None when the elements are not one real interval (an integer
-        lattice, a finite set, a union).
+        with an unbounded end at `reach` (`(lo, hi)`, the claim's
+        resolved pseudo-infinity) when given, else at the number
+        representation's reach, or None when the elements are not one
+        real interval (an integer lattice, a finite set, a union).
     """
     from ._sampling import _reach_ends, representation_reach
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     if bounds is None:
-        reach = representation_reach()
-        return -reach, reach
+        return lo_reach, hi_reach
     pieces = getattr(bounds, "pieces", None)
     if pieces is not None:
         def numeric(v) -> bool:
@@ -1798,18 +1826,18 @@ def _element_range(bounds) -> "tuple[float, float] | None":
             return None
         real = [p for p in pieces if not isinstance(p, frozenset)]
         if not real:
-            reach = representation_reach()
-            return -reach, reach
+            return lo_reach, hi_reach
         if len(real) != 1:
             return None
         bounds = real[0]
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
             and len(bounds) == 2:
         try:
-            lo, hi, _ul, _uh = _reach_ends(bounds)
+            lo, hi, unbounded_lo, unbounded_hi = _reach_ends(bounds)
         except (TypeError, ValueError):
             return None
-        return lo, hi
+        return (lo_reach if unbounded_lo else lo,
+                hi_reach if unbounded_hi else hi)
     return None
 
 
@@ -1835,11 +1863,12 @@ def _cancel_magnitudes(top: float) -> list:
     return out or [top]
 
 
-def sequence_corners(bounds, n: "int | None" = None) -> list:
+def sequence_corners(bounds, n: "int | None" = None, reach=None) -> list:
     """Intent:
         The magnitude corners of a sequence whose elements range over
-        `bounds` (None the whole line, an unbounded end at the number
-        representation's reach), each a list: the pairs that cancel at
+        `bounds` (None the whole line, an unbounded end at `reach`, the
+        claim's resolved pseudo-infinity range, when given, else at the
+        number representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
         range's own limit, the range's opposite ends `[lo, hi]`, and
         the same-sign pair `[e, e]` at each end `e` past half the
@@ -1849,7 +1878,7 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
         elements are not one real interval.
     """
     from ._sampling import representation_reach
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None or (n is not None and n < 2):
         return []
     lo, hi = span
@@ -1867,23 +1896,28 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
 
 
-def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
+def _sequence_corner(rng: random.Random, n: int, bounds,
+                     reach=None) -> "list | None":
     """Intent:
         One sequence from the corners where float arithmetic breaks, or
         None when the elements' domain is not one real interval:
         entries that cancel at a large magnitude (`[M, -M, ...]`),
         entries at the range's stated ends, or a series one ulp from
-        constant. Every entry lies inside the element range.
+        constant. Every entry lies inside the element range, whose
+        unbounded ends are at `reach` (`(lo, hi)`, the claim's resolved
+        pseudo-infinity) when given, else at the number
+        representation's reach.
     """
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None:
         return None
     lo, hi = span
     from ._sampling import representation_reach
-    reach = representation_reach()
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     # entries at the range's own ends only where the claim states them;
-    # an unbounded side's float limit is the reach draws' business
-    stated = not (lo == -reach and hi == reach)
+    # an unbounded side's limit is the reach draws' business
+    stated = not (lo == lo_reach and hi == hi_reach)
     shapes = ["near-constant"] + (["edges"] if stated else [])
     if n >= 2 and lo < 0 < hi:
         shapes.append("cancel")
@@ -1910,7 +1944,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
           length: "int | None" = None,
-          lap: "_SpecialCycle | None" = None):
+          lap: "_SpecialCycle | None" = None,
+          reach=None):
+    # `reach`, the claim's resolved pseudo-infinity range when one
+    # applies, bounds a sequence's corner draws along unbounded ends.
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
@@ -1948,7 +1985,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # construction rather than by rejection
         n = length if length is not None else rng.randint(1, 8)
         if rng.random() < _SEQUENCE_CORNER_SHARE:
-            corner = _sequence_corner(rng, n, bounds)
+            corner = _sequence_corner(rng, n, bounds, reach)
             if corner is not None:
                 return corner
         if bounds is not None:
@@ -2519,8 +2556,34 @@ class SamplingSetup:
     affine: bool = False
     explicit_trials: bool = False
     scale: float = 1.0
-    # "probe" or "probe:semi_analytical", the route value the evidence
-    # honestly earns, per record-schema.md's open route field.
+    domain: dict = dataclasses.field(default_factory=dict)
+    # "probe:semi_analytical" when an analytically discovered critical
+    # point exists, else "probe"; the subroute is earned only once a
+    # draw lands on one of `analytical_hints` (`earned_route`)
+    analytical_hints: dict = dataclasses.field(default_factory=dict)
+
+    def earned_route(self, drew_critical: bool) -> str:
+        """Intent:
+            The route a sampling pass reports: `route`, except that
+            `probe:semi_analytical` falls back to plain `probe` when no
+            draw it evaluated was an analytically discovered critical
+            point.
+        """
+        if self.route == "probe:semi_analytical" and not drew_critical:
+            return "probe"
+        return self.route
+
+    def is_critical_draw(self, values: dict) -> bool:
+        """Intent:
+            Whether a draw (`{param: value}`) puts some parameter exactly
+            on one of its own analytically discovered critical points.
+        """
+        for p, hints in self.analytical_hints.items():
+            v = values.get(p)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and v in hints:
+                return True
+        return False
 
 
 def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
@@ -2563,6 +2626,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     # this function; hazard-channel values (the decade sweep, stub
     # boundaries) widen the sampling but never relabel its mechanism
     analytical = bool(critical_hints)
+    analytical_hints = {p: list(vs) for p, vs in critical_hints.items()}
     for param, values in _hazard_hint_values(fn, facts, domain).items():
         critical_hints.setdefault(param, []).extend(values)
     # kept per-parameter, not merged into the shared `specials` pool, so
@@ -2575,16 +2639,17 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     scale = min(1.0, trials_scale)
     budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
-    # states plainly that at least one parameter's own sampling was
-    # informed by an analytically discovered critical point this run,
-    # not blind trial-and-error.
+    # states plainly that at least one draw evaluated this run was an
+    # analytically discovered critical point, not blind trial-and-error;
+    # a pass reports it through `SamplingSetup.earned_route`.
     route_value = "probe:semi_analytical" if analytical else "probe"
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
                          extra_cycles=extra_cycles, route=route_value,
                          affine=affine, explicit_trials=trials is not None,
-                         scale=scale)
+                         scale=scale, analytical_hints=analytical_hints,
+                         domain=dict(domain or {}))
 
 
 def _scaled_budget(budget: int, scale: float) -> int:
@@ -2598,18 +2663,27 @@ def _scaled_budget(budget: int, scale: float) -> int:
     return budget
 
 
-def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict,
+                          bound: "dict | None" = None) -> "tuple[dict, int]":
     """Intent:
         The risk and trial budget for one claim: the function's own
-        setup, with the `language` factor read off the claim's domain
-        (a written binding or an inferred one), and the budget set from
-        the complexity that factor adds. An explicit trial count is kept
-        as given.
+        setup, with the `wide_domain` and `float_extremes` factors read
+        off the claim's own written binding `bound` (which replaces the
+        setup's domain for each parameter it binds), the `language`
+        factor read off the claim's domain (a written binding or an
+        inferred one), and the budget set from the complexity those
+        factors give. An explicit trial count is kept as given.
     """
+    risk = dict(setup.risk)
+    if bound:
+        claimed = _structural_risk(facts, {**setup.domain, **bound})
+        risk["wide_domain"] = claimed["wide_domain"]
+        risk["float_extremes"] = claimed["float_extremes"]
     language = _language_risk(facts.params, cj_domain)
-    if language is None or language == setup.risk.get("language"):
+    if language is not None:
+        risk["language"] = language
+    if risk == setup.risk:
         return setup.risk, setup.budget
-    risk = {**setup.risk, "language": language}
     if setup.explicit_trials:
         return risk, setup.budget
     return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
