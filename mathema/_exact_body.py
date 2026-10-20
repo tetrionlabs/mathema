@@ -76,6 +76,18 @@ power, `float()` or `math` function of one, and runs the same step on
 integers as the computation runs it first, raising the computation's
 own error (`10 ** 400 / 1` overflows).
 
+A float with no exact reading (a finite float or a complex number: a
+module global, a closure value, a library's or a builtin's result, or
+an exact number mixed with one, `0.1 * ONE` or `complex(0, x)`) is a
+double, not the number the code states, so no decision is taken on it
+outside a shadow run: a comparison, test, rounding, key or order whose
+operand is or holds one makes the point undecided, as does a module's
+function or a float's own method called on one returning anything but
+floats (`math.isfinite(y)`, `y.is_integer()`), and a builtin turning a
+number standing for a float into one (`complex`, `sum` with a float).
+A value holding one cannot be the run's exact result either (`wrap`).
+An infinity and a nan are not rounded values and are decided as ever.
+
 A function `enforce_domain` wraps with no policy on its result is read
 as its domain check, a decision taken on the arguments, then the
 function it wraps.
@@ -1290,21 +1302,65 @@ def _floatish(value) -> bool:
                   or _stands_for_float(v))
 
 
+def _raw(value) -> bool:
+    """Whether `value` is a float with no exact reading: a finite float
+    (a numpy one included) or a complex number, the double a module
+    global, a closure, a library or a builtin gave, or one an exact
+    number became when mixed with such a float (`0.1 * ONE`,
+    `complex(0, x)`). An infinity and a nan are no rounded value and
+    are not raw."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, complex):
+        return True
+    np = sys.modules.get("numpy")
+    if np is not None and isinstance(value, np.generic):
+        return isinstance(value, np.complexfloating) or (
+            isinstance(value, np.floating) and bool(np.isfinite(value)))
+    return False
+
+
+def _holds_raw(value) -> bool:
+    """Whether `value` is, or holds (`_holds`), a float with no exact
+    reading (`_raw`), a float or complex numpy array included."""
+    np = sys.modules.get("numpy")
+    if np is not None and isinstance(value, np.ndarray) \
+            and value.dtype.kind in "fc":
+        return value.size > 0
+    return _holds(value, _raw)
+
+
+def _raw_declined(value, what: str) -> None:
+    """Outside a shadow run, leave the point undecided when `value` holds
+    a float with no exact reading (`_holds_raw`): `what` on it is a
+    decision on a double, not on the number the code states, though the
+    float run takes it alike."""
+    if _STATE.mode != "float" and _holds_raw(value):
+        _not_exact(f"{what} on {value}, a float with no exact reading, is "
+                   f"not taken exactly")
+
+
 def _held(value, what: str) -> None:
     """Leave the point undecided when `value` holds a number standing
-    for a float (`_holds_stand_in`): `what`, a decision the reading does
-    not follow decision by decision, is declined on it."""
+    for a float (`_holds_stand_in`) or a float with no exact reading
+    (`_raw_declined`): `what`, a decision the reading does not follow
+    decision by decision, is declined on it."""
     if _holds_stand_in(value):
         _not_exact(f"{what} on {value}, which stands for a float, is not "
                    f"taken exactly")
+    _raw_declined(value, what)
 
 
 def _symbolic_declined(value, what: str) -> None:
     """In an exact run, leave the point undecided when `value` holds a
     sympy number (`_holds_symbolic`), on which `what`, as Python takes
-    it, is not the mathematics."""
+    it, is not the mathematics, or a float with no exact reading
+    (`_raw_declined`)."""
     if _STATE.mode == "exact" and _holds_symbolic(value):
         _not_exact(f"{what} on {value} is not taken exactly")
+    _raw_declined(value, what)
 
 
 def _run_callee():
@@ -1364,17 +1420,50 @@ def _helper(fn):
     return call
 
 
-def _opaque(func):
-    """A callable the reading does not look into, run as itself when no
-    exact number standing for a float is among its arguments, else
-    leaving the point undecided."""
+def _opaque(func, owner=None):
+    """Intent:
+        A callable the reading does not look into (a module's C
+        function, a method of a value of another kind, an exception
+        class), run as itself.
+
+    Raises:
+        NotExact: an exact number standing for a float is among its
+            arguments; or, outside a shadow run, a float with no exact
+            reading (`_raw`) is among its arguments or is `owner`, the
+            value whose method it is, and the result is anything but
+            such floats (`math.isfinite(y)`, `y.is_integer()`): a
+            decision on a double the run does not see. An exception
+            class is constructed as ever.
+    """
+    exception = isinstance(func, type) and issubclass(func, BaseException)
+
     def call(*args, **kwargs):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        raw = not exception and _STATE.mode != "float" and (
+            _raw(owner) or _holds_raw(args) or _holds_raw(kwargs))
         args, kwargs = _read_args(args, kwargs)
-        return func(*args, **kwargs)
+        out = func(*args, **kwargs)
+        if raw and not _only_raw(out):
+            _not_exact(f"{_named(func)} decides on a float with no exact "
+                       f"reading")
+        return out
     return call
+
+
+def _only_raw(value) -> bool:
+    """Whether `value` is a float or complex number, or a list or tuple
+    of nothing else (a float array included): a result carrying no
+    decision taken on its arguments."""
+    np = sys.modules.get("numpy")
+    if isinstance(value, (list, tuple)):
+        return all(_only_raw(v) for v in value)
+    if np is not None and isinstance(value, np.ndarray):
+        return value.dtype.kind in "fc"
+    if np is not None and isinstance(value, np.generic):
+        return isinstance(value, (np.floating, np.complexfloating))
+    return isinstance(value, (float, complex)) and not isinstance(value, bool)
 
 
 #: the comparisons of two operands, by the symbol `decide_symbolic`
@@ -1401,7 +1490,10 @@ def _compare(site, op: str, a, b):
     if mode is None:
         _held(a, "a comparison")
         _held(b, "a comparison")
-    elif mode == "exact" and (_holds_symbolic(a) or _holds_symbolic(b)):
+    elif mode == "exact":
+        _raw_declined(a, "a comparison")
+        _raw_declined(b, "a comparison")
+    if mode == "exact" and (_holds_symbolic(a) or _holds_symbolic(b)):
         if not (_exact(a) and _exact(b)) or isinstance(a, bool) \
                 or isinstance(b, bool):
             _not_exact(f"a comparison of {a} and {b} is not taken exactly")
@@ -1485,6 +1577,8 @@ def _test(site, value):
     """
     np = sys.modules.get("numpy")
     array = np is not None and isinstance(value, np.ndarray)
+    if _raw(value) or (array and _holds_raw(value)):
+        _raw_declined(value, "a test")
     if _STATE.mode is None:
         if _stands_for_float(value) or (array and _holds_stand_in(value)):
             _not_exact(f"a test of {value}, which stands for a float, is "
@@ -1729,9 +1823,22 @@ def _builtin(func):
             args = (items,) if len(args) == 1 else tuple(items)
             if kwargs.get("key") is not None:
                 kwargs = {**kwargs, "key": _keyed_by(kwargs["key"])}
+        standing = id(func) not in _PASSING and _STATE.mode != "float" \
+            and (_holds_stand_in(args) or _holds_stand_in(kwargs))
         args, kwargs = _read_args(args, kwargs)
-        return func(*args, **kwargs)
+        out = func(*args, **kwargs)
+        if standing and _holds_raw(out):
+            _not_exact(f"{_named(func)} turns an exact number into a float "
+                       f"with no exact reading")
+        return out
     return call
+
+
+#: the builtins handing on the values they are given, as they are
+_PASSING = frozenset(id(f) for f in (
+    list, tuple, zip, enumerate, reversed, iter, next, map, filter, print,
+    len, isinstance, issubclass, type, getattr, setattr, hasattr, callable,
+    range, slice, object))
 
 
 def _unordered_inside(items) -> None:
@@ -1742,6 +1849,7 @@ def _unordered_inside(items) -> None:
         if not _stands_for_float(item) and _holds_stand_in(item):
             _not_exact("an ordering of containers holding a number "
                        "standing for a float is not taken exactly")
+    _raw_declined(items, "an ordering")
 
 
 def _order(site, items: list, key, reverse) -> list:
@@ -2045,7 +2153,7 @@ def _callee(func, site=None):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
             return _method(func, site)
-        return _opaque(func)
+        return _opaque(func, owner)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
 
@@ -2513,6 +2621,7 @@ def _decline(*operands) -> None:
         if _stands_for_float(value):
             _not_exact(f"a decision on {value}, which stands for a float, "
                        f"is not taken exactly")
+        _raw_declined(value, "a decision")
 
 
 def _guarded_native(native, *operands) -> None:

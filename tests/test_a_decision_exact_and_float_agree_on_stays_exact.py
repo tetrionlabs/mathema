@@ -289,3 +289,95 @@ def test_the_domain_check_of_an_enforced_function_still_raises(enforced):
     with pytest.raises(Exception) as caught:
         exact_callee(enforced)("bob")
     assert type(caught.value).__name__ == "DomainError", caught.value
+
+
+# --- a float with no exact reading ----------------------------------------
+
+#: module floats: doubles the reading cannot read as written
+ONE = 1.0
+THRESH = 0.3
+
+
+def through_a_global(n: int) -> float:
+    # 3/10 times the double 1.0 is the double 0.3; in float 0.3 * 1.0 is
+    # 0.30000000000000004, above THRESH
+    _spin()
+    y = n * 0.1 * ONE
+    if y > THRESH:
+        return 1 + 1e-17
+    return 1
+
+
+def equal_through_a_global(n: int) -> bool:
+    _spin()
+    return n * 0.1 * ONE == THRESH
+
+
+def rounded_through_a_global(n: int) -> int:
+    _spin()
+    y = (n * 0.1 * ONE - THRESH) * 1e17
+    return round(y)
+
+
+def branch_through_a_global(n: int) -> int:
+    _spin()
+    y = n * 0.1 * ONE
+    if y > THRESH:
+        return 1
+    return 0
+
+
+def scaled_through_a_global(n: int) -> int:
+    # 7/10 times the double 1.0 is the double 0.7, as in the computation:
+    # both runs find 0.7 * 90 = 62.99999999999999 below 63, while 7/10 * 90
+    # is 63
+    _spin()
+    x = n / 10 * ONE
+    if x * 90 < 63:
+        return 1
+    return 0
+
+
+def through_complex(n: int) -> int:
+    # complex() holds 7/10 as the double 0.7; 0.7 * 90 is
+    # 62.99999999999999, while 7/10 * 90 is 63
+    _spin()
+    z = complex(0, n / 10)
+    if z.imag * 90 < 63:
+        return 1
+    return 0
+
+
+def truncated_through_complex(n: int) -> int:
+    _spin()
+    z = complex(n / 10, 0)
+    return int(z.real * 90)
+
+
+@pytest.mark.parametrize("fn,law", [
+    # neither proven exactly on a decision taken on a double
+    (through_a_global, "for n in {3}, f(n) == 1"),
+    (scaled_through_a_global, "for n in {7}, f(n) == 1"),
+    (through_complex, "for n in {7}, f(n) == 1"),
+    (truncated_through_complex, "for n in {7}, f(n) == 62"),
+    # nor falsified exactly on one: the computation's value holds
+    (equal_through_a_global, "for n in {3}, f(n) == False"),
+    (rounded_through_a_global, "for n in {3}, f(n) == 6"),
+    (branch_through_a_global, "for n in {3}, f(n) == 1"),
+], ids=lambda v: getattr(v, "__name__", None))
+def test_a_decision_on_a_float_with_no_exact_reading_is_capped(fn, law):
+    _capped(_check(fn, law))
+
+
+def test_a_float_with_no_exact_reading_never_reaches_an_exact_value():
+    from mathema.analysis import effective_facts
+    from mathema.gates import _point_evaluator
+    for fn, n in ((through_a_global, 3), (scaled_through_a_global, 7),
+                  (through_complex, 7),
+                  (truncated_through_complex, 7)):
+        with pytest.raises(NotExact):
+            exact_callee(fn)(n)
+        cj = claim("for n in {%d}, f(n) == 1" % n)
+        deps = _point_evaluator(cj, fn, effective_facts(fn), dict(cj.domain),
+                                {})
+        assert deps["evaluate"].exact_as_written({"n": n}) is None, fn
