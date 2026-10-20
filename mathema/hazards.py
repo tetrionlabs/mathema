@@ -386,8 +386,10 @@ def _extreme_candidates(bounds, pseudo_infinity=None, profile=None) -> list[floa
         the ladder is the profile's: its non-negative rungs for an
         unbounded upper side, its non-positive rungs for an unbounded
         lower side. A declared end past the profile's range counts as
-        unbounded, every candidate lies within the range, and an
-        integral profile keeps integer endpoints exact.
+        unbounded, and every candidate lies within the range. Under an
+        integral profile a declared end contributes the first integer
+        the domain admits at or inside it (`(0.5, 10)` gives 1, `(0, 10)`
+        open gives 1 and 9), as an exact integer.
     """
     from .grammar import domain_contains
 
@@ -402,6 +404,12 @@ def _extreme_candidates(bounds, pseudo_infinity=None, profile=None) -> list[floa
                 and not isinstance(value, bool):
             return value
         return float(value)
+
+    def inward(value, step: int):
+        if profile is None or not profile.integral:
+            return value
+        whole = math.ceil(value) if step > 0 else math.floor(value)
+        return whole if admitted(whole) else whole + step
 
     if profile is None:
         rungs_hi = list(_REPRESENTATION_LADDER)
@@ -429,9 +437,9 @@ def _extreme_candidates(bounds, pseudo_infinity=None, profile=None) -> list[floa
     if reach_hi and pseudo_infinity is None and hi is not None:
         pseudo_infinity = (-abs(hi), hi)
     if lo is not None and abs(lo) != float("inf") and not reach_lo and not past_lo:
-        raw.append(lo)
+        raw.append(inward(lo, 1))
     if hi is not None and abs(hi) != float("inf") and not reach_hi and not past_hi:
-        raw.append(hi)
+        raw.append(inward(hi, -1))
     unbounded_hi = hi is None or hi == float("inf") or reach_hi or past_hi
     unbounded_lo = lo is None or lo == -float("inf") or reach_lo or past_lo
     if unbounded_hi:

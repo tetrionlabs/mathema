@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from mathema.analysis import analyze_source
+from mathema.domain import Interval
 from mathema.grammar import _RESERVED_REPRESENTATIONS
 from mathema.hazards import _REPRESENTATION_LADDER, hazard_points
 from mathema.koine import Document
@@ -133,3 +134,16 @@ def test_an_operation_s_own_manifest_line_wins_over_the_class_line():
 
 def test_a_bigint_parameter_cannot_overflow_whatever_the_manifest_says():
     assert overflow_semantics(_document("bigint"), "x") == "arbitrary"
+
+
+@pytest.mark.parametrize("bounds, expected", [
+    ((0.5, 1e30), [1, 2**63 - 1]),
+    ((-1e30, 3.5), [-2**63, -1, 0, 3]),
+    ((0.0, 10.0), [0, 10]),
+    (Interval(0, 10, False, False), [1, 9]),
+    (Interval(0.5, 0.75), []),
+])
+def test_an_integer_parameter_s_extremes_are_integers_inside_the_domain(bounds, expected):
+    values = _extremes(None, facts_from_koine(_document("i64")), {"x": bounds})
+    assert sorted(values) == expected
+    assert all(type(v) is int for v in values)
