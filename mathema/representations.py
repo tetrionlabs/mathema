@@ -40,6 +40,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 
+from ._representation_words import NUMBER_REPRESENTATIONS
 from .claim_families import _ACCIDENTAL_CRASHES
 from .hazards import _REPRESENTATION_LADDER
 
@@ -180,13 +181,8 @@ F64INT = Representation(
     integral=True,
 )
 
-#: One profile per representation word the claim grammar reserves,
-#: by tag.
-PROFILES: dict[str, Representation] = {
-    **{f"i{bits}": _fixed_width(f"i{bits}", bits, signed=True)
-       for bits in (8, 16, 32, 64, 128)},
-    **{f"u{bits}": _fixed_width(f"u{bits}", bits, signed=False)
-       for bits in (8, 16, 32, 64, 128)},
+#: The profiles of the reserved words that are not fixed-width integers.
+_NAMED_PROFILES: dict[str, Representation] = {
     "f16": _binary_float("f16", 65504.0, 256.0, 12.0, 1e-5, 2.0**-24, 2.0**-11),
     "f32": _binary_float("f32", 3.4028234663852886e38, 2.0**64, 89.0, 1e-38, 2.0**-149,
                          2.0**-24),
@@ -194,6 +190,26 @@ PROFILES: dict[str, Representation] = {
     "bigint": PY_INT,
     "f64int": F64INT,
 }
+
+
+def _reserved_profile(tag: str) -> Representation:
+    """Intent:
+        The profile of the reserved representation word `tag`: a
+        fixed-width integer for `i<bits>` and `u<bits>`, else the
+        named profile.
+
+    Raises:
+        KeyError: `tag` is neither a fixed-width integer word nor named.
+    """
+    if tag[:1] in ("i", "u") and tag[1:].isdigit():
+        return _fixed_width(tag, int(tag[1:]), signed=tag[0] == "i")
+    return _NAMED_PROFILES[tag]
+
+
+#: One profile per representation word the claim grammar reserves,
+#: by tag, read from the one table of representation words.
+PROFILES: dict[str, Representation] = {
+    tag: _reserved_profile(tag) for tag in NUMBER_REPRESENTATIONS}
 
 
 def profile(tag: str) -> Representation:

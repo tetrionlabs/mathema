@@ -74,3 +74,18 @@ def test_the_alias_table_ships_with_the_package():
     declared = {os.path.normpath(p) for pattern in patterns
                 for p in glob.glob(os.path.join(glob.escape(str(pkg)), pattern))}
     assert os.path.normpath(str(pkg / "data" / "aliases.yaml")) in declared
+
+
+def test_a_koine_parameter_names_every_reserved_number_representation():
+    from mathema.grammar import _RESERVED_REPRESENTATIONS
+    from mathema.representations import PROFILES
+    reserved = {f"representation::{tag}" for tag in _RESERVED_REPRESENTATIONS}
+    assert reserved == {f"representation::{tag}" for tag in PROFILES}
+    assert reserved <= V.REPRS
+    assert V.REPRS - reserved == {"representation::c128", "representation::bool",
+                                  "representation::str"}
+
+
+def test_the_interpreter_runs_only_representations_koine_names():
+    from mathema.koine.interpret import RUNNABLE_REPRS
+    assert RUNNABLE_REPRS <= V.REPRS

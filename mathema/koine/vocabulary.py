@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .._representation_words import REPRESENTATION_WORDS
+
 KOINE_VERSION = "0.0.1"
 
 # --- sorts: what an argument position accepts ----------------------------
@@ -283,9 +285,7 @@ KINDS = frozenset(f"kind::{k}" for k in (
     "table", "dict", "unknown", "record"))
 SEQUENCE_KINDS = frozenset({"kind::sequence", "kind::vec", "kind::mat"})
 
-REPRS = frozenset(f"representation::{r}" for r in (
-    "f64", "f32", "f64int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-    "bigint", "c128", "bool", "str"))
+REPRS = frozenset(f"representation::{r}" for r in REPRESENTATION_WORDS)
 
 #: why an expression has no value, by stratum: mathematics (the same
 #: whatever runs it), the machine (a property of the representation),
