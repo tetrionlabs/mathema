@@ -926,7 +926,25 @@ def _exact_raise_guard(cond):
         return cond
     if exact.has(sympy.ConditionSet) or exact.free_symbols - {sym}:
         return cond
-    return exact
+    return _parameter_first(exact, sym)
+
+
+def _parameter_first(expr, sym):
+    """Intent:
+        `expr` with each relation written with `sym` on its left (`1 <
+        w` as `w > 1`), the same set of points.
+    """
+    def flip(rel):
+        if sym not in rel.lhs.free_symbols and sym in rel.rhs.free_symbols:
+            return rel.reversed
+        return rel
+    if isinstance(expr, sympy.core.relational.Relational):
+        return flip(expr)
+    try:
+        return expr.replace(
+            lambda e: isinstance(e, sympy.core.relational.Relational), flip)
+    except Exception:
+        return expr
 
 
 def lift_piecewise(fn, facts) -> "ConditionedLift | None":
