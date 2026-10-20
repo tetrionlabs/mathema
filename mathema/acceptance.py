@@ -42,7 +42,7 @@ import os
 import subprocess
 
 from .grammar import split_relation
-from .identity import same_form
+from .identity import namespaced_form, same_form
 from .routes import safety_predicates
 from .spec import classify_verdict, write_yaml
 
@@ -616,7 +616,7 @@ def plan_rename(root: str, new_key: str, old_key: str,
                f"remove {os.path.relpath(old_path, root)}",
                "re-stamp the integrity and re-anchor it to HEAD"]
     if not matches:
-        actions.insert(0, f"the record's form hash {recorded} differs from "
+        actions.insert(0, f"the record's form hash {namespaced_form(recorded)} differs from "
                           f"{new_key}'s {live}: it may not be the same "
                           f"function, and the next verify checks it again")
     if old_key in load_locks(root):

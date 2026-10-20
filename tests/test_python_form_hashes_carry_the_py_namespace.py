@@ -194,3 +194,34 @@ def test_a_bare_recorded_form_that_differs_is_still_a_changed_body(project):
     out = verify_project(root=str(project))
     assert out.adjudicated >= 1
     assert _entry(project)["identity"]["form"].startswith("py:")
+
+
+def _bare_lock(root, live: str) -> None:
+    from mathema.locks import lock
+    lock(str(root), _KEY, live[3:], by="lovelace")
+
+
+def test_a_bare_lock_on_an_unchanged_body_is_no_pending_decision(project):
+    from mathema.interfaces.mcp.tools import pending_decisions
+    _bare_lock(project, mathema.analyze(sys.modules["pyform"].settle).form)
+    rows = pending_decisions(root=str(project))["rows"]
+    assert "locked-changed" not in {r[2] for r in rows}
+
+
+def test_a_tripped_bare_lock_names_both_forms_namespaced(project):
+    from mathema.interfaces.mcp.tools import pending_decisions
+    from mathema.verify import verify_project
+    live = mathema.analyze(sys.modules["pyform"].settle).form
+    _bare_lock(project, live)
+    src = project / "pyform.py"
+    src.write_text(src.read_text().replace("return abs(halve(x))", "return halve(x)"))
+    importlib.invalidate_caches()
+    importlib.reload(sys.modules["pyform"])
+    changed = mathema.analyze(sys.modules["pyform"].settle).form
+    assert changed != live
+    message = next(p for p in verify_project(root=str(project)).problems
+                   if "locked at form" in p)
+    assert f"locked at form {live} but the code is now {changed}" in message
+    detail = next(r[3] for r in pending_decisions(root=str(project))["rows"]
+                  if r[2] == "locked-changed")
+    assert f"locked at {live}, code is now {changed}" in detail

@@ -29,7 +29,7 @@ from __future__ import annotations
 import datetime
 import os
 
-from .identity import same_form
+from .identity import namespaced_form, same_form
 
 
 class LockError(Exception):
@@ -79,7 +79,7 @@ def lock(root: str, key: str, form: str, *, by: str | None = None,
         if same_form(existing.get("form"), form):
             return existing
         raise LockError(
-            f"{key} is already locked at form {existing.get('form')} "
+            f"{key} is already locked at form {namespaced_form(existing.get('form'))} "
             f"(the code is now {form}); a human runs `mathema unlock "
             f"{key}` before it can be re-locked")
     entry = {"form": form, "at": datetime.date.today().isoformat()}
