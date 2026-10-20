@@ -7501,8 +7501,9 @@ def _table_columns(param: str, cj, facts) -> list:
     """Intent:
         The column names a table parameter is drawn with: every column
         the claim (statement and premises) or the function body reads
-        as `param.name` or `param["name"]`, in the order first met, or
-        `["a", "b"]` when nothing names one.
+        as `param.name` or `param["name"]`, in the order first met,
+        then every column the claim binds (`for param.name in ...`),
+        or `["a", "b"]` when nothing names one.
     """
     trees = []
     for src in _claim_sides(cj) + [a for a in (cj.assuming or "",) if a]:
@@ -7532,6 +7533,12 @@ def _table_columns(param: str, cj, facts) -> list:
                 name = node.slice.value
             if name is not None and name not in found:
                 found.append(name)
+    for key in getattr(cj, "domain", None) or {}:
+        head, dot, name = str(key).partition(".")
+        if head == param and dot and name.isidentifier() \
+                and not name.startswith("_") \
+                and name not in _TABLE_ATTRIBUTES and name not in found:
+            found.append(name)
     return found or ["a", "b"]
 
 
@@ -8252,11 +8259,13 @@ def _admitted_container_points(ctx, facts) -> tuple:
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
             (length,) = _floor.sizes(bound, rng, (3, 3))
+            columns = _table_columns(p, ctx.cj, facts)
             base = {c: [_synth("float", rng,
                                _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))
                         for _ in range(length)]
-                    for c in _table_columns(p, ctx.cj, facts)}
-            floor = _floor.table_floor(holes, absent=absent)
+                    for c in columns}
+            floor = _floor.table_floor(holes, absent=absent, column_holes=_column_holes(
+                holes, {c: (ctx.cj_domain or {}).get(f"{p}.{c}") for c in columns}))
         elif len(dims) >= 2:
             square = len(set(dims[:2])) == 1
             n_rows, n_cols = _floor.sizes(bound, rng, (2, 2) if square else (2, 3), 2)
@@ -8450,7 +8459,9 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
     else:
         from .probing import sequence_corners
-        floor = _floor.table_floor(holes, absent=absent)
+        column_holes = _column_holes(holes, column_bounds)
+        floor = _floor.table_floor(holes, absent=absent,
+                                   column_holes=column_holes)
         # each column meets the magnitude corners of the completed
         # element range, after the degenerate tables
         # a column the claim binds (`for df.r in [0, 1]^n`) meets the
@@ -8460,7 +8471,27 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                              reach=reach),
             {c: sequence_corners(_column_bound(b, None), reach=reach)
              for c, b in (column_bounds or {}).items()})
+        return _floor.ContainerDraws(form, floor, holes, column_holes)
     return _floor.ContainerDraws(form, floor, holes)
+
+
+def _column_holes(holes: list, column_bounds: "dict | None") -> dict:
+    """Intent:
+        `{column: holes}` for each table column whose binding excludes
+        some of the table's `holes`: the holes it still admits. A
+        binding excluding the class (`\\ {missing}`) admits none, one
+        excluding a member (`\\ {nan}`) every other.
+    """
+    from .domain import MISSING, member, member_of
+    out: dict = {}
+    for c, b in (column_bounds or {}).items():
+        excluded = getattr(b, "excluded", None) or frozenset()
+        kept = [h for h in holes
+                if MISSING not in excluded
+                and member(member_of(h) or "") not in excluded]
+        if len(kept) < len(holes):
+            out[c] = kept
+    return out
 
 
 def _asks_missing(cj) -> bool:

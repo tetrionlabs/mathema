@@ -74,6 +74,61 @@ both. Declare only names your type has and a list lacks: a name a list
 also has (`index`, `copy`, `sort`) would draw a list-using function as
 your type. An adapter without `USES` is never chosen this way.
 
+An adapter whose `kinds` include `table` realises mathema's typed
+table: a Spark, Arrow or database frame in a package needs nothing in
+core beyond the adapter. `realise` receives an `AbstractTable`, named
+columns of one length in order (`column_names()`, `row_count()`), each
+an `AbstractVec` whose `values` hold the column's cells,
+`missing` the positions holding a hole, and `element_type(column)` its
+type, one of `float`, `int`, `bool` and `str` (`column_types()` gives
+them all). It builds the frame with each column in the library's type
+for that element type, and a hole as the library holds one (a hole the
+library cannot hold as drawn, NaN in a string column, say, as its
+null). `observe` turns a returned frame back into an `AbstractTable`,
+stating each column's `element` from the library's type, so a column
+of holes only keeps its type; a one-dimensional result indexed by
+column names (what a reduction of a table returns) is an `AbstractVec`
+with those names as its `labels`, which a claim reads by name:
+
+```python
+from mathema.runtime_types import (AbstractTable, AbstractVec, NotMine,
+                                   element_type)
+
+_TYPES = {"float": "double", "int": "bigint", "bool": "boolean",
+          "str": "string"}
+
+
+class SparkFrameAdapter:
+    name = "pyspark.sql.DataFrame"
+    kinds = frozenset({"table"})
+    requires = ("pyspark",)
+
+    def detect(self, annotation):
+        ...
+
+    def realise(self, table, options):
+        schema = ", ".join(f"{name} {_TYPES[element_type(col)]}"
+                           for name, col in table.columns.items())
+        rows = [tuple(None if k in col.missing else col.values[k]
+                      for col in table.columns.values())
+                for k in range(table.row_count())]
+        return self.spark.createDataFrame(rows, schema)
+
+    def observe(self, obj):
+        if type(obj).__name__ != "DataFrame":
+            return NotMine
+        ...
+        return AbstractTable({name: AbstractVec(values, missing,
+                                                element=element)
+                              for name, (values, missing, element)
+                              in columns.items()})
+```
+
+Code inside mathema reads a table through `mathema.runtime_types`
+(`column_names`, `column_types`, `column`, `row_count`, `as_table`),
+which goes through `observe`, so a registered adapter's frames read
+exactly as pandas and polars ones do.
+
 ## Target resolvers
 
 A fourth group, `mathema.target_resolvers`, turns a tagged
