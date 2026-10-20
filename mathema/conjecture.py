@@ -6295,9 +6295,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                        ctx.cj_domain)
             if ctx.companion is not None \
                     and ctx.companion.verdict == "falsified":
+                # no proof stands behind this line: only the B its
+                # conditioning gives is offered, never one found by search
                 _settle_infinity_offer(ctx.companion, probed_with, params,
-                                       ctx.cj_domain,
-                                       witness=ctx.companion_witness)
+                                       ctx.cj_domain)
             if ctx.companion is None and probed.verdict == "holds" \
                     and _stands_in_for_derive(ctx):
                 # the probe stood in for derive on the mathematics: the
@@ -9676,8 +9677,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
             and found_at.get("point") is not None \
             and "mathema.proof_contradicted" not in (companion.meta or {}):
         point = found_at["point"]
+        # a search for B stands only on a proof; a probe standing in for
+        # derive is offered the B its conditioning gives alone
         _settle_infinity_offer(companion, run_with, list(point),
-                               ctx.cj_domain, witness=point)
+                               ctx.cj_domain,
+                               witness=point if proven.verdict == "proven"
+                               else None)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
