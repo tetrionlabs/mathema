@@ -276,9 +276,10 @@ def claim_conflicts(fn, file_entry: dict,
     """
     import inspect
 
-    from .authoring import parse_docstring_claims
+    from .authoring import _fn_key, parse_docstring_claims
     doc_claims = {c.get("name"): c
-                  for c in parse_docstring_claims(inspect.getdoc(fn) or "")}
+                  for c in parse_docstring_claims(inspect.getdoc(fn) or "",
+                                                  owner=_fn_key(fn))}
     verified_rows = {}
     for row in (verified_entry or {}).get("claims") or []:
         meta = row.get("meta") or {}
@@ -470,11 +471,12 @@ def docstring_drift(fn, entry: dict, verified_entry: dict | None) -> list:
     import inspect
     import re
 
-    from .authoring import parse_docstring_claims
+    from .authoring import _fn_key, parse_docstring_claims
     doc = inspect.getdoc(fn) or ""
     if not re.search(r"^\s*claims:\s*$", doc, re.I | re.M):
         return []
-    doc_names = {c.get("name") for c in parse_docstring_claims(doc)}
+    doc_names = {c.get("name") for c in parse_docstring_claims(
+        doc, owner=_fn_key(fn))}
     declared_names = {c.get("name") for c in entry.get("claims") or []}
     verified_names = {c.get("name")
                       for c in (verified_entry or {}).get("claims") or []
