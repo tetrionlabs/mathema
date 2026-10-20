@@ -21,12 +21,13 @@ from mathema.conjecture import check_conjectures, claim  # noqa: E402
 
 
 def rows_read(a: pd.DataFrame):
-    return float(len(a)) + 0.0 * float(len(a["w"]))
+    return float(len(a)) + 0.0 * float(len(a["w"])) * float(len(a["k"]))
 
 
 @pytest.mark.parametrize("text", [
     "for a.r in [0, 1]^n \\ {missing}, f(a) >= 1",
     "for a.r in [0, 1]^n \\ {missing}, a.w in {1, 2}^n \\ {missing}, f(a) >= 1",
+    'for a.r in [0, 1]^n \\ {missing}, a.k in {"u", "v"}^n \\ {missing}, f(a) >= 1',
 ])
 def test_a_table_bound_by_column_is_drawn_with_one_row_count(text):
     (p,) = check_conjectures(rows_read, [claim(text)])

@@ -17,22 +17,32 @@ import math
 from dataclasses import dataclass, field
 
 
+#: the types the elements of a vector, and so the cells of a table
+#: column, can have
+ELEMENT_TYPES = ("float", "int", "bool", "str")
+
+
 @dataclass(frozen=True)
 class AbstractVec:
-    """A vector of `len(values)` numbers, with `missing` the positions
-    that hold no value and `spelling` the member they are held as
-    (`nan`, `null`, `NA`), None for the runtime type's own default;
-    `members` the member each missing position holds, `((position,
-    member), ...)`, when they are not all one. The number stored at a
-    missing position is NaN and carries no meaning. `labels` names
+    """A vector of `len(values)` numbers, strings or booleans, with
+    `missing` the positions that hold no value and `spelling` the
+    member they are held as (`nan`, `null`, `NA`), None for the runtime
+    type's own default; `members` the member each missing position
+    holds, `((position, member), ...)`, when they are not all one. The
+    value stored at a missing position is NaN and carries no meaning.
+    `labels` names
     each position when the vector is indexed by name (a pandas Series
     labelled by column names, as a table's reduction answers), `()`
-    when its positions carry no names."""
+    when its positions carry no names. `element` is the type of its
+    elements, one of `ELEMENT_TYPES`, when it was drawn or returned as
+    that type; None when the values say it (`element_type`). A vector
+    of strings or booleans holds them in `values` as they are."""
     values: tuple
     missing: frozenset = frozenset()
     spelling: "str | None" = None
     members: tuple = ()
     labels: tuple = ()
+    element: "str | None" = None
 
     def __len__(self) -> int:
         return len(self.values)
@@ -59,13 +69,61 @@ class AbstractMat:
         return (len(self.rows), len(self.rows[0]) if self.rows else 0)
 
 
+def element_type(vec: AbstractVec) -> str:
+    """Intent:
+        The type of a vector's elements, one of `ELEMENT_TYPES`: its
+        `element` when stated, else what its values show, `str` or
+        `bool` when every value present is one, `int` when every value
+        present is an integer, and `float` otherwise (a vector of holes
+        only, or of no positions, included).
+    """
+    if vec.element is not None:
+        return vec.element
+    present = vec.non_missing()
+    if present and all(isinstance(v, bool) for v in present):
+        return "bool"
+    if present and all(isinstance(v, str) for v in present):
+        return "str"
+    if present and all(isinstance(v, int) for v in present):
+        return "int"
+    return "float"
+
+
 @dataclass(frozen=True)
 class AbstractTable:
-    """Named columns of equal length, each an `AbstractVec`, in order."""
+    """Named columns of equal length, each an `AbstractVec`, in order.
+    `column_names`, `column_types`, `column` and `row_count` read it
+    whatever runtime type it was realised as or observed from."""
     columns: dict = field(default_factory=dict)
 
     def __hash__(self) -> int:
         return hash(tuple(self.columns.items()))
+
+    def column_names(self) -> tuple:
+        """The column names, in order."""
+        return tuple(self.columns)
+
+    def column_types(self) -> dict:
+        """`{name: type}`, each column's `element_type`, in order."""
+        return {name: element_type(col) for name, col in self.columns.items()}
+
+    def column(self, name: str) -> AbstractVec:
+        """Intent:
+            The column called `name`.
+
+        Raises:
+            KeyError: the table has no such column; the message names
+                the columns it has.
+        """
+        try:
+            return self.columns[name]
+        except KeyError:
+            raise KeyError(f"the table has no column {name!r} (columns: "
+                           f"{', '.join(self.columns) or 'none'})") from None
+
+    def row_count(self) -> int:
+        """The number of rows: the length of its columns, 0 with none."""
+        return len(next(iter(self.columns.values()))) if self.columns else 0
 
 
 class _NotMine:
@@ -130,11 +188,13 @@ def _number(v):
 def abstract_of(value):
     """Intent:
         The abstract value a plain drawn value stands for: a list or
-        tuple of numbers (missing elements allowed) is an
-        `AbstractVec`, a list of equal-length lists of numbers an
-        `AbstractMat`, a dict of such lists an `AbstractTable`.
-        Anything else (a scalar, a list of strings, an empty nested
-        list) gives None, meaning the value is passed as drawn.
+        tuple of numbers, of strings or of booleans (missing elements
+        allowed) is an `AbstractVec`, its `element` `str` or `bool`
+        for strings or booleans, a list of equal-length lists of
+        numbers an `AbstractMat`, a dict of such lists an
+        `AbstractTable`. Anything else (a scalar, a list mixing
+        numbers and strings, an empty nested list) gives None, meaning
+        the value is passed as drawn.
     """
     if isinstance(value, (AbstractVec, AbstractMat, AbstractTable)):
         return value
@@ -160,7 +220,7 @@ def abstract_of(value):
                                  for i, r in enumerate(value)),
                            frozenset(holes), _one_spelling(holes.values()),
                            _members(holes))
-    values, missing, words = [], set(), []
+    values, missing, words, kinds = [], set(), [], set()
     for k, v in enumerate(value):
         if _is_missing_element(v):
             values.append(math.nan)
@@ -168,10 +228,18 @@ def abstract_of(value):
             words.append(_hole_word(v))
         elif _is_number(v):
             values.append(_number(v))
+            kinds.add("number")
+        elif isinstance(v, (str, bool)):
+            values.append(v)
+            kinds.add("bool" if isinstance(v, bool) else "str")
         else:
             return None
+    if len(kinds) > 1:
+        return None
+    element = next(iter(kinds)) if kinds and kinds != {"number"} else None
     return AbstractVec(tuple(values), frozenset(missing), _one_spelling(words),
-                       _members(dict(zip(sorted(missing), words))))
+                       _members(dict(zip(sorted(missing), words))),
+                       element=element)
 
 
 class Labelled(list):

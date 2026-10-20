@@ -38,8 +38,9 @@ import warnings
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 
-from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
-                        abstract_of, plain)
+from ._abstract import (ELEMENT_TYPES, AbstractMat, AbstractTable,
+                        AbstractVec, Labelled, NotMine, abstract_of,
+                        element_type, plain)
 from ._adapters import (BUILTIN_ADAPTERS, KINDS, BodyUses, Detection,
                         ListAdapter, RuntimeTypeAdapter)
 from ._missing import (Definition, absence_defined, definitions, members,
@@ -520,6 +521,53 @@ def observe(obj):
 
 def _root_module_of(obj) -> str:
     return (type(obj).__module__ or "").split(".", 1)[0]
+
+
+# --- tables, read the same whatever their runtime type ---------------
+
+def as_table(obj) -> AbstractTable:
+    """Intent:
+        `obj` as an `AbstractTable`: itself when it is one, a dict of
+        columns read as drawn values, any other object as the
+        installed adapter that recognises it observes it (a pandas or
+        polars DataFrame, or a table a registered adapter carries).
+
+    Raises:
+        TypeError: `obj` is no table.
+    """
+    if isinstance(obj, AbstractTable):
+        return obj
+    found = abstract_of(obj) if isinstance(obj, dict) else observe(obj)
+    if not isinstance(found, AbstractTable):
+        raise TypeError(f"{type(obj).__name__} is not a table")
+    return found
+
+
+def column_names(table) -> tuple:
+    """The column names of a table (`as_table`), in order."""
+    return as_table(table).column_names()
+
+
+def column_types(table) -> dict:
+    """`{name: type}` for each column of a table (`as_table`), the
+    type one of `ELEMENT_TYPES`."""
+    return as_table(table).column_types()
+
+
+def column(table, name: str) -> AbstractVec:
+    """Intent:
+        The column `name` of a table (`as_table`), as an `AbstractVec`.
+
+    Raises:
+        KeyError: the table has no such column; the message names the
+            columns it has.
+    """
+    return as_table(table).column(name)
+
+
+def row_count(table) -> int:
+    """The number of rows of a table (`as_table`)."""
+    return as_table(table).row_count()
 
 
 def observed_plain(obj):
@@ -1047,6 +1095,8 @@ def strong_hints(facts) -> list:
 
 __all__ = [
     "AbstractMat", "AbstractTable", "AbstractVec", "Definition", "Detection",
+    "ELEMENT_TYPES", "Labelled", "as_table", "column", "column_names",
+    "column_types", "element_type", "row_count",
     "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
     "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",

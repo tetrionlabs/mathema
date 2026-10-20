@@ -49,3 +49,11 @@ def test_a_column_excluding_one_member_keeps_the_others():
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
                                               p.counterexample)
 
+
+def test_a_string_column_excluding_missing_has_no_hole():
+    def holes_in_k(a: pd.DataFrame):
+        return float(a["k"].isna().sum())
+    (p,) = check_conjectures(
+        holes_in_k, [claim('for a.k in {"u", "v"}^n \\ {missing}, f(a) == 0')])
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
+                                              p.counterexample)

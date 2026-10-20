@@ -45,8 +45,9 @@ def is_array(value) -> bool:
 
 class Table(dict):
     """A table in a claim: a dict of named columns, each a numpy
-    vector, whose columns read as attributes (`df.returns`) or items
-    (`df["returns"]`)."""
+    vector (a float one for numbers, an object one for strings or
+    booleans), whose columns read as attributes (`df.returns`) or
+    items (`df["returns"]`)."""
 
     def __getattr__(self, name):
         if name.startswith("__"):
@@ -121,8 +122,29 @@ def _labelled(array, labels: tuple):
 
 def _numbers(value) -> bool:
     from .runtime_types import abstract_of
-    from .runtime_types._abstract import AbstractMat, AbstractVec
-    return isinstance(abstract_of(value), (AbstractVec, AbstractMat))
+    from .runtime_types._abstract import AbstractMat, AbstractVec, element_type
+    found = abstract_of(value)
+    return isinstance(found, AbstractMat) or (
+        isinstance(found, AbstractVec)
+        and element_type(found) in ("int", "float"))
+
+
+def _typed_column(value):
+    """A drawn table column of strings or booleans as an object array
+    holding its values as drawn (a hole as the value it was drawn as),
+    so a claim compares it element by element; None for any other
+    value."""
+    from .runtime_types import abstract_of
+    from .runtime_types._abstract import AbstractVec, element_type
+    if not isinstance(value, (list, tuple)):
+        return None
+    found = abstract_of(value)
+    if not isinstance(found, AbstractVec) \
+            or element_type(found) not in ("str", "bool"):
+        return None
+    out = _np().empty(len(value), dtype=object)
+    out[:] = list(value)
+    return out
 
 
 def as_array(value):
@@ -131,7 +153,8 @@ def as_array(value):
         numbers (a list, nested lists, an array) as a float numpy
         array with NaN at each missing position, its positions still
         named when the list names them (`runtime_types.Labelled`), a
-        dict of columns as a `Table`, anything else unchanged.
+        dict of columns as a `Table` (a column of strings or booleans
+        as an object array), anything else unchanged.
     """
     np = _numpy()
     if np is None:
@@ -139,7 +162,8 @@ def as_array(value):
     if isinstance(value, Table):
         return value
     if isinstance(value, dict):
-        cols = {str(k): as_array(v) for k, v in value.items()}
+        cols = {str(k): (typed if (typed := _typed_column(v)) is not None
+                         else as_array(v)) for k, v in value.items()}
         if cols and all(is_array(c) and c.ndim == 1 for c in cols.values()):
             return Table(cols)
         return value
