@@ -425,6 +425,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         if falsified and (falsified[0] or "").startswith("f("):
             # a witness written as calls is named by its first call
             head = f"falsified at {_first_call(falsified[0])}"
+        elif falsified and _LINK.match(falsified[0] or ""):
+            head = _link_head(falsified[0])
         elif falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
             head = head.split(": ", 1)[0] if ": " in head else head
@@ -437,6 +439,22 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out
+
+
+#: a chained comparison's witness: the link, its comparison, then the
+#: point and what was found there
+_LINK = re.compile(r"link \d+: (.+?): (.+)$", re.S)
+
+
+def _link_head(witness: str) -> str:
+    """A chained comparison's falsified headline from its witness
+    (`link 1: 0 < f(x): x = -30: 0 vs -1.0`): the comparison that
+    failed and the point, `falsified: 0 < f(x) fails at x = -30`. The
+    link's number stays in the witness on the line below."""
+    found = _LINK.match(witness)
+    comparison, rest = found.group(1), found.group(2)
+    point = rest.split(": ", 1)[0]
+    return f"falsified: {comparison} fails at {point}"
 
 
 def _folded(main, under: list) -> bool:
