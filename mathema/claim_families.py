@@ -401,6 +401,62 @@ def _held_text(facts, target: str, args: list) -> str:
                      for p, v in zip(facts.params, args) if p != target)
 
 
+#: a shape probe's call the function's own guard refused, or one made at
+#: a missing argument: outside the working domain, no trial
+_REFUSED = object()
+
+
+def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
+    """Intent:
+        One call a shape probe makes, with `target` at `x`, as
+        `(value, no_value)`. `no_value` is None when the call returned a
+        value, and otherwise says how the call had none: a raise that is
+        not the function's own guard, a nan or an infinity, or a None
+        its return type does not admit. `value` is `_REFUSED` when the
+        function's own guard rejected the call or the call raised at a
+        missing argument.
+
+    Raises:
+        PremiseRejected: the call lies outside the claim's premises.
+
+    Notes:
+        A None under a return type that admits it is returned as the
+        value with no `no_value`: the missing-value policy reads it.
+    """
+    from ._missing_words import declared_optional_return, value_shown
+    from ._premises import PremiseRejected
+    from .conjecture import deliberate_raise
+    from .domain import is_missing
+    try:
+        with _pinned_float_env():
+            value = _call_with_target(fn, facts, target, args, x)
+    except PremiseRejected:
+        raise
+    except Exception as exc:
+        if deliberate_raise(exc, fn) or any(
+                is_missing(a) for p, a in zip(facts.params, args)
+                if p != target):
+            return _REFUSED, None
+        return None, f"raised {exception_name(exc)}"
+    if value is None:
+        return value, (None if declared_optional_return(fn) else
+                       "returned None, which its return type does not "
+                       "admit")
+    scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
+    if scalar and _is_nonfinite(value):
+        return value, f"returned {value_shown(value)}"
+    return value, None
+
+
+def _no_value_witness(target: str, x, no_value: str, held: str) -> str:
+    """The counterexample a shape probe reports at a point of the
+    domain where f has no value."""
+    return (f"{target} = {_fmt_coordinate(x)}"
+            f"{f' at {held}' if held else ''}: f {no_value}, no value; "
+            f"narrow the claim's domain to where every call returns a "
+            f"value")
+
+
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     trials: int, *, increasing: bool):
     """Pairwise-sampling monotonicity: per trial, two ordered values of
@@ -426,19 +482,23 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None
         if x1 > x2:
             x1, x2 = x2, x1
-        try:
-            v1 = _call_with_target(fn, facts, target, args, x1)
-            v2 = _call_with_target(fn, facts, target, args, x2)
-        except Exception:
+        (v1, gone1), (v2, gone2) = (_shape_call(fn, facts, target, args, x)
+                                    for x in (x1, x2))
+        for x, gone in ((x1, gone1), (x2, gone2)):
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        if v1 is _REFUSED or v2 is _REFUSED:
             return None
         for x, v in ((x1, v1), (x2, v2)):
             if not _a_value(v):
-                # a point with no value to order is skipped, and said
+                # a None the return type admits, or a value that is no
+                # number, has no order: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         e1, e2 = _exact_real(v1), _exact_real(v2)
         if e1 is None or e2 is None:
-            # an overflow or a nan says nothing about direction
+            # a value that is no real number has no direction
             return None
         slack = Fraction(1, 10 ** 9)
         ok = (e1 <= e2 + slack) if increasing else (e1 >= e2 - slack)
@@ -549,14 +609,19 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         h = max(h, abs(x0) * 1e-12, 1e-300)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
             return None
-        try:
-            v_lo = _call_with_target(fn, facts, target, args, x0 - h)
-            v_mid = _call_with_target(fn, facts, target, args, x0)
-            v_hi = _call_with_target(fn, facts, target, args, x0 + h)
-        except Exception:
+        calls = [(x, *_shape_call(fn, facts, target, args, x))
+                 for x in (x0 - h, x0, x0 + h)]
+        for x, _v, gone in calls:
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        if any(v is _REFUSED for _x, v, _gone in calls):
             return None
-        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+        (_, v_lo, _), (_, v_mid, _), (_, v_hi, _) = calls
+        for x, v, _gone in calls:
             if not _a_value(v):
+                # a None the return type admits, or a value that is no
+                # number, has no curvature: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         try:
@@ -564,7 +629,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except (TypeError, ValueError):
             return None
         if not all(math.isfinite(v) for v in values):
-            # an overflow or a nan says nothing about how f bends
+            # a value that is no real number has no curvature
             return None
         second_diff = values[0] - 2 * values[1] + values[2]
         # curvature, not the raw second difference: dividing by h*h
