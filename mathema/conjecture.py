@@ -7098,7 +7098,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         checked against its own float run), called on the point's exact
         values (`_exact_side.exact_sides` with `exact_calls`) under the
         fast wall-clock cap, the sides compared exactly (within the claim's
-        own declared tolerance, when it states one). True or False, or
+        own declared tolerance, when it states one, except on `==`, which
+        is exact equality, `_exact_slack`). True or False, or
         None when the evaluation cannot be carried out exactly.
 
     Notes:
@@ -7126,8 +7127,9 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
-        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
-        unless the claim declares a tolerance, a tolerance kind as the
+        `a ~= b` as `abs(a - b) <= ε`, `==` as exact equality whatever
+        tolerance is declared, every other relation exactly unless the
+        claim declares a tolerance, a tolerance kind as the
         whole allowance at each pair compared. A side sympy computed (a
         root, a transcendental value of a body read exactly) is settled
         symbolically (`_exact_side.decide_symbolic`), never under a
@@ -7151,8 +7153,13 @@ def _exact_relation(cj, left, right) -> "bool | None":
 
 def _exact_slack(cj) -> float:
     """The absolute slack a claim's relation gets when it is decided
-    exactly: the declared tolerance; else ε (`DEFAULT_TOLERANCE`) for
-    `~=`, which is `abs(a - b) <= ε`, and 0 for every other relation."""
+    exactly: 0 for `==`, exact equality on the mathematics line whatever
+    tolerance is declared (a declared tolerance binds the computation
+    line only); else the declared tolerance; else ε
+    (`DEFAULT_TOLERANCE`) for `~=`, which is `abs(a - b) <= ε`, and 0
+    for every other relation."""
+    if cj.relation == "==":
+        return 0.0
     if cj.tolerance is not None:
         return cj.tolerance
     return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0

@@ -1365,8 +1365,10 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         `mathematics`, the function run on the point's exact values.
         Applies to a closed ordering (`<=`/`>=`), an equality (`==`) and
         `~=`; no comparison happens when the claim is another relation,
-        declares its own tolerance (which is then part of the claim),
-        or derive's witness lies outside the domain. `found`, when
+        is an ordering that declares its own tolerance (which is then
+        part of the claim), or derive's witness lies outside the domain.
+        A tolerance declared on `==` binds the computation line only, so
+        `==` is compared exactly whatever it declares. `found`, when
         given, receives the record of a violation (the reading, the
         point's exact and computed sides). `disagreed`, when given,
         receives a sentence for each point where the float run and the
@@ -1387,7 +1389,8 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         from dataclasses import replace
         cj = replace(cj, lhs=f"abs(({cj.lhs}) - ({cj.rhs}))", relation="<=",
                      rhs="ε")
-    if cj.relation not in ("<=", ">=", "==") or cj.tolerance is not None:
+    if cj.relation not in ("<=", ">=", "==") or (
+            cj.tolerance is not None and cj.relation != "=="):
         return None, False
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             sequences=True, exact=True)

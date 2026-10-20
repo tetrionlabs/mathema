@@ -155,17 +155,22 @@ under `~=`. A definition row in a compendium is an exact equation, written
 with `==`.
 
 On the probe route, which runs the real function in floating point, `~=`
-is the same `abs(a - b) <= ε` in float64, and `==` counts the two sides as
-equal when they agree within a relative tolerance of 1e-6 or an absolute
-tolerance of 1e-9, whichever is larger. So under `==` the computation
-`x * (1 + 1e-8)` equals `x` everywhere, while a constant offset of `1e-7`
-is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
+is the same `abs(a - b) <= ε` in float64, and `==` counts the computed
+sides as equal when they agree within the computation's allowance, a
+relative 1e-7 of the result plus an absolute part of at most 1e-9. A draw
+that passes only within that allowance is decided again in exact
+arithmetic wherever the body can be read exactly, so `x * (1 + 1e-8)`
+written in the body is not `x` under `==`, while the same factor read from
+a module constant, which has no exact reading, leaves such a draw
+inconclusive and uncounted. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
-it, with no relative tolerance on top. On a function equivalence `f =:= g`
-the tolerance governs the computation line alone, since its mathematics
-line is exact, as [Multi-function claims](multi-function-claims.md)
-describes. A single `a ~= b`, and an `f =:= g`, may also name the
+it, with no relative tolerance on top. On `==`, as on a function
+equivalence `f =:= g`, the tolerance governs the computation line alone,
+since the mathematics line is exact: `x + 1e-6 == x` with a tolerance of
+1e-3 is falsified by its exact gap, and "close enough mathematically" is
+`~=`, as [Multi-function claims](multi-function-claims.md) describes for
+`=:=`. A single `a ~= b`, and an `f =:= g`, may also name the
 tolerance's kind (see [Tolerance kinds](#tolerance-kinds) below), while
 every other relation takes a bare number.
 
@@ -251,8 +256,8 @@ derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```
 
-A declared tolerance is part of the claim, so it stays in force on both
-routes. Where the executed code rounds the difference away, the body is
+A tolerance declared on an ordering is part of the claim, so it stays in
+force on both routes; on `==` it binds the computation line only. Where the executed code rounds the difference away, the body is
 read exactly at derive's witness: a literal is the decimal written, so
 `x + 1e-20` is `x + 1/10^20` and the claim is falsified on the
 mathematics, the record noting that the float computation holds within
