@@ -1968,8 +1968,8 @@ def _docsync_checklist(args) -> int:
     if root not in sys.path:
         sys.path.insert(0, root)
     for key, fn in sorted(resolve(args.target, args.root).functions.items()):
-        import inspect
         name = key.rsplit(".", 1)[-1]
+        import inspect
         if (inspect.getdoc(fn) or "").strip():
             sync = docstring_sync(fn, root=args.root)
             print(f"{name}: docstring present, docsync {sync.percent}%")
@@ -3084,6 +3084,10 @@ def cmd_coverage(args) -> int:
         print("no functions found")
         return 0
     for fc in pc.functions:
+        if not fc.statements:
+            # no statement line to read: coverage unknown, never full
+            print(f"   -  {fc.key}  [no source]")
+            continue
         srcs = "+".join(k for k in ("test", "probe", "derive")
                         if k in fc.by_source) or "-"
         line = f"{fc.percent:3d}%  {fc.key}  [{srcs}]"
@@ -3091,6 +3095,9 @@ def cmd_coverage(args) -> int:
         if r:
             line += f"  -> {r}"
         print(line)
+    if not any(fc.statements for fc in pc.functions):
+        print("\nimplementation coverage: unknown (no source to read)")
+        return 0
     print(f"\nimplementation coverage: {pc.percent}%")
     if pc.potential_percent > pc.percent:
         print(f"(up to {pc.potential_percent}% after re-running the tests)")
