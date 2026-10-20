@@ -206,6 +206,13 @@ The other relations use the same allowance where it makes sense: `<=` and
 none, since equality must not pass for strictly less, and `!=` with no
 declared tolerance fails only where the two sides are exactly equal.
 
+On the probe route a draw whose computed values meet `==`, `<=` or `>=`
+only within the allowance (inside its absolute part as well as through
+its relative part) is decided again in exact arithmetic wherever the
+body can be read exactly, its literals as the decimals written: false
+there falsifies, with that draw as the witness, so the allowance never
+carries a claim that is false at a point the probe ran.
+
 Every computation line that holds with a gap the tolerance absorbed says
 so in its note, for `==` as for `<=` and `>=`, on every route (a probe
 line, a ground claim's one call, the `[float]` line a proof spawns, the
@@ -238,8 +245,8 @@ for route in ["probe", "derive"]:
 
 <!-- example: just-below output -->
 ```text
-probe   holds
-        fails by 1e-10 at x = 0, within the default tolerance (1e-09)
+probe   falsified x = 0: -1e-10 vs 0, within the float tolerance but false here in exact arithmetic
+
 derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```

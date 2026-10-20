@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""A draw that passes only within the tolerance (the relative part, or
-an array draw's round-off) is decided in exact arithmetic at that point:
+"""A draw that passes only within the tolerance (its absolute floor,
+the relative part, or an array draw's round-off) is decided in exact
+arithmetic at that point:
 false there falsifies, true there holds with the gap printed, and a
 draw that cannot be evaluated exactly is inconclusive and not counted
 (ruling of 2026-10-01: the mathematics is exact, tolerance belongs to
@@ -64,10 +65,27 @@ def a_hair_over_one(x: float) -> float:
     return min(1.0, x) + 1e-12
 
 
-def test_a_chained_claim_keeps_the_gap_its_link_passed_within():
-    # the upper link passes only within the tolerance; the chain says so
+def test_a_chained_link_passing_within_the_floor_is_decided_exactly():
+    # the upper link passes in float64 only within the tolerance's
+    # absolute floor (1e-12 over 1); exactly f(2) = 1 + 1/10**12 > 1
     (p,) = check_conjectures(a_hair_over_one, [claim(
         "for x in [0.5, 2], 0 <= f(x) <= 1", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "link 2: f(x) <= 1" in p.counterexample, p.counterexample
+    assert "false here in exact arithmetic" in p.counterexample, \
+        p.counterexample
+
+
+def one_by_rounding(x: float) -> float:
+    # (0.1 + 0.2) / 0.3 is 1.0000000000000002 in float64 and exactly 1
+    return min(1.0, x) * (0.1 + 0.2) / 0.3
+
+
+def test_a_chained_claim_keeps_the_gap_its_link_passed_within():
+    # the upper link passes only within the tolerance and holds exactly;
+    # the chain says so
+    (p,) = check_conjectures(one_by_rounding, [claim(
+        "for x in [0.5, 2], 0 <= f(x) <= 1", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "fails by 1e-12 at x = 2, within the default tolerance (1.01e-07)" in p.note, \
-        p.note
+    assert "fails by 2.22e-16 at x = " in p.note, p.note
+    assert "within the default tolerance (1.01e-07)" in p.note, p.note

@@ -12701,25 +12701,38 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        # `within`: an `==` or `~=` pass beyond the allowance's absolute
+        # floor, through its relative part or a draw's round-off;
+        # `inside`: a pass of `==`, `<=` or `>=` the compared sides
+        # satisfy only within the allowance, inside its floor or beyond
         within = (ok is True and cj.tolerance is None
                   and cj.relation in ("==", "~=")
                   and relation_within(compare_l, compare_r, cj.relation,
                                       ABSOLUTE, 0.0, side) is not True)
+        inside = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "<=", ">=")
+                  and relation_within(compare_l, compare_r, cj.relation,
+                                      _exact_slack(cj), 0.0, side)
+                  is not True)
         exactly_false = False
-        if within:
+        if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
-            # with the gap printed, and a draw that cannot be evaluated
-            # exactly is inconclusive and not counted
+            # with the gap printed. Where it cannot be evaluated
+            # exactly, an `==` or `~=` pass beyond the floor is
+            # inconclusive and not counted; any other stands as the
+            # computation's pass, its gap printed
             exact_ok = _exact_verdict(cj, code_l, code_r, env,
                                       *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-            if exact_ok is None:
+            if exact_ok is None and within:
                 checked -= 1
                 inconclusive += 1
                 continue
             if exact_ok is False:
                 ok, exactly_false = False, True
+            elif exact_ok is None or not within:
+                pass
             elif roundoff_gap is not None:
                 if roundoff_gap > roundoff_absorbed:
                     roundoff_absorbed, roundoff_at = roundoff_gap, _point_text(args)
