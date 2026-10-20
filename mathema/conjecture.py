@@ -7918,7 +7918,8 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                      for v in realise_sentinel(s, policy.members, policy.absence)]
     if not listed:
         return None
-    deps = _point_evaluator(ctx.cj, calling(fn, facts), facts, cj_domain,
+    deps = _point_evaluator(ctx.cj, calling(fn, facts, _declared_elements(cj_domain)),
+                            facts, cj_domain,
                             bound_funcs, assumption)
     if deps is None:
         return None
@@ -7946,7 +7947,8 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
     point = sorted(failures, key=lambda f: f[0])[0][1]
     witness = _fmt_point(point, names)
     from ._brute_force import _raised_at
-    raised = _raised_at(calling(fn, facts), facts, point)
+    raised = _raised_at(calling(fn, facts, _declared_elements(ctx.cj_domain)),
+                        facts, point)
     return Probe(ctx.cj.name, statement, "falsified", route="derive",
                  counterexample=witness, note=note,
                  sketch=(f"the real members are proven, and the claim's own "
@@ -8225,6 +8227,45 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
              for c, b in (column_bounds or {}).items()})
         return _floor.ContainerDraws(form, floor, holes, column_holes)
     return _floor.ContainerDraws(form, floor, holes)
+
+
+def _set_element(bound) -> "str | None":
+    """`str` or `bool` when a binding's elements are a finite set of
+    strings only or of booleans only (holes and absence aside), else
+    None."""
+    from .domain import is_sentinel
+    pieces = getattr(bound, "pieces", None)
+    if not pieces or any(not isinstance(p, frozenset) for p in pieces):
+        return None
+    values = [v for p in pieces for v in p
+              if v is not None and not is_sentinel(v)]
+    for name, cls in (("bool", bool), ("str", str)):
+        if values and all(isinstance(v, cls) for v in values):
+            return name
+    return None
+
+
+def _declared_elements(cj_domain) -> dict:
+    """Intent:
+        The element types a claim's bindings declare for the calls'
+        runtime types (`runtime_types.calling`): `{param: {"element":
+        t}}` for a vector bound to a finite set of strings or booleans,
+        `{param: {"columns": {column: t}}}` for such a table column
+        binding (`for df.k in {"u", "v"}^n`).
+    """
+    out: dict = {}
+    for key, bound in (cj_domain or {}).items():
+        if not getattr(bound, "dims", ()):
+            continue
+        element = _set_element(bound)
+        if element is None:
+            continue
+        head, dot, column = str(key).partition(".")
+        if dot and column.isidentifier():
+            out.setdefault(head, {}).setdefault("columns", {})[column] = element
+        elif not dot and head.isidentifier():
+            out.setdefault(head, {})["element"] = element
+    return out
 
 
 def _column_holes(holes: list, column_bounds: "dict | None") -> dict:
@@ -10650,7 +10691,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
     except _dims.DimensionConflict:
         bind_env = None
     from .runtime_types import calling
-    inner = calling(fn, facts)
+    inner = calling(fn, facts, _declared_elements(cj_domain))
     if array_params:
         inner = _linalg_eval.law_callable(inner)
     base = {"f": inner, F_CALL: inner, **_SAFE_FUNCS, **_linalg_eval.FUNCTIONS,
@@ -10790,7 +10831,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             return Probe(cj.name, statement, "skipped", route=None,
                          note=f"{note}; assuming clause isn't evaluable "
                               f"on the probe route: {e}")
-        family_fn = calling(fn, facts)
+        family_fn = calling(fn, facts, _declared_elements(cj_domain))
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
@@ -11281,7 +11322,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         arg_names, shown_names = tuple(kinds), None
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
-    fn_call = calling(fn, facts)
+    fn_call = calling(fn, facts, _declared_elements(cj_domain))
     if as_arrays:
         fn_call = _linalg_eval.law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)

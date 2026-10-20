@@ -477,12 +477,17 @@ def descriptor_names(facts) -> list:
 
 # --- realise and observe ---------------------------------------------
 
-def realise(value, detection: Detection, options: "dict | None" = None):
+def realise(value, detection: Detection, options: "dict | None" = None,
+            declared: "dict | None" = None):
     """Intent:
         `value` (a drawn plain value) as the object the detection's
         runtime type carries, or `value` unchanged when it is not a
         vector, matrix or table the adapter carries (a scalar, a value
-        already of the runtime type).
+        already of the runtime type). `declared` states the element
+        type the claim binds where the values may not show it:
+        `{"element": "str"}` for a vector, `{"columns": {"k": "str"}}`
+        for a table's columns; a vector or column whose own values
+        state no type (holes only, or no rows) takes it.
     """
     found = adapter(detection.adapter)
     if found is None:
@@ -490,11 +495,29 @@ def realise(value, detection: Detection, options: "dict | None" = None):
     abstract = abstract_of(value)
     if abstract is None:
         return value
+    abstract = _with_declared(abstract, declared or {})
     kind = ("mat" if isinstance(abstract, AbstractMat) else
             "table" if isinstance(abstract, AbstractTable) else "vec")
     if kind not in found.kinds:
         return value
     return found.realise(abstract, dict(options or {}))
+
+
+def _with_declared(abstract, declared: dict):
+    """`abstract` with the element types `declared` states set on each
+    vector whose `element` is not stated."""
+    from dataclasses import replace
+
+    def typed(vec, element):
+        if element is None or not isinstance(vec, AbstractVec) \
+                or vec.element is not None:
+            return vec
+        return replace(vec, element=element)
+    if isinstance(abstract, AbstractTable):
+        columns = declared.get("columns") or {}
+        return AbstractTable({name: typed(col, columns.get(name))
+                              for name, col in abstract.columns.items()})
+    return typed(abstract, declared.get("element"))
 
 
 def observe(obj):
@@ -590,11 +613,13 @@ class _Realising:
     such parameters are those has its result returned as it is."""
 
     def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None,
-                 containers: "dict | None" = None):
+                 containers: "dict | None" = None,
+                 declared: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
         self._enums = enums or {}
         self._containers = containers or {}
+        self._declared = declared or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -608,7 +633,8 @@ class _Realising:
         for name, detection in self._bindings.items():
             if name in bound.arguments:
                 bound.arguments[name] = realise(bound.arguments[name],
-                                                detection)
+                                                detection,
+                                                declared=self._declared.get(name))
         for name, cls in self._enums.items():
             if name in bound.arguments:
                 bound.arguments[name] = as_enum_member(bound.arguments[name], cls)
@@ -684,7 +710,7 @@ def as_annotated(value, container: "type | None"):
         return value
 
 
-def calling(fn, facts):
+def calling(fn, facts, declared: "dict | None" = None):
     """Intent:
         A callable with `fn`'s signature and attributes that calls
         `fn`, with a `SystemExit` it raises arriving as the raise
@@ -692,7 +718,9 @@ def calling(fn, facts):
         than a list, the call first realises each such parameter's
         drawn value through its adapter, and observes the result into
         a plain value. A parameter annotated as a set, a frozenset or a
-        tuple is passed as one.
+        tuple is passed as one. `declared`, `{param: declared}` as
+        `realise` reads it, states the element types the claim binds
+        for a vector or a table's columns.
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
@@ -710,7 +738,8 @@ def calling(fn, facts):
     sig = _signature(fn)
     if sig is None:
         return exiting_as_raise(fn)
-    return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers))
+    return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers,
+                                       declared))
 
 
 def enum_parameters(fn) -> dict:
