@@ -285,6 +285,10 @@ class _Precision:
         # first miss beyond it (`_allowance.precision_miss`)
         self.within = None
         self.beyond = None
+        # the points with no exact value whose float64 pass of `==` or
+        # `~=` the relative part of the allowance alone admits
+        # (`_uncounted_at`), each by its text
+        self.uncounted: list = []
 
     def add(self, measured, where) -> None:
         """Count a point's `(miss, allowance)`, `where` its text or a
@@ -384,6 +388,22 @@ def _float64_at(cj, computed, point: dict) -> "tuple | None":
         return None
     return precision_miss(computed[0], computed[1], cj.relation,
                           cj.tolerance, reference_side(cj), scale_of(point))
+
+
+def _uncounted_at(cj, computed) -> bool:
+    """Intent:
+        Whether the float64 sides `computed` of a point with no exact
+        value pass `==` or `~=` (no declared tolerance) only through the
+        relative part of the default allowance: past its absolute 1e-9
+        (`_allowance.ABSOLUTE`, ε for `~=`). Such a pass is not counted,
+        as on the probe route.
+    """
+    from ._allowance import ABSOLUTE, reference_side, relation_within
+    if computed is None or cj.tolerance is not None \
+            or cj.relation not in ("==", "~="):
+        return False
+    return relation_within(computed[0], computed[1], cj.relation, ABSOLUTE,
+                           0.0, reference_side(cj)) is not True
 
 
 def _call_words(fn, facts, point: dict) -> str:
@@ -937,6 +957,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             inexact.append(point)
             precision.inexact(_float64_at(cj, computed, point),
                               lambda: _fmt_point(point, names))
+            if _uncounted_at(cj, computed):
+                precision.uncounted.append(_fmt_point(point, names))
         elif said is False and exact_miss is None:
             exact_miss = (point, sides, _exact_witness_words(
                 _fmt_point(point, names), sides, evaluate.sides()))
@@ -986,6 +1008,21 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.sweep_holds": True, **_tried(grid),
                                 **counted, **no_exact},
+                               executed_missing(deps)))
+    if precision.uncounted:
+        # a point with no exact value that passed only within the
+        # relative part of the allowance is not counted, as on the probe
+        # route: the sweep decides nothing
+        n = len(precision.uncounted)
+        return ProofResult(
+            "undecided",
+            sketch=(f"{n} point{'s' if n != 1 else ''} passed only within "
+                    f"the tolerance and could not be evaluated in exact "
+                    f"arithmetic, first at {precision.uncounted[0]}, so "
+                    f"{'they are' if n != 1 else 'it is'} not counted and "
+                    f"the sweep decides nothing"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid), **counted, **no_exact},
                                executed_missing(deps)))
     if inexact and precision.beyond is not None:
         # a point with no exact value whose float64 computation misses
@@ -1185,6 +1222,11 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     if inexact:
         precision.add(evaluate.last_precision(), witness)
         precision.inexact(_float64_at(cj, computed, {}), witness)
+        if _uncounted_at(cj, computed):
+            # the call passed only within the relative part of the
+            # allowance and has no exact value: not counted, nothing
+            # decided
+            return None
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:
         return ProofResult(
             "undecided",

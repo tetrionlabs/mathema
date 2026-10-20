@@ -144,14 +144,29 @@ def _check(fn, law):
 @pytest.mark.parametrize("fn,law", [
     (drift_global, "for x in {1, 2}, f(x) == x"),
     (drift_global, "for x in {1, 2}, f(x) ~= x"),
+])
+def test_a_pass_only_through_the_relative_allowance_with_no_exact_value_is_unknown(
+        fn, law):
+    # f(1) is 1.000000002 in float64: the gap 2e-9 is past the absolute
+    # 1e-9 (for ~=, past ε) and inside only the relative part of the
+    # allowance, and the body has no exact reading, so no point is
+    # counted and nothing is decided
+    p = _check(fn, law)
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+    assert "could not be evaluated in exact arithmetic" in (p.note or ""), \
+        p.note
+
+
+@pytest.mark.parametrize("fn,law", [
     (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
     (offset_global, "for n in [0, 3] subset Z, f(n) == n"),
     (constant_global, "f([]) == 0"),
 ])
 def test_a_body_with_no_exact_value_missing_beyond_float64_holds(fn, law):
-    # each float64 result misses the relation by 2e-9 (relative to 1)
-    # or 5e-10 (against 0 at inputs of magnitude at most 0 or 1),
-    # beyond float64's precision there: evidence, not a proof
+    # each float64 result misses the relation by 5e-10 (against 0 at
+    # inputs of magnitude at most 0, or 1 at n = 1), beyond float64's
+    # precision there and inside the allowance's absolute floor:
+    # evidence, not a proof
     p = _check(fn, law)
     assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
     assert p.route == "derive:brute_force", p.route
@@ -177,10 +192,10 @@ def test_a_literal_gap_inside_the_allowance_is_an_exact_miss(fn, law):
 
 
 def test_the_record_names_the_point_with_no_exact_value():
-    p = _check(drift_global, "for x in {1, 2}, f(x) == x")
+    p = _check(offset_global, "for n in {0, 1, 2, 3}, f(n) == n")
     inexact = p.meta["mathema.sweep_inexact"]
-    assert inexact["points"] == 2, inexact
-    assert inexact["first"] == "x = 1", inexact
+    assert inexact["points"] == 4, inexact
+    assert inexact["first"] == "n = 0", inexact
     assert "exactly" in p.sketch, p.sketch
 
 
