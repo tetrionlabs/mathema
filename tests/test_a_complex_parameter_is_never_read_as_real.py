@@ -112,7 +112,7 @@ def test_a_complex_square_root_is_defined_on_the_plane():
 
 def test_the_magnitude_of_a_complex_parameter_still_derives():
     assert lift(magnitude, effective_facts(magnitude)) is not None
-    (p, *_rest) = check_conjectures(magnitude, [claim("f(z) == abs(z)")])
+    (p, *_rest) = check_conjectures(magnitude, [claim("f(z) >= 0")])
     assert p.verdict == "proven", (p.verdict, p.route, p.note)
 
 
@@ -126,10 +126,10 @@ def test_an_ordering_over_the_plane_is_misspecified(law):
 
 
 def test_an_unbound_complex_parameter_ranges_over_the_plane():
-    (p, companion) = check_conjectures(magnitude, [claim("f(z) == abs(z)")],
+    (p, companion) = check_conjectures(magnitude, [claim("f(z) >= 0")],
                                        float_companions=True)
     assert "inferred z in C from its own complex annotation" in p.note, p.note
-    assert companion.name == "f_z_eq_abs_z[complex]", companion.name
+    assert companion.name == "f_z_ge_0[complex]", companion.name
     assert companion.verdict == "holds", (companion.verdict,
                                           companion.counterexample)
 
@@ -166,3 +166,16 @@ def test_an_ordering_of_a_real_part_false_off_the_real_line_is_not_proven():
 def test_an_ordering_of_a_magnitude_is_adjudicated(law):
     (p,) = check_conjectures(squared, [claim(law)])
     assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+
+
+def real_part(z: complex) -> float:
+    return z.real
+
+
+@pytest.mark.parametrize("law", ["f(z) >= 0", "for z in C, f(z) >= 0"],
+                         ids=["inferred", "written"])
+def test_an_ordering_of_a_real_result_is_adjudicated(law):
+    (p,) = check_conjectures(magnitude, [claim(law)])
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    (p,) = check_conjectures(real_part, [claim(law)])
+    assert p.verdict == "falsified", (p.verdict, p.note)

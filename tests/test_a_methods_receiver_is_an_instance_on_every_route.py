@@ -218,3 +218,39 @@ def test_a_receiver_built_by_its_own_constructor_is_drawn():
     _no_number_receiver(rows)
     assert rows[0].verdict in ("proven", "holds"), (rows[0].verdict,
                                                     rows[0].note)
+
+
+class Squared:
+    def __init__(self, k: float):
+        self.k = k * k + 1.0
+
+    def root(self) -> float:
+        import math
+        return math.sqrt(self.k - 1.0)
+
+
+@pytest.mark.parametrize("fn", [Positive.root, PositiveRecord.root,
+                                Squared.root],
+                         ids=["refusing", "post_init", "transforming"])
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_a_derive_witness_no_constructor_builds_is_not_a_falsification(fn, route):
+    (p,) = check_conjectures(fn, [claim("f(self) >= 0", route=route)])
+    assert p.verdict in ("holds", "proven", "unknown"), (p.verdict,
+                                                         p.counterexample)
+    if p.verdict == "unknown":
+        assert "is no instance of" in p.note or "does not build" in p.note, \
+            p.note
+
+
+class TakesList:
+    def __init__(self, xs: list[float]):
+        self.n = len(xs)
+
+    def inv(self) -> float:
+        return 1.0 / self.n
+
+
+def test_an_undrawable_receiver_names_its_constructor_argument():
+    (p,) = check_conjectures(TakesList.inv, [claim("f(self) > 0")])
+    assert p.verdict == "skipped", (p.verdict, p.note)
+    assert "its constructor takes xs (list[float])" in p.note, p.note

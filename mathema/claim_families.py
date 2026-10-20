@@ -645,6 +645,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return None
         try:
             values = (float(v_lo), float(v_mid), float(v_hi))
+        except OverflowError:
+            # a value too large for a float (a huge int): the curvature
+            # is taken exactly, under the same tolerance
+            return _exact_curvature(kind, target, x0, h, (v_lo, v_mid, v_hi))
         except (TypeError, ValueError):
             return None
         if not all(math.isfinite(v) for v in values):
@@ -685,6 +689,40 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
     return _with_no_value_note(result, fn, target, cj, no_value)
+
+
+def _exact_curvature(kind: str, target: str, x0: float, h: float,
+                     values: tuple):
+    """Intent:
+        `_second_difference_probe`'s verdict at one point from three
+        values one of which no float holds, read exactly: True when the
+        curvature settles `kind` (affine, convex, concave) within the
+        relative tolerance the float reading uses, the witness text when
+        it does not, None when a value is no real number.
+    """
+    from fractions import Fraction
+    try:
+        lo, mid, hi = (Fraction(v) for v in values)
+    except (TypeError, ValueError):
+        return None
+    step, at = Fraction(h), Fraction(x0)
+    curvature = (lo - 2 * mid + hi) / step / step
+    size = max(abs(lo), abs(mid), abs(hi))
+    reach = max(abs(at), step)
+    natural = size / reach / reach
+    noise = 16 * (8 * Fraction(2.220446049250313e-16) * size / step / step)
+    tol = max(natural / 10000, noise)
+    ok = (abs(curvature) <= tol if kind == "affine" else
+          curvature >= -tol if kind == "convex" else
+          curvature <= tol)
+    if ok:
+        return True
+    try:
+        shown = f"{float(curvature):.6g}"
+    except OverflowError:
+        shown = f"{'-' if curvature < 0 else ''}beyond float64"
+    return (f"{target} = {_fmt_coordinate(x0)}, h = {h:.3g}: curvature estimate "
+            f"{shown} does not settle {kind}")
 
 
 def _raise_or_nonfinite(out) -> "str | None":

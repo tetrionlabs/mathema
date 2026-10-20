@@ -6733,9 +6733,13 @@ def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
         if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
             continue
         if p in ("self", "cls") and facts.params and p == facts.params[0]:
+            from .runtime_types._receivers import method_receiver, undrawn_reason
+            receiver = method_receiver(fn)
+            why = (undrawn_reason(receiver[1]) if receiver is not None
+                   else "the body does not show the fields it holds")
             return (f"no evaluable inputs: {p} is the receiver, an instance "
-                    f"of {cls}, which mathema has no way to draw (the body "
-                    f"does not show the fields it holds); check the method "
+                    f"of {cls}, which mathema has no way to draw ({why}); "
+                    f"check the method "
                     f"bound to an instance ({cls}(...).{getattr(fn, '__name__', 'f')}), "
                     f"or bind {p} in the claim (for {p} in L[...])")
         return (f"no evaluable inputs: {p} is annotated {cls}, a class "
@@ -8219,7 +8223,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          route=None, note=f"{note}; {refusal}")
     complex_bound = {p for p, bound in cj_domain.items()
                      if bound == "C" or getattr(bound, "base_type", None) == "C"}
-    ordered = _complex_ordered(cj, complex_bound)
+    ordered = _complex_ordered(cj, complex_bound, fn)
     if ordered:
         # the complex numbers have no order, so the claim is not well
         # formed, whether the binding is written or inferred
@@ -9108,16 +9112,21 @@ def _as_domain_or_none(bound):
     return None if bound is None else _as_domain(bound)
 
 
-def _complex_ordered(cj, complex_names: set) -> "tuple | None":
+def _complex_ordered(cj, complex_names: set, fn=None) -> "tuple | None":
     """Intent:
         `(relation, names)` for the first ordering the claim states
-        (`<`, `<=`, `>`, `>=`, a chain's links included) with a side that
-        reads a parameter ranging over C outside `abs(...)`, `re(...)`,
-        `im(...)`, `.real` or `.imag`, the complex names it reads; None
-        when every ordering compares real quantities.
+        (`<`, `<=`, `>`, `>=`, a chain's links included) that compares a
+        complex value: a side reading a parameter that ranges over C as
+        a complex number (`z`, `z * 2`, `f(z)` where f is annotated to
+        return a complex), the complex names it reads; None when every
+        ordering compares real quantities (`abs(...)`, `re(...)`,
+        `im(...)`, `.real`, `.imag`, or `f(z)` where f is annotated to
+        return a real number) or f's result type is not stated (the
+        values it returns decide).
     """
     if not complex_names:
         return None
+    result = _result_kind(fn)
     links = list(cj.links or [(cj.lhs, cj.relation, cj.rhs)])
     for lhs, relation, rhs in links:
         if relation not in ("<=", ">=", "<", ">"):
@@ -9130,26 +9139,102 @@ def _complex_ordered(cj, complex_names: set) -> "tuple | None":
                 tree = ast.parse(str(text), mode="eval")
             except SyntaxError:
                 continue
-            found |= _complex_reads(tree, complex_names)
+            found |= _complex_reads(tree, complex_names, result)
         if found:
             return relation, sorted(found)
     return None
 
 
-def _complex_reads(node, complex_names: set) -> set:
-    """The names in `complex_names` an expression reads outside a real
-    part of it: `abs(...)`, `re(...)`, `im(...)`, `.real`, `.imag`."""
+def _result_kind(fn) -> "str | None":
+    """`complex` or `real` by f's return annotation, None when it states
+    neither."""
+    try:
+        ann = callable_signature(fn).return_annotation if fn is not None else None
+    except (TypeError, ValueError):
+        return None
+    if ann in (complex, "complex"):
+        return "complex"
+    if ann in (float, int, bool, "float", "int", "bool"):
+        return "real"
+    return None
+
+
+def _complex_reads(node, complex_names: set, result: "str | None" = None) -> set:
+    """The names in `complex_names` an expression reads as complex
+    numbers: outside `abs(...)`, `re(...)`, `im(...)`, `.real` and
+    `.imag`, and outside a call of f unless f returns a complex
+    (`result`)."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
             and node.func.id in ("abs", "Abs", "re", "im"):
         return set()
     if isinstance(node, ast.Attribute) and node.attr in ("real", "imag"):
         return set()
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == "f" and result != "complex":
+        return set()
     if isinstance(node, ast.Name):
         return {node.id} & complex_names
     out: set = set()
     for child in ast.iter_child_nodes(node):
-        out |= _complex_reads(child, complex_names)
+        out |= _complex_reads(child, complex_names, result)
     return out
+
+
+def _receiver_witness_held(gated: "Probe", proof, fn) -> "Probe":
+    """Intent:
+        A derive disproof held to the instances the receiver's class
+        builds: when the witness sets fields of a method's receiver
+        (`self.k = -1`) and the class builds an instance through a
+        constructor of its own or a `__post_init__`, the instance is
+        built with each same-named argument at the witness's value. A
+        build the class refuses, or an instance whose fields differ from
+        the witness (a constructor that transforms its argument), means
+        the witness is no instance of the class: the disproof is not
+        reproduced and the verdict is unknown with the reason. Any other
+        verdict or witness is returned as it is.
+    """
+    import dataclasses
+
+    from .runtime_types._receivers import _own_init, constructor_kinds, method_receiver
+    if gated.verdict != "falsified":
+        return gated
+    receiver = method_receiver(fn)
+    witness = getattr(proof, "witness", None) or {}
+    if receiver is None or not isinstance(witness, dict):
+        return gated
+    name, cls = receiver
+    fields = {k[len(name) + 1:]: v for k, v in witness.items()
+              if isinstance(k, str) and k.startswith(f"{name}.")}
+    builds = (hasattr(cls, "__post_init__") if dataclasses.is_dataclass(cls)
+              else _own_init(cls))
+    if not fields or not builds:
+        return gated
+    if dataclasses.is_dataclass(cls):
+        plan = [f.name for f in dataclasses.fields(cls) if f.init]
+    else:
+        plan = list(constructor_kinds(cls) or {})
+    values = {a: fields[a] for a in plan if a in fields}
+    shown = ", ".join(f"{name}.{k} = {v}" for k, v in fields.items())
+    try:
+        inst = cls(**values)
+    except Exception as exc:
+        reason = (f"{cls.__name__}({', '.join(f'{k}={v}' for k, v in values.items())})"
+                  f" raises {type(exc).__name__}: the witness {shown} is no "
+                  f"instance of {cls.__name__}")
+    else:
+        moved = [k for k, v in fields.items() if getattr(inst, k, object()) != v]
+        if not moved:
+            return gated
+        reason = (f"{cls.__name__}'s constructor does not build an instance "
+                  f"with {shown}")
+    gated.verdict = "unknown"
+    gated.counterexample = None
+    gated.meta = {**(gated.meta or {}),
+                  "mathema.corroboration": "uncorroborated"}
+    gated.note = (f"{gated.note}; derive found this claim false at {shown}, "
+                  f"but {reason}, so the disproof is not reproduced on any "
+                  f"instance and the verdict stays unknown").lstrip("; ")
+    return gated
 
 
 def _receiver_instances(fn, facts, cj_domain: dict):
@@ -10350,10 +10435,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               route="derive", sketch=dproof.sketch,
                               counterexample=dproof.counterexample,
                               note=note, meta=_provenance_meta(dproof))
-            return _corroboration_gate(falsified, dproof, cj, fn, facts,
-                                       {**cj_domain, **ctx.receiver},
-                                       _bound_callables(cj),
-                                       assum=assumption or [])
+            return _receiver_witness_held(
+                _corroboration_gate(falsified, dproof, cj, fn, facts,
+                                    {**cj_domain, **ctx.receiver},
+                                    _bound_callables(cj),
+                                    assum=assumption or []), dproof, fn)
         if dproof is not None and dproof.sketch:
             definitions_hint = dproof.sketch
     # a claim over vectors or matrices (an `R^n`/`R^(m,n)` domain, a
@@ -10682,9 +10768,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                           meta=_provenance_meta(proof))
         # a symbolic decider can be wrong, only trust the disproof
         # once it reproduces against the REAL function
-        gated = _corroboration_gate(falsified, proof, cj, fn, facts,
-                                    {**cj_domain, **ctx.receiver}, bound_funcs,
-                                    assum=assumption or [])
+        gated = _receiver_witness_held(
+            _corroboration_gate(falsified, proof, cj, fn, facts,
+                                {**cj_domain, **ctx.receiver}, bound_funcs,
+                                assum=assumption or []), proof, fn)
         if gated.verdict == "falsified" and ctx.exclude_own_guards \
                 and _refused_by_own_guard(fn, proof.witness
                                           or _point_of(gated.counterexample)):

@@ -99,7 +99,8 @@ def rows(request, tmp_path_factory):
 def test_no_complex_result_is_read_as_a_raise(rows):
     for key, (verdict, _route, note, witness) in rows.items():
         if key.startswith("complex_symmetric") or "norm" in key:
-            # without numpy a claim's own trace or det has no value
+            # these rows are judged by their own tests below: an
+            # ordering on a complex trace or det, and a norm
             continue
         assert "raised" not in witness and "TypeError" not in note, \
             (key, verdict, witness, note)

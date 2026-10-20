@@ -100,3 +100,17 @@ def test_a_literal_beyond_float_is_not_compared_as_an_infinity():
     assert "the literal 1e400 is beyond float64" in p.note, p.note
     (p,) = check_conjectures(constant, [claim("f(2) == 1e400")])
     assert p.verdict == "proven", (p.verdict, p.note)
+
+
+def huge_step(x: float) -> int:
+    if x > 0:
+        return 10 ** 400
+    return 0
+
+
+@pytest.mark.parametrize("law", ["for x in [-10, 10], d(f(x), x, x) >= 0",
+                                 "for x in [-10, 10], d(f(x), x, x) == 0"])
+def test_a_second_difference_over_huge_ints_never_ends_the_check(law):
+    (p,) = check_conjectures(huge_step, [claim(law)])
+    assert p.verdict in ("holds", "falsified", "unknown"), (p.verdict, p.note)
+    assert "OverflowError" not in (p.note or ""), p.note
