@@ -8,6 +8,7 @@ value at every point of [-1, 1], so a guard refusing a call inside it
 is a call with no value there, and the claim is falsified at that
 point. A binding on a parameter no guard reads leaves the guards'
 cut in place."""
+import math
 import sys
 from fractions import Fraction
 
@@ -77,3 +78,15 @@ def test_a_bound_domain_inside_what_the_guard_leaves_is_proven():
 def test_a_binding_no_guard_reads_keeps_the_guards_cut():
     p = _row(guard_on_y, "for x in [-1, 1], is_defined(f)")
     assert p.verdict in ("proven", "holds"), (p.verdict, p.counterexample)
+
+
+def log_above_zero(x: float) -> float:
+    if x <= 0:
+        raise ValueError("nonpositive")
+    return math.log(x)
+
+
+def test_a_bound_row_inside_the_guard_says_nothing_of_a_working_domain():
+    p = _row(log_above_zero, "for x in (0, 1], is_defined(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch)
+    assert "working domain" not in (p.sketch or "") + (p.note or ""), p.sketch

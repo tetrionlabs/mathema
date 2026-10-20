@@ -9,6 +9,8 @@ refused by the function's own guard in a value claim is reported as the
 refusal it is, never as a floating-point boundary."""
 import math
 
+import pytest
+
 from mathema import enforce_domain
 from mathema.conjecture import check_conjectures, claim
 
@@ -34,6 +36,12 @@ def capped(x: float) -> float:
     for _ in range(2):
         total += x
     return total
+
+
+def overflow_literal(x: float) -> float:
+    if x > 0:
+        return 1e309
+    return x
 
 
 def _row(fn, text, name):
@@ -79,6 +87,18 @@ def test_a_raise_inside_the_domain_falsifies_a_curvature_claim():
     p = _row(root_sum, "for x in [-10, 10], d(f(x), x, x) <= 0", "concave[x]")
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "raised ValueError" in p.counterexample, p.counterexample
+
+
+@pytest.mark.parametrize("text, name", [
+    ("for x in [-10, 10], d(f(x), x) >= 0", "monotonic_increasing[x]"),
+    ("for x in [-10, 10], d(f(x), x, x) == 0", "affine[x]"),
+    ("for x in [-10, 10], d(f(x), x, x) >= 0", "convex[x]"),
+])
+def test_an_infinite_literal_falsifies_and_never_ends_the_check(text, name):
+    p = _row(overflow_literal, text, name)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "inf" in p.counterexample, p.counterexample
+    assert _witness_x(p) > 0, p.counterexample
 
 
 def test_the_functions_own_guard_cuts_the_working_domain():

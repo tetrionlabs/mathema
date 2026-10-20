@@ -3728,8 +3728,16 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     structured = _definedness_region_structured(fn, facts, region_gaps,
                                                 working=working, domain=domain)
     cuts = guard_cut_texts(fn, facts) if working else []
+    # every parameter the guards read has a domain the claim states
+    import re as _re
+    bound_here = _claim_bound(fn, domain)
+    stated = bool(cuts) and all(
+        p in bound_here for text in cuts for p in facts.params
+        if _re.search(rf"\b{_re.escape(p)}\b", text))
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
-                f"cuts the working domain)" if cuts else "")
+                f"refuses no point of the stated domain)" if cuts and stated
+                else f" (its own guard raises where {' or '.join(cuts)}, "
+                     f"which cuts the working domain)" if cuts else "")
     if working:
         domain = _working_bounds(fn, domain)
     computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
@@ -3802,8 +3810,10 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         if not computed:
             return ProofResult(
                 "proven",
-                sketch=("is_defined: every call inside the working domain "
-                        "returns, so f is defined on it" + cut_text)
+                sketch=("is_defined: every call inside the "
+                        + ("stated" if stated else "working")
+                        + " domain returns, so f is defined on it"
+                        + cut_text)
                 if cuts else
                 "is_defined: the body has no raise region, so "
                 "every call returns and f is defined on the whole "

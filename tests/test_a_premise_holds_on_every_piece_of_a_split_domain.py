@@ -26,6 +26,26 @@ def exits_below(x: float) -> float:
     return x + 1
 
 
+def two_guards(x: float) -> float:
+    if x < -3:
+        raise ValueError("low")
+    if x > 3:
+        raise ValueError("high")
+    return x
+
+
+def abs_split(x: float) -> float:
+    if x < 2:
+        return 2 - x
+    return x - 2
+
+
+def _x(p) -> float:
+    from fractions import Fraction
+    return float(Fraction(p.counterexample.split("x = ", 1)[1]
+                          .split(":")[0].split(",")[0].split()[0]))
+
+
 def _row(fn, text, route):
     return check_conjectures(fn, [claim(text, route=route)])[0]
 
@@ -59,3 +79,26 @@ def test_a_premise_does_not_hide_a_point_it_admits():
     p = _row(guarded, "assuming is_defined(f), for x in [-10, 10], f(x) >= 2",
              "derive")
     assert p.verdict == "falsified", (p.verdict, p.sketch)
+
+
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_a_witness_lies_inside_the_definedness_premise(route):
+    p = _row(two_guards,
+             "assuming is_defined(f), for x in [-10, 10], f(x) <= 2", route)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
+    assert 2 < _x(p) <= 3, p.counterexample
+
+
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_a_piece_a_nonlinear_premise_rules_out_is_left_out(route):
+    # x * x >= 9 admits x <= -3 and x >= 3; the split's piece x = 2 is
+    # outside it, where f(2) = 0
+    p = _row(abs_split, "assuming x * x >= 9, for x in [-10, 10], f(x) >= 1",
+             route)
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.sketch, p.note)
+    assert "bug" not in (p.note or ""), p.note
+    q = _row(abs_split, "assuming x * x >= 9, for x in [0, 10], f(x) >= 2",
+             route)
+    assert q.verdict == "falsified", (q.verdict, q.sketch)
+    assert _x(q) ** 2 >= 9 and _x(q) - 2 < 2, q.counterexample
+    assert "[2.0, 2.0]" not in (q.sketch or ""), q.sketch
