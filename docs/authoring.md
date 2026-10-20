@@ -781,7 +781,16 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 
 <!-- example: write-spec repl -->
 ```
->>> mathema.write_spec(softmax, root='.')
+>>> record = mathema.write_spec(softmax, root='.')
+>>> record
+mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+  holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  sums_to_one  sum(f(scores)) = 1   holds
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  8 built-in checks: 3 proven, 3 holds, 2 falsified (record.render(families=True) prints them)
+>>> print(record.render(families=True))
 mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   is_deterministic  f(scores) = f(scores)   holds
@@ -814,7 +823,9 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
-`sums_to_one` came from the docstring `Claims:` block, and the rest are
+`sums_to_one` came from the docstring `Claims:` block, and the record
+prints those first, folding the rest into one line that counts their
+verdicts; `render(families=True)` prints every row. The rest are
 mathema's built-in battery: every function gets the determinism and
 state probes, a function computing a number from numbers gets the
 stability probe too, and a list-in, list-out function also gets the
