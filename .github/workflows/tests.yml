@@ -101,6 +101,8 @@ jobs:
   # demand, at the two ends only:
   # the supported floor (Python 3.10 with numpy 2.0, pandas 2.2 and polars
   # 1.0) and the ceiling (Python 3.14 with the libraries pip resolves today).
+  # The weekly run checks out develop, the integration branch; a run on
+  # any other event checks out the commit that triggered it.
   third-party-compendiums:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -114,6 +116,8 @@ jobs:
             libraries: ""
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
