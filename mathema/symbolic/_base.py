@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .._signatures import module_scope
 import ast
+import cmath
 import contextlib
 import contextvars
 import inspect
@@ -870,6 +871,11 @@ def _exact_numeric_literal(value: int | float) -> "sympy.Integer | sympy.Rationa
     comparison but capable of leaving a real identity's difference
     non-zero (`falsified`, not just imprecise) once raised to a
     symbolic power elsewhere in the same expression."""
+    if isinstance(value, (float, complex)) and not cmath.isfinite(value):
+        # a literal Python reads as nan or an infinity (`1e309`) has no
+        # real value to lift
+        raise NotSymbolic(f"a literal with no finite value: {value!r}",
+                          category="non-numeric-constant")
     if isinstance(value, complex):
         real = sympy.Rational(str(value.real)) if value.real else sympy.Integer(0)
         return real + sympy.I * sympy.Rational(str(value.imag))
