@@ -378,7 +378,7 @@ class PandasSeriesAdapter:
     def observe(self, obj):
         import pandas as pd
         if isinstance(obj, pd.Series):
-            return _vec_from_pandas(obj)
+            return _vec_from_pandas(obj, _name_labels(obj.index))
         if obj is pd.NA:
             return math.nan
         return NotMine
@@ -455,13 +455,25 @@ def _pandas_column(abstract: AbstractVec, options: dict, index):
     return pd.Series(values, index=index)
 
 
-def _vec_from_pandas(series) -> AbstractVec:
+def _vec_from_pandas(series, labels: tuple = ()) -> AbstractVec:
     mask = series.isna().tolist()
     values = tuple(math.nan if m else (v.item() if hasattr(v, "item")
                                        else v)
                    for v, m in zip(series.tolist(), mask))
     return AbstractVec(values, frozenset(k for k, m in enumerate(mask)
-                                         if m))
+                                         if m), labels=labels)
+
+
+def _name_labels(index) -> tuple:
+    """The names an index gives its positions, when every label is a
+    distinct string (a Series labelled by column names, as
+    `DataFrame.sum()` returns it); `()` for an index of dates, of
+    positions, or of anything else."""
+    labels = index.tolist()
+    if labels and all(isinstance(v, str) for v in labels) \
+            and len(set(labels)) == len(labels):
+        return tuple(labels)
+    return ()
 
 
 def _pandas_detect(adapter, annotation, cls_name: str, kind: str):

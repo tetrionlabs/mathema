@@ -82,6 +82,43 @@ def _holed(array, holes: dict):
     return out
 
 
+_LABELLED: list = []
+
+
+def _labelled(array, labels: tuple):
+    """A 1-D `array` whose positions are named by `labels`, read by
+    position as any array is and by name as `a["x"]`; `array`
+    unchanged when it has no labels or its length differs from
+    theirs. An array computed from it element by element keeps the
+    names; a slice or a reshape drops them."""
+    if not labels or getattr(array, "ndim", 0) != 1 \
+            or len(array) != len(labels):
+        return array
+    if not _LABELLED:
+        np = _np()
+        from .runtime_types._abstract import label_position
+
+        class LabelledArray(np.ndarray):  # type: ignore[name-defined]
+            """A float vector whose positions are named."""
+            labels: tuple = ()
+
+            def __array_finalize__(self, obj):
+                names = getattr(obj, "labels", ())
+                self.labels = names if self.ndim == 1 \
+                    and len(self) == len(names) else ()
+
+            def __getitem__(self, key):
+                if isinstance(key, str) and self.labels:
+                    key = label_position(self.labels, key)
+                    return self.view(np.ndarray)[key]
+                return super().__getitem__(key)
+
+        _LABELLED.append(LabelledArray)
+    out = array.view(_LABELLED[0])
+    out.labels = tuple(labels)
+    return out
+
+
 def _numbers(value) -> bool:
     from .runtime_types import abstract_of
     from .runtime_types._abstract import AbstractMat, AbstractVec
@@ -92,8 +129,9 @@ def as_array(value):
     """Intent:
         A drawn value as the claim evaluates it: a vector or matrix of
         numbers (a list, nested lists, an array) as a float numpy
-        array with NaN at each missing position, a dict of columns as
-        a `Table`, anything else unchanged.
+        array with NaN at each missing position, its positions still
+        named when the list names them (`runtime_types.Labelled`), a
+        dict of columns as a `Table`, anything else unchanged.
     """
     np = _numpy()
     if np is None:
@@ -118,9 +156,12 @@ def as_array(value):
                                      for v in r] for r in value], dtype=float),
                           {(i, j): v for i, r in enumerate(value)
                            for j, v in enumerate(r) if kept(v)})
-        return _holed(np.array([math.nan if is_missing(v) else float(v)
-                                for v in value], dtype=float),
-                      {(k,): v for k, v in enumerate(value) if kept(v)})
+        holes = {(k,): v for k, v in enumerate(value) if kept(v)}
+        array = np.array([math.nan if is_missing(v) else float(v)
+                          for v in value], dtype=float)
+        if holes:
+            return _holed(array, holes)
+        return _labelled(array, getattr(value, "labels", ()))
     return value
 
 

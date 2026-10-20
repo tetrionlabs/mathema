@@ -24,11 +24,15 @@ class AbstractVec:
     (`nan`, `null`, `NA`), None for the runtime type's own default;
     `members` the member each missing position holds, `((position,
     member), ...)`, when they are not all one. The number stored at a
-    missing position is NaN and carries no meaning."""
+    missing position is NaN and carries no meaning. `labels` names
+    each position when the vector is indexed by name (a pandas Series
+    labelled by column names, as a table's reduction answers), `()`
+    when its positions carry no names."""
     values: tuple
     missing: frozenset = frozenset()
     spelling: "str | None" = None
     members: tuple = ()
+    labels: tuple = ()
 
     def __len__(self) -> int:
         return len(self.values)
@@ -170,16 +174,48 @@ def abstract_of(value):
                        _members(dict(zip(sorted(missing), words))))
 
 
+class Labelled(list):
+    """A vector whose positions are named: a list, read by position as
+    any list is, that also reads the value at a name (`v["x"]`).
+    `labels` holds one name per position."""
+
+    def __init__(self, values=(), labels: tuple = ()):
+        super().__init__(values)
+        self.labels = tuple(labels)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return list.__getitem__(self, label_position(self.labels, key))
+        return list.__getitem__(self, key)
+
+
+def label_position(labels: tuple, name: str) -> int:
+    """Intent:
+        The position `name` labels among `labels`.
+
+    Raises:
+        KeyError: no position is labelled `name`; the message lists
+            the labels there are.
+    """
+    try:
+        return labels.index(name)
+    except ValueError:
+        raise KeyError(f"no position is labelled {name!r} (labels: "
+                       f"{', '.join(map(str, labels)) or 'none'})") from None
+
+
 def plain(value):
     """Intent:
         The plain Python value an abstract value compares as: an
-        `AbstractVec` is a list with NaN at each missing position, an
+        `AbstractVec` is a list with NaN at each missing position (a
+        `Labelled` list when its positions are named), an
         `AbstractMat` a list of row lists, an `AbstractTable` a dict of
         column lists. Any other value is returned unchanged.
     """
     if isinstance(value, AbstractVec):
-        return [math.nan if k in value.missing else v
-                for k, v in enumerate(value.values)]
+        values = [math.nan if k in value.missing else v
+                  for k, v in enumerate(value.values)]
+        return Labelled(values, value.labels) if value.labels else values
     if isinstance(value, AbstractMat):
         return [list(r) for r in value.rows]
     if isinstance(value, AbstractTable):
