@@ -4746,6 +4746,47 @@ def _own_finding(probe: "Probe") -> "Probe":
                     counterexample=None, meta=meta)
 
 
+def _merged_drawn(a: "dict | None", b: "dict | None") -> "dict | None":
+    """Two `mathema.drawn` records as one: the entries added, the
+    smallest and largest sizes over both; either alone as it is."""
+    if not a or not b:
+        return a or b
+    if not (a.get("smallest") and b.get("smallest")):
+        return a if a.get("smallest") else b
+    return {**a,
+            "smallest": [min(x, y) for x, y in zip(a["smallest"], b["smallest"])],
+            "largest": [max(x, y) for x, y in zip(a["largest"], b["largest"])],
+            "entries": (a.get("entries") or 0) + (b.get("entries") or 0)}
+
+
+def _fold_stand_in_draws(main: "Probe", companion: "Probe") -> None:
+    """Intent:
+        Fold the draws of a probe that stood in for an undecided derive
+        and held into the `[float]` row that failed under it, so the
+        claim has one computation line: the row's `n` becomes the
+        stand-in's draws plus the points the row itself ran, and the
+        stand-in's `mathema.drawn` (merged with the row's own),
+        `mathema.sampling` and `mathema.confidence` are carried onto
+        the row, each with its meaning unchanged. The stand-in row
+        keeps its verdict, `n` and meta. Nothing changes unless `main`
+        holds on a probe route and `companion` is falsified.
+    """
+    if main.verdict != "holds" or not str(main.route or "").startswith("probe") \
+            or companion.verdict != "falsified" or not main.n:
+        return
+    own = companion.n or 0
+    meta = dict(companion.meta or {})
+    main_meta = main.meta or {}
+    drawn = main_meta.get("mathema.drawn")
+    if drawn and (meta.get("mathema.drawn") or not own):
+        meta["mathema.drawn"] = _merged_drawn(meta.get("mathema.drawn"), drawn)
+    for key in ("mathema.sampling", "mathema.confidence"):
+        if key in main_meta and key not in meta:
+            meta[key] = main_meta[key]
+    companion.n = main.n + own
+    companion.meta = meta
+
+
 def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
     """Append a stamped float companion to the output, tagged with the
     claim it was spawned from and the family it belongs to."""
@@ -6031,9 +6072,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                                     conjectures)
             out.append(stamp(probed, _cap=verdict_cap))
             if ctx.companion is not None:
-                _emit_companion(out, _stamped(ctx.companion, cj_record,
-                                              written=cj.domain or {}),
-                                probed.name)
+                companion = _stamped(ctx.companion, cj_record,
+                                     written=cj.domain or {})
+                _fold_stand_in_draws(probed, companion)
+                _emit_companion(out, companion, probed.name)
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)
         except LanguageDrawFailed as e:

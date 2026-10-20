@@ -347,6 +347,10 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             # a verdict reached by running the code is the computation's
             aspect = "computation" if _ran(found.get("route")) else "mathematics"
             lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
+        elif _folded(main, under):
+            # the stand-in's draws are carried by its failing `[float]`
+            # row, the claim's one computation line
+            pass
         else:
             aspect = _aspect(main)
             lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
@@ -372,8 +376,9 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 if (c.condition or "").startswith("let |inf| be ") and "|inf|" not in shown:
                     # the pseudo-infinity that bounded the computation
                     shown = f"{c.condition.split(', ', 1)[0]}, {shown}"
-                lines.append(_row(_verdict(c), "computation", shown,
-                                  _detail(c, count_words)))
+                detail = (_folded_detail(main, c, count_words)
+                          if _folded(main, under) else _detail(c, count_words))
+                lines.append(_row(_verdict(c), "computation", shown, detail))
                 lines += _extras(c)
                 if _verdict(c) == "falsified":
                     lines += _conditioning_lines(
@@ -432,6 +437,29 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out
+
+
+def _folded(main, under: list) -> bool:
+    """Whether `main` is a probe that stood in for an undecided derive
+    and held, with a falsified `[float]` row under it carrying its draws
+    (`conjecture._fold_stand_in_draws`): the claim then prints one
+    computation line, that row's."""
+    return (_ran(main.route) and _verdict(main) == "holds" and any(
+        (c.meta or {}).get("mathema.family") == _COMPUTATION
+        and _verdict(c) == "falsified" for c in under))
+
+
+def _folded_detail(main, c, count_words) -> str:
+    """The one computation line of a folded stand-in: the draws, any gap
+    the stand-in's passes fell within, then the `[float]` row's
+    counterexample."""
+    parts = []
+    if c.n:
+        parts.append(count_words(c.n, (c.meta or {}).get("mathema.drawn")))
+    parts += [g for g in (main.note or "").split("; ") if _WITHIN.search(g)]
+    if c.counterexample:
+        parts.append(f"counterexample {c.counterexample}")
+    return "; ".join(parts)
 
 
 def _extras(p) -> list:
