@@ -857,9 +857,12 @@ def suggest_coverage_command(root: str = ".") -> str | None:
 
 
 def is_test_covered(fn, coverage_data: dict[str, set[int]] | None) -> bool | None:
-    """`None` means unknown (no coverage report found, or this
-    function's file wasn't in it), never conflate that with False."""
-    if coverage_data is None:
+    """`None` means unknown (no coverage report found, this function's
+    file wasn't in it, or `fn` stands for a function another frontend
+    read, whose coverage is not in a Python report), never conflate that
+    with False."""
+    from .analysis import foreign_body
+    if coverage_data is None or foreign_body(fn):
         return None
     try:
         src_file = inspect.getsourcefile(fn)
@@ -888,7 +891,9 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
         to anything but a function (a constant, a class, a submodule
         not called through) is not a callee and is left out.
     """
-    from .analysis import get_tree
+    from .analysis import foreign_body, get_tree
+    if foreign_body(fn):
+        return []
     try:
         _src, fdef = get_tree(fn)
     except Exception:
@@ -918,14 +923,16 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
         seen.add(dotted)
         dep: dict = {"name": dotted, "kind": "function",
                      "key": f"{obj.__module__}.{obj.__qualname__}"}
+        foreign = foreign_body(obj)
         try:
-            src = inspect.getsourcefile(obj)
+            src = None if foreign else inspect.getsourcefile(obj)
             if src:
                 dep["file"] = src
         except TypeError:
             pass
-        line = getattr(getattr(obj, "__code__", None), "co_firstlineno",
-                       None)
+        line = (None if foreign else
+                getattr(getattr(obj, "__code__", None), "co_firstlineno",
+                        None))
         if line is not None:
             dep["line"] = line
         callee_facts = quiet_facts(obj)
@@ -982,13 +989,16 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             dep["key"] = getattr(obj, "__name__", name)
         elif mod and qual:
             dep["key"] = f"{mod}.{qual}"
+        from .analysis import foreign_body
+        foreign = foreign_body(obj)
         try:
-            src = inspect.getsourcefile(obj)
+            src = None if foreign else inspect.getsourcefile(obj)
             if src:
                 dep["file"] = src
         except TypeError:
             pass
-        line = getattr(getattr(obj, "__code__", None), "co_firstlineno", None)
+        line = (None if foreign else
+                getattr(getattr(obj, "__code__", None), "co_firstlineno", None))
         if line is None and kind == "class":
             try:
                 line = inspect.getsourcelines(obj)[1]

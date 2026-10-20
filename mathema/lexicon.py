@@ -452,6 +452,14 @@ LEXICON: dict[str, str] = {
     "derivative_second_mixed": "d(f(x, y), x, y) == 0",
     "derivative_at_point": "d(f(x), x) @ {x = 1} == 2",
     "derivative_at_word": "d(f(x), x) at {x = 1} == 2",
+    # a derivative's sign over a body derive cannot read (a branch, a
+    # loop) is decided by running the code, the check the
+    # monotonic_increasing, convex and sibling claims make
+    "derivative_sign_by_probe": "for x in [-10, 10], d(f(x), x) >= 0",
+    "derivative_sign_by_probe_trap": ("for payment in [0, 100], "
+                                      "d(f(payment), payment) >= 0"),
+    "second_derivative_sign_by_probe": ("for rate in [0, 0.2], "
+                                        "d(f(rate), rate, rate) >= 0"),
     # limits and integrals -----------------------------------------
     "limit_call": "lim(f(x), x, oo) == 0",
     "limit_arrow": "lim(f(x), x -> 0) == 0",
@@ -789,7 +797,9 @@ SECTIONS: dict[str, tuple[str, ...]] = {
     "calculus": (
         "derivative_call", "derivative_prime",
         "derivative_partial_symbol", "derivative_second_mixed",
-        "derivative_at_point", "derivative_at_word", "limit_call",
+        "derivative_at_point", "derivative_at_word",
+        "derivative_sign_by_probe", "derivative_sign_by_probe_trap",
+        "second_derivative_sign_by_probe", "limit_call",
         "limit_arrow", "integrate_definite", "integral_symbol",
         "integrate_evaluation_bar", "sum_subscript", "prod_call",
         "principal_value", "recurrence_identity"),
@@ -982,6 +992,10 @@ TAGS: dict[str, tuple[str, ...]] = {
     "let_pseudo_infinity": ("infinity", "unbounded", "limit of the range"),
     "derivative_call": ("derivative", "differentiate", "gradient", "slope"),
     "derivative_prime": ("derivative", "prime notation", "f'"),
+    "derivative_sign_by_probe": ("derivative", "increasing", "branch",
+                                 "if statement"),
+    "derivative_sign_by_probe_trap": ("derivative", "decreasing", "loop"),
+    "second_derivative_sign_by_probe": ("second derivative", "convex", "loop"),
     "limit_call": ("limit", "asymptote", "approaches", "tends to"),
     "integrate_definite": ("integral", "area under", "antiderivative"),
     "sum_subscript": ("sum", "series", "sigma", "summation"),
@@ -1801,6 +1815,38 @@ def logistic_standard(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
+def logistic_branched(x: float) -> float:
+    """The logistic function arranged so `exp` never sees a large
+    positive argument: one formula for x >= 0, another below. Increasing
+    everywhere, which is what "derivative_sign_by_probe" states."""
+    import math
+    if x >= 0:
+        return 1 / (1 + math.exp(-x))
+    z = math.exp(x)
+    return z / (1 + z)
+
+
+def loan_balance(payment: float) -> float:
+    """What is still owed on 1000 after twelve months at 1% a month,
+    paying `payment` each month. A larger payment leaves less owed, so
+    "derivative_sign_by_probe_trap" (the balance grows with the payment)
+    is false."""
+    balance = 1000.0
+    for _ in range(12):
+        balance = balance * 1.01 - payment
+    return balance
+
+
+def compound_value(rate: float) -> float:
+    """100 grown for twelve periods at `rate` per period, one period at
+    a time. Convex in the rate, which is what
+    "second_derivative_sign_by_probe" states."""
+    value = 100.0
+    for _ in range(12):
+        value = value * (1 + rate)
+    return value
+
+
 def gd_convergence_factor(alpha: float, q: float) -> float:
     """r = 1 - alpha*q, the per-step convergence factor of fixed-step
     gradient descent on the quadratic bowl f(t) = 0.5*q*t^2: successive
@@ -2100,6 +2146,9 @@ _EXAMPLE_ENTRIES: dict[str, tuple[object, list[str]]] = {
         "sigmoid_bounded_below", "sigmoid_bounded_above",
     ]),
     "gd_convergence_factor": (gd_convergence_factor, ["descent_converges"]),
+    "logistic_branched": (logistic_branched, ["derivative_sign_by_probe"]),
+    "loan_balance": (loan_balance, ["derivative_sign_by_probe_trap"]),
+    "compound_value": (compound_value, ["second_derivative_sign_by_probe"]),
     "geometric_mean_two": (geometric_mean_two, ["chained_comparison"]),
     "discounted_price": (discounted_price, [
         "named_under_test", "let_alias_for_under_test",

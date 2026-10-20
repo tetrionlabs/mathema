@@ -52,6 +52,7 @@ from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_prob
 from .runtime_types import SEQUENCE_KINDS
 from .runtime_types import annotated_container as _annotated_container
 from .runtime_types import as_annotated as _as_annotated
+from . import _exits
 from ._exits import exception_name
 from ._signatures import callable_signature
 
@@ -139,7 +140,7 @@ def _call_with_target(fn: Callable[..., Any], facts: Facts, target: str, args: l
     values[target] = value
     call_args, call_kwargs = call_arguments(fn, facts.params, values)
     try:
-        return fn(*call_args, **call_kwargs)
+        return _exits.call(fn, *call_args, **call_kwargs)
     except Exception as exc:
         log = _ROUND_RAISES.get()
         if log is not None:
@@ -272,7 +273,7 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         call_args, call_kwargs = call_arguments(fn, facts.params, at)
         try:
             with _pinned_float_env():
-                return fn(*call_args, **call_kwargs), None
+                return _exits.call(fn, *call_args, **call_kwargs), None
         except PremiseRejected:
             return None, "PremiseRejected"
         except Exception as exc:
@@ -819,7 +820,7 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, names, values)
             with _pinned_float_env():
-                out = fn(*call_args, **call_kwargs)
+                out = _exits.call(fn, *call_args, **call_kwargs)
         except Exception:
             missed["raised"] += 1
             return None
@@ -2124,7 +2125,13 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
     language_bound = getattr(bound, "base_type", None) == "L"
     if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
-    guarded = _guards(facts.tree, facts.params).get(target) in ("raise", "assert")
+    # with no body there is no guard to read: an accidental-type raise
+    # is then neither a declared rejection nor a crash, and the run is
+    # unknown with the reason
+    unread = facts.tree is None
+    guarded = (not unread
+               and _guards(facts.tree, facts.params).get(target) in ("raise", "assert"))
+    unreadable: dict = {}
 
     def crash_on(args, value):
         try:
@@ -2191,6 +2198,25 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
         exc = crash_on(args, value)
         if exc is None:
             return True
+        if unread:
+            if "said" in unreadable:
+                return None
+            if side is not None:
+                inside_now = side == "inside"
+                value = _shrink_in_language(
+                    value, lambda s: (crash_on(args, s) is not None
+                                      and bool(domain_contains(s, bound)) == inside_now),
+                    bound)
+                shown = f"{_witness_value(value)} ({side} {names})"
+            elif members is None:
+                shown = repr(shrink(value, lambda s: crash_on(args, s) is not None))
+            else:
+                shown = repr(value)
+            unreadable["said"] = (
+                f"{target} = {shown} raised {exc}, and {facts.name} has no "
+                f"Python source to read whether a validating guard raises "
+                f"it or it is an unguarded crash")
+            return None
         if side is None and members is not None:
             return (f"{target} = {value!r}, a member of its set, raised {exc}, "
                     f"an unguarded crash, not a declared rejection")
@@ -2211,6 +2237,8 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
                                          max(trials, len(corpus)), trial)
+    if unreadable and verdict != "falsified":
+        return ("unknown", checked, unreadable["said"])
     if sampled is not None:
         return verdict, checked, cx, {"mathema.sampled": sampled}
     return verdict, checked, cx
@@ -3074,7 +3102,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     for p, v in point.items()}
             executed += 1
             try:
-                out = fn(**call)
+                out = _exits.call(fn, **call)
             except Exception as exc:
                 if working and deliberate_raise(exc, fn):
                     # the function's own guard: outside its working
@@ -4230,9 +4258,37 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     for off in _WITNESS_OFFSETS + (1e-6, -1e-6, 10.0, -10.0):
                         yield {**base, p: float(root) + off}
 
+    def emptied():
+        # the inputs a subscript or a field read fails on: the empty
+        # sequence, string and mapping, and a mapping without each key
+        # the body reads
+        from .probing import _synth_dict
+        from .symbolic._base import _dict_key_tree
+        for p in params:
+            if p in call_pins or p in held or p in marked or p in shapes:
+                continue
+            p_kind = facts.param_kinds.get(p)
+            if array_forms.get(p) == "mat":
+                # a matrix keeps at least one row: the row is empty
+                yield {**draw(), p: [[]]}
+            elif p_kind in SEQUENCE_KINDS:
+                yield {**draw(), p: as_container(p, [])}
+            elif p_kind == "string":
+                yield {**draw(), p: ""}
+            elif p_kind == "dict":
+                yield {**draw(), p: {}}
+                keys = (_dict_key_tree(facts.tree, p)
+                        if facts.tree is not None else {})
+                for key in keys:
+                    without = _synth_dict(keys, rng)
+                    without.pop(key, None)
+                    yield {**draw(), p: without}
+
     def candidates():
         yield from corners()
         yield from array_corners()
+        if kind == "is_defined":
+            yield from emptied()
         if bare and kind == "is_overflow_safe":
             yield from extremes()
         if not bare:
@@ -4257,7 +4313,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, params, point)
             with _pinned_float_env():
-                out = fn(*call_args, **call_kwargs)
+                out = _exits.call(fn, *call_args, **call_kwargs)
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
@@ -4711,7 +4767,7 @@ def _output_predicate_probe(check):
             filled = [point[p] for p in facts.params]
             try:
                 with _pinned_float_env():
-                    out = fn(*filled)
+                    out = _exits.call(fn, *filled)
             except Exception as exc:
                 if any(is_missing(v) for p, v in point.items()
                        if not (p in held and v is None)):
@@ -4832,7 +4888,7 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
         filled = _sample(empties.pop() if empties else None)
         try:
             with _pinned_float_env():
-                out = fn(*filled)
+                out = _exits.call(fn, *filled)
         except Exception as e:
             if _raised_by_library(e, library):
                 return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: raised "
@@ -4932,7 +4988,7 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, facts.params, values)
             with _pinned_float_env():
-                fn(*call_args, **call_kwargs)
+                _exits.call(fn, *call_args, **call_kwargs)
         except RecursionError:
             return (f"{_fmt_point(values, list(facts.params))}: f raised "
                     f"RecursionError, the recursion limit is reached "
@@ -5150,7 +5206,7 @@ def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
             values[p] = build(0)
         try:
             call_args, call_kwargs = call_arguments(fn, facts.params, values)
-            fn(*call_args, **call_kwargs)
+            _exits.call(fn, *call_args, **call_kwargs)
         except Exception as exc:
             why = _shape_failure(exc)
             if why is None:

@@ -914,6 +914,21 @@
   "unicode": "f'(x) at {x=1} = 2",
   "ascii": "d(f(x), x) @ {x=1} = 2"
  },
+ "derivative_sign_by_probe": {
+  "input": "for x in [-10, 10], d(f(x), x) >= 0",
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, f'(x) ≥ 0",
+  "ascii": "for x in [-10.0, 10.0] : float|missing, d(f(x), x) >= 0"
+ },
+ "derivative_sign_by_probe_trap": {
+  "input": "for payment in [0, 100], d(f(payment), payment) >= 0",
+  "unicode": "∀ payment ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f'(payment) ≥ 0",
+  "ascii": "for payment in [0.0, 100.0] : float|missing, d(f(payment), payment) >= 0"
+ },
+ "second_derivative_sign_by_probe": {
+  "input": "for rate in [0, 0.2], d(f(rate), rate, rate) >= 0",
+  "unicode": "∀ rate ∈ [0.0, 0.2] ⊂ ℝ ∪ {∅}, f''(rate) ≥ 0",
+  "ascii": "for rate in [0.0, 0.2] : float|missing, d(f(rate), rate, rate) >= 0"
+ },
  "limit_call": {
   "input": "lim(f(x), x, oo) == 0",
   "unicode": "lim(f(x), x, ∞) = 0",

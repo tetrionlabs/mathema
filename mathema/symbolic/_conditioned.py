@@ -196,6 +196,19 @@ def _inline_expr_env(unmodified: set, affine_locals: dict, params: dict) -> dict
     return env
 
 
+def _field_key(node: ast.AST, unmodified: set) -> "str | None":
+    """Intent:
+        The domain key of a field read off an unmodified parameter
+        (`o.kind`, `o["kind"]`, `o.address.zip` as `o.address.zip`),
+        or None for anything else.
+    """
+    from ._base import _chain
+    found = _chain(node)
+    if found is None or found[0] not in unmodified:
+        return None
+    return f"{found[0]}.{found[1]}"
+
+
 def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
                    affine_locals: dict | None = None,
                    params: dict | None = None) -> bool | None:
@@ -261,6 +274,11 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
             if result is not None:
                 return result
             break   # a recognized param name commits this case, either way
+        field = _field_key(subject, unmodified)
+        if field is not None and isinstance(domain.get(field), frozenset):
+            # a field of an unmodified parameter bound to a finite set
+            # (`o.kind in {"a", "b"}`) is decided over its members
+            return _compare_truth_literal(field, op, other, domain, flipped)
 
     for subject, other, flipped in sides:
         if isinstance(subject, ast.Name) and subject.id in affine_locals \

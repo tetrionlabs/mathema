@@ -147,7 +147,10 @@ def call_sites(root: str, library_claims: dict) -> list:
     from ..analysis import get_tree
     from ..conjecture import _resolve_func_ref
     out: list = []
+    from ..analysis import foreign_body
     for caller, fn, facts in _project_functions(root):
+        if foreign_body(fn):
+            continue
         try:
             _src, fdef = get_tree(fn)
             first = inspect.getsourcelines(fn)[1]

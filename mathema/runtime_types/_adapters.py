@@ -15,7 +15,8 @@ import typing
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from ._abstract import AbstractMat, AbstractTable, AbstractVec, NotMine
+from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
+                        element_type)
 
 #: the kinds of abstract value an adapter can carry
 KINDS = frozenset({"vec", "mat", "table"})
@@ -32,6 +33,41 @@ class Detection:
     evidence: str
 
 
+@dataclass(frozen=True)
+class BodyUses:
+    """The uses of a parameter in a function body that a runtime type
+    supports and a list does not, by which an unannotated parameter is
+    drawn as that type: the `attributes` read off it (`x.iloc`), the
+    `methods` called on it (`x.mean()`), the `keyed` methods called on
+    it with a column name as the first argument (`df.groupby("k")`),
+    and `matmul` when it can be an operand of `@`. `described` names
+    the type in the record's evidence (`"a pandas DataFrame"` gives
+    `the body uses it as a pandas DataFrame`)."""
+    attributes: frozenset = frozenset()
+    methods: frozenset = frozenset()
+    keyed: frozenset = frozenset()
+    matmul: bool = False
+    described: str = ""
+
+    def supports(self, use: tuple) -> bool:
+        """Intent:
+            Whether the type supports one body use, `(form, name)`:
+            `("attr", name)` an attribute read (any declared name, a
+            method read without a call included), `("call", name)` a
+            method call (a method or a keyed method), `("keyed", name)`
+            a method call whose first argument is a string (a keyed
+            method only), `("@", "")` an operand of `@`.
+        """
+        form, name = use
+        if form == "attr":
+            return name in self.attributes | self.methods | self.keyed
+        if form == "call":
+            return name in self.methods | self.keyed
+        if form == "keyed":
+            return name in self.keyed
+        return form == "@" and self.matmul
+
+
 @runtime_checkable
 class RuntimeTypeAdapter(Protocol):
     """What a runtime type adapter provides.
@@ -46,7 +82,10 @@ class RuntimeTypeAdapter(Protocol):
     or returns `NotMine` for an object that is not its runtime type.
     An adapter may also state `ALIASES`, the module aliases its
     library is usually imported under (`{"pd": "pandas"}`), through
-    which an annotation's source text is read.
+    which an annotation's source text is read, and `USES`, a
+    `BodyUses` naming the uses of an unannotated parameter only its
+    type supports, by which such a parameter is drawn as its type in a
+    module that imports its library.
     """
     name: str
     kinds: frozenset
@@ -232,6 +271,14 @@ class NumpyAdapter:
     SPELLINGS = {"nan": (lambda: math.nan, _is_nan)}
     MISSING_MEMBERS = ("nan",)
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter only an array supports
+    USES = BodyUses(
+        attributes=frozenset({"T", "shape", "ndim", "size", "dtype"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "cumsum",
+            "cumprod", "round", "clip", "argmax", "argmin", "any", "all",
+            "dot", "astype", "reshape", "flatten", "ravel", "tolist"}),
+        matmul=True, described="a numpy array")
 
     def detect(self, annotation):
         text = _annotation_text(annotation)
@@ -260,6 +307,13 @@ class NumpyAdapter:
             return np.array([list(r) for r in abstract.rows])
         if isinstance(abstract, AbstractTable):
             raise TypeError("numpy.ndarray does not carry a table")
+        if element_type(abstract) in ("str", "bool"):
+            # strings, or booleans with a hole, as an object array, so a
+            # hole stays NaN and never becomes the text "nan"
+            values = _missing_to(abstract.values, abstract.missing, math.nan)
+            if element_type(abstract) == "bool" and not abstract.missing:
+                return np.array(values, dtype=bool)
+            return np.array(values, dtype=object)
         return np.array(_missing_to(abstract.values, abstract.missing,
                                     _spelling(options, {"nan": lambda:
                                                         math.nan}, "nan",
@@ -303,6 +357,22 @@ class PandasSeriesAdapter:
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a Series supports and a
+    #: list does not
+    USES = BodyUses(
+        attributes=frozenset({"iloc", "loc", "values", "shape", "ndim",
+                              "size", "dtype", "T", "str", "dt"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "median",
+            "cumsum", "cumprod", "cummax", "cummin", "pct_change",
+            "dropna", "fillna", "rolling", "expanding", "ewm", "shift",
+            "diff", "quantile", "skew", "kurt", "kurtosis", "abs", "clip",
+            "round", "to_numpy", "tolist", "argmax", "argmin", "idxmax",
+            "idxmin", "any", "all", "dot", "nunique", "unique",
+            "value_counts", "rank", "sem", "cov", "corr", "isna", "notna",
+            "isnull", "notnull", "astype", "apply", "resample", "groupby",
+            "map"}),
+        matmul=True, described="a pandas Series")
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "Series", "vec")
@@ -316,7 +386,7 @@ class PandasSeriesAdapter:
     def observe(self, obj):
         import pandas as pd
         if isinstance(obj, pd.Series):
-            return _vec_from_pandas(obj)
+            return _vec_from_pandas(obj, _name_labels(obj.index))
         if obj is pd.NA:
             return math.nan
         return NotMine
@@ -332,6 +402,22 @@ class PandasDataFrameAdapter:
     SPELLINGS = PANDAS_SPELLINGS
     MISSING_MEMBERS = ("nan", "null", "NA")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a DataFrame supports and a
+    #: list does not; a keyed method takes a column name
+    USES = BodyUses(
+        attributes=frozenset({"iloc", "loc", "values", "columns", "shape",
+                              "ndim", "size", "dtypes", "T"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "prod", "min", "max", "median",
+            "cumsum", "cumprod", "cummax", "cummin", "pct_change",
+            "dropna", "fillna", "rolling", "expanding", "ewm", "shift",
+            "diff", "quantile", "skew", "kurt", "kurtosis", "abs", "clip",
+            "round", "to_numpy", "idxmax", "idxmin", "any", "all", "dot",
+            "nunique", "value_counts", "rank", "sem", "cov", "corr",
+            "isna", "notna", "isnull", "notnull", "astype", "apply",
+            "resample"}),
+        keyed=frozenset({"groupby", "sort_values", "set_index"}),
+        matmul=True, described="a pandas DataFrame")
 
     def detect(self, annotation):
         return _pandas_detect(self, annotation, "DataFrame", "table")
@@ -340,9 +426,7 @@ class PandasDataFrameAdapter:
         import pandas as pd
         if not isinstance(abstract, AbstractTable):
             raise TypeError("pandas.DataFrame carries a table")
-        n = len(next(iter(abstract.columns.values()))) \
-            if abstract.columns else 0
-        index = _default_index(n, options)
+        index = _default_index(abstract.row_count(), options)
         return pd.DataFrame(
             {name: _pandas_column(col, options, index)
              for name, col in abstract.columns.items()},
@@ -362,6 +446,8 @@ def _pandas_column(abstract: AbstractVec, options: dict, index):
     or `pd.NA` (a nullable `Float64` Series). A vector with no
     positions is an empty float Series, the dtype of a float draw."""
     import pandas as pd
+    if element_type(abstract) in ("str", "bool"):
+        return _pandas_typed_column(abstract, options, index)
     if not abstract.values:
         return pd.Series([], index=index, dtype=float)
     spellings = {"nan": lambda: math.nan, "null": lambda: None,
@@ -377,13 +463,76 @@ def _pandas_column(abstract: AbstractVec, options: dict, index):
     return pd.Series(values, index=index)
 
 
-def _vec_from_pandas(series) -> AbstractVec:
+def _pandas_typed_column(abstract: AbstractVec, options: dict, index):
+    """A vector of strings or booleans as a pandas Series on `index`, of
+    the dtype pandas holds such a column in: with nothing missing,
+    pandas' own string dtype or `bool`; a hole held as `nan` (the
+    string dtype, or `object` for booleans), `None` (`object`) or
+    `pd.NA` (`string`, `boolean`); holes of more than one member in an
+    `object` Series. A column of holes only, or of no rows, keeps the
+    dtype of its type."""
+    import pandas as pd
+    element = element_type(abstract)
+    spellings = {"nan": lambda: math.nan, "null": lambda: None,
+                 "NA": lambda: pd.NA}
+    fill = _spelling(options, spellings, "nan", abstract.spelling)
+    per = _per_position(options, spellings, "nan", abstract)
+    values = _missing_to(abstract.values, abstract.missing, fill, per)
+    strings = pd.Series(["s"]).dtype
+    if not abstract.missing:
+        dtype = strings if element == "str" else bool
+    elif per or fill is None:
+        dtype = object
+    elif fill is pd.NA:
+        dtype = "string" if element == "str" else "boolean"
+    else:
+        dtype = strings if element == "str" else object
+    return pd.Series(values, index=index, dtype=dtype)
+
+
+def _vec_from_pandas(series, labels: tuple = ()) -> AbstractVec:
     mask = series.isna().tolist()
     values = tuple(math.nan if m else (v.item() if hasattr(v, "item")
                                        else v)
                    for v, m in zip(series.tolist(), mask))
-    return AbstractVec(values, frozenset(k for k, m in enumerate(mask)
-                                         if m))
+    missing = frozenset(k for k, m in enumerate(mask) if m)
+    return AbstractVec(values, missing, labels=labels,
+                       element=_pandas_element(series.dtype, values, missing))
+
+
+def _pandas_element(dtype, values: tuple, missing: frozenset) -> "str | None":
+    """The element type a pandas column's dtype holds: `bool` for a
+    boolean dtype, `int` for an integer one, `float` for a float one,
+    `str` for a string dtype; for an `object` column, the type every
+    value present has (`str` or `bool`), None when they differ or none
+    is present."""
+    import pandas as pd
+    kind = getattr(dtype, "kind", "O")
+    if kind == "b":
+        return "bool"
+    if kind in "iu":
+        return "int"
+    if kind == "f":
+        return "float"
+    if isinstance(dtype, pd.StringDtype):
+        return "str"
+    present = [v for k, v in enumerate(values) if k not in missing]
+    for name, cls in (("bool", bool), ("str", str)):
+        if present and all(isinstance(v, cls) for v in present):
+            return name
+    return None
+
+
+def _name_labels(index) -> tuple:
+    """The names an index gives its positions, when every label is a
+    distinct string (a Series labelled by column names, as
+    `DataFrame.sum()` returns it); `()` for an index of dates, of
+    positions, or of anything else."""
+    labels = index.tolist()
+    if labels and all(isinstance(v, str) for v in labels) \
+            and len(set(labels)) == len(labels):
+        return tuple(labels)
+    return ()
 
 
 def _pandas_detect(adapter, annotation, cls_name: str, kind: str):
@@ -412,20 +561,27 @@ class PolarsSeriesAdapter:
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a polars Series supports
+    #: and a list does not
+    USES = BodyUses(
+        attributes=frozenset({"shape", "dtype"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "product", "min", "max", "median",
+            "cum_sum", "cum_prod", "cum_max", "cum_min", "pct_change",
+            "drop_nulls", "fill_null", "fill_nan", "shift", "diff",
+            "quantile", "skew", "kurtosis", "abs", "clip", "round",
+            "to_numpy", "to_list", "arg_max", "arg_min", "any", "all",
+            "dot", "n_unique", "unique", "value_counts", "rank", "is_null",
+            "is_not_null", "is_nan", "cast", "len"}),
+        matmul=True, described="a polars Series")
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "Series", "vec")
 
     def realise(self, abstract, options):
-        import polars as pl
         if not isinstance(abstract, AbstractVec):
             raise TypeError("polars.Series carries a vector")
-        values = _polars_values(abstract, options)
-        # a vector of numbers with no value left, or none at all, is
-        # still a float column
-        dtype = pl.Float64 if not values or all(
-            v is None or (isinstance(v, float) and v != v) for v in values) else None
-        return pl.Series(options.get("name", ""), values, dtype=dtype, strict=False)
+        return _polars_series(options.get("name", ""), abstract, options)
 
     def observe(self, obj):
         import polars as pl
@@ -444,6 +600,17 @@ class PolarsDataFrameAdapter:
     SPELLINGS = POLARS_SPELLINGS
     MISSING_MEMBERS = ("null", "nan")
     ABSENCE = ("None",)
+    #: the uses of an unannotated parameter a polars DataFrame supports
+    #: and a list does not; a keyed method takes a column name
+    USES = BodyUses(
+        attributes=frozenset({"columns", "shape", "height", "width",
+                              "schema", "dtypes"}),
+        methods=frozenset({
+            "mean", "std", "var", "sum", "min", "max", "median",
+            "to_numpy", "null_count", "describe", "with_columns", "head",
+            "tail"}),
+        keyed=frozenset({"group_by", "select", "drop", "get_column"}),
+        described="a polars DataFrame")
 
     def detect(self, annotation):
         return _polars_detect(self, annotation, "DataFrame", "table")
@@ -452,9 +619,7 @@ class PolarsDataFrameAdapter:
         import polars as pl
         if not isinstance(abstract, AbstractTable):
             raise TypeError("polars.DataFrame carries a table")
-        return pl.DataFrame({name: pl.Series(name,
-                                             _polars_values(col, options),
-                                             strict=False)
+        return pl.DataFrame({name: _polars_series(name, col, options)
                              for name, col in abstract.columns.items()})
 
     def observe(self, obj):
@@ -465,12 +630,36 @@ class PolarsDataFrameAdapter:
         return NotMine
 
 
+def _polars_series(name: str, abstract: AbstractVec, options: dict):
+    """A vector as a polars Series called `name`: strings as a `String`
+    column and booleans as a `Boolean` one, numbers as the column
+    polars makes of them; a column of numbers with no value left, or
+    of no rows, is still a `Float64` column."""
+    import polars as pl
+    values = _polars_values(abstract, options)
+    element = element_type(abstract)
+    if element == "str":
+        dtype = pl.String
+    elif element == "bool":
+        dtype = pl.Boolean
+    elif not values or all(v is None or (isinstance(v, float) and v != v)
+                           for v in values):
+        dtype = pl.Float64
+    else:
+        dtype = None
+    return pl.Series(name, values, dtype=dtype, strict=False)
+
+
 def _polars_values(abstract: AbstractVec, options: "dict | None" = None
                    ) -> list:
     """A vector's values for a polars Series, a missing position held
-    as `null` (the default) or `NaN`, which polars treats as an
-    ordinary float and mathema reads as missing all the same."""
+    as `null` (the default) or, in a column of numbers, `NaN`, which
+    polars treats as an ordinary float and mathema reads as missing all
+    the same. A string or boolean column holds a hole as `null` only,
+    whatever member it was drawn as."""
     spellings = {"null": lambda: None, "nan": lambda: math.nan}
+    if element_type(abstract) in ("str", "bool"):
+        spellings = {"null": lambda: None}
     fill = _spelling(options or {}, spellings, "null", abstract.spelling)
     values = _missing_to(abstract.values, abstract.missing, fill,
                          _per_position(options or {}, spellings, "null", abstract))
@@ -485,7 +674,22 @@ def _vec_from_polars(series) -> AbstractVec:
     missing = frozenset(k for k, v in enumerate(raw)
                         if v is None or (isinstance(v, float) and v != v))
     values = tuple(math.nan if v is None else v for v in raw)
-    return AbstractVec(values, missing)
+    return AbstractVec(values, missing, element=_polars_element(series.dtype))
+
+
+def _polars_element(dtype) -> "str | None":
+    """The element type a polars dtype holds: `float`, `int`, `bool` or
+    `str`, None for any other dtype."""
+    import polars as pl
+    if dtype == pl.Boolean:
+        return "bool"
+    if dtype == pl.String:
+        return "str"
+    if dtype.is_float():
+        return "float"
+    if dtype.is_integer():
+        return "int"
+    return None
 
 
 def _polars_detect(adapter, annotation, cls_name: str, kind: str):

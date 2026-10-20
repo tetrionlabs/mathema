@@ -102,13 +102,46 @@ sampling note says what they were realised as (`as pandas.Series`).
 When the body uses a parameter as a vector, a matrix or a table (a
 method such as `.mean()` or `.std()`, `np.mean(x)`, `.T`, `@`,
 indexing, a column read by name) but the signature names no runtime
-type, how it is drawn depends on the use. A use only a numpy array
-supports (`.T`, `@`, `.shape`, a numpy function called on it), in a
-module that imports numpy, draws it as an ndarray, and the record says
-so ("the body uses it as a numpy array"). Any other such use draws it
-as a list, and in a module that imports numpy, pandas, polars or a
-library with a registered adapter the record names the runtime type
-to annotate:
+type, how it is drawn depends on the use. Each runtime type adapter
+declares the uses its type supports and a list does not: attributes
+(`.iloc`, `.columns`, `.shape`), methods (`.mean()`, `.dropna()`),
+methods called with a column name (`df.groupby("k")`), and `@`. When
+every such use in the body is one the types of exactly one library the
+module imports support, the parameter is drawn as that library's type,
+and the record says so ("the body uses it as a pandas DataFrame"). A
+library's Series and DataFrame both supporting the uses, the body's
+usage decides: a column read or a keyed method makes it the DataFrame,
+a vector use the Series. A use no imported library's type supports
+draws it as a list, and so do uses the types of two imported libraries
+both support; the record then names the runtime type to annotate, and
+in the second case each of them:
+
+<!-- example: rt-promote run inline requires=polars -->
+```python
+import numpy as np
+import pandas as pd
+import mathema
+
+
+def first_row_share(df):
+    totals = df.groupby("k")["v"].sum()
+    first = df.iloc[0]
+    return first["v"] / totals[first["k"]]
+
+
+def spread(xs):
+    return xs.max() - xs.min()
+
+
+mathema.analyze(first_row_share).runtime_types["df"][0].evidence  # 'the body uses it as a pandas DataFrame'
+mathema.analyze(spread).runtime_hints["xs"]["text"]  # 'xs is used as a vector; this module imports pandas and numpy, whose types both support that use: to sample it as one, annotate: xs: pd.Series or xs: np.ndarray'
+```
+
+In a module that imports pandas alone, `spread`'s `xs` is drawn as a
+pandas Series; with numpy alone, as an ndarray. When the body's uses
+are ones a list also serves (indexing, `np.mean(x)`), or ones no
+imported library's type supports, the hint names the runtime type of
+the library the module imports:
 
 <!-- illustration -->
 ```text
@@ -145,9 +178,9 @@ claim (`for b in L[...]`). A claim that passes an instance itself
 | `list` (and `tuple`) | vector, matrix (nested lists), table (dict of lists) | `None`, NaN | a matrix is drawn as nested lists up to 64 per axis |
 | `numpy.ndarray` | vector (1-D), matrix (2-D) | NaN | |
 | `pandas.Series` | vector | NaN, `None`, `pd.NA` | a business-day index from 2020-01-01 |
-| `pandas.DataFrame` | table | NaN, `None`, `pd.NA` | the Series index |
+| `pandas.DataFrame` | table | NaN, `None`, `pd.NA` | the Series index; each column in the dtype of its type ([tables](#tables)) |
 | `polars.Series` | vector | null, NaN | |
-| `polars.DataFrame` | table | null, NaN | |
+| `polars.DataFrame` | table | null, NaN | each column in the dtype of its type; a hole in a string or boolean column is null |
 
 A missing position is a hole, one concept in mathema whatever a library
 calls it: every spelling in the table reads back as `missing` when a
@@ -207,11 +240,12 @@ for returns in [-1e6, 1e6]^n, c in [-2, 2], dot(f(returns, c), returns) ~= c * n
 ```
 
 A table parameter (a `pandas.DataFrame` or `polars.DataFrame`) is drawn
-with one column per name the claim or the body reads, and a claim reads
-a column as a vector, by attribute or by item: `df.returns`,
-`df["returns"]`. A returned DataFrame compares with another column by
-column, and its own columns read the same way (`f(df)["a"]`); the
-arithmetic of a whole table (`f(df) - 1`) is not claim syntax yet.
+with one column per name the claim or the body reads, or the claim
+binds ([tables](#tables)), and a claim reads a column as a vector, by
+attribute or by item: `df.returns`, `df["returns"]`. A returned
+DataFrame compares with another column by column, and its own columns
+read the same way (`f(df)["a"]`); the arithmetic of a whole table
+(`f(df) - 1`) is not claim syntax yet.
 
 <!-- example: rt-frame run requires=pandas -->
 ```python
@@ -240,8 +274,103 @@ f(df) == df   # falsified
 ```
 
 The derive route reads a Series or array method through its
-definition row (next section), and a column of a DataFrame as a vector
-of its own, whose methods read through the Series rows.
+definition row (the section after next), and a column of a DataFrame as
+a vector of its own, whose methods read through the Series rows.
+
+## Tables
+
+A table is named columns of one length, its row count `n`, which it
+shares with every other parameter whose domain names `n`, as vectors
+do: `for df in [0, 1]^n, w in [0, 1]^n` draws `w` as long as `df` has
+rows. Its columns are the ones the claim or the body reads (`df.qty`,
+`df["qty"]`) and the ones the claim binds, and a column's binding says
+what it holds:
+
+| binding | the column holds |
+|---|---|
+| `df.fee in [0, 10]^n` | numbers |
+| `df.qty in [0, 100]^n subset Z` | integers |
+| `df.side in {"buy", "sell"}^n` | strings |
+| `df.open in {True, False}^n` | booleans |
+
+A column with no binding of its own is drawn from the table's domain
+(`for df in [0, 1]^n`), or from the reals. Every column holds the holes
+the table's type admits; `\ {missing}` on a column's binding excludes
+them from that column alone, and `\ {nan}` excludes one member. pandas
+receives each column in the dtype pandas holds such a column in: its
+string dtype, `bool`, `int64` or `float64`, a string or boolean column
+with a hole spelled `None` as `object`, and a hole spelled `NA` in the
+nullable `string`, `boolean` or `Float64`. polars receives `String`,
+`Boolean`, `Int64` or `Float64`, a hole in a string or boolean column
+as null. A table the function returns is read back with the same names
+and types, and a string or boolean column compares element by element
+like any other.
+
+<!-- example: rt-table run requires=polars -->
+```python
+import pandas as pd
+import polars as pl
+
+
+def totals(df: pd.DataFrame):
+    return df.sum()
+
+
+def totals_polars(df: pl.DataFrame):
+    return df.sum()
+
+
+def signed_qty(df: pd.DataFrame):
+    return df.qty.where(df.side == "buy", -df.qty)
+```
+
+A buy keeps its quantity and a sell negates it, so the size of each
+signed quantity is the quantity, and the signed quantity is not:
+
+<!-- example: rt-table verdicts fn=signed_qty requires=pandas -->
+```
+for df.side in {"buy", "sell"}^n \ {missing}, df.qty in [0, 100]^n subset Z \ {missing}, abs(f(df)) == df.qty   # holds
+for df.side in {"buy", "sell"}^n \ {missing}, df.qty in [0, 100]^n subset Z \ {missing}, f(df) == df.qty   # falsified
+```
+
+A reduction answers one value per column, and a claim reads the value
+for a column by its name. pandas answers `df.sum()` with a Series
+labelled by the column names, read back with its labels, so
+`f(df)["qty"]` is the sum of column `qty` whatever the table's other
+columns and their order; polars answers with a one-row DataFrame, whose
+column `qty` holds the sum. A position reads a position: the columns
+here are drawn `qty` then `fee`, so `f(df)[0]` is the sum of `qty` and
+`f(df)[1]` the sum of `fee`.
+
+<!-- example: rt-table verdicts fn=totals requires=pandas -->
+```
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["qty"] ~= sum(df.qty)   # holds
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["fee"] ~= sum(df.fee)   # holds
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)[1] ~= sum(df.qty)   # falsified
+```
+
+<!-- example: rt-table verdicts fn=totals_polars requires=polars -->
+```
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["qty"] ~= sum(df.qty)   # holds
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["fee"] ~= sum(df.qty)   # falsified
+```
+
+Code that reads a table without knowing its library uses the neutral
+operations in `mathema.runtime_types`: `column_names(t)`,
+`column_types(t)` (`{"qty": "int", "side": "str"}`, each one of
+`float`, `int`, `bool` and `str`), `column(t, name)` and
+`row_count(t)`. Each reads a pandas or polars DataFrame, a table a
+registered adapter carries, or the plain dict of columns a draw is.
+
+<!-- example: rt-table run inline requires=polars -->
+```python
+from mathema.runtime_types import column_names, column_types, row_count
+
+frame = pl.DataFrame({"qty": [3, 5], "side": ["buy", None]})
+column_names(frame)  # ('qty', 'side')
+column_types(frame)  # {'qty': 'int', 'side': 'str'}
+row_count(pd.DataFrame({"qty": [3, 5, 8]}))  # 3
+```
 
 ## Proofs on pandas and numpy code
 
@@ -459,10 +588,18 @@ source text as a string) and returns a `Detection` or None;
 `realise(abstract, options)`, which builds the object passed to the
 function from an `AbstractVec`, `AbstractMat` or `AbstractTable`; and
 `observe(obj)`, which turns a returned object into an abstract value or
-a plain number, or returns `NotMine`. An adapter may also state
+a plain number, or returns `NotMine`. An adapter carrying `table`
+realises each column of the `AbstractTable` in the type
+`element_type(column)` names and observes a table it is handed back as
+an `AbstractTable` (see [extending
+mathema](extending.md#runtime-type-adapters)). An adapter may also state
 `ALIASES`, the module aliases its library is usually imported under
 (`{"pd": "pandas"}` for the pandas adapters): an annotation's source
 text is read through them, and the hint for an undeclared parameter
 names the adapter's runtime type in a module that imports its library.
+It may state `USES`, a `mathema.runtime_types.BodyUses`, the body uses
+its type supports and a list does not, by which an unannotated
+parameter is drawn as its type ([The hint](#the-hint);
+[extending mathema](extending.md#runtime-type-adapters)).
 A built-in adapter wins a name clash, and an adapter that fails to
 load is skipped with a warning.

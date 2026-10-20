@@ -33,6 +33,102 @@ Discovery is fail-soft everywhere. A provider that raises on import is
 skipped with a warning, and mathema falls back to its own behaviour.
 Your extension being broken or absent never crashes someone's run.
 
+## Runtime type adapters
+
+An adapter registered under `mathema.runtime_types` follows the
+`mathema.runtime_types.RuntimeTypeAdapter` protocol, described with
+its `name`, `kinds`, `requires`, `detect`, `realise` and `observe` in
+[runtime types](runtime-types.md#adding-a-runtime-type). Besides
+`ALIASES`, it may state `USES`, a `BodyUses` naming the uses of a
+parameter its type supports and a list does not:
+
+```python
+from mathema.runtime_types import BodyUses
+
+
+class TorchTensorAdapter:
+    name = "torch.Tensor"
+    kinds = frozenset({"vec", "mat"})
+    requires = ("torch",)
+    ALIASES = {"th": "torch"}
+    USES = BodyUses(
+        attributes=frozenset({"T", "shape", "device"}),
+        methods=frozenset({"mean", "sum", "numel", "detach"}),
+        matmul=True,
+        described="a torch tensor")
+    ...
+```
+
+`attributes` are names read off the parameter (`x.shape`), `methods`
+names called on it (`x.mean()`), `keyed` methods called with a column
+name as the first argument (`df.groupby("k")`), and `matmul` says the
+type can be an operand of `@`. `described` is how the record names the
+type: `the body uses it as a torch tensor`.
+
+An unannotated parameter is drawn as the adapter's type when every use
+the body makes of it that says anything about a runtime type is one
+the adapter declares, the function's module imports the adapter's
+library, and no other imported library's adapter supports the same
+uses; with two such libraries it is drawn as a list and the hint names
+both. Declare only names your type has and a list lacks: a name a list
+also has (`index`, `copy`, `sort`) would draw a list-using function as
+your type. An adapter without `USES` is never chosen this way.
+
+An adapter whose `kinds` include `table` realises mathema's typed
+table: a Spark, Arrow or database frame in a package needs nothing in
+core beyond the adapter. `realise` receives an `AbstractTable`, named
+columns of one length in order (`column_names()`, `row_count()`), each
+an `AbstractVec` whose `values` hold the column's cells,
+`missing` the positions holding a hole, and `element_type(column)` its
+type, one of `float`, `int`, `bool` and `str` (`column_types()` gives
+them all). It builds the frame with each column in the library's type
+for that element type, and a hole as the library holds one (a hole the
+library cannot hold as drawn, NaN in a string column, say, as its
+null). `observe` turns a returned frame back into an `AbstractTable`,
+stating each column's `element` from the library's type, so a column
+of holes only keeps its type; a one-dimensional result indexed by
+column names (what a reduction of a table returns) is an `AbstractVec`
+with those names as its `labels`, which a claim reads by name:
+
+```python
+from mathema.runtime_types import (AbstractTable, AbstractVec, NotMine,
+                                   element_type)
+
+_TYPES = {"float": "double", "int": "bigint", "bool": "boolean",
+          "str": "string"}
+
+
+class SparkFrameAdapter:
+    name = "pyspark.sql.DataFrame"
+    kinds = frozenset({"table"})
+    requires = ("pyspark",)
+
+    def detect(self, annotation):
+        ...
+
+    def realise(self, table, options):
+        schema = ", ".join(f"{name} {_TYPES[element_type(col)]}"
+                           for name, col in table.columns.items())
+        rows = [tuple(None if k in col.missing else col.values[k]
+                      for col in table.columns.values())
+                for k in range(table.row_count())]
+        return self.spark.createDataFrame(rows, schema)
+
+    def observe(self, obj):
+        if type(obj).__name__ != "DataFrame":
+            return NotMine
+        ...
+        return AbstractTable({name: AbstractVec(values, missing,
+                                                element=element)
+                              for name, (values, missing, element)
+                              in columns.items()})
+```
+
+Code inside mathema reads a table through `mathema.runtime_types`
+(`column_names`, `column_types`, `column`, `row_count`, `as_table`),
+which goes through `observe`, so a registered adapter's frames read
+exactly as pandas and polars ones do.
+
 ## Target resolvers
 
 A fourth group, `mathema.target_resolvers`, turns a tagged

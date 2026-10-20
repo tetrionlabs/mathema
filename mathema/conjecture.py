@@ -42,7 +42,7 @@ from dataclasses import replace as _dc_replace
 
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import effective_facts, hydrated
+from .analysis import SourceUnavailable, effective_facts, hydrated
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -583,16 +583,11 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
     if region_row_kind(base):
         return True
     call = f"f({', '.join(facts.params)})"
-    form = _DERIVATIVE_FAMILY_FORMS.get(base)
-    if form is not None:
-        order, relation = form
+    if base in _DERIVATIVE_FAMILY_FORMS:
         param = cj.name[len(base):]
         if not (param.startswith("[") and param.endswith("]")):
             return False
-        param = param[1:-1]
-        expected = f"d({call}, {', '.join([param] * order)})"
-        return (cj.relation == relation and _squash(cj.rhs) == "0"
-                and _squash(cj.lhs) == _squash(expected))
+        return _states_derivative_form(cj, base, param[1:-1], facts)
     if base in _SELF_AGREEMENT_FAMILIES:
         return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
                 and _squash(cj.rhs) == _squash(call))
@@ -605,6 +600,82 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                 and (bound == _ACCURATE or bound is accurate))
     return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
                                    OutputPredicateFamily))
+
+
+def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
+    """Intent:
+        Whether the claim states the derivative-sign fact the family
+        `base` adjudicates in `param`: `d(f(<params>), param) >= 0` for
+        `monotonic_increasing`, `d(f(<params>), param, param) == 0` for
+        `affine`, and the rest of `_DERIVATIVE_FAMILY_FORMS`, with the
+        call naming every parameter of f in order.
+    """
+    order, relation = _DERIVATIVE_FAMILY_FORMS[base]
+    call = f"f({', '.join(facts.params)})"
+    expected = f"d({call}, {', '.join([param] * order)})"
+    return (cj.relation == relation and _squash(cj.rhs) == "0"
+            and _squash(cj.lhs) == _squash(expected))
+
+
+def _derivative_family_by_statement(cj, fn, facts) -> "tuple | None":
+    """Intent:
+        The derivative-sign family whose statement the claim writes, for
+        a claim under any name: `(family, family_claim_name)`, e.g. the
+        `monotonic_increasing` family and `monotonic_increasing[x]` for
+        `d(f(x), x) >= 0`. None when the statement is no family's, when
+        the claim binds its own `d` or `f`, carries a tolerance, chains
+        comparisons or states a negation, or when the family declines
+        the function.
+    """
+    if cj.links or cj.negated or cj.tolerance is not None \
+            or {"d", "f"} & set(cj.funcs or {}):
+        return None
+    for base in _DERIVATIVE_FAMILY_FORMS:
+        for param in facts.params:
+            if not _states_derivative_form(cj, base, param, facts):
+                continue
+            family = families.families().get(base)
+            name = f"{base}[{param}]"
+            if family is not None and family.can_handle(fn, facts, name):
+                return family, name
+    return None
+
+
+def _derivative_family_decides(cj, fn, facts) -> bool:
+    """Intent:
+        Whether a derivative-sign family's probe decides the claim: the
+        claim names that family and states its statement, or states it
+        under another name (`_derivative_family_by_statement`), and the
+        parameter the derivative is taken in is a real scalar, the only
+        kind that family's probe draws.
+    """
+    named = _claim_family(cj, fn, facts)
+    if named is not None and families.claim_base_name(cj.name) in _DERIVATIVE_FAMILY_FORMS:
+        name = cj.name
+    else:
+        found = _derivative_family_by_statement(cj, fn, facts)
+        if found is None:
+            return False
+        name = found[1]
+    if "[" not in name or not name.endswith("]"):
+        return False
+    param = name[name.index("[") + 1:-1]
+    return facts.param_kinds.get(param) == "scalar"
+
+
+def _how_the_family_checks(family_name: str) -> str:
+    """Intent:
+        The sentence a claim decided by a derivative-sign family's probe
+        carries: which family check decided it and how that check reads
+        the derivative (`as convex[x] does, with the second derivative
+        estimated by finite differences`).
+    """
+    base = families.claim_base_name(family_name)
+    order, _ = _DERIVATIVE_FAMILY_FORMS[base]
+    param = family_name[len(base) + 1:-1]
+    how = (f"comparing f at ordered pairs of {param}" if order == 1 else
+           "with the second derivative estimated by finite differences")
+    return f"the probe decided it as {family_name} does, {how}"
 
 
 def _lengths_scope(cj, family, facts):
@@ -827,6 +898,25 @@ def _path_bound(p: str, path: str, fields: dict, cj_domain: dict):
     return None if isinstance(node, (dict, list)) else node
 
 
+def _categorical_levels(bound) -> "frozenset | None":
+    """Intent:
+        The levels of a categorical field: its bound as a finite set of
+        strings (a set, or a domain whose one piece is that set and
+        which admits no missing value), else None.
+    """
+    from .domain import Domain
+    if isinstance(bound, Domain):
+        if bound.dims or bound.excluded or len(bound.pieces) != 1 \
+                or not isinstance(bound.pieces[0], frozenset) \
+                or getattr(bound, "absent", False) or getattr(bound, "members", ()):
+            return None
+        bound = bound.pieces[0]
+    if isinstance(bound, frozenset) and bound \
+            and all(isinstance(v, str) for v in bound):
+        return bound
+    return None
+
+
 def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
     """Intent:
         `(field_domain, reason)`: the `p.field` and `p.field.len`
@@ -834,7 +924,10 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
         the fields the body reads, or `(None, reason)` naming the first
         parameter or field with no symbolic reading: a parameter whose
         language states no fields, or a field read as a value that is
-        not a number (a categorical, text read as text).
+        not a number (text read as text, a categorical whose levels
+        neither the claim nor the language states). A categorical field
+        whose levels are stated (`_categorical_levels`) is bound to that
+        set of strings, for the derive route to split on.
     """
     from .domain import LanguageRef
     from .symbolic._base import field_reads
@@ -853,6 +946,10 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
                           "running the code")
         for f in plain:
             bound = _path_bound(p, f, schema[p], cj_domain)
+            levels = _categorical_levels(bound)
+            if levels is not None:
+                out[f"{p}.{f}"] = levels
+                continue
             if not _is_numeric_bound(bound):
                 return None, (f"derive cannot read the function's field "
                               f"{p}.{f}, which is not a number, so the "
@@ -865,6 +962,56 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
                               "is not a text field")
             out[f"{p}.{f}.len"] = _length_domain(bound)
     return out, ""
+
+
+#: the most cases a split on categorical fields' levels proves one by one
+_MAX_LEVEL_CASES = 16
+
+
+def _level_split_proof(levels: dict, prove_case):
+    """Intent:
+        A proof by cases over categorical fields: `levels` maps each
+        field to its finite set of levels, and `prove_case(case)` proves
+        the claim with each field bound to one level. Proven when every
+        combination is proven by the same mechanism (equal meta), the
+        sketch naming each case; otherwise undecided, naming the first
+        case that is not proven, or the count past `_MAX_LEVEL_CASES`.
+    """
+    import itertools
+
+    from .symbolic._proof_support import ProofResult
+    keys = sorted(levels)
+    combos = list(itertools.product(*(sorted(levels[k]) for k in keys)))
+    split = " and ".join(keys)
+    if len(combos) > _MAX_LEVEL_CASES:
+        return ProofResult(
+            "undecided",
+            sketch=f"derive would split on {split} into {len(combos)} cases, "
+                   f"more than the {_MAX_LEVEL_CASES} it proves one by one")
+    proved = []
+    for combo in combos:
+        case = {k: frozenset({v}) for k, v in zip(keys, combo)}
+        named = ", ".join(f"{k} = {v!r}" for k, v in zip(keys, combo))
+        result = prove_case(case)
+        if result.status != "proven":
+            return ProofResult(
+                "undecided",
+                sketch=f"split on {split}: the case {named} is not proven "
+                       f"({result.status}: {result.sketch})")
+        proved.append((named, result))
+    first_meta = dict(proved[0][1].meta or {})
+    if any(dict(r.meta or {}) != first_meta for _n, r in proved[1:]):
+        return ProofResult(
+            "undecided",
+            sketch=f"split on {split}: every case is proven, by different "
+                   f"mechanisms, so no one route states the proof")
+    quantifiers = {r.quantifier for _n, r in proved}
+    return ProofResult(
+        "proven",
+        sketch=f"split on {split} over its levels: "
+               + "; ".join(f"{n}: {r.sketch}" for n, r in proved),
+        quantifier=quantifiers.pop() if len(quantifiers) == 1 else None,
+        meta=first_meta)
 
 
 def _ref_resolves(ref, resolve) -> bool:
@@ -3376,7 +3523,12 @@ def deliberate_raise(exc: BaseException, fn) -> bool:
 
 
 def _raise_lines(fn) -> frozenset:
-    """The source lines of the `raise` statements in fn's own body."""
+    """The source lines of the `raise` statements in fn's own body; none
+    for a callable standing for a function another frontend read
+    (`analysis.foreign_body`), whose Python source is a wrapper's."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return frozenset()
     try:
         lines, start = inspect.getsourcelines(fn)
         import textwrap
@@ -3930,10 +4082,13 @@ def _project_root(fn) -> str:
     """Intent:
         The project a function belongs to: the nearest directory above
         its source file holding a pyproject.toml, else the working
-        directory.
+        directory, as for a callable standing for a function another
+        frontend read (`analysis.foreign_body`).
     """
+    from .analysis import foreign_body
     try:
-        source = inspect.getsourcefile(fn) or ""
+        source = ("" if foreign_body(fn)
+                  else inspect.getsourcefile(fn) or "")
     except (TypeError, OSError):
         source = ""
     here = os.path.dirname(os.path.abspath(source)) if source else ""
@@ -4340,7 +4495,8 @@ def _with_pins(fn, pins: dict):
             given = sig.bind_partial(*a, **k).arguments
         except TypeError:
             given = {}
-        return fn(*a, **{**{p: v for p, v in pins.items() if p not in given}, **k})
+        return _exits.call(fn, *a, **{**{p: v for p, v in pins.items() if p not in given},
+                                      **k})
     return call
 
 
@@ -4945,9 +5101,19 @@ def _effective_facts(fn, facts=None):
         else `analysis.effective_facts(fn)` (the callable's injected
         `__mathema_facts__` when it carries them, else analysis of its
         source). Facts carrying a KOINE document and no syntax tree are
-        read through the document either way.
+        read through the document either way. A callable with neither
+        (a builtin, a function defined through `exec` or `python -c`, a
+        method a dataclass generates) gets the documentation-only facts
+        `mathema.check` reads it by, its parameter kinds taken from its
+        signature, so both entries adjudicate it alike.
     """
-    return hydrated(facts) if facts is not None else effective_facts(fn)
+    if facts is not None:
+        return hydrated(facts)
+    try:
+        return effective_facts(fn)
+    except SourceUnavailable:
+        from . import _doc_only_facts
+        return _doc_only_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):
@@ -5120,12 +5286,12 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn):
-        out = _check_conjectures(
-            fn, values, domain=domain, trials=trials,
+        out = _around_failing_languages(lambda claims: _check_conjectures(
+            fn, claims, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
             known_premises=known_premises,
             float_companions=float_companions,
-            pseudo_infinity=pseudo_infinity) if values else []
+            pseudo_infinity=pseudo_infinity), values) if values else []
         for p in out:
             _policy.note_draws(p.name, p.n,
                                ((p.meta or {}).get("mathema.missing") or {}).get("origin"))
@@ -5184,6 +5350,79 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
             if steps and not (p.note or "").endswith(steps[-1]):
                 p.note = "\n".join([p.note or "", *steps]).lstrip("\n")
         return out
+
+
+#: the claim the innermost running `_check_conjectures` is adjudicating,
+#: as a one-key holder each `_around_failing_languages` call sets
+_ADJUDICATING: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_adjudicating", default=None)
+
+#: the hooks of the `languages.Language` protocol a language package
+#: implements
+_LANGUAGE_HOOKS = frozenset({"contains", "explain", "sample", "members",
+                             "hazards", "outside", "shrink", "fields",
+                             "render", "to_json"})
+
+
+def _language_hook_failure(exc: BaseException) -> "tuple | None":
+    """Intent:
+        `(language name, hook)` when `exc` was raised inside a hook of
+        a language (a frame of its traceback runs one of the protocol's
+        hooks on an object that satisfies the protocol), the outermost
+        such hook named; None for any other exception.
+    """
+    from .languages import language_problems
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        if frame.f_code.co_name in _LANGUAGE_HOOKS:
+            owner = frame.f_locals.get("self")
+            if owner is not None and not language_problems(owner):
+                return owner.name, frame.f_code.co_name
+        tb = tb.tb_next
+    return None
+
+
+def _around_failing_languages(run, claims: list) -> list:
+    """Intent:
+        `run(claims)`, the rows of the claims; when a language one claim
+        ranges over raises from one of its hooks, that claim's row is
+        `skipped` with the language, the hook and the exception named,
+        and the other claims are adjudicated again without it, so one
+        broken language never ends the check.
+
+    Raises:
+        TimeoutError: as `run` does.
+        Exception: any exception `run` raises that no language hook
+            raised, or that no claim of `claims` was being adjudicated
+            when it was raised.
+    """
+    failed: list = []
+    remaining = list(claims)
+    while True:
+        holder: dict = {"cj": None}
+        token = _ADJUDICATING.set(holder)
+        try:
+            return run(remaining) + failed if remaining else failed
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            hook = _language_hook_failure(exc)
+            culprit = next((c for c in remaining if c is holder["cj"]), None)
+            if hook is None or culprit is None:
+                raise
+            name, where = hook
+            failed.append(Probe(
+                culprit.name,
+                statement_text(culprit.relation, culprit.lhs, culprit.rhs),
+                "skipped", route=None,
+                note=(f"L[{name}] raised {type(exc).__name__} in its "
+                      f"{where}(): {exc}; the claim cannot be evaluated "
+                      f"over that language"),
+                meta={"mathema.surface": culprit.source}))
+            remaining.remove(culprit)
+        finally:
+            _ADJUDICATING.reset(token)
 
 
 def _unrepeatable(row, witness: str):
@@ -5567,8 +5806,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        if [c.name for c in conjectures].count(name) > 1}
     overflow_links = overflow_safe_links(conjectures)
     from .policy import _CLAIM as _policy_claim
+    adjudicating = _ADJUDICATING.get()
     for cj in ordered:
         _policy_claim.set(cj.name)
+        if adjudicating is not None:
+            adjudicating["cj"] = cj
         if overflow_links and not cj.overflow_safe \
                 and "is_defined" in (region_row_kind(cj.name),
                                      cj.relation):
@@ -5655,6 +5897,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # with the reason in the sketch, never mis-adjudicated or
         # reported as an "unresolved bound function"
         unsupported = routes.unsupported_forms(cj.route, cj)
+        if unsupported == ["d"] and cj.route == "probe" \
+                and _derivative_family_decides(cj, fn, facts):
+            # a derivative-sign statement the probe decides with the
+            # family's own technique
+            unsupported = []
         if unsupported:
             out.append(_stamped(Probe(
                 cj.name, statement, "skipped", route=None, note=note,
@@ -7317,8 +7564,9 @@ def _table_columns(param: str, cj, facts) -> list:
     """Intent:
         The column names a table parameter is drawn with: every column
         the claim (statement and premises) or the function body reads
-        as `param.name` or `param["name"]`, in the order first met, or
-        `["a", "b"]` when nothing names one.
+        as `param.name` or `param["name"]`, in the order first met,
+        then every column the claim binds (`for param.name in ...`),
+        or `["a", "b"]` when nothing names one.
     """
     trees = []
     for src in _claim_sides(cj) + [a for a in (cj.assuming or "",) if a]:
@@ -7348,6 +7596,12 @@ def _table_columns(param: str, cj, facts) -> list:
                 name = node.slice.value
             if name is not None and name not in found:
                 found.append(name)
+    for key in getattr(cj, "domain", None) or {}:
+        head, dot, name = str(key).partition(".")
+        if head == param and dot and name.isidentifier() \
+                and not name.startswith("_") \
+                and name not in _TABLE_ATTRIBUTES and name not in found:
+            found.append(name)
     return found or ["a", "b"]
 
 
@@ -8068,11 +8322,13 @@ def _admitted_container_points(ctx, facts) -> tuple:
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
             (length,) = _floor.sizes(bound, rng, (3, 3))
+            columns = _table_columns(p, ctx.cj, facts)
             base = {c: [_synth("float", rng,
                                _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))
                         for _ in range(length)]
-                    for c in _table_columns(p, ctx.cj, facts)}
-            floor = _floor.table_floor(holes, absent=absent)
+                    for c in columns}
+            floor = _floor.table_floor(holes, absent=absent, column_holes=_column_holes(
+                holes, {c: (ctx.cj_domain or {}).get(f"{p}.{c}") for c in columns}))
         elif len(dims) >= 2:
             square = len(set(dims[:2])) == 1
             n_rows, n_cols = _floor.sizes(bound, rng, (2, 2) if square else (2, 3), 2)
@@ -8121,11 +8377,12 @@ def _call_by_name(fn, point: dict, extra: "dict | None" = None):
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
-        return fn(*point.values(), **rest)
+        return _exits.call(fn, *point.values(), **rest)
     positional = [p for p, prm in params.items()
                   if prm.kind is inspect.Parameter.POSITIONAL_ONLY and p in point]
-    return fn(*[point[p] for p in positional],
-              **{p: v for p, v in point.items() if p not in positional}, **rest)
+    return _exits.call(fn, *[point[p] for p in positional],
+                       **{p: v for p, v in point.items() if p not in positional},
+                       **rest)
 
 
 def _refill_caller(fn_call, pins: "dict | None" = None):
@@ -8265,7 +8522,9 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
         floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
     else:
         from .probing import sequence_corners
-        floor = _floor.table_floor(holes, absent=absent)
+        column_holes = _column_holes(holes, column_bounds)
+        floor = _floor.table_floor(holes, absent=absent,
+                                   column_holes=column_holes)
         # each column meets the magnitude corners of the completed
         # element range, after the degenerate tables
         # a column the claim binds (`for df.r in [0, 1]^n`) meets the
@@ -8275,7 +8534,27 @@ def _container_draws(p: str, kind: str, bound, record, resolution: dict,
                              reach=reach),
             {c: sequence_corners(_column_bound(b, None), reach=reach)
              for c, b in (column_bounds or {}).items()})
+        return _floor.ContainerDraws(form, floor, holes, column_holes)
     return _floor.ContainerDraws(form, floor, holes)
+
+
+def _column_holes(holes: list, column_bounds: "dict | None") -> dict:
+    """Intent:
+        `{column: holes}` for each table column whose binding excludes
+        some of the table's `holes`: the holes it still admits. A
+        binding excluding the class (`\\ {missing}`) admits none, one
+        excluding a member (`\\ {nan}`) every other.
+    """
+    from .domain import MISSING, member, member_of
+    out: dict = {}
+    for c, b in (column_bounds or {}).items():
+        excluded = getattr(b, "excluded", None) or frozenset()
+        kept = [h for h in holes
+                if MISSING not in excluded
+                and member(member_of(h) or "") not in excluded]
+        if len(kept) < len(holes):
+            out[c] = kept
+    return out
 
 
 def _asks_missing(cj) -> bool:
@@ -8817,7 +9096,9 @@ def _derive_line_coverage(fn, facts, domain):
     whole body') when there are no branches, no domain restriction, or
     the branch analysis cannot resolve every pruned branch to lines, so
     the derive coverage stays all-or-nothing there rather than
-    under-counting on a partial analysis. This is provenance for the
+    under-counting on a partial analysis, and for a callable standing
+    for a function another frontend read, whose lines are not in a
+    Python file (`analysis.foreign_body`). This is provenance for the
     implementation-coverage pass, never a verdict."""
     tree = getattr(facts, "tree", None)
     if tree is None or not domain:
@@ -8848,6 +9129,9 @@ def _derive_line_coverage(fn, facts, domain):
     # facts.tree's line numbers are 1-based within the function's own
     # source block; map them to absolute FILE lines so the coverage pass
     # (which works in file lines) can intersect them.
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         first_line = inspect.getsourcelines(fn)[1]
     except (OSError, TypeError):
@@ -9902,19 +10186,29 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # domain, a claim-level `o.field` binding overriding, and the
         # ordinary prover runs
         from .symbolic._base import row_fields
-        # each row-bound parameter expands into exactly the field keys
-        # bounded above, whatever class its rows are
-        with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
-                         for p in language_params}):
-            exact_law = True
-            proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
-                              exact_literal_text(cj.rhs), cj.relation,
-                              domain={**row_domain, **cj_domain},
-                              tolerance=cj.tolerance,
-                              extensive=extensive, funcs=bound_funcs or None,
-                              assumption=assumption,
-                              assume_defined=ctx.assume_defined,
-                              exclude_own_guards=ctx.exclude_own_guards)
+        # a categorical field is not a symbol: the proof is split on its
+        # levels, one case per combination, each case binding the field
+        # to its one level so the branches reading it settle
+        levels = {k: v for k, v in row_domain.items()
+                  if _categorical_levels(v) is not None}
+        numeric = {k: v for k, v in row_domain.items() if k not in levels}
+
+        def prove_case(case: dict):
+            # each row-bound parameter expands into exactly the numeric
+            # field keys bounded above, whatever class its rows are
+            with row_fields({p: [k for k in numeric if k.startswith(f"{p}.")]
+                             for p in language_params}):
+                return try_prove(fn, facts, exact_literal_text(cj.lhs),
+                                 exact_literal_text(cj.rhs), cj.relation,
+                                 domain={**numeric, **cj_domain, **case},
+                                 tolerance=cj.tolerance,
+                                 extensive=extensive, funcs=bound_funcs or None,
+                                 assumption=assumption,
+                                 assume_defined=ctx.assume_defined,
+                                 exclude_own_guards=ctx.exclude_own_guards)
+        exact_law = True
+        proof = (prove_case({}) if not levels
+                 else _level_split_proof(levels, prove_case))
     elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts
@@ -10806,13 +11100,23 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # family-owned name (the orchestration loop resolves the family
     # for every concrete route). Calls fn directly, not through the
     # compiled lhs/rhs eval() the generic loop below needs.
-    algo_route = family.routes().get("probe:algorithmic") if family is not None else None
+    # A claim under any name whose statement is a derivative-sign
+    # family's (`d(f(x), x) >= 0`) reaches that family's technique, run
+    # as the family's own claim (`monotonic_increasing[x]`).
+    algo_family, family_cj, by_statement = family, cj, None
+    if family is None:
+        by_statement = _derivative_family_by_statement(cj, fn, facts)
+        if by_statement is not None:
+            algo_family = by_statement[0]
+            family_cj = _dc_replace(cj, name=by_statement[1])
+    algo_route = (algo_family.routes().get("probe:algorithmic")
+                  if algo_family is not None else None)
     if algo_route is not None:
         # the probe is registered under "probe:algorithmic", but a member
         # may name a more specific mechanism to stamp (fuzz + shrink ->
         # "probe:minimal_example"); the stamped subroute has its own rung
         # on EVIDENCE_LADDER.
-        probe_route = getattr(family, "probe_route", "probe:algorithmic")
+        probe_route = getattr(algo_family, "probe_route", "probe:algorithmic")
         setup = sampling()
         from . import _premises
         from .runtime_types import calling
@@ -10826,7 +11130,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
-                facts, cj, cj_domain, setup.rng, setup.budget)
+                facts, family_cj, cj_domain, setup.rng, setup.budget)
         premise_unmet = (guard is not None and guard.admitted == 0
                          and guard.rejected > 0)
         if algo_result is not None:
@@ -10840,6 +11144,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             verdict, checked, cx, established, algo_meta = \
                 split_probe_result(algo_result)
             algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
+            if by_statement is not None:
+                note = f"{note}; {_how_the_family_checks(by_statement[1])}".lstrip("; ")
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
             # a family's caveat (a hidden input, a restore that failed) is

@@ -647,8 +647,16 @@ _TYPE_PROBE_TRIALS = 32   # default sample count for a Shape-derived probe,
 
 
 def _call(fn, sig, args: dict):
-    return fn(**args) if all(p in sig.parameters for p in args) \
-        else fn(*[args[p] for p in sig.parameters if p in args])
+    """Intent:
+        `fn` called with `args`, by name when the signature names every
+        one, else by position in signature order.
+
+    Raises:
+        ExitRaised: `fn` raised `SystemExit` (`_exits.call`).
+    """
+    from ._exits import call
+    return call(fn, **args) if all(p in sig.parameters for p in args) \
+        else call(fn, *[args[p] for p in sig.parameters if p in args])
 
 
 def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,

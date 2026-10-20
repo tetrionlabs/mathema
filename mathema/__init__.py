@@ -398,6 +398,7 @@ def _doc_only_facts(fn) -> Facts:
     import hashlib
     import inspect
 
+    from . import _exits
     from ._signatures import callable_signature
     from .intent import parse_doc
 
@@ -414,7 +415,7 @@ def _doc_only_facts(fn) -> Facts:
         params, sig_str = [], "(…)"
         for arity in (1, 2, 3):
             try:
-                fn(*[0.5] * arity)
+                _exits.call(fn, *[0.5] * arity)
             except TypeError:
                 continue
             except Exception:
