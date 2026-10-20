@@ -2789,18 +2789,19 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if result.status == "disproven":
                 piece_text = render_domain_bound(piece)
                 witness = dict(result.witness or {})
+                # the sub-proof's witness may not name every parameter:
+                # the point its counterexample names, else for the split
+                # parameter a point of the piece
+                named = _named_point(result.counterexample, facts.params)
+                for q, v in named.items():
+                    witness.setdefault(q, v)
                 if p not in witness:
-                    # the piece fixed or narrowed p, so the sub-proof's
-                    # witness may not name it: the point its
-                    # counterexample names, else a point of the piece
-                    named = _named_point(result.counterexample,
-                                         facts.params).get(p)
-                    point = named if named is not None \
-                        else _piece_point(piece)
+                    point = _piece_point(piece)
                     if point is not None:
                         witness[p] = point
                 if _premise_refuses(fn, facts, witness, claim_terms):
-                    # a counterexample lies inside the claim's premise
+                    # a point outside the claim's premise disproves
+                    # nothing
                     return None
                 return replace(result, sketch=f"on the sub-domain {p} in "
                                f"{piece_text}: {result.sketch}",

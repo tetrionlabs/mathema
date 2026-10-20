@@ -34,6 +34,14 @@ def two_guards(x: float) -> float:
     return x
 
 
+def two_guards_and_y(x: float, y: float) -> float:
+    if x < -3:
+        raise ValueError("low")
+    if x > 3:
+        raise ValueError("high")
+    return x + y
+
+
 def abs_split(x: float) -> float:
     if x < 2:
         return 2 - x
@@ -102,3 +110,14 @@ def test_a_piece_a_nonlinear_premise_rules_out_is_left_out(route):
     assert q.verdict == "falsified", (q.verdict, q.sketch)
     assert _x(q) ** 2 >= 9 and _x(q) - 2 < 2, q.counterexample
     assert "[2.0, 2.0]" not in (q.sketch or ""), q.sketch
+
+
+def test_a_two_parameter_witness_lies_inside_the_definedness_premise():
+    import re
+    p = _row(two_guards_and_y,
+             "assuming is_defined(f), for x in [-10, 10], for y in [-1, 1], "
+             "f(x, y) <= 3", "best")
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
+    x = float(re.search(r"x = ([-0-9.e/]+)", p.counterexample).group(1))
+    y = float(re.search(r"y = ([-0-9.e/]+)", p.counterexample).group(1))
+    assert -3 <= x <= 3 and x + y > 3, p.counterexample
