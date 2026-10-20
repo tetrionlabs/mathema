@@ -107,3 +107,41 @@ def test_a_decided_derive_claim_is_unchanged():
                                             name="c", route="derive")])
     assert (p.verdict, p.route) == ("proven", "derive")
     assert _ALONE not in (p.note or "")
+
+
+def test_a_derive_proof_keeps_its_float_companion():
+    rows = {p.name: p for p in check_conjectures(double, [claim(
+        "for x in [-10, 10], f(x) == 2*x", name="c", route="derive")],
+        float_companions=True)}
+    assert (rows["c"].verdict, rows["c"].route) == ("proven", "derive")
+    assert rows["c"].meta["mathema.float_companion"] == "c[float]"
+    assert rows["c[float]"].verdict == "holds"
+
+
+def test_a_derive_disproof_keeps_its_executed_witness():
+    (p,) = check_conjectures(double, [claim(
+        "for x in [0, 4], f(x) == 3*x", name="c", route="derive")])
+    assert p.verdict == "falsified"
+    assert p.route in ("derive", "probe:semi_analytical")
+    assert p.meta["mathema.corroboration"] == "reproduced"
+    assert p.counterexample
+
+
+def test_an_uncorroborated_derive_disproof_is_unknown_with_the_flag(monkeypatch):
+    from mathema.symbolic import _proof_support as ps
+
+    def forged_disproof(lhs, rhs, diff, relation, domain, bound_context, params,
+                        tolerance=1e-9):
+        return ps.ProofResult("disproven", sketch="forged sign error",
+                              witness={"x": 3.0}, disproof_hint=None)
+
+    monkeypatch.setitem(ps._RELATION_DECIDERS, ">=", forged_disproof)
+
+    def sq(x):
+        return x * x
+    (p,) = check_conjectures(sq, [claim("for x in [-5, 5], f(x) >= 0",
+                                        name="c", route="derive")])
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert p.meta.get("mathema.corroboration") == "uncorroborated"
+    assert "mathema bug" in p.note
+    assert _ALONE in p.note
