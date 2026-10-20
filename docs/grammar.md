@@ -581,7 +581,9 @@ entry check of `@enforce_dimensions` reject a call on purpose, so
 through, and the record names each guard by its condition. A bare
 `assert` is not a guard: a failed assert counts against `is_defined`, and
 so does a `RangeError` from `@enforce_range` (a result outside its
-declared range).
+declared range). Nor is a nan or an infinity the body returns
+(`return math.nan`, `x if x > 0 else float("inf")`): it is no value,
+so it counts against `is_defined` as a failing call does.
 
 The old family names `is_builtin_safe`, `is_extremity_safe`,
 `is_arbitrary_input_safe` and `is_compendium_safe` are still read, as

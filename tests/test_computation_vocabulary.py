@@ -41,8 +41,8 @@ def power_two(x: float) -> float:
     return x ** 2
 
 
-def all_nan(x: float) -> float:
-    return float("nan") * x
+def nan_in_float(x: float) -> float:
+    return (x - x) * (1e308 * 10.0)
 
 
 def exp_of(x: float) -> float:
@@ -79,7 +79,7 @@ def test_a_raise_in_the_computation_is_named_as_such():
 
 
 def test_a_nan_from_the_computation_is_named_as_such():
-    probes = _check(all_nan, "for x in [1, 2], f(x) * 0 == 0")
+    probes = _check(nan_in_float, "for x in [1, 2], f(x) * 0 == 0")
     comp = probes.get("law[float]")
     assert comp is not None and comp.verdict == "falsified"
     assert "implementation" not in _text(comp)

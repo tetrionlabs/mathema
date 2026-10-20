@@ -37,7 +37,8 @@ reasoning, no largest double, no overflow threshold, no operational
 infinity. What does enter is the mathematics of definedness, namely the
 real domain of the primitives (a root of a negative, a logarithm at or
 below zero, a division by zero), a `raise` the function's own source
-states, and a library's `is_defined` row, since a function undefined at
+states, a nan or an infinity its source returns as the value
+(`math.nan`, `float("inf")`), and a library's `is_defined` row, since a function undefined at
 a point of its domain is not the function the claim describes. The
 computation is one implementation executed in one language, one runtime
 and one number representation, and the number representation follows the domain: float64 for a claim
