@@ -37,7 +37,7 @@ def _probe(fn, law, route="derive"):
 def test_the_closed_form_of_a_sum_over_the_parameter_name_is_proven(fn, law):
     probe = _probe(fn, law)
     assert probe.verdict == "proven", (probe.verdict, probe.note)
-    assert probe.route == "derive:extensive"
+    assert probe.route == "derive"
 
 
 def test_a_product_binds_its_index_the_same_way():

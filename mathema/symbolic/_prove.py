@@ -3398,78 +3398,6 @@ def lengths_judged() -> bool:
     return _JUDGE_LENGTHS.get()
 
 
-#: whether a proof the fast attempt closes is decided again by the
-#: extensive rungs before it is kept (`corroborating`)
-_CORROBORATE: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
-    "mathema_corroborate", default=False)
-
-
-@contextlib.contextmanager
-def corroborating():
-    """Within the block, a relation the fast attempt proves is decided
-    again by the extensive rungs (`_corroborated`)."""
-    token = _CORROBORATE.set(True)
-    try:
-        yield
-    finally:
-        _CORROBORATE.reset(token)
-
-
-def _corroborated(result: ProofResult, lhs, rhs, relation: str, domain,
-                  bound_context, params: dict, opaque) -> ProofResult:
-    """Intent:
-        A fast proof of `lhs <relation> rhs` decided again by the
-        extensive rungs (the strategy ladder, then the case split), under
-        the extensive wall clock. Proven again: the proof, the rung that
-        decided it again named in `mathema.corroborated_by`. Anything
-        else: the proof, with what the rungs did in
-        `mathema.corroboration_tried`; a disproof from them has no
-        executed witness, so it does not overturn the proof, and is
-        named there as a disagreement.
-
-    Notes:
-        `mathema.corroborated_by` and `mathema.corroboration_tried` are
-        read by the caller and never copied onto a record.
-    """
-    from .._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
-    from ._extensive import extensive_ladder
-
-    def decide():
-        found, tried = extensive_ladder(lhs, rhs, relation, domain,
-                                        bound_context, params, opaque=opaque)
-        if found is None or found.status not in ("proven", "disproven"):
-            tried = [*tried, "case split"]
-            split = _try_case_split(lhs, rhs, relation, domain, bound_context,
-                                    params, opaque=opaque, extensive=True)
-            if split is not None and split.status in ("proven", "disproven"):
-                return split, "case split", tried
-            return None, None, tried
-        return found, (found.meta or {}).get("mathema.derive_route"), tried
-
-    try:
-        found, rung, tried = _with_timeout(decide, EXTENSIVE_TIMEOUT_SECONDS)
-    except TimeoutError:
-        return replace(result, meta={
-            **result.meta,
-            "mathema.corroboration_tried": "the extensive rungs ran out of "
-                                           "their wall clock"})
-    if found is None:
-        return replace(result, meta={**result.meta,
-                                     "mathema.corroboration_tried":
-                                         ", ".join(tried)})
-    if found.status == "disproven":
-        return replace(result, meta={
-            **result.meta,
-            "mathema.corroboration_tried":
-                f"they find it false ({found.sketch}) with no executed "
-                f"witness, a disagreement that is probably a mathema bug "
-                f"worth reporting"})
-    return replace(result,
-                   sketch=f"{result.sketch}; corroborated: {found.sketch}",
-                   meta={**result.meta,
-                         "mathema.corroborated_by": rung or "the strategy ladder"})
-
-
 def length_admitted(name: str, k: int, domain, assumption,
                     shapes: "dict | None" = None) -> "bool | None":
     """Intent:
@@ -4680,10 +4608,6 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                                           lifted.params)
             if rescue is not None:
                 result = rescue
-        if result.status == "proven" and _split_depth == 0 \
-                and _CORROBORATE.get():
-            result = _corroborated(result, lhs, rhs, relation, domain,
-                                   bound_context, lifted.params, lifted.opaque)
         if result.status == "undecided" and extensive:
             # the strategy ladder, not just a longer leash: root
             # isolation, interval refinement, the rewrite gallery, the

@@ -124,19 +124,12 @@ def test_a_plain_derive_proof_reports_the_base_route_not_extensive(tmp_path):
     try:
         from affine_fixture import line
         results = check_conjectures(
-            line, [claim("f(x) - f(x) == 0")])
-        derived = check_conjectures(
             line, [claim("f(x) - f(x) == 0", route="derive")])
     finally:
         sys.path.remove(str(tmp_path))
         sys.modules.pop("affine_fixture", None)
     assert results[0].verdict == "proven"
     assert results[0].route == "derive"
-    # on route derive the extensive rungs decide it again, and the route
-    # says so
-    assert derived[0].verdict == "proven"
-    assert derived[0].route == "derive:extensive"
-    assert "corroborated by the extensive rungs" in derived[0].note
 
 
 def _spike_at_four(n: int) -> int:

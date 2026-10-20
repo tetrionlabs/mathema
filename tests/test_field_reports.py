@@ -182,7 +182,7 @@ def test_an_absolute_value_takes_the_sign_the_domain_fixes():
         "for n in [1,100], lag in [0,10], f(n, lag+1) == f(n, lag) - 1",
         route="derive")])[0]
     assert proven.verdict == "proven", proven.note
-    assert proven.route == "derive:extensive"
+    assert proven.route == "derive"
 
 
 def test_the_same_claim_over_a_signed_domain_still_falsifies():

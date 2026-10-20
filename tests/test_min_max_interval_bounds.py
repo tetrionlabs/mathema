@@ -32,7 +32,7 @@ def _probe(law, **kw):
 def test_the_clip_is_at_most_one_by_interval_evaluation(no_smt, route):
     probe = _probe("for x in [-5, 5], f(x) <= 1", route=route)
     assert probe.verdict == "proven", (probe.verdict, probe.note)
-    assert probe.route == ("derive:extensive" if route == "derive" else "derive")
+    assert probe.route == "derive"
     assert "interval evaluation" in probe.sketch
     assert "nlsat" not in probe.sketch
 
@@ -42,7 +42,7 @@ def test_the_clip_is_at_most_one_by_interval_evaluation(no_smt, route):
 def test_the_clip_is_nonnegative_without_smt(no_smt, route):
     probe = _probe("for x in [-5, 5], f(x) >= 0", route=route)
     assert probe.verdict == "proven", (probe.verdict, probe.note)
-    assert probe.route == ("derive:extensive" if route == "derive" else "derive")
+    assert probe.route == "derive"
     assert "nlsat" not in probe.sketch
 
 
@@ -110,7 +110,7 @@ def _decide(fn, law, route="derive"):
 ])
 def test_a_clamp_between_parameters_is_proven_without_smt(no_smt, fn, law):
     probe = _decide(fn, law)
-    assert (probe.verdict, probe.route) == ("proven", "derive:extensive"), \
+    assert (probe.verdict, probe.route) == ("proven", "derive"), \
         (probe.verdict, probe.route, probe.note)
 
 

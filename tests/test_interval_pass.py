@@ -81,10 +81,7 @@ def test_trig_product_proves_after_sympy_collapses_the_dependency():
 
     p = _one(sincos, "for x in [-1.4, 1.4], f(x) >= 0")
     assert p.verdict == "proven"
-    # the fast path proves it; on route derive the extensive rungs
-    # decide it again
-    assert p.route == "derive:extensive"
-    assert "the fast proof is corroborated" in p.note
+    assert p.route == "derive"
 
 
 def test_exponential_decay_gap_proves_on_the_fast_path():
@@ -96,8 +93,7 @@ def test_exponential_decay_gap_proves_on_the_fast_path():
 
     p = _one(exp_decay_gap, "for x in [0, 50], f(x) >= 0")
     assert p.verdict == "proven"
-    assert p.route == "derive:extensive"
-    assert "the fast proof is corroborated" in p.note
+    assert p.route == "derive"
 
 
 def test_straddling_interval_never_falsifies_a_true_claim():

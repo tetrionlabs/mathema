@@ -159,11 +159,8 @@ it, and a claim's name never implies a route.
   it executes falsifies the claim, on the probe's route with derive's
   reason in the note, and draws that find none leave the claim
   `unknown`, never `holds`, with the number of draws in the note. A
-  proof over a domain too large to visit is decided again by the
-  extensive rungs, and reads `derive:extensive` with the corroborating
-  rung in its note when they agree. A proof's `[float]` companion (the
-  computation line) and a disproof's executed witness are as on any
-  route.
+  proof's `[float]` companion and a disproof's executed witness are as
+  on any route.
 - A claim pinned to `route: probe` never attempts a proof.
 - Calculus forms (`d`, `lim`, `integrate`, `Sum`, `Prod`) are decided by
   the derive route. When the proof cannot close, numeric evidence on

@@ -123,8 +123,7 @@ def test_an_equivalence_on_derive_samples_as_a_falsifier_only():
 def test_a_decided_derive_claim_is_unchanged():
     (p,) = check_conjectures(double, [claim("for x in [-10, 10], f(x) == 2*x",
                                             name="c", route="derive")])
-    assert (p.verdict, p.route) == ("proven", "derive:extensive")
-    assert "corroborated by the extensive rungs" in p.note
+    assert (p.verdict, p.route) == ("proven", "derive")
     assert _NO_VERDICT not in (p.note or "")
 
 
@@ -132,7 +131,7 @@ def test_a_derive_proof_keeps_its_float_companion():
     rows = {p.name: p for p in check_conjectures(double, [claim(
         "for x in [-10, 10], f(x) == 2*x", name="c", route="derive")],
         float_companions=True)}
-    assert (rows["c"].verdict, rows["c"].route) == ("proven", "derive:extensive")
+    assert (rows["c"].verdict, rows["c"].route) == ("proven", "derive")
     assert rows["c"].meta["mathema.float_companion"] == "c[float]"
     assert rows["c[float]"].verdict == "holds"
 
@@ -164,32 +163,3 @@ def test_an_uncorroborated_derive_disproof_is_unknown_with_the_flag(monkeypatch)
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
     assert "mathema bug" in p.note
     assert _NO_VERDICT in p.note
-
-
-def lifted(x: float) -> float:
-    return x * x + 1
-
-
-def test_a_derive_proof_over_the_reals_is_corroborated_by_the_extensive_rungs():
-    (p,) = check_conjectures(lifted, [claim("f(x) >= 1", name="c",
-                                            route="derive")])
-    assert (p.verdict, p.route) == ("proven", "derive:extensive")
-    assert "corroborated by the extensive rungs" in p.note
-
-
-def test_the_default_routes_proof_is_not_re_decided():
-    (p,) = check_conjectures(lifted, [claim("f(x) >= 1", name="c")])
-    assert (p.verdict, p.route) == ("proven", "derive")
-    assert "corroborated by the extensive rungs" not in (p.note or "")
-
-
-def test_a_corroborated_proof_keeps_its_computation_line():
-    import mathema
-    rec = mathema.check(lifted, claims=[claim("f(x) >= 1", name="c",
-                                              route="derive")])
-    rows = {p.name: p for p in rec.probes}
-    assert rows["c"].route == "derive:extensive"
-    assert rows["c"].meta["mathema.float_companion"] == "c[float]"
-    assert "c[float]" in rows
-    text = repr(rec)
-    assert "computation" in text and "mathematics" in text
