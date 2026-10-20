@@ -215,11 +215,16 @@ def test_d_rejects_non_parameter_variable():
     assert results[0].verdict == "unknown"
 
 
-def test_d_is_derive_route_only_probe_skips_cleanly():
-    # "d" isn't in the probe route's safe-call whitelist; a probe claim
-    # using it must skip cleanly, never crash the adjudication loop.
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="probe")])
-    assert results[0].verdict == "skipped"
+def test_d_on_the_probe_is_decided_only_in_a_shape_claim_spelling():
+    # the probe decides d(f(x), x) >= 0 with the monotonic_increasing
+    # check; any other d spelling skips cleanly with the reason, never
+    # crashing the adjudication loop
+    (p,) = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="probe")])
+    assert (p.verdict, p.route) == ("holds", "probe:algorithmic")
+    assert "as monotonic_increasing[x] does" in p.note
+    (q,) = check_conjectures(cube, [claim("d(f(x), x) >= 1", route="probe")])
+    assert q.verdict == "skipped"
+    assert "is not one of them" in q.sketch
 
 
 def test_pde_renders_to_latex():
