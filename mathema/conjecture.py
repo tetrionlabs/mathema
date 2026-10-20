@@ -58,10 +58,11 @@ from ._float_text import exact_literal_text, overlong_literals
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
 from . import _conditioning
-from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
-                         relation_within)
+from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
+                         reference_side, relation_within)
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
+from ._tolerance import number_text as _number_text
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -4901,6 +4902,58 @@ def _own_finding(probe: "Probe") -> "Probe":
                     counterexample=None, meta=meta)
 
 
+def _merged_drawn(a: "dict | None", b: "dict | None") -> "dict | None":
+    """Two `mathema.drawn` records as one: the entries added, the
+    smallest and largest sizes over both; either alone as it is."""
+    if not a or not b:
+        return a or b
+    if not (a.get("smallest") and b.get("smallest")):
+        return a if a.get("smallest") else b
+    return {**a,
+            "smallest": [min(x, y) for x, y in zip(a["smallest"], b["smallest"])],
+            "largest": [max(x, y) for x, y in zip(a["largest"], b["largest"])],
+            "entries": (a.get("entries") or 0) + (b.get("entries") or 0)}
+
+
+#: how strong each verdict a computation line can carry is, weakest first
+_LINE_STRENGTH = {"falsified": 0, "invalidated": 0, "unknown": 1,
+                  "skipped": 1, "holds": 2, "proven": 3}
+
+
+def _fold_stand_in_draws(main: "Probe", companion: "Probe") -> None:
+    """Intent:
+        Fold a probe that stood in for an undecided derive into the
+        `[float]` row spawned under it, so the claim has one computation
+        line: the row's verdict becomes the weaker of the two (falsified
+        when either is), its `n` the stand-in's draws plus the points the
+        row itself ran, and the stand-in's `mathema.drawn` (merged with
+        the row's own), `mathema.sampling` and `mathema.confidence` are
+        carried onto the row, each with its meaning unchanged. The
+        stand-in row keeps its verdict, `n` and meta. A row its
+        empty-input line falsified is read by its own finding over
+        non-empty inputs (`_own_finding`). Nothing changes unless that
+        finding was reached on a probe route.
+    """
+    stood_in = _own_finding(main)
+    if not str(stood_in.route or "").startswith("probe"):
+        return
+    weaker = min((stood_in.verdict, companion.verdict),
+                 key=lambda v: _LINE_STRENGTH.get((v or "").split(":", 1)[0], 1))
+    own = companion.n or 0
+    meta = dict(companion.meta or {})
+    main_meta = main.meta or {}
+    drawn = main_meta.get("mathema.drawn")
+    if drawn and (meta.get("mathema.drawn") or not own):
+        meta["mathema.drawn"] = _merged_drawn(meta.get("mathema.drawn"), drawn)
+    for key in ("mathema.sampling", "mathema.confidence"):
+        if key in main_meta and key not in meta:
+            meta[key] = main_meta[key]
+    if stood_in.n or own:
+        companion.n = (stood_in.n or 0) + own
+    companion.verdict = weaker
+    companion.meta = meta
+
+
 def _emit_companion(out: list, companion: "Probe", parent: str) -> None:
     """Append a stamped float companion to the output, tagged with the
     claim it was spawned from and the family it belongs to."""
@@ -6277,9 +6330,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                                     conjectures)
             out.append(stamp(probed, _cap=verdict_cap))
             if ctx.companion is not None:
-                _emit_companion(out, _stamped(ctx.companion, cj_record,
-                                              written=cj.domain or {}),
-                                probed.name)
+                companion = _stamped(ctx.companion, cj_record,
+                                     written=cj.domain or {})
+                _fold_stand_in_draws(probed, companion)
+                _emit_companion(out, companion, probed.name)
             if float_companions:
                 out.extend(_stamped(line, cj, canonical=False) for line in lines)
         except LanguageDrawFailed as e:
@@ -6530,6 +6584,26 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 
 #: the clause a probe's note gives a pass within the tolerance, with its gap
 _WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
+
+
+def passed_within_words(relation: str, gap: float, at: "str | None",
+                        allowance: float, tolerance=None) -> str:
+    """Intent:
+        The clause a computation line's note gives a pass whose sides
+        differ: the largest gap (`differs by` for an equality, `fails
+        by` for an ordering), the point it was measured at, and the
+        tolerance it fell within: the declared one as the claim writes
+        it, else the default allowance's value at that point.
+    """
+    verb = "differs" if relation in ("==", "~=") else "fails"
+    where = f" at {at}" if at else ""
+    if tolerance is None:
+        within = f"the default tolerance ({allowance:.3g})"
+    else:
+        written = (tolerance.text() if isinstance(tolerance, ToleranceKind)
+                   else _number_text(tolerance))
+        within = f"the tolerance (declared {written})"
+    return f"{verb} by {gap:.3g}{where}, within {within}"
 
 
 def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
@@ -10535,6 +10609,11 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
     verdict = ("proven" if proof.status == "proven" and route != "probe"
                else "holds")
     note = f"{note}; {proof.sketch}"
+    passed = proof.meta.get("mathema.ground_pass_gap")
+    if route == "probe" and passed is not None:
+        # the call is the computation line: the gap its pass fell within
+        note = f"{note}; " + passed_within_words(
+            cj.relation, passed[0], None, passed[1], cj.tolerance)
     fallen = ctx.derive_undecided
     if fallen is not None and route != "probe":
         # the symbolic attempt that did not decide it, in the trail
@@ -11398,13 +11477,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     checked, cx, cx_stratum = 0, None, None
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
-    absorbed, absorbed_at = 0.0, None
+    absorbed, absorbed_at, absorbed_allowance = 0.0, None, DEFAULT_TOLERANCE
     # the largest disagreement a draw's own round-off accounted for
     roundoff_absorbed, roundoff_at = 0.0, None
     # the largest equality gap the relative tolerance absorbed at a draw
     # that holds in exact arithmetic, and the draws that passed only
     # within a tolerance and could not be evaluated exactly
     relative_absorbed, relative_at = 0.0, None
+    # the largest gap any pass of `==`, `<=` or `>=` fell within, the
+    # allowance there and the arguments it happened at
+    passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
@@ -12501,6 +12583,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
                 absorbed, absorbed_at = gap, _point_text(args)
+                measured = float_miss(lv, rv, cj.relation, None, 0.0, side)
+                absorbed_allowance = (measured[1] if measured is not None
+                                      else DEFAULT_TOLERANCE)
+        if ok and roundoff_gap is None and cj.relation in ("==", "<=", ">="):
+            measured = float_miss(compare_l, compare_r, cj.relation,
+                                  cj.tolerance, 0.0, side)
+            if measured is not None and measured[0] > passed_gap:
+                passed_gap, passed_allowance = measured
+                passed_at = _point_text(args)
         mathematics = None
         if not ok and not exactly_false and family is None:
             # the mathematics at the point: f run on the exact numbers
@@ -12536,7 +12627,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     reduces=bool(corner_row or _conditioning.claim_reduces(cj)),
                     exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
                                                  bound_funcs)
-                              if mathematics is True else None))
+                              if mathematics is True else None),
+                    sides=(compare_l, compare_r))
                 f_call.calls = made
                 if found["kappa"] is None and mathematics is None:
                     found = None
@@ -12685,8 +12777,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
     if absorbed > 0:
-        note = (f"{note}; fails by {absorbed:.3g} at {absorbed_at}, within "
-                f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
+        note = (f"{note}; " + passed_within_words(
+            cj.relation, absorbed, absorbed_at, absorbed_allowance)
+                ).lstrip("; ")
     if roundoff_absorbed > 0:
         note = (f"{note}; differs by {roundoff_absorbed:.3g} at "
                 f"{roundoff_at}, within the round-off of that draw's "
@@ -12696,6 +12789,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"{relative_at}, within the tolerance ({DEFAULT_TOLERANCE:g} "
                 f"plus {_declared_rel_tol(cj):g} times the larger side), and "
                 f"holds there in exact arithmetic").lstrip("; ")
+    if passed_gap > 0 and not (absorbed or roundoff_absorbed
+                               or relative_absorbed):
+        note = (f"{note}; " + passed_within_words(
+            cj.relation, passed_gap, passed_at, passed_allowance,
+            cj.tolerance)).lstrip("; ")
     if inconclusive:
         note = f"{note}; {inconclusive_words}".lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,

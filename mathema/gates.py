@@ -184,6 +184,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # how far the float sides missed the relation at the last point
     # compared, and the allowance applied there (`_allowance.float_miss`)
     precision: list = [None]
+    # the largest gap a pass of `==`, `<=` or `>=` fell within, as
+    # `(gap, allowance, point)`
+    passed: list = [None]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -198,6 +201,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             miss[0] = largest_miss(lv, rv, side)
         precision[0] = float_miss(lv, rv, cj.relation, declared,
                                   input_scaled, side)
+        if held is True and cj.relation in ("==", "<=", ">=") \
+                and precision[0] is not None and precision[0][0] > 0 \
+                and (passed[0] is None or precision[0][0] > passed[0][0]):
+            passed[0] = (*precision[0], dict(point or {}))
         return held
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
@@ -1163,6 +1170,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `(miss, allowance)` of the float comparison at the last point
     # evaluated, None where no numbers were compared
     evaluate.last_precision = lambda: precision[0]  # type: ignore[attr-defined]
+    # the largest gap a pass fell within over every point evaluated,
+    # `(gap, allowance, point)`, None where every pass was exact
+    evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point
@@ -2295,5 +2305,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(name, parent.statement, "skipped", route=float_route,
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
+    largest = deps["evaluate"].largest_pass()
+    if largest is not None:
+        from .conjecture import passed_within_words
+        gap, allowance, at = largest
+        what = f"{what}; " + passed_within_words(
+            cj.relation, gap, _fmt_point(at, deps["names"]) if at else None,
+            allowance, cj.tolerance)
     return Probe(name, parent.statement, "holds", route=float_route,
                  n=numbers, note=what, meta=tried_meta or None)

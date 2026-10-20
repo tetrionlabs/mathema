@@ -806,13 +806,25 @@ def _rung_closed_forms(case: _Case, state: _LadderState) -> Probe | None:
 class _Sampled:
     """What one run of both functions at the shared draws found: the
     first disagreement's text (None when every compared point agreed),
-    the points compared, the points executed, and the sampling meta."""
+    the points compared, the points executed, the sampling meta, and
+    the largest gap between two agreeing values as `(gap, allowance,
+    point text)` (None when every agreeing pair was equal)."""
     counterexample: str | None
     checked: int
     executed: int
     both_raised: int
     discarded: dict
     meta: dict
+    largest: tuple | None = None
+
+    def gap_words(self, tolerance) -> str:
+        """The note's clause for the largest gap the tolerance covered,
+        empty when the agreeing values were equal."""
+        if self.largest is None:
+            return ""
+        from .conjecture import passed_within_words
+        gap, allowance, at = self.largest
+        return "; " + passed_within_words("==", gap, at, allowance, tolerance)
 
     def aside(self) -> str:
         """The note's account of points not compared, and of agreeing
@@ -852,6 +864,20 @@ def _values_agree(case: _Case, fv, gv) -> bool:
     return abs(fv - gv) <= tol
 
 
+def _agreement_allowance(case: _Case, fv, gv) -> float:
+    """The gap `_values_agree` allows between two values: the declared
+    kind's bound, the declared bare number, or each side's computation
+    allowance added."""
+    from ._allowance import allowance
+    from ._tolerance import ToleranceKind
+    tol = case.cj.tolerance
+    if isinstance(tol, ToleranceKind):
+        return float(tol.bound(abs(fv), abs(gv)))
+    if tol is None:
+        return float(2 * allowance(max(abs(fv), abs(gv))))
+    return float(tol)
+
+
 def _sample_pair(case: _Case) -> _Sampled:
     """Intent:
         Run both functions at `EQUIV_SAMPLE_DRAWS` shared draws from
@@ -877,6 +903,7 @@ def _sample_pair(case: _Case) -> _Sampled:
     f_call = calling(case.fn, case.facts)
     g_call = calling(case.gfn, case.gfacts)
     checked, executed, cx, both_raised = 0, 0, None, 0
+    largest = None
     discarded = {"out_of_domain": 0, "not_compared": 0, "non_numeric": 0}
     for _ in range(EQUIV_SAMPLE_DRAWS):
         args = [_synth(k, rng, case.cj_domain.get(p))
@@ -937,6 +964,13 @@ def _sample_pair(case: _Case) -> _Sampled:
             cx = (_fmt(tuple(args), names=tuple(kinds))
                   + f": {_fmt_value(fv)} vs {_fmt_value(gv)}")
             break
+        try:
+            gap = float(abs(fv - gv))
+        except (TypeError, OverflowError):
+            gap = 0.0
+        if gap > 0 and (largest is None or gap > largest[0]):
+            largest = (gap, _agreement_allowance(case, fv, gv),
+                       _fmt(tuple(args), names=tuple(kinds)))
 
     sampling: dict = {"draws": EQUIV_SAMPLE_DRAWS, "checked": checked,
                       "seed": EQUIV_SEED}
@@ -946,7 +980,7 @@ def _sample_pair(case: _Case) -> _Sampled:
     if nonzero:
         sampling["discarded"] = nonzero
     return _Sampled(cx, checked, executed, both_raised, discarded,
-                    {"mathema.equivalence.sampling": sampling})
+                    {"mathema.equivalence.sampling": sampling}, largest)
 
 
 #: what the note of a falsified shared-draw row says counts as a
@@ -997,7 +1031,8 @@ def _rung_sampled(case: _Case, state: _LadderState) -> Probe | None:
         return _stamp(Probe(
             cj.name, case.statement, "holds", route="probe", n=checked,
             note=f"{case.note}; {checked} executed shared points agree "
-                 f"within tolerance (sampling, never proof){aside}",
+                 f"within tolerance (sampling, never proof){aside}"
+                 f"{run.gap_words(cj.tolerance)}",
             meta=meta), "sampled")
     state.sampling_meta = meta
     return None
@@ -1032,7 +1067,8 @@ def _computation_row(case: _Case, main: Probe) -> Probe:
         return _stamp(Probe(
             name, main.statement, "holds", route="probe", n=run.checked,
             note=f"{what}, and they agree within tolerance at every one "
-                 f"(sampling, never proof)",
+                 f"(sampling, never proof)"
+                 f"{run.gap_words(case.cj.tolerance)}",
             meta=meta), "sampled")
     return _stamp(Probe(
         name, main.statement, "unknown", route="probe", n=run.checked,
