@@ -10598,6 +10598,11 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
     verdict = ("proven" if proof.status == "proven" and route != "probe"
                else "holds")
     note = f"{note}; {proof.sketch}"
+    passed = proof.meta.get("mathema.ground_pass_gap")
+    if route == "probe" and passed is not None:
+        # the call is the computation line: the gap its pass fell within
+        note = f"{note}; " + passed_within_words(
+            cj.relation, passed[0], None, passed[1], cj.tolerance)
     fallen = ctx.derive_undecided
     if fallen is not None and route != "probe":
         # the symbolic attempt that did not decide it, in the trail

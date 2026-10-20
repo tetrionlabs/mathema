@@ -206,9 +206,10 @@ The other relations use the same allowance where it makes sense: `<=` and
 none, since equality must not pass for strictly less, and `!=` with no
 declared tolerance fails only where the two sides are exactly equal.
 
-A probe line, or the computation row of an `f =:= g` claim, that holds
-with a gap the tolerance absorbed says so in its note, for `==` as for
-`<=` and `>=`: the largest gap, the point it
+Every computation line that holds with a gap the tolerance absorbed says
+so in its note, for `==` as for `<=` and `>=`, on every route (a probe
+line, a ground claim's one call, the `[float]` line a proof spawns, the
+computation row of an `f =:= g` claim): the largest gap, the point it
 was measured at, and the tolerance it fell within (the declared one, or
 the default allowance's value at that point). A pass with no gap carries
 no such clause, so a bit-exact pass reads apart from an absorbed one.
