@@ -389,12 +389,16 @@ def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
         The shadow run of `fn` (`_shadow_of`) on `args` and `kwargs`,
         the floats the computation held, gathering its decisions. A
         function with no shadow runs as written and its decisions are
-        unknown (`log` None).
+        unknown (`log` None). A `SystemExit` it raises is kept as the
+        raise it is (`_exits.as_raise`).
     """
+    from ._exits import as_raise
     shadow = _shadow_of(fn)
     if shadow is None:
         try:
             return _Computed(None, value=fn(*args, **kwargs))
+        except SystemExit as e:
+            return _Computed(None, error=as_raise(e))
         except Exception as e:
             return _Computed(None, error=e)
     saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard)
@@ -403,6 +407,9 @@ def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
     log = _STATE.log
     try:
         return _Computed(log, value=shadow(*args, **kwargs))
+    except SystemExit as e:
+        error = as_raise(e)
+        return _Computed(log, error=error, where=_where(error))
     except Exception as e:
         return _Computed(log, error=e, where=_where(e))
     finally:
@@ -419,7 +426,9 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
         The twin's run on the exact `args` and `kwargs`, each decision
         it takes checked against `computation`'s (`_event`): the twin's
         value, or the exception both runs raised alike (the same class
-        at the same line of the body).
+        at the same line of the body). A `SystemExit` either run raises
+        is compared, and raised, as the raise it is
+        (`_exits.as_raise`).
 
     Raises:
         NotExact: the computation's decisions are unknown, a step of the
@@ -434,16 +443,17 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     reference = _Reference(computation.log)
     _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint = (
         "exact", None, reference, None)
+    from ._exits import as_raise
     raised = None
     try:
         try:
             out = twin(*args, **kwargs)
         except NotExact:
             raise
-        except Exception as e:
+        except (Exception, SystemExit) as e:
             if _STATE.taint is not None:
                 raise NotExact(_STATE.taint) from None
-            raised = e
+            raised = as_raise(e) if isinstance(e, SystemExit) else e
         if _STATE.taint is not None:
             raise NotExact(_STATE.taint)
         if reference.at < len(reference.log):
@@ -787,7 +797,12 @@ def _checked_first(fn, check, body):
 
 def _parse(fn):
     """`(src, FunctionDef, first line)` of `fn`'s source, dedented, or
-    None when there is no source or it is not one plain `def`."""
+    None when there is no source or it is not one plain `def`. A
+    statement that only calls `sys.exit` (or the interpreter's `exit`
+    or `quit`) reads as the `raise SystemExit(...)` it is
+    (`_exits.exits_as_raises`), as it does for every other reader of
+    the body."""
+    from ._exits import exits_as_raises
     try:
         lines, first = inspect.getsourcelines(fn)
     except (OSError, TypeError):
@@ -799,7 +814,7 @@ def _parse(fn):
         return None
     if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
         return None
-    return src, tree.body[0], first
+    return src, exits_as_raises(tree.body[0], fn), first
 
 
 def _plain(fn):
