@@ -742,7 +742,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             if all(words.values()):
                 out.append(_made(
                     f"for {p1} in {words[p1]}, {p2} in {words[p2]}, "
-                    f"{aux} in {words[p2]}, f(f({p1}, {p2}), {aux}) == "
+                    f"let {aux} be {words[p2]}, f(f({p1}, {p2}), {aux}) == "
                     f"f({p1}, f({p2}, {aux}))",
                     name="associative", source="mathema", route="best"))
         elif p1 in declared or p2 in declared:
