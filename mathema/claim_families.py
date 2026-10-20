@@ -682,6 +682,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 return None
         try:
             values = (float(v_lo), float(v_mid), float(v_hi))
+        except OverflowError:
+            # an integer past the float range: the float64 run overflows
+            overflowed.setdefault("at", x0)
+            return None
         except (TypeError, ValueError):
             return None
         if not all(math.isfinite(v) for v in values):

@@ -45,6 +45,12 @@ def overflow_literal(x: float) -> float:
     return x
 
 
+def huge_integer(x: float) -> float:
+    if x > 0:
+        return 10 ** 400
+    return x
+
+
 def _row(fn, text, name):
     (p,) = check_conjectures(fn, [claim(text, name=name, route="best")])
     return p
@@ -129,3 +135,10 @@ def test_a_guard_refusal_is_named_as_the_guard_refusing():
     assert "DomainError" in p.counterexample
     assert "floating-point boundary" not in p.counterexample, p.counterexample
     assert math.isfinite(1.0)
+
+
+def test_an_integer_past_the_float_range_never_ends_the_check():
+    p = _row(huge_integer, "for x in [-10, 10], d(f(x), x, x) >= 0",
+             "convex[x]")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert "inf" not in (p.counterexample or ""), p.counterexample
