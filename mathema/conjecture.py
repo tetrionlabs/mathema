@@ -42,7 +42,7 @@ from dataclasses import replace as _dc_replace
 
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
-from .analysis import effective_facts, hydrated
+from .analysis import SourceUnavailable, effective_facts, hydrated
 from .grammar import (Domain, InvalidDomain, NoRelation,
                       is_missing, extract_assuming_clause,
                       extract_diff_fraction_sugar, extract_let_bindings,
@@ -4410,7 +4410,8 @@ def _with_pins(fn, pins: dict):
             given = sig.bind_partial(*a, **k).arguments
         except TypeError:
             given = {}
-        return fn(*a, **{**{p: v for p, v in pins.items() if p not in given}, **k})
+        return _exits.call(fn, *a, **{**{p: v for p, v in pins.items() if p not in given},
+                                      **k})
     return call
 
 
@@ -4974,9 +4975,19 @@ def _effective_facts(fn, facts=None):
         else `analysis.effective_facts(fn)` (the callable's injected
         `__mathema_facts__` when it carries them, else analysis of its
         source). Facts carrying a KOINE document and no syntax tree are
-        read through the document either way.
+        read through the document either way. A callable with neither
+        (a builtin, a function defined through `exec` or `python -c`, a
+        method a dataclass generates) gets the documentation-only facts
+        `mathema.check` reads it by, its parameter kinds taken from its
+        signature, so both entries adjudicate it alike.
     """
-    return hydrated(facts) if facts is not None else effective_facts(fn)
+    if facts is not None:
+        return hydrated(facts)
+    try:
+        return effective_facts(fn)
+    except SourceUnavailable:
+        from . import _doc_only_facts
+        return _doc_only_facts(fn)
 
 
 def _receiver_params_bound(fn, facts, conjectures):
@@ -5149,12 +5160,12 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn):
-        out = _check_conjectures(
-            fn, values, domain=domain, trials=trials,
+        out = _around_failing_languages(lambda claims: _check_conjectures(
+            fn, claims, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
             known_premises=known_premises,
             float_companions=float_companions,
-            pseudo_infinity=pseudo_infinity) if values else []
+            pseudo_infinity=pseudo_infinity), values) if values else []
         for p in out:
             _policy.note_draws(p.name, p.n,
                                ((p.meta or {}).get("mathema.missing") or {}).get("origin"))
@@ -5213,6 +5224,79 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
             if steps and not (p.note or "").endswith(steps[-1]):
                 p.note = "\n".join([p.note or "", *steps]).lstrip("\n")
         return out
+
+
+#: the claim the innermost running `_check_conjectures` is adjudicating,
+#: as a one-key holder each `_around_failing_languages` call sets
+_ADJUDICATING: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_adjudicating", default=None)
+
+#: the hooks of the `languages.Language` protocol a language package
+#: implements
+_LANGUAGE_HOOKS = frozenset({"contains", "explain", "sample", "members",
+                             "hazards", "outside", "shrink", "fields",
+                             "render", "to_json"})
+
+
+def _language_hook_failure(exc: BaseException) -> "tuple | None":
+    """Intent:
+        `(language name, hook)` when `exc` was raised inside a hook of
+        a language (a frame of its traceback runs one of the protocol's
+        hooks on an object that satisfies the protocol), the outermost
+        such hook named; None for any other exception.
+    """
+    from .languages import language_problems
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        if frame.f_code.co_name in _LANGUAGE_HOOKS:
+            owner = frame.f_locals.get("self")
+            if owner is not None and not language_problems(owner):
+                return owner.name, frame.f_code.co_name
+        tb = tb.tb_next
+    return None
+
+
+def _around_failing_languages(run, claims: list) -> list:
+    """Intent:
+        `run(claims)`, the rows of the claims; when a language one claim
+        ranges over raises from one of its hooks, that claim's row is
+        `skipped` with the language, the hook and the exception named,
+        and the other claims are adjudicated again without it, so one
+        broken language never ends the check.
+
+    Raises:
+        TimeoutError: as `run` does.
+        Exception: any exception `run` raises that no language hook
+            raised, or that no claim of `claims` was being adjudicated
+            when it was raised.
+    """
+    failed: list = []
+    remaining = list(claims)
+    while True:
+        holder: dict = {"cj": None}
+        token = _ADJUDICATING.set(holder)
+        try:
+            return run(remaining) + failed if remaining else failed
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            hook = _language_hook_failure(exc)
+            culprit = next((c for c in remaining if c is holder["cj"]), None)
+            if hook is None or culprit is None:
+                raise
+            name, where = hook
+            failed.append(Probe(
+                culprit.name,
+                statement_text(culprit.relation, culprit.lhs, culprit.rhs),
+                "skipped", route=None,
+                note=(f"L[{name}] raised {type(exc).__name__} in its "
+                      f"{where}(): {exc}; the claim cannot be evaluated "
+                      f"over that language"),
+                meta={"mathema.surface": culprit.source}))
+            remaining.remove(culprit)
+        finally:
+            _ADJUDICATING.reset(token)
 
 
 def _unrepeatable(row, witness: str):
@@ -5596,8 +5680,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        if [c.name for c in conjectures].count(name) > 1}
     overflow_links = overflow_safe_links(conjectures)
     from .policy import _CLAIM as _policy_claim
+    adjudicating = _ADJUDICATING.get()
     for cj in ordered:
         _policy_claim.set(cj.name)
+        if adjudicating is not None:
+            adjudicating["cj"] = cj
         if overflow_links and not cj.overflow_safe \
                 and "is_defined" in (region_row_kind(cj.name),
                                      cj.relation):
@@ -8134,11 +8221,12 @@ def _call_by_name(fn, point: dict, extra: "dict | None" = None):
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
-        return fn(*point.values(), **rest)
+        return _exits.call(fn, *point.values(), **rest)
     positional = [p for p, prm in params.items()
                   if prm.kind is inspect.Parameter.POSITIONAL_ONLY and p in point]
-    return fn(*[point[p] for p in positional],
-              **{p: v for p, v in point.items() if p not in positional}, **rest)
+    return _exits.call(fn, *[point[p] for p in positional],
+                       **{p: v for p, v in point.items() if p not in positional},
+                       **rest)
 
 
 def _refill_caller(fn_call, pins: "dict | None" = None):

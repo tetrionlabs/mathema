@@ -9,7 +9,9 @@ code. `call` and `exiting_as_raise` turn it into `ExitRaised`, which is
 both a `SystemExit` (a `raises(..., SystemExit)` claim matches it, and
 it keeps the exit code) and an `Exception` (every handler records it
 like any other raise). Any other `BaseException` (`KeyboardInterrupt`,
-the wall-clock alarm) passes through unchanged.
+the wall-clock alarm) passes through unchanged. What the function
+writes to `sys.stdout` and `sys.stderr` during a `call` is kept off the
+terminal (`_callee_output`).
 """
 from __future__ import annotations
 
@@ -47,13 +49,17 @@ def as_raise(exc: SystemExit) -> ExitRaised:
 def call(fn, *args, **kwargs):
     """Intent:
         `fn(*args, **kwargs)`, with a `SystemExit` it raises turned
-        into `ExitRaised`.
+        into `ExitRaised`, and what it writes to `sys.stdout` and
+        `sys.stderr` kept off the terminal
+        (`_callee_output.kept_off_terminal`).
 
     Raises:
         ExitRaised: `fn` raised `SystemExit`.
     """
+    from ._callee_output import kept_off_terminal
     try:
-        return fn(*args, **kwargs)
+        with kept_off_terminal():
+            return fn(*args, **kwargs)
     except ExitRaised:
         raise
     except SystemExit as exc:

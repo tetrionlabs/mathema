@@ -327,23 +327,113 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
     return spec
 
 
+#: the longest mapping key, in characters of its YAML text, a YAML
+#: reader accepts as an implicit key
+_KEY_LIMIT = 1024
+
+
+def _needs_escape(ch: str) -> bool:
+    """Whether `ch` must be written as an escape inside a double-quoted
+    YAML scalar: a quote or backslash, a line break, a control
+    character, a byte-order mark, or a character outside YAML's
+    printable set; everything else stands as itself."""
+    if ch in '"\\\x85\u2028\u2029\ufeff':
+        return True
+    return not ("\x20" <= ch <= "\x7e" or "\xa0" <= ch <= "\ud7ff"
+                or "\ue000" <= ch <= "\ufffd" or "\U00010000" <= ch <= "\U0010ffff")
+
+
+def _escape(ch: str) -> str:
+    """Intent:
+        `ch` as a YAML double-quoted escape: `\\"` and `\\\\` for a
+        quote and a backslash, `\\n` and `\\t` for a line feed and a
+        tab, else its code point as `\\xXX`, `\\uXXXX` or
+        `\\UXXXXXXXX`.
+
+    Raises:
+        ValueError: `ch` is a lone surrogate, which no YAML reader
+            mathema uses reads back.
+    """
+    if ch in '"\\':
+        return "\\" + ch
+    if ch == "\n":
+        return "\\n"
+    if ch == "\t":
+        return "\\t"
+    code = ord(ch)
+    if 0xD800 <= code <= 0xDFFF:
+        raise ValueError(f"a lone surrogate (U+{code:04X}) has no YAML spelling")
+    if code <= 0xFF:
+        return f"\\x{code:02X}"
+    if code <= 0xFFFF:
+        return f"\\u{code:04X}"
+    return f"\\U{code:08X}"
+
+
+def _quoted(text: str) -> str:
+    """Intent:
+        `text` as a double-quoted YAML scalar that reads back as `text`.
+
+    Raises:
+        ValueError: `text` holds a lone surrogate.
+    """
+    return '"' + "".join(_escape(ch) if _needs_escape(ch) else ch
+                         for ch in text) + '"'
+
+
 @functools.lru_cache(maxsize=4096)
 def _bare_key_reads_back(key: str) -> bool:
     """Whether `key` written bare as a mapping key reads back as the
-    same string (`null`, `true`, `1` and `a: b` do not)."""
+    same string under every YAML reader mathema reads records with
+    (`null`, `true`, `1` and `a: b` do not), standing first in a
+    mapping or first in a list item."""
     import yaml
+    if any(_needs_escape(ch) for ch in key):
+        return False
+    loaders = {yaml.SafeLoader, _SAFE_LOADER}
     try:
-        return yaml.safe_load(f"{key}: 0") == {key: 0}
+        return all(yaml.load(text, Loader=loader) == want
+                   for loader in loaders
+                   for text, want in ((f"{key}: 0", {key: 0}),
+                                      (f"- {key}: 0", [{key: 0}])))
     except yaml.YAMLError:
         return False
 
 
+def _shown_key(k) -> str:
+    """A key or value as an error message names it: its repr, cut at
+    60 characters."""
+    text = repr(k)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
 def _key(k) -> str:
-    """A mapping key as YAML text: bare when it reads back as itself,
-    else in the form `_scalar` gives its value."""
+    """Intent:
+        A mapping key as YAML text: bare when it reads back as itself,
+        else in the form `_scalar` gives its value.
+
+    Raises:
+        ValueError: a key no YAML reader reads back as itself: one not
+            a string, a number, a boolean or None, one holding a lone
+            surrogate, or one longer than a reader takes as a key. The
+            message names the key.
+    """
+    if k is not None and not isinstance(k, (str, int, float)):
+        raise ValueError(f"record key {_shown_key(k)} cannot be written: a "
+                         f"{type(k).__name__} key does not read back from "
+                         f"YAML; use a string")
     if isinstance(k, str) and _bare_key_reads_back(k):
         return k
-    return _scalar(k)
+    try:
+        text = _quoted(k) if isinstance(k, str) else _scalar(k)
+    except ValueError as exc:
+        raise ValueError(f"record key {_shown_key(k)} cannot be written: "
+                         f"{exc}") from None
+    if len(text) > _KEY_LIMIT:
+        raise ValueError(f"record key {_shown_key(k)} cannot be written: its "
+                         f"YAML text is {len(text)} characters, and a YAML "
+                         f"reader takes a key of at most {_KEY_LIMIT}")
+    return text
 
 
 def _word_keys(node):
@@ -389,7 +479,7 @@ def _dump(value, indent: int = 0) -> str:
             if isinstance(item, (dict, list)) and item:
                 body = _dump(item, indent + 1)
                 first, _, rest = body.partition("\n")
-                out += f"{pad}- {first.strip()}\n" + (rest if rest.strip() else "")
+                out += f"{pad}- {first.lstrip(' ')}\n" + (rest if rest.strip() else "")
             else:
                 out += f"{pad}- {_scalar(item)}\n"
         return out
@@ -402,7 +492,7 @@ def _scalar(v) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, float):
-        r = repr(v)
+        r = float.__repr__(v)
         if r in ("inf", "-inf", "nan"):
             return {"inf": ".inf", "-inf": "-.inf", "nan": ".nan"}[r]
         if "e" in r and "." not in r.split("e", 1)[0]:
@@ -412,9 +502,12 @@ def _scalar(v) -> str:
             r = f"{mantissa}.0e{exponent}"
         return r
     if isinstance(v, int):
-        return repr(v)
-    s = str(v).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{s}"'
+        return int.__repr__(v)
+    try:
+        return _quoted(str(v))
+    except ValueError as exc:
+        raise ValueError(f"record value {_shown_key(str(v))} cannot be "
+                         f"written: {exc}") from None
 
 
 def dump_yaml(spec: dict) -> str:
