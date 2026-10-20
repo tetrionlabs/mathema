@@ -547,7 +547,9 @@ def _may_fail(node: ast.AST, scope: dict) -> bool:
     if isinstance(node, ast.BinOp):
         return isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow))
     if isinstance(node, ast.Call):
-        return bool(_lemmas_for_call(node, scope)) or _opaque_call(node, scope)
+        read_check = _READ_CHECK.get()
+        return bool(_lemmas_for_call(node, scope)) or _opaque_call(node, scope) \
+            or (read_check is not None and read_check(node) is not None)
     read_check = _READ_CHECK.get()
     return read_check is not None \
         and isinstance(node, (ast.Subscript, ast.Attribute)) \
@@ -615,6 +617,9 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             opaque.append(f"line {getattr(node, 'lineno', '?')}: {how}")
     if isinstance(node, ast.Call):
         opaque = _OPAQUE_OUT.get()
+        how = read_check(node) if read_check is not None else None
+        if opaque is not None and how is not None:
+            opaque.append(f"line {getattr(node, 'lineno', '?')}: {how}")
         if opaque is not None and _opaque_call(node, scope):
             opaque.append(f"line {getattr(node, 'lineno', '?')}: a call to "
                           f"{ast.unparse(node.func)}, whose definedness is "

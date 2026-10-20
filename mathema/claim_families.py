@@ -4231,9 +4231,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                         yield {**base, p: float(root) + off}
 
     def emptied():
-        # the inputs a subscript or a field read fails on: the empty
-        # sequence, string and mapping, and a mapping without each key
-        # the body reads
+        # the inputs a subscript, a field read or a conversion fails
+        # on: the empty sequence, string and mapping, text that is no
+        # number, and a mapping without each key the body reads
         from .probing import _synth_dict
         from .symbolic._base import _dict_key_tree
         for p in params:
@@ -4246,7 +4246,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             elif p_kind in SEQUENCE_KINDS:
                 yield {**draw(), p: as_container(p, [])}
             elif p_kind == "string":
+                # the empty string, and text no number conversion parses
                 yield {**draw(), p: ""}
+                yield {**draw(), p: "x"}
             elif p_kind == "dict":
                 yield {**draw(), p: {}}
                 keys = (_dict_key_tree(facts.tree, p)
