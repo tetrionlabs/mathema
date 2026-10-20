@@ -56,6 +56,16 @@ def nan_inside_a_loop(x: float) -> float:
     return total / 2
 
 
+def overflowing_product(x: float) -> float:
+    if x > 0:
+        return 0.0 * (1e308 * 10.0)
+    return x
+
+
+def infinity_minus_infinity(x: float) -> float:
+    return x if x <= 1 else 1e308 * 10 - 1e308 * 10
+
+
 def compares_with_infinity(x: float) -> float:
     return x if x < math.inf else 0.0
 
@@ -118,3 +128,12 @@ def test_a_literal_that_never_reaches_the_result_keeps_the_proof():
         assert guards == [] and unread is None, (fn.__name__, guards, unread)
         p = _verdict(fn)
         assert p.verdict == "proven", (fn.__name__, p.route, p.note)
+
+
+def test_arithmetic_of_literals_with_no_float_value_is_no_value():
+    # 1e308 * 10.0 overflows to inf; 0.0 * inf and inf - inf are nan
+    for fn in (overflowing_product, infinity_minus_infinity):
+        guards, _unread = partiality_walk(fn, effective_facts(fn))
+        assert any(exc == NO_VALUE for _cond, exc in guards), fn.__name__
+        p = _verdict(fn)
+        assert p.verdict == "falsified", (fn.__name__, p.route, p.sketch)

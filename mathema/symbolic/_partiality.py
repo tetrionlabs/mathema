@@ -767,10 +767,41 @@ def _non_finite_number(value) -> bool:
     return not (math.isfinite(z.real) and math.isfinite(z.imag))
 
 
+_CONSTANT_OPS = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+                 ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
+
+
+def _constant_value(node: ast.AST):
+    """The value Python computes for an arithmetic of number literals
+    alone (zero times a literal product past the float range is nan, and
+    so is that product minus itself), or None when the expression reads anything else or raises."""
+    if isinstance(node, ast.Constant):
+        value = node.value
+        return value if isinstance(value, (int, float, complex)) \
+            and not isinstance(value, bool) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op,
+                                                    (ast.USub, ast.UAdd)):
+        inner = _constant_value(node.operand)
+        return None if inner is None else (
+            -inner if isinstance(node.op, ast.USub) else inner)
+    if isinstance(node, ast.BinOp) and type(node.op) in _CONSTANT_OPS:
+        left, right = _constant_value(node.left), _constant_value(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            return _CONSTANT_OPS[type(node.op)](left, right)
+        except (ArithmeticError, TypeError, ValueError):
+            return None
+    return None
+
+
 def _no_value_literal(node: ast.AST, scope: dict, local: frozenset) -> bool:
     """Intent:
         Whether one node spells a nan or an infinity whatever the input:
-        a non-finite constant (`1e309`), a module attribute holding one
+        a non-finite constant (`1e309`), an arithmetic of number literals
+        whose value Python computes as one (zero times a literal product
+        past the float range), a
+        module attribute holding one
         (`math.nan`, `numpy.inf`), a module-level name holding one
         (`from math import inf`, `NAN = float("nan")`), or a float or
         complex type called on a constant (`float("nan")`).
@@ -781,6 +812,8 @@ def _no_value_literal(node: ast.AST, scope: dict, local: frozenset) -> bool:
     """
     if isinstance(node, ast.Constant):
         return _non_finite_number(node.value)
+    if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        return _non_finite_number(_constant_value(node))
     if isinstance(node, ast.Name):
         return node.id not in local and node.id in scope \
             and _non_finite_number(scope[node.id])
@@ -828,6 +861,8 @@ def _infinity_sign(node: ast.AST, scope: dict, local: frozenset) -> int:
         value = scope[node.id]
     elif isinstance(node, ast.Attribute):
         value = getattr(scope[node.value.id], node.attr)
+    elif isinstance(node, ast.BinOp):
+        value = _constant_value(node)
     else:
         value = _call_target(node, scope)[0](node.args[0].value)
     try:

@@ -42,7 +42,8 @@ def power_two(x: float) -> float:
 
 
 def nan_in_float(x: float) -> float:
-    return (x - x) * (1e308 * 10.0)
+    big = x * 1e308 * 10.0
+    return big - big
 
 
 def exp_of(x: float) -> float:
