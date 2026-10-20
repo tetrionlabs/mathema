@@ -158,9 +158,13 @@ def receiver_fields(cls, tree, name: str) -> "tuple | None":
         The fields an instance of `cls` is drawn with when it stands for
         a method's receiver `name`: a dataclass's declared fields, each
         an int or a float; for any other class the fields the body reads
-        (`self.rate`); none when the body never names the receiver.
-        None when no draw is known: a dataclass with a field of another
-        type, a body that names the receiver only otherwise (a method
+        (`self.rate`), none when it reads none, when the class's own
+        constructor can be called with drawn arguments
+        (`constructor_kinds`); without a constructor of its own, the
+        fields the body reads, none when the body never names the
+        receiver. None when no draw is known: a dataclass with a field
+        of another type, a constructor taking an argument mathema cannot
+        draw, a body that names the receiver only otherwise (a method
         call, passing it on), or no body to read.
     """
     import ast
@@ -171,13 +175,99 @@ def receiver_fields(cls, tree, name: str) -> "tuple | None":
         from ..symbolic._base import _dataclass_field_names
         numeric = _dataclass_field_names(cls)
         return tuple(numeric) if numeric else None
+    from ..symbolic._base import _attr_keys_used
+    read = tuple(_attr_keys_used(tree, name)) if tree is not None else ()
+    if _own_init(cls):
+        return read if constructor_kinds(cls) is not None else None
     if tree is None:
         return None
-    from ..symbolic._base import _attr_keys_used
-    read = _attr_keys_used(tree, name)
     if read:
-        return tuple(read)
+        return read
     body = [n for stmt in getattr(tree, "body", []) for n in ast.walk(stmt)]
     if not any(isinstance(n, ast.Name) and n.id == name for n in body):
         return ()
     return None
+
+
+def _own_init(cls) -> bool:
+    """Whether `cls` (or a class it inherits from, other than `object`)
+    defines its own `__init__`."""
+    return getattr(cls, "__init__", object.__init__) is not object.__init__
+
+
+def constructor_kinds(cls) -> "dict | None":
+    """Intent:
+        `{parameter: kind}` for the arguments `cls(...)` is called with
+        to build an instance: each parameter of the constructor, drawn
+        as an `int`, a `bool` or a `float` by its annotation (a float
+        when it states none); a parameter with a default and no
+        annotation is left at its default. None when a parameter cannot
+        be drawn (another annotation, `*args` or `**kwargs` without a
+        default to fall back on) or the signature cannot be read.
+    """
+    try:
+        sig = inspect.signature(cls)
+    except (TypeError, ValueError):
+        return None
+    out: dict = {}
+    for p in sig.parameters.values():
+        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            continue
+        ann = p.annotation
+        if ann is p.empty:
+            if p.default is not p.empty:
+                continue
+            out[p.name] = "float"
+        elif ann in (int, "int"):
+            out[p.name] = "int"
+        elif ann in (bool, "bool"):
+            out[p.name] = "bool"
+        elif ann in (float, "float"):
+            out[p.name] = "float"
+        elif p.default is not p.empty:
+            continue
+        else:
+            return None
+    return out
+
+
+class ReceiverRefused(BaseException):
+    """No drawn arguments built an instance of a method's receiver class:
+    its constructor refused every draw. A `BaseException` so no trial's
+    own `except Exception` reads it as the function raising."""
+
+
+def construct_receiver(cls, fields: tuple, bounds: dict, draw, tries: int = 200):
+    """Intent:
+        One instance of `cls` for a method's receiver, built as the class
+        builds one, so it holds what the class guarantees: a dataclass
+        from its fields `((name, kind), ...)`, its `__post_init__`
+        included; a class with a constructor of its own through that
+        constructor, its arguments drawn by `constructor_kinds`; any
+        other class field by field without a constructor. Each value is
+        `draw(kind, bound)`, a field's or a same-named argument's bound
+        taken from `bounds`. A draw the constructor refuses (it raises)
+        is outside the class and drawn again.
+
+    Raises:
+        ReceiverRefused: the constructor refused `tries` draws in a row.
+    """
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        plan = dict(fields)
+    elif _own_init(cls):
+        plan = constructor_kinds(cls) or {}
+    else:
+        inst = object.__new__(cls)
+        for f, kind in fields:
+            setattr(inst, f, draw(kind, bounds.get(f)))
+        return inst
+    for _ in range(tries):
+        values = {name: draw(kind, bounds.get(name))
+                  for name, kind in plan.items()}
+        try:
+            return cls(**values)
+        except Exception:
+            continue
+    raise ReceiverRefused(f"{cls.__name__}(...) refused {tries} drawn "
+                          f"arguments in a row")

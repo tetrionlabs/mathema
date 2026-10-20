@@ -1455,6 +1455,12 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
             return 0.0
         # the difference is taken exactly, so an integer too large for
         # a float never has to be converted unless it is the answer
+        if isinstance(lv, float) or isinstance(rv, float):
+            if any(isinstance(v, float) and not math.isfinite(v)
+                   for v in (lv, rv)):
+                return 0.0
+            from fractions import Fraction
+            lv, rv = Fraction(lv), Fraction(rv)
         exact = (lv - rv) if relation == "<=" else (rv - lv)
         if exact <= 0:
             return 0.0
@@ -2103,12 +2109,12 @@ def _synth(kind: str, rng: random.Random, bounds=None,
 @dataclass(frozen=True, eq=False)
 class Instances:
     """Intent:
-        The instances of `cls` a method's receiver ranges over: each
-        field of `fields`, `((name, kind), ...)`, drawn as its kind
-        (`int` or `float`) inside its bound in `bounds`, `((name,
-        bound), ...)`, None for the whole line. A dataclass is
-        constructed; any other class is built field by field without
-        running its `__init__`.
+        The instances of `cls` a method's receiver ranges over, built
+        as the class builds one (`_receivers.construct_receiver`): each
+        field of `fields`, `((name, kind), ...)`, or each argument of the
+        class's own constructor, drawn as its kind (`int` or `float`)
+        inside its bound in `bounds`, `((name, bound), ...)`, None for
+        the whole line.
     """
     cls: type
     fields: tuple
@@ -2120,16 +2126,10 @@ class Instances:
         return self.cls
 
     def draw(self, rng: random.Random, specials=None):
-        import dataclasses
-        bounds = dict(self.bounds)
-        values = {f: _synth(kind, rng, bounds.get(f), specials=specials)
-                  for f, kind in self.fields}
-        if dataclasses.is_dataclass(self.cls):
-            return self.cls(**values)
-        inst: object = object.__new__(self.cls)
-        for f, v in values.items():
-            setattr(inst, f, v)
-        return inst
+        from .runtime_types._receivers import construct_receiver
+        return construct_receiver(
+            self.cls, self.fields, dict(self.bounds),
+            lambda kind, bound: _synth(kind, rng, bound, specials=specials))
 
 
 def bound_element_type(bound) -> "str | None":
@@ -2179,8 +2179,8 @@ def typed_element_bound(fn, param: str, bound):
             return Domain(base_type="S", explicit_type=True, clause=True)
         return None
     if element == "int":
-        from .conjecture import _int_completed
-        return _int_completed(bound, "list[int]")
+        from ._annotation_text import int_completed
+        return int_completed(bound, "list[int]")
     return bound
 
 

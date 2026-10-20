@@ -71,3 +71,32 @@ def test_a_vector_with_a_huge_int_is_read_entry_by_entry():
     assert not _is_nonfinite([huge, 1])
     assert _is_nonfinite([huge, math.inf])
     assert _is_nonfinite([huge, math.nan])
+
+
+def beyond(n: int) -> int:
+    return 10 ** 400 + n
+
+
+def below(n: int) -> int:
+    return -(10 ** 400) + n
+
+
+def constant(n: int) -> int:
+    return 10 ** 400
+
+
+@pytest.mark.parametrize("fn, law", [
+    (beyond, "for n in [0, 10] subset Z, f(n) >= 1e308"),
+    (below, "for n in [0, 10] subset Z, f(n) <= -1e308"),
+])
+def test_an_ordering_against_a_float_is_decided_exactly(fn, law):
+    (p,) = check_conjectures(fn, [claim(law, route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.note)
+
+
+def test_a_literal_beyond_float_is_not_compared_as_an_infinity():
+    (p,) = check_conjectures(constant, [claim("f(2) == 1e400", route="probe")])
+    assert p.verdict == "unknown", (p.verdict, p.counterexample)
+    assert "the literal 1e400 is beyond float64" in p.note, p.note
+    (p,) = check_conjectures(constant, [claim("f(2) == 1e400")])
+    assert p.verdict == "proven", (p.verdict, p.note)

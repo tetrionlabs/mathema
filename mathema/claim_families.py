@@ -3260,6 +3260,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in params}
     if not params or any(k not in _WITNESS_SCALAR_KINDS for k in kinds.values()):
         return None, 0
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is not None and receiver[0] == params[0]:
+        # a method's receiver is an instance of its class, never a number
+        return None, 0
     try:
         signature = callable_signature(fn)
         signature.bind(**{p: 0 for p in params})

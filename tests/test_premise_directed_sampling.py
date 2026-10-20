@@ -89,3 +89,10 @@ def test_synth_singular_is_singular(n):
         assert len(m) == n and all(len(row) == n for row in m)
         with pytest.raises(np.linalg.LinAlgError):
             np.linalg.inv(np.asarray(m))
+
+
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_derive_admits_no_empty_sequence_under_r_n(route):
+    (p,) = check_conjectures(head, [claim(
+        "for xs in R^n, assuming dim(xs) < 1, f(xs) == 0", route=route)])
+    assert p.verdict in ("unknown", "skipped"), (p.verdict, p.counterexample)

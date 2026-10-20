@@ -86,7 +86,7 @@ def test_ordering_over_c_refuses_on_both_routes():
     for route in ("derive", "probe"):
         (p,) = check_conjectures(modsq, [claim("for z in C, f(z) >= 0",
                                                route=route)])
-        assert p.verdict == "skipped"
+        assert p.verdict == "skipped:misspecified"
         assert "complex plane" in p.note
 
 

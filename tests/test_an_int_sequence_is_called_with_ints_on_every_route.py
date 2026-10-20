@@ -8,9 +8,12 @@ smoke call and the exact reading of the claim. A hole the claim admits
 is the one entry that is not an int. A vector the claim evaluates as an
 array goes back to the function with the ints it was drawn with, holes
 included, and a hole inside mathema's own array is still seen as one."""
+from typing import Optional
+
 import pytest
 
 import mathema
+from mathema.conjecture import check_conjectures, claim
 
 np = pytest.importorskip("numpy")
 npt = pytest.importorskip("numpy.typing")
@@ -79,3 +82,36 @@ def test_a_hole_inside_mathemas_own_array_is_seen():
     assert inputs_missing([read([None, 9, 3])])
     assert inputs_missing([read([None, 9.0, 3.0])])
     assert not inputs_missing([read([1, 2])])
+
+
+_CALLED_WITH: list = []
+
+
+def summed(xs: list[int]) -> int:
+    _CALLED_WITH.append(xs)
+    return sum(xs)
+
+
+def maybe_summed(xs: Optional[list[int]]) -> int:
+    _CALLED_WITH.append(xs)
+    return 0 if xs is None else sum(xs)
+
+
+def flags(xs: list[bool]) -> int:
+    _CALLED_WITH.append(xs)
+    return sum(1 for b in xs if b)
+
+
+def lengths(xs: list[str]) -> int:
+    _CALLED_WITH.append(xs)
+    return sum(len(s) for s in xs)
+
+
+@pytest.mark.parametrize("fn", [summed, maybe_summed, flags, lengths],
+                         ids=lambda fn: fn.__name__)
+def test_the_region_probe_draws_the_sequence(fn):
+    _CALLED_WITH.clear()
+    (p,) = check_conjectures(fn, [claim("is_defined(f)")])
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
+    assert any(isinstance(xs, (list, tuple)) and xs for xs in _CALLED_WITH), \
+        _CALLED_WITH[:3]
