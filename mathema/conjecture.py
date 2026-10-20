@@ -582,16 +582,11 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
     if region_row_kind(base):
         return True
     call = f"f({', '.join(facts.params)})"
-    form = _DERIVATIVE_FAMILY_FORMS.get(base)
-    if form is not None:
-        order, relation = form
+    if base in _DERIVATIVE_FAMILY_FORMS:
         param = cj.name[len(base):]
         if not (param.startswith("[") and param.endswith("]")):
             return False
-        param = param[1:-1]
-        expected = f"d({call}, {', '.join([param] * order)})"
-        return (cj.relation == relation and _squash(cj.rhs) == "0"
-                and _squash(cj.lhs) == _squash(expected))
+        return _states_derivative_form(cj, base, param[1:-1], facts)
     if base in _SELF_AGREEMENT_FAMILIES:
         return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
                 and _squash(cj.rhs) == _squash(call))
@@ -604,6 +599,82 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
                 and (bound == _ACCURATE or bound is accurate))
     return not isinstance(family, (_NamedClaimFamily, MatrixPropertyFamily,
                                    OutputPredicateFamily))
+
+
+def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
+    """Intent:
+        Whether the claim states the derivative-sign fact the family
+        `base` adjudicates in `param`: `d(f(<params>), param) >= 0` for
+        `monotonic_increasing`, `d(f(<params>), param, param) == 0` for
+        `affine`, and the rest of `_DERIVATIVE_FAMILY_FORMS`, with the
+        call naming every parameter of f in order.
+    """
+    order, relation = _DERIVATIVE_FAMILY_FORMS[base]
+    call = f"f({', '.join(facts.params)})"
+    expected = f"d({call}, {', '.join([param] * order)})"
+    return (cj.relation == relation and _squash(cj.rhs) == "0"
+            and _squash(cj.lhs) == _squash(expected))
+
+
+def _derivative_family_by_statement(cj, fn, facts) -> "tuple | None":
+    """Intent:
+        The derivative-sign family whose statement the claim writes, for
+        a claim under any name: `(family, family_claim_name)`, e.g. the
+        `monotonic_increasing` family and `monotonic_increasing[x]` for
+        `d(f(x), x) >= 0`. None when the statement is no family's, when
+        the claim binds its own `d` or `f`, carries a tolerance, chains
+        comparisons or states a negation, or when the family declines
+        the function.
+    """
+    if cj.links or cj.negated or cj.tolerance is not None \
+            or {"d", "f"} & set(cj.funcs or {}):
+        return None
+    for base in _DERIVATIVE_FAMILY_FORMS:
+        for param in facts.params:
+            if not _states_derivative_form(cj, base, param, facts):
+                continue
+            family = families.families().get(base)
+            name = f"{base}[{param}]"
+            if family is not None and family.can_handle(fn, facts, name):
+                return family, name
+    return None
+
+
+def _derivative_family_decides(cj, fn, facts) -> bool:
+    """Intent:
+        Whether a derivative-sign family's probe decides the claim: the
+        claim names that family and states its statement, or states it
+        under another name (`_derivative_family_by_statement`), and the
+        parameter the derivative is taken in is a real scalar, the only
+        kind that family's probe draws.
+    """
+    named = _claim_family(cj, fn, facts)
+    if named is not None and families.claim_base_name(cj.name) in _DERIVATIVE_FAMILY_FORMS:
+        name = cj.name
+    else:
+        found = _derivative_family_by_statement(cj, fn, facts)
+        if found is None:
+            return False
+        name = found[1]
+    if "[" not in name or not name.endswith("]"):
+        return False
+    param = name[name.index("[") + 1:-1]
+    return facts.param_kinds.get(param) == "scalar"
+
+
+def _how_the_family_checks(family_name: str) -> str:
+    """Intent:
+        The sentence a claim decided by a derivative-sign family's probe
+        carries: which family check decided it and how that check reads
+        the derivative (`as convex[x] does, with the second derivative
+        estimated by finite differences`).
+    """
+    base = families.claim_base_name(family_name)
+    order, _ = _DERIVATIVE_FAMILY_FORMS[base]
+    param = family_name[len(base) + 1:-1]
+    how = (f"comparing f at ordered pairs of {param}" if order == 1 else
+           "with the second derivative estimated by finite differences")
+    return f"the probe decided it as {family_name} does, {how}"
 
 
 def _lengths_scope(cj, family, facts):
@@ -5613,6 +5684,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # with the reason in the sketch, never mis-adjudicated or
         # reported as an "unresolved bound function"
         unsupported = routes.unsupported_forms(cj.route, cj)
+        if unsupported == ["d"] and cj.route == "probe" \
+                and _derivative_family_decides(cj, fn, facts):
+            # a derivative-sign statement the probe decides with the
+            # family's own technique
+            unsupported = []
         if unsupported:
             out.append(_stamped(Probe(
                 cj.name, statement, "skipped", route=None, note=note,
@@ -10743,13 +10819,23 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # family-owned name (the orchestration loop resolves the family
     # for every concrete route). Calls fn directly, not through the
     # compiled lhs/rhs eval() the generic loop below needs.
-    algo_route = family.routes().get("probe:algorithmic") if family is not None else None
+    # A claim under any name whose statement is a derivative-sign
+    # family's (`d(f(x), x) >= 0`) reaches that family's technique, run
+    # as the family's own claim (`monotonic_increasing[x]`).
+    algo_family, family_cj, by_statement = family, cj, None
+    if family is None:
+        by_statement = _derivative_family_by_statement(cj, fn, facts)
+        if by_statement is not None:
+            algo_family = by_statement[0]
+            family_cj = _dc_replace(cj, name=by_statement[1])
+    algo_route = (algo_family.routes().get("probe:algorithmic")
+                  if algo_family is not None else None)
     if algo_route is not None:
         # the probe is registered under "probe:algorithmic", but a member
         # may name a more specific mechanism to stamp (fuzz + shrink ->
         # "probe:minimal_example"); the stamped subroute has its own rung
         # on EVIDENCE_LADDER.
-        probe_route = getattr(family, "probe_route", "probe:algorithmic")
+        probe_route = getattr(algo_family, "probe_route", "probe:algorithmic")
         setup = sampling()
         from . import _premises
         from .runtime_types import calling
@@ -10763,7 +10849,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
-                facts, cj, cj_domain, setup.rng, setup.budget)
+                facts, family_cj, cj_domain, setup.rng, setup.budget)
         premise_unmet = (guard is not None and guard.admitted == 0
                          and guard.rejected > 0)
         if algo_result is not None:
@@ -10777,6 +10863,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             verdict, checked, cx, established, algo_meta = \
                 split_probe_result(algo_result)
             algo_meta = copy.deepcopy(algo_meta) if algo_meta else {}
+            if by_statement is not None:
+                note = f"{note}; {_how_the_family_checks(by_statement[1])}".lstrip("; ")
             if algo_meta.get("mathema.sampled"):
                 note = f"{note}; {algo_meta['mathema.sampled']}".lstrip("; ")
             # a family's caveat (a hidden input, a restore that failed) is
