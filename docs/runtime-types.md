@@ -300,7 +300,10 @@ them from that column alone, and `\ {nan}` excludes one member. pandas
 receives each column in the dtype pandas holds such a column in: its
 string dtype, `bool`, `int64` or `float64`, a string or boolean column
 with a hole spelled `None` as `object`, and a hole spelled `NA` in the
-nullable `string`, `boolean` or `Float64`. polars receives `String`,
+nullable `string`, `boolean` or `Float64`; a string or boolean column
+with no value at all (holes only, or no rows) takes a dtype that states
+its type, pandas' string dtype on pandas 3, else the nullable `string`
+or `boolean`. polars receives `String`,
 `Boolean`, `Int64` or `Float64`, a hole in a string or boolean column
 as null. A table the function returns is read back with the same names
 and types, and a string or boolean column compares element by element
