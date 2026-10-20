@@ -317,9 +317,10 @@ def decide_symbolic(relation: str, left, right, slack) -> "bool | None":
 
 def _exact_value(value, rounded_roots: bool = False):
     """`value` as a plain exact value (an int, Fraction or bool, an exact
-    sympy number, or a nested list of them), or None when any part is
-    inexact. With `rounded_roots`, a square root of an exact rational
-    (`_linalg_eval._Root`, rounded once to a float or, beyond float
+    sympy number, a finite Decimal as its Fraction, or a nested list of
+    them), or None when any part is inexact. With `rounded_roots`, a
+    square root of an exact rational (`_linalg_eval._Root`, rounded
+    once to a float or, beyond float
     range, to 60 significant digits) is read as that rounded value, a
     reading close enough for a computation line's tolerance."""
     from ._linalg_eval import _Root
@@ -334,6 +335,10 @@ def _exact_value(value, rounded_roots: bool = False):
         return from_symbolic(value)
     if _is_exact(value):
         return value
+    from decimal import Decimal
+    if isinstance(value, Decimal) and value.is_finite():
+        # a finite Decimal is the rational its digits say
+        return Fraction(value)
     if isinstance(value, (list, tuple)):
         parts = [_exact_value(v, rounded_roots) for v in value]
         if any(p is None for p in parts):
