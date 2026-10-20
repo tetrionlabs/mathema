@@ -5342,10 +5342,12 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
         value claims, then the stated policy rows, then the gates.
     """
     from . import policy as _policy
-    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
+    from ._annotation_text import complex_parameters
+    from .grammar import (_BAR_MATRICES, bars_over_matrices, complex_in_view,
+                          matrices_in_view)
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
-            _policy.exceptions_of(fn):
+            _policy.exceptions_of(fn), complex_in_view(complex_parameters(fn)):
         out = _around_failing_languages(lambda claims: _check_conjectures(
             fn, claims, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,

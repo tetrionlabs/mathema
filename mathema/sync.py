@@ -71,9 +71,12 @@ def _identity(statement: str, domain: "dict | None" = None,
         to silently skip; the old fingerprint returned None here, and
         a conflict on an unparseable claim simply vanished.
     """
+    from ._annotation_text import complex_parameters
+    from .grammar import complex_in_view
     from .spec import _declared_conjecture, fingerprint_text
-    return (fingerprint_text(_completed(_declared_conjecture(
-        {"statement": statement, "domain": domain}), fn)),)
+    with complex_in_view(complex_parameters(fn) if fn is not None else ()):
+        return (fingerprint_text(_completed(_declared_conjecture(
+            {"statement": statement, "domain": domain}), fn)),)
 
 
 def _claim_identity(c: dict, fn=None) -> "tuple | None":
