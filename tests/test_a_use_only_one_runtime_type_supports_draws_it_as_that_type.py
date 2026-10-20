@@ -96,9 +96,35 @@ def test_uses_two_imported_libraries_support_promote_nothing():
 def test_a_use_the_imported_library_does_not_support_promotes_nothing():
     facts = analyze_source(promote_numpy_only.first_by_position)
     assert "xs" not in facts.runtime_types, facts.runtime_types
-    assert facts.runtime_hints["xs"]["text"] == (
-        "xs is used as a vector; this module imports numpy: to sample it "
-        "as one, annotate: xs: np.ndarray")
+    hint = facts.runtime_hints["xs"]
+    assert hint["unsupported"] == ["xs.iloc"]
+    assert hint["text"] == (
+        "xs is used as a vector; this module imports numpy, but "
+        "numpy.ndarray does not support xs.iloc: annotate xs with the "
+        "type it has")
+
+
+@pytest.mark.parametrize("fn, runtime", [
+    (promote_numpy_only.sum_and_weight, "numpy.ndarray"),
+    (promote_pandas.total_and_weight, "pandas.Series")],
+    ids=["numpy", "pandas"])
+def test_an_attribute_the_type_lacks_keeps_the_list_draw(fn, runtime):
+    param = "x" if fn is promote_numpy_only.sum_and_weight else "xs"
+    facts = analyze_source(fn)
+    assert param not in facts.runtime_types, facts.runtime_types
+    hint = facts.runtime_hints[param]
+    assert hint["unsupported"] == [f"{param}.weight"]
+    assert hint["text"] == (
+        f"{param} is used as a vector; this module imports "
+        f"{runtime.split('.')[0]}, but {runtime} does not support "
+        f"{param}.weight: annotate {param} with the type it has")
+
+
+def test_an_attribute_the_type_lacks_never_falsifies_through_the_draw():
+    (p,) = check_conjectures(promote_numpy_only.sum_and_weight,
+                             [claim("for x in [0, 1]^n, f(x) >= 0")])
+    assert p.verdict != "falsified", (p.verdict, p.counterexample, p.note)
+    assert "x.weight" in (p.note or ""), p.note
 
 
 def test_a_module_importing_no_such_library_is_unchanged():

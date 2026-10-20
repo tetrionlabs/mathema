@@ -28,3 +28,9 @@ def scaled_annotated(df: pd.DataFrame, c):
     """The returns column scaled by c, the frame's type annotated."""
     assert "returns" in df.columns
     return df["returns"] * c
+
+
+def total_and_weight(xs):
+    """The total times a weight read off the same object: a Series has
+    no `.weight`."""
+    return xs.sum() * xs.weight

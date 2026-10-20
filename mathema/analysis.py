@@ -1235,7 +1235,8 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
     from .runtime_types import (detect_parameters, promotions,
-                                undrawable_parameters, usage_hints)
+                                undrawable_parameters, usage_hints,
+                                with_unsupported)
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
     undrawable = undrawable_parameters(fn, detected)
@@ -1251,8 +1252,8 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
     # runtime type supports is drawn as that type, and the record says
     # why; uses two imported libraries both support leave it undrawn as
     # either, with a hint naming each
-    promoted, ambiguous = promotions(fn, fdef, params, param_kinds,
-                                     detected)
+    promoted, ambiguous, unsupported = promotions(fn, fdef, params,
+                                                  param_kinds, detected)
     for p, detection in promoted.items():
         if p not in undrawable:
             detected[p] = (detection,)
@@ -1260,6 +1261,12 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
     for p, hint in ambiguous.items():
         if p not in undrawable:
             hints[p] = hint
+    # a hint naming a type that lacks one of the body's uses names
+    # those uses instead of advising that type
+    for p, hint in list(hints.items()):
+        lacking = (unsupported.get(p) or {}).get(hint.get("type"))
+        if lacking:
+            hints[p] = with_unsupported(hint, p, lacking)
     apply_runtime_kinds(param_kinds, detected)
     form = identity.form_hash(fdef)
     # every reader past this point (the guards below and each lifter

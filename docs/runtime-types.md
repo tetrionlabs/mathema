@@ -106,15 +106,16 @@ type, how it is drawn depends on the use. Each runtime type adapter
 declares the uses its type supports and a list does not: attributes
 (`.iloc`, `.columns`, `.shape`), methods (`.mean()`, `.dropna()`),
 methods called with a column name (`df.groupby("k")`), and `@`. When
-every such use in the body is one the types of exactly one library the
-module imports support, the parameter is drawn as that library's type,
-and the record says so ("the body uses it as a pandas DataFrame"). A
-library's Series and DataFrame both supporting the uses, the body's
-usage decides: a column read or a keyed method makes it the DataFrame,
-a vector use the Series. A use no imported library's type supports
-draws it as a list, and so do uses the types of two imported libraries
-both support; the record then names the runtime type to annotate, and
-in the second case each of them:
+every use the body makes of the parameter (apart from what every Python
+object has, such as `.__class__`) is one the types of exactly one
+library the module imports support, the parameter is drawn as that
+library's type, and the record says so ("the body uses it as a pandas
+DataFrame"). A library's Series and DataFrame both supporting the uses,
+the body's usage decides: a column read or a keyed method makes it the
+DataFrame, a vector use the Series. A single use the type does not
+declare (`x.weight` beside `x.sum()`) keeps the parameter a list, and
+the hint names that use; uses the types of two imported libraries both
+support also keep it a list, and the hint names each type:
 
 <!-- example: rt-promote run inline requires=polars -->
 ```python
@@ -133,15 +134,19 @@ def spread(xs):
     return xs.max() - xs.min()
 
 
+def sum_and_weight(x):
+    return x.sum() * x.weight
+
+
 mathema.analyze(first_row_share).runtime_types["df"][0].evidence  # 'the body uses it as a pandas DataFrame'
 mathema.analyze(spread).runtime_hints["xs"]["text"]  # 'xs is used as a vector; this module imports pandas and numpy, whose types both support that use: to sample it as one, annotate: xs: pd.Series or xs: np.ndarray'
+mathema.analyze(sum_and_weight).runtime_hints["x"]["text"]  # 'x is used as a vector; this module imports pandas, but pandas.Series does not support x.weight: annotate x with the type it has'
 ```
 
 In a module that imports pandas alone, `spread`'s `xs` is drawn as a
 pandas Series; with numpy alone, as an ndarray. When the body's uses
-are ones a list also serves (indexing, `np.mean(x)`), or ones no
-imported library's type supports, the hint names the runtime type of
-the library the module imports:
+are ones a list also serves (indexing, `np.mean(x)`), the hint names
+the runtime type of the library the module imports:
 
 <!-- illustration -->
 ```text

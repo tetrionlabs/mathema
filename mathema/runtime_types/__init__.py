@@ -837,14 +837,46 @@ def _typed_use(use: tuple, declared: list) -> bool:
     """Intent:
         Whether a body use says anything about a runtime type: one a
         list does not support (`.T`, `@`, a vector method or attribute)
-        or one some adapter's `USES` declares. Any other attribute
-        (`x.weight` on an object of the caller's own) is not.
+        or one some adapter's `USES` declares.
     """
     form, name = use
     if form == "@" or name == "T" or name in _VECTOR_METHODS \
             or name in _VECTOR_ATTRS:
         return True
     return any(uses.supports(use) for uses in declared)
+
+
+def _universal(use: tuple) -> bool:
+    """Intent:
+        Whether every Python object supports the use: an attribute or
+        method `object` itself has (`x.__class__`, `x.__eq__(y)`).
+    """
+    form, name = use
+    return form != "@" and hasattr(object, name)
+
+
+def _use_text(p: str, use: tuple) -> str:
+    """`x.weight` for an attribute read, `x.fit()` for a method call,
+    `x @` for an operand of `@`."""
+    form, name = use
+    if form == "@":
+        return f"{p} @"
+    return f"{p}.{name}()" if form in ("call", "keyed") else f"{p}.{name}"
+
+
+def with_unsupported(hint: dict, p: str, unsupported: list) -> dict:
+    """Intent:
+        `hint` for a parameter whose uses include `unsupported` (use
+        texts, `x.weight`), uses the runtime type the hint names does
+        not support: the same keys plus `unsupported`, and a text
+        naming those uses in place of the advice to annotate that type.
+    """
+    lib = hint["type"].split(".", 1)[0]
+    return {**hint, "unsupported": list(unsupported),
+            "text": f"{p} is used as a {hint['usage']}; this module imports "
+                    f"{lib}, but {hint['type']} does not support "
+                    f"{_listed(list(unsupported), 'and')}: annotate {p} "
+                    f"with the type it has"}
 
 
 #: the kinds a body usage asks for, in order of preference
@@ -889,29 +921,33 @@ def _promoted_kind(found, usage: "str | None") -> str:
 def promotions(fn, fdef, params: list, param_kinds: dict,
                detected: dict) -> tuple:
     """Intent:
-        The parameters the body's uses draw as a runtime type, and the
-        ones whose uses leave the type open, `(promoted, ambiguous)`.
+        The parameters the body's uses draw as a runtime type, the ones
+        whose uses leave the type open, and the uses each imported
+        runtime type does not support, `(promoted, ambiguous,
+        unsupported)`.
         A parameter qualifies as `usage_hints` reads one: no runtime
         type named, no annotation naming a type, not an `int`, `bool`,
         `string` or `complex` kind, in a module importing a library
-        with a runtime type adapter. Its typed uses (`_typed_use`) are
-        matched against each adapter's `USES` whose library the module
-        imports; an adapter matches when it supports every one of them.
+        with a runtime type adapter, and at least one of its uses typed
+        (`_typed_use`). Every use the body makes of it, apart from one
+        every object supports (`_universal`), is matched against each
+        adapter's `USES` whose library the module imports; an adapter
+        matches when it supports every one of them, so an attribute it
+        does not declare (`x.weight`) rules it out.
         A library whose adapters match selects one (`_library_choice`).
         `promoted` is `{param: Detection}` when exactly one library
         selects an adapter, its evidence `the body uses it as <the
         adapter's described type>`. `ambiguous` is `{param: hint}`
         when two or more do, the hint (`usage_hints`'s keys, plus
         `types`, the runtime types in detection order) naming each.
-
-    Notes:
-        A parameter with no typed use, or whose uses no imported
-        library's adapter supports in full, is in neither.
+        `unsupported` is `{param: {runtime type: [use texts]}}` for a
+        qualifying parameter in neither, each imported adapter with
+        `USES` mapped to the uses it does not support (`_use_text`).
     """
     scope = module_scope(fn)
     imported = module_imports(scope)
     if not imported or fdef is None:
-        return {}, {}
+        return {}, {}, {}
     declared = [(a, a.USES) for a in adapters().values()
                 if isinstance(getattr(a, "USES", None), BodyUses)]
     numpy_aliases = {alias for lib, alias in imported.items()
@@ -922,12 +958,13 @@ def promotions(fn, fdef, params: list, param_kinds: dict,
     annotated = _annotated(fdef)
     promoted: dict = {}
     ambiguous: dict = {}
+    unsupported: dict = {}
     for p, uses in _body_uses(fdef, params).items():
         if p in detected or p in annotated \
                 or param_kinds.get(p) in ("int", "bool", "string", "complex"):
             continue
-        typed = [u for u in uses if _typed_use(u, [d for _a, d in declared])]
-        if not typed:
+        typed = [u for u in uses if not _universal(u)]
+        if not any(_typed_use(u, [d for _a, d in declared]) for u in typed):
             continue
         usage = (usages.get(p) or (None,))[0]
         by_library: dict = {}
@@ -956,7 +993,13 @@ def promotions(fn, fdef, params: list, param_kinds: dict,
                         f"{_listed(libs, 'and')}, whose types {both} "
                         f"support that use: to sample it as one, annotate: "
                         f"{_listed(spelled, 'or')}"}
-    return promoted, ambiguous
+        else:
+            unsupported[p] = {
+                found.name: [_use_text(p, u) for u in typed
+                             if not body_uses.supports(u)]
+                for found, body_uses in declared
+                if found.name.split(".", 1)[0] in imported}
+    return promoted, ambiguous, unsupported
 
 
 def _listed(items: list, word: str) -> str:
@@ -983,4 +1026,5 @@ __all__ = [
     "installed", "library_version", "module_imports", "observe",
     "observed_plain", "plain", "promotions", "realise",
     "realised_parameters", "strong_hints", "usage_hints", "BodyUses",
+    "with_unsupported",
 ]

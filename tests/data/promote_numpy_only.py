@@ -17,3 +17,9 @@ def spread(xs):
 def first_by_position(xs):
     """The first value by position, a use an array does not support."""
     return xs.iloc[0]
+
+
+def sum_and_weight(x):
+    """The total times a weight read off the same object: an array has
+    no `.weight`."""
+    return x.sum() * x.weight
