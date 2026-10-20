@@ -182,8 +182,7 @@ Among the results, all found with no claims written:
 <!-- example: finds output match=subset -->
 ```text
   bounded_lower  min(x) <= f(x, alpha)   falsified at x = [3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268], alpha = -1.9849565326553186e+115
-    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268], alpha = -1.9849565326553186e+115: f returned -inf, and an infinity for a finite input is no value
-    falsified  computation  min(x) <= f(x, alpha)   counterexample x = [1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.8642753322018042e+135: f returned nan
+    falsified  computation  min(x) <= f(x, alpha)   63 entries across 14 draws, sizes (1, 1) to (7, 1); counterexample x = [3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268, 3.3979503951326806, 3.39795039513268], alpha = -1.9849565326553186e+115: f returned -inf, and an infinity for a finite input is no value; and x = [1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308, 1.7976931348623157e+308, -1.7976931348623157e+308], alpha = -1.8642753322018042e+135: f returned nan
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)

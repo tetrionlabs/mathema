@@ -4915,21 +4915,30 @@ def _merged_drawn(a: "dict | None", b: "dict | None") -> "dict | None":
             "entries": (a.get("entries") or 0) + (b.get("entries") or 0)}
 
 
+#: how strong each verdict a computation line can carry is, weakest first
+_LINE_STRENGTH = {"falsified": 0, "invalidated": 0, "unknown": 1,
+                  "skipped": 1, "holds": 2, "proven": 3}
+
+
 def _fold_stand_in_draws(main: "Probe", companion: "Probe") -> None:
     """Intent:
-        Fold the draws of a probe that stood in for an undecided derive
-        and held into the `[float]` row that failed under it, so the
-        claim has one computation line: the row's `n` becomes the
-        stand-in's draws plus the points the row itself ran, and the
-        stand-in's `mathema.drawn` (merged with the row's own),
-        `mathema.sampling` and `mathema.confidence` are carried onto
-        the row, each with its meaning unchanged. The stand-in row
-        keeps its verdict, `n` and meta. Nothing changes unless `main`
-        holds on a probe route and `companion` is falsified.
+        Fold a probe that stood in for an undecided derive into the
+        `[float]` row spawned under it, so the claim has one computation
+        line: the row's verdict becomes the weaker of the two (falsified
+        when either is), its `n` the stand-in's draws plus the points the
+        row itself ran, and the stand-in's `mathema.drawn` (merged with
+        the row's own), `mathema.sampling` and `mathema.confidence` are
+        carried onto the row, each with its meaning unchanged. The
+        stand-in row keeps its verdict, `n` and meta. A row its
+        empty-input line falsified is read by its own finding over
+        non-empty inputs (`_own_finding`). Nothing changes unless that
+        finding was reached on a probe route.
     """
-    if main.verdict != "holds" or not str(main.route or "").startswith("probe") \
-            or companion.verdict != "falsified" or not main.n:
+    stood_in = _own_finding(main)
+    if not str(stood_in.route or "").startswith("probe"):
         return
+    weaker = min((stood_in.verdict, companion.verdict),
+                 key=lambda v: _LINE_STRENGTH.get((v or "").split(":", 1)[0], 1))
     own = companion.n or 0
     meta = dict(companion.meta or {})
     main_meta = main.meta or {}
@@ -4939,7 +4948,9 @@ def _fold_stand_in_draws(main: "Probe", companion: "Probe") -> None:
     for key in ("mathema.sampling", "mathema.confidence"):
         if key in main_meta and key not in meta:
             meta[key] = main_meta[key]
-    companion.n = main.n + own
+    if stood_in.n or own:
+        companion.n = (stood_in.n or 0) + own
+    companion.verdict = weaker
     companion.meta = meta
 
 

@@ -62,3 +62,50 @@ def test_where_derive_decides_the_record_is_unchanged():
                for ln in text.splitlines()), text
     assert any(ln.split()[:2] == ["falsified", "computation"]
                for ln in text.splitlines()), text
+
+
+def _stand_in(verdict, counterexample=None):
+    from mathema.records import Probe
+    return Probe("c", "for x in [0, 1], f(x) == 1", verdict, route="probe",
+                 n=40, counterexample=counterexample,
+                 meta={"mathema.float_companion": "c[float]"})
+
+
+def _float_row():
+    from mathema.records import Probe
+    return Probe("c[float]", "for x in [0, 1], f(x) == 1", "falsified",
+                 route="probe", counterexample="x = 1e-300: f returned inf",
+                 meta={"mathema.companion_of": "c",
+                       "mathema.family": "is_numerically_stable"})
+
+
+def _printed(main, line):
+    from mathema._layout import blocks
+    from mathema._missing_words import count_words
+    return blocks([main, line], ["x"], {"x": "scalar"}, "mod.f",
+                  count_words)[id(main)]
+
+
+def test_a_falsified_stand_in_folds_into_the_one_computation_line():
+    from mathema.conjecture import _fold_stand_in_draws
+    main, line = _stand_in("falsified", "x = 0.5: 0.9 vs 1"), _float_row()
+    _fold_stand_in_draws(main, line)
+    assert (line.verdict, line.n) == ("falsified", 40), line
+    assert (main.verdict, main.n) == ("falsified", 40), main
+    printed = _printed(main, line)
+    rows = [ln for ln in printed if ln.split()[1:2] == ["computation"]]
+    assert len(rows) == 1, printed
+    assert "40 draws" in rows[0], rows[0]
+    assert "x = 0.5: 0.9 vs 1" in rows[0], rows[0]
+    assert "x = 1e-300: f returned inf" in rows[0], rows[0]
+    assert printed[0].endswith("falsified at x = 0.5"), printed[0]
+
+
+def test_an_undecided_stand_in_folds_too_and_the_line_is_falsified():
+    from mathema.conjecture import _fold_stand_in_draws
+    main, line = _stand_in("unknown"), _float_row()
+    _fold_stand_in_draws(main, line)
+    assert (line.verdict, line.n) == ("falsified", 40), line
+    printed = _printed(main, line)
+    rows = [ln for ln in printed if ln.split()[1:2] == ["computation"]]
+    assert len(rows) == 1 and rows[0].split()[0] == "falsified", printed
