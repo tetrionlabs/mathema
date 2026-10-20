@@ -1133,13 +1133,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # whose callable stands in for fn) so the seam is testable
     def exact_at(point):
         # the claim's sides at a point of exact numbers, the function and
-        # the bound functions run on those numbers themselves
+        # the bound functions run on those numbers with their bodies read
+        # exactly (`_exact_callees`)
         from ._exact_side import exact_sides
         _reset()
         try:
             return exact_sides(code_l, code_r, {**base_env, **point},
-                               {"f": fn_call, **(bound_funcs or {})},
-                               exact_calls=True)
+                               _exact_callees(), exact_calls=True)
         finally:
             _reset()
 
@@ -1152,12 +1152,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # as it is); a claim with no right side compares against 0, as
         # the float evaluation does
         from ._exact_side import exact_sides
-        written = {n: _written_exactly(v) for n, v in _typed(point).items()}
+        typed = _typed(point)
+        written = {n: _written_exactly(v) for n, v in typed.items()}
         _reset()
         try:
             sides = exact_sides(code_l, code_r, {**base_env, **written},
                                 _exact_callees(),
-                                exact_calls=True, opaque_results=True)
+                                exact_calls=True, opaque_results=True,
+                                computed_env={**base_env, **typed})
         finally:
             _reset()
         if sides is not None and code_r is None:
@@ -1324,7 +1326,29 @@ def _sequence_witness(witness, seq_names):
     return out
 
 
-_DEFAULT_ORDERING_SLACK = 1e-9
+
+def _allowed_miss_words(deps, point) -> str:
+    """Intent:
+        How the executed code passes at `point` on the probe route, in
+        words: `the executed code misses the relation there by M, within
+        the allowance A the probe route gives the computation`, M and A
+        the float miss and allowance measured there
+        (`evaluate.last_precision`); without the measurement, the same
+        without the numbers.
+    """
+    measured = None
+    try:
+        if deps["evaluate"](point) is True:
+            measured = deps["evaluate"].last_precision()
+    except Exception:
+        measured = None
+    if measured is None:
+        return ("the executed code passes there within the allowance the "
+                "probe route gives the computation")
+    miss, allowed = measured
+    return (f"the executed code misses the relation there by {miss:.3g}, "
+            f"within the allowance ({allowed:.3g}) the probe route gives "
+            f"the computation")
 
 
 def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
@@ -1720,9 +1744,8 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         _exact_witness_found(falsified, deps, fn, facts, exact_point, found[0])
         falsified.note = (
             f"{falsified.note}; reproduced exactly at derive's witness: "
-            f"the executed code violates the relation there by less than "
-            f"the default tolerance ({_DEFAULT_ORDERING_SLACK:g}) the probe "
-            f"route allows, and compared exactly it fails").lstrip("; ")
+            f"{_allowed_miss_words(deps, exact_point)}, and compared "
+            f"exactly it fails").lstrip("; ")
         return falsified
     certified = (_certified_point_witness(cj, deps, proof, cj_domain)
                  if not assum else None)

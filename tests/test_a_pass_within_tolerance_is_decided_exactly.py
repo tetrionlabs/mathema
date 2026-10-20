@@ -23,6 +23,14 @@ def round_trip(x: float) -> float:
     return math.exp(math.log(x))
 
 
+#: a float the body reads from outside, which has no exact reading
+_ONE = 1.0
+
+
+def round_trip_by_global(x: float) -> float:
+    return math.exp(math.log(x) * _ONE)
+
+
 def test_a_relative_pass_false_in_exact_arithmetic_falsifies():
     (p,) = check_conjectures(nudged, [claim(
         "for x in [1000, 1000000], f(x) == x", route="probe")])
@@ -38,10 +46,18 @@ def test_a_relative_pass_true_in_exact_arithmetic_holds_with_its_gap():
 
 
 def test_a_relative_pass_that_cannot_be_evaluated_exactly_is_not_counted():
-    (p,) = check_conjectures(round_trip, [claim(
+    (p,) = check_conjectures(round_trip_by_global, [claim(
         "for x in [1e8, 1e9], f(x) == x", route="probe")])
     assert p.verdict != "falsified"
     assert "could not be evaluated in exact arithmetic" in p.note
+
+
+def test_a_relative_pass_of_a_round_trip_holds_in_exact_arithmetic():
+    # read exactly, exp(log(x)) is x
+    (p,) = check_conjectures(round_trip, [claim(
+        "for x in [1e8, 1e9], f(x) == x", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
+    assert "holds there in exact arithmetic" in p.note, p.note
 
 
 def a_hair_over_one(x: float) -> float:

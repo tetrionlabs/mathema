@@ -18,7 +18,7 @@ Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
 import pytest
 
-from mathema._exact_body import exact_twin, unfaithful
+from mathema._exact_body import exact_callee, exact_twin, unfaithful
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -172,9 +172,16 @@ def test_the_twin_raises_where_the_computation_raises(fn):
         twin(-1)
     if fn is not asserts_fstring:
         # `x < 0` on a value the computation held as a float is a
-        # decision the reading declines
+        # decision the twin on its own declines
         with pytest.raises(NotExact):
             twin(Fraction(-1))
+    # checked against the function's own float run, the same decision
+    # goes the same way at 3.0 and at -1.0, so the reading takes it
+    reading = exact_callee(fn)
+    assert reading(Fraction(3)) == Fraction(3, 2)
+    with pytest.raises(ValueError if fn is not asserts_fstring
+                       else AssertionError):
+        reading(Fraction(-1))
 
 
 @pytest.mark.parametrize("fn", [raises_fstring, raises_percent, raises_format,

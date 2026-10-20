@@ -19,11 +19,15 @@ place. The checks are numpy-fast when numpy is importable and fall
 back to pure Python otherwise, except the spectral ones (eigenvalues,
 definiteness), which have no cheap pure-Python form and decline
 (`None`) rather than compute an unsound answer. numpy is not a
-runtime dependency of mathema, only a fast path when present. A value
-that is a single Python number is read the same way in both cases:
-`is_finite` holds when it is neither an infinity nor a NaN (for a
-complex number, both parts), and `is_real` holds for an int or a float
-and not for a complex.
+runtime dependency of mathema, only a fast path when present.
+`is_finite` and `is_real` read a number (an int, a bool, a float, a
+complex, a Fraction or a Decimal), or a vector or matrix of numbers,
+by value and identically with or without numpy: a number is finite
+when it is neither an infinity nor a NaN (a complex one when both
+parts are), and real unless it is a complex number with a nonzero
+imaginary part. An empty vector or matrix is finite and real. Any
+other value (None, a string, a ragged nesting) is undecided, "the
+result is not a number".
 
 The hierarchy `level` names, cheapest first, is the taxonomy the whole
 feature is organised around:
@@ -37,9 +41,12 @@ feature is organised around:
 from __future__ import annotations
 
 import cmath
+import math
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
+from fractions import Fraction
 
 
 def _numpy():
@@ -87,71 +94,118 @@ def _square(rows: list) -> bool:
 _TOL = 1e-9
 
 
-def _number(v) -> bool:
-    """Whether `v` is a Python number: an int, a float or a complex,
-    a bool excluded."""
-    return isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+#: why `is_finite` or `is_real` leaves a value undecided when it is not
+#: a number, nor a vector or matrix of numbers
+NOT_A_NUMBER = "the result is not a number"
+
+_NUMBER_TYPES = (int, float, complex, Fraction, Decimal)
+
+
+def _plain(v):
+    """A numpy scalar as the Python value it holds and a numpy array as
+    nested lists; any other value unchanged."""
+    np = _numpy()
+    if np is not None and isinstance(v, (np.ndarray, np.generic)):
+        return v.tolist()
+    return v
+
+
+def _nested(seq) -> "tuple | None":
+    """`(entries, shape)` of a list or tuple nested to a uniform depth
+    with the same length at every level, whose innermost elements are
+    all numbers (an int, a bool, a float, a complex, a Fraction or a
+    Decimal, numpy scalars included); None for any other value. An
+    empty list has no entries and shape `(0,)`."""
+    items = [_plain(v) for v in seq]
+    if items and all(isinstance(v, (list, tuple)) for v in items):
+        parts = [_nested(v) for v in items]
+        if any(p is None for p in parts):
+            return None
+        shapes = {p[1] for p in parts}
+        if len(shapes) != 1:
+            return None
+        return ([e for p in parts for e in p[0]],
+                (len(items), *shapes.pop()))
+    if not all(isinstance(v, _NUMBER_TYPES) for v in items):
+        return None
+    return items, (len(items),)
 
 
 def _entries(m) -> "list | None":
-    """The entries of a non-empty vector, or of a rectangular matrix
-    with at least one column, whose entries are all Python numbers;
-    None for any other value."""
-    if not isinstance(m, (list, tuple)) or not m:
-        return None
-    if all(isinstance(row, (list, tuple)) for row in m):
-        width = len(m[0])
-        if not width or any(len(row) != width for row in m):
+    """The numbers `m` holds: `[m]` for a single number, every entry of
+    a vector, matrix or deeper rectangular nesting of numbers (none
+    for an empty one), the entries of an array-like value (a pandas or
+    polars series) read through numpy; None for any other value
+    (None, a string, a dict, a ragged or partly non-numeric
+    nesting)."""
+    m = _plain(m)
+    if isinstance(m, _NUMBER_TYPES):
+        return [m]
+    if not isinstance(m, (list, tuple, str, bytes, dict)) \
+            and hasattr(m, "__array__"):
+        np = _numpy()
+        if np is None:
             return None
-        flat = [v for row in m for v in row]
-    else:
-        flat = list(m)
-    return flat if all(_number(v) for v in flat) else None
+        try:
+            m = np.asarray(m).tolist()
+        except (ValueError, TypeError):
+            return None
+        if isinstance(m, _NUMBER_TYPES):
+            return [m]
+    if not isinstance(m, (list, tuple)):
+        return None
+    got = _nested(m)
+    return None if got is None else got[0]
+
+
+def is_numeric(value) -> bool:
+    """Whether `value` is a number, or a vector, matrix or deeper
+    rectangular nesting of numbers, the values `is_finite` and
+    `is_real` decide."""
+    return _entries(value) is not None
+
+
+def _finite_value(v) -> bool:
+    """Whether the number `v` is finite: an int, a bool or a Fraction
+    always is; a float or a Decimal when it is neither an infinity nor
+    a NaN; a complex when both its parts are."""
+    if isinstance(v, (int, Fraction)):
+        return True
+    if isinstance(v, Decimal):
+        return v.is_finite()
+    if isinstance(v, complex):
+        return cmath.isfinite(v)
+    return math.isfinite(v)
+
+
+def _real_value(v) -> bool:
+    """Whether the number `v` is real: not a complex, or a complex with
+    a zero imaginary part."""
+    return not isinstance(v, complex) or v.imag == 0
 
 
 def _check_finite(m) -> "bool | None":
-    """Whether every entry of `m` is finite. A single Python number is
-    finite when it is neither an infinity nor a NaN, a complex one
-    when both its real and imaginary parts are; an int always is."""
-    if _number(m):
-        return True if isinstance(m, int) else cmath.isfinite(m)
-    np = _numpy()
-    if np is not None:
-        try:
-            arr = np.asarray(m, dtype=float)
-        except (ValueError, TypeError):
-            return None
-        return bool(np.isfinite(arr).all())
-    rows = _as_rows(m)
-    if rows is None:
-        # a 1-D numeric sequence is still finite-checkable
-        if isinstance(m, (list, tuple)) and m and all(
-                not isinstance(v, bool) and isinstance(v, (int, float))
-                for v in m):
-            return all(v == v and abs(v) != float("inf") for v in m)
-        return None
-    return all(v == v and abs(v) != float("inf") for row in rows for v in row)
-
-
-def _check_real(m) -> "bool | None":
-    """Whether `m` holds no complex entry. A single Python number is
-    real when it is an int or a float and not when it is a complex
-    (`1 + 0j` included, as numpy's complex dtype reads it); a vector
-    or matrix of Python numbers is real when none of its entries is a
-    complex."""
-    if _number(m):
-        return not isinstance(m, complex)
-    np = _numpy()
-    if np is not None:
-        try:
-            arr = np.asarray(m)
-        except (ValueError, TypeError):
-            return None
-        return not np.iscomplexobj(arr)
+    """Whether every number `m` holds is finite (see `_finite_value`);
+    an empty vector or matrix is (no entry is infinite or NaN). None
+    when `m` is not a number nor a nesting of numbers (`NOT_A_NUMBER`).
+    The same reading with or without numpy."""
     entries = _entries(m)
     if entries is None:
         return None
-    return not any(isinstance(v, complex) for v in entries)
+    return all(_finite_value(v) for v in entries)
+
+
+def _check_real(m) -> "bool | None":
+    """Whether every number `m` holds is real, read by value: an int,
+    a bool, a float, a Fraction or a Decimal is real, and a complex
+    number is real when its imaginary part is zero (`1 + 0j` is,
+    `1 + 2j` and `complex(0, nan)` are not); an empty vector or matrix
+    is. None when `m` is not a number nor a nesting of numbers
+    (`NOT_A_NUMBER`). The same reading with or without numpy."""
+    entries = _entries(m)
+    if entries is None:
+        return None
+    return all(_real_value(v) for v in entries)
 
 
 def _pairwise(m, rel) -> "bool | None":

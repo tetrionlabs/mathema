@@ -212,7 +212,7 @@ def _check(fn, law):
     return p
 
 
-def test_the_reported_false_falsification_is_gone():
+def test_a_type_check_on_a_stand_in_keeps_the_proof_exact():
     # `type(x)` of a Fraction standing in for 0.5 is `float` in the
     # twin, so the exact run takes the `x * 0.5` branch the computation
     # took and the claim is proven exactly
@@ -223,7 +223,7 @@ def test_the_reported_false_falsification_is_gone():
     assert "mathema.sweep_inexact" not in p.meta, p.meta
 
 
-def test_the_reported_repro_over_integers_fails_by_execution_alone():
+def test_an_integer_point_fails_by_execution_alone():
     # the set {1, 2, 3} reaches f as ints, and typed(1) is 100.0 in
     # Python: the computation itself fails there, no exact reading
     # involved

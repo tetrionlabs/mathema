@@ -6,10 +6,14 @@ number where the computation held a float. A decision on such a number
 `ceil`, `trunc`, `int()`, `round`, `divmod`, `//`, `%`, or an `except`
 catching an arithmetic error) can go the other way from the
 computation's, whose float was rounded: a loop counting 0.1 steps runs
-ten times exactly and eleven times in float. The reading does not take
-such a decision: the point is undecided and the sweep, every point run,
-is proven within float64. A correct body is never falsified on a path
-the computation did not take. Decisions on integers stay exact.
+ten times exactly and eleven times in float. Such a decision is taken
+both ways, by the exact reading and by the function's own float run at
+the same point: where they differ the point is undecided and the
+sweep, every point run, is proven within float64; where they agree at
+every decision the exact path stands. A twin run on its own, with no
+float run beside it, declines every such decision. A correct body is
+never falsified on a path the computation did not take. Decisions on
+integers stay exact.
 
 Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
@@ -125,6 +129,16 @@ def swallowed(x: int) -> float:
         return 1.0
 
 
+def swallowed_sum(x: int) -> float:
+    _spin()
+    try:
+        if x / 10 + 0.2 <= 0.3:
+            return 1.0
+        return 0.0
+    except Exception:
+        return 1.0
+
+
 def divisors(n: int) -> int:
     _spin()
     count = 0
@@ -154,19 +168,27 @@ def _check(fn, law):
     return p
 
 
-#: the review's bodies: correct code each, every point run in float64
+#: the review's bodies: correct code each, every point run in float64,
+#: a decision at some point going the other way from the computation's
+#: (or, for `log_key`, a sympy number used as a dict key)
 DECIDED_BY_ROUNDING = [
     (steps, "for n in {1, 2}, f(n) == 11"),
     (cents_tie, "for x in {1}, f(x) == 2.67"),
     (floor_flat, "for x in {1, 2}, f(x) == x"),
     (float_pow_overflow, "for x in {1, 2}, f(x) <= 1e300"),
-    (int_cut, "for x in {1}, f(x) == 3"),
     (eq_branch, "for x in {1}, f(x) == 0"),
     (eq_int, "for x in {1}, f(x) == 0"),
     (eq_bool, "for x in {1}, f(x) == False"),
+    (log_key, "for x in {1}, f(x) == 3"),
+    (swallowed_sum, "for x in {1}, f(x) >= 0"),
+]
+
+#: the review's bodies whose every decision the function's own float
+#: run takes alike at every point
+DECIDED_ALIKE = [
+    (int_cut, "for x in {1}, f(x) == 3"),
     (log_check, "for x in {1, 2}, f(x) == 1"),
     (pythag, "for x in {1, 2, 4}, f(x) == 1"),
-    (log_key, "for x in {1}, f(x) == 3"),
     (under_threshold, "for x in {1, 2, 3}, f(x) == 1"),
     (swallowed, "for x in {1, 2, 3}, f(x) == 1"),
 ]
@@ -181,6 +203,16 @@ def test_a_decision_on_an_exact_number_leaves_the_point_undecided(fn, law):
     assert p.route == "derive:brute_force:within_float64", p.route
     assert "mathema.exact_witness" not in p.meta, p.meta
     assert p.meta["mathema.sweep_inexact"]["points"] >= 1, p.meta
+
+
+@pytest.mark.parametrize("fn,law", DECIDED_ALIKE,
+                         ids=lambda v: getattr(v, "__name__", None))
+def test_a_decision_the_float_run_takes_alike_is_proven_exactly(fn, law):
+    p = _check(fn, law)
+    assert p.verdict == "proven", (fn.__name__, p.verdict, p.route,
+                                   p.sketch, p.counterexample)
+    assert p.route == "derive:brute_force", (p.route, p.note)
+    assert "mathema.sweep_inexact" not in p.meta, p.meta
 
 
 def test_a_bool_and_an_int_of_the_same_decision_agree():
@@ -316,7 +348,7 @@ def test_an_integer_division_under_a_catch_raises_as_the_computation():
 
 def test_a_caught_decision_still_leaves_the_point_undecided():
     with pytest.raises(NotExact):
-        exact_callee(swallowed)(1)
+        exact_callee(swallowed_sum)(1)
 
 
 def orders_pairs(y):

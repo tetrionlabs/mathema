@@ -72,13 +72,17 @@ def test_a_clean_sweep_over_an_unexamined_function_holds_with_its_reason():
 
 
 def test_a_clean_sweep_over_a_pure_function_is_still_proven():
-    # pure, and the body's divisions are read as ratios: every point has
-    # an exact value
+    # pure, and the body's divisions are read as ratios; at active = 29,
+    # periods = 50 the floor differs (float 29 / 50 * 100 is
+    # 57.99999999999999, floor 57; exactly 58), so that point has no
+    # exact value and the sweep is proven within float64
     (p,) = check_conjectures(exposure_pure, [claim(
         _DOMAIN + "f(active, periods) <= active / periods")])
     assert p.verdict == "proven", (p.verdict, p.note)
-    assert p.route == "derive:brute_force"
-    assert "mathema.sweep_inexact" not in p.meta, p.meta
+    assert p.route == "derive:brute_force:within_float64", p.route
+    assert p.meta["mathema.sweep_inexact"] == {
+        "points": 1, "first": "active = 29, periods = 50"}, p.meta
+    assert "active = 29, periods = 50" in p.note, p.note
 
 
 def test_a_clean_sweep_over_a_pure_exact_function_is_still_proven():

@@ -388,6 +388,7 @@ def _exact_lhs(code, point: dict, fn, bound: dict):
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .conjecture import _SAFE_FUNCS
     from .gates import _written_exactly
+    computed = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound, **point}
     env = {**_SAFE_FUNCS, **MATH_CONSTANTS, **bound,
            **{n: _written_exactly(v) for n, v in point.items()}}
     # each body read exactly; a body the reading cannot follow
@@ -397,7 +398,8 @@ def _exact_lhs(code, point: dict, fn, bound: dict):
     try:
         sides = _with_timeout(
             lambda: exact_sides(code, None, env, callees,
-                                exact_calls=True, opaque_results=True),
+                                exact_calls=True, opaque_results=True,
+                                computed_env=computed),
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return None

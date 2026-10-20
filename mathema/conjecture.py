@@ -7092,10 +7092,12 @@ def _witness_labels(cj, kinds, cj_domain) -> "tuple[tuple[str, ...] | None, set 
 
 def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     """Intent:
-        The claim at the point `env` in exact arithmetic: f and the
-        claim's bound functions run on the point's exact values
-        (`_exact_side.exact_sides` with `exact_calls`) under the fast
-        wall-clock cap, the sides compared exactly (within the claim's
+        The claim at the point `env` in exact arithmetic: `fn` and the
+        claim's `bound_funcs`, the functions as the exact reading runs
+        them (`_exact_body.exact_callee`, each body read exactly and
+        checked against its own float run), called on the point's exact
+        values (`_exact_side.exact_sides` with `exact_calls`) under the
+        fast wall-clock cap, the sides compared exactly (within the claim's
         own declared tolerance, when it states one). True or False, or
         None when the evaluation cannot be carried out exactly.
 
@@ -7230,8 +7232,9 @@ def _magnitude_corner(args) -> bool:
 
 def _exact_point_sides(code_l, code_r, env, fn, bound_funcs):
     """A function of a point (`{param: exact value}`) evaluating the
-    claim's sides with f run on those exact numbers, under the fast cap;
-    None where it cannot."""
+    claim's sides with `fn` and `bound_funcs` (the functions as the exact
+    reading runs them, `_exact_body.exact_callee`) called on those exact
+    numbers, under the fast cap; None where it cannot."""
     from ._exact_side import exact_sides
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
 
@@ -11785,10 +11788,28 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts, _declared_elements(cj_domain))
+    original_bound = dict(bound_funcs or {})
     if as_arrays:
         fn_call = _linalg_eval.law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    # f and the bound functions as the exact reading runs them, each
+    # body read exactly and checked against its own float run
+    # (`_exact_body.exact_callee`), built at the first exact evaluation
+    exact_readings: list = []
+
+    def _exact_calls() -> tuple:
+        if not exact_readings:
+            from ._exact_body import exact_callee
+            f_exact = calling(exact_callee(fn), facts)
+            bound_exact = {name: exact_callee(v)
+                           for name, v in original_bound.items()}
+            if as_arrays:
+                f_exact = _linalg_eval.law_callable(f_exact)
+                bound_exact = {name: _bound_for_arrays(v)
+                               for name, v in bound_exact.items()}
+            exact_readings.append((f_exact, bound_exact))
+        return exact_readings[0]
     executed_record.refill_at = _refill_caller(fn_call, call_pins)
     executed_record.fills = {
         p: fill for p in kinds
@@ -12270,7 +12291,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # it passes only within the tolerance: the
                     # mathematics at the point decides
                     decided = _exact_verdict(cj, code_l, code_r, env,
-                                             fn_call, bound_funcs)
+                                             *_exact_calls())
                     if decided is None:
                         call_raised[0] = call_nan[0] = call_inf[0] = None
                         call_hole[0] = None
@@ -12503,8 +12524,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and _exactly_holds_at(cj, code_l, code_r, env, fn_call,
-                                      bound_funcs):
+                and _exactly_holds_at(cj, code_l, code_r, env,
+                                      *_exact_calls()):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the
@@ -12690,8 +12711,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # exact arithmetic: false there falsifies, true there holds
             # with the gap printed, and a draw that cannot be evaluated
             # exactly is inconclusive and not counted
-            exact_ok = _exact_verdict(cj, code_l, code_r, env, fn_call,
-                                      bound_funcs)
+            exact_ok = _exact_verdict(cj, code_l, code_r, env,
+                                      *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             if exact_ok is None:
                 checked -= 1
@@ -12745,8 +12766,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # violating it makes the claim false there. The calls these
             # readings make are not the draw's own
             made = list(f_call.calls)
-            mathematics = _exact_verdict(cj, code_l, code_r, env, fn_call,
-                                         bound_funcs)
+            mathematics = _exact_verdict(cj, code_l, code_r, env,
+                                         *_exact_calls())
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
         aux_part = ("; " + ", ".join(
@@ -12772,8 +12793,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     reference, cj_domain,
                     mathematics=True if corner_row else mathematics,
                     reduces=bool(corner_row or _conditioning.claim_reduces(cj)),
-                    exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
-                                                 bound_funcs)
+                    exact_at=(_exact_point_sides(code_l, code_r, env,
+                                                 *_exact_calls())
                               if mathematics is True else None),
                     sides=(compare_l, compare_r),
                     calls=returned_calls(made, facts))

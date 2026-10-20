@@ -1161,6 +1161,7 @@ def _exact_disagreement(case: _Case, proof, rhs_name: str,
         Two values are written in full, `<f's> vs <g's>`, or with
         `named`, as what each side returned.
     """
+    from ._exact_body import exact_callee
     from ._exact_side import to_exact, wrap
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .probing import _fmt, complex_is_a_raise
@@ -1176,8 +1177,10 @@ def _exact_disagreement(case: _Case, proof, rhs_name: str,
         if not all(_numberlike(a) for a in args):
             return None
         try:
-            value = wrap(callee, exact_calls=True)(*[to_exact(a)
-                                                     for a in args])
+            # the body read exactly, checked against its own float run
+            # on the same arguments (`_exact_body.exact_callee`)
+            value = wrap(exact_callee(callee), exact_calls=True)(
+                *[to_exact(a) for a in args])
         except Exception:
             return None
         return value if _numberlike(value) or isinstance(value, Fraction) \
