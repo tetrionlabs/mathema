@@ -7254,8 +7254,9 @@ def _table_columns(param: str, cj, facts) -> list:
     """Intent:
         The column names a table parameter is drawn with: every column
         the claim (statement and premises) or the function body reads
-        as `param.name` or `param["name"]`, in the order first met, or
-        `["a", "b"]` when nothing names one.
+        as `param.name` or `param["name"]`, in the order first met,
+        then every column the claim binds (`for param.name in ...`),
+        or `["a", "b"]` when nothing names one.
     """
     trees = []
     for src in _claim_sides(cj) + [a for a in (cj.assuming or "",) if a]:
@@ -7285,6 +7286,12 @@ def _table_columns(param: str, cj, facts) -> list:
                 name = node.slice.value
             if name is not None and name not in found:
                 found.append(name)
+    for key in getattr(cj, "domain", None) or {}:
+        head, dot, name = str(key).partition(".")
+        if head == param and dot and name.isidentifier() \
+                and not name.startswith("_") \
+                and name not in _TABLE_ATTRIBUTES and name not in found:
+            found.append(name)
     return found or ["a", "b"]
 
 
