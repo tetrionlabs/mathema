@@ -3451,7 +3451,12 @@ def deliberate_raise(exc: BaseException, fn) -> bool:
 
 
 def _raise_lines(fn) -> frozenset:
-    """The source lines of the `raise` statements in fn's own body."""
+    """The source lines of the `raise` statements in fn's own body; none
+    for a callable standing for a function another frontend read
+    (`analysis.foreign_body`), whose Python source is a wrapper's."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return frozenset()
     try:
         lines, start = inspect.getsourcelines(fn)
         import textwrap
@@ -4005,10 +4010,13 @@ def _project_root(fn) -> str:
     """Intent:
         The project a function belongs to: the nearest directory above
         its source file holding a pyproject.toml, else the working
-        directory.
+        directory, as for a callable standing for a function another
+        frontend read (`analysis.foreign_body`).
     """
+    from .analysis import foreign_body
     try:
-        source = inspect.getsourcefile(fn) or ""
+        source = ("" if foreign_body(fn)
+                  else inspect.getsourcefile(fn) or "")
     except (TypeError, OSError):
         source = ""
     here = os.path.dirname(os.path.abspath(source)) if source else ""
@@ -8830,7 +8838,9 @@ def _derive_line_coverage(fn, facts, domain):
     whole body') when there are no branches, no domain restriction, or
     the branch analysis cannot resolve every pruned branch to lines, so
     the derive coverage stays all-or-nothing there rather than
-    under-counting on a partial analysis. This is provenance for the
+    under-counting on a partial analysis, and for a callable standing
+    for a function another frontend read, whose lines are not in a
+    Python file (`analysis.foreign_body`). This is provenance for the
     implementation-coverage pass, never a verdict."""
     tree = getattr(facts, "tree", None)
     if tree is None or not domain:
@@ -8861,6 +8871,9 @@ def _derive_line_coverage(fn, facts, domain):
     # facts.tree's line numbers are 1-based within the function's own
     # source block; map them to absolute FILE lines so the coverage pass
     # (which works in file lines) can intersect them.
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         first_line = inspect.getsourcelines(fn)[1]
     except (OSError, TypeError):

@@ -1347,6 +1347,50 @@ def has_injected_facts(fn) -> bool:
     return isinstance(getattr(fn, "__mathema_facts__", None), Facts)
 
 
+#: form-hash namespaces the Python frontend and the documentation-only
+#: fallback write; a bare hash is the Python frontend's own form
+PYTHON_FORM_NAMESPACES = frozenset({"py", "doc"})
+
+
+def written_elsewhere(facts) -> bool:
+    """Intent:
+        Whether `facts` were read by a frontend other than the Python
+        one: their `provenance` names another frontend (by `name` in a
+        mapping, or as a string), or, with no frontend named, their form
+        hash is namespaced (`"<frontend>:<sha>"`) outside `py` and `doc`.
+    """
+    stated = getattr(facts, "provenance", None) or {}
+    frontend = stated.get("frontend") if isinstance(stated, dict) else None
+    if isinstance(frontend, dict):
+        frontend = frontend.get("name")
+    from .koine.frontends import PYTHON
+    if frontend:
+        return frontend != PYTHON
+    form = getattr(facts, "form", None) or ""
+    if ":" not in form:
+        return False
+    return form.split(":", 1)[0] not in PYTHON_FORM_NAMESPACES
+
+
+def foreign_body(fn) -> bool:
+    """Intent:
+        Whether `fn` stands for a function a frontend other than Python
+        read: it, or the function it wraps, carries injected facts
+        (`__mathema_facts__`) `written_elsewhere`. Its Python source, when
+        it has one, is a wrapper's, and nothing read from that source (a
+        line, a span, a raise, an assert, an effect, coverage) describes
+        the function.
+    """
+    seen = 0
+    while fn is not None and seen < 16:
+        injected = getattr(fn, "__mathema_facts__", None)
+        if isinstance(injected, Facts):
+            return written_elsewhere(injected)
+        fn = getattr(fn, "__wrapped__", None)
+        seen += 1
+    return False
+
+
 def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
     """Intent:
         Set, in place, the kind of each parameter whose first runtime

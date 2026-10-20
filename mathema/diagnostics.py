@@ -58,8 +58,13 @@ _CLAMP_CALL_NAMES = ("min", "max", "clip", "minimum", "maximum")
 
 def _source_file(fn) -> str:
     """The file `fn` is defined in, read through any wrapper that names
-    it as `__wrapped__`."""
+    it as `__wrapped__`; `<unknown>` for a callable standing for a
+    function another frontend read (`analysis.foreign_body`)."""
     import inspect
+
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return "<unknown>"
     return inspect.getsourcefile(inspect.unwrap(fn)) or "<unknown>"
 
 

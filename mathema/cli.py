@@ -746,7 +746,8 @@ def _name_use_lines(r: dict, names: list) -> dict:
     """
     import ast as _ast
     fn = r.get("_fn")
-    if fn is None:
+    from .analysis import foreign_body
+    if fn is None or foreign_body(fn):
         return {}
     try:
         from .analysis import get_tree
