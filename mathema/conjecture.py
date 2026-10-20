@@ -7950,11 +7950,17 @@ def _validate_claim(cj, statement: str, note: str, facts,
                           f"{colliding[0]!r} is also a real parameter; use the "
                           f"explicit d(expr, {colliding[0][1:]}) form instead")
     cj_domain = {**domain, **cj.domain}   # inline quantifier wins
+    from .runtime_types import SEQUENCE_KINDS as _SEQ_KINDS
+    from .runtime_types import annotated_element as _annotated_element
     for p in cj.domain or {}:
         # an int annotation completes a binding that states no type to
-        # the integers (`[0, 10]` on `n: int` is `[0, 10] : int`)
-        cj_domain[p] = _int_completed(cj_domain[p],
-                                      facts.param_kinds.get(p))
+        # the integers (`[0, 10]` on `n: int` is `[0, 10] : int`), the
+        # elements' annotation a sequence's binding (`[0, 1]^n` on
+        # `xs: list[int]` is `[0, 1]^n : int`)
+        kind = facts.param_kinds.get(p)
+        if kind in _SEQ_KINDS and _annotated_element(fn, p) == "int":
+            kind = "[int]"
+        cj_domain[p] = _int_completed(cj_domain[p], kind)
     inferred_domain = _inferred_literal_domain(cj.lhs, facts.params)
     if cj.rhs:
         for p, bounds in _inferred_literal_domain(cj.rhs, facts.params).items():
@@ -8007,7 +8013,9 @@ def _validate_claim(cj, statement: str, note: str, facts,
         note = (f"{note}; inferred "
                + ", ".join(f"{p} in C" for p in complex_inferred)
                + " from its own complex annotation")
-    element_inferred = _element_inferred(fn, facts, read, cj_domain)
+    element_inferred = _element_inferred(
+        fn, facts, set(read) | (set(facts.params) if whole else set()),
+        cj_domain)
     if element_inferred:
         cj_domain = {**{p: b for p, (b, _w, _t) in element_inferred.items()},
                      **cj_domain}
@@ -9161,14 +9169,20 @@ def _int_completed(bound, kind: "str | None"):
     from dataclasses import replace
 
     from .domain import _as_domain
+    from .domain import is_sentinel
     elements = isinstance(kind, str) and kind.endswith("[int]")
     if not (kind == "int" or elements) or bound is None \
             or isinstance(bound, (str, frozenset)):
         return bound
     dom = _as_domain(bound)
+    # a piece listing values is a set the claim states; a piece of
+    # sentinels only (`| {missing}`) states the missing values beside
+    # the range
     if dom.explicit_type or dom.base_type != "R" or (dom.dims and not elements) \
             or not dom.pieces \
-            or any(isinstance(piece, frozenset) for piece in dom.pieces):
+            or any(isinstance(piece, frozenset)
+                   and not all(is_sentinel(v) for v in piece)
+                   for piece in dom.pieces):
         return bound
     return replace(dom, base_type="Z", explicit_type=True)
 

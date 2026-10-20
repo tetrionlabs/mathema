@@ -570,7 +570,14 @@ def observe(obj):
 
 
 def _root_module_of(obj) -> str:
-    return (type(obj).__module__ or "").split(".", 1)[0]
+    """The library `obj`'s type comes from: the first class in its
+    method resolution order that mathema does not define, so mathema's
+    own subclass of a numpy array reads as numpy's."""
+    for cls in type(obj).__mro__:
+        root = (cls.__module__ or "").split(".", 1)[0]
+        if root != "mathema":
+            return root
+    return "mathema"
 
 
 # --- tables, read the same whatever their runtime type ---------------
@@ -636,17 +643,21 @@ class _Realising:
     function's own (`__globals__`, `__code__`, `__defaults__`), and
     `__wrapped__` is the function, so signature and source readers see
     the function itself. A parameter annotated as a set, a frozenset or
-    a tuple is passed as one (`as_annotated`); a function whose only
-    such parameters are those has its result returned as it is."""
+    a tuple is passed as one (`as_annotated`), and a sequence annotated
+    with int or bool elements receives a whole float element as the int
+    or bool it equals (`as_element_type`); a function whose only such
+    parameters are those has its result returned as it is."""
 
     def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None,
                  containers: "dict | None" = None,
-                 declared: "dict | None" = None):
+                 declared: "dict | None" = None,
+                 elements: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
         self._enums = enums or {}
         self._containers = containers or {}
         self._declared = declared or {}
+        self._elements = elements or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -657,6 +668,10 @@ class _Realising:
             bound = self._sig.bind(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
+        for name, element in self._elements.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_element_type(bound.arguments[name],
+                                                        element)
         for name, detection in self._bindings.items():
             if name in bound.arguments:
                 bound.arguments[name] = realise(bound.arguments[name],
@@ -818,13 +833,16 @@ def calling(fn, facts, declared: "dict | None" = None):
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
     containers = annotated_containers(fn, facts)
-    if not bindings and not enums and not containers:
+    kinds = getattr(facts, "param_kinds", None) or {}
+    elements = {p: made for p, k in kinds.items() if k in SEQUENCE_KINDS
+                and (made := annotated_element(fn, p)) in ("int", "bool")}
+    if not bindings and not enums and not containers and not elements:
         return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
         return exiting_as_raise(fn)
     return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers,
-                                       declared))
+                                       declared, elements))
 
 
 def enum_parameters(fn) -> dict:

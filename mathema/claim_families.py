@@ -104,6 +104,22 @@ def _held_at_none(fn, facts: Facts, domain: "dict | None") -> frozenset:
     return frozenset(held)
 
 
+def _typed_element_draw(fn, p: str, domain: "dict | None", rng):
+    """Intent:
+        A drawer of one element for the sequence parameter `p` when its
+        annotation states an int, bool or str element type: each draw
+        inside the parameter's binding in `domain`, held to that type
+        (`probing.typed_element_bound`); None when the annotation states
+        no such type.
+    """
+    from .probing import typed_element_bound
+    from .runtime_types import annotated_element
+    if annotated_element(fn, p) not in ("int", "bool", "str"):
+        return None
+    bound = typed_element_bound(fn, p, (domain or {}).get(p))
+    return lambda: _synth("float", rng, bound)
+
+
 def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
                         rng: random.Random) -> list:
     """One synthesized positional-argument list for every parameter of
@@ -117,8 +133,11 @@ def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domai
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
-        args.append(_synth(k, rng, domain.get(p) if k not in SEQUENCE_KINDS
-                           else None))
+        if k in SEQUENCE_KINDS:
+            from .probing import typed_element_bound
+            args.append(_synth(k, rng, typed_element_bound(fn, p, None)))
+            continue
+        args.append(_synth(k, rng, domain.get(p)))
     return args
 
 
@@ -1504,7 +1523,9 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     leaf = leaf[0]
                 leaf[rng.randrange(len(leaf))] = bad
             else:
-                seq = [rng.uniform(-10, 10) for _ in range(4)]
+                element = (_typed_element_draw(fn, target, None, rng)
+                           or (lambda: rng.uniform(-10, 10)))
+                seq = [element() for _ in range(4)]
                 seq[rng.randrange(len(seq))] = bad
             value = seq
             spelled = f"{target}[...] = {bad!r}"
@@ -1944,9 +1965,10 @@ def _empty_value(fn, facts, target: str, cj=None) -> tuple:
 
 def _realised(fn, facts, target: str, cells: list, cj=None):
     """A container of `cells` for `target`, through its runtime type: a
-    float numpy array, a float pandas or polars Series, a frame whose
-    columns (the ones the body reads) hold `cells` each, a plain list for
-    a list parameter; the empty container through `_empty_value`."""
+    float numpy array, a float pandas or polars Series (an int one when
+    every cell is an int), a frame whose columns (the ones the body
+    reads) hold `cells` each, a plain list for a list parameter; the
+    empty container through `_empty_value`."""
     if not cells:
         return _empty_value(fn, facts, target, cj)[0]
     from .runtime_types import realised_parameters
@@ -1965,15 +1987,16 @@ def _realised(fn, facts, target: str, cells: list, cj=None):
         side = int(math.isqrt(len(cells))) or 1
         grid = np.array(cells[: side * side], dtype=float).reshape(side, side)
         return grid if adapter in ("numpy.ndarray", "") else grid.tolist()
+    ints = all(isinstance(c, int) and not isinstance(c, bool) for c in cells)
     if adapter == "numpy.ndarray":
         import numpy as np
-        return np.array(cells, dtype=float)
+        return np.array(cells) if ints else np.array(cells, dtype=float)
     if adapter == "pandas.Series":
         import pandas as pd
-        return pd.Series(cells, dtype=float)
+        return pd.Series(cells) if ints else pd.Series(cells, dtype=float)
     if adapter == "polars.Series":
         import polars as pl
-        return pl.Series(cells, dtype=pl.Float64)
+        return pl.Series(cells) if ints else pl.Series(cells, dtype=pl.Float64)
     return list(cells)
 
 
@@ -2030,12 +2053,15 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     state: dict = {"idx": 0, "said": None}
     empty, shown = _empty_value(fn, facts, target, cj)
 
+    element = (_typed_element_draw(fn, target, None, rng)
+               or (lambda: rng.uniform(-10, 10)))
+
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
         cells = ([] if shape == "empty"
-                 else [rng.uniform(-10, 10)] if shape == "single"
-                 else [rng.uniform(-10, 10) for _ in range(5)])
+                 else [element()] if shape == "single"
+                 else [element() for _ in range(5)])
         value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
@@ -4069,8 +4095,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if shapes.get(p) == "matrix":
             return _rand(rng.randint(2, 5), rng)
         if shapes.get(p) == "sequence":
-            return [rng.uniform(-10.0, 10.0)
-                    for _ in range(rng.randint(1, 6))]
+            element = (_typed_element_draw(fn, p, domain, rng)
+                       or (lambda: rng.uniform(-10.0, 10.0)))
+            return [element() for _ in range(rng.randint(1, 6))]
         form = array_forms.get(p)
         if form == "table":
             n = rng.randint(1, 6)
@@ -4080,12 +4107,19 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             rows, cols = rng.randint(1, 5), rng.randint(1, 5)
             return [[rng.uniform(-10.0, 10.0) for _ in range(cols)]
                     for _ in range(rows)]
-        value = _synth(facts.param_kinds.get(p, "unknown"), rng,
-                       (domain or {}).get(p))
+        kind = facts.param_kinds.get(p, "unknown")
+        bound = (domain or {}).get(p)
+        if kind in SEQUENCE_KINDS:
+            from .probing import typed_element_bound
+            bound = typed_element_bound(fn, p, bound)
+        value = _synth(kind, rng, bound)
         return as_container(p, value) if form == "vec" else value
 
     def draw_marked(sizes: dict, p: str):
         bound = (domain or {}).get(p)
+        typed = _typed_element_draw(fn, p, domain, rng)
+        if typed is not None:
+            return resolver.synth(p, sizes, typed, rng)
         if getattr(bound, "pieces", None):
             # a declared element bound (`[a, b]^n`) holds every element
             return resolver.synth(p, sizes,
@@ -4160,6 +4194,10 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if pinf is not None and not getattr(bound, "pieces", None) \
                     and _interval_ends(bound) is None:
                 bound = tuple(pinf)
+            if _typed_element_draw(fn, p, domain, rng) is not None:
+                # elements of another type than the reals have no
+                # magnitude corners of a real range
+                continue
             for pair in sequence_corners(
                     bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
@@ -4533,6 +4571,15 @@ def _structured_draws(fn, facts, cj, domain: dict):
             ndim = shape.ndim if shape is not None and declared else 0
             props = structures.get(p, ())
             kind = facts.param_kinds.get(p, "scalar")
+            typed = (_typed_element_draw(fn, p, domain, rng)
+                     if kind in SEQUENCE_KINDS else None)
+            if typed is not None and ndim < 2 and not props:
+                # a sequence whose annotation states its element type: a
+                # vector of elements of that type
+                n = (sizes.get(resolver.key(p, 0)) if ndim == 1 else None) \
+                    or rng.randint(1, 5)
+                out.append([typed() for _ in range(n)])
+                continue
             if ndim == 2 or (ndim == 0 and (props or kind in SEQUENCE_KINDS)):
                 if ndim == 2:
                     rows = sizes.get(resolver.key(p, 0)) or 3
@@ -5223,9 +5270,12 @@ def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
             fixed = [_shapes.fixed_size(d) or sizes.setdefault(
                 d, rng.randint(1, 4)) for d in shape]
 
-            def build(axis, fixed=fixed):
+            element = (_typed_element_draw(fn, p, domain, rng)
+                       or (lambda: rng.uniform(-10, 10)))
+
+            def build(axis, fixed=fixed, element=element):
                 if axis == len(fixed):
-                    return rng.uniform(-10, 10)
+                    return element()
                 return [build(axis + 1) for _ in range(fixed[axis])]
             values[p] = build(0)
         try:

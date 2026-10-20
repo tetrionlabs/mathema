@@ -63,24 +63,28 @@ class Table(dict):
 _HOLED: list = []
 
 
-def _holed(array, holes: dict):
-    """`array` carrying the values positions were drawn as where the
-    float array holds something else, `{position: value}`: a hole drawn
-    as `None` or `pd.NA` (held as NaN), an int (held as the float
-    nearest it), so the function receives them as drawn when the array
-    goes back to a plain list."""
-    if not holes:
+def _holed(array, holes: dict, ints: "dict | None" = None):
+    """`array` carrying the hole values its missing positions were drawn
+    as (`None`, `pd.NA`), `{position: value}`, and the ints positions
+    were drawn as, which a float array holds only as floats, so the
+    function receives them as drawn when the array goes back to a plain
+    list; the array itself holds NaN at a hole and the float nearest an
+    int. `hole_values` names the holes only."""
+    if not holes and not ints:
         return array
     if not _HOLED:
         np = _np()
 
         class HoledArray(np.ndarray):  # type: ignore[name-defined]
-            """A float array with the values positions were drawn as."""
+            """A float array with the hole values and the ints it
+            stands for."""
             hole_values: dict = {}
+            int_values: dict = {}
 
         _HOLED.append(HoledArray)
     out = array.view(_HOLED[0])
     out.hole_values = dict(holes)
+    out.int_values = dict(ints or {})
     return out
 
 
@@ -224,22 +228,18 @@ def as_array(value):
         if nested:
             cells = {(i, j): v for i, r in enumerate(value)
                      for j, v in enumerate(r)}
-            held = {k: v for k, v in cells.items() if kept(v)} or {
-                k: v for k, v in cells.items() if whole(v)}
             return _holed(np.array([[math.nan if is_missing(v) else float(v)
                                      for v in r] for r in value], dtype=float),
-                          held)
+                          {k: v for k, v in cells.items() if kept(v)},
+                          {k: v for k, v in cells.items() if whole(v)})
         holes = {(k,): v for k, v in enumerate(value) if kept(v)}
+        ints = {(k,): v for k, v in enumerate(value) if whole(v)}
         array = np.array([math.nan if is_missing(v) else float(v)
                           for v in value], dtype=float)
-        if holes:
-            return _holed(array, holes)
         labels = getattr(value, "labels", ())
-        if labels:
+        if labels and not holes:
             return _labelled(array, labels)
-        # with no hole and no names, the ints go back to the function as
-        # the ints they were drawn as
-        return _holed(array, {(k,): v for k, v in enumerate(value) if whole(v)})
+        return _holed(array, holes, ints)
     return value
 
 
@@ -259,8 +259,10 @@ def to_plain(value):
         out = _floats(value.tolist()) \
             if getattr(value, "exact", None) is not None \
             and value.dtype.kind == "O" else value.tolist()
-        for position, hole in (getattr(value, "hole_values", None) or {}).items():
-            # the hole value the array was drawn with, back in its slot
+        drawn = {**(getattr(value, "int_values", None) or {}),
+                 **(getattr(value, "hole_values", None) or {})}
+        for position, hole in drawn.items():
+            # the value the array was drawn with, back in its slot
             if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
                 out[position[0]] = hole
             elif len(position) == 2 and isinstance(out, list) \
