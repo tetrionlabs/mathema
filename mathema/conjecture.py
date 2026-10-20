@@ -12620,6 +12620,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # reduce its inputs: its mathematics settled (a trusted
                 # row, f run exactly), or a reduction word on the claim
                 # side it stands against
+                from .gates import _returned_calls as returned_calls
                 found = _conditioning.at_miss(
                     fn, facts, _called_point(f_call, facts, env, kinds), gap,
                     reference, cj_domain,
@@ -12628,7 +12629,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
                                                  bound_funcs)
                               if mathematics is True else None),
-                    sides=(compare_l, compare_r))
+                    sides=(compare_l, compare_r),
+                    calls=returned_calls(made, facts))
                 f_call.calls = made
                 if found["kappa"] is None and mathematics is None:
                     found = None
