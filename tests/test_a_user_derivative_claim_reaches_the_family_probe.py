@@ -137,3 +137,29 @@ def test_a_recorded_row_adjudicates_again_the_same_way():
     (again,) = check_conjectures(remaining, entry_claims({"claims": [row]}))
     assert (again.verdict, again.route) == (first.verdict, first.route)
     assert "(not increasing)" in again.counterexample
+
+
+@pytest.mark.parametrize("text", [
+    "for x in [-10, 10], d(f(x), x) >= 1",
+    "for x in [-10, 10], d(f(x), x) > 0",
+    "for x in [-10, 10], 0 <= d(f(x), x)",
+])
+def test_another_derivative_spelling_says_why_it_stays_undecided(text):
+    (p,) = check_conjectures(square_loop, [claim(text, name="mine")])
+    assert p.verdict == "unknown"
+    assert "unrecognized call" not in p.note
+    assert ("the probe decides a derivative claim only as the shape claims "
+            "state it (a first derivative compared with 0 by <= or >=, a "
+            "second derivative compared with 0 by ==, <= or >=)") in p.note
+    assert "is not one of them" in p.note
+    assert "derive could not read" in p.note
+
+
+def test_a_derive_route_claim_never_falls_to_the_family_probe():
+    (p,) = check_conjectures(paid, [claim(
+        "for payment in [-10, 10], d(f(payment), payment) >= 0", name="mine",
+        route="derive")])
+    assert p.verdict == "unknown"
+    assert p.route == "derive"
+    assert "the claim asks for the derive route alone" in p.note
+    assert "unrecognized call" not in p.note
