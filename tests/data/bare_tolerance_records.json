@@ -619,15 +619,6 @@
    {
     "counterexample": "x = 0: 1e-06 vs 0.0",
     "meta": {
-     "mathema.conditioning": {
-      "error": 1.0,
-      "how": "derivative",
-      "inherent": false,
-      "kappa": 0.0,
-      "narrow": null,
-      "scale": 0.0,
-      "words": "f loses more than the conditioning explains (\u03ba \u2248 0, error 1)"
-     },
      "mathema.confidence": {
       "factors": {
        "branches": 0,
@@ -670,7 +661,7 @@
     },
     "n": 1,
     "name": "f_x_approx_x",
-    "note": "f loses more than the conditioning explains (\u03ba \u2248 0, error 1); read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-7 (declared)",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-7 (declared)",
     "route": "probe",
     "tolerance": 1e-07,
     "verdict": "falsified"
@@ -777,7 +768,7 @@
   "route": "probe",
   "rows": [
    {
-    "counterexample": null,
+    "counterexample": "x = 1e+06: 1000000.0001000001 vs 1000000.0, within the float tolerance but false here in exact arithmetic",
     "meta": {
      "mathema.confidence": {
       "factors": {
@@ -788,10 +779,13 @@
        "wide_domain": 1
       },
       "max_stars": 5,
-      "n": 21,
-      "score": 6.4,
-      "stars": 3
+      "n": 2,
+      "score": 3.0,
+      "stars": 1
      },
+     "mathema.counterexample_args": [
+      1000000.0
+     ],
      "mathema.missing": {
       "admitted": {
        "x": {
@@ -801,25 +795,10 @@
         ]
        }
       },
-      "behaviour": {
-       "x": {
-        "nan": "propagates"
-       }
-      },
-      "executed": {
-       "x": {
-        "nan": "nan in, nan out (propagates)"
-       }
-      },
       "means": "missing for x (float) means nan",
       "origin": {
        "x": {
         "missing": "type"
-       }
-      },
-      "said": {
-       "x": {
-        "nan": "at x = nan f gave nan back"
        }
       },
       "tried": {
@@ -828,38 +807,15 @@
        ]
       }
      },
-     "mathema.sampling": "x~U(1,1e+06)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=21",
+     "mathema.sampling": "x~U(1,1e+06)\u2294{lo,hi,mid,\u00b1\u03b5}[p=.3], seed=20260718, n=2",
      "mathema.surface": "declared"
     },
-    "n": 21,
+    "n": 2,
     "name": "f_x_approx_x",
-    "note": "140 draws passed only within the tolerance and could not be evaluated in exact arithmetic, so they are not counted; at x = nan f gave nan back; read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-9 (the default)",
+    "note": "read as abs(f(x) - x) <= \u03b5, \u03b5 = 1e-9 (the default)",
     "route": "probe",
     "tolerance": null,
-    "verdict": "holds"
-   },
-   {
-    "counterexample": null,
-    "meta": {
-     "mathema.policy": {
-      "behaviour": "propagates",
-      "evidence": "confirmed on the 21 draws of f_x_approx_x",
-      "exception": null,
-      "kind": "missing",
-      "member": null,
-      "parameter": "x",
-      "premise": "",
-      "reason": "default for a float, which may be nan; confirmed on the 21 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
-      "source": "default"
-     },
-     "mathema.surface": "mathema"
-    },
-    "n": 1,
-    "name": "missing[x]",
-    "note": "default for a float, which may be nan; confirmed on the 21 draws of f_x_approx_x. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
-    "route": "probe:counterfactual",
-    "tolerance": null,
-    "verdict": "holds"
+    "verdict": "falsified"
    }
   ],
   "tolerance": null
@@ -1290,7 +1246,7 @@
      "mathema.companion_of": "f_x_eq_x",
      "mathema.conditioning": {
       "error": 0.0016222000122069861,
-      "how": "derivative",
+      "how": "mathematics",
       "inherent": false,
       "kappa": 1.0,
       "narrow": null,
