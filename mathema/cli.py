@@ -1969,8 +1969,8 @@ def _docsync_checklist(args) -> int:
         sys.path.insert(0, root)
     for key, fn in sorted(resolve(args.target, args.root).functions.items()):
         name = key.rsplit(".", 1)[-1]
-        import inspect
-        if (inspect.getdoc(fn) or "").strip():
+        from .analysis import docstring_of
+        if docstring_of(fn).strip():
             sync = docstring_sync(fn, root=args.root)
             print(f"{name}: docstring present, docsync {sync.percent}%")
             for line in docstring_sync_checklist(sync):

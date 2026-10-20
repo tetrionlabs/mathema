@@ -2191,7 +2191,6 @@ def reread_intent(root: str, item: dict) -> "dict | None":
     """
     import importlib
     import importlib.util
-    import inspect
     import os
     import sys
 
@@ -2223,8 +2222,9 @@ def reread_intent(root: str, item: dict) -> "dict | None":
     if fresh is None or fn is None:
         return fresh
     from .analysis import _intent_block_text
+    from .analysis import docstring_of
     from .intent import parse_doc
-    doc = inspect.getdoc(fn) or ""
+    doc = docstring_of(fn)
     live = (_intent_block_text(doc) or parse_doc(doc).summary or "").strip()
     if live and live != fresh["text"]:
         fresh["live_text"] = live

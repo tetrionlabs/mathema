@@ -741,7 +741,8 @@ def render_docstring(fn, root: str = ".") -> str:
     entry = rec["entry"]
     claims = entry.get("claims") or []
 
-    doc = inspect.getdoc(fn) or ""
+    from .analysis import docstring_of
+    doc = docstring_of(fn)
     text = _strip_block(doc, "Claims:")
 
     claim_lines = [f"    {c['name']}{_route_tag(c)}: {c['statement']}"
@@ -779,7 +780,8 @@ def generate_docstring(fn, key: str | None = None, root: str = ".") -> str | Non
     from .authoring import _fn_key, resolve_declared
     from .spec import load_verified
 
-    if (inspect.getdoc(fn) or "").strip():
+    from .analysis import docstring_of
+    if docstring_of(fn).strip():
         return None
     key = key or _fn_key(fn)
     declared = resolve_declared(fn, key=key, root=root)
