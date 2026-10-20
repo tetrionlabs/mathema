@@ -43,6 +43,10 @@ ABSOLUTE = 1e-9
 RELATIVE = 1e-7
 #: float64's unit roundoff, half the gap from 1 to the next float
 UNIT_ROUNDOFF = 2.0 ** -53
+#: the unit roundoffs float64's precision at a point allows, per unit of
+#: the values it is read against: what a correctly rounded chain of a
+#: handful of operations may lose
+PRECISION_FACTOR = 8
 #: the growth a backward-stable computation may show over its condition
 #: number times the unit roundoff before the loss is the code's
 STABILITY_FACTOR = 2 ** 10
@@ -418,21 +422,23 @@ def float_miss(lv, rv, relation: str, declared=None,
 
 
 def precision_miss(lv, rv, relation: str, declared=None,
-                   side: "int | None" = None,
+                   side: "int | None" = None, kappa: "float | None" = None,
                    inputs_scale: float = 0.0) -> "tuple | None":
     """Intent:
-        `(miss, precision)`, both floats, for two computed sides at one
-        point: how far they miss the relation itself, with no allowance
-        (`abs(lv - rv)` for `==`, the amount an ordering `<=`/`>=` is
-        violated by, for `~=` the amount the difference passes ε, the
-        bare `declared` tolerance else `DEFAULT_TOLERANCE`, and 0 for a
-        relation they satisfy outright), and float64's own precision at
-        the point: `STABILITY_FACTOR` unit roundoffs (the conditioning
-        bound at a condition number of 1) times the magnitude of the
+        `(miss, precision, magnitude)`, all floats, for two computed
+        sides at one point: how far they miss the relation itself, with
+        no allowance (`abs(lv - rv)` for `==`, the amount an ordering
+        `<=`/`>=` is violated by, for `~=` the amount the difference
+        passes ε, the bare `declared` tolerance else `DEFAULT_TOLERANCE`,
+        and 0 for a relation they satisfy outright); float64's own
+        precision at the point, `PRECISION_FACTOR` unit roundoffs of
+        `magnitude + kappa * inputs_scale`; and `magnitude`, that of the
         value compared against (the reference side's, `side`, else the
-        larger side's; the largest entry over arrays), or times
-        `inputs_scale` when that magnitude is 0. None when a side is not
-        a finite real number, or the tolerance is a tolerance kind.
+        larger side's; the largest entry over arrays). `kappa` is the
+        computation's condition number at the point and `inputs_scale`
+        its inputs' largest magnitude; with no `kappa` the inputs add
+        nothing. None when a side is not a finite real number, or the
+        tolerance is a tolerance kind.
     """
     from ._tolerance import ToleranceKind
     from .probing import _is_matrix_value, plain_value
@@ -455,8 +461,9 @@ def precision_miss(lv, rv, relation: str, declared=None,
         magnitude = float(magnitude)
     except OverflowError:
         magnitude = float("inf")
-    base = magnitude if magnitude else float(inputs_scale)
-    return miss, STABILITY_FACTOR * UNIT_ROUNDOFF * base
+    spread = kappa * float(inputs_scale) if kappa is not None else 0.0
+    return (miss, PRECISION_FACTOR * UNIT_ROUNDOFF * (magnitude + spread),
+            magnitude)
 
 
 def _exactly_equal(lv, rv) -> bool:

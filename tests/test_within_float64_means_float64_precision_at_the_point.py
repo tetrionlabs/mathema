@@ -3,9 +3,11 @@
 """An exhaustive sweep that cannot decide a point exactly is proven
 within_float64 only when, at every such point, the float64 computation
 satisfies the relation to within float64's own precision there: a miss
-of at most 2^10 unit roundoffs (u = 2^-53) relative to the value
-compared against (the inputs' largest magnitude when that value is 0),
-the conditioning bound at a condition number of 1. A larger miss inside
+of at most 8 unit roundoffs (u = 2^-53) of the value compared against,
+plus the condition number times the inputs' largest magnitude where the
+condition number can be read at the point; where it cannot, the inputs
+lend nothing, so a body that never computes with a large input gets no
+credit for it. A larger miss inside
 the allowance's absolute floor is evidence, `holds` on
 `derive:brute_force`, never a proof; a miss that only the relative part
 of the allowance admits, at a point with no exact reading, is not
@@ -49,6 +51,27 @@ def constant_global(xs: list) -> float:
 def one_and_a_nudge(xs: list) -> float:
     _spin()
     return 1 + NUDGE
+
+
+def tiny_global(x: float) -> float:
+    # never computes with x
+    _spin()
+    return OFFSET
+
+
+def minus_tiny_global(x: float) -> float:
+    _spin()
+    return -OFFSET
+
+
+def below_global(x: float) -> float:
+    _spin()
+    return x - NUDGE
+
+
+def tenth_cancelled(x: float) -> float:
+    _spin()
+    return (x + TENTH) - x - TENTH
 
 
 def tenths_global(x: float) -> float:
@@ -116,7 +139,28 @@ def test_a_miss_within_float64_precision_is_proven_within_float64(fn, law):
 
 def test_the_sketch_names_the_point_and_its_precision():
     p = _check(offset_global, "for n in {1, 2, 3}, f(n) == n")
-    # 1 + 5e-10 misses 1 by 5e-10 in float64; 2^10 * 2^-53 * 1 = 1.1e-13
+    # 1 + 5e-10 misses 1 by 5e-10 in float64; 8 * 2^-53 * 1 = 8.9e-16
     assert "at n = 1 the float64 computation misses the relation by 5e-10" \
         in p.sketch, p.sketch
-    assert "beyond float64's precision there (1.1e-13)" in p.sketch, p.sketch
+    assert ("beyond float64's precision there (8.9e-16, 8 unit roundoffs "
+            "of 1)") in p.sketch, p.sketch
+
+
+@pytest.mark.parametrize("fn,law", [
+    # 5e-10 against 0: the body never computes with x = 10^6, so the
+    # input's magnitude lends no precision; float64's precision at a
+    # value of 0 is 0
+    (tiny_global, "for x in {1000000}, f(x) == 0"),
+    (minus_tiny_global, "for x in {1000000}, f(x) >= 0"),
+    # 10^6 - 2e-9 misses x by 2e-9, about 17 units in the last place of
+    # 10^6, past 8 unit roundoffs of 10^6 (8.9e-10)
+    (below_global, "for x in {1000000}, f(x) >= x"),
+    # (10^6 + 0.1) - 10^6 - 0.1 is 2.3e-11 in float64 against 0, and the
+    # condition number that would credit the inputs' magnitude cannot
+    # be read from this body
+    (tenth_cancelled, "for x in {1000000}, f(x) == 0"),
+])
+def test_a_miss_the_values_compared_do_not_explain_is_not_proven(fn, law):
+    p = _check(fn, law)
+    assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force", p.route

@@ -35,6 +35,7 @@ does, rather than a second, subtly different reading of the claim.
 from __future__ import annotations
 
 import itertools
+import math
 
 from ._exact_side import holds_number
 from ._exits import call, exception_name
@@ -280,7 +281,8 @@ class _Precision:
         self.miss = None
         self.allowance = None
         self.at = None
-        # at the points with no exact value: `(miss, precision, where)`
+        # at the points with no exact value: `(miss, precision, where,
+        # words)`
         # of the largest miss within float64's precision, and of the
         # first miss beyond it (`_allowance.precision_miss`)
         self.within = None
@@ -302,18 +304,19 @@ class _Precision:
             self.at = where() if callable(where) else where
 
     def inexact(self, measured, where) -> None:
-        """Count a point with no exact value at its `(miss, precision)`
-        (`_allowance.precision_miss`), `where` its text or a callable
+        """Count a point with no exact value at its `(miss, precision,
+        words)` (`_float64_at`), `where` its text or a callable
         giving it; None (no numbers compared) counts nothing."""
         if measured is None:
             return
-        miss, bound = measured
+        miss, bound, words = measured
         if miss > bound:
             if self.beyond is None:
                 self.beyond = (miss, bound,
-                               where() if callable(where) else where)
+                               where() if callable(where) else where, words)
         elif self.within is None or miss > self.within[0]:
-            self.within = (miss, bound, where() if callable(where) else where)
+            self.within = (miss, bound, where() if callable(where) else where,
+                           words)
 
     def beyond_words(self, ran: str, call: str) -> str:
         """Intent:
@@ -325,11 +328,12 @@ class _Precision:
             not be computed exactly.
         """
         from .records import delta_text
-        miss, bound, where = self.beyond
+        miss, bound, where, words = self.beyond
         return (f"{ran} in float64 and the claim held at each within the "
                 f"computation's allowance; at {where} the float64 "
                 f"computation misses the relation by {delta_text(miss)}, "
-                f"beyond float64's precision there ({delta_text(bound)}), "
+                f"beyond float64's precision there ({delta_text(bound)}, "
+                f"{words}), "
                 f"and the value could not be computed exactly ({call}), so "
                 f"the sweep is evidence, not a proof")
 
@@ -360,10 +364,10 @@ class _Precision:
                  "below float64's resolution at these values")
         within = ""
         if self.within is not None:
-            miss, bound, where = self.within
+            miss, bound, where, words = self.within
             within = (f", and within float64's precision at every point "
                       f"with no exact value (a miss of {delta_text(miss)} "
-                      f"against {delta_text(bound)} at {where})")
+                      f"against {delta_text(bound)}, {words}, at {where})")
         return (f"{ran} in float64 "
                 f"and the claim held at each; the largest delta was {delta} "
                 f"against an allowance of {delta_text(self.allowance)}"
@@ -373,21 +377,66 @@ class _Precision:
                 f"{below} would not show")
 
 
-def _float64_at(cj, computed, point: dict) -> "tuple | None":
+class _Kappa:
+    """The condition number of a function at the points of one sweep
+    (`_conditioning.condition_at`), read only where a miss needs it;
+    once it cannot be read at one point it is not tried again in the
+    sweep."""
+
+    def __init__(self, cj, fn, facts):
+        self.cj, self.fn, self.facts = cj, fn, facts
+        self.unreadable = False
+
+    def at(self, point: dict, reference: float) -> "float | None":
+        from ._conditioning import claim_reduces, condition_at
+        if self.unreadable or self.fn is None or self.facts is None:
+            return None
+        try:
+            kappa, _how = condition_at(self.fn, self.facts, point, reference,
+                                       reduces=claim_reduces(self.cj))
+        except Exception:
+            kappa = None
+        if kappa is None or not math.isfinite(kappa):
+            self.unreadable = True
+            return None
+        return kappa
+
+
+def _float64_at(cj, computed, point: dict,
+                kappa: "_Kappa | None" = None) -> "tuple | None":
     """Intent:
-        `(miss, precision)` of the float64 sides `computed` at `point`
-        (`_allowance.precision_miss`): how far they miss the claim's
-        relation itself, and float64's precision there, read against
-        the claim's own side where exactly one side runs no code and
-        against the point's largest magnitude where that value is 0.
-        None when there are no sides or no numbers to compare.
+        `(miss, precision, words)` of the float64 sides `computed` at
+        `point` (`_allowance.precision_miss`): how far they miss the
+        claim's relation itself; float64's precision there,
+        `PRECISION_FACTOR` unit roundoffs of the value compared against
+        (the claim's own side where exactly one side runs no code), plus
+        the condition number times the point's largest magnitude where
+        the miss needs it and `kappa` reads it; and that precision's
+        reading in words. None when there are no sides or no numbers to
+        compare.
     """
-    from ._allowance import precision_miss, reference_side
-    from ._conditioning import scale_of
+    from ._allowance import PRECISION_FACTOR, precision_miss, reference_side
+    from ._conditioning import scale_of, short
     if computed is None:
         return None
-    return precision_miss(computed[0], computed[1], cj.relation,
-                          cj.tolerance, reference_side(cj), scale_of(point))
+    side = reference_side(cj)
+    found = precision_miss(computed[0], computed[1], cj.relation,
+                           cj.tolerance, side)
+    if found is None:
+        return None
+    miss, bound, magnitude = found
+    words = f"{PRECISION_FACTOR} unit roundoffs of {short(magnitude)}"
+    if miss > bound and kappa is not None:
+        scale = scale_of(point)
+        k = kappa.at(point, magnitude) if scale else None
+        if k is not None:
+            miss, bound, magnitude = precision_miss(
+                computed[0], computed[1], cj.relation, cj.tolerance, side,
+                kappa=k, inputs_scale=scale)
+            words = (f"{PRECISION_FACTOR} unit roundoffs of "
+                     f"{short(magnitude)} plus κ ≈ {short(k)} times the "
+                     f"inputs' {short(scale)}")
+    return miss, bound, words
 
 
 def _uncounted_at(cj, computed) -> bool:
@@ -899,6 +948,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     exact_miss = None
     # how far the floats missed over the points compared
     precision = _Precision()
+    kappa = _Kappa(cj, fn, facts)
     for point in (plan.points if plan is not None else
                   (dict(zip(names, combo))
                    for combo in itertools.product(*(grid[n] for n in names)))):
@@ -955,7 +1005,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         said, sides = _exactly_at(cj, evaluate, point)
         if said is None:
             inexact.append(point)
-            precision.inexact(_float64_at(cj, computed, point),
+            precision.inexact(_float64_at(cj, computed, point, kappa),
                               lambda: _fmt_point(point, names))
             if _uncounted_at(cj, computed):
                 precision.uncounted.append(_fmt_point(point, names))
@@ -1221,7 +1271,8 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     precision = _Precision()
     if inexact:
         precision.add(evaluate.last_precision(), witness)
-        precision.inexact(_float64_at(cj, computed, {}), witness)
+        precision.inexact(_float64_at(cj, computed, {},
+                                      _Kappa(cj, fn, facts)), witness)
         if _uncounted_at(cj, computed):
             # the call passed only within the relative part of the
             # allowance and has no exact value: not counted, nothing
