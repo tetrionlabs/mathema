@@ -113,6 +113,18 @@ CALLERS = '''
         return h.checked(x) + 1
 
 
+    def _spin(n):
+        while n > 0:
+            n = n - 1
+        return 0
+
+
+    def guarded_spin(x):
+        if x < 0:
+            _spin(3)
+        return x + 1
+
+
     from dataclasses import dataclass
 
 
@@ -210,3 +222,14 @@ def test_a_sibling_method_that_returns_on_the_domain_is_proven(callers):
     p = _row(callers.Account.scaled,
              "for self.rate in [1, 2], x in [0, 1], f(self, x) == x")
     assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_callee_in_a_branch_the_domain_excludes_does_not_block_the_proof(callers):
+    p = _row(callers.guarded_spin, "for x in [0, 10], f(x) >= 1")
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.route, p.sketch)
+
+
+def test_a_callee_the_walk_cannot_read_where_it_is_reached_blocks_the_proof(callers):
+    p = _row(callers.guarded_spin, "for x in [-1, 10], f(x) >= 0")
+    assert p.route != "derive", (p.verdict, p.route, p.sketch)

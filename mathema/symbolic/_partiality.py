@@ -388,6 +388,34 @@ _OPAQUE_OUT: contextvars.ContextVar = contextvars.ContextVar(
 _READ_CHECK: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_read_check", default=None)
 
+# the declared domain the walk reads, by parameter name
+_WALK_DOMAIN: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_walk_domain", default=None)
+
+
+def _unreached(path_cond) -> bool:
+    """Intent:
+        Whether the walk's declared domain rules out every point where
+        `path_cond` holds: an operation only reached there can raise
+        nowhere in the domain, so what the walk cannot read about it
+        does not matter.
+    """
+    domain = _WALK_DOMAIN.get()
+    if not domain or path_cond is sympy.true:
+        return False
+    symbols = {str(s): s for s in getattr(path_cond, "free_symbols", ())}
+    if not symbols or not all(name in domain for name in symbols):
+        return False
+    from ._proof_support import _relational_truth_over_domain
+    try:
+        return _relational_truth_over_domain(path_cond, domain,
+                                             symbols) is False
+    except TimeoutError:
+        raise
+    except Exception:
+        return False
+
+
 # the callees whose raise regions the walk is reading, outermost first
 _CALLEE_PATH: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_callee_path", default=frozenset())
@@ -580,7 +608,7 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
         can't condition exactly, are reported as missed.
     """
     def miss(what: str) -> None:
-        if missed is not None:
+        if missed is not None and not _unreached(path_cond):
             missed.append(f"line {getattr(node, 'lineno', '?')}: {what}")
 
     read_check = _READ_CHECK.get()
@@ -1091,6 +1119,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         else None)
     int_token = _INT_SYMS.set(int_syms)
     self_token = _SELF_OF.set(_self_of(fn, facts))
+    domain_token = _WALK_DOMAIN.set(domain or None)
     names_token = _COMPLEX_NAMES.set(frozenset(
         name for name, bound in (domain or {}).items()
         if bound == "C" or getattr(bound, "base_type", None) == "C"))
@@ -1099,6 +1128,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
     finally:
         _COMPLEX_NAMES.reset(names_token)
         _SELF_OF.reset(self_token)
+        _WALK_DOMAIN.reset(domain_token)
         _INT_SYMS.reset(int_token)
         _OPAQUE_OUT.reset(opaque_token)
         _READ_CHECK.reset(read_token)
