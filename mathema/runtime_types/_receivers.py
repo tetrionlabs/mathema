@@ -189,6 +189,36 @@ def receiver_fields(cls, tree, name: str) -> "tuple | None":
     return None
 
 
+def undrawn_reason(cls) -> str:
+    """Intent:
+        Why an instance of `cls` cannot be drawn for a method's
+        receiver, in words: a dataclass field that is not an int or a
+        float, a constructor argument mathema cannot draw (named with its
+        annotation), or a body that does not show the fields it holds.
+    """
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        from .._annotation_text import annotation_text
+        for f in dataclasses.fields(cls):
+            if f.type not in (int, float, "int", "float"):
+                return (f"its field {f.name} ({annotation_text(f.type)}) is "
+                        f"not a number mathema draws")
+    if _own_init(cls):
+        try:
+            sig = inspect.signature(cls)
+        except (TypeError, ValueError):
+            return "its constructor's signature cannot be read"
+        from .._annotation_text import annotation_text
+        for p in sig.parameters.values():
+            if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) or p.default is not p.empty:
+                continue
+            if p.annotation not in (p.empty, int, float, bool, "int", "float", "bool"):
+                return (f"its constructor takes {p.name} "
+                        f"({annotation_text(p.annotation)}), which mathema "
+                        f"cannot draw")
+    return "the body does not show the fields it holds"
+
+
 def _own_init(cls) -> bool:
     """Whether `cls` (or a class it inherits from, other than `object`)
     defines its own `__init__`."""
