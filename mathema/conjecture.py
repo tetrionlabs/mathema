@@ -7098,7 +7098,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         checked against its own float run), called on the point's exact
         values (`_exact_side.exact_sides` with `exact_calls`) under the
         fast wall-clock cap, the sides compared exactly (within the claim's
-        own declared tolerance, when it states one). True or False, or
+        own declared tolerance, when it states one, except on `==`, which
+        is exact equality, `_exact_slack`). True or False, or
         None when the evaluation cannot be carried out exactly.
 
     Notes:
@@ -7126,8 +7127,9 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
-        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
-        unless the claim declares a tolerance, a tolerance kind as the
+        `a ~= b` as `abs(a - b) <= ε`, `==` as exact equality whatever
+        tolerance is declared, every other relation exactly unless the
+        claim declares a tolerance, a tolerance kind as the
         whole allowance at each pair compared. A side sympy computed (a
         root, a transcendental value of a body read exactly) is settled
         symbolically (`_exact_side.decide_symbolic`), never under a
@@ -7151,8 +7153,13 @@ def _exact_relation(cj, left, right) -> "bool | None":
 
 def _exact_slack(cj) -> float:
     """The absolute slack a claim's relation gets when it is decided
-    exactly: the declared tolerance; else ε (`DEFAULT_TOLERANCE`) for
-    `~=`, which is `abs(a - b) <= ε`, and 0 for every other relation."""
+    exactly: 0 for `==`, exact equality on the mathematics line whatever
+    tolerance is declared (a declared tolerance binds the computation
+    line only); else the declared tolerance; else ε
+    (`DEFAULT_TOLERANCE`) for `~=`, which is `abs(a - b) <= ε`, and 0
+    for every other relation."""
+    if cj.relation == "==":
+        return 0.0
     if cj.tolerance is not None:
         return cj.tolerance
     return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0
@@ -12701,25 +12708,38 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        # `within`: an `==` or `~=` pass beyond the allowance's absolute
+        # floor, through its relative part or a draw's round-off;
+        # `inside`: a pass of `==`, `<=` or `>=` the compared sides
+        # satisfy only within the allowance, inside its floor or beyond
         within = (ok is True and cj.tolerance is None
                   and cj.relation in ("==", "~=")
                   and relation_within(compare_l, compare_r, cj.relation,
                                       ABSOLUTE, 0.0, side) is not True)
+        inside = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "<=", ">=")
+                  and relation_within(compare_l, compare_r, cj.relation,
+                                      _exact_slack(cj), 0.0, side)
+                  is not True)
         exactly_false = False
-        if within:
+        if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
-            # with the gap printed, and a draw that cannot be evaluated
-            # exactly is inconclusive and not counted
+            # with the gap printed. Where it cannot be evaluated
+            # exactly, an `==` or `~=` pass beyond the floor is
+            # inconclusive and not counted; any other stands as the
+            # computation's pass, its gap printed
             exact_ok = _exact_verdict(cj, code_l, code_r, env,
                                       *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-            if exact_ok is None:
+            if exact_ok is None and within:
                 checked -= 1
                 inconclusive += 1
                 continue
             if exact_ok is False:
                 ok, exactly_false = False, True
+            elif exact_ok is None or not within:
+                pass
             elif roundoff_gap is not None:
                 if roundoff_gap > roundoff_absorbed:
                     roundoff_absorbed, roundoff_at = roundoff_gap, _point_text(args)

@@ -14,9 +14,10 @@ allowance absorbs never reaches a proof.
 - A point the function cannot be evaluated at exactly (a float it
   reads from outside its body, a module global, has no exact reading)
   caps the proof at float64: every point ran and agreed in the
-  computation, so the claim is proven on
-  `derive:brute_force:within_float64`, the record stating the largest
-  delta, never an exact proof.
+  computation within float64's own precision, so the claim is proven
+  on `derive:brute_force:within_float64`, the record stating the
+  largest delta, never an exact proof. A float64 miss beyond that
+  precision, which the allowance admits, is `holds`.
 - A function that satisfies the claim exactly at every point is still
   proven.
 
@@ -147,10 +148,13 @@ def _check(fn, law):
     (offset_global, "for n in [0, 3] subset Z, f(n) == n"),
     (constant_global, "f([]) == 0"),
 ])
-def test_a_body_with_no_exact_value_is_proven_within_float64(fn, law):
+def test_a_body_with_no_exact_value_missing_beyond_float64_holds(fn, law):
+    # each float64 result misses the relation by 2e-9 (relative to 1)
+    # or 5e-10 (against 0 at inputs of magnitude at most 0 or 1),
+    # beyond float64's precision there: evidence, not a proof
     p = _check(fn, law)
-    assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
-    assert p.route == "derive:brute_force:within_float64", p.route
+    assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force", p.route
     assert "mathema.sweep_precision" in p.meta, p.meta
 
 
