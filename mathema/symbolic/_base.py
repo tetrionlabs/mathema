@@ -859,7 +859,9 @@ def _literal_int_index(node: ast.AST) -> int | None:
     return None
 
 
-def _exact_numeric_literal(value: int | float) -> "sympy.Integer | sympy.Rational":
+def _exact_numeric_literal(value: int | float,
+                           written: "str | None" = None
+                           ) -> "sympy.Integer | sympy.Rational":
     """An int/float literal from claim text, converted without the
     binary floating-point rounding `sympy.Float`/plain `sympy.sympify`
     would introduce for a float. Python's own `str()` of a float is
@@ -870,12 +872,21 @@ def _exact_numeric_literal(value: int | float) -> "sympy.Integer | sympy.Rationa
     differ at the ~1e-17 relative level, invisible for a single
     comparison but capable of leaving a real identity's difference
     non-zero (`falsified`, not just imprecise) once raised to a
-    symbolic power elsewhere in the same expression."""
+    symbolic power elsewhere in the same expression. A real literal
+    past the float range (`1e309`, which Python reads as an infinity)
+    is the number `written` spells, 10**309; with no written text it
+    does not lift."""
     if isinstance(value, (float, complex)) and not cmath.isfinite(value):
-        # a literal Python reads as nan or an infinity (`1e309`) has no
-        # real value to lift
-        raise NotSymbolic(f"a literal with no finite value: {value!r}",
-                          category="non-numeric-constant")
+        exact = None
+        if isinstance(value, float) and written:
+            try:
+                exact = sympy.Rational(written.replace("_", ""))
+            except (TypeError, ValueError):
+                exact = None
+        if exact is None:
+            raise NotSymbolic(f"a literal with no finite value: {value!r}",
+                              category="non-numeric-constant")
+        return exact
     if isinstance(value, complex):
         real = sympy.Rational(str(value.real)) if value.real else sympy.Integer(0)
         return real + sympy.I * sympy.Rational(str(value.imag))
@@ -1105,7 +1116,8 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
             raise NotSymbolic(f"a complex literal with no imaginary part "
                               f"lifts to a real number: {ast.unparse(node)!r}")
         if not isinstance(node.value, bool) and isinstance(node.value, (int, float, complex)):
-            return _exact_numeric_literal(node.value)
+            return _exact_numeric_literal(
+                node.value, getattr(node, "mathema_written", None))
         if opaque is not None and is_opaque_eligible(node.value):
             return opaque.register(node.value)
         raise NotSymbolic(f"non-numeric constant {node.value!r}",

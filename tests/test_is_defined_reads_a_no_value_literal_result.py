@@ -67,6 +67,19 @@ def infinity_minus_infinity(x: float) -> float:
     return x if x <= 1 else 1e308 * 10 - 1e308 * 10
 
 
+def overflow_through_a_name(x: float) -> float:
+    big = 1e308 * x * 10.0
+    return x if x <= 1 else big - big
+
+
+def zero_times_infinity(x: float) -> float:
+    return x if x <= 1 else 0.0 * math.inf
+
+
+def infinity_minus_itself(x: float) -> float:
+    return x if x <= 1 else math.inf - math.inf
+
+
 def compares_with_infinity(x: float) -> float:
     return x if x < math.inf else 0.0
 
@@ -131,9 +144,19 @@ def test_a_literal_that_never_reaches_the_result_keeps_the_proof():
         assert p.verdict == "proven", (fn.__name__, p.route, p.note)
 
 
-def test_arithmetic_of_literals_with_no_float_value_is_no_value():
-    # 1e308 * 10.0 overflows to inf; 0.0 * inf and inf - inf are nan
-    for fn in (overflowing_product, infinity_minus_infinity):
+def test_an_arithmetic_of_finite_literals_is_read_as_written():
+    # 1e308 * 10.0 is 10**309, a finite number; 0 * 10**309 and
+    # 10**309 - 10**309 are 0: only the float64 run overflows
+    for fn in (overflowing_product, infinity_minus_infinity,
+               overflow_through_a_name):
+        guards, _unread = partiality_walk(fn, effective_facts(fn))
+        assert not any(exc == NO_VALUE for _c, exc in guards), fn.__name__
+        p = _verdict(fn)
+        assert p.verdict == "proven", (fn.__name__, p.route, p.sketch)
+
+
+def test_an_infinity_literal_times_zero_has_no_value():
+    for fn in (zero_times_infinity, infinity_minus_itself):
         guards, _unread = partiality_walk(fn, effective_facts(fn))
         assert any(exc == NO_VALUE for _cond, exc in guards), fn.__name__
         p = _verdict(fn)

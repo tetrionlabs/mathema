@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from ._signatures import module_scope
 import ast
+import cmath
 import inspect
 import re
 import textwrap
@@ -233,6 +234,13 @@ def get_tree(fn) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]:
             "exec/stdin do not."
         ) from e
     mod = ast.parse(src)
+    for node in ast.walk(mod):
+        # a decimal literal past the float range (`1e309`) parses to an
+        # infinity; the number it denotes is kept as written
+        if isinstance(node, ast.Constant) \
+                and isinstance(node.value, (float, complex)) \
+                and not cmath.isfinite(node.value):
+            node.mathema_written = ast.get_source_segment(src, node)
     fdef = next((n for n in mod.body
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
                 None)
