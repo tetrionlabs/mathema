@@ -8,7 +8,10 @@ are stated, by the claim (`o.kind in {"restock", "discount"}`) or by the
 record's language, derive proves the claim once per level with the
 field bound to that level, so every branch that reads it settles: the
 claim is proven when every case is, and otherwise left to running the
-code. With no level stated the field still has no reading.
+code. With no level stated the field still has no reading. Identity (`is`,
+`is not`) against anything but a singleton (None, True, False,
+Ellipsis) depends on how the runtime interns its objects, so derive
+never decides such a branch: the code is run instead.
 """
 import sys
 import textwrap
@@ -57,6 +60,24 @@ ORDERS = '''
         if o.kind == "a":
             return o.qty * 12
         return 0
+
+
+    def is_not_export(o: Order) -> int:
+        if o.kind is not "export":
+            return o.qty * 12
+        return 1000
+
+
+    def identity_of_text(s: str, x: float) -> float:
+        if s is not "export":
+            return x
+        return 1000.0
+
+
+    def none_checked(o: Order) -> int:
+        if o.kind is None:
+            return 1000
+        return o.qty * 12
 
 
     def initial_units(o: Order) -> float:
@@ -181,3 +202,28 @@ def test_too_many_levels_are_not_split(orders):
     p = _one(orders.wide_units, "for o in L[categorical_orders.Wide], f(o) <= 120")
     assert p.route != "derive", (p.verdict, p.route)
     assert "more than the 16" in (p.note or ""), p.note
+
+
+def test_identity_against_text_is_never_decided_by_derive(orders):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = _one(orders.is_not_export, "for o in L[categorical_orders.Order], f(o) <= 120")
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
+    assert p.route != "derive"
+
+
+def test_identity_of_a_plain_text_parameter_is_never_decided_by_derive(orders):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = _one(orders.identity_of_text,
+                 'for s in {"export", "a"}, x in [0, 1], f(s, x) <= 1')
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
+    assert "identity" in (p.note or "") + (p.sketch or ""), (p.note, p.sketch)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_identity_against_none_is_still_decided(orders):
+    p = _one(orders.none_checked, "for o in L[categorical_orders.Order], f(o) <= 120")
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.route, p.sketch)
