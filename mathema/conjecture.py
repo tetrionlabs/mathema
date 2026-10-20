@@ -2111,6 +2111,14 @@ def _claim(law: str, name: str | None, source: str, route: str,
                       meta=dict(meta or {}), raw=law)
 
 
+def _reads_as_number(text: str) -> bool:
+    """Whether `text` reads as a finite number (`"1e-9"`)."""
+    try:
+        return math.isfinite(float(text))
+    except ValueError:
+        return False
+
+
 def _read_claim_tolerance(tolerance, relation: str, law: str,
                           sides: "tuple" = (), chained: bool = False):
     """Intent:
@@ -2121,12 +2129,20 @@ def _read_claim_tolerance(tolerance, relation: str, law: str,
         the claim's expressions, searched for `ε`.
 
     Raises:
-        InvalidConjecture: a mapping that is not one kind; a kind on a
+        InvalidConjecture: text that does not read as a number (a kind
+            written as a string, `"{abs: 0}"`); a mapping that is not
+            one kind; a kind on a
             chain, on a claim that is neither `=:=` nor `~=`, or on a
             claim whose text reads `ε` (`eps`, `epsilon`), the tolerance
             as one number.
     """
     from ._tolerance import read_tolerance
+    if isinstance(tolerance, str) and not _reads_as_number(tolerance):
+        raise InvalidConjecture(
+            f"the tolerance {tolerance!r} is text that is not a number; "
+            f"pass a number (tolerance=1e-9) or a mapping naming one kind "
+            f"(tolerance={{'abs': 0}}, written {{abs: 0}} in a claims "
+            f"file), in the claim {law.strip()!r}")
     try:
         read = read_tolerance(tolerance)
     except ValueError as e:
@@ -6295,9 +6311,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                        ctx.cj_domain)
             if ctx.companion is not None \
                     and ctx.companion.verdict == "falsified":
+                # no proof stands behind this line: only the B its
+                # conditioning gives is offered, never one found by search
                 _settle_infinity_offer(ctx.companion, probed_with, params,
-                                       ctx.cj_domain,
-                                       witness=ctx.companion_witness)
+                                       ctx.cj_domain)
             if ctx.companion is None and probed.verdict == "holds" \
                     and _stands_in_for_derive(ctx):
                 # the probe stood in for derive on the mathematics: the
@@ -9676,8 +9693,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
             and found_at.get("point") is not None \
             and "mathema.proof_contradicted" not in (companion.meta or {}):
         point = found_at["point"]
+        # a search for B stands only on a proof; a probe standing in for
+        # derive is offered the B its conditioning gives alone
         _settle_infinity_offer(companion, run_with, list(point),
-                               ctx.cj_domain, witness=point)
+                               ctx.cj_domain,
+                               witness=point if proven.verdict == "proven"
+                               else None)
     if companion is None:
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
@@ -12620,6 +12641,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # reduce its inputs: its mathematics settled (a trusted
                 # row, f run exactly), or a reduction word on the claim
                 # side it stands against
+                from .gates import _returned_calls as returned_calls
                 found = _conditioning.at_miss(
                     fn, facts, _called_point(f_call, facts, env, kinds), gap,
                     reference, cj_domain,
@@ -12628,7 +12650,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     exact_at=(_exact_point_sides(code_l, code_r, env, fn_call,
                                                  bound_funcs)
                               if mathematics is True else None),
-                    sides=(compare_l, compare_r))
+                    sides=(compare_l, compare_r),
+                    calls=returned_calls(made, facts))
                 f_call.calls = made
                 if found["kappa"] is None and mathematics is None:
                     found = None

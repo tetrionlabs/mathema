@@ -396,6 +396,84 @@ def _computed_entries(value) -> "list | None":
     return None
 
 
+def _nearest_to(value, approx: Fraction, slack: Fraction) -> "bool | None":
+    """Whether the float `value` is the float64 nearest a real number
+    known only as `approx`, within `slack` of it; None where the number
+    may lie on either side of a midpoint between two floats."""
+    c = Fraction(value)
+    try:
+        nearest = float(approx)
+    except OverflowError:
+        return None
+    if value == nearest:
+        toward = math.inf if approx > c else -math.inf
+        midpoint = (c + Fraction(math.nextafter(value, toward))) / 2
+        return True if abs(approx - midpoint) > slack else None
+    if abs(c - approx) - abs(Fraction(nearest) - approx) > 2 * slack:
+        return False
+    return None
+
+
+def f_correctly_rounded(fn, facts, calls) -> "bool | None":
+    """Intent:
+        Whether every value f returned at a miss is its exact value at
+        the arguments it was called with, correctly rounded: no float64
+        lies closer to it. `calls` holds `(value, {param: argument})`
+        for each call; f's exact value is its lifted body (derive's
+        reading) at the exact arguments, read to 60 significant digits
+        where it is irrational. None where the body does not lift, a
+        value or argument is not a finite real number, or a value sits
+        too close to a rounding midpoint to decide.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import lift
+    if not calls:
+        return None
+    try:
+        lifted = _with_timeout(lambda: lift(fn, facts), FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+    if lifted is None or isinstance(lifted.expr, tuple):
+        return None
+
+    def decide():
+        for value, point in calls:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not math.isfinite(value):
+                return None
+            subs = {}
+            for name, sym in lifted.params.items():
+                arg = point.get(name)
+                if isinstance(arg, bool) or not isinstance(arg, (int, float)) \
+                        or not math.isfinite(arg):
+                    return None
+                subs[sym] = sympy.Rational(arg) if isinstance(arg, float) \
+                    else sympy.Integer(arg)
+            exact = lifted.expr.subs(subs)
+            if exact.is_Rational:
+                e = Fraction(int(exact.p), int(exact.q))
+                nearest = _nearest_distance(e)
+                if nearest is None:
+                    return None
+                if abs(Fraction(value) - e) > nearest:
+                    return False
+                continue
+            approx = sympy.N(exact, 60)
+            if not approx.is_real or not approx.is_finite:
+                return None
+            a = Fraction(str(approx))
+            said = _nearest_to(value, a, abs(a) * Fraction(1, 10 ** 50))
+            if said is not True:
+                return said
+        return True
+    try:
+        return _with_timeout(decide, FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+
+
 def correctly_rounded(exact, gap: float, sides=None) -> "bool | None":
     """Intent:
         Whether the computation delivered the exact result correctly
@@ -564,7 +642,8 @@ def infinity_floor(names: list, cj_domain: dict) -> "float | None":
 def at_miss(fn, facts, point: dict, gap: float, reference: float,
             cj_domain: "dict | None" = None,
             mathematics: "bool | None" = True,
-            reduces: bool = True, exact_at=None, sides=None) -> dict:
+            reduces: bool = True, exact_at=None, sides=None,
+            calls=None) -> dict:
     """Intent:
         What the conditioning says about a computation-line miss at
         `point`, where the computed value missed the exact `reference`
@@ -581,6 +660,12 @@ def at_miss(fn, facts, point: dict, gap: float, reference: float,
         `exact_at`, when given, also decides whether the computed value
         is the exact result correctly rounded (`correctly_rounded`),
         from `sides`, the claim's two sides as compared, where given.
+        `calls`, `(value, {param: argument})` for each call of f at the
+        point, decides whether f's own values are correctly rounded
+        (`f_correctly_rounded`); where they are, the claim holds at the
+        point in exact arithmetic (`mathematics` True) and the sides
+        still miss, the loss is in the claim's own expression run in
+        float64, and inherent.
     """
     scale = scale_of(point)
     if exact_at is not None:
@@ -603,7 +688,12 @@ def at_miss(fn, facts, point: dict, gap: float, reference: float,
         error = math.inf if gap else 0.0
     rounded = (correctly_rounded(exact_at(point), gap, sides)
                if exact_at is not None and gap else None)
-    verdict = inherent(kappa, error, rounded)
+    # f's own rounding speaks for the claim only where the claim holds
+    # at the point in exact arithmetic
+    f_rounded = f_correctly_rounded(fn, facts, calls) \
+        if calls and rounded is not True and fn is not None \
+        and mathematics is True else None
+    verdict = inherent(kappa, error, True if f_rounded is True else rounded)
     if verdict is True and mathematics is None:
         words = (f"ill-conditioned here (κ ≈ {short(kappa)}): float64 "
                  f"cannot deliver this result at inputs of magnitude "
@@ -614,6 +704,12 @@ def at_miss(fn, facts, point: dict, gap: float, reference: float,
         words = (f"ill-conditioned here (the exact result is 0 at inputs "
                  f"of magnitude {short(scale)}): no float64 computation "
                  f"can deliver it exactly")
+    elif verdict is True and f_rounded is True:
+        conditioned = f" (κ ≈ {short(kappa)})" if kappa is not None else ""
+        words = (f"f returns its exact value correctly rounded here"
+                 f"{conditioned}; the loss is in the claim's own expression "
+                 f"run in float64, so no float64 computation of f can "
+                 f"deliver this result")
     elif verdict is True and rounded is True:
         conditioned = f" (κ ≈ {short(kappa)})" if kappa is not None else ""
         words = (f"the computed value is the float64 nearest the exact "

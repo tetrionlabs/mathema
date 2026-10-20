@@ -1505,6 +1505,19 @@ def _written_inside(cj_domain, point) -> bool:
     return True
 
 
+def _returned_calls(calls, facts) -> list:
+    """`(value, {param: argument})` for each call of f that returned, from
+    `(kind, outcome, args, kwargs)` records."""
+    out = []
+    for kind, value, args, kwargs in calls or ():
+        if kind != "returned":
+            continue
+        point = dict(zip(list(facts.params), args))
+        point.update(kwargs or {})
+        out.append((value, point))
+    return out
+
+
 def _capped_exact(exact_at, point):
     """`exact_at(point)` under the fast wall-clock cap, None on the cap."""
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
@@ -2259,6 +2272,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             exact_at = getattr(deps["evaluate"], "exact_at", None)
             found = _conditioning.at_miss(
                 fn, facts, called, gap, reference, cj_domain,
+                calls=_returned_calls(deps["evaluate"].calls(), facts),
                 reduces=_conditioning.claim_reduces(cj),
                 exact_at=(lambda point: _capped_exact(exact_at, point))
                 if exact_at is not None else None)
