@@ -3132,16 +3132,6 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         tolerance, max_callee_depth, extensive, _split_depth,
                         funcs, assumption, assume_defined, _walk_notes=notes,
                         exclude_own_guards=exclude_own_guards)
-    if (result.status == "disproven" and tolerance is not None
-            and relation != "=="
-            and result.meta.get("mathema.exact_disproof")):
-        # a declared tolerance on an ordering is part of the claim: a
-        # difference below it disproves nothing; on `==` it binds the
-        # computation line only, and the exact gap disproves
-        return ProofResult(
-            "undecided",
-            sketch=(f"{result.sketch}; within the declared tolerance "
-                    f"({tolerance:g}), so not a disproof of this claim"))
     if result.status == "proven" and notes.get("claim_side"):
         return ProofResult(
             "undecided",

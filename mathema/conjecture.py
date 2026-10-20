@@ -7098,8 +7098,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         checked against its own float run), called on the point's exact
         values (`_exact_side.exact_sides` with `exact_calls`) under the
         fast wall-clock cap, the sides compared exactly (within the claim's
-        own declared tolerance, when it states one, except on `==`, which
-        is exact equality, `_exact_slack`). True or False, or
+        own declared tolerance only for `~=`, `_exact_slack`). True or
+        False, or
         None when the evaluation cannot be carried out exactly.
 
     Notes:
@@ -7127,9 +7127,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
-        `a ~= b` as `abs(a - b) <= ε`, `==` as exact equality whatever
-        tolerance is declared, every other relation exactly unless the
-        claim declares a tolerance, a tolerance kind as the
+        `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
+        whatever bare tolerance is declared, a tolerance kind as the
         whole allowance at each pair compared. A side sympy computed (a
         root, a transcendental value of a body read exactly) is settled
         symbolically (`_exact_side.decide_symbolic`), never under a
@@ -7148,21 +7147,18 @@ def _exact_relation(cj, left, right) -> "bool | None":
                                cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
         left, right, cj.relation, _exact_slack(cj),
-        exact_inequality=cj.tolerance is None, rel_tol=0.0)
+        exact_inequality=True, rel_tol=0.0)
 
 
 def _exact_slack(cj) -> float:
     """The absolute slack a claim's relation gets when it is decided
-    exactly: 0 for `==`, exact equality on the mathematics line whatever
-    tolerance is declared (a declared tolerance binds the computation
-    line only); else the declared tolerance; else ε
-    (`DEFAULT_TOLERANCE`) for `~=`, which is `abs(a - b) <= ε`, and 0
-    for every other relation."""
-    if cj.relation == "==":
+    exactly: for `~=`, which is `abs(a - b) <= ε`, ε, the declared
+    tolerance else `DEFAULT_TOLERANCE`; 0 for every other relation,
+    decided exactly on the mathematics line whatever tolerance is
+    declared (a declared tolerance binds the computation line only)."""
+    if cj.relation != "~=":
         return 0.0
-    if cj.tolerance is not None:
-        return cj.tolerance
-    return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0
+    return cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
 
 
 def _inside_as_written(cj, env) -> bool:
@@ -12725,20 +12721,19 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
-            # with the gap printed. Where it cannot be evaluated
-            # exactly, an `==` or `~=` pass beyond the floor is
-            # inconclusive and not counted; any other stands as the
-            # computation's pass, its gap printed
+            # with the gap printed; where it cannot be evaluated
+            # exactly the pass is no evidence either way, inconclusive
+            # and not counted
             exact_ok = _exact_verdict(cj, code_l, code_r, env,
                                       *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-            if exact_ok is None and within:
+            if exact_ok is None:
                 checked -= 1
                 inconclusive += 1
                 continue
             if exact_ok is False:
                 ok, exactly_false = False, True
-            elif exact_ok is None or not within:
+            elif not within:
                 pass
             elif roundoff_gap is not None:
                 if roundoff_gap > roundoff_absorbed:

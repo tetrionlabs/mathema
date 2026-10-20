@@ -12,7 +12,8 @@ literal `1e-20` is 1/10^20 and the claim is falsified on the
 mathematics, the computation holding within its allowance; a gap read
 from outside the body has no exact reading, and the disproof is then
 `unknown` with the reason "exact arithmetic only". A declared tolerance
-absorbs it outright."""
+binds the computation line only: the mathematics line still falsifies on
+the exact gap."""
 from mathema.conjecture import check_conjectures, claim
 
 #: a float read from outside the body: no exact reading
@@ -92,10 +93,12 @@ def test_a_probe_holds_with_nothing_absorbed_carries_no_tolerance_note():
     assert "within the default tolerance" not in (p.note or "")
 
 
-def test_a_declared_tolerance_is_part_of_the_claim_and_stays():
+def test_a_declared_tolerance_binds_only_the_computation_line():
+    # exactly f(x) - x = 1/10**10 > 0, inside the declared 1e-9: the
+    # mathematics line is exact and falsifies
     p = _v(just_above, "for x in [0, 1], f(x) <= x", "best",
            tolerance=1e-9)
-    assert p.verdict != "falsified", (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)
     assert "within the default tolerance" not in (p.note or "")
 
 
@@ -168,8 +171,10 @@ def test_a_gross_violation_falsifies_with_a_witness_and_no_rounding_label():
 
 
 def test_a_violation_inside_a_declared_tolerance_is_not_an_engine_bug():
+    # derive's exact disproof reproduces at its witness: an executed
+    # witness, no engine-bug flag
     p = _v(just_above, "for x in [0, 1], f(x) <= x", "best",
            tolerance=1e-9)
-    assert p.verdict == "holds", (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)
     assert "mathema bug" not in (p.note or "")
-    assert p.meta.get("mathema.corroboration") is None
+    assert p.meta.get("mathema.corroboration") == "reproduced", p.meta

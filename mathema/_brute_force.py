@@ -287,9 +287,8 @@ class _Precision:
         # first miss beyond it (`_allowance.precision_miss`)
         self.within = None
         self.beyond = None
-        # the points with no exact value whose float64 pass of `==` or
-        # `~=` the relative part of the allowance alone admits
-        # (`_uncounted_at`), each by its text
+        # the points with no exact value whose float64 pass rests on
+        # the default allowance alone (`_uncounted_at`), each by its text
         self.uncounted: list = []
 
     def add(self, measured, where) -> None:
@@ -439,20 +438,17 @@ def _float64_at(cj, computed, point: dict,
     return miss, bound, words
 
 
-def _uncounted_at(cj, computed) -> bool:
+def _uncounted_at(cj, measured) -> bool:
     """Intent:
-        Whether the float64 sides `computed` of a point with no exact
-        value pass `==` or `~=` (no declared tolerance) only through the
-        relative part of the default allowance: past its absolute 1e-9
-        (`_allowance.ABSOLUTE`, ε for `~=`). Such a pass is not counted,
-        as on the probe route.
+        Whether a point with no exact value, at its `(miss, precision,
+        words)` (`_float64_at`), is not counted: its float64 sides miss
+        the relation beyond float64's precision there and the claim
+        declares no tolerance, so the pass rests on the default
+        allowance alone and is no evidence either way, as on the probe
+        route.
     """
-    from ._allowance import ABSOLUTE, reference_side, relation_within
-    if computed is None or cj.tolerance is not None \
-            or cj.relation not in ("==", "~="):
-        return False
-    return relation_within(computed[0], computed[1], cj.relation, ABSOLUTE,
-                           0.0, reference_side(cj)) is not True
+    return cj.tolerance is None and measured is not None \
+        and measured[0] > measured[1]
 
 
 def _call_words(fn, facts, point: dict) -> str:
@@ -1005,9 +1001,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         said, sides = _exactly_at(cj, evaluate, point)
         if said is None:
             inexact.append(point)
-            precision.inexact(_float64_at(cj, computed, point, kappa),
-                              lambda: _fmt_point(point, names))
-            if _uncounted_at(cj, computed):
+            measured = _float64_at(cj, computed, point, kappa)
+            precision.inexact(measured, lambda: _fmt_point(point, names))
+            if _uncounted_at(cj, measured):
                 precision.uncounted.append(_fmt_point(point, names))
         elif said is False and exact_miss is None:
             exact_miss = (point, sides, _exact_witness_words(
@@ -1061,8 +1057,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                                executed_missing(deps)))
     if precision.uncounted:
         # a point with no exact value that passed only within the
-        # relative part of the allowance is not counted, as on the probe
-        # route: the sweep decides nothing
+        # default allowance is not counted, as on the probe route: the
+        # sweep decides nothing
         n = len(precision.uncounted)
         return ProofResult(
             "undecided",
@@ -1271,11 +1267,11 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     precision = _Precision()
     if inexact:
         precision.add(evaluate.last_precision(), witness)
-        precision.inexact(_float64_at(cj, computed, {},
-                                      _Kappa(cj, fn, facts)), witness)
-        if _uncounted_at(cj, computed):
-            # the call passed only within the relative part of the
-            # allowance and has no exact value: not counted, nothing
+        measured = _float64_at(cj, computed, {}, _Kappa(cj, fn, facts))
+        precision.inexact(measured, witness)
+        if _uncounted_at(cj, measured):
+            # the call passed only within the allowance, beyond float64's
+            # precision, and has no exact value: not counted, nothing
             # decided
             return None
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:

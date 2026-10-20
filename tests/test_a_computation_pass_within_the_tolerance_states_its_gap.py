@@ -64,10 +64,11 @@ def test_an_inequality_with_a_declared_tolerance_states_its_gap():
 
 def test_an_inequality_names_the_default_allowance_at_its_point():
     # the default allowance against b near 0.3 is relative to b, about
-    # 3e-08 there, not its absolute floor 1e-09
+    # 3e-08 there (1e-7 * 0.31 + 1e-9 = 3.2e-08 at the largest counted
+    # gap), not its absolute floor 1e-09
     p = _probe(lerp, "for b in [0.29, 0.31], f(-0.1, b, 1) <= b")
     assert p.verdict == "holds", p
-    assert "within the default tolerance (3e-08)" in p.note, p.note
+    assert "within the default tolerance (3.2e-08)" in p.note, p.note
 
 
 def test_a_bit_exact_pass_carries_no_gap():
