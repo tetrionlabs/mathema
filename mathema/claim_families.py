@@ -52,6 +52,7 @@ from .probing import (_fmt, _fmt_coordinate, _pinned_float_env, _points_for_prob
 from .runtime_types import SEQUENCE_KINDS
 from .runtime_types import annotated_container as _annotated_container
 from .runtime_types import as_annotated as _as_annotated
+from . import _exits
 from ._exits import exception_name
 from ._signatures import callable_signature
 
@@ -139,7 +140,7 @@ def _call_with_target(fn: Callable[..., Any], facts: Facts, target: str, args: l
     values[target] = value
     call_args, call_kwargs = call_arguments(fn, facts.params, values)
     try:
-        return fn(*call_args, **call_kwargs)
+        return _exits.call(fn, *call_args, **call_kwargs)
     except Exception as exc:
         log = _ROUND_RAISES.get()
         if log is not None:
@@ -272,7 +273,7 @@ def _hazard_blame(fn: Callable[..., Any], facts: Facts, domain: dict, cx: str,
         call_args, call_kwargs = call_arguments(fn, facts.params, at)
         try:
             with _pinned_float_env():
-                return fn(*call_args, **call_kwargs), None
+                return _exits.call(fn, *call_args, **call_kwargs), None
         except PremiseRejected:
             return None, "PremiseRejected"
         except Exception as exc:
@@ -819,7 +820,7 @@ def _accuracy_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, names, values)
             with _pinned_float_env():
-                out = fn(*call_args, **call_kwargs)
+                out = _exits.call(fn, *call_args, **call_kwargs)
         except Exception:
             missed["raised"] += 1
             return None
@@ -3101,7 +3102,7 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     for p, v in point.items()}
             executed += 1
             try:
-                out = fn(**call)
+                out = _exits.call(fn, **call)
             except Exception as exc:
                 if working and deliberate_raise(exc, fn):
                     # the function's own guard: outside its working
@@ -4284,7 +4285,7 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, params, point)
             with _pinned_float_env():
-                out = fn(*call_args, **call_kwargs)
+                out = _exits.call(fn, *call_args, **call_kwargs)
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
@@ -4738,7 +4739,7 @@ def _output_predicate_probe(check):
             filled = [point[p] for p in facts.params]
             try:
                 with _pinned_float_env():
-                    out = fn(*filled)
+                    out = _exits.call(fn, *filled)
             except Exception as exc:
                 if any(is_missing(v) for p, v in point.items()
                        if not (p in held and v is None)):
@@ -4859,7 +4860,7 @@ def _compendium_probe(fn, facts, cj, domain: dict, rng, trials: int):
         filled = _sample(empties.pop() if empties else None)
         try:
             with _pinned_float_env():
-                out = fn(*filled)
+                out = _exits.call(fn, *filled)
         except Exception as e:
             if _raised_by_library(e, library):
                 return diagnosed(f"{_fmt(tuple(filled), tuple(facts.params))}: raised "
@@ -4959,7 +4960,7 @@ def _recursion_probe(fn, facts, cj, domain: dict, rng: random.Random,
         try:
             call_args, call_kwargs = call_arguments(fn, facts.params, values)
             with _pinned_float_env():
-                fn(*call_args, **call_kwargs)
+                _exits.call(fn, *call_args, **call_kwargs)
         except RecursionError:
             return (f"{_fmt_point(values, list(facts.params))}: f raised "
                     f"RecursionError, the recursion limit is reached "
@@ -5177,7 +5178,7 @@ def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
             values[p] = build(0)
         try:
             call_args, call_kwargs = call_arguments(fn, facts.params, values)
-            fn(*call_args, **call_kwargs)
+            _exits.call(fn, *call_args, **call_kwargs)
         except Exception as exc:
             why = _shape_failure(exc)
             if why is None:

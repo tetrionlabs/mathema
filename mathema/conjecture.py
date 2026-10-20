@@ -4339,7 +4339,8 @@ def _with_pins(fn, pins: dict):
             given = sig.bind_partial(*a, **k).arguments
         except TypeError:
             given = {}
-        return fn(*a, **{**{p: v for p, v in pins.items() if p not in given}, **k})
+        return _exits.call(fn, *a, **{**{p: v for p, v in pins.items() if p not in given},
+                                      **k})
     return call
 
 
@@ -8068,11 +8069,12 @@ def _call_by_name(fn, point: dict, extra: "dict | None" = None):
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
-        return fn(*point.values(), **rest)
+        return _exits.call(fn, *point.values(), **rest)
     positional = [p for p, prm in params.items()
                   if prm.kind is inspect.Parameter.POSITIONAL_ONLY and p in point]
-    return fn(*[point[p] for p in positional],
-              **{p: v for p, v in point.items() if p not in positional}, **rest)
+    return _exits.call(fn, *[point[p] for p in positional],
+                       **{p: v for p, v in point.items() if p not in positional},
+                       **rest)
 
 
 def _refill_caller(fn_call, pins: "dict | None" = None):
