@@ -417,6 +417,48 @@ def float_miss(lv, rv, relation: str, declared=None,
     return best[0] if complete else None
 
 
+def precision_miss(lv, rv, relation: str, declared=None,
+                   side: "int | None" = None,
+                   inputs_scale: float = 0.0) -> "tuple | None":
+    """Intent:
+        `(miss, precision)`, both floats, for two computed sides at one
+        point: how far they miss the relation itself, with no allowance
+        (`abs(lv - rv)` for `==`, the amount an ordering `<=`/`>=` is
+        violated by, for `~=` the amount the difference passes ε, the
+        bare `declared` tolerance else `DEFAULT_TOLERANCE`, and 0 for a
+        relation they satisfy outright), and float64's own precision at
+        the point: `STABILITY_FACTOR` unit roundoffs (the conditioning
+        bound at a condition number of 1) times the magnitude of the
+        value compared against (the reference side's, `side`, else the
+        larger side's; the largest entry over arrays), or times
+        `inputs_scale` when that magnitude is 0. None when a side is not
+        a finite real number, or the tolerance is a tolerance kind.
+    """
+    from ._tolerance import ToleranceKind
+    from .probing import _is_matrix_value, plain_value
+    if isinstance(declared, ToleranceKind):
+        return None
+    measured = float_miss(lv, rv, relation, 0.0, 0.0, side)
+    if measured is None:
+        return None
+    miss = measured[0]
+    if relation == "~=":
+        from .conjecture import DEFAULT_TOLERANCE
+        eps = declared if declared is not None else DEFAULT_TOLERANCE
+        miss = max(0.0, miss - float(eps))
+    lv, rv = plain_value(lv), plain_value(rv)
+    if _is_matrix_value(lv) or _is_matrix_value(rv):
+        magnitude = _array_scale(lv, rv, side)
+    else:
+        magnitude = _magnitude(_reference_of(lv, rv, side)) or 0
+    try:
+        magnitude = float(magnitude)
+    except OverflowError:
+        magnitude = float("inf")
+    base = magnitude if magnitude else float(inputs_scale)
+    return miss, STABILITY_FACTOR * UNIT_ROUNDOFF * base
+
+
 def _exactly_equal(lv, rv) -> bool:
     """Whether two values (numbers, or nested lists of them) are equal
     exactly, element by element; different shapes are unequal."""
