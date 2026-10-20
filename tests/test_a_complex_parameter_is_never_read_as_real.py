@@ -112,15 +112,24 @@ def test_a_complex_square_root_is_defined_on_the_plane():
 
 def test_the_magnitude_of_a_complex_parameter_still_derives():
     assert lift(magnitude, effective_facts(magnitude)) is not None
-    (p, *_rest) = check_conjectures(magnitude, [claim("f(z) >= 0")])
+    (p, *_rest) = check_conjectures(magnitude, [claim("f(z) == abs(z)")])
     assert p.verdict == "proven", (p.verdict, p.route, p.note)
 
 
+@pytest.mark.parametrize("law", ["f(z) >= 0", "for z in C, f(z) >= 0"],
+                         ids=["inferred", "written"])
+def test_an_ordering_over_the_plane_is_misspecified(law):
+    (p,) = check_conjectures(squared, [claim(law)])
+    assert p.verdict == "skipped:misspecified", (p.verdict, p.note)
+    assert "ordering (>=) has no meaning over the complex plane" in p.note
+    assert "abs(...), re(...) or im(...)" in p.note, p.note
+
+
 def test_an_unbound_complex_parameter_ranges_over_the_plane():
-    (p, companion) = check_conjectures(magnitude, [claim("f(z) >= 0")],
+    (p, companion) = check_conjectures(magnitude, [claim("f(z) == abs(z)")],
                                        float_companions=True)
     assert "inferred z in C from its own complex annotation" in p.note, p.note
-    assert companion.name == "f_z_ge_0[complex]", companion.name
+    assert companion.name == "f_z_eq_abs_z[complex]", companion.name
     assert companion.verdict == "holds", (companion.verdict,
                                           companion.counterexample)
 
@@ -145,8 +154,15 @@ def test_a_real_binding_keeps_the_float_companion():
         [p.name for p in rows]
 
 
-def test_an_ordering_false_off_the_real_line_is_not_proven():
-    (p, *_rest) = check_conjectures(squared, [claim("f(z) >= 0")],
+def test_an_ordering_of_a_real_part_false_off_the_real_line_is_not_proven():
+    (p, *_rest) = check_conjectures(squared, [claim("re(f(z)) >= 0")],
                                     float_companions=True)
     assert p.verdict == "falsified", (p.verdict, p.route, p.note)
     assert _non_real_witness(p.counterexample), p.counterexample
+
+
+@pytest.mark.parametrize("law", ["abs(f(z)) >= 0", "for z in C, abs(f(z)) >= 0"],
+                         ids=["inferred", "written"])
+def test_an_ordering_of_a_magnitude_is_adjudicated(law):
+    (p,) = check_conjectures(squared, [claim(law)])
+    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)

@@ -43,7 +43,7 @@ def magnitude(z: complex) -> float:
 
 
 def test_a_function_defined_on_the_whole_plane_still_holds():
-    (p,) = check_conjectures(magnitude, [claim("f(z) >= 0")])
+    (p,) = check_conjectures(magnitude, [claim("f(z) == abs(z)")])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.counterexample)
 
 

@@ -3331,9 +3331,9 @@ def length_admitted(name: str, k: int, domain, assumption,
     Notes:
         A value claim is over non-empty sequences: an unbound sequence
         and one over a dimension name (`x in R^n`, `Shape("n")`) admit
-        every length from one, and the empty list only where a premise
-        reads the sequence's length and holds at zero (`assuming
-        len(x) == 0`); what f does with an empty list the claim does not
+        every length from one; an unbound one admits the empty list only
+        where a premise reads the sequence's length and holds at zero
+        (`assuming len(x) == 0`), a space never (`R^n` means n >= 1); what f does with an empty list the claim does not
         name is the empty-input line's question (`empty_input_line`). A
         fixed length (`R^3`) admits only itself, and a dimension name
         the claim binds to whole numbers (`n in [2, 5] subset Z`) admits
@@ -3346,6 +3346,9 @@ def length_admitted(name: str, k: int, domain, assumption,
     from ..domain import domain_contains
     domain = domain or {}
     dims = dims_of(domain.get(name)) or dims_of((shapes or {}).get(name))
+    if dims and k == 0:
+        # a space (`R^n`, `Shape("n")`) has at least one entry on each axis
+        return False
     if dims:
         size = fixed_size(dims[0])
         if size is not None and size != k:

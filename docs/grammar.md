@@ -470,7 +470,11 @@ letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 Over `C` equality and closeness are adjudicated like any other value
 claim: `==` compares exactly and `~=` compares `abs(a - b)` against the
 same tolerance as over the reals, while an ordering (`<`, `<=`, `>`,
-`>=`) is refused, since complex numbers have no order. The computation
+`>=`) of a side that reads a complex value is skipped as misspecified,
+since complex numbers have no order: compare a real quantity instead,
+`abs(...)`, `re(...)` or `im(...)` (`z.real`, `z.imag` on a parameter).
+This holds whether the claim writes `for z in C` or the parameter's
+`complex` annotation puts it over `C`. The computation
 companion of a claim over `C` runs in complex128 and is named
 `<claim>[complex]`, with corners on both axes at float64's largest
 magnitude; a NaN or an infinity in either component is no value.

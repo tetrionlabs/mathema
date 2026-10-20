@@ -108,7 +108,7 @@ def test_exact_equality_over_c_compares_on_the_probe_route():
 def test_ordering_over_c_stays_refused_and_says_ordering():
     (p,) = check_conjectures(csqrt, [claim("for z in C, f(z) < z",
                                            route="probe")])
-    assert p.verdict == "skipped"
+    assert p.verdict == "skipped:misspecified"
     assert "ordering" in p.note, p.note
 
 

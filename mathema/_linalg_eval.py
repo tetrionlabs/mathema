@@ -516,6 +516,35 @@ def _abs(x):
     return builtins.abs(x)
 
 
+def _plain_norm(x) -> "float | None":
+    """Intent:
+        The Euclidean norm of a vector, or the Frobenius norm of a
+        matrix, given as a list (rows of lists) of real or complex
+        numbers, without numpy: the square root of the sum of each
+        entry's squared magnitude, a hole contributing nothing, taken
+        on the entries scaled to the largest magnitude so no square
+        overflows. None for any other value.
+    """
+    from .domain import is_missing
+    rows = x if isinstance(x, (list, tuple)) else None
+    if rows is None:
+        return None
+    flat = ([v for r in rows for v in r]
+            if rows and all(isinstance(r, (list, tuple)) for r in rows)
+            else list(rows))
+    values = [v for v in flat if not is_missing(v)]
+    if not all(isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+               for v in values):
+        return None
+    if not values:
+        return 0.0
+    scale = max(builtins.abs(v) for v in values)
+    if scale == 0 or not math.isfinite(scale):
+        return float(scale)
+    return scale * math.sqrt(builtins.sum((builtins.abs(v) / scale) ** 2
+                                          for v in values))
+
+
 def _norm(x, ord=None):
     """The Euclidean norm of a vector, the Frobenius norm of a matrix,
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
@@ -525,6 +554,10 @@ def _norm(x, ord=None):
     other norm of a matrix holding a hole is a hole."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
+    if _numpy() is None and ord is None:
+        plain = _plain_norm(x)
+        if plain is not None:
+            return plain
     np = _np()
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
@@ -1342,11 +1375,18 @@ def _square_rows(A):
     return rows
 
 
+def _number_of(value):
+    """A numpy scalar as the Python number it holds: a complex one
+    stays complex, its imaginary part kept."""
+    item = value.item() if hasattr(value, "item") else value
+    return item if isinstance(item, complex) else float(item)
+
+
 def _det(A):
     """The determinant of a square matrix, exact and rounded once."""
     rows = _square_rows(A)
     if rows is None:
-        return float(_np().linalg.det(_matrix(A)))
+        return _number_of(_np().linalg.det(_matrix(A)))
     return _rounded(_exact_det(rows))
 
 
@@ -1391,7 +1431,7 @@ def _trace(A):
             f"trace needs a square matrix, got shape {a.shape}")
     rows = _exact_rows(a)
     if rows is None:
-        return float(_np().trace(a))
+        return _number_of(_np().trace(a))
     return _exact_sum([rows[i][i] for i in range(len(rows))])
 
 

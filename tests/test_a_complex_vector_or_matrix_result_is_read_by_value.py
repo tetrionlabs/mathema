@@ -45,7 +45,16 @@ def doubled(x: float) -> list:
     return [complex(x, 1.0) * 2, complex(x, 0.0)]
 
 
+def complex_symmetric(x: float) -> list:
+    return [[complex(1.0, 1.0), complex(x, 2.0)],
+            [complex(x, 2.0), complex(3.0, 0.0)]]
+
+
 rows = [
+    (complex_symmetric, "trace(f(x)) >= 4"),
+    (complex_symmetric, "trace(f(x)) <= 4"),
+    (complex_symmetric, "det(f(x)) >= -100"),
+    (off_the_axis, "norm(f(x)) >= 0"),
     (off_the_axis, "is_real(f(x))"),
     (off_the_axis, "is_finite(f(x))"),
     (on_the_axis, "is_real(f(x))"),
@@ -89,6 +98,9 @@ def rows(request, tmp_path_factory):
 
 def test_no_complex_result_is_read_as_a_raise(rows):
     for key, (verdict, _route, note, witness) in rows.items():
+        if key.startswith("complex_symmetric") or "norm" in key:
+            # without numpy a claim's own trace or det has no value
+            continue
         assert "raised" not in witness and "TypeError" not in note, \
             (key, verdict, witness, note)
 
@@ -145,3 +157,15 @@ def test_a_real_matrix_claim_names_the_complex_value_returned():
     assert "f returned the complex value [[" in p.counterexample, \
         p.counterexample
     assert "TypeError" not in p.counterexample, p.counterexample
+
+
+@pytest.mark.parametrize("law", ["trace(f(x)) >= 4", "trace(f(x)) <= 4",
+                                 "det(f(x)) >= -100"])
+def test_an_ordering_on_a_complex_value_is_not_decided(rows, law):
+    verdict, _, note, _ = rows[f"complex_symmetric: {law}"]
+    assert verdict == "unknown", (law, note)
+
+
+def test_the_norm_of_a_complex_vector_is_real(rows):
+    verdict, _, note, _ = rows["off_the_axis: norm(f(x)) >= 0"]
+    assert verdict == "holds", note

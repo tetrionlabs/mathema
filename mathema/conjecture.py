@@ -40,6 +40,7 @@ import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
+from ._annotation_text import int_completed as _int_completed
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import SourceUnavailable, effective_facts, hydrated
@@ -4774,15 +4775,13 @@ def _draw_trial_sizes(resolver, lo, hi, groups, rng, floor=None):
 
 def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     """Intent:
-        One sampled instance for a bundled parameter: every field
-        drawn like a scalar parameter named `p.field` (its declared
-        domain respected when one exists). Dataclasses construct
-        normally; a plain class is built field-by-field without
-        running __init__; the declared field domains are the
-        contract.
+        One sampled instance for a bundled parameter, built as its
+        class builds one (`_receivers.construct_receiver`): every field,
+        or every argument of the class's own constructor, drawn like a
+        scalar parameter named `p.field` (its declared domain respected
+        when one exists, an int field as an int). A draw the
+        constructor refuses is drawn again.
     """
-    import dataclasses as _dc
-
     from .probing import _synth
     cls, fields = bundle
     bound = cj_domain.get(p)
@@ -4801,14 +4800,11 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
                     and _still_member(inst, bound, domain_contains):
                 break
         return inst
-    values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
-                        specials=specials) for f in fields}
-    if isinstance(cls, type) and _dc.is_dataclass(cls):
-        return cls(**values)
-    inst = object.__new__(cls)
-    for f, v in values.items():
-        setattr(inst, f, v)
-    return inst
+    from .runtime_types._receivers import construct_receiver
+    return construct_receiver(
+        cls, tuple((f, _field_kind(cls, f)) for f in fields),
+        {f: cj_domain.get(f"{p}.{f}") for f in fields},
+        lambda kind, b: _synth(kind, rng, b, specials=specials))
 
 
 def _field_kind(cls, field: str) -> str:
@@ -6372,8 +6368,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # route == "best" and the derive stage couldn't settle it:
                 # fall through to the probe stage, same as an ordinary
                 # probe claim.
-            probed = _arbitrate_empirical_fallback(
-                _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            from .runtime_types._receivers import ReceiverRefused
+            try:
+                probed = _arbitrate_empirical_fallback(
+                    _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            except ReceiverRefused as refused:
+                probed = Probe(cj.name, ctx.statement, "skipped", route="probe",
+                               note=f"{ctx.note}; no evaluable inputs: "
+                                    f"{refused}".lstrip("; "),
+                               meta={"mathema.probe_gap": "input-synthesis"})
 
             def probed_with(bound, cj=cj):
                 # the claim on the probe route under `let |inf| be bound`:
@@ -8030,9 +8033,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
         note = (f"{note}; inferred "
                + ", ".join(f"{p} in C" for p in complex_inferred)
                + " from its own complex annotation")
-    element_inferred = _element_inferred(
-        fn, facts, set(read) | (set(facts.params) if whole else set()),
-        cj_domain)
+    element_inferred = _element_inferred(fn, facts, read, cj_domain)
     if element_inferred:
         cj_domain = {**{p: b for p, (b, _w, _t) in element_inferred.items()},
                      **cj_domain}
@@ -8220,20 +8221,18 @@ def _validate_claim(cj, statement: str, note: str, facts,
         if refusal is not None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None, note=f"{note}; {refusal}")
-    if cj.relation in ("<=", ">=", "<", ">"):
-        complex_typed = sorted(
-            p for p, bound in cj_domain.items()
-            if (bound == "C" or getattr(bound, "base_type", None) == "C")
-            and p not in complex_inferred)
-        if complex_typed:
-            # mirrors the derive route's refusal of ordering over
-            # opaque values: ordering was never meaningful to claim
-            # over the complex plane, so no route should pretend to
-            # adjudicate it.
-            return Probe(cj.name, statement, "skipped", route=None,
-                         note=f"{note}; ordering ({cj.relation}) isn't "
-                              f"meaningful over the complex plane "
-                              f"({', '.join(complex_typed)} ⊂ ℂ)")
+    complex_bound = {p for p, bound in cj_domain.items()
+                     if bound == "C" or getattr(bound, "base_type", None) == "C"}
+    ordered = _complex_ordered(cj, complex_bound)
+    if ordered:
+        # the complex numbers have no order, so the claim is not well
+        # formed, whether the binding is written or inferred
+        relation, names = ordered
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=f"{note}; ordering ({relation}) has no meaning over "
+                          f"the complex plane ({', '.join(names)} ⊂ ℂ): compare "
+                          f"a real quantity instead, abs(...), re(...) or "
+                          f"im(...), or z.real and z.imag on a parameter")
     from .domain import KNOWN_BASE_TYPES, LanguageRef
     language_bound = {p: b for p, b in cj_domain.items()
                       if getattr(b, "base_type", None) == "L"}
@@ -9113,6 +9112,50 @@ def _as_domain_or_none(bound):
     return None if bound is None else _as_domain(bound)
 
 
+def _complex_ordered(cj, complex_names: set) -> "tuple | None":
+    """Intent:
+        `(relation, names)` for the first ordering the claim states
+        (`<`, `<=`, `>`, `>=`, a chain's links included) with a side that
+        reads a parameter ranging over C outside `abs(...)`, `re(...)`,
+        `im(...)`, `.real` or `.imag`, the complex names it reads; None
+        when every ordering compares real quantities.
+    """
+    if not complex_names:
+        return None
+    links = list(cj.links or [(cj.lhs, cj.relation, cj.rhs)])
+    for lhs, relation, rhs in links:
+        if relation not in ("<=", ">=", "<", ">"):
+            continue
+        found: set = set()
+        for text in (lhs, rhs):
+            if not text:
+                continue
+            try:
+                tree = ast.parse(str(text), mode="eval")
+            except SyntaxError:
+                continue
+            found |= _complex_reads(tree, complex_names)
+        if found:
+            return relation, sorted(found)
+    return None
+
+
+def _complex_reads(node, complex_names: set) -> set:
+    """The names in `complex_names` an expression reads outside a real
+    part of it: `abs(...)`, `re(...)`, `im(...)`, `.real`, `.imag`."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ("abs", "Abs", "re", "im"):
+        return set()
+    if isinstance(node, ast.Attribute) and node.attr in ("real", "imag"):
+        return set()
+    if isinstance(node, ast.Name):
+        return {node.id} & complex_names
+    out: set = set()
+    for child in ast.iter_child_nodes(node):
+        out |= _complex_reads(child, complex_names)
+    return out
+
+
 def _receiver_instances(fn, facts, cj_domain: dict):
     """Intent:
         `(name, probing.Instances)` for an unbound method's receiver
@@ -9171,37 +9214,6 @@ def _element_inferred(fn, facts, read, cj_domain: dict) -> dict:
         text = defaults.slot_type if defaults is not None else element
         out[p] = (bound, words, text)
     return out
-
-
-def _int_completed(bound, kind: "str | None"):
-    """Intent:
-        A real binding that states no type, completed to the integers
-        when its parameter is annotated `int` (`[0, 10]` on `n: int` is
-        `[0, 10] : int`), or when it bounds the elements of a sequence
-        whose annotation states int elements (`[0, 1]^n` on `xs:
-        list[int]`, `kind` then the slot type `list[int]`, is `[0, 1]^n
-        : int`); any other binding unchanged. A type the claim states
-        wins.
-    """
-    from dataclasses import replace
-
-    from .domain import _as_domain
-    from .domain import is_sentinel
-    elements = isinstance(kind, str) and kind.endswith("[int]")
-    if not (kind == "int" or elements) or bound is None \
-            or isinstance(bound, (str, frozenset)):
-        return bound
-    dom = _as_domain(bound)
-    # a piece listing values is a set the claim states; a piece of
-    # sentinels only (`| {missing}`) states the missing values beside
-    # the range
-    if dom.explicit_type or dom.base_type != "R" or (dom.dims and not elements) \
-            or not dom.pieces \
-            or any(isinstance(piece, frozenset)
-                   and not all(is_sentinel(v) for v in piece)
-                   for piece in dom.pieces):
-        return bound
-    return replace(dom, base_type="Z", explicit_type=True)
 
 
 def _complete_missing(cj, fn) -> tuple:
@@ -9935,7 +9947,13 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                                 missing=missing, holes=holes,
                                 excluded=excluded, witness=witness)
     found_at: dict = {}
-    companion = run(ctx.cj, found_at)
+    from .runtime_types._receivers import ReceiverRefused
+    try:
+        companion = run(ctx.cj, found_at)
+    except ReceiverRefused as refused:
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion": f"none ({refused})"}
+        return
 
     def run_with(bound):
         line = run(_with_infinity(ctx.cj, bound))
@@ -11291,11 +11309,45 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         a hole of the runtime its containers are realised in (see
         `_null_is_a_hole`).
     """
+    beyond = _literals_beyond_float(ctx.cj)
+    if beyond:
+        # the probe compares in float64, where such a literal is an
+        # infinity, not the number the claim writes
+        cj = ctx.cj
+        return Probe(cj.name, ctx.statement, "unknown", route="probe",
+                     note=f"{ctx.note}; the literal {', '.join(beyond)} is "
+                          f"beyond float64, which reads it as an infinity, "
+                          f"so the probe compares no point against the "
+                          f"number written".lstrip("; "))
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     try:
         return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
+
+
+def _literals_beyond_float(cj) -> list:
+    """Intent:
+        The numeric literals a claim's sides write that float64 reads as
+        an infinity (`1e400`), each as written; empty when there is none.
+    """
+    import math
+    out: list = []
+    for text in (cj.lhs, cj.rhs, *(part for link in (cj.links or ())
+                                   for part in (link[0], link[2]))):
+        if not text:
+            continue
+        try:
+            tree = ast.parse(str(text), mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, float) \
+                    and math.isinf(node.value):
+                written = ast.get_source_segment(str(text), node) or repr(node.value)
+                if written not in out:
+                    out.append(written)
+    return out
 
 
 #: whether a `None` that f returns is the null hole of the runtime its
