@@ -401,6 +401,62 @@ def _held_text(facts, target: str, args: list) -> str:
                      for p, v in zip(facts.params, args) if p != target)
 
 
+#: a shape probe's call the function's own guard refused, or one made at
+#: a missing argument: outside the working domain, no trial
+_REFUSED = object()
+
+
+def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
+    """Intent:
+        One call a shape probe makes, with `target` at `x`, as
+        `(value, no_value)`. `no_value` is None when the call returned a
+        value, and otherwise says how the call had none: a raise that is
+        not the function's own guard, a nan or an infinity, or a None
+        its return type does not admit. `value` is `_REFUSED` when the
+        function's own guard rejected the call or the call raised at a
+        missing argument.
+
+    Raises:
+        PremiseRejected: the call lies outside the claim's premises.
+
+    Notes:
+        A None under a return type that admits it is returned as the
+        value with no `no_value`: the missing-value policy reads it.
+    """
+    from ._missing_words import declared_optional_return, value_shown
+    from ._premises import PremiseRejected
+    from .conjecture import deliberate_raise
+    from .domain import is_missing
+    try:
+        with _pinned_float_env():
+            value = _call_with_target(fn, facts, target, args, x)
+    except PremiseRejected:
+        raise
+    except Exception as exc:
+        if deliberate_raise(exc, fn) or any(
+                is_missing(a) for p, a in zip(facts.params, args)
+                if p != target):
+            return _REFUSED, None
+        return None, f"raised {exception_name(exc)}"
+    if value is None:
+        return value, (None if declared_optional_return(fn) else
+                       "returned None, which its return type does not "
+                       "admit")
+    scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
+    if scalar and _is_nonfinite(value):
+        return value, f"returned {value_shown(value)}"
+    return value, None
+
+
+def _no_value_witness(target: str, x, no_value: str, held: str) -> str:
+    """The counterexample a shape probe reports at a point of the
+    domain where f has no value."""
+    return (f"{target} = {_fmt_coordinate(x)}"
+            f"{f' at {held}' if held else ''}: f {no_value}, no value; "
+            f"narrow the claim's domain to where every call returns a "
+            f"value")
+
+
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     trials: int, *, increasing: bool):
     """Pairwise-sampling monotonicity: per trial, two ordered values of
@@ -426,19 +482,23 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None
         if x1 > x2:
             x1, x2 = x2, x1
-        try:
-            v1 = _call_with_target(fn, facts, target, args, x1)
-            v2 = _call_with_target(fn, facts, target, args, x2)
-        except Exception:
+        (v1, gone1), (v2, gone2) = (_shape_call(fn, facts, target, args, x)
+                                    for x in (x1, x2))
+        for x, gone in ((x1, gone1), (x2, gone2)):
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        if v1 is _REFUSED or v2 is _REFUSED:
             return None
         for x, v in ((x1, v1), (x2, v2)):
             if not _a_value(v):
-                # a point with no value to order is skipped, and said
+                # a None the return type admits, or a value that is no
+                # number, has no order: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         e1, e2 = _exact_real(v1), _exact_real(v2)
         if e1 is None or e2 is None:
-            # an overflow or a nan says nothing about direction
+            # a value that is no real number has no direction
             return None
         slack = Fraction(1, 10 ** 9)
         ok = (e1 <= e2 + slack) if increasing else (e1 >= e2 - slack)
@@ -549,14 +609,19 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         h = max(h, abs(x0) * 1e-12, 1e-300)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
             return None
-        try:
-            v_lo = _call_with_target(fn, facts, target, args, x0 - h)
-            v_mid = _call_with_target(fn, facts, target, args, x0)
-            v_hi = _call_with_target(fn, facts, target, args, x0 + h)
-        except Exception:
+        calls = [(x, *_shape_call(fn, facts, target, args, x))
+                 for x in (x0 - h, x0, x0 + h)]
+        for x, _v, gone in calls:
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        if any(v is _REFUSED for _x, v, _gone in calls):
             return None
-        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+        (_, v_lo, _), (_, v_mid, _), (_, v_hi, _) = calls
+        for x, v, _gone in calls:
             if not _a_value(v):
+                # a None the return type admits, or a value that is no
+                # number, has no curvature: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         try:
@@ -564,7 +629,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except (TypeError, ValueError):
             return None
         if not all(math.isfinite(v) for v in values):
-            # an overflow or a nan says nothing about how f bends
+            # a value that is no real number has no curvature
             return None
         second_diff = values[0] - 2 * values[1] + values[2]
         # curvature, not the raw second difference: dividing by h*h
@@ -711,6 +776,68 @@ def _pole_exclusion_proof(fn, facts, domain: dict, params,
     return ProofResult("proven", sketch=proven_sketch)
 
 
+def _certified_pole(fn, facts, domain: dict, param: str, pole_text: str):
+    """Intent:
+        The pole `param = pole_text` as an exact witness: `disproven`,
+        with the certificate as `mathema.witness_certified`, when a
+        region of the body where it has no value at a zero (a divisor,
+        `Eq(x*x - 2, 0)`, or a call's no-value region, `Eq(cos(x), 0)`
+        for tan) over `param` alone is zero at the pole exactly and
+        interval arithmetic certifies a zero there inside the domain,
+        independently of the solver that found it. None otherwise.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import ProofResult
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    from .symbolic._prove import _certified_guard
+    try:
+        pole = sympy.sympify(pole_text)
+        guards, _unread = partiality_walk(fn, facts, domain)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        # the zero itself, and the path condition reaching the operation
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        if len(zeros) != 1:
+            continue
+        cond = zeros[0]
+        free = list(cond.free_symbols)
+        if len(free) != 1 or str(free[0]) != param \
+                or guard.free_symbols != cond.free_symbols:
+            continue
+        sym = free[0]
+        try:
+            zero = _with_timeout(
+                lambda c=cond, s=sym, g=guard: sympy.simplify(
+                    (c.lhs - c.rhs).subs(s, pole)) == 0
+                and all(bool(p.subs(s, pole)) is True
+                        for p in (g.args if isinstance(g, sympy.And) else ())
+                        if p is not c),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            continue
+        except Exception:
+            continue
+        if not zero:
+            continue
+        text = _certified_guard(cond, {sym: pole}, {param: sym}, domain)
+        if text is not None:
+            return ProofResult(
+                "disproven",
+                sketch=f"{param} = {pole_text} is a pole inside the "
+                       f"declared domain; {text}",
+                counterexample=f"{param} = {pole_text}",
+                meta={"mathema.witness_certified": text})
+    return None
+
+
 def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     """Intent:
         The pole-containment disproof as it may be reported: the real
@@ -722,8 +849,12 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
         An irrational pole (sqrt(2)) has no exact float spelling, so
         the call lands beside it, where the code may well return a
         large finite value: the pole exists in exact arithmetic and
-        floating point does not reproduce it, so the disproof is not
-        reported as one, and its reason says so.
+        floating point does not reproduce it. It is then `disproven` by
+        its exact witness when interval arithmetic certifies that a
+        divisor of the body, or a no-value region of a call it makes,
+        is zero there (`_certified_pole`), as `is_defined` certifies the
+        same point; otherwise the uncorroborated `undecided`, with a
+        reason saying so.
     """
     import sympy
     from .hazards import _admitted_spelling
@@ -735,6 +866,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     except Exception:
         value = None
     if value is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         return _uncorroborated_family_disproof(
             sketch, f"the pole {pole_text} is not a value a float can "
                     f"hold inside the domain, so the code could not be "
@@ -742,6 +876,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         from .corroboration import (EXACT_ARITHMETIC_ONLY,
                                     EXACT_ARITHMETIC_ONLY_NOTE)
         return _uncorroborated_family_disproof(
@@ -1159,12 +1296,81 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     domain = domain or {}
     if not isinstance(domain.get(param), tuple):
         return None
-    return _pole_exclusion_proof(
+    result = _pole_exclusion_proof(
         fn, facts, domain, [param],
         proven_sketch=f"the declared domain for {param} excludes every "
                       f"pole of {facts.name} that mathema found (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
+    if result is not None and result.status == "disproven":
+        return result
+    inside, settled = _guard_poles(fn, facts, domain, param)
+    if inside:
+        return _witnessed_pole(fn, facts, domain, param, inside[0])
+    if result is not None and result.status == "proven" and not settled:
+        return None
+    return result
+
+
+def _guard_poles(fn, facts, domain: dict, param: str) -> tuple:
+    """Intent:
+        `(inside, settled)`: the points of `param`'s declared interval
+        where the body's raise-region reading puts an isolated point
+        with no value over `param` alone (a divisor's zero, `x*x - 2 ==
+        0`, or a call's no-value point, `cos(x) == 0` for tan), as exact
+        texts, and whether every such region was solved. The same
+        regions `is_defined` reads, so the two families name the same
+        poles.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import bound_to_sympy_set
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    try:
+        guards, _unread = partiality_walk(fn, facts, domain)
+        region = bound_to_sympy_set(domain[param])
+    except TimeoutError:
+        raise
+    except Exception:
+        return [], False
+    inside: list = []
+    settled = True
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        free = list(guard.free_symbols)
+        if len(zeros) != 1 or len(free) != 1 or str(free[0]) != param:
+            continue
+        cond, sym = zeros[0], free[0]
+        try:
+            roots = _with_timeout(
+                lambda c=cond, v=sym: sympy.solveset(c, v, region),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            settled = False
+            continue
+        except Exception:
+            settled = False
+            continue
+        if roots is sympy.S.EmptySet:
+            continue
+        if not isinstance(roots, sympy.FiniteSet):
+            settled = False
+            continue
+        for r in sorted(roots, key=lambda r: float(r)):
+            # the operation is reached at the root only where the path
+            # condition holds there
+            reached = [bool(c.subs(sym, r)) if c.subs(sym, r) in
+                       (sympy.true, sympy.false) else None
+                       for c in parts if c is not cond]
+            if None in reached:
+                settled = False
+            elif all(reached) and str(r) not in inside:
+                inside.append(str(r))
+    return inside, settled
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -3306,6 +3512,142 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
         meta=meta)
 
 
+def _is_defined_working(fn, facts, bound, domain=None) -> bool:
+    """Intent:
+        Whether the bare `is_defined` is read over the working domain
+        f's own guards leave. True when the claim (or its call) binds no
+        domain any guard refuses a point of: a domain it binds is the
+        domain, so where a guard (a conditional raise, an exit, a guard
+        to a set of strings, `@enforce_domain`) refuses a call inside
+        it, that call has no value and the working domain is not read.
+
+    Notes:
+        A refusal is ruled out only where it is shown: the guard's
+        condition, over one bound parameter, has no solution in the
+        bound domain; the bound strings all lie in the guard's set; the
+        bound domain lies inside the enforced one. A guard whose
+        condition does not lift, a raise branch true at every input and
+        a body that raises before any return refuse somewhere in any
+        bound domain.
+    """
+    import ast as _ast
+
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _body_always_raises, _own_guard_conditions
+    from .domain import bound_to_sympy_set
+    from .hazards import finite_guard_sets
+    bound = set(bound or ()) & set(facts.params)
+    if not bound:
+        return True
+    domain = domain or {}
+
+    def as_set(b):
+        try:
+            return bound_to_sympy_set(b)
+        except Exception:
+            return None
+
+    conds = _own_guard_conditions(fn, facts)
+    listed = finite_guard_sets(facts)
+    raises = facts.tree is not None and any(
+        isinstance(n, _ast.Raise) for n in _ast.walk(facts.tree))
+    if (raises and not conds and not listed) \
+            or any(c is _sympy.true for c in conds) \
+            or _body_always_raises(facts):
+        return False
+    for cond in conds:
+        names = {str(sym) for sym in getattr(cond, "free_symbols", ())}
+        if not names & bound:
+            continue
+        free = list(cond.free_symbols)
+        region = as_set(domain.get(str(free[0]))) if len(free) == 1 else None
+        if region is None:
+            return False
+        try:
+            refused = _with_timeout(
+                lambda c=cond, v=free[0], r=region: _sympy.solveset(c, v, r),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return False
+        except Exception:
+            return False
+        if refused is not _sympy.S.EmptySet:
+            return False
+    for p, allowed in listed.items():
+        if p not in bound:
+            continue
+        here = domain.get(p)
+        if not isinstance(here, (set, frozenset)) or not set(here) <= set(allowed):
+            return False
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        if p not in bound or domain.get(p) is guard:
+            continue
+        here, admitted = as_set(domain.get(p)), as_set(guard)
+        if here is None or admitted is None or not here.is_subset(admitted):
+            return False
+    return True
+
+
+def _claim_bound(fn, domain) -> set:
+    """The parameters a claim or its call binds a domain for; the domain
+    `@enforce_domain` states is f's own guard, not a binding."""
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    return {p for p, b in (domain or {}).items()
+            if b is not None and (p not in enforced or b is not enforced[p])}
+
+
+def _enforced_refusal(fn, facts, domain: dict):
+    """Intent:
+        The `is_defined` disproof where a domain the claim binds reaches
+        outside the domain `@enforce_domain` admits: the call at a point
+        of the bound domain the decorator refuses, executed; `disproven`
+        with that witness when it raises, None when no such point is
+        found or the call returns.
+    """
+    import sympy as _sympy
+
+    from .domain import bound_to_sympy_set
+    from .symbolic import ProofResult
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        bound = (domain or {}).get(p)
+        if bound is None or bound is guard or p not in facts.params:
+            continue
+        try:
+            outside = bound_to_sympy_set(bound) - bound_to_sympy_set(guard)
+        except Exception:
+            continue
+        pieces = (outside.args if isinstance(outside, _sympy.Union)
+                  else (outside,))
+        for piece in pieces:
+            if isinstance(piece, _sympy.Interval):
+                point = (piece.start + piece.end) / 2 \
+                    if piece.start.is_finite and piece.end.is_finite \
+                    else None
+            elif isinstance(piece, _sympy.FiniteSet) and piece.args:
+                point = piece.args[0]
+            else:
+                point = None
+            if point is None:
+                continue
+            what, _calls = _executed_family_witness(
+                fn, facts, p, float(point), domain or {})
+            if what is not None:
+                return ProofResult(
+                    "disproven",
+                    sketch=f"is_defined: the claim's domain for {p} reaches "
+                           f"outside the domain @enforce_domain admits, "
+                           f"and the call there has no value",
+                    counterexample=f"{p} = {_fmt_coordinate(float(point))}: "
+                                   f"f {what}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+    return None
+
+
 def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                        relation: str, domain: dict | None = None,
                        tolerance: float | None = None,
@@ -3351,14 +3693,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .conjecture import _definedness_region_structured, guard_cut_texts
     from .symbolic._base import REL_TEXT as rel_of
     # the bare predicate reads the working domain: the function's own
-    # guards cut it, and only a failure inside it counts (decision A)
+    # guards cut it, and only a failure inside it counts (decision A);
+    # a domain the claim binds for a parameter a guard reads is the
+    # domain itself, and a guard refusing inside it is no value there
     bare = relation == "is_defined"
+    working = bare and _is_defined_working(fn, facts,
+                                           _claim_bound(fn, domain), domain)
     structured = _definedness_region_structured(fn, facts, region_gaps,
-                                                working=bare, domain=domain)
-    cuts = guard_cut_texts(fn, facts) if bare else []
+                                                working=working, domain=domain)
+    cuts = guard_cut_texts(fn, facts) if working else []
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
                 f"cuts the working domain)" if cuts else "")
-    if bare:
+    if working:
         domain = _working_bounds(fn, domain)
     computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
                 for rel in structured]
@@ -3390,14 +3736,14 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     def disproof(sketch: str, gaps: list, says_defined):
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
-                                   domain, premises, working=bare)
+                                   domain, premises, working=working)
 
     def incomplete(sketch: str, gaps: list, says_defined):
         # the computed region is not the whole definedness region: only
         # an executed disagreement decides
         point, _executed = _definedness_witness(fn, facts, gaps,
                                                 says_defined, domain,
-                                                premises, working=bare)
+                                                premises, working=working)
         if point is not None:
             return ProofResult(
                 "disproven", sketch=sketch,
@@ -3417,6 +3763,9 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         # region at all; falsified when it has one and a point in the
         # domain executes and raises. A stated region falls through
         # to the restriction reading below.
+        refused = None if working else _enforced_refusal(fn, facts, domain)
+        if refused is not None:
+            return refused
         if region_gaps:
             return incomplete(
                 "is_defined: f is not defined everywhere, an executed "
@@ -4300,6 +4649,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             yield draw()
 
     from .conjecture import deliberate_raise, guard_cut_texts
+    # the plane a complex parameter no binding names is drawn over is
+    # not a binding
+    reads_working = _is_defined_working(fn, facts, set(cj.domain or {}) | {
+        p for p in _claim_bound(fn, domain)
+        if not (domain.get(p) == "C" and (cj.domain or {}).get(p) is None
+                and facts.param_kinds.get(p) == "complex")}, domain)
     checked = n_in = n_out = cut = 0
     seen: set = set()
     for point in candidates():
@@ -4319,7 +4674,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
-            if kind == "is_defined" and bare and deliberate_raise(exc, fn):
+            if kind == "is_defined" and bare and reads_working \
+                    and deliberate_raise(exc, fn):
                 # the function's own guard rejects the call: outside its
                 # working domain (decision A), no trial
                 cut += 1

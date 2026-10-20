@@ -37,7 +37,8 @@ reasoning, no largest double, no overflow threshold, no operational
 infinity. What does enter is the mathematics of definedness, namely the
 real domain of the primitives (a root of a negative, a logarithm at or
 below zero, a division by zero), a `raise` the function's own source
-states, and a library's `is_defined` row, since a function undefined at
+states, a nan or an infinity its source returns as the value
+(`math.nan`, `float("inf")`), and a library's `is_defined` row, since a function undefined at
 a point of its domain is not the function the claim describes. The
 computation is one implementation executed in one language, one runtime
 and one number representation, and the number representation follows the domain: float64 for a claim
@@ -130,9 +131,13 @@ or a non-finite result at a pole, is the witness; a call that behaves
 leaves the disproof uncorroborated. Where the code, run where the
 difference is, rounds it away, the body is read exactly there (its
 literals as written, its divisions as ratios, a root as sympy holds
-it), and a difference that reading confirms is the witness. Where no
-exact reading confirms it (an irrational pole, a gap below float
-resolution that comes from a float outside the body), the record adds
+it), and a difference that reading confirms is the witness. A pole no
+float lands on (`sqrt(2)` for `1 / (x*x - 2)`, where the nearest float
+returns a large finite number) is the witness itself when interval
+arithmetic certifies that the divisor is zero there, independently of
+the solver that found it, as `is_defined` certifies the same point.
+Where no exact reading confirms it (a gap below float resolution that
+comes from a float outside the body), the record adds
 `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says so instead of naming an engine bug. A falsification is
 therefore equally strong whichever route found it, because it always

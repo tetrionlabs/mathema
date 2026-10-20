@@ -34,7 +34,9 @@ def test_a_nan_from_a_present_input_fails_every_relation(relation):
 
 def test_a_nan_at_one_present_point_is_found():
     p = run(nan_at_half, "for x in {0.25, 0.5}, f(x) == x", route="best")
-    assert p.verdict == "falsified" and "0.5" in p.counterexample
+    assert p.verdict == "falsified"
+    assert p.counterexample.startswith("x = 1/2:"), p.counterexample
+    assert "nan" in p.counterexample
 
 
 def test_a_nan_that_propagates_a_listed_hole_agrees_with_itself():

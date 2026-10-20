@@ -2586,9 +2586,64 @@ def _calculus_vars(src: str) -> set:
     return names
 
 
+def _piece_outside_premise(fn, facts, sub_domain: dict,
+                           claim_terms: dict) -> "str | None":
+    """Intent:
+        Why no point of a piece of a split domain satisfies the claim's
+        premise, or None when some point may: a premise bounding one
+        parameter by a constant that empties the piece (`assuming x >=
+        5` over [-10, 0)), or `assuming is_defined(f)` over a piece
+        where one of f's own raise branches holds at every point.
+    """
+    emptied = premise_empties_domain(sub_domain, set(facts.params),
+                                     claim_terms.get("assumption"))
+    if emptied is not None:
+        return f"no {emptied} there satisfies the premise"
+    if not claim_terms.get("assume_defined"):
+        return None
+    try:
+        pw = lift_piecewise(fn, facts)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    for cond, exc in (getattr(pw, "raise_guards", None) or []):
+        if _holds_throughout(cond, sub_domain):
+            return f"f raises {exc} at every point there"
+    return None
+
+
+def _holds_throughout(cond, domain: dict) -> bool:
+    """Intent:
+        Whether a condition over one parameter holds at every point of
+        that parameter's declared domain: the domain, as a set of reals,
+        lies inside the condition's solution set. False when it cannot
+        be shown (several parameters, a bound with no set reading, a
+        solve that does not finish).
+    """
+    from ..domain import bound_to_sympy_set
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if cond is sympy.true:
+        return True
+    free = list(getattr(cond, "free_symbols", ()))
+    if len(free) != 1 or domain.get(str(free[0])) is None:
+        return False
+    try:
+        region = bound_to_sympy_set(domain[str(free[0])])
+        solved = _with_timeout(
+            lambda: sympy.solveset(cond, free[0], sympy.S.Reals),
+            FAST_TIMEOUT_SECONDS)
+        return bool(region.is_subset(solved))
+    except TimeoutError:
+        raise
+    except Exception:
+        return False
+
+
 def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                       domain: dict, tolerance, max_callee_depth: int,
-                      extensive: bool, depth: int) -> ProofResult | None:
+                      extensive: bool, depth: int,
+                      **claim_terms) -> ProofResult | None:
     """Intent:
         Marginalize a relation claim over a branch guard the declared
         domain doesn't settle: split one guarded parameter's domain at
@@ -2605,7 +2660,10 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         split levels so the number of sub-proofs stays small (each
         level is at most seven pieces). `None` when no guard yields a
         usable split or some piece stays undecided, the caller falls
-        back to its ordinary unliftable report.
+        back to its ordinary unliftable report. `claim_terms` (the bound
+        functions, the premise, `assume_defined`, `exclude_own_guards`)
+        reach every piece's proof, so each piece is the claim itself
+        over a smaller domain.
     """
     if depth >= 2 or not domain:
         return None
@@ -2633,13 +2691,19 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if pieces is None:
                 continue
         results = []
+        left_out = []
         for piece in pieces:
             sub_domain = dict(domain)
             sub_domain[p] = piece
+            why = _piece_outside_premise(fn, facts, sub_domain, claim_terms)
+            if why is not None:
+                left_out.append(f"{render_domain_bound(piece)} ({why})")
+                continue
             result = try_prove(fn, facts, lhs_src, rhs_src, relation,
                                domain=sub_domain, tolerance=tolerance,
                                max_callee_depth=max_callee_depth,
-                               extensive=extensive, _split_depth=depth + 1)
+                               extensive=extensive, _split_depth=depth + 1,
+                               **claim_terms)
             if result.status == "disproven":
                 piece_text = render_domain_bound(piece)
                 witness = dict(result.witness or {})
@@ -2655,14 +2719,18 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if result.status != "proven":
                 return None
             results.append((piece, result))
+        if not results:
+            return None
         piece_list = ", ".join(render_domain_bound(piece) for piece, _ in results)
         how = ("into its stated values" if isinstance(domain.get(p), frozenset)
                else "at its guard boundaries into")
+        outside = (f"; left out, as the claim's premise rules out every "
+                   f"point of it: {', '.join(left_out)}" if left_out else "")
         return ProofResult(
             "proven",
             sketch=f"proven piecewise: {p}'s domain split {how} "
                    f"{piece_list}, each piece proven "
-                   f"separately",
+                   f"separately{outside}",
             quantifier=_quantifier_clause(set(facts.params),
                                           list(facts.params), domain),
             meta={"mathema.derive_route": "domain_split"})
@@ -3990,7 +4058,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # boundaries and prove each piece separately.
             split = _try_domain_split(fn, facts, lhs_src, rhs_src, relation,
                                       domain or {}, tolerance,
-                                      max_callee_depth, extensive, _split_depth)
+                                      max_callee_depth, extensive, _split_depth,
+                                      funcs=funcs, assumption=assumption,
+                                      assume_defined=assume_defined,
+                                      exclude_own_guards=exclude_own_guards)
             if split is not None:
                 return split
             # the last lifting resort: the full piecewise form, every
@@ -4485,7 +4556,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # case per member of the parameter's finite set
             split = _try_domain_split(fn, facts, lhs_src, rhs_src, relation,
                                       domain or {}, tolerance, max_callee_depth,
-                                      extensive, _split_depth)
+                                      extensive, _split_depth, funcs=funcs,
+                                      assumption=assumption,
+                                      assume_defined=assume_defined,
+                                      exclude_own_guards=exclude_own_guards)
             if split is not None:
                 result = split
         if result.status == "undecided" and piecewise_hint:

@@ -39,6 +39,10 @@ def all_nan(x: float) -> float:
     return float("nan") * x
 
 
+def nan_in_float(x: float) -> float:
+    return (x - x) * (1e308 * 10.0)
+
+
 def count_up(n: float) -> float:
     total = 0.0
     for _ in range(n):
@@ -69,11 +73,19 @@ def test_precision_loss_falsifies_the_companion_not_the_proof():
 
 
 def test_nan_everywhere_falsifies_the_companion_over_an_unbounded_domain():
-    probes, _ = _check(all_nan, "f(x) == f(x)")
+    probes, _ = _check(nan_in_float, "f(x) == f(x)")
     assert probes["law"].verdict == "proven"
     comp = probes["law[float]"]
     assert comp.verdict == "falsified"
     assert "NaN" in comp.sketch
+
+
+def test_a_nan_the_code_returns_falsifies_the_mathematics():
+    probes, _ = _check(all_nan, "f(x) == f(x)")
+    law = probes["law"]
+    assert law.verdict == "falsified"
+    assert "returned nan" in law.counterexample
+    assert "law[float]" not in probes
 
 
 def test_unbounded_direction_without_pseudo_infinity_reaches_a_large_magnitude():
