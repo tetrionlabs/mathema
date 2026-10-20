@@ -413,6 +413,19 @@ def wrong_shaped(bound, rng: random.Random, element) -> "tuple | None":
 WITNESS_ENTRIES = 16
 
 
+def _same_entry(a, b) -> bool:
+    """Whether two witness entries are the same: two holes when they
+    are the same member (`nan`, `null`, `NA`), a hole and a value never,
+    two values when they are equal."""
+    from .domain import is_missing, member_of
+    if is_missing(a) or is_missing(b):
+        return is_missing(a) and is_missing(b) and member_of(a) == member_of(b)
+    try:
+        return bool(a == b)
+    except (TypeError, ValueError):
+        return False
+
+
 def witness_text(value) -> "str | None":
     """Intent:
         A short rendering for a large container witness: "30 by 15,
@@ -434,9 +447,7 @@ def witness_text(value) -> "str | None":
     def one(v) -> str:
         return f"{v:.6g}" if isinstance(v, float) else repr(v)
 
-    same = all(v == entries[0] or (isinstance(v, float) and isinstance(entries[0], float)
-                                   and v != v and entries[0] != entries[0])
-               for v in entries)
+    same = all(_same_entry(v, entries[0]) for v in entries)
     if same:
         return f"{words(shape)}, every entry {one(entries[0])}"
     if len(shape) == 1:
