@@ -9180,6 +9180,21 @@ def _complex_reads(node, complex_names: set, result: "str | None" = None) -> set
     return out
 
 
+def _receiver_premises(fn, facts) -> list:
+    """Intent:
+        The premises a method's receiver satisfies by construction,
+        `[(lhs, relation, rhs), ...]` over its fields
+        (`_receivers.constructor_premises`): what its class's
+        constructor admits. Empty for any other function, or a
+        constructor that cannot be read that way.
+    """
+    from .runtime_types._receivers import constructor_premises, method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0]:
+        return []
+    return constructor_premises(receiver[1], receiver[0]) or []
+
+
 def _receiver_witness_held(gated: "Probe", proof, fn) -> "Probe":
     """Intent:
         A derive disproof held to the instances the receiver's class
@@ -10249,6 +10264,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    built = _receiver_premises(fn, facts)
+    if built:
+        # derive ranges over the instances the receiver's class builds
+        assumption = (assumption or []) + built
+        note = (f"{note}; derive reads {facts.params[0]} over the instances "
+                f"its class builds ("
+                + ", ".join(f"{a} {r} {b}" for a, r, b in built) + ")").lstrip("; ")
     refused = _guard_refuses_part_of_the_claim(ctx, fn, facts)
     if refused is not None:
         # the guard is the function's domain: a claim reaching inputs it

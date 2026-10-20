@@ -301,3 +301,120 @@ def construct_receiver(cls, fields: tuple, bounds: dict, draw, tries: int = 200)
             continue
     raise ReceiverRefused(f"{cls.__name__}(...) refused {tries} drawn "
                           f"arguments in a row")
+
+
+#: the comparison a refused region's complement states, by the region's own
+_COMPLEMENT = {"Lt": ">=", "LtE": ">", "Gt": "<=", "GtE": "<", "Eq": "!=",
+               "NotEq": "=="}
+_STATED = {"Lt": "<", "LtE": "<=", "Gt": ">", "GtE": ">=", "Eq": "==",
+           "NotEq": "!="}
+
+
+def constructor_premises(cls, name: str) -> "list | None":
+    """Intent:
+        The fields of `cls`'s instances as its constructor admits them,
+        `[(lhs, relation, rhs), ...]` over `name.field` (`self.k > 0`):
+        the complement of every region the constructor refuses with a
+        raise, read from a dataclass's `__post_init__` or a class's own
+        `__init__` that stores its arguments unchanged (`self.k = k`).
+        An empty list when the class refuses nothing; None when the
+        constructor cannot be read this way: a statement other than a
+        guard raising and a plain store, a stored value computed from
+        the arguments (`self.k = k * k`), or a refused region that is no
+        conjunction of comparisons once complemented.
+    """
+    import ast
+    import dataclasses
+    import textwrap
+    if dataclasses.is_dataclass(cls):
+        method = cls.__dict__.get("__post_init__")
+        if method is None:
+            return []
+        owner = "post_init"
+    elif _own_init(cls) and "__init__" in cls.__dict__:
+        method = cls.__dict__["__init__"]
+        owner = "init"
+    else:
+        return [] if not _own_init(cls) else None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+    except (OSError, TypeError, SyntaxError):
+        return None
+    fdef = tree.body[0]
+    if not isinstance(fdef, ast.FunctionDef) or not fdef.args.args:
+        return None
+    me = fdef.args.args[0].arg
+    stored: dict = {}
+    guards: list = []
+    for stmt in fdef.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
+                and isinstance(stmt.value.value, str):
+            continue
+        if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
+                and isinstance(stmt.body[0], ast.Raise):
+            guards.append(stmt.test)
+            continue
+        if owner == "init" and isinstance(stmt, ast.Assign) \
+                and len(stmt.targets) == 1 \
+                and isinstance(stmt.targets[0], ast.Attribute) \
+                and isinstance(stmt.targets[0].value, ast.Name) \
+                and stmt.targets[0].value.id == me \
+                and isinstance(stmt.value, ast.Name):
+            stored[stmt.value.id] = stmt.targets[0].attr
+            continue
+        return None
+
+    class _Fields(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if owner == "init" and node.id in stored:
+                return ast.Attribute(value=ast.Name(id=name, ctx=ast.Load()),
+                                     attr=stored[node.id], ctx=ast.Load())
+            if owner == "init":
+                raise ValueError(node.id)
+            return ast.Name(id=name if node.id == me else node.id, ctx=node.ctx)
+
+    out: list = []
+    for test in guards:
+        if owner == "init":
+            # a guard on an argument that is stored unchanged reads the
+            # field; one on anything else is not a statement about it
+            try:
+                test = _Fields().visit(test)
+            except ValueError:
+                return None
+        else:
+            test = _Fields().visit(test)
+        complement = _complement(test)
+        if complement is None:
+            return None
+        out += complement
+    return out
+
+
+def _complement(test) -> "list | None":
+    """The conjunction of comparisons true exactly where `test` is false,
+    as `(lhs, relation, rhs)` texts, or None when it is no such
+    conjunction."""
+    import ast
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = test.operand
+        if isinstance(inner, ast.Compare) and len(inner.ops) == 1:
+            op = type(inner.ops[0]).__name__
+            if op in _STATED:
+                return [(ast.unparse(inner.left), _STATED[op],
+                         ast.unparse(inner.comparators[0]))]
+        return None
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        out: list = []
+        for value in test.values:
+            part = _complement(value)
+            if part is None:
+                return None
+            out += part
+        return out
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        op = type(test.ops[0]).__name__
+        if op in _COMPLEMENT:
+            return [(ast.unparse(test.left), _COMPLEMENT[op],
+                     ast.unparse(test.comparators[0]))]
+    return None
