@@ -7991,6 +7991,16 @@ def _validate_claim(cj, statement: str, note: str, facts,
                + "/".join(sorted({facts.param_kinds[p]
                                   for p in annotation_inferred}))
                + " annotation")
+    # a complex annotation completes an unbound parameter to the
+    # complex plane, as an int annotation does to the integers
+    complex_inferred = sorted(p for p in facts.params
+                              if facts.param_kinds.get(p) == "complex"
+                              and p in read and p not in cj_domain)
+    if complex_inferred:
+        cj_domain = {**{p: "C" for p in complex_inferred}, **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in C" for p in complex_inferred)
+               + " from its own complex annotation")
     literal_inferred = {p: b for p, (b, cat, _d) in stated.items()
                         if cat == "stated_values"}
     if literal_inferred:
@@ -8169,7 +8179,8 @@ def _validate_claim(cj, statement: str, note: str, facts,
     if cj.relation in ("<=", ">=", "<", ">"):
         complex_typed = sorted(
             p for p, bound in cj_domain.items()
-            if bound == "C" or getattr(bound, "base_type", None) == "C")
+            if (bound == "C" or getattr(bound, "base_type", None) == "C")
+            and p not in complex_inferred)
         if complex_typed:
             # mirrors the derive route's refusal of ordering over
             # opaque values: ordering was never meaningful to claim

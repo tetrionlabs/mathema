@@ -66,6 +66,89 @@ _SYMPY_RELOPS = {
 }
 
 
+#: elementary functions whose cmath and numpy forms compute on a complex
+#: argument along the principal branch sympy reads them with
+_PLANE_FUNCTIONS = frozenset({"sqrt", "exp", "log", "log10", "log2", "sin",
+                              "cos", "tan", "sinh", "cosh", "tanh"})
+
+
+def _complex_typed(value) -> bool:
+    """Intent:
+        Whether a lifted value stands for a Python complex number: it
+        reads a parameter bound as a complex symbol, or the imaginary
+        unit, anywhere outside an `Abs` (whose result is a real number).
+        Python arithmetic with a complex operand always returns a
+        complex, so a value built from one keeps the type.
+    """
+    if isinstance(value, tuple):
+        return any(_complex_typed(v) for v in value)
+    if isinstance(value, _SymbolicArray):
+        return _complex_typed(value.expr)
+    if not isinstance(value, sympy.Basic):
+        return False
+    if isinstance(value, sympy.Abs):
+        return False
+    if value is sympy.I:
+        return True
+    if isinstance(value, sympy.Symbol):
+        return bool(value.is_complex) and value.is_extended_real is not True
+    return any(_complex_typed(a) for a in value.args)
+
+
+def _callee_object(node: ast.Call, ctx: "_LiftCtx | None"):
+    """The object a call's function expression names in the module the
+    body is read in (`math.exp`, a name imported from cmath), or None
+    when it does not resolve there."""
+    import builtins
+    f = node.func
+    scope = ctx.globals_ns if ctx is not None else {}
+    if isinstance(f, ast.Name):
+        if f.id in scope:
+            return scope[f.id]
+        return getattr(builtins, f.id, None)
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+        module = scope.get(f.value.id)
+        return getattr(module, f.attr, None) if module is not None else None
+    return None
+
+
+def _accepts_complex(node: ast.Call, name: str, ctx: "_LiftCtx | None") -> bool:
+    """Intent:
+        Whether the function a call names computes on a Python complex
+        argument, as the lifted sympy function does: the builtin `abs`,
+        `numpy.abs` and `numpy.conjugate`, and the cmath and numpy forms
+        of the elementary functions in `_PLANE_FUNCTIONS`. Every other
+        function (`float`, `min`, `max`, `round`, anything in the math
+        module, a floor or a two-argument arctangent) raises TypeError
+        on a complex argument or orders it in a way sympy does not, so
+        it does not.
+
+    Notes:
+        A callee that does not resolve in the module's namespace does
+        not accept complex.
+    """
+    import builtins
+    obj = _callee_object(node, ctx)
+    if obj is None:
+        return False
+    if obj is builtins.abs:
+        return True
+    module = getattr(obj, "__module__", None) or ""
+    root = module.split(".")[0]
+    if root == "cmath":
+        return name in _PLANE_FUNCTIONS
+    if root == "numpy":
+        return name in _PLANE_FUNCTIONS or name in ("abs", "conjugate")
+    return False
+
+
+def _refuse_real_only(node: ast.AST, category: str) -> "NotSymbolic":
+    """The refusal for a real-only operation applied to a complex value,
+    which raises TypeError in Python."""
+    return NotSymbolic(f"a real-only operation on a complex value raises "
+                       f"TypeError: {ast.unparse(node)!r}", category=category)
+
+
 def _unsupported_call_message(node: ast.Call) -> str:
     """`unsupported call {full expression}` alone is ambiguous for a
     nested call like `_display(np.minimum(r, R_CLIP))`, np.minimum
@@ -363,6 +446,11 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
 
     args = [_expr_to_sympy(a, env, ctx, opaque) for a in node.args]
     if any(isinstance(a, (tuple, _SymbolicArray)) for a in args):
+        return None
+    if any(_complex_typed(a) and not _complex_typed(lifted.params[p])
+           for p, a in zip(sig_params, args)):
+        # the callee was read over a real parameter; a complex argument
+        # may meet a real-only operation in its body
         return None
     subs = {lifted.params[p]: a for p, a in zip(sig_params, args)}
     return lifted.expr.subs(subs, simultaneous=True)
@@ -834,6 +922,10 @@ def _cond_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
                 raise NotSymbolic(f"cannot use a tuple or array value in a "
                                   f"condition: {ast.unparse(node)!r}",
                                   category="tuple-in-expression")
+            if relop not in (sympy.Eq, sympy.Ne) and (
+                    _complex_typed(left) or _complex_typed(right)):
+                # complex numbers have no order: `<` raises TypeError
+                raise _refuse_real_only(node, "ternary")
             parts.append(relop(left, right))
         return sympy.And(*parts) if len(parts) > 1 else parts[0]
     raise NotSymbolic(f"unsupported ternary condition {ast.unparse(node)!r}",
@@ -1001,6 +1093,11 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
     means for any all-constant tuple. See the derive-route docs for
     this boundary."""
     if isinstance(node, ast.Constant):
+        if isinstance(node.value, complex) and node.value.imag == 0:
+            # a complex literal on the real axis is still a Python
+            # complex, which the exact number it denotes does not show
+            raise NotSymbolic(f"a complex literal with no imaginary part "
+                              f"lifts to a real number: {ast.unparse(node)!r}")
         if not isinstance(node.value, bool) and isinstance(node.value, (int, float, complex)):
             return _exact_numeric_literal(node.value)
         if opaque is not None and is_opaque_eligible(node.value):
@@ -1129,9 +1226,17 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if isinstance(left, tuple) or isinstance(right, tuple):
             raise NotSymbolic(f"cannot use a tuple value in an arithmetic "
                               f"operation: {ast.unparse(node)!r}", category="tuple-in-expression")
+        typed = _complex_typed(left) or _complex_typed(right)
+        if typed and isinstance(node.op, (ast.Mod, ast.FloorDiv)):
+            raise _refuse_real_only(node, "unsupported-syntax")
         if isinstance(left, _SymbolicArray) or isinstance(right, _SymbolicArray):
-            return _array_elementwise_binop(op, left, right)
-        return op(left, right)
+            result = _array_elementwise_binop(op, left, right)
+        else:
+            result = op(left, right)
+        if typed and not _complex_typed(result):
+            # `z - z` is the number 0 but the Python value 0j
+            raise _refuse_real_only(node, "unsupported-syntax")
+        return result
     if isinstance(node, ast.Call):
         if (isinstance(node.func, ast.Name) and node.func.id == "len"
                 and len(node.args) == 1 and not node.keywords
@@ -1167,9 +1272,18 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if any(isinstance(a, tuple) for a in args):
             raise NotSymbolic(f"cannot pass a tuple value to a function call: "
                               f"{ast.unparse(node)!r}", category="tuple-in-expression")
+        typed = any(_complex_typed(a) for a in args)
+        if typed and not _accepts_complex(node, name, ctx):
+            raise _refuse_real_only(node, "unsupported-call")
         if any(isinstance(a, _SymbolicArray) for a in args):
-            return _apply_elementwise(_SYMPY_FUNCS[name], args)
-        return _SYMPY_FUNCS[name](*args)
+            result = _apply_elementwise(_SYMPY_FUNCS[name], args)
+        else:
+            result = _SYMPY_FUNCS[name](*args)
+        if typed and name not in ("abs", "Abs") and not _complex_typed(result):
+            # `cmath.exp(1j * math.pi)` is the number -1 but the Python
+            # value (-1+1.2e-16j)
+            raise _refuse_real_only(node, "unsupported-call")
+        return result
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                          ast.GeneratorExp)):
         raise NotSymbolic(
