@@ -1173,6 +1173,10 @@ def enforce_structure(key: str | None = None, root: str = "."):
     `PositiveDefinite` marker also enforces symmetry. A property the
     registry cannot decide for an argument (a spectral check with no
     numpy) is skipped rather than raising, never a false rejection.
+    `Finite` and `Real` are the exception: an argument that is not a
+    number, nor a vector or matrix of numbers (None, a string, a list
+    holding None), does not have the declared structure and raises,
+    with or without numpy.
 
     Like `@enforce_domain`, it makes the function REJECT inputs the
     claim was never about and auto-declares the matching
@@ -1217,10 +1221,16 @@ def enforce_structure(key: str | None = None, root: str = "."):
                     continue
                 value = bound.arguments[param]
                 for prop in sorted(props):
-                    if _mtx.PROPERTIES[prop].check(value) is False:
+                    got = _mtx.PROPERTIES[prop].check(value)
+                    numberless = (got is None
+                                  and _mtx.PROPERTIES[prop].level == "finite"
+                                  and not _mtx.is_numeric(value))
+                    if got is False or numberless:
                         raise ValueError(
                             f"{fn.__name__}: {param} is not "
-                            f"{prop} ({prop[3:].replace('_', ' ')})")
+                            f"{prop} ({prop[3:].replace('_', ' ')})"
+                            + (", the value is not a number"
+                               if numberless else ""))
             return fn(*args, **kwargs)
 
         # auto-declare the matching predicate claims, as enforce_domain
