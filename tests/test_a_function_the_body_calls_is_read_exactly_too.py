@@ -212,4 +212,5 @@ def test_the_function_as_written_never_runs_on_an_exact_number():
     def body(x):
         return _record(x / 2)
     assert exact_callee(body)(3) == Fraction(3, 2)
-    assert seen == ["float"], seen
+    # the function's own float run, then its exact reading
+    assert seen == ["float", "float"], seen

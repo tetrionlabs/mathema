@@ -1145,12 +1145,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # as it is); a claim with no right side compares against 0, as
         # the float evaluation does
         from ._exact_side import exact_sides
-        written = {n: _written_exactly(v) for n, v in _typed(point).items()}
+        typed = _typed(point)
+        written = {n: _written_exactly(v) for n, v in typed.items()}
         _reset()
         try:
             sides = exact_sides(code_l, code_r, {**base_env, **written},
                                 _exact_callees(),
-                                exact_calls=True, opaque_results=True)
+                                exact_calls=True, opaque_results=True,
+                                computed_env={**base_env, **typed})
         finally:
             _reset()
         if sides is not None and code_r is None:

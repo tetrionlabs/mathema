@@ -23,37 +23,62 @@ steps read as mathematics:
 Everything else runs as written. A float the body reads from outside
 (a module global, a closure, a value a library returns) is a double
 with no exact reading, and the twin's result is then inexact at that
-point, as `wrap` reports it. `abs`, `sum`, `min` and `max` are exact
-on rationals as Python defines them and are left alone.
+point, as `wrap` reports it. `abs` and `sum` are exact on rationals as
+Python defines them and are left alone; `min` and `max` pick an
+element, a decision (below).
 
-No decision is taken on a number standing for a float. The twin holds
-an exact number where the computation held a rounded float, and a
-decision on it can go the other way: a loop adding 0.1 until it
-reaches 1 runs ten times exactly and eleven times in float. So a
-comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in`, `is`,
-`is not`) with such a number among its operands or inside one, its use
-as a subscript or as a key of a dict or set (a display, `dict.get`,
-`set.add`, `set()`, `dict()`, `hash`), the test of an `if`, `while`,
-conditional expression, comprehension condition, `and`, `or`, `not`,
-`bool`, `any`, `all` or `filter` on it, a `key=` of `sorted`, `min`,
-`max` or `list.sort` returning it, a search of a list holding it
-(`index`, `count`, `remove`), and `math.floor`, `math.ceil`,
-`math.trunc`, `int()`, `round`, `divmod`, `//` and `%` of it, each
-makes the point undecided (`NotExact`). Inside the body of a `try`
-whose handlers catch an arithmetic or math domain error (a bare
-`except`, `except Exception`, `except OverflowError`, ...), or of a
-`with` statement, so does any division, power, `float()` or `math`
-function of such a number, which could raise in the computation where
-the exact step does not (`10.0 ** 400` overflows); the same step on
-integers runs as the computation runs it first, raising the
-computation's own error. The same decisions on integers are taken as
-written: they are the computation's own (`n % d == 0`, a `range`
-loop). Identity against `None`, `True`, `False` or `...` is no
-decision on the number and is taken too. An `assert`'s test is left as
-written: the assert raises or not, and a raise leaves the point
-undecided. Comparisons and the other decisions on a number standing
-for a float are declined for now, whether or not the float and the
-exact number would decide alike.
+A decision on a number standing for a float is taken twice. The twin
+holds an exact number where the computation held a rounded float, and
+a decision on it can go the other way: a loop adding 0.1 until it
+reaches 1 runs ten times exactly and eleven times in float. So the
+function also runs as its shadow (`_shadow_of`): the same body
+rewritten with the same decision sites, every step computed as Python
+computes it, on the floats the computation held at the point (the
+computation's own arguments when a claim evaluation pairs the calls,
+`paired`), each decision recorded with its site and its outcome. The
+twin then runs, and each decision it takes is checked against the
+shadow's next one (`_event`): the same site, the same outcome. A site
+is a node of the source (its file, its place, its role), so a loop
+revisiting a decision is checked once per pass, and a Python function
+the body calls runs as its own shadow inside the caller's, its
+decisions part of the same order. The decisions are: a comparison
+(`==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in`, `is`, `is not`), its
+truth; the test of an `if`, `while`, conditional expression,
+comprehension condition, `and`, `or`, `not`, `bool`, `any`, `all` or
+`filter`, its truth; a subscript, a dict display's or comprehension's
+key, `dict()`, `dict.get` and the dict's other key methods, the entry
+the key reaches (a key holding a float by the place of the key it
+equals); `sorted`, `min`, `max` and `list.sort`, the order or the place
+picked; a list's `index`, `count`, `remove` and `in`, the result;
+`math.floor`, `math.ceil`, `math.trunc`, `int()`, `round`, `divmod`,
+`//`, `%` and `hash`, the value, a number agreeing only when the float
+equals the exact value (3.0 and 3 agree; 0.12 and 3/25 do not); and the
+body of a `try` or `with` statement, whether it completes or raises,
+and what and where. Where every decision agrees and both runs end
+alike (returning, or raising the same class at the same line), the
+exact run stands. Where a decision differs, the shadow reaches a
+decision the twin does not (or the other way), or one run raises where
+the other does not, the point is undecided (`NotExact`). A comparison
+with a sympy number is settled by sympy (`_exact_side.decide_symbolic`)
+and left undecided where sympy cannot; any other decision on a sympy
+number, a set holding a number standing for a float (whose order of
+iteration rests on its hashes), a `match` on one, and a decision a
+builtin takes on one handed to it as a value (`map(hash, xs)`) are
+declined. The same decisions on integers are the computation's own
+and always agree. Identity against `None`, `True`, `False` or `...` is
+no decision on the number. An `assert`'s test is left as written: the
+assert raises or not, and a raise is the end of the run the two runs
+are compared on. The twin run on its own (`exact_twin`), with no shadow
+beside it, declines every decision on a number standing for a float;
+inside the body of a `try` whose handlers catch an arithmetic or math
+domain error, or of a `with` statement, it also declines any division,
+power, `float()` or `math` function of one, and runs the same step on
+integers as the computation runs it first, raising the computation's
+own error (`10 ** 400 / 1` overflows).
+
+A function `enforce_domain` wraps with no policy on its result is read
+as its domain check, a decision taken on the arguments, then the
+function it wraps.
 
 Every call the body makes is read too, so no function written in
 Python runs as written on an exact number. A Python function the body
@@ -124,6 +149,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import contextlib
 import copy
 import functools
 import inspect
@@ -154,6 +180,13 @@ _TWIN_MARK = "__mathema_twin__"
 _OPERAND, _TEST, _KEY = "__mathema_operand__", "__mathema_test__", "__mathema_key__"
 _MEMBER = "__mathema_member__"
 _MOD, _GUARD = "__mathema_mod__", "__mathema_guard__"
+#: the names the rewritten body calls for a comparison of two operands,
+#: any other comparison's result, a subscript's container and a dict
+#: display or comprehension, and the key marking a dict as a shadow's
+#: globals
+_COMPARE, _DECIDED = "__mathema_compare__", "__mathema_decided__"
+_SUB, _DICT = "__mathema_sub__", "__mathema_dict__"
+_SHADOW_MARK = "__mathema_shadow__"
 
 #: the most calls of other functions' twins nested inside one another
 #: before the point is left undecided
@@ -162,6 +195,12 @@ _MAX_DEPTH = 64
 #: each function's reading, built once: `(twin, None)`, or `(None,
 #: reason)` for a body that cannot be read faithfully
 _TWINS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+#: each function's shadow (`_shadow_of`), built once, None when there
+#: is none
+_SHADOWS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+#: the source files of the functions read, by which an exception's
+#: line in the body is found (`_where`)
+_READ_FILES: set = set()
 
 
 class NotExact(Exception):
@@ -176,10 +215,19 @@ class _State(threading.local):
     first `NotExact` raised in the current run, kept even when the body
     catches the exception; `guard`, the handlers catching an arithmetic
     error (and `with` statements) the run is currently inside
-    (`_Guard`)."""
+    (`_Guard`); `mode`, which run is going on: None for a twin run on
+    its own (every decision on a stand-in declined), `"float"` for a
+    shadow run (`log` gathering its decisions), `"exact"` for a twin
+    run checked against a shadow run's decisions (`reference`);
+    `session`, the claim evaluation pairing the calls of the
+    computation with those of the exact reading (`paired`)."""
     depth = 0
     guard = 0
     taint: "str | None" = None
+    mode: "str | None" = None
+    log: "list | None" = None
+    reference: "_Reference | None" = None
+    session: "_Session | None" = None
 
 
 _STATE = _State()
@@ -215,12 +263,22 @@ def exact_twin(fn):
 
 def exact_callee(fn):
     """Intent:
-        `fn` as the exact reading runs it: its exact twin, or, when no
+        `fn` as the exact reading runs it: its exact twin, checked
+        decision by decision against the function's own float run at
+        the same point (`_shadow_of`, the module docstring), or, when no
         faithful twin exists (`exact_twin` is None), a callable that
         raises `NotExact` with the reason, so a point read through it is
         undecided rather than read through a body the reading cannot
-        vouch for. A run during which any step raised `NotExact` raises
-        it, though the body caught it.
+        vouch for. The float run is the one a claim evaluation pairs
+        with this call (`paired`), else a run on the arguments as the
+        computation holds them (`_as_computed`). A run during which any
+        step raised `NotExact` raises it, though the body caught it.
+
+    Raises:
+        NotExact: no faithful twin, a step of the reading has no exact
+            value, or the two runs differ: a decision taken otherwise,
+            a decision one run reaches and the other does not, or one
+            run raising where the other returns or raises otherwise.
     """
     twin, reason = _reading(fn)
     if twin is None:
@@ -230,22 +288,369 @@ def exact_callee(fn):
 
     @functools.wraps(twin)
     def run(*args, **kwargs):
-        saved, _STATE.taint = _STATE.taint, None
+        session = _STATE.session
+        if session is not None and session.mode == "float":
+            return session.computed(fn, args, kwargs)
+        if session is not None and session.mode == "exact":
+            computation = session.take(fn)
+        else:
+            computation = _computed(
+                fn, tuple(_as_computed(a) for a in args),
+                {k: _as_computed(v) for k, v in kwargs.items()})
+        return _against(twin, computation, args, kwargs)
+    return run
+
+
+# --- the shadow run --------------------------------------------------------
+
+class _Reference:
+    """The decisions of a float run (`log`, `(site, outcome)` in the
+    order taken), with `at`, the next one the exact run must take."""
+
+    def __init__(self, log: list):
+        self.log = log
+        self.at = 0
+
+
+class _Computed:
+    """A shadow run of a function at a point: `log`, its decisions in
+    order (None when the function has no shadow, so nothing is known
+    of them); `value` returned, or `error` raised with `where`, the
+    line of the body it was raised at (`_where`)."""
+
+    def __init__(self, log, value=None, error=None, where=None):
+        self.log = log
+        self.value = value
+        self.error = error
+        self.where = where
+
+
+def _as_computed(value):
+    """Intent:
+        A value the exact reading holds, as the computation held it: a
+        number standing for a float as the float nearest it, an int the
+        claim wrote (`ExactInt`) as an int, and the elements of a list,
+        tuple, set, frozenset, dict or object array the same way;
+        anything else as it is.
+    """
+    from ._exact_side import ExactInt
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, ExactInt):
+        return int(value)
+    if isinstance(value, Fraction) or _symbolic_number(value):
+        return float(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return type(value)(_as_computed(v) for v in value)
+    if isinstance(value, dict):
+        return {_as_computed(k): _as_computed(v) for k, v in value.items()}
+    np = sys.modules.get("numpy")
+    if np is not None and isinstance(value, np.ndarray) \
+            and value.dtype == object:
+        try:
+            return value.astype(float)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def _where(error) -> "tuple | None":
+    """The place in a body read (a file of `_READ_FILES`) an exception
+    was raised: `(file, line)` of the innermost such frame of its
+    traceback, None when it passed through none."""
+    found = None
+    tb = error.__traceback__
+    while tb is not None:
+        code = tb.tb_frame.f_code
+        if code.co_filename in _READ_FILES and code.co_filename != __file__:
+            found = (code.co_filename, tb.tb_lineno)
+        tb = tb.tb_next
+    return found
+
+
+def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
+    """Intent:
+        The shadow run of `fn` (`_shadow_of`) on `args` and `kwargs`,
+        the floats the computation held, gathering its decisions. A
+        function with no shadow runs as written and its decisions are
+        unknown (`log` None).
+    """
+    shadow = _shadow_of(fn)
+    if shadow is None:
+        try:
+            return _Computed(None, value=fn(*args, **kwargs))
+        except Exception as e:
+            return _Computed(None, error=e)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = (
+        "float", [], None, 0)
+    log = _STATE.log
+    try:
+        return _Computed(log, value=shadow(*args, **kwargs))
+    except Exception as e:
+        return _Computed(log, error=e, where=_where(e))
+    finally:
+        _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = saved
+
+
+def _raised_words(error, where) -> str:
+    at = f" at line {where[1]}" if where else ""
+    return f"raised {type(error).__name__}{at}"
+
+
+def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
+    """Intent:
+        The twin's run on the exact `args` and `kwargs`, each decision
+        it takes checked against `computation`'s (`_event`): the twin's
+        value, or the exception both runs raised alike (the same class
+        at the same line of the body).
+
+    Raises:
+        NotExact: the computation's decisions are unknown, a step of the
+            reading has no exact value, a decision differs or one run
+            reaches it and the other does not, or one run raises where
+            the other returns or raises otherwise.
+    """
+    if computation.log is None:
+        _not_exact("the function's float run cannot be followed decision "
+                   "by decision")
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint)
+    reference = _Reference(computation.log)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint = (
+        "exact", None, reference, None)
+    raised = None
+    try:
         try:
             out = twin(*args, **kwargs)
         except NotExact:
             raise
-        except Exception:
+        except Exception as e:
             if _STATE.taint is not None:
                 raise NotExact(_STATE.taint) from None
-            raise
-        finally:
-            taint = _STATE.taint
-            _STATE.taint = saved if saved is not None else taint
-        if taint is not None:
-            raise NotExact(taint)
-        return out
-    return run
+            raised = e
+        if _STATE.taint is not None:
+            raise NotExact(_STATE.taint)
+        if reference.at < len(reference.log):
+            site = reference.log[reference.at][0]
+            _not_exact(f"the computation takes a decision at line "
+                       f"{_line(site)} the exact reading does not reach")
+        if raised is None and computation.error is None:
+            return out
+        if raised is None:
+            _not_exact(f"the computation {_raised_words(computation.error, computation.where)} "
+                       f"where the exact reading returns")
+        where = _where(raised)
+        if computation.error is None:
+            _not_exact(f"the exact reading {_raised_words(raised, where)} "
+                       f"where the computation returns")
+        if type(raised) is not type(computation.error) \
+                or where != computation.where:
+            _not_exact(f"the exact reading {_raised_words(raised, where)} "
+                       f"where the computation "
+                       f"{_raised_words(computation.error, computation.where)}")
+        raise raised
+    finally:
+        taint = _STATE.taint
+        _STATE.mode, _STATE.log, _STATE.reference = saved[:3]
+        _STATE.taint = saved[3] if saved[3] is not None else taint
+
+
+class _Session:
+    """The calls of the functions read that one claim evaluation makes
+    (`paired`): `computation` evaluates the claim as the computation
+    does, run once, when the exact evaluation first calls a function
+    read exactly; in `"float"` mode each call is the computation's own,
+    run as its shadow and kept in order (`records`); in `"exact"` mode
+    each call of the exact reading takes the record of the same call in
+    the same order."""
+
+    def __init__(self, computation):
+        self.computation = computation
+        self.mode = "exact"
+        self.ran = False
+        self.records: list = []
+
+    def computed(self, fn, args: tuple, kwargs: dict):
+        record = _computed(fn, args, kwargs)
+        self.records.append((fn, record))
+        if record.error is not None:
+            raise record.error
+        return record.value
+
+    def take(self, fn) -> _Computed:
+        if not self.ran:
+            self.ran = True
+            self.mode = "float"
+            try:
+                self.computation()
+            except Exception:
+                pass
+            finally:
+                self.mode = "exact"
+        if not self.records:
+            _not_exact(f"the exact reading calls {_named(fn)} where the "
+                       f"computation makes no further call")
+        recorded, record = self.records.pop(0)
+        if recorded is not fn:
+            _not_exact(f"the exact reading calls {_named(fn)} where the "
+                       f"computation calls {_named(recorded)}")
+        return record
+
+    def complete(self) -> bool:
+        """Whether every call the computation made was made again by the
+        exact reading."""
+        return not self.records
+
+
+@contextlib.contextmanager
+def paired(computation):
+    """Intent:
+        Pair the calls one claim evaluation makes of functions read
+        exactly (`exact_callee`) with the computation's own: yield a
+        session (`_Session`) for the exact evaluation; at its first call
+        of a function read exactly, `computation`, the claim evaluated
+        on the floats the computation held, runs once, each such call
+        in it run as its shadow and kept, and each call of the exact
+        evaluation is checked against the computation's call in the
+        same order. An exception `computation` raises ends it; the
+        calls made before it are kept.
+
+    Notes:
+        Sessions nest: the previous one is restored on exit.
+    """
+    session = _Session(computation)
+    saved, _STATE.session = _STATE.session, session
+    try:
+        yield session
+    finally:
+        _STATE.session = saved
+
+
+def _line(site) -> object:
+    return site[1] if isinstance(site, tuple) and len(site) > 1 else "?"
+
+
+#: the outcome no other outcome equals: a value whose agreement between
+#: the two runs cannot be judged
+class _Unjudged:
+    def __eq__(self, other):
+        return False
+
+    def __hash__(self):
+        return id(self)
+
+    def __repr__(self):
+        return "a value that cannot be compared"
+
+
+def _outcome(value):
+    """Intent:
+        A decision's result as the two runs are compared on it: a number
+        (an int, a float, a Fraction, a rational sympy number, a numpy
+        number) as `("n", its exact value)`, so the float 3.0 and the
+        int 3 agree and the float 0.1 and the Fraction 1/10 do not; a
+        float infinity or nan by its text; an irrational sympy number as
+        itself, equal to no float; a bool, None, a string or bytes as
+        itself; a tuple, list or array element by element; a class, a
+        module, a builtin function or an enum member by identity; any
+        other value as `_Unjudged`, so the runs never agree on it.
+    """
+    import enum
+    np = sys.modules.get("numpy")
+    if value is None or isinstance(value, (bool, str, bytes)):
+        return value
+    if isinstance(value, int):
+        return ("n", Fraction(value))
+    if isinstance(value, float):
+        return ("n", Fraction(value)) if math.isfinite(value) \
+            else ("f", repr(value))
+    if isinstance(value, Fraction):
+        return ("n", value)
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(value, sympy.Basic):
+        if value is sympy.true or value is sympy.false:
+            return bool(value)
+        if _symbolic_number(value):
+            return (("n", Fraction(int(value.p), int(value.q)))
+                    if value.is_Rational else ("x", value))
+        return _Unjudged()
+    if np is not None and isinstance(value, np.generic):
+        return _outcome(value.item())
+    if np is not None and isinstance(value, np.ndarray):
+        return ("a", value.shape,
+                tuple(_outcome(v) for v in value.ravel().tolist()))
+    if isinstance(value, (tuple, list)):
+        return (type(value).__name__, tuple(_outcome(v) for v in value))
+    if isinstance(value, slice):
+        return ("slice", _outcome(value.start), _outcome(value.stop),
+                _outcome(value.step))
+    if isinstance(value, (type, types.ModuleType, types.BuiltinFunctionType,
+                          enum.Enum)):
+        return ("id", id(value))
+    return _Unjudged()
+
+
+def _shown(outcome) -> str:
+    """An outcome (`_outcome`) in words."""
+    if isinstance(outcome, tuple) and len(outcome) == 2 \
+            and outcome[0] == "n":
+        return str(outcome[1])
+    if isinstance(outcome, tuple) and outcome and outcome[0] == "raised":
+        return f"to raise {outcome[1]}"
+    return repr(outcome)
+
+
+def _event(site, outcome) -> None:
+    """Intent:
+        A decision taken at `site` with `outcome`: in a shadow run kept
+        in order; in an exact run checked against the shadow run's
+        decision at the same place in the order; in a twin run on its
+        own nothing.
+
+    Raises:
+        NotExact: in an exact run, the computation took no further
+            decision, took it at another site, or reached another
+            outcome there.
+    """
+    mode = _STATE.mode
+    if mode == "float":
+        _STATE.log.append((site, outcome))
+        return
+    if mode != "exact":
+        return
+    reference = _STATE.reference
+    if reference.at >= len(reference.log):
+        _not_exact(f"the exact reading takes a decision at line "
+                   f"{_line(site)} the computation does not reach")
+    expected_site, expected = reference.log[reference.at]
+    if expected_site != site:
+        _not_exact(f"the exact reading takes a decision at line "
+                   f"{_line(site)} where the computation takes one at line "
+                   f"{_line(expected_site)}")
+    if expected != outcome:
+        _not_exact(f"at line {_line(site)} the exact reading decides "
+                   f"{_shown(outcome)} where the computation decides "
+                   f"{_shown(expected)} in float64")
+    reference.at += 1
+
+
+def _decide(site, compute, judged=None):
+    """Intent:
+        Take the decision `compute` makes at `site` and record its
+        outcome (`_event`): the outcome of the value it returns
+        (`_outcome`), or of `judged(value)` when given, or `("raised",
+        the exception's class name)` when it raises, the exception then
+        raised as ever.
+    """
+    try:
+        value = compute()
+    except NotExact:
+        raise
+    except Exception as e:
+        _event(site, ("raised", type(e).__name__))
+        raise
+    _event(site, _outcome(value) if judged is None else judged(value))
+    return value
 
 
 def unfaithful(fn) -> list:
@@ -275,12 +680,89 @@ def _reading(fn) -> tuple:
         return _TWINS[fn]
     except KeyError:
         pass
-    reading = _build(fn)
+    guarded = _domain_guarded(fn)
+    if guarded is not None:
+        check, inner = guarded
+        twin, reason = _build(inner, exact=True, decorated=True)
+        reading = ((None, reason) if twin is None
+                   else (_checked_first(fn, check, twin), None))
+    else:
+        reading = _build(fn, exact=True)
     try:
         _TWINS[fn] = reading
     except TypeError:
         pass
     return reading
+
+
+def _shadow_of(fn):
+    """Intent:
+        The shadow of `fn`: the same body rewritten as the twin is, with
+        the same decision sites (`_Exact` with `exact=False`), but every
+        step computed as Python computes it, so a run of it is the
+        computation's own run with each decision recorded (`_event`).
+        A Python function it calls runs as its own shadow
+        (`_shadow_callee`). None when `fn` has no twin. Built once per
+        function.
+    """
+    fn = _plain(fn)
+    if not isinstance(fn, types.FunctionType):
+        return None
+    try:
+        return _SHADOWS[fn]
+    except KeyError:
+        pass
+    shadow = None
+    guarded = _domain_guarded(fn)
+    if guarded is not None:
+        check, inner = guarded
+        if _reading(fn)[0] is not None:
+            inner_shadow = _build(inner, exact=False, decorated=True)[0]
+            if inner_shadow is not None:
+                shadow = _checked_first(fn, check, inner_shadow)
+    elif _reading(fn)[0] is not None:
+        shadow = _build(fn, exact=False)[0]
+    try:
+        _SHADOWS[fn] = shadow
+    except TypeError:
+        pass
+    return shadow
+
+
+def _domain_guarded(fn) -> "tuple | None":
+    """`(check, inner)` for a function `enforce_domain` wraps with no
+    policy on its result: `check(args, kwargs)` raises where the
+    wrapper raises before calling `inner`, the function it wraps; None
+    for any other function."""
+    check = getattr(fn, "__mathema_domain_check__", None)
+    inner = getattr(fn, "__wrapped__", None)
+    if check is None or not isinstance(inner, types.FunctionType):
+        return None
+    return check, inner
+
+
+def _checked_first(fn, check, body):
+    """Intent:
+        `fn`, a function `enforce_domain` wraps, as a reading runs it:
+        the domain check on the arguments, a decision (`_decide`) whose
+        outcome is that it passes or the exception it raises, then
+        `body`, the reading of the function it wraps.
+
+    Raises:
+        NotExact: in a twin run on its own, an argument holds a number
+            standing for a float, whose membership is a decision.
+    """
+    site = (fn.__code__.co_filename, 0, 0, 0, 0, f"domain {fn.__qualname__}")
+
+    @functools.wraps(body)
+    def checked(*args, **kwargs):
+        if _STATE.mode is None and (_holds_stand_in(args)
+                                    or _holds_stand_in(kwargs)):
+            _not_exact(f"the domain check of {fn.__qualname__} on a number "
+                       f"standing for a float is not taken exactly")
+        _decide(site, lambda: check(args, kwargs) and None)
+        return body(*args, **kwargs)
+    return checked
 
 
 def _parse(fn):
@@ -314,9 +796,13 @@ def _plain(fn):
     return fn
 
 
-def _build(fn) -> tuple:
+def _build(fn, exact: bool, decorated: bool = False) -> tuple:
     """`(twin, None)`, or `(None, reason)` when `fn` has no faithful
-    twin."""
+    twin; with `exact` False, `(shadow, None)` (`_shadow_of`) of a
+    function that has one. With `decorated`, `fn` is the function an
+    `enforce_domain` wrapper calls, the one its `def` made, and its
+    decorators, already applied outside it, are left out of the
+    reading."""
     name = fn.__qualname__
     if getattr(fn, "__wrapped__", None) is not None:
         return None, f"{name} wraps another function"
@@ -324,8 +810,9 @@ def _build(fn) -> tuple:
     if parsed is None:
         return None, f"the source of {name} cannot be read as one function"
     src, node, first = parsed
-    if node.decorator_list:
+    if node.decorator_list and not decorated:
         return None, f"{name} is decorated"
+    node.decorator_list = []
     if node.name != fn.__name__:
         return None, f"the source of {name} defines another name"
     found = _Scan(src, fn).found_in(node)
@@ -333,15 +820,18 @@ def _build(fn) -> tuple:
         return None, (f"the body of {name} is not read exactly: {found[0]} "
                       f"depends on the number's Python type or text, not "
                       f"its mathematics")
-    node = _Exact(src, fn.__globals__).visit(node)
+    filename = fn.__code__.co_filename
+    node = _Exact(src, fn.__globals__, exact=exact, filename=filename,
+                  first=first).visit(node)
     ast.fix_missing_locations(node)
     ast.increment_lineno(node, first - 1)
     module = ast.Module(body=[node], type_ignores=[])
     try:
-        compiled = compile(module, fn.__code__.co_filename, "exec")
+        compiled = compile(module, filename, "exec")
     except (SyntaxError, ValueError, TypeError):
         return None, f"the exact reading of {name} does not compile"
-    env = _globals_of(fn)
+    _READ_FILES.add(filename)
+    env = _globals_of(fn) if exact else _shadow_globals(fn)
     if env is None:
         return None, f"a closure cell of {name} is empty"
     try:
@@ -651,19 +1141,52 @@ def _globals_of(fn) -> "dict | None":
             env[name] = value if exact is None else exact
     env[_LITERAL] = _literal
     env[_DIV] = _div
-    env[_FLOORDIV] = _floordiv
     env[_POW] = _pow
     env[_CLASS] = _class
     env[_CALLEE] = _callee
-    env[_NOT_EXACT] = NotExact
-    env[_OPERAND] = _operand
-    env[_MEMBER] = _member
-    env[_TEST] = _test
-    env[_KEY] = _key
-    env[_MOD] = _mod
-    env[_GUARD] = _Guard
+    env.update(_deciding_names())
     env[_TWIN_MARK] = True
     return env
+
+
+def _deciding_names() -> dict:
+    """The helpers the twin and the shadow both call at a decision site,
+    by the names the rewritten body calls them by."""
+    return {_FLOORDIV: _floordiv, _MOD: _mod, _NOT_EXACT: NotExact,
+            _OPERAND: _operand, _MEMBER: _member, _TEST: _test,
+            _KEY: _key, _GUARD: _Guard, _COMPARE: _compare,
+            _DECIDED: _decided, _SUB: _sub, _DICT: _dict_of}
+
+
+def _shadow_globals(fn) -> "dict | None":
+    """Intent:
+        The shadow's globals (`_shadow_of`): `fn`'s, copied, with the
+        cells of its closure as globals, Python's own builtins and
+        operators, the decision helpers the twin calls, the call of
+        each callee through `_shadow_callee`, and the mark
+        (`_SHADOW_MARK`) by which a function the shadow defines is known
+        to be a shadow already. None when a closure cell is empty.
+    """
+    env = dict(fn.__globals__)
+    env["__builtins__"] = builtins.__dict__
+    freevars = fn.__code__.co_freevars
+    if freevars:
+        try:
+            env.update({name: cell.cell_contents for name, cell
+                        in zip(freevars, fn.__closure__ or ())})
+        except ValueError:
+            return None
+    env[_DIV] = _plain_div
+    env[_POW] = pow
+    env[_CALLEE] = _shadow_callee
+    env.update(_deciding_names())
+    env[_SHADOW_MARK] = True
+    return env
+
+
+def _plain_div(a, b):
+    """`a / b` as Python computes it."""
+    return a / b
 
 
 # --- the calls the twin's body makes -----------------------------------
@@ -715,38 +1238,95 @@ def _named(func) -> str:
         func, "__name__", None) or type(func).__name__
 
 
-def _holds_stand_in(value, depth: int = 0) -> bool:
+def _holds(value, standing, depth: int = 0) -> bool:
     """Intent:
-        Whether `value` is, or holds, an exact number standing where
-        the computation had a float (`_stands_for_float`): itself, or
-        an element of a list, tuple, set or frozenset, a key or value
-        of a dict, or an element of an object array, looked into up to
-        six levels deep; a container nested deeper counts as holding
-        one.
+        Whether `value` is, or holds, a value `standing` picks out:
+        itself, or an element of a list, tuple, set or frozenset, a key
+        or value of a dict, or an element of an object array, looked
+        into up to six levels deep; a container nested deeper counts as
+        holding one.
     """
-    if _stands_for_float(value):
+    if standing(value):
         return True
     if depth >= 6:
         return isinstance(value, (list, tuple, set, frozenset, dict))
     if isinstance(value, (list, tuple, set, frozenset)):
-        return any(_holds_stand_in(v, depth + 1) for v in value)
+        return any(_holds(v, standing, depth + 1) for v in value)
     if isinstance(value, dict):
-        return any(_holds_stand_in(k, depth + 1)
-                   or _holds_stand_in(v, depth + 1)
+        return any(_holds(k, standing, depth + 1)
+                   or _holds(v, standing, depth + 1)
                    for k, v in value.items())
+    if isinstance(value, slice):
+        return any(_holds(v, standing, depth + 1)
+                   for v in (value.start, value.stop, value.step))
     np = sys.modules.get("numpy")
     if np is not None and isinstance(value, np.ndarray) \
             and value.dtype == object:
-        return any(_holds_stand_in(v, depth + 1) for v in value.ravel())
+        return any(_holds(v, standing, depth + 1) for v in value.ravel())
     return False
 
 
+def _holds_stand_in(value, depth: int = 0) -> bool:
+    """Whether `value` is, or holds (`_holds`), an exact number standing
+    where the computation had a float (`_stands_for_float`)."""
+    return _holds(value, _stands_for_float, depth)
+
+
+def _holds_symbolic(value) -> bool:
+    """Whether `value` is, or holds (`_holds`), a sympy number: one
+    Python's own comparisons, hashing and rounding do not read as the
+    number it is."""
+    return _holds(value, _symbolic_number)
+
+
+def _floatish(value) -> bool:
+    """Whether `value` is, or holds (`_holds`), a float or a number
+    standing for one."""
+    return _holds(value, lambda v: isinstance(v, float)
+                  or _stands_for_float(v))
+
+
+def _held(value, what: str) -> None:
+    """Leave the point undecided when `value` holds a number standing
+    for a float (`_holds_stand_in`): `what`, a decision the reading does
+    not follow decision by decision, is declined on it."""
+    if _holds_stand_in(value):
+        _not_exact(f"{what} on {value}, which stands for a float, is not "
+                   f"taken exactly")
+
+
+def _symbolic_declined(value, what: str) -> None:
+    """In an exact run, leave the point undecided when `value` holds a
+    sympy number (`_holds_symbolic`), on which `what`, as Python takes
+    it, is not the mathematics."""
+    if _STATE.mode == "exact" and _holds_symbolic(value):
+        _not_exact(f"{what} on {value} is not taken exactly")
+
+
+def _run_callee():
+    """The call of a Python function in the run going on: its shadow in
+    a shadow run (`_shadow_callee`), its twin otherwise (`_callee`)."""
+    return _shadow_callee if _STATE.mode == "float" else _callee
+
+
 def _read_args(args: tuple, kwargs: dict) -> tuple:
-    """The arguments of a call the twin makes to a callable it does not
-    read: each Python function among them (a callback, `map`'s
-    function, `sorted`'s key) as the twin calls it (`_callee`)."""
+    """The arguments of a call to a callable the run does not read: each
+    Python function among them (a callback, `map`'s function, `sorted`'s
+    key) as the run calls it (`_run_callee`), and in a twin each builtin
+    function deciding on its argument (`hash`, `any`, `all`, `filter`,
+    `sorted`, `min`, `max`) as the twin's reading of it, declining a
+    number standing for a float."""
+    call = _run_callee()
+    twin = _STATE.mode != "float"
+
     def read(v):
-        return _callee(v) if isinstance(v, types.FunctionType) else v
+        if isinstance(v, types.FunctionType):
+            return call(v)
+        if twin and isinstance(v, types.BuiltinFunctionType) \
+                and getattr(v, "__self__", None) is builtins \
+                and id(v) in _VALUE_DECIDING:
+            return _builtin(v)
+        return v
     return (tuple(read(a) for a in args),
             {k: read(v) for k, v in kwargs.items()})
 
@@ -793,18 +1373,65 @@ def _opaque(func):
     return call
 
 
+#: the comparisons of two operands, by the symbol `decide_symbolic`
+#: reads
+_COMPARISONS: dict = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+                      "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+                      ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
+
+
+def _compare(site, op: str, a, b):
+    """Intent:
+        `a op b`, a comparison of two operands at `site`, a decision
+        (`_decide`): of two numbers either of them a sympy number, as
+        sympy settles it (`_exact_side.decide_symbolic`); else as
+        Python compares them.
+
+    Raises:
+        NotExact: in a twin run on its own, an operand is, or holds, a
+            number standing for a float; in an exact run, sympy cannot
+            settle the comparison, or a sympy number is held inside an
+            operand.
+    """
+    mode = _STATE.mode
+    if mode is None:
+        _held(a, "a comparison")
+        _held(b, "a comparison")
+    elif mode == "exact" and (_holds_symbolic(a) or _holds_symbolic(b)):
+        if not (_exact(a) and _exact(b)) or isinstance(a, bool) \
+                or isinstance(b, bool):
+            _not_exact(f"a comparison of {a} and {b} is not taken exactly")
+        from ._exact_side import decide_symbolic
+        truth = decide_symbolic(op, a, b, 0)
+        if truth is None:
+            _not_exact(f"sympy cannot decide {a} {op} {b}")
+        _event(site, truth)
+        return truth
+    return _decide(site, lambda: _COMPARISONS[op](a, b))
+
+
+def _decided(site, value):
+    """The result of a comparison chained, or by `in`, `not in`, `is`
+    or `is not`, at `site`, a decision (`_event`), as it is; its
+    operands are checked on the way in (`_operand`, `_member`)."""
+    _event(site, _outcome(value))
+    return value
+
+
 def _operand(value):
-    """An operand of a comparison (`==`, `<`, `in`, `is`, ...), as it
+    """An operand of a comparison chained, or by `in`, `is`, ..., as it
     is.
 
     Raises:
-        NotExact: the operand is, or holds, a number standing for a
-            float (`_holds_stand_in`): the comparison could go the
-            other way from the computation's.
+        NotExact: in a twin run on its own, the operand is, or holds, a
+            number standing for a float (`_holds_stand_in`): the
+            comparison could go the other way from the computation's;
+            in an exact run, it holds a sympy number, which Python's
+            operators do not compare as the number it is.
     """
-    if _holds_stand_in(value):
-        _not_exact(f"a comparison on {value}, which stands for a float, "
-                   f"is not taken exactly")
+    if _STATE.mode is None:
+        _held(value, "a comparison")
+    _symbolic_declined(value, "a comparison")
     return value
 
 
@@ -812,14 +1439,17 @@ def _member(container):
     """The container of `in` or `not in`, as it is: of a dict or a dict's
     view its keys or elements are compared, of a list, tuple, set or
     array its elements (`_operand`), of a string or a range nothing
-    standing for a float.
+    standing for a float. In a shadow run, as it is.
 
     Raises:
-        NotExact: the container holds a number standing for a float, or
-            is one whose elements cannot be looked at without consuming
-            them (an iterator, a generator, an object of another kind).
+        NotExact: outside a shadow run, the container holds a number
+            `_operand` declines, or is one whose elements cannot be
+            looked at before a membership test without consuming them
+            (an iterator, a generator, an object of another kind).
     """
     import collections.abc as abc
+    if _STATE.mode == "float":
+        return container
     np = sys.modules.get("numpy")
     if isinstance(container, (str, bytes, bytearray, range)):
         return container
@@ -837,107 +1467,230 @@ def _member(container):
     return container
 
 
-def _test(value):
-    """The value an `if`, `while`, conditional expression, condition of
-    a comprehension, `and`, `or` or `not` tests, as it is.
+def _test(site, value):
+    """Intent:
+        The value an `if`, `while`, conditional expression, condition of
+        a comprehension, `and`, `or` or `not` tests at `site`, as it is,
+        its truth a decision (`_decide`).
 
     Raises:
-        NotExact: the value is a number standing for a float, or an
-            array holding one: its truth is a comparison with zero.
+        NotExact: in a twin run on its own, the value is a number
+            standing for a float, or an array holding one: its truth is
+            a comparison with zero; in an exact run, it is a sympy
+            number or an array holding one.
     """
     np = sys.modules.get("numpy")
-    if _stands_for_float(value) or (
-            np is not None and isinstance(value, np.ndarray)
-            and _holds_stand_in(value)):
-        _not_exact(f"a test of {value}, which stands for a float, is not "
-                   f"taken exactly")
+    array = np is not None and isinstance(value, np.ndarray)
+    if _STATE.mode is None:
+        if _stands_for_float(value) or (array and _holds_stand_in(value)):
+            _not_exact(f"a test of {value}, which stands for a float, is "
+                       f"not taken exactly")
+        return value
+    if _STATE.mode == "exact" and (_symbolic_number(value) or (
+            array and _holds_symbolic(value))):
+        _not_exact(f"a test of {value} is not taken exactly")
+    _decide(site, lambda: bool(value))
     return value
 
 
 def _key(value):
-    """A subscript, or a key of a dict or set, as it is.
+    """A key of a set display or comprehension, or the subject of a
+    `match`, as it is.
 
     Raises:
         NotExact: the key is, or holds, a number standing for a float:
-            its hash and equality are decisions on it.
+            its hash and equality are decisions the reading does not
+            follow (a set's order of iteration rests on its hashes).
     """
-    if _holds_stand_in(value):
-        _not_exact(f"{value}, which stands for a float, is not used as a "
-                   f"key exactly")
+    _held(value, "a key")
     return value
 
 
+def _key_outcome(container, key):
+    """The outcome of a key looked up in `container` (`_event`): in a
+    dict, a key holding a float or a number standing for one by the
+    place of the key it equals (None when it equals none), so the two
+    runs agree when they reach the same entry; any other key by its
+    value (`_outcome`)."""
+    if isinstance(container, dict) and _floatish(key):
+        for i, k in enumerate(container):
+            if k is key or k == key:
+                return ("at", i)
+        return ("at", None)
+    return ("k", _outcome(key))
+
+
+class _Subscripted:
+    """The container of a subscript at `site` (`a[k]`, `a[k] = v`,
+    `del a[k]`), whose key is a decision (`_key_outcome`)."""
+
+    __slots__ = ("site", "container")
+
+    def __init__(self, site, container):
+        self.site = site
+        self.container = container
+
+    def _keyed(self, key) -> None:
+        if _STATE.mode is None:
+            _held(key, "a subscript")
+            return
+        _symbolic_declined(key, "a subscript")
+        _event(self.site, _key_outcome(self.container, key))
+
+    def __getitem__(self, key):
+        self._keyed(key)
+        return self.container[key]
+
+    def __setitem__(self, key, value):
+        self._keyed(key)
+        self.container[key] = value
+
+    def __delitem__(self, key):
+        self._keyed(key)
+        del self.container[key]
+
+
+def _sub(site, container):
+    """The container of a subscript at `site`, its key a decision
+    (`_Subscripted`)."""
+    return _Subscripted(site, container)
+
+
+def _dict_of(site, items):
+    """Intent:
+        A dict display or comprehension at `site`: `items`, each a
+        `(key, value)` pair or a 1-tuple of a mapping unpacked (`**m`),
+        entered in order, the outcome of each key (`_key_outcome`
+        against the entries before it) one decision.
+
+    Raises:
+        NotExact: in a twin run on its own, a key holds a number
+            standing for a float; in an exact run, a sympy number.
+    """
+    out: dict = {}
+    keys: list = []
+    for item in items:
+        if len(item) == 1 and not hasattr(item[0], "keys"):
+            raise TypeError(f"'{type(item[0]).__name__}' object is not a "
+                            f"mapping")
+        pairs = ([(k, item[0][k]) for k in item[0].keys()]
+                 if len(item) == 1 else [item])
+        for k, v in pairs:
+            if _STATE.mode is None:
+                _held(k, "a key")
+            _symbolic_declined(k, "a key")
+            keys.append(_key_outcome(out, k))
+            out[k] = v
+    _event(site, ("dict", tuple(keys)))
+    return out
+
+
 class _Guard:
-    """The body of a `try` whose handlers catch an arithmetic error, or
-    of a `with` statement: inside it a step on a number standing for a
-    float, which could raise in the computation (an overflow, a
+    """The body of a `try` or `with` statement at `site`: how it ends
+    (completed, or the class of the exception it raised and the line,
+    `_where`) is a decision (`_event`), so a body that raises in one run
+    and not in the other, or raises otherwise, makes the runs differ.
+    With `arithmetic` (a handler catching an arithmetic error, or a
+    `with`), a step on a number standing for a float in a twin run on
+    its own, which could raise in the computation (an overflow, a
     division by a float rounded to zero) where the exact step does not,
     leaves the point undecided (`_guarded_native`)."""
 
+    def __init__(self, site=None, arithmetic: bool = True):
+        self.site = site
+        self.arithmetic = arithmetic
+
     def __enter__(self):
-        _STATE.guard += 1
+        if self.arithmetic:
+            _STATE.guard += 1
         return self
 
-    def __exit__(self, *exc):
-        _STATE.guard -= 1
+    def __exit__(self, kind, error, tb):
+        if self.arithmetic:
+            _STATE.guard -= 1
+        if self.site is not None and _STATE.mode is not None:
+            if error is None:
+                _event(self.site, None)
+            elif isinstance(error, Exception) \
+                    and not isinstance(error, NotExact):
+                _event(self.site, ("raised", type(error).__name__,
+                                   _where(error)))
         return False
 
 
 def _keyed_by(key):
-    """A `key=` of `sorted`, `min`, `max` or `list.sort`, read exactly,
-    whose results are compared: each is an operand (`_operand`)."""
+    """A `key=` of `sorted`, `min`, `max` or `list.sort` in a twin run on
+    its own, read exactly, whose results are compared: each declined on
+    a number standing for a float (`_held`)."""
     key = _callee(key) if isinstance(key, types.FunctionType) else key
 
     def keyed(value):
-        return _operand(key(value))
+        out = key(value)
+        _held(out, "a comparison")
+        return out
     return keyed
 
 
 def _truths(func):
-    """`any` or `all`, testing each element (`_test`)."""
+    """`any` or `all` with no site, testing each element (`_held`)."""
     def call(iterable):
-        return func(_test(v) for v in iterable)
+        def tested():
+            for v in iterable:
+                _held(v, "a test")
+                yield v
+        return func(tested())
     return call
 
 
 def _filter(function, iterable):
-    """`filter`, testing each value its function returns (`_test`)."""
+    """`filter` with no site, each value its function returns declined
+    on a number standing for a float (`_held`)."""
+    def kept(v):
+        _held(v, "a test")
+        return v
     if function is None:
-        return filter(_test, iterable)
-    function = _callee(function)
-    return filter(lambda v: _test(function(v)), iterable)
+        return filter(kept, iterable)
+    function = _run_callee()(function) \
+        if isinstance(function, types.FunctionType) else function
+    return filter(lambda v: kept(function(v)), iterable)
 
 
 def _keyed_result(func):
-    """`set`, `frozenset` or `dict`, its keys checked (`_key`)."""
+    """`set`, `frozenset` or `dict` with no site, its keys declined on a
+    number standing for a float (`_held`)."""
     def call(*args, **kwargs):
         args, kwargs = _read_args(args, kwargs)
         out = func(*args, **kwargs)
-        _key(list(out))
+        _held(list(out), "a key")
         return out
     return call
 
 
 def _int(*args, **kwargs):
-    """`int`, declining a number standing for a float (a truncation)."""
+    """`int` with no site, declining a number standing for a float (a
+    truncation)."""
     if args:
         _decline(args[0])
     return int(*args, **kwargs)
 
 
 def _bool(*args):
-    """`bool`, declining a number standing for a float (a test)."""
-    return bool(*(_test(a) for a in args))
+    """`bool` with no site, declining a number standing for a float (a
+    test)."""
+    for a in args:
+        _held(a, "a test")
+    return bool(*args)
 
 
 def _hash(value):
-    """`hash`, declining a value holding a number standing for a
-    float."""
-    return hash(_key(value))
+    """`hash` with no site, declining a value holding a number standing
+    for a float."""
+    _held(value, "a hash")
+    return hash(value)
 
 
 #: the builtins whose decisions on a number standing for a float are
-#: declined, as the twin calls them
+#: declined when called with no site, as the twin calls them
 _DECIDING: dict = {id(int): _int, id(bool): _bool, id(hash): _hash,
                    id(any): _truths(any), id(all): _truths(all),
                    id(filter): _filter, id(set): _keyed_result(set),
@@ -945,13 +1698,17 @@ _DECIDING: dict = {id(int): _int, id(bool): _bool, id(hash): _hash,
                    id(dict): _keyed_result(dict)}
 #: the builtins comparing their elements by a `key=`
 _KEYED = frozenset(id(f) for f in (sorted, min, max))
+#: the builtin functions read as the twin's own when handed to another
+#: callable as a value (`map(hash, xs)`)
+_VALUE_DECIDING = frozenset(id(f) for f in (hash, any, all, filter, sorted,
+                                            min, max))
 
 
 def _builtin(func):
     """A builtin, run as itself with any Python function among its
-    arguments read exactly, its decisions on a number standing for a
-    float declined (`_DECIDING`, a `key=` of `sorted`, `min` or
-    `max`)."""
+    arguments read as the run reads it (`_read_args`), its decisions on
+    a number standing for a float declined (`_DECIDING`, a `key=` of
+    `sorted`, `min` or `max`)."""
     deciding = _DECIDING.get(id(func))
     if deciding is not None:
         return deciding
@@ -983,6 +1740,178 @@ def _unordered_inside(items) -> None:
                        "standing for a float is not taken exactly")
 
 
+def _order(site, items: list, key, reverse) -> list:
+    """Intent:
+        The order `sorted` gives `items` by `key` (the run's reading of
+        it, `_run_callee`), as the places of the items in order, a
+        decision at `site` (`_decide`).
+
+    Raises:
+        NotExact: in an exact run, an item or a key holds a sympy
+            number.
+    """
+    if key is not None and isinstance(key, types.FunctionType):
+        key = _run_callee()(key)
+    keyed = [key(v) for v in items] if key is not None else items
+    _symbolic_declined(keyed, "an ordering")
+    return _decide(site, lambda: sorted(range(len(items)),
+                                        key=keyed.__getitem__,
+                                        reverse=bool(reverse)),
+                   judged=lambda places: ("order", tuple(places)))
+
+
+def _ordered(func, site):
+    """Intent:
+        `sorted`, `min` or `max` at `site`: the order of the elements, or
+        the place of the one picked, a decision (`_order`, `_decide`). A
+        call the builtin itself refuses (no elements given, an unknown
+        keyword) is passed to it as it is.
+    """
+    raw = _builtin(func)
+    allowed = {"key", "reverse"} if func is sorted else {"key", "default"}
+
+    def call(*args, **kwargs):
+        if _STATE.mode is None:
+            return raw(*args, **kwargs)
+        if not args or set(kwargs) - allowed or (
+                func is sorted and len(args) != 1) or (
+                len(args) > 1 and "default" in kwargs):
+            return func(*args, **kwargs)
+        items = list(args[0]) if len(args) == 1 else list(args)
+        key = kwargs.get("key")
+        if func is sorted:
+            places = _order(site, items, key, kwargs.get("reverse", False))
+            return [items[i] for i in places]
+        if not items:
+            if "default" in kwargs:
+                _event(site, ("empty",))
+                return kwargs["default"]
+            return _decide(site, lambda: func(items))
+        if key is not None and isinstance(key, types.FunctionType):
+            key = _run_callee()(key)
+        keyed = [key(v) for v in items] if key is not None else items
+        _symbolic_declined(keyed, "an ordering")
+        pick = min if func is min else max
+        place = _decide(site, lambda: pick(range(len(items)),
+                                           key=keyed.__getitem__),
+                        judged=lambda i: ("at", i))
+        return items[place]
+    return call
+
+
+def _taken(site, kind: str, compute, *operands):
+    """Intent:
+        A rounding or a test (`kind`) of `operands` at `site`, computed
+        by `compute`, a decision (`_decide`).
+
+    Raises:
+        NotExact: in a twin run on its own, an operand stands for a
+            float or holds one; in an exact run, an operand holds a
+            sympy number.
+    """
+    if _STATE.mode is None:
+        for v in operands:
+            _held(v, kind)
+        return compute()
+    for v in operands:
+        _symbolic_declined(v, kind)
+    return _decide(site, compute)
+
+
+def _as_float_kind(value, *operands):
+    """`value`, an int a floor or quotient of `operands` gave, as the
+    Fraction of it when an operand stands for a float: the computation's
+    value there is a float."""
+    if isinstance(value, int) and not isinstance(value, bool) \
+            and any(_stands_for_float(v) for v in operands):
+        return Fraction(value)
+    return value
+
+
+def _sited(func, site):
+    """Intent:
+        `func`, a builtin or `math` function deciding on its argument
+        (or the twin's reading of one, `__mathema_native__`), as a
+        decision at `site`: `int`, `bool`, `hash`, `round`, `divmod`,
+        `math.floor`, `math.ceil`, `math.trunc`, `any`, `all`, `filter`,
+        `sorted`, `min`, `max` and `dict`. None for any other callable.
+    """
+    native = getattr(func, "__mathema_native__", func) if _own(func) else func
+    try:
+        kind = _SITED_KINDS.get(id(native))
+    except TypeError:
+        kind = None
+    if kind is None or native is not _SITED_NATIVES.get(id(native)):
+        return None
+    if kind in ("sorted", "min", "max"):
+        return _ordered(native, site)
+    if kind in ("any", "all"):
+        def truths(iterable):
+            if _STATE.mode is None:
+                return _truths(native)(iterable)
+            return native(_test(site, v) for v in iterable)
+        return truths
+    if kind == "filter":
+        def filtered(function, iterable):
+            if _STATE.mode is None:
+                return _filter(function, iterable)
+            if function is None:
+                return filter(lambda v: _test(site, v), iterable)
+            if isinstance(function, types.FunctionType):
+                function = _run_callee()(function)
+            return filter(lambda v: _test(site, function(v)), iterable)
+        return filtered
+    if kind == "dict":
+        def made(*args, **kwargs):
+            if _STATE.mode is None:
+                return _keyed_result(dict)(*args, **kwargs)
+            if len(args) > 1:
+                return dict(*args, **kwargs)
+            items: list = []
+            if args:
+                source = args[0]
+                items = ([(k, source[k]) for k in source.keys()]
+                         if hasattr(source, "keys") else
+                         [tuple(pair) for pair in source])
+            items += list(kwargs.items())
+            return _dict_of(site, items)
+        return made
+    if kind == "divmod":
+        def split(a, b):
+            q, r = _taken(site, "a quotient", lambda: divmod(a, b), a, b)
+            return _as_float_kind(q, a, b), r
+        return split
+    if kind == "round":
+        def rounded(x, ndigits=None):
+            return _taken(site, "a rounding",
+                          lambda: round(x) if ndigits is None
+                          else round(x, ndigits), x)
+        return rounded
+    if kind in ("floor", "ceil", "trunc"):
+        whole = getattr(math, kind)
+        return lambda x: _taken(site, "a rounding", lambda: whole(x), x)
+    if kind == "int":
+        def truncated(*args, **kwargs):
+            return _taken(site, "a truncation",
+                          lambda: int(*args, **kwargs), *args[:1])
+        return truncated
+    if kind == "bool":
+        return lambda *args: _taken(site, "a test", lambda: bool(*args),
+                                    *args)
+    return lambda value: _taken(site, "a hash", lambda: hash(value), value)
+
+
+#: the natives `_sited` takes as a decision, by kind
+_SITED_NATIVES: dict = {id(f): f for f in (
+    int, bool, hash, round, divmod, any, all, filter, sorted, min, max, dict,
+    math.floor, math.ceil, math.trunc)}
+_SITED_KINDS: dict = {id(f): k for f, k in (
+    (int, "int"), (bool, "bool"), (hash, "hash"), (round, "round"),
+    (divmod, "divmod"), (any, "any"), (all, "all"), (filter, "filter"),
+    (sorted, "sorted"), (min, "min"), (max, "max"), (dict, "dict"),
+    (math.floor, "floor"), (math.ceil, "ceil"), (math.trunc, "trunc"))}
+
+
 #: the methods of a dict or set whose first argument is a key, and
 #: those that may add keys
 _KEY_METHODS = frozenset({"get", "pop", "setdefault", "__contains__",
@@ -993,25 +1922,59 @@ _KEY_ADDING = frozenset({"update", "setdefault", "__setitem__", "add",
                          "difference", "symmetric_difference",
                          "intersection_update", "difference_update",
                          "symmetric_difference_update", "copy"})
+#: the methods of a dict whose key is a decision the runs are compared
+#: on (`_key_outcome`)
+_DICT_KEYED = frozenset({"get", "pop", "setdefault", "__contains__",
+                         "__getitem__", "__delitem__", "__setitem__"})
 #: the methods of a list or tuple comparing its elements
 _SEARCHING = frozenset({"index", "count", "remove", "__contains__"})
 
 
-def _method(func):
-    """A builtin value's own method (`_BUILTIN_VALUES`), run as itself
-    with its decisions on a number standing for a float declined: a key
-    of a dict or set, a search of a list, a `key=` of `list.sort`."""
+def _method(func, site=None):
+    """Intent:
+        A builtin value's own method (`_BUILTIN_VALUES`), run as itself.
+        At a site, outside a twin run on its own, a dict's key
+        (`_DICT_KEYED`), a list's or tuple's search and `list.sort` are
+        decisions (`_key_outcome`, `_decide`, `_order`); otherwise its
+        decisions on a number standing for a float are declined: a key
+        of a dict or set, a search of a list, a `key=` of `list.sort`.
+
+    Raises:
+        NotExact: a declined decision, or in an exact run a sympy number
+            in a decision Python does not take as the number it is.
+    """
     owner = func.__self__
     name = func.__name__
     keyed = isinstance(owner, (dict, set, frozenset))
     searched = isinstance(owner, (list, tuple)) and name in _SEARCHING
 
     def call(*args, **kwargs):
+        followed = site is not None and _STATE.mode is not None
+        if followed and isinstance(owner, dict) and name in _DICT_KEYED \
+                and args:
+            _symbolic_declined(args[0], "a key")
+            _event(site, _key_outcome(owner, args[0]))
+            args, kwargs = _read_args(args, kwargs)
+            return func(*args, **kwargs)
+        if followed and searched:
+            _symbolic_declined(args, "a search")
+            _symbolic_declined(owner, "a search")
+            if name == "remove" and isinstance(owner, list) and args:
+                place = _decide(site, lambda: owner.index(*args))
+                del owner[place]
+                return None
+            return _decide(site, lambda: func(*args, **kwargs))
+        if followed and name == "sort" and isinstance(owner, list) \
+                and not args and not set(kwargs) - {"key", "reverse"}:
+            places = _order(site, list(owner), kwargs.get("key"),
+                            kwargs.get("reverse", False))
+            owner[:] = [owner[i] for i in places]
+            return None
         if keyed and name in _KEY_METHODS and args:
-            _key(args[0])
+            _held(args[0], "a key")
         if searched:
-            _operand(args)
-            _operand(owner)
+            _held(args, "a search")
+            _held(owner, "a search")
         if name == "sort":
             _unordered_inside(owner)
             if kwargs.get("key") is not None:
@@ -1019,25 +1982,31 @@ def _method(func):
         args, kwargs = _read_args(args, kwargs)
         out = func(*args, **kwargs)
         if keyed and name in _KEY_ADDING:
-            _key(list(owner))
+            _held(list(owner), "a key")
             if isinstance(out, (dict, set, frozenset)):
-                _key(list(out))
+                _held(list(out), "a key")
         return out
     return call
 
 
-def _callee(func):
+def _callee(func, site=None):
     """Intent:
-        `func` as the twin's body calls it: a reading of this module as
-        itself, a `math` function as its exact version, a function the
-        twin defined as itself (its code is already the reading), any
-        other Python function as its exact twin (`_helper`), a builtin
-        or a builtin class as itself (`_builtin`), a C function of a
-        module and an exception class as themselves while no exact
-        number is among their arguments (`_opaque`). A library
-        function, a bound method, any other class or callable object
-        leaves the point undecided when called.
+        `func` as the twin's body calls it: at a site, a builtin or
+        `math` function deciding on its argument as that decision
+        (`_sited`); a reading of this module as itself, a `math`
+        function as its exact version, a function the twin defined as
+        itself (its code is already the reading), any other Python
+        function as its exact twin (`_helper`), a builtin or a builtin
+        class as itself (`_builtin`), a builtin value's method as itself
+        (`_method`), a C function of a module and an exception class as
+        themselves while no exact number is among their arguments
+        (`_opaque`). A library function, a bound method, any other class
+        or callable object leaves the point undecided when called.
     """
+    if site is not None:
+        sited = _sited(func, site)
+        if sited is not None:
+            return sited
     if _own(func):
         return func
     try:
@@ -1071,10 +2040,44 @@ def _callee(func):
         if _stands_for_float(owner):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
-            return _method(func)
+            return _method(func, site)
         return _opaque(func)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
+
+
+def _shadow_callee(func, site=None):
+    """Intent:
+        `func` as the shadow's body calls it (`_shadow_of`): at a site, a
+        builtin or `math` function deciding on its argument as that
+        decision (`_sited`), as in the twin; a Python function the code
+        under test defines as its own shadow, so its decisions are part
+        of the run; a builtin, a builtin value's method and a module's C
+        function as themselves with any Python function among their
+        arguments read as shadows (`_builtin`, `_method`, `_opaque`);
+        anything else as it is.
+    """
+    if site is not None:
+        sited = _sited(func, site)
+        if sited is not None:
+            return sited
+    if isinstance(func, types.FunctionType):
+        if func.__globals__.get(_SHADOW_MARK) is True or _own(func) \
+                or _library(func):
+            return func
+        shadow = _shadow_of(func)
+        return func if shadow is None else shadow
+    if isinstance(func, type):
+        return _builtin(func) if func.__module__ == "builtins" else func
+    if isinstance(func, types.BuiltinFunctionType) \
+            and getattr(func, "__self__", None) is builtins:
+        return _builtin(func)
+    if isinstance(func, _C_CALLABLES):
+        owner = getattr(func, "__self__", None)
+        if isinstance(owner, _BUILTIN_VALUES):
+            return _method(func, site)
+        return _opaque(func)
+    return func
 
 
 def _import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -1097,31 +2100,59 @@ def _exact_global(value):
 
 
 class _Exact(ast.NodeTransformer):
-    """The rewrite: each float literal a call reading its source text,
-    each `/`, `//` and `**` (and `/=`, `//=`, `**=`) a call of the exact
-    operator, each `.__class__` read a call answering the type as the
-    computation would, each call made through `_callee`, each `try`
-    letting a `NotExact` through its handlers, annotations dropped so
-    they are not evaluated in the twin. Each decision is made through a
-    check declining a number standing for a float: a comparison's
-    operands (`_operand`, the container of `in` by `_member`, and none
-    for `is` against `None`, `True`, `False` or `...`), the value an
-    `if`, `while`, conditional expression,
+    """The rewrite of a body into its twin, or with `exact` False into
+    its shadow (`_shadow_of`). Both: each `/`, `//`, `%` and `**` (and
+    `/=`, `//=`, `%=`, `**=`) a call of the run's operator, each call
+    made through the run's callee (`_callee`, `_shadow_callee`) with
+    its site, each `try` letting a `NotExact` through its handlers,
+    annotations dropped so they are not evaluated. Each decision is a
+    call naming its site (the source file, the node's place in it and
+    its role), the same in the twin and the shadow, so the two runs'
+    decisions are compared in order (`_event`): a comparison of two
+    operands (`_compare`), any other comparison's result (`_decided`,
+    its operands through `_operand`, the container of `in` through
+    `_member`, and no decision for `is` against `None`, `True`, `False`
+    or `...`), the value an `if`, `while`, conditional expression,
     comprehension condition, `and`, `or` or `not` tests (`_test`), a
-    subscript or a key of a dict or set display (`_key`), `%` (`_mod`),
-    and the body of a `try` whose handlers catch an arithmetic error,
-    or of a `with` statement (`_Guard`). An `assert`'s test is left as
-    written: it raises or not, and a raise leaves the point undecided."""
+    subscript (`_sub`), a dict display or comprehension (`_dict_of`),
+    `//` and `%` (`_floordiv`, `_mod`), and the body of a `try` or
+    `with` statement (`_Guard`, marking a handler catching an
+    arithmetic error). A set display's or comprehension's keys and a
+    `match` subject are declined on a number standing for a float
+    (`_key`). The twin only: each float literal a call reading its
+    source text, each `.__class__` read a call answering the type as
+    the computation would. An `assert`'s test is left as written: it
+    raises or not, and a raise leaves the point undecided."""
 
-    def __init__(self, src: str, env: "dict | None" = None):
+    def __init__(self, src: str, env: "dict | None" = None,
+                 exact: bool = True, filename: str = "<body>",
+                 first: int = 1):
         self.src = src
         self.env = env or {}
+        self.exact = exact
+        self.filename = filename
+        self.offset = first - 1
         # inside an assert's test, whose decisions are left as written
         self.asserting = False
 
     def _wrap(self, name: str, node):
         return ast.copy_location(ast.Call(
             func=ast.Name(name, ast.Load()), args=[node], keywords=[]), node)
+
+    def _call(self, name: str, at, *args):
+        return ast.copy_location(ast.Call(
+            func=ast.Name(name, ast.Load()), args=list(args), keywords=[]),
+            at)
+
+    def _site(self, node, role: str):
+        """The constant naming a decision site: the source file, the
+        node's first and last line and column, and the role."""
+        line = getattr(node, "lineno", 0) or 0
+        end = getattr(node, "end_lineno", None) or line
+        return ast.Constant((self.filename, line + self.offset,
+                             getattr(node, "col_offset", 0) or 0,
+                             end + self.offset,
+                             getattr(node, "end_col_offset", 0) or 0, role))
 
     def _decides(self) -> bool:
         return not self.asserting
@@ -1155,20 +2186,30 @@ class _Exact(ast.NodeTransformer):
                 pairs.append((node.ops[i], sides[i + 1]))
             return all(isinstance(op, (ast.Is, ast.IsNot)) and singleton(o)
                        for op, o in pairs)
+
         def container_only(i: int) -> bool:
             # operand i is only ever the container of `in`/`not in`
             return i > 0 and isinstance(node.ops[i - 1], (ast.In, ast.NotIn)) \
                 and i == len(node.ops)
 
+        if all(singleton(s) or identity_only(i) for i, s in enumerate(sides)):
+            return node
+        site = self._site(node, "compare")
+        if len(node.ops) == 1 and type(node.ops[0]) in _ORDERINGS:
+            return self._call(_COMPARE, node, site,
+                              ast.Constant(_ORDERINGS[type(node.ops[0])]),
+                              node.left, node.comparators[0])
         wrapped = [s if singleton(s) or identity_only(i)
                    else self._wrap(_MEMBER, s) if container_only(i)
                    else self._wrap(_OPERAND, s)
                    for i, s in enumerate(sides)]
         node.left, node.comparators = wrapped[0], wrapped[1:]
-        return node
+        return self._call(_DECIDED, node, site, node)
 
     def _tested(self, node):
-        return self._wrap(_TEST, node) if self._decides() else node
+        if not self._decides():
+            return node
+        return self._call(_TEST, node, self._site(node, "test"), node)
 
     def visit_If(self, node):
         self.generic_visit(node)
@@ -1200,19 +2241,19 @@ class _Exact(ast.NodeTransformer):
 
     def visit_Subscript(self, node):
         self.generic_visit(node)
-        if isinstance(node.slice, ast.Slice):
-            for part in ("lower", "upper", "step"):
-                value = getattr(node.slice, part)
-                if value is not None:
-                    setattr(node.slice, part, self._keyed(value))
-        else:
-            node.slice = self._keyed(node.slice)
+        if self._decides():
+            node.value = self._call(_SUB, node.value,
+                                    self._site(node, "subscript"), node.value)
         return node
 
     def visit_Dict(self, node):
         self.generic_visit(node)
-        node.keys = [k if k is None else self._keyed(k) for k in node.keys]
-        return node
+        if not self._decides():
+            return node
+        items = [ast.Tuple([v] if k is None else [k, v], ast.Load())
+                 for k, v in zip(node.keys, node.values)]
+        return self._call(_DICT, node, self._site(node, "dict"),
+                          ast.List(items, ast.Load()))
 
     def visit_Set(self, node):
         self.generic_visit(node)
@@ -1221,8 +2262,12 @@ class _Exact(ast.NodeTransformer):
 
     def visit_DictComp(self, node):
         self.generic_visit(node)
-        node.key = self._keyed(node.key)
-        return node
+        if not self._decides():
+            return node
+        pairs = ast.copy_location(ast.ListComp(
+            elt=ast.Tuple([node.key, node.value], ast.Load()),
+            generators=node.generators), node)
+        return self._call(_DICT, node, self._site(node, "dict"), pairs)
 
     def visit_SetComp(self, node):
         self.generic_visit(node)
@@ -1231,14 +2276,14 @@ class _Exact(ast.NodeTransformer):
 
     def visit_Match(self, node):
         self.generic_visit(node)
-        node.subject = self._wrap(_OPERAND, node.subject)
+        node.subject = self._wrap(_KEY, node.subject)
         return node
 
-    def _guarded(self, body: list, at) -> list:
+    def _guarded(self, body: list, at, arithmetic: bool) -> list:
         return [ast.copy_location(ast.With(
-            items=[ast.withitem(context_expr=ast.Call(
-                func=ast.Name(_GUARD, ast.Load()), args=[], keywords=[]),
-                optional_vars=None)],
+            items=[ast.withitem(context_expr=self._call(
+                _GUARD, at, self._site(at, "guard"),
+                ast.Constant(arithmetic)), optional_vars=None)],
             body=body), at)]
 
     def _catches_arithmetic(self, handler) -> bool:
@@ -1259,22 +2304,21 @@ class _Exact(ast.NodeTransformer):
 
     def visit_With(self, node):
         self.generic_visit(node)
-        node.body = self._guarded(node.body, node)
+        node.body = self._guarded(node.body, node, True)
         return node
 
     visit_AsyncWith = visit_With
 
     def visit_Call(self, node):
         self.generic_visit(node)
-        node.func = ast.copy_location(ast.Call(
-            func=ast.Name(_CALLEE, ast.Load()), args=[node.func],
-            keywords=[]), node.func)
+        node.func = self._call(_CALLEE, node.func, node.func,
+                               self._site(node, "call"))
         return node
 
     def visit_Try(self, node):
         self.generic_visit(node)
-        if any(self._catches_arithmetic(h) for h in node.handlers):
-            node.body = self._guarded(node.body, node)
+        arithmetic = any(self._catches_arithmetic(h) for h in node.handlers)
+        node.body = self._guarded(node.body, node, arithmetic)
         # `except NotExact: raise` ahead of the body's own handlers
         node.handlers.insert(0, ast.copy_location(ast.ExceptHandler(
             type=ast.Name(_NOT_EXACT, ast.Load()), name=None,
@@ -1285,37 +2329,42 @@ class _Exact(ast.NodeTransformer):
 
     def visit_Constant(self, node):
         value = node.value
-        if isinstance(value, float) and math.isfinite(value):
+        if self.exact and isinstance(value, float) and math.isfinite(value):
             text = ast.get_source_segment(self.src, node) or repr(value)
             return ast.copy_location(ast.Call(
                 func=ast.Name(_LITERAL, ast.Load()),
                 args=[ast.Constant(text)], keywords=[]), node)
         return node
 
+    def _operator(self, op, left, right, at):
+        name = _operator_name(op)
+        if name is None:
+            return None
+        args = [left, right]
+        if name in (_FLOORDIV, _MOD):
+            args.append(self._site(at, "operator"))
+        return ast.Call(func=ast.Name(name, ast.Load()), args=args,
+                        keywords=[])
+
     def visit_BinOp(self, node):
         self.generic_visit(node)
-        name = _operator_name(node.op)
-        if name is None:
-            return node
-        return ast.copy_location(ast.Call(
-            func=ast.Name(name, ast.Load()),
-            args=[node.left, node.right], keywords=[]), node)
+        call = self._operator(node.op, node.left, node.right, node)
+        return node if call is None else ast.copy_location(call, node)
 
     def visit_AugAssign(self, node):
         self.generic_visit(node)
-        name = _operator_name(node.op)
-        if name is None:
-            return node
         read = copy.deepcopy(node.target)
         read.ctx = ast.Load()
-        call = ast.Call(func=ast.Name(name, ast.Load()),
-                        args=[read, node.value], keywords=[])
+        call = self._operator(node.op, read, node.value, node)
+        if call is None:
+            return node
         return ast.copy_location(
             ast.Assign(targets=[node.target], value=call), node)
 
     def visit_Attribute(self, node):
         self.generic_visit(node)
-        if node.attr != "__class__" or not isinstance(node.ctx, ast.Load):
+        if not self.exact or node.attr != "__class__" \
+                or not isinstance(node.ctx, ast.Load):
             return node
         return ast.copy_location(ast.Call(
             func=ast.Name(_CLASS, ast.Load()),
@@ -1331,6 +2380,12 @@ class _Exact(ast.NodeTransformer):
         return node
 
     visit_AsyncFunctionDef = visit_FunctionDef
+
+
+#: the comparisons of two operands taken as one decision (`_compare`),
+#: by the symbol it reads
+_ORDERINGS: dict = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<",
+                    ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
 
 
 #: the errors a float step raises where its exact step may not (or the
@@ -1460,11 +2515,16 @@ def _guarded_native(native, *operands) -> None:
     """Under a handler that catches an arithmetic error (`_Guard`): leave
     the point undecided when an operand stands for a float, and run the
     step on integer operands as the computation does, so it raises the
-    computation's own error (an overflow) where the computation does."""
+    computation's own error (an overflow) where the computation does.
+    In a run checked against a shadow run, a step on a number standing
+    for a float is taken exactly: how the guarded body ends is the
+    decision the runs are compared on (`_Guard`)."""
     if not _STATE.guard:
         return
-    _decline(*operands)
-    native(*operands)
+    if _STATE.mode is None:
+        _decline(*operands)
+    if not any(_stands_for_float(v) for v in operands):
+        native(*operands)
 
 
 def _div(a, b):
@@ -1480,27 +2540,28 @@ def _div(a, b):
     return a / b
 
 
-def _floordiv(a, b):
-    """`a // b`: Python's floor division, of two ints an int.
+def _floordiv(a, b, site=None):
+    """`a // b` at `site`, a decision (`_taken`): Python's floor
+    division, of two ints an int, of a number standing for a float the
+    Fraction of the whole number, as the computation's is a float.
 
     Raises:
-        NotExact: an operand stands for a float (`_decline`).
+        NotExact: an operand `_taken` declines.
     """
-    _decline(a, b)
-    return a // b
+    return _as_float_kind(
+        _taken(site, "a floor division", lambda: a // b, a, b), a, b)
 
 
-def _mod(a, b):
-    """`a % b`: Python's remainder, of two ints an int, and text
-    formatting as ever when `a` is a string.
+def _mod(a, b, site=None):
+    """`a % b` at `site`, a decision (`_taken`): Python's remainder, of
+    two ints an int, and text formatting as ever when `a` is a string.
 
     Raises:
-        NotExact: an operand of a remainder stands for a float.
+        NotExact: an operand `_taken` declines.
     """
     if isinstance(a, (str, bytes)):
         return a % b
-    _decline(a, b)
-    return a % b
+    return _taken(site, "a remainder", lambda: a % b, a, b)
 
 
 def _divmod(a, b):
@@ -1741,6 +2802,13 @@ def _guarded_math(name: str, exact):
 
 _MATH_EXACT = {name: (fn if name == "pow" else _guarded_math(name, fn))
                for name, fn in _MATH_EXACT.items()}
+# the readings standing for a builtin or `math` function that decides on
+# its argument, taken as that decision at a site (`_sited`)
+for _name in ("floor", "ceil", "trunc"):
+    _MATH_EXACT[_name].__mathema_native__ = getattr(math, _name)
+_round.__mathema_native__ = round  # type: ignore[attr-defined]
+_divmod.__mathema_native__ = divmod  # type: ignore[attr-defined]
+del _name
 
 #: the `math` functions a body may bind by name (`from math import
 #: sqrt`), by identity, to their exact versions
