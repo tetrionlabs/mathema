@@ -6701,13 +6701,14 @@ def passed_within_words(relation: str, gap: float, at: "str | None",
     """
     verb = "differs" if relation in ("==", "~=") else "fails"
     where = f" at {at}" if at else ""
+    from ._allowance import allowance_text
     if tolerance is None:
-        within = f"the default tolerance ({allowance:.3g})"
+        within = f"the default tolerance ({allowance_text(allowance)})"
     else:
         written = (tolerance.text() if isinstance(tolerance, ToleranceKind)
                    else _number_text(tolerance))
         within = f"the tolerance (declared {written})"
-    return f"{verb} by {gap:.3g}{where}, within {within}"
+    return f"{verb} by {allowance_text(gap)}{where}, within {within}"
 
 
 def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
