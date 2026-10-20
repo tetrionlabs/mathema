@@ -54,9 +54,9 @@ def arcsine(x: float) -> float:
     return float(np.arcsin(x))
 
 
-def _verdict(fn, law, route="derive"):
+def _verdict(fn, law):
     from mathema.conjecture import check_conjectures, claim
-    (p,) = check_conjectures(fn, [claim(law, route=route)])
+    (p,) = check_conjectures(fn, [claim(law, route="derive")])
     return p
 
 
@@ -68,8 +68,6 @@ def _verdict(fn, law, route="derive"):
 ])
 def test_no_real_value_is_never_proven(sqrt_without_definedness, fn, law):
     p = _verdict(fn, law)
-    assert p.verdict != "proven", (p.verdict, p.note)
-    p = _verdict(fn, law, route="best")
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 

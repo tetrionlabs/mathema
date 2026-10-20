@@ -945,6 +945,21 @@ to its closed form rather than unrolled, so a Fibonacci-shaped function
 can reach `proven` over a stated integer range. See [the derive
 route](derive-route.md) for the exact shapes this covers.
 
+## Routes
+
+A claim's route says which evidence it accepts, and it is set beside
+the claim text (`route=` in Python, `route:` in a claims file), never
+inside it. The default, `best`, attempts a proof and falls through to
+running the code when the proof cannot settle the claim, so a sampled
+`holds` can stand in for a proof that did not close. `probe` runs the
+code only. `derive` asks for derive's verdict: when the proof cannot
+settle the claim the probe still samples it, but only a counterexample
+it executes counts, and the claim is then `falsified` on the probe's
+route with derive's reason in the note. Draws that find no
+counterexample leave the claim `unknown`, never `holds`. A proof's
+`[float]` companion and a disproof's executed witness are the same on
+every route. See [Verdicts and exit codes](verdicts.md).
+
 ## When a claim will not parse
 
 `mathema check` reports an unparseable claim as a clean error naming

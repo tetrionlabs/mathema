@@ -309,10 +309,14 @@ def adjudicate(ctx: EquivalenceContext, fn,
 
     state = _LadderState()
     for name, rung in RUNGS:
-        if name == "sampled" and cj.route == "derive":
-            # a claim on the derive route is decided by derive alone
-            continue
         probe = rung(case, state)
+        if name == "sampled" and cj.route == "derive" and probe is not None \
+                and probe.verdict == "holds":
+            # on the derive route sampling falsifies only: shared points
+            # that agree are no verdict
+            state.sampling_meta = {k: v for k, v in (probe.meta or {}).items()
+                                   if k != "mathema.equivalence.rung"}
+            continue
         if probe is None:
             continue
         if name in _MATHEMATICS_RUNGS and probe.verdict in ("proven",
@@ -1242,12 +1246,16 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
     """Nothing decided. The route reports the strongest mechanism that
     actually produced information: derive when a proof attempt
     returned a result, probe when points executed, None when no
-    mechanism engaged at all. A claim on the derive route ran no
-    sampled rung, and the note says so."""
+    mechanism engaged at all; a claim on the derive route reports
+    derive. On the derive route the sampled rung falsifies only, and the
+    note says how many points agreed."""
     meta = state.sampling_meta or dict(case.annotations)
     sampling = meta.get("mathema.equivalence.sampling") or {}
     checked = sampling.get("checked", 0)
-    if state.proof is not None and state.proof.status != "unliftable":
+    if case.cj.route == "derive":
+        # the derive route reports its own unknown, as for any claim
+        route = "derive"
+    elif state.proof is not None and state.proof.status != "unliftable":
         # the symbolic mechanism genuinely engaged (undecided or an
         # uncorroborated disproof already handled upstream); unliftable
         # means it never got to reason at all
@@ -1257,9 +1265,10 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
     else:
         route = None
     if case.cj.route == "derive":
-        said = ("neither the canonical forms nor the symbolic difference "
-                "could settle equivalence; the claim asks for the derive "
-                "route alone, so the probe did not run")
+        said = (f"neither the canonical forms nor the symbolic difference "
+                f"could settle equivalence, and the {checked} shared points "
+                f"sampled found no disagreement, which on the derive route "
+                f"is not a verdict")
     else:
         said = (f"neither the canonical forms, the symbolic difference, "
                 f"nor sampling ({checked} evaluable points) could settle "

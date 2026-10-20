@@ -29,7 +29,7 @@ def test_true_on_surface_claim_is_never_falsified():
 
 def test_false_on_surface_claim_falsifies_with_an_on_surface_witness():
     law = "assuming x + y == 2, for x in [0,2], y in [0,2], f(x,y) <= 0.5"
-    p = _v(law, route="best")
+    p = _v(law)
     assert p.verdict == "falsified"
     assert p.counterexample
     # the witness coordinates must actually satisfy x + y == 2 (the

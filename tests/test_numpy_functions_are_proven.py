@@ -182,7 +182,7 @@ def test_solve_holds_and_its_row_is_stated_over_a_matrix_and_a_vector():
     # matrix route reads a row with a vector parameter
     assert (p.verdict, p.route) == ("holds", "probe"), (p.verdict, p.note)
     p = _one(solve_for, law, route="derive")
-    assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.note)
+    assert p.verdict == "unknown", (p.verdict, p.note)
     assert "numpy.linalg.solve definition is stated over vectors" in p.note
 
 

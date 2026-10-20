@@ -152,19 +152,23 @@ cannot decide falls through to probing, with the reason the proof
 stopped kept in the record. The result names the mechanism that settled
 it, and a claim's name never implies a route.
 
-- A claim pinned to `route: derive` is decided by derive alone. When
-  the proof cannot settle it (a body derive cannot read, a branch it
-  cannot decide, the wall clock), the claim is `unknown` on the derive
-  route with the reason in its note, and nothing runs the code for it.
+- A claim pinned to `route: derive` makes the fast proof attempt only,
+  and derive gives its verdict. When the proof cannot settle it (a body
+  derive cannot read, a branch it cannot decide, the wall clock), the
+  probe still samples the claim, as a falsifier only: a counterexample
+  it executes falsifies the claim, on the probe's route with derive's
+  reason in the note, and draws that find none leave the claim
+  `unknown`, never `holds`, with the number of draws in the note. A
+  proof's `[float]` companion and a disproof's executed witness are as
+  on any route.
 - A claim pinned to `route: probe` never attempts a proof.
 - Calculus forms (`d`, `lim`, `integrate`, `Sum`, `Prod`) are decided by
-  the derive route. When the proof of a claim on the `best` route
-  cannot close, numeric evidence on
+  the derive route. When the proof cannot close, numeric evidence on
   the lifted expression is reported as such, as mathema's reconstruction
   of the code rather than the code itself.
 - A matrix identity the algebra cannot close is sampled over matrices
-  of its declared shape on the `best` route, and stays `unknown` where
-  it cannot be sampled or is pinned to `route: derive`.
+  of its declared shape, and stays `unknown` only where it cannot be
+  sampled.
 
 ## What composes, and what does not
 
@@ -196,10 +200,9 @@ built. See [Claims transfer](claims-transfer.md).
 - **Time caps.** Proof attempts are capped on the wall clock: 3 seconds
   for the ordinary attempt, 15 when `extensive=True` asks for more, with
   a 45 second failsafe over the whole extensive ladder. A proof that runs
-  out of time falls through to probing on the `best` route and the
-  record says so (`mathema.timeout`), so a slow machine can turn a
-  `proven` into a `holds`, and never the reverse; a claim pinned to
-  `route: derive` stays `unknown` instead.
+  out of time falls through to probing and the record says so
+  (`mathema.timeout`), so a slow machine can turn a `proven` into a
+  `holds` (an `unknown` on `route: derive`), and never the reverse.
 - **What the derive route lifts.** Straight-line and branching scalar
   code, accumulating loops, linear self-recursion, and more, catalogued
   in [The derive route](derive-route.md). Beyond scalars and sequences,

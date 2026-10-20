@@ -47,15 +47,10 @@ def test_no_literal_argument_still_stays_undecided_as_before():
     results = check_conjectures(
         price_with_discount,
         [claim("raises(f(50, code), ValueError)", route="derive")])
-    # nothing to infer for the bare-name argument, exactly as before;
-    # the inference note names price and not code
-    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
-    assert "price=50" in results[0].note
-    assert "code=" not in results[0].note
-    # on the default route the probe fallback then finds most sampled
-    # codes do NOT raise, falsifying the unquantified raises claim
-    results = check_conjectures(
-        price_with_discount, [claim("raises(f(50, code), ValueError)")])
+    # nothing to infer for the bare-name argument, exactly as before,
+    # the probe fallback then finds most sampled codes do NOT raise,
+    # falsifying the unquantified raises claim; the inference note
+    # still names price and not code
     assert results[0].verdict == "falsified"
     assert "price=50" in results[0].note
     assert "code=" not in results[0].note

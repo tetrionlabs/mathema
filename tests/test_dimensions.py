@@ -454,7 +454,7 @@ def test_a_premise_reaches_the_sequence_derive_route(tmp_path, monkeypatch):
     import mathema
     fn = _repeat(tmp_path, monkeypatch)
     (bare,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim("f(xs, s) >= 0")])
+        fn, [mathema.claim("f(xs, s) >= 0", route="derive")])
     (premised,) = mathema.claims.check_conjectures(
         fn, [mathema.claim("assuming s >= 0, f(xs, s) >= 0", route="derive")])
     assert bare.verdict == "falsified", bare.sketch
@@ -533,7 +533,7 @@ def test_a_premise_relating_two_parameters_reaches_the_sequence_route(
     importlib.invalidate_caches()
     fn = __import__("spreadmod").spread
     (bare,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim("f(xs, lo, hi) >= 0")])
+        fn, [mathema.claim("f(xs, lo, hi) >= 0", route="derive")])
     (premised,) = mathema.claims.check_conjectures(
         fn, [mathema.claim("assuming hi >= lo, f(xs, lo, hi) >= 0",
                            route="derive")])
@@ -599,9 +599,8 @@ def test_a_fixed_dimension_premise_proves_on_derive(tmp_path, monkeypatch):
         return p.verdict, p.sketch
 
     # without the premise the claim really is false for other lengths
-    (bare,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim("f(x) == x[0]**2 + x[1]**2")])
-    assert bare.verdict == "falsified", bare.verdict
+    bare, _ = verdict("f(x) == x[0]**2 + x[1]**2")
+    assert bare == "falsified", bare
     for spelling in ("assuming len(x) == 2, f(x) == x[0]**2 + x[1]**2",
                      "assuming dim(x, 0) == 2, f(x) == x[0]**2 + x[1]**2"):
         v, sketch = verdict(spelling)

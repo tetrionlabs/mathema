@@ -155,11 +155,16 @@ def test_another_derivative_spelling_says_why_it_stays_undecided(text):
     assert "derive could not read" in p.note
 
 
-def test_a_derive_route_claim_never_falls_to_the_family_probe():
+def test_a_derive_route_claim_takes_only_the_family_probes_counterexample():
     (p,) = check_conjectures(paid, [claim(
         "for payment in [-10, 10], d(f(payment), payment) >= 0", name="mine",
         route="derive")])
     assert p.verdict == "unknown"
     assert p.route == "derive"
-    assert "the claim asks for the derive route alone" in p.note
+    assert "draws found no counterexample" in p.note
     assert "unrecognized call" not in p.note
+    (q,) = check_conjectures(remaining, [claim(
+        "for payment in [-10, 10], d(f(payment), payment) >= 0", name="mine",
+        route="derive")])
+    assert (q.verdict, q.route) == ("falsified", "probe:algorithmic")
+    assert "(not increasing)" in q.counterexample

@@ -67,12 +67,9 @@ def test_bare_reference_to_a_bundled_parameter_is_a_clear_error():
     # free/aux variable; it has no single scalar value.
     results = check_conjectures(
         sum_fields, [claim("f(cfg) == cfg", route="derive")])
-    # never a phantom free variable: the clear error is kept in the note
-    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
-    assert "bundles multiple fields" in results[0].note
-    # on the default route probing then compares the sum against the
-    # dataclass itself, which is simply unequal
-    results = check_conjectures(sum_fields, [claim("f(cfg) == cfg")])
+    # never a phantom free variable: the clear error is kept in the
+    # note, and probing then compares the sum against the dataclass
+    # itself, which is simply unequal
     assert results[0].verdict == "falsified"
     assert "bundles multiple fields" in results[0].note
 

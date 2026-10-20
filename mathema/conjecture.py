@@ -621,15 +621,14 @@ def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
 def _derivative_family_by_statement(cj, fn, facts) -> "tuple | None":
     """Intent:
         The derivative-sign family whose statement the claim writes, for
-        a claim under any name on the probe or best route:
-        `(family, family_claim_name)`, e.g. the `monotonic_increasing`
-        family and `monotonic_increasing[x]` for `d(f(x), x) >= 0`. None
-        on any other route (a derive claim asks for derive alone), when
-        the statement is no family's, when the claim binds its own `d`
-        or `f`, carries a tolerance, chains comparisons or states a
-        negation, or when the family declines the function.
+        a claim under any name: `(family, family_claim_name)`, e.g. the
+        `monotonic_increasing` family and `monotonic_increasing[x]` for
+        `d(f(x), x) >= 0`. None when the statement is no family's, when
+        the claim binds its own `d` or `f`, carries a tolerance, chains
+        comparisons or states a negation, or when the family declines
+        the function.
     """
-    if cj.route not in ("probe", "best") or cj.links or cj.negated or cj.tolerance is not None \
+    if cj.links or cj.negated or cj.tolerance is not None \
             or {"d", "f"} & set(cj.funcs or {}):
         return None
     for base in _DERIVATIVE_FAMILY_FORMS:
@@ -6361,32 +6360,27 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     if float_companions:
                         out.extend(_stamped(line, cj, canonical=False) for line in lines)
                     continue
-            if cj.route == "derive":
-                # derive alone: what derive could not settle stays
-                # unknown with its reason, and nothing runs the code
-                alone, lines = _with_empty_input_lines(
-                    _derive_alone(ctx), ctx, fn, facts, float_companions,
-                    conjectures)
-                out.append(stamp(alone, _cap=verdict_cap))
-                if ctx.companion is not None:
-                    _emit_companion(out, _stamped(ctx.companion, cj_record,
-                                                  written=cj.domain or {}),
-                                    alone.name)
-                if float_companions:
-                    out.extend(_stamped(line, cj, canonical=False) for line in lines)
-                continue
-            # route "best" or "examine" and the derive stage couldn't
-            # settle it: fall through to the probe stage, same as an
-            # ordinary probe claim.
+            # the derive stage couldn't settle it: fall through to the
+            # probe stage, same as an ordinary probe claim. On route
+            # "derive" the probe is a falsifier only: its executed
+            # counterexample falsifies, and anything else leaves the
+            # claim unknown with derive's reason (`_derive_alone`).
             from .runtime_types._receivers import ReceiverRefused
+            import copy
+            stashed = (copy.deepcopy(ctx.derive_undecided)
+                       if cj.route == "derive" else None)
+            raw = None
             try:
-                probed = _arbitrate_empirical_fallback(
-                    _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+                raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
+                probed = _arbitrate_empirical_fallback(raw, ctx)
             except ReceiverRefused as refused:
                 probed = Probe(cj.name, ctx.statement, "skipped", route="probe",
                                note=f"{ctx.note}; no evaluable inputs: "
                                     f"{refused}".lstrip("; "),
                                meta={"mathema.probe_gap": "input-synthesis"})
+            if cj.route == "derive" and probed.verdict != "falsified":
+                ctx.derive_undecided = stashed
+                probed = _derive_alone(ctx, raw if raw is not None else probed)
 
             def probed_with(bound, cj=cj):
                 # the claim on the probe route under `let |inf| be bound`:
@@ -10416,11 +10410,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {why}",
             meta={"mathema.derive_status":
                   (mproof.status if mproof is not None else "unliftable")})
-        if cj.route == "derive":
-            # strict: this route promises proof-strength evidence, so
-            # an undecided identity is the honest unknown, never a
-            # silent fall to sampling.
-            return unknown
+        # route "best" takes the probe's evidence over this unknown;
+        # route "derive" takes only a counterexample the probe executes
         ctx.derive_undecided = unknown
         return None
     no_ordinary_derive = cj.relation in routes.examine_predicates()
@@ -10851,13 +10842,15 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                        "mathema.recursion_depth": dict(info)})
 
 
-def _derive_alone(ctx: "_ClaimContext") -> "Probe":
+def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
     """Intent:
-        The row of a route="derive" claim derive did not settle: unknown
-        on the derive route, the derive attempt's own report when one
-        was kept (`ctx.derive_undecided`), its reason in the note, and a
-        note that the probe did not run. `mathema.routes_attempted`
-        names the derive attempt alone.
+        The row of a route="derive" claim neither derive nor the probe's
+        falsifier settled: unknown on the derive route, the derive
+        attempt's own report when one was kept (`ctx.derive_undecided`),
+        its reason in the note, then what the probe found: how many
+        draws found no counterexample (a sampled pass is no verdict on
+        this route), or why it could not run them.
+        `mathema.routes_attempted` names both attempts.
     """
     cj = ctx.cj
     fallen = ctx.derive_undecided
@@ -10869,11 +10862,18 @@ def _derive_alone(ctx: "_ClaimContext") -> "Probe":
     if fallen.sketch and fallen.sketch not in note:
         note = f"{note} ({fallen.sketch})" if note.endswith(
             "derive could not decide it") else f"{note}; {fallen.sketch}"
-    fallen.note = (f"{note}; the claim asks for the derive route alone, so "
-                   f"the probe did not run").lstrip("; ")
+    if probed.verdict in ("holds", "proven"):
+        drawn = probed.n or 0
+        said = (f"the probe's {drawn} draw{'s' if drawn != 1 else ''} found "
+                f"no counterexample, and on the derive route a sampled pass "
+                f"is not a verdict")
+    else:
+        said = _probe_said(probed)
+    fallen.note = f"{note}; {said}".lstrip("; ")
     fallen.meta = {**(fallen.meta or {}),
                    "mathema.routes_attempted":
-                       f"routes attempted, {_derive_attempt_label(fallen)}"}
+                       f"routes attempted, {_derive_attempt_label(fallen)}; "
+                       f"{_probe_attempt_label(probed)}"}
     return fallen
 
 

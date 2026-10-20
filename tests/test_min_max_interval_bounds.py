@@ -50,8 +50,7 @@ def test_the_clip_is_nonnegative_without_smt(no_smt, route):
 def test_a_bound_the_clip_exceeds_is_not_proven(route):
     probe = _probe("for x in [-5, 5], f(x) <= 0.5", route=route)
     assert probe.verdict != "proven", (probe.verdict, probe.sketch)
-    assert probe.verdict == ("unknown" if route == "derive" else "falsified"), \
-        (probe.verdict, probe.note)
+    assert probe.verdict == "falsified", (probe.verdict, probe.note)
 
 
 x = sympy.Symbol("x", real=True)

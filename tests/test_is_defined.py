@@ -302,10 +302,7 @@ def test_an_unindexed_restriction_must_name_the_whole_region():
             raise ValueError("x must be positive")
         return math.sqrt(y) / x
 
-    (p,) = check_conjectures(two_guards, [
-        claim("y >= 0", name="is_defined", route="derive")])
-    assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.note)
-    for route in ("best", "probe"):
+    for route in ("derive", "best", "probe"):
         (p,) = check_conjectures(two_guards, [
             claim("y >= 0", name="is_defined", route=route)])
         assert p.verdict == "falsified", (route, p.verdict, p.note)
@@ -344,10 +341,7 @@ def test_a_chained_region_is_one_region_on_the_probe_route():
 def test_a_chained_region_wider_than_the_body_is_falsified_by_execution():
     # the body returns for every x >= -1, so x = 2 has a value outside
     # the stated region
-    (p,) = check_conjectures(_lower_only, [
-        claim("-1 <= x <= 1", name="is_defined", route="derive")])
-    assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.note)
-    for route in ("best", "probe"):
+    for route in ("derive", "best", "probe"):
         (p,) = check_conjectures(_lower_only, [
             claim("-1 <= x <= 1", name="is_defined", route=route)])
         assert p.verdict == "falsified", (route, p.verdict, p.note)

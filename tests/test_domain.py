@@ -110,13 +110,11 @@ def test_the_narrowed_region_is_reported_exactly():
 def test_narrowing_never_hides_a_counterexample():
     """A premise restricts where the claim is made, never what may
     refute it inside that region."""
-    false_in_region = _verdict(_recip, "assuming x > 0, for x in [-10,10], f(x) > 1",
-                               route="best")
+    false_in_region = _verdict(_recip, "assuming x > 0, for x in [-10,10], f(x) > 1")
     assert false_in_region.verdict == "falsified"
     assert false_in_region.counterexample
 
-    also_false = _verdict(_square, "assuming x >= 2, for x in [-10,10], f(x) >= 100",
-                          route="best")
+    also_false = _verdict(_square, "assuming x >= 2, for x in [-10,10], f(x) >= 100")
     assert also_false.verdict == "falsified"
 
 
@@ -183,10 +181,6 @@ def test_a_premise_relating_two_parameters_carries_its_strictness():
     # is admitted, and the difference is zero there
     weak_premise = _verdict(
         _gap, "assuming a <= b, for a in [-10,10], b in [-10,10], f(a,b) > 0")
-    assert weak_premise.verdict == "unknown", weak_premise.verdict
-    weak_premise = _verdict(
-        _gap, "assuming a <= b, for a in [-10,10], b in [-10,10], f(a,b) > 0",
-        route="best")
     assert weak_premise.verdict == "falsified", weak_premise.verdict
 
 
@@ -194,8 +188,7 @@ def test_a_two_parameter_premise_still_falsifies_from_inside_its_region():
     """`b^2 - a^2 >= 0` is false under `a <= b` (a = -8, b = -2), and
     the witness must satisfy the premise."""
     probe = _verdict(
-        _sq_gap, "assuming a <= b, for a in [-10,10], b in [-10,10], f(a,b) >= 0",
-        route="best")
+        _sq_gap, "assuming a <= b, for a in [-10,10], b in [-10,10], f(a,b) >= 0")
     assert probe.verdict == "falsified"
     numbers = [float(part.split("=")[1])
                for part in probe.counterexample.split(":")[0].split(",")]

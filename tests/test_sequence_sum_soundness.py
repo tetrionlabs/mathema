@@ -106,9 +106,6 @@ def _check(fn, law, **kw):
 def test_a_sum_against_the_first_element_is_not_proven(mod, route):
     kw = {"route": route} if route else {}
     p = _check(mod.against_first, "for xs in R^n, f(xs) >= 0", **kw)
-    if route == "derive":
-        assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.sketch)
-        p = _check(mod.against_first, "for xs in R^n, f(xs) >= 0")
     assert p.verdict == "falsified", (p.verdict, p.sketch)
     assert mod.against_first([1, -2]) < 0
     (witness,) = p.meta["mathema.counterexample_args"]

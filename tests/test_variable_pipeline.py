@@ -11,8 +11,8 @@ import pytest
 from mathema.claims import check_conjectures, claim
 
 
-def _v(fn, law, route="derive"):
-    return check_conjectures(fn, [claim(law, route=route)])[0]
+def _v(fn, law):
+    return check_conjectures(fn, [claim(law, route="derive")])[0]
 
 
 def test_let_bound_variable_proves_like_a_parameter():
@@ -40,8 +40,6 @@ def test_scaled_assumed_gap_proves():
     assert p.verdict == "proven"
     assert "b/2" in p.sketch
     p = _v(radius, "for a in [0,10], b in [0,10], f(a,b) >= 0")
-    assert p.verdict != "proven"
-    p = _v(radius, "for a in [0,10], b in [0,10], f(a,b) >= 0", route="best")
     assert p.verdict == "falsified"
 
 

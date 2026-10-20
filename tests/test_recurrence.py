@@ -85,8 +85,6 @@ def test_no_domain_is_gated_the_same_way():
     # `n <= 1: return n` clause makes f(0) = 0 while
     # f(-1) + f(-2) = -3, a real counterexample at n = 0
     r = _verdict(fib, "f(n) == f(n-1) + f(n-2)")
-    assert (r.verdict, r.route) == ("unknown", "derive")
-    r = _verdict(fib, "f(n) == f(n-1) + f(n-2)", route="best")
     assert r.verdict == "falsified"
     assert r.counterexample
 

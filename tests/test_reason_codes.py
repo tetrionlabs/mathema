@@ -98,7 +98,7 @@ def test_build_issue_record_explicit_claims_override_suggest_claims():
     # test_build_issue_record_omitted_claims_uses_suggest_claims);
     # lenient here has nothing to report even though clock_wraps is
     # genuinely falsified.
-    cj = claim("for hour in [0, 15], f(hour) == hour", name="clock_wraps")
+    cj = claim("for hour in [0, 15], f(hour) == hour", route="derive", name="clock_wraps")
     assert build_issue_record(clock_hour, [cj]) is None
     record = build_issue_record(clock_hour, [cj], include_falsified=True)
     assert [c["name"] for c in record["claims"]] == ["clock_wraps"]
@@ -130,9 +130,9 @@ def test_build_issue_record_multiple_failure_nodes():
     # law at all); an open unknown always counts, lenient or strict,
     # so lenient here already reports one failing node, and strict is
     # what makes it two at once.
-    cj1 = claim("for hour in [0, 15], f(hour) == hour", name="clock_wraps")
+    cj1 = claim("for hour in [0, 15], f(hour) == hour", route="derive", name="clock_wraps")
     cj2 = claim("for hour in [0, 100], Sum(f(hour), k, 1, 3) <= 32",
-                name="stays_small")
+                route="derive", name="stays_small")
     # stays_small now FALSIFIES through the lifted-numeric fallback
     # (3*Mod(hour,12) reaches 33 > 32, an executed witness on the
     # resolved intermediate), so no OPEN unknown remains and the

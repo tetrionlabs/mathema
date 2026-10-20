@@ -40,7 +40,7 @@ def test_a_disproof_reproduced_via_the_seed_is_semi_analytical():
     # exactly probe:semi_analytical, pinned, not a permissive set
     def sqm1(x):
         return x * x - 1.0
-    p = _v(sqm1, "for x in [-2, 2], f(x) >= 0", route="best")
+    p = _v(sqm1, "for x in [-2, 2], f(x) >= 0")
     assert p.verdict == "falsified"
     assert p.route == "probe:semi_analytical"
 

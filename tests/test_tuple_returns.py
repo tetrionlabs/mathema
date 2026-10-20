@@ -61,12 +61,9 @@ def test_comparing_a_tuple_valued_claim_against_a_scalar_is_unliftable():
     # not a crash, a clear, reported refusal
     results = check_conjectures(
         to_cartesian, [claim("f(r, theta) == r", route="derive")])
-    # the refusal is clear (kept in the note)
-    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
-    assert "tuple-valued" in results[0].note
-    # on the default route the probe fallback then compares the tuple
-    # against the scalar for real, which is simply unequal
-    results = check_conjectures(to_cartesian, [claim("f(r, theta) == r")])
+    # the refusal is clear (kept in the note), and the probe fallback
+    # then compares the tuple against the scalar for real, which is
+    # simply unequal
     assert results[0].verdict == "falsified"
     assert "tuple-valued" in results[0].note
 
@@ -76,8 +73,6 @@ def test_an_out_of_range_tuple_index_falsifies_the_claim_not_a_crash():
     # value at any point of its domain
     results = check_conjectures(
         to_cartesian, [claim("f(r, theta)[2] == r", route="derive")])
-    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
-    results = check_conjectures(to_cartesian, [claim("f(r, theta)[2] == r")])
     assert results[0].verdict == "falsified"
     assert "IndexError" in (results[0].counterexample or "")
 

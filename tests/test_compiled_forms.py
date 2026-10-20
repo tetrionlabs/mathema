@@ -62,18 +62,18 @@ def heat_index_like(t, h):
             + 0.012 * t * t * math.exp(h / 80) / (1 + 0.01 * t * h))
 
 
-def test_false_derivative_claim_is_never_proven():
+def test_false_derivative_claim_falsifies_through_some_route():
     # d(f,h) >= -10 is genuinely false in the box (the -0.146*t term
-    # dominates); sympy's sign engine stalls on the expression, and no
-    # route may prove it
-    for route in ("derive", "best"):
-        (p,) = check_conjectures(heat_index_like, [claim(
-            "for t in [80,110], h in [40,100], d(f(t,h), h) >= -10",
-            route=route)])
-        assert p.verdict != "proven", (route, p.verdict)
-        if p.route == "probe:lifted_numeric":
-            assert "reconstruction" in p.note
-            assert p.counterexample
+    # dominates); sympy's sign engine stalls on the expression, so the
+    # lifted-numeric fallback supplies the counterexample, but any
+    # route agreeing it is false is a pass
+    (p,) = check_conjectures(heat_index_like, [claim(
+        "for t in [80,110], h in [40,100], d(f(t,h), h) >= -10",
+        route="derive")])
+    assert p.verdict == "falsified"
+    if p.route == "probe:lifted_numeric":
+        assert "reconstruction" in p.note
+        assert p.counterexample
 
 
 def test_true_derivative_claim_gathers_lifted_numeric_evidence():
@@ -98,7 +98,8 @@ def test_unclosable_integral_gets_quad_backed_evidence():
     def carrier(a):
         return a
     (p,) = check_conjectures(carrier, [claim(
-        "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10")])
+        "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10",
+        route="derive")])
     assert p.verdict == "falsified"
     assert p.route == "probe:lifted_numeric"
     assert p.counterexample
