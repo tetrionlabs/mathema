@@ -132,8 +132,8 @@ twin cannot tell the real `float` from its exact one), `str`/`repr`/
 `format`/`ascii`/`bin`/`hex`/`oct`/`id` calls, f-strings, `%`
 formatting with a string, `.format(...)`,
 `__str__`/`__repr__`/`__format__`, `.hex()`, `float.fromhex`,
-`.as_integer_ratio()`, explicit `Fraction(...)` and `Decimal(...)`,
-`isinstance`/`issubclass` against `Fraction`, `Decimal`,
+`.as_integer_ratio()`, `isinstance`/`issubclass` against `Fraction`,
+`Decimal`,
 `numbers.Rational` or a sympy class, `math.isclose`, `math.frexp`,
 `math.ldexp`, `math.ulp`, `math.nextafter`, and any use of the
 `struct` or `ctypes` modules, under any alias and whether imported at
@@ -142,7 +142,11 @@ module level or inside the body. Text turned back into a number
 with the text. An `import math` inside the body reaches the exact
 `math` too. A body with no source to scan (built in, a lambda,
 defined by `exec`) or a decorated function is refused the same way:
-nothing vouches for it.
+nothing vouches for it. `Fraction(...)` and `Decimal(...)` built from
+exact arguments (an int, a string, a `Decimal`) are exact by
+construction and read as the computation builds them; built from a
+float, or from a `Fraction` (which may stand for one), the point is
+undecided when the call runs (`_exact_constructor`).
 
 Text whose only reach is an exception's message is not refused: an
 f-string, `"..." % x`, `"...".format(...)`, `str(...)` or `repr(...)`
@@ -906,17 +910,53 @@ _CATCHING: tuple = (ast.Try, getattr(ast, "TryStar", ast.Try), ast.With,
 
 
 def _refused_callables() -> frozenset:
-    """The ids of the callables (and classes) whose value depends on the
-    float representation, or that build an exact number the computation
-    never had."""
-    import decimal
+    """The ids of the callables whose value depends on the float
+    representation. `Fraction` and `Decimal` are not among them: called
+    on exact arguments they build an exact number, and called on
+    anything else the reading declines at run time
+    (`_exact_constructor`)."""
     import numbers
-    values = [Fraction, decimal.Decimal, numbers.Rational, math.isclose,
+    values = [numbers.Rational, math.isclose,
               math.frexp, math.ldexp, math.nextafter, float.fromhex,
               float.hex, float.as_integer_ratio]
     if hasattr(math, "ulp"):
         values.append(math.ulp)
     return frozenset(id(v) for v in values)
+
+
+def _refused_classes() -> frozenset:
+    """The ids of the classes a type check of a number cannot ask in the
+    reading: an exact number standing for a float is a `Fraction`, so
+    `isinstance(x, Fraction)` would be answered otherwise than the
+    computation answers it."""
+    import decimal
+    return _refused_callables() | frozenset(
+        id(v) for v in (Fraction, decimal.Decimal))
+
+
+def _exact_constructor(func):
+    """Intent:
+        `Fraction` or `Decimal` as the reading calls it: built as the
+        computation builds it when every argument is exact by
+        construction (an int, a string, a `Decimal`), in the twin's run
+        and in its shadow alike.
+
+    Raises:
+        NotExact: in a run of the twin, an argument is anything else: a
+            float, which has no exact reading beyond its own value, or a
+            `Fraction`, which may stand for one.
+    """
+    import decimal
+
+    def call(*args, **kwargs):
+        if _STATE.mode != "float":
+            for arg in (*args, *kwargs.values()):
+                if isinstance(arg, (int, str, decimal.Decimal)):
+                    continue
+                _not_exact(f"{_named(func)} is called on a number it does "
+                           f"not read exactly")
+        return func(*args, **kwargs)
+    return call
 
 
 def _refused_modules() -> frozenset:
@@ -939,6 +979,7 @@ class _Scan(ast.NodeVisitor):
         self.imported: dict = {}
         self.found: list = []
         self.callables = _refused_callables()
+        self.classes = _refused_classes()
         self.modules = _refused_modules()
         # the ids of the text constructs whose only reach is an
         # exception's message (`_message_text`)
@@ -1020,7 +1061,7 @@ class _Scan(ast.NodeVisitor):
         value = self._resolve(node)
         if value is _MISSING or not isinstance(value, type):
             return False
-        if id(value) in self.callables:
+        if id(value) in self.classes:
             return True
         return any((getattr(c, "__module__", "") or "").split(".")[0] == "sympy"
                    for c in value.__mro__)
@@ -2160,6 +2201,9 @@ def _callee(func, site=None):
     if isinstance(func, type):
         if func.__module__ == "builtins":
             return _builtin(func)
+        if func is Fraction or func.__name__ == "Decimal" \
+                and func.__module__ in ("decimal", "_decimal"):
+            return _exact_constructor(func)
         if issubclass(func, BaseException):
             return _opaque(func)
         return _refuser(f"{name} is a class the reading does not follow")

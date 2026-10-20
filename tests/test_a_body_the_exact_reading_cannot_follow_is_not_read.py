@@ -250,11 +250,29 @@ def test_a_hidden_read_declines_the_sweep_before_any_reading():
     assert p.route == "probe", p.route
 
 
-@pytest.mark.parametrize("fn", REFUSED, ids=lambda f: f.__name__)
+#: bodies building an exact number from a float (`Fraction(x)`,
+#: `Decimal(x)`): the construction is read, and declined when it runs on
+#: a number standing for a float, which has no exact reading beyond its
+#: own value
+BUILT_FROM_A_FLOAT = [via_decimal, via_local_fraction]
+
+
+@pytest.mark.parametrize("fn", [fn for fn in REFUSED
+                                if fn not in BUILT_FROM_A_FLOAT],
+                         ids=lambda f: f.__name__)
 def test_the_refusal_is_found_on_the_syntax_tree(fn):
     found = unfaithful(fn)
     assert found, fn.__name__
     assert exact_twin(fn) is None, fn.__name__
+    with pytest.raises(Exception) as caught:
+        exact_callee(fn)(1.0)
+    assert type(caught.value).__name__ == "NotExact", caught.value
+
+
+@pytest.mark.parametrize("fn", BUILT_FROM_A_FLOAT, ids=lambda f: f.__name__)
+def test_a_construction_from_a_float_is_declined_when_it_runs(fn):
+    assert unfaithful(fn) == [], fn.__name__
+    assert exact_twin(fn) is not None, fn.__name__
     with pytest.raises(Exception) as caught:
         exact_callee(fn)(1.0)
     assert type(caught.value).__name__ == "NotExact", caught.value
