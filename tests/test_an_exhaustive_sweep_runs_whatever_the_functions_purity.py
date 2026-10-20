@@ -54,6 +54,7 @@ def test_the_examination_cannot_read_the_pandas_call():
     assert _examined_clean(exposure_pure)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_rare_counterexample_is_found_though_purity_is_unknown():
     (p,) = check_conjectures(exposure_counts, [claim(
         _DOMAIN + "f(active, periods) <= active / periods + 0.0099")])
@@ -63,6 +64,7 @@ def test_a_rare_counterexample_is_found_though_purity_is_unknown():
     assert exposure_counts(7, 25) == 0.29
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_clean_sweep_over_an_unexamined_function_holds_with_its_reason():
     (p,) = check_conjectures(exposure_floor, [claim(
         _DOMAIN + "f(active, periods) <= active / periods")])
@@ -71,6 +73,7 @@ def test_a_clean_sweep_over_an_unexamined_function_holds_with_its_reason():
     assert "proven needs the function to be shown pure" in p.note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_clean_sweep_over_a_pure_function_is_still_proven():
     # pure, and the body's divisions are read as ratios; at active = 29,
     # periods = 50 the floor differs (float 29 / 50 * 100 is
@@ -85,6 +88,7 @@ def test_a_clean_sweep_over_a_pure_function_is_still_proven():
     assert "active = 29, periods = 50" in p.note, p.note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_clean_sweep_over_a_pure_exact_function_is_still_proven():
     (p,) = check_conjectures(exposure_percent_pure, [claim(
         _DOMAIN + "f(active, periods) <= 100 * active / periods")])

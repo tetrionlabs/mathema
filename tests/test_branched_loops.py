@@ -10,6 +10,8 @@ loop-then-branch regions, in-branch further branching around a loop,
 sequence parameters, and non-returning arms all stay honestly out."""
 import textwrap
 
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -214,6 +216,7 @@ def geometric(n: int, y: float, face: float) -> float:
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_elif_chain_around_a_loop(tmp_path):
     mod = _mod(tmp_path, _BODY, "bl_g")
     p = _run(mod.elif_chain,
@@ -249,6 +252,7 @@ def test_avoided_raise_region_still_proves(tmp_path):
 
 # --- designed declines, pinned ----------------------------------------------
 
+@pytest.mark.needs_full_proof_budget
 def test_loop_then_branch_proves(tmp_path):
     # the loop closes into the environment and its value flows through
     # the branches that follow, both sides prove

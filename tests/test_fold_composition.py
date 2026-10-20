@@ -45,6 +45,7 @@ def _one(fn, law, funcs, route="derive"):
     return p
 
 
+@pytest.mark.needs_full_proof_budget
 def test_scale_composes_and_proves_for_any_linear_fold(folds):
     for fn, law in (
         (folds.ema, "for alpha in [0,1], let c be [0.1, 10], "
