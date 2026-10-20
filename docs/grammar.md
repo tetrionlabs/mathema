@@ -206,8 +206,13 @@ The other relations use the same allowance where it makes sense: `<=` and
 none, since equality must not pass for strictly less, and `!=` with no
 declared tolerance fails only where the two sides are exactly equal.
 
-A probe `holds` that the allowance on `<=` or `>=` absorbed says so in its
-note, with the largest gap it absorbed. The derive route has no allowance
+A probe line, or the computation row of an `f =:= g` claim, that holds
+with a gap the tolerance absorbed says so in its note, for `==` as for
+`<=` and `>=`: the largest gap, the point it
+was measured at, and the tolerance it fell within (the declared one, or
+the default allowance's value at that point). A pass with no gap carries
+no such clause, so a bit-exact pass reads apart from an absorbed one.
+The derive route has no allowance
 to spend: when it disproves a `<=`, `>=` or `==` claim, the real code is
 run at derive's witness and compared exactly, and a violation there,
 however small, falsifies the claim with that point as the witness. So

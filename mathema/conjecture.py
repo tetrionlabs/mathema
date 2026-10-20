@@ -58,10 +58,11 @@ from ._float_text import exact_literal_text, overlong_literals
 from .domain import DuplicateBinding
 from .domain import operational_domain as _operational_domain
 from . import _conditioning
-from ._allowance import (ABSOLUTE, exact_side_at, largest_miss, reference_side,
-                         relation_within)
+from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
+                         reference_side, relation_within)
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
+from ._tolerance import number_text as _number_text
 from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
@@ -6285,6 +6286,26 @@ def _combine_conjunction(probes: list, name: str, statement: str,
 _WITHIN = re.compile(r"within the (?:default tolerance|tolerance \(|round-off)")
 
 
+def passed_within_words(relation: str, gap: float, at: "str | None",
+                        allowance: float, tolerance=None) -> str:
+    """Intent:
+        The clause a computation line's note gives a pass whose sides
+        differ: the largest gap (`differs by` for an equality, `fails
+        by` for an ordering), the point it was measured at, and the
+        tolerance it fell within: the declared one as the claim writes
+        it, else the default allowance's value at that point.
+    """
+    verb = "differs" if relation in ("==", "~=") else "fails"
+    where = f" at {at}" if at else ""
+    if tolerance is None:
+        within = f"the default tolerance ({allowance:.3g})"
+    else:
+        written = (tolerance.text() if isinstance(tolerance, ToleranceKind)
+                   else _number_text(tolerance))
+        within = f"the tolerance (declared {written})"
+    return f"{verb} by {gap:.3g}{where}, within {within}"
+
+
 def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
     """Intent:
         The reason a claim has no evaluable inputs when it would draw a
@@ -11092,13 +11113,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     checked, cx, cx_stratum = 0, None, None
     # the largest exact ordering violation the default allowance
     # absorbed, and the arguments it happened at
-    absorbed, absorbed_at = 0.0, None
+    absorbed, absorbed_at, absorbed_allowance = 0.0, None, DEFAULT_TOLERANCE
     # the largest disagreement a draw's own round-off accounted for
     roundoff_absorbed, roundoff_at = 0.0, None
     # the largest equality gap the relative tolerance absorbed at a draw
     # that holds in exact arithmetic, and the draws that passed only
     # within a tolerance and could not be evaluated exactly
     relative_absorbed, relative_at = 0.0, None
+    # the largest gap any pass of `==`, `<=` or `>=` fell within, the
+    # allowance there and the arguments it happened at
+    passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
@@ -12195,6 +12219,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             gap = ordering_shortfall(lv, rv, cj.relation)
             if gap > absorbed:
                 absorbed, absorbed_at = gap, _point_text(args)
+                measured = float_miss(lv, rv, cj.relation, None, 0.0, side)
+                absorbed_allowance = (measured[1] if measured is not None
+                                      else DEFAULT_TOLERANCE)
+        if ok and roundoff_gap is None and cj.relation in ("==", "<=", ">="):
+            measured = float_miss(compare_l, compare_r, cj.relation,
+                                  cj.tolerance, 0.0, side)
+            if measured is not None and measured[0] > passed_gap:
+                passed_gap, passed_allowance = measured
+                passed_at = _point_text(args)
         mathematics = None
         if not ok and not exactly_false and family is None:
             # the mathematics at the point: f run on the exact numbers
@@ -12380,8 +12413,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "skipped", route="probe",
                      note=note + why)
     if absorbed > 0:
-        note = (f"{note}; fails by {absorbed:.3g} at {absorbed_at}, within "
-                f"the default tolerance ({DEFAULT_TOLERANCE:g})").lstrip("; ")
+        note = (f"{note}; " + passed_within_words(
+            cj.relation, absorbed, absorbed_at, absorbed_allowance)
+                ).lstrip("; ")
     if roundoff_absorbed > 0:
         note = (f"{note}; differs by {roundoff_absorbed:.3g} at "
                 f"{roundoff_at}, within the round-off of that draw's "
@@ -12391,6 +12425,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"{relative_at}, within the tolerance ({DEFAULT_TOLERANCE:g} "
                 f"plus {_declared_rel_tol(cj):g} times the larger side), and "
                 f"holds there in exact arithmetic").lstrip("; ")
+    if passed_gap > 0 and not (absorbed or roundoff_absorbed
+                               or relative_absorbed):
+        note = (f"{note}; " + passed_within_words(
+            cj.relation, passed_gap, passed_at, passed_allowance,
+            cj.tolerance)).lstrip("; ")
     if inconclusive:
         note = f"{note}; {inconclusive_words}".lstrip("; ")
     return Probe(cj.name, statement, "holds", n=checked, route=probe_route, note=note,

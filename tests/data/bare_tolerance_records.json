@@ -741,7 +741,7 @@
     },
     "n": 33,
     "name": "f_x_eq_x",
-    "note": "derive could not decide it (x + 1/1000000 \u2260 x: the difference 1/1000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (1e-05), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
+    "note": "differs by 1e-06 at x = 3.6372060900598457, within the tolerance (declared 1e-5); derive could not decide it (x + 1/1000000 \u2260 x: the difference 1/1000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (1e-05), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
     "route": "probe",
     "tolerance": 1e-05,
     "verdict": "holds"
@@ -927,7 +927,7 @@
     },
     "n": 161,
     "name": "f_x_eq_x",
-    "note": "derive could not decide it (10000000001*x/10000000000 \u2260 x: the difference x/10000000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (0.001), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
+    "note": "differs by 0.0001 at x = 1e+06, within the tolerance (declared 0.001); derive could not decide it (10000000001*x/10000000000 \u2260 x: the difference x/10000000000 is nonzero in exact arithmetic, by less than the tolerance; within the declared tolerance (0.001), so not a disproof of this claim), so the probe decided it by running the code; at x = nan f gave nan back",
     "route": "probe",
     "tolerance": 0.001,
     "verdict": "holds"
