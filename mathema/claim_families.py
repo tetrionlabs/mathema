@@ -4694,8 +4694,7 @@ def _matrix_output_probe(prop):
             if got is None:
                 if prop.level == "finite" and not_a_number is None \
                         and not is_numeric(value):
-                    not_a_number = (f"{_fmt(tuple(filled), tuple(facts.params))}: "
-                                    f"{NOT_A_NUMBER}")
+                    not_a_number = f"{witness}: {NOT_A_NUMBER}"
                 continue
             checked += 1
             if got is not True:
