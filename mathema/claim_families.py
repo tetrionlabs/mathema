@@ -424,16 +424,22 @@ def _held_text(facts, target: str, args: list) -> str:
 #: a missing argument: outside the working domain, no trial
 _REFUSED = object()
 
+#: a shape probe's call whose float64 run overflowed: the mathematics
+#: there is not shown by the computation, no trial
+_OVERFLOWED = object()
+
 
 def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
     """Intent:
         One call a shape probe makes, with `target` at `x`, as
         `(value, no_value)`. `no_value` is None when the call returned a
         value, and otherwise says how the call had none: a raise that is
-        not the function's own guard, a nan or an infinity, or a None
-        its return type does not admit. `value` is `_REFUSED` when the
-        function's own guard rejected the call or the call raised at a
-        missing argument.
+        not the function's own guard, a nan, or a None its return type
+        does not admit. `value` is `_REFUSED` when the function's own
+        guard rejected the call or the call raised at a missing
+        argument, and `_OVERFLOWED` when the float64 run overflowed (an
+        OverflowError, or an infinity returned): an overflow is the
+        computation's, never a shape claim's counterexample.
 
     Raises:
         PremiseRejected: the call lies outside the claim's premises.
@@ -456,6 +462,8 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
                 is_missing(a) for p, a in zip(facts.params, args)
                 if p != target):
             return _REFUSED, None
+        if not _no_overflow(None, exc):
+            return _OVERFLOWED, None
         return None, f"raised {exception_name(exc)}"
     if value is None:
         return value, (None if declared_optional_return(fn) else
@@ -463,8 +471,28 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
                        "admit")
     scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
     if scalar and _is_nonfinite(value):
+        if not _no_overflow(value, None):
+            return _OVERFLOWED, None
         return value, f"returned {value_shown(value)}"
     return value, None
+
+
+def _with_overflow_reason(result, target: str, overflowed: dict):
+    """Intent:
+        A shape probe's result once some call overflowed: a run that
+        found no counterexample is unknown, with the reason that the
+        float64 run overflowed at the first such point, since the
+        mathematics there is not what the computation shows. A
+        counterexample found elsewhere stands.
+    """
+    if not overflowed or result is None or result[0] not in ("holds",
+                                                             "skipped"):
+        return result
+    return ("unknown", result[1],
+            f"the float64 run overflowed at {target} = "
+            f"{_fmt_coordinate(overflowed['at'])}, where the mathematics "
+            f"has a value the computation does not show, and an overflow "
+            f"is judged by is_computation_safe")
 
 
 def _no_value_witness(target: str, x, no_value: str, held: str) -> str:
@@ -493,6 +521,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     bounds = domain.get(target)
     no_value: dict = {}
+    overflowed: dict = {}
 
     def trial(args):
         x1 = _synth("float", rng, bounds)
@@ -507,7 +536,10 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if gone is not None:
                 return _no_value_witness(target, x, gone,
                                          _held_text(facts, target, args))
-        if v1 is _REFUSED or v2 is _REFUSED:
+        for x, v in ((x1, v1), (x2, v2)):
+            if v is _OVERFLOWED:
+                overflowed.setdefault("at", x)
+        if any(v is _REFUSED or v is _OVERFLOWED for v in (v1, v2)):
             return None
         for x, v in ((x1, v1), (x2, v2)):
             if not _a_value(v):
@@ -530,6 +562,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{f' at {held}' if held else ''} (not {direction})")
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _with_overflow_reason(result, target, overflowed)
     return _with_no_value_note(result, fn, target, cj, no_value)
 
 
@@ -611,6 +644,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
     bounds = domain.get(target)
     lo, hi = _interval_ends(bounds) or (None, None)
     no_value: dict = {}
+    overflowed: dict = {}
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
@@ -634,7 +668,10 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if gone is not None:
                 return _no_value_witness(target, x, gone,
                                          _held_text(facts, target, args))
-        if any(v is _REFUSED for _x, v, _gone in calls):
+        for x, v, _gone in calls:
+            if v is _OVERFLOWED:
+                overflowed.setdefault("at", x)
+        if any(v is _REFUSED or v is _OVERFLOWED for _x, v, _gone in calls):
             return None
         (_, v_lo, _), (_, v_mid, _), (_, v_hi, _) = calls
         for x, v, _gone in calls:
@@ -688,6 +725,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{curvature:.6g} does not settle {kind}")
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _with_overflow_reason(result, target, overflowed)
     return _with_no_value_note(result, fn, target, cj, no_value)
 
 
@@ -3351,8 +3389,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         return True
 
     from .probing import _bound_is_complex
-    # over real arguments a complex result is no value
-    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
+    from .symbolic._partiality import returns_complex
+    # over real arguments a complex result is no value, unless f's own
+    # return annotation admits a complex number
+    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values()) \
+        and not returns_complex(fn)
     executed = 0
     caught: dict = {}
 

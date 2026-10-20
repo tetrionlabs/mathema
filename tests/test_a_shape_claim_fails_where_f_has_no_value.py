@@ -39,8 +39,15 @@ def capped(x: float) -> float:
 
 
 def overflow_literal(x: float) -> float:
+    # 1e309 is a finite number past the float range: Python reads inf
     if x > 0:
         return 1e309
+    return x
+
+
+def huge_integer(x: float) -> float:
+    if x > 0:
+        return 10 ** 400
     return x
 
 
@@ -89,16 +96,23 @@ def test_a_raise_inside_the_domain_falsifies_a_curvature_claim():
     assert "raised ValueError" in p.counterexample, p.counterexample
 
 
+def test_an_overflow_is_no_counterexample_to_a_direction():
+    # 1e309 as written is 10**309, so f never decreases; the float64 run
+    # reads it as inf, which says nothing about the mathematics
+    p = _row(overflow_literal, "for x in [-10, 10], d(f(x), x) >= 0",
+             "monotonic_increasing[x]")
+    assert p.verdict == "unknown", (p.verdict, p.counterexample, p.note)
+    assert "float64 run overflowed" in (p.note or ""), p.note
+
+
 @pytest.mark.parametrize("text, name", [
-    ("for x in [-10, 10], d(f(x), x) >= 0", "monotonic_increasing[x]"),
     ("for x in [-10, 10], d(f(x), x, x) == 0", "affine[x]"),
     ("for x in [-10, 10], d(f(x), x, x) >= 0", "convex[x]"),
 ])
-def test_an_infinite_literal_falsifies_and_never_ends_the_check(text, name):
+def test_an_overflow_is_no_counterexample_to_a_curvature(text, name):
     p = _row(overflow_literal, text, name)
-    assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "inf" in p.counterexample, p.counterexample
-    assert _witness_x(p) > 0, p.counterexample
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert "inf" not in (p.counterexample or ""), p.counterexample
 
 
 def test_the_functions_own_guard_cuts_the_working_domain():
@@ -121,3 +135,10 @@ def test_a_guard_refusal_is_named_as_the_guard_refusing():
     assert "DomainError" in p.counterexample
     assert "floating-point boundary" not in p.counterexample, p.counterexample
     assert math.isfinite(1.0)
+
+
+def test_an_integer_past_the_float_range_never_ends_the_check():
+    p = _row(huge_integer, "for x in [-10, 10], d(f(x), x, x) >= 0",
+             "convex[x]")
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert "inf" not in (p.counterexample or ""), p.counterexample

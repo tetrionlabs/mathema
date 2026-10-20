@@ -40,8 +40,7 @@ def all_nan(x: float) -> float:
 
 
 def nan_in_float(x: float) -> float:
-    big = x * 1e308 * 10.0
-    return big - big
+    return (x - x) * (1e308 * 10.0)
 
 
 def count_up(n: float) -> float:
