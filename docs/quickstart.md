@@ -164,10 +164,10 @@ binds to (an excerpt):
 
 <!-- example: docstring output match=subset -->
 ```yaml
-# machine record; binds to form d2ab6eef1b84
+# machine record; binds to form py:d2ab6eef1b84
 pricing.discounted:
   identity:
-    form: "d2ab6eef1b84"
+    form: "py:d2ab6eef1b84"
   claims:
     - name: "missing[price]"
       statement: "missing(f, price) propagates"

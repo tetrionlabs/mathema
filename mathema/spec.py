@@ -1190,7 +1190,8 @@ def _dependency_state(dep: dict, verified: dict,
            for c in entry.get("claims") or []):
         return "invalidated"
     stored_form = (entry.get("identity") or {}).get("form")
-    if stored_form != form:
+    from .identity import same_form
+    if not same_form(stored_form, form):
         return "stale"
     from .koine.facts import provenance_change
     moved = provenance_change(dep.get("provenance"),

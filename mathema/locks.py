@@ -29,6 +29,8 @@ from __future__ import annotations
 import datetime
 import os
 
+from .identity import same_form
+
 
 class LockError(Exception):
     """A lock operation that cannot proceed: unknown key, a re-lock at
@@ -74,7 +76,7 @@ def lock(root: str, key: str, form: str, *, by: str | None = None,
     locks = load_locks(root)
     existing = locks.get(key)
     if existing:
-        if existing.get("form") == form:
+        if same_form(existing.get("form"), form):
             return existing
         raise LockError(
             f"{key} is already locked at form {existing.get('form')} "
@@ -113,14 +115,20 @@ def lock_state(key: str, current_form: str | None, locks: dict,
         "moved-outside" (the meta entry pins a different form from the
         record's lock stamp, i.e. someone edited the lock file rather
         than unlocking and re-locking).
+
+    Notes:
+        Forms compare by `identity.same_form`, so a lock taken at a
+        bare form, before Python forms were namespaced, still holds at
+        the same form written `py:<sha>`.
     """
     meta_entry = locks.get(key)
     stamped = (verified_entry or {}).get("locked")
     if meta_entry is None:
         return "removed-outside" if isinstance(stamped, dict) else None
     if isinstance(stamped, dict) and stamped.get("form") \
-            and stamped.get("form") != meta_entry.get("form"):
+            and not same_form(stamped.get("form"), meta_entry.get("form")):
         return "moved-outside"
-    if current_form is not None and meta_entry.get("form") != current_form:
+    if current_form is not None and not same_form(meta_entry.get("form"),
+                                                  current_form):
         return "changed"
     return "held"

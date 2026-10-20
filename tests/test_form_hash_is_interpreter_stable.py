@@ -39,7 +39,7 @@ def test_a_field_an_interpreter_adds_empty_does_not_change_the_text():
 
 
 def test_the_hash_is_the_one_every_supported_python_produces():
-    assert form_hash(_fdef()) == "ebb4c9b87847"
+    assert form_hash(_fdef()) == "py:ebb4c9b87847"
 
 
 def test_content_still_tells_forms_apart():

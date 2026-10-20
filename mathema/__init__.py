@@ -1098,7 +1098,8 @@ def status(root: str = ".") -> str:
             lines.append(f"  ∅ {key}: no verified record")
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
-        state = ("fresh" if stored and stored == current
+        from .identity import same_form
+        state = ("fresh" if stored and same_form(stored, current)
                  else "stale (code changed since spec)" if stored else "no hash")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")

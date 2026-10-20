@@ -40,7 +40,7 @@ print(mathema.check(mean_return, claims=[value]))
 
 <!-- example: mean output -->
 ```text
-mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
+mathema.Record(mean_return) · source, no side effects · form py:cb973acd88fd
   bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
     holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   445 entries across 99 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
@@ -88,7 +88,7 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_missing_safe(f
 
 <!-- example: mean output -->
 ```text
-mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
+mathema.Record(mean_return) · source, no side effects · form py:cb973acd88fd
   bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
     holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   445 entries across 99 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
@@ -126,7 +126,7 @@ print(mathema.check(mean_return, claims=[value, mathema.claim("is_empty_safe(xs)
 
 <!-- example: mean output -->
 ```text
-mathema.Record(mean_return) · source, no side effects · form cb973acd88fd
+mathema.Record(mean_return) · source, no side effects · form py:cb973acd88fd
   bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   falsified at xs = []
     holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   445 entries across 99 draws, sizes (1, 1) to (8, 1)
     falsified  policy       f([])   f(xs) returns nan at xs = []: no value for no data, and no empty policy is stated
@@ -181,7 +181,7 @@ print(mathema.check(returns_fixed.mean_return, claims=[
 
 <!-- example: mean output -->
 ```text
-mathema.Record(mean_return) · source, no side effects · form 9671b357ded6
+mathema.Record(mean_return) · source, no side effects · form py:9671b357ded6
   bounded  for xs in ([-1.0, 1.0] | {missing})^n : float, -1 <= f(xs) <= 1   holds
     holds      computation  for xs in ([-1.0, 1.0])^n : float, -1 <= f(xs) <= 1   531 entries across 124 draws, sizes (1, 1) to (8, 1)
     holds      policy       f([])

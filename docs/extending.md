@@ -411,7 +411,9 @@ could honestly state, with `tree=None` and a namespaced form hash
 (`"<frontend>:<sha>"`). `mathema.analyze` returns it outright when present,
 which is richer than the documentation-only fallback a source-less
 callable would otherwise get. Form hashes are compared only within a
-namespace, never across.
+namespace, never across. The Python frontend writes `py:<sha>`; a
+bare hash, which records from releases before 0.6.3 hold, is read as
+Python's.
 
 Every part of mathema that reads a callable's facts reads the injected
 ones when they are present: checking and proving its claims, a

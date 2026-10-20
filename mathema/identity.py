@@ -140,13 +140,40 @@ def form_text(node) -> str:
     return repr(node)
 
 
+#: the namespace of every form hash the Python frontend writes
+PYTHON_FORM_NAMESPACE = "py"
+
+
 def form_hash(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    """The `form` identity: a 12-hex-char hash of the function's
-    alpha-normalized AST (`normalized()`, locals/parameters replaced
-    by binding-order names, so a pure rename doesn't change it, but any
-    real structural change does), rendered by `form_text` so the hash
-    is the same on every supported Python."""
-    return hashlib.sha256(form_text(normalized(fdef)).encode()).hexdigest()[:12]
+    """The `form` identity, `py:<sha>`: the Python frontend's namespace
+    and a 12-hex-char hash of the function's alpha-normalized AST
+    (`normalized()`, locals/parameters replaced by binding-order names,
+    so a pure rename doesn't change it, but any real structural change
+    does), rendered by `form_text` so the hash is the same on every
+    supported Python."""
+    digest = hashlib.sha256(form_text(normalized(fdef)).encode()).hexdigest()[:12]
+    return f"{PYTHON_FORM_NAMESPACE}:{digest}"
+
+
+def namespaced_form(form: "str | None") -> "str | None":
+    """Intent:
+        `form` as `<frontend>:<sha>`. A bare hash, the spelling a record
+        written before Python forms were namespaced holds, is the Python
+        frontend's and reads as `py:<sha>`; a namespaced hash, None and
+        the empty string are returned unchanged.
+    """
+    if not form or ":" in form:
+        return form
+    return f"{PYTHON_FORM_NAMESPACE}:{form}"
+
+
+def same_form(a: "str | None", b: "str | None") -> bool:
+    """Intent:
+        Whether two form hashes name the same form, a bare hash read as
+        the Python frontend's (`namespaced_form`). Hashes in different
+        namespaces never match.
+    """
+    return namespaced_form(a) == namespaced_form(b)
 
 
 def signature_string(fn) -> str:
