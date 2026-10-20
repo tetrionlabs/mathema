@@ -248,11 +248,12 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
     """A draw of a constant sequence for `param`: the length is the
     trial's planned size or the usual 2..8 band (at least `ddof + 1`),
     and the element comes from the parameter's declared element bound,
-    its ends and midpoint included."""
+    its ends and midpoint included, the integers among them for an
+    integer bound."""
     import math
     import random as _random
 
-    from .probing import _synth
+    from .probing import _synth, bound_element_type
     bound = (domain or {}).get(param)
     corners: list = []
     if bound is not None:
@@ -260,6 +261,9 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
         ends = _interval_ends(bound)
         if ends is not None and all(math.isfinite(e) for e in ends):
             corners = [ends[0], ends[1], (ends[0] + ends[1]) / 2]
+            if bound_element_type(bound) == "int":
+                lo, hi = math.ceil(ends[0]), math.floor(ends[1])
+                corners = [lo, hi, (lo + hi) // 2] if lo <= hi else []
 
     def draw(rng: _random.Random, size):
         n = size if size is not None else rng.randint(1, 8)

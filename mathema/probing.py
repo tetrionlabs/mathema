@@ -2159,7 +2159,7 @@ def bound_element_type(bound) -> "str | None":
     return None
 
 
-def _element_typed_bound(fn, param: str, bound):
+def typed_element_bound(fn, param: str, bound):
     """Intent:
         The bound a sequence parameter's elements are drawn from, held
         to the element type its annotation states: with no bound, the
@@ -2977,7 +2977,7 @@ def probe(fn, facts, domain: dict | None = None,
         length = None
         if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
             length = sizes.get(resolver.key(p, 0))
-        bound = (_element_typed_bound(fn, p, domain.get(p))
+        bound = (typed_element_bound(fn, p, domain.get(p))
                  if k in SEQUENCE_KINDS else domain.get(p))
         drawn = _synth(k, rng, bound, specials=specials,
                        extra=critical_hints.get(p),
@@ -2985,7 +2985,7 @@ def probe(fn, facts, domain: dict | None = None,
         if inputs_missing([drawn]):
             # the smoke call asks whether f can be called with a value;
             # a claim's own missing points are its own to execute
-            drawn = _synth(k, rng, _element_typed_bound(fn, p, None)
+            drawn = _synth(k, rng, typed_element_bound(fn, p, None)
                            if k in SEQUENCE_KINDS else None,
                            specials=specials, length=length)
         return as_element_type(drawn, bound_element_type(bound)) \
