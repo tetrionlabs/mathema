@@ -235,7 +235,7 @@ for route in ["probe", "derive"]:
 probe   holds
         fails by 1e-10 at x = 0, within the default tolerance (1e-09)
 derive  falsified x = 0.06163325083761284
-        reproduced exactly at derive's witness: the executed code violates the relation there by less than the default tolerance (1e-09) the probe route allows, and compared exactly it fails
+        reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```
 
 A declared tolerance is part of the claim, so it stays in force on both
