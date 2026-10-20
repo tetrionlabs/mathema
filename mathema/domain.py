@@ -1573,7 +1573,11 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
     element. A number of another type (a `Decimal`, a `Fraction`, a
     numpy scalar) is judged by the number it holds, an exact one
     meeting every endpoint and member as written (`0.1` is 1/10), as
-    `number_member` reads it."""
+    `number_member` reads it. The instances a method's receiver ranges
+    over (`probing.Instances`) hold exactly the instances of its class."""
+    instances_of = getattr(bound, "instances_of", None)
+    if instances_of is not None:
+        return isinstance(value, instances_of)
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
     if isinstance(value, _Sentinel):
@@ -3307,6 +3311,9 @@ def bound_to_sympy_set(bound: Any) -> sympy.Set:
     if bound == "S" or (isinstance(bound, Domain) and bound.base_type == "S"):
         raise InvalidDomain("the type of strings (: str) has no real-set "
                             "reading")
+    if getattr(bound, "instances_of", None) is not None:
+        raise InvalidDomain("the instances of a class (a method's receiver) "
+                            "have no real-set reading")
 
     def piece_set(piece):
         if isinstance(piece, frozenset):

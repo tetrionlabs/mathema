@@ -434,7 +434,34 @@ def undrawable_parameters(fn, detected: dict) -> dict:
         if isinstance(cls, type) and typing.get_origin(cls) is None \
                 and not _drawable_class(cls) and not _adapts_to_language(cls):
             out[p] = cls.__name__
+    receiver = _undrawable_receiver(fn)
+    if receiver is not None and receiver[0] not in detected:
+        out[receiver[0]] = receiver[1]
     return out
+
+
+def _undrawable_receiver(fn) -> "tuple[str, str] | None":
+    """Intent:
+        `(name, class name)` when `fn` is an unbound method whose
+        receiver mathema knows no way to draw as an instance of its
+        class (`_receivers.receiver_fields` is None), else None.
+    """
+    from ._receivers import method_receiver, receiver_fields
+    receiver = method_receiver(fn)
+    if receiver is None:
+        return None
+    name, cls = receiver
+    try:
+        from ..analysis import SourceUnavailable, get_tree
+        try:
+            tree = get_tree(fn)[1]
+        except SourceUnavailable:
+            tree = None
+    except Exception:
+        return None
+    if receiver_fields(cls, tree, name) is not None:
+        return None
+    return name, cls.__name__
 
 
 def realised_parameters(facts) -> dict:

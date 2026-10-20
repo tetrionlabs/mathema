@@ -1781,6 +1781,8 @@ def _classify_bound(bounds) -> str:
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
         return "language" if bounds.base_type == "L" else "domain"
+    if isinstance(bounds, Instances):
+        return "instances"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -1970,6 +1972,9 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if isinstance(bounds, Instances):
+        # a method's receiver: an instance of its class
+        return bounds.draw(rng, specials)
     if _classify_bound(bounds) == "language":
         # a language bound is the parameter's own domain whatever kind
         # the body suggested (a mapping read, an iteration): the author
@@ -2065,6 +2070,38 @@ def _synth(kind: str, rng: random.Random, bounds=None,
             return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
+
+
+@dataclass(frozen=True, eq=False)
+class Instances:
+    """Intent:
+        The instances of `cls` a method's receiver ranges over: each
+        field of `fields`, `((name, kind), ...)`, drawn as its kind
+        (`int` or `float`) inside its bound in `bounds`, `((name,
+        bound), ...)`, None for the whole line. A dataclass is
+        constructed; any other class is built field by field without
+        running its `__init__`.
+    """
+    cls: type
+    fields: tuple
+    bounds: tuple = ()
+
+    @property
+    def instances_of(self) -> type:
+        """The class whose instances these are."""
+        return self.cls
+
+    def draw(self, rng: random.Random, specials=None):
+        import dataclasses
+        bounds = dict(self.bounds)
+        values = {f: _synth(kind, rng, bounds.get(f), specials=specials)
+                  for f, kind in self.fields}
+        if dataclasses.is_dataclass(self.cls):
+            return self.cls(**values)
+        inst: object = object.__new__(self.cls)
+        for f, v in values.items():
+            setattr(inst, f, v)
+        return inst
 
 
 def bound_element_type(bound) -> "str | None":

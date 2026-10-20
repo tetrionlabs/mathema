@@ -4288,9 +4288,16 @@ def _instance_bundles(fn, facts) -> dict:
     """
     import dataclasses as _dc
 
-    from .symbolic._base import (_attr_keys_used, _dataclass_field_names,
-                                 _enclosing_class)
+    from .runtime_types._receivers import method_receiver, receiver_fields
+    from .symbolic._base import _dataclass_field_names
     out: dict = {}
+    receiver = method_receiver(fn)
+    if receiver is not None and facts.params and facts.params[0] == receiver[0]:
+        # a method's receiver: an instance of its class, drawn by the
+        # fields it is known to hold, a dataclass's even without source
+        fields = receiver_fields(receiver[1], facts.tree, receiver[0])
+        if fields is not None:
+            out[receiver[0]] = (receiver[1], list(fields))
     if facts.tree is None:
         return out
     try:
@@ -4304,17 +4311,6 @@ def _instance_bundles(fn, facts) -> dict:
             fields = _dataclass_field_names(ann)
             if fields:
                 out[p] = (ann, fields)
-            continue
-        if p == facts.params[0] and p in ("self", "cls"):
-            cls = _enclosing_class(fn)
-            if cls is not None and _dc.is_dataclass(cls):
-                fields = _dataclass_field_names(cls)
-                if fields:
-                    out[p] = (cls, fields)
-            elif cls is not None:
-                read = _attr_keys_used(facts.tree, p)
-                if read:
-                    out[p] = (cls, read)
     return out
 
 
@@ -6723,6 +6719,12 @@ def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
             continue
         if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
             continue
+        if p in ("self", "cls") and facts.params and p == facts.params[0]:
+            return (f"no evaluable inputs: {p} is the receiver, an instance "
+                    f"of {cls}, which mathema has no way to draw (the body "
+                    f"does not show the fields it holds); check the method "
+                    f"bound to an instance ({cls}(...).{getattr(fn, '__name__', 'f')}), "
+                    f"or bind {p} in the claim (for {p} in L[...])")
         return (f"no evaluable inputs: {p} is annotated {cls}, a class "
                 f"mathema has no way to draw; supply {cls} through a "
                 f"runtime type adapter, or bind {p} in the claim "
@@ -7593,6 +7595,10 @@ class _ClaimContext:
     # working domain, so derive excludes them and the probe skips (and
     # counts) the draws they refuse
     exclude_own_guards: bool = False
+    # an unbound method's receiver, `{name: probing.Instances}`: the
+    # instances of its class the routes that run the code draw it as,
+    # kept apart from `cj_domain`, which the mathematics reads
+    receiver: dict = field(default_factory=dict)
     guard_refused: int = 0
     # draws a path binding rejected because the path reached no value
     # (an index past the end, a field holding None) the bound does not
@@ -8009,6 +8015,11 @@ def _validate_claim(cj, statement: str, note: str, facts,
                + ", ".join(f"{p} in {words} from its own {text} annotation"
                            for p, (_b, words, text)
                            in sorted(element_inferred.items())))
+    receiver = _receiver_instances(fn, facts, cj_domain)
+    receiver_draw = {receiver[0]: receiver[1]} if receiver is not None else {}
+    if receiver is not None:
+        note = (f"{note}; {receiver[0]} drawn as an instance of "
+                f"{receiver[1].cls.__name__}")
     literal_inferred = {p: b for p, (b, cat, _d) in stated.items()
                         if cat == "stated_values"}
     if literal_inferred:
@@ -8292,7 +8303,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          cj_domain=cj_domain, extra=frozenset(cj.funcs),
                          missing={**implied_resolution, **resolution},
                          record_domain={**implied, **completed},
-                         implied=frozenset(implied))
+                         implied=frozenset(implied), receiver=receiver_draw)
 
 
 def _admitted_scalar_points(ctx) -> list:
@@ -9075,6 +9086,29 @@ def _as_domain_or_none(bound):
     """A binding as a Domain, or None for no binding."""
     from .domain import _as_domain
     return None if bound is None else _as_domain(bound)
+
+
+def _receiver_instances(fn, facts, cj_domain: dict):
+    """Intent:
+        `(name, probing.Instances)` for an unbound method's receiver
+        the claim does not bind itself: the instances of its class every
+        route draws it as, each field inside the claim's binding of it
+        (`for self.rate in [0, 1]`); None for any other function, or a
+        receiver mathema has no way to draw.
+    """
+    from .probing import Instances
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0] \
+            or receiver[0] in cj_domain:
+        return None
+    bundle = _instance_bundles(fn, facts).get(receiver[0])
+    if bundle is None:
+        return None
+    cls, fields = bundle
+    kinds = tuple((f, _field_kind(cls, f)) for f in fields)
+    bounds = tuple((f, cj_domain.get(f"{receiver[0]}.{f}")) for f in fields)
+    return receiver[0], Instances(cls, kinds, bounds)
 
 
 def _element_inferred(fn, facts, read, cj_domain: dict) -> dict:
@@ -9863,7 +9897,8 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     missing = _admitted_scalar_points(ctx) + containers
 
     def run(cj, witness=None):
-        return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
+        return _float_companion(proven, cj, fn, facts,
+                                {**ctx.cj_domain, **ctx.receiver},
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
@@ -10271,7 +10306,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               counterexample=dproof.counterexample,
                               note=note, meta=_provenance_meta(dproof))
             return _corroboration_gate(falsified, dproof, cj, fn, facts,
-                                       cj_domain, _bound_callables(cj),
+                                       {**cj_domain, **ctx.receiver},
+                                       _bound_callables(cj),
                                        assum=assumption or [])
         if dproof is not None and dproof.sketch:
             definitions_hint = dproof.sketch
@@ -10602,7 +10638,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # a symbolic decider can be wrong, only trust the disproof
         # once it reproduces against the REAL function
         gated = _corroboration_gate(falsified, proof, cj, fn, facts,
-                                    cj_domain, bound_funcs,
+                                    {**cj_domain, **ctx.receiver}, bound_funcs,
                                     assum=assumption or [])
         if gated.verdict == "falsified" and ctx.exclude_own_guards \
                 and _refused_by_own_guard(fn, proof.witness
@@ -11352,7 +11388,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
-                facts, family_cj, cj_domain, setup.rng, setup.budget)
+                facts, family_cj, {**cj_domain, **ctx.receiver}, setup.rng,
+                setup.budget)
         premise_unmet = (guard is not None and guard.admitted == 0
                          and guard.rejected > 0)
         if algo_result is not None:
