@@ -342,7 +342,7 @@ def _as_computed(value):
         return value
     if isinstance(value, ExactInt):
         return int(value)
-    if isinstance(value, Fraction) or _symbolic_number(value):
+    if _stands_for_float(value):
         return float(value)
     if isinstance(value, (list, tuple, set, frozenset)):
         return type(value)(_as_computed(v) for v in value)
@@ -2606,8 +2606,18 @@ def _pow(a, b, mod=None):
 
 def _stands_for_float(value) -> bool:
     """An exact number standing where the computation had a float: a
-    Fraction or a sympy number (an int stands for an int)."""
-    return isinstance(value, Fraction) or _symbolic_number(value)
+    Fraction, a sympy number, or an algebraic number with an isolating
+    interval (`_exact_witness.Algebraic`, a witness read exactly); an
+    int stands for an int."""
+    return (isinstance(value, Fraction) or _symbolic_number(value)
+            or _algebraic(value))
+
+
+def _algebraic(value) -> bool:
+    """Whether `value` is an `_exact_witness.Algebraic` (none is when
+    that module has not been imported)."""
+    witness = sys.modules.get(f"{__package__}._exact_witness")
+    return witness is not None and isinstance(value, witness.Algebraic)
 
 
 class _FloatMeta(type):
@@ -2624,10 +2634,10 @@ class _FloatMeta(type):
 
 class ExactFloat(metaclass=_FloatMeta):
     """`float` as the exact reading sees it: an int (a bool included)
-    as the Fraction of the same value, the identity on a Fraction or a
-    sympy number, Python's `float` on anything else (a string, a float,
-    a library's number). Named `float`, as `type(x).__name__` reads it
-    in the computation."""
+    as the Fraction of the same value, the identity on a Fraction, a
+    sympy number or an algebraic number, Python's `float` on anything
+    else (a string, a float, a library's number). Named `float`, as
+    `type(x).__name__` reads it in the computation."""
 
     def __new__(cls, x=0):
         if isinstance(x, bool):
@@ -2637,7 +2647,7 @@ class ExactFloat(metaclass=_FloatMeta):
             float(x)
         if _is_rational(x):
             return Fraction(x)
-        if _symbolic_number(x):
+        if _symbolic_number(x) or _algebraic(x):
             return x
         return float(x)
 
