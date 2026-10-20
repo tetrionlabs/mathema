@@ -7,8 +7,12 @@ on:
     # skipped run is a commit with no verdict. Documentation is not on
     # it: the suite runs every documented example and compares its
     # output (tests/test_docs_outputs.py), so a page edit can break a
-    # test. The site build itself is docs-check.yml's job.
+    # test. The site build itself is docs-check.yml's job. CHANGELOG.md
+    # is read by no test; the house-style prose check the lint job runs
+    # over it also runs in docs-check.yml, which a Markdown change
+    # triggers.
     paths-ignore: &docs-paths
+      - "CHANGELOG.md"
       - "mkdocs.yml"
       - "LICENSE.md"
       - "NOTICE"
