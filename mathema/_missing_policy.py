@@ -896,6 +896,32 @@ class Reading:
     others: tuple = ()
 
 
+#: the name `separate` reads a call by when f gave no value back: the
+#: call fails as a raise does
+_NO_VALUE_BACK = "no value back"
+
+
+def _no_value_as_failure(call_at):
+    """Intent:
+        `call_at` with a call that gives only a no value back (nan,
+        None, a result every slot of which is a hole) answered as failing, under `_NO_VALUE_BACK`,
+        so `separate` can ask whose the no value is.
+    """
+    def at(point: dict):
+        got, err = call_at(point)
+        if err is None and _wholly_no_value(got):
+            return got, _NO_VALUE_BACK
+        return got, err
+    return at
+
+
+def _wholly_no_value(value) -> bool:
+    """Whether every slot of `value` is a no value: a scalar nan or
+    None, or a container whose every slot is a hole."""
+    slots = no_value_slots(value)
+    return slots.count() > 0 and slots.count() >= slots.capacity()
+
+
 def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
               presence: "Presence | None" = None, refills: bool = True,
               paths: "dict | None" = None) -> list:
@@ -910,12 +936,35 @@ def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
         filed as it is. Every reading of a raise carries the call with
         its owners present. `paths` are the paths a claim binds.
 
+        A call that gave only a no value back (`_wholly_no_value`) is
+        first asked whose that no value is, the same way (`blame`): one that stays with every
+        missing input present comes from another argument (an empty
+        input) and says nothing about the missing inputs, so it is read
+        at another draw of the other arguments where f gives a value
+        with them present, else is `INCONCLUSIVE`; one owned by some of
+        the missing parameters is filed under their keys alone.
+
     Notes:
         `call_at(point)` calls f at the arguments by name and returns
         `(output, raised)`.
     """
-    found = blame(call_at, point, raised, fills, presence, paths)
     missing = tuple(dict.fromkeys(q for q, _k, _m in keys_of(point, paths)))
+    if raised is None and missing and not any(is_path(q) for q in missing) \
+            and _wholly_no_value(output):
+        empty = blame(_no_value_as_failure(call_at), point, _NO_VALUE_BACK,
+                      fills, presence, paths)
+        if empty.moved is not None:
+            point = empty.moved
+            output, raised = call_at(point)
+        elif not empty.owners:
+            return [Reading(point, output, raised, INCONCLUSIVE)]
+        elif set(empty.owners) != set(missing):
+            keys = keys_of(point, paths)
+            return [Reading(point, output, raised, None,
+                            [k for k in keys if k[0] in empty.owners]),
+                    Reading(point, output, raised, INCONCLUSIVE,
+                            [k for k in keys if k[0] not in empty.owners])]
+    found = blame(call_at, point, raised, fills, presence, paths)
     if found.moved is not None:
         point = found.moved
         output, raised = call_at(point)
