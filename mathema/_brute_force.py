@@ -304,18 +304,18 @@ class _Precision:
 
     def inexact(self, measured, where) -> None:
         """Count a point with no exact value at its `(miss, precision,
-        words)` (`_float64_at`), `where` its text or a callable
+        words, detail)` (`_float64_at`), `where` its text or a callable
         giving it; None (no numbers compared) counts nothing."""
         if measured is None:
             return
-        miss, bound, words = measured
+        miss, bound, words, detail = measured
         if miss > bound:
             if self.beyond is None:
                 self.beyond = (miss, bound,
                                where() if callable(where) else where, words)
         elif self.within is None or miss > self.within[0]:
             self.within = (miss, bound, where() if callable(where) else where,
-                           words)
+                           words, detail)
 
     def beyond_words(self, ran: str, call: str) -> str:
         """Intent:
@@ -336,13 +336,20 @@ class _Precision:
                 f"and the value could not be computed exactly ({call}), so "
                 f"the sweep is evidence, not a proof")
 
-    def meta(self) -> dict:
+    def meta(self, proven: bool = False) -> dict:
+        """The `mathema.sweep_precision` record; for a sweep `proven`
+        within float64 it also carries `precision`, float64's precision
+        at the point with no exact value whose miss was largest
+        (`_float64_at`'s detail: `bound`, `factor`, `magnitude`,
+        `kappa`, `returned`)."""
         if self.points == 0:
             return {}
-        return {"mathema.sweep_precision": {
-            "points": self.points, "largest_delta": self.miss,
-            "allowance": self.allowance, "at": self.at,
-            "representation": "float64"}}
+        found = {"points": self.points, "largest_delta": self.miss,
+                 "allowance": self.allowance, "at": self.at,
+                 "representation": "float64"}
+        if proven and self.within is not None:
+            found["precision"] = dict(self.within[4])
+        return {"mathema.sweep_precision": found}
 
     def capped_words(self, ran: str, point: str, call: str) -> str:
         """Intent:
@@ -363,7 +370,7 @@ class _Precision:
                  "below float64's resolution at these values")
         within = ""
         if self.within is not None:
-            miss, bound, where, words = self.within
+            miss, bound, where, words, _detail = self.within
             within = (f", and within float64's precision at every point "
                       f"with no exact value (a miss of {delta_text(miss)} "
                       f"against {delta_text(bound)}, {words}, at {where})")
@@ -378,17 +385,24 @@ class _Precision:
 
 class _Kappa:
     """The condition number of a function at the points of one sweep
-    (`_conditioning.condition_at`), read only where a miss needs it;
-    once it cannot be read at one point it is not tried again in the
-    sweep."""
+    (`_conditioning.condition_at`), with the magnitude of the value the
+    function returns there, read only where a miss needs them; once the
+    condition number cannot be read at one point it is not tried again
+    in the sweep."""
 
     def __init__(self, cj, fn, facts):
         self.cj, self.fn, self.facts = cj, fn, facts
         self.unreadable = False
 
-    def at(self, point: dict, reference: float) -> "float | None":
+    def at(self, point: dict, reference: float) -> "tuple | None":
+        """`(kappa, |f(point)|)`, or None when either cannot be read:
+        the condition number is unknown, or the function's value at the
+        point is not a finite real number."""
         from ._conditioning import claim_reduces, condition_at
         if self.unreadable or self.fn is None or self.facts is None:
+            return None
+        params = list(getattr(self.facts, "params", None) or [])
+        if not params or any(p not in point for p in params):
             return None
         try:
             kappa, _how = condition_at(self.fn, self.facts, point, reference,
@@ -398,50 +412,97 @@ class _Kappa:
         if kappa is None or not math.isfinite(kappa):
             self.unreadable = True
             return None
-        return kappa
+        try:
+            value = call(self.fn, *[point[p] for p in params])
+        except Exception:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            returned = abs(float(value))
+        except OverflowError:
+            return None
+        if not math.isfinite(returned):
+            return None
+        return kappa, returned
 
 
 def _float64_at(cj, computed, point: dict,
-                kappa: "_Kappa | None" = None) -> "tuple | None":
+                kappa: "_Kappa | None" = None,
+                returned=None) -> "tuple | None":
     """Intent:
-        `(miss, precision, words)` of the float64 sides `computed` at
+        `(miss, precision, words, detail)` of the float64 sides `computed` at
         `point` (`_allowance.precision_miss`): how far they miss the
         claim's relation itself; float64's precision there,
         `PRECISION_FACTOR` unit roundoffs of the value compared against
         (the claim's own side where exactly one side runs no code), plus
-        the condition number times the point's largest magnitude where
-        the miss needs it and `kappa` reads it; and that precision's
-        reading in words. None when there are no sides or no numbers to
-        compare.
+        the function's relative condition number times the magnitude of
+        the value it returned there, where the miss needs it and `kappa`
+        reads both; that precision's reading in words; and `detail`,
+        the record of it (`bound`, `factor`, `magnitude`, `kappa` and
+        `returned`, the last two None where not read). With
+        `returned`, the claim's sides on exact values the code returned
+        (`evaluate.returned_exactly`), the miss is theirs, exactly, and
+        the precision 0: an exact value has no rounding to explain a
+        miss. None when there are no sides or no numbers to compare.
     """
     from ._allowance import PRECISION_FACTOR, precision_miss, reference_side
-    from ._conditioning import scale_of, short
+    from ._conditioning import short
     if computed is None:
         return None
     side = reference_side(cj)
+    if returned is not None:
+        found = precision_miss(returned[0], returned[1], cj.relation,
+                               cj.tolerance, side)
+        if found is not None:
+            return (found[0], 0.0, "0, the code returned an exact value",
+                    {"bound": 0.0, "factor": PRECISION_FACTOR,
+                     "magnitude": found[2], "kappa": None,
+                     "returned": None})
     found = precision_miss(computed[0], computed[1], cj.relation,
                            cj.tolerance, side)
     if found is None:
         return None
     miss, bound, magnitude = found
     words = f"{PRECISION_FACTOR} unit roundoffs of {short(magnitude)}"
+    detail = {"bound": bound, "factor": PRECISION_FACTOR,
+              "magnitude": magnitude, "kappa": None, "returned": None}
     if miss > bound and kappa is not None:
-        scale = scale_of(point)
-        k = kappa.at(point, magnitude) if scale else None
-        if k is not None:
-            miss, bound, magnitude = precision_miss(
-                computed[0], computed[1], cj.relation, cj.tolerance, side,
-                kappa=k, inputs_scale=scale)
-            words = (f"{PRECISION_FACTOR} unit roundoffs of "
-                     f"{short(magnitude)} plus κ ≈ {short(k)} times the "
-                     f"inputs' {short(scale)}")
-    return miss, bound, words
+        read = kappa.at(point, magnitude)
+        if read is not None:
+            k, returned = read
+            again = precision_miss(computed[0], computed[1], cj.relation,
+                                   cj.tolerance, side, kappa=k,
+                                   returned=returned)
+            if again is not None:
+                miss, bound, magnitude = again
+                words = (f"{PRECISION_FACTOR} unit roundoffs of "
+                         f"{short(magnitude)} plus κ ≈ {short(k)} times "
+                         f"the value f returned, {short(returned)}")
+                detail = {"bound": bound, "factor": PRECISION_FACTOR,
+                          "magnitude": magnitude, "kappa": k,
+                          "returned": returned}
+    return miss, bound, words, detail
+
+
+def _returned_at(evaluate, point: dict):
+    """The claim's sides on exact values the code returned at `point`
+    (`evaluate.returned_exactly`) under the fast wall-clock cap, or None
+    where a call returns a value that is not exact."""
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    returned = getattr(evaluate, "returned_exactly", None)
+    if returned is None:
+        return None
+    try:
+        return _with_timeout(lambda: returned(point), FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
 
 
 def _uncounted_at(cj, measured) -> bool:
     """Intent:
         Whether a point with no exact value, at its `(miss, precision,
-        words)` (`_float64_at`), is not counted: its float64 sides miss
+        words, detail)` (`_float64_at`), is not counted: its float64 sides miss
         the relation beyond float64's precision there and the claim
         declares no tolerance, so the pass rests on the default
         allowance alone and is no evidence either way, as on the probe
@@ -1001,7 +1062,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         said, sides = _exactly_at(cj, evaluate, point)
         if said is None:
             inexact.append(point)
-            measured = _float64_at(cj, computed, point, kappa)
+            measured = _float64_at(cj, computed, point, kappa,
+                                   _returned_at(evaluate, point))
             precision.inexact(measured, lambda: _fmt_point(point, names))
             if _uncounted_at(cj, measured):
                 precision.uncounted.append(_fmt_point(point, names))
@@ -1095,7 +1157,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             quantifier=scope.quantifier(names, total),
             meta=with_executed({"mathema.derive_route":
                                     "brute_force:within_float64",
-                                **_tried(grid), **counted, **no_exact},
+                                **_tried(grid), **counted, **no_exact,
+                                **precision.meta(proven=True)},
                                executed_missing(deps)))
     return ProofResult(
         "proven",
@@ -1267,7 +1330,8 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     precision = _Precision()
     if inexact:
         precision.add(evaluate.last_precision(), witness)
-        measured = _float64_at(cj, computed, {}, _Kappa(cj, fn, facts))
+        measured = _float64_at(cj, computed, {}, _Kappa(cj, fn, facts),
+                               _returned_at(evaluate, {}))
         precision.inexact(measured, witness)
         if _uncounted_at(cj, measured):
             # the call passed only within the allowance, beyond float64's
@@ -1312,7 +1376,7 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
                                     "brute_force:within_float64",
                                 "mathema.sweep_inexact": {
                                     "points": 1, "first": witness},
-                                **precision.meta()},
+                                **precision.meta(proven=True)},
                                executed_missing(deps)))
     return ProofResult(
         "proven", sketch=sketch,

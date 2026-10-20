@@ -4,10 +4,12 @@
 within_float64 only when, at every such point, the float64 computation
 satisfies the relation to within float64's own precision there: a miss
 of at most 8 unit roundoffs (u = 2^-53) of the value compared against,
-plus the condition number times the inputs' largest magnitude where the
-condition number can be read at the point; where it cannot, the inputs
-lend nothing, so a body that never computes with a large input gets no
-credit for it. A larger miss rests on the default allowance alone and,
+plus the function's relative condition number times the magnitude of
+the value it returned at the point, where both can be read: a relative
+input error u moves the result by about kappa u relative to the result,
+so near a root the spread shrinks with the result. Where they cannot be
+read, nothing is added, so a body that never computes with a large
+input gets no credit for it. A larger miss rests on the default allowance alone and,
 at a point with no exact reading, is not counted, so such a sweep
 decides nothing (`unknown`), as on the probe route; inside a declared
 tolerance it is evidence, `holds` on `derive:brute_force`, never a
@@ -15,6 +17,8 @@ proof; a miss past the allowance falsifies as before. The same holds for a groun
 
 Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
+import math
+
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -71,6 +75,19 @@ def below_global(x: float) -> float:
 def tenth_cancelled(x: float) -> float:
     _spin()
     return (x + TENTH) - x - TENTH
+
+
+def near_a_root(x: float) -> float:
+    # exp(10) - exp(10) cancels to 0; the 5e-10 is the miss
+    return math.exp(x) - math.exp(10.0) + 5e-10
+
+
+#: an opaque function the claim binds: a table of values
+_TABLE = {10: 0.0}
+
+
+def tabled(x):
+    return _TABLE.get(int(x), 0.0)
 
 
 def tenths_global(x: float) -> float:
@@ -174,3 +191,25 @@ def test_a_miss_the_values_compared_do_not_explain_is_not_proven(fn, law):
     # exact reading: not counted
     p = _check(fn, law)
     assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("law", ["for x in {10}, f(x) == g(x)",
+                                 "for x in {10}, f(x) <= g(x)"])
+def test_a_condition_number_scales_the_value_not_the_inputs(law):
+    # near the root the relative condition number is about 4e14, but
+    # float64's precision there is 8 u * |f(10)| * (1 + kappa), about
+    # 1.8e-11 for |f(10)| = 5e-10, far below the 5e-10 miss: no proof
+    (p,) = check_conjectures(near_a_root, [claim(law, funcs={"g": tabled})])
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
+
+
+def test_the_record_carries_float64_precision_at_the_point():
+    # tenths_global: float64 7 * 0.1 * 10 is 7.000000000000001, the
+    # largest miss (8.88e-16) against 8 * 2^-53 * 7 = 6.2e-15 at x = 7
+    p = _check(tenths_global, "for x in {1, 3, 7}, f(x) == x")
+    precision = p.meta["mathema.sweep_precision"]["precision"]
+    assert precision["factor"] == 8, precision
+    assert precision["magnitude"] == 7.0, precision
+    assert abs(precision["bound"] - 8 * 2.0 ** -53 * 7) < 1e-30, precision
+    assert precision["kappa"] is None and precision["returned"] is None, \
+        precision

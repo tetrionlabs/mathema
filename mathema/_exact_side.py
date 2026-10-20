@@ -666,6 +666,26 @@ def _exact_sides(code_l, code_r, env: dict, callees: dict,
     return left, right
 
 
+def returned_sides(code_l, code_r, env: dict, callees: dict,
+                   computed_env: "dict | None" = None) -> "tuple | None":
+    """Intent:
+        `(left, right)` with each callee run on the executed floats and
+        kept only when the value it returns is exact (an int, a Fraction,
+        a bool, or a list of them), the claim's literals as written and
+        the point as `env` holds it: the claim on the exact values the
+        code itself returned. None when a callee returns a value that is
+        not exact or a side is not exact.
+    """
+    def on_floats(callee):
+        def run(*args, **kwargs):
+            return callee(*[to_float(a) for a in args],
+                          **{k: to_float(v) for k, v in kwargs.items()})
+        return run
+    return exact_sides(code_l, code_r, env,
+                       {n: on_floats(c) for n, c in callees.items()},
+                       exact_calls=True, computed_env=computed_env)
+
+
 def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:
     """Intent:
         Whether either side of the claim, evaluated exactly at the point

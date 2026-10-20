@@ -174,13 +174,16 @@ def test_a_false_sibling_is_falsified(fn, law):
 
 
 @pytest.mark.needs_full_proof_budget
-def test_solve_holds_and_its_row_is_stated_over_a_matrix_and_a_vector():
+def test_solve_is_undecided_and_its_row_is_stated_over_a_matrix_and_a_vector():
     law = ("for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, "
            "A @ f(A, b) == b")
     p = _one(fn=solve_for, law=law)
     # numpy.linalg.solve definition carries this on derive once the
-    # matrix route reads a row with a vector parameter
-    assert (p.verdict, p.route) == ("holds", "probe"), (p.verdict, p.note)
+    # matrix route reads a row with a vector parameter; until then each
+    # draw meets b only within the computation's allowance, and numpy's
+    # result has no exact reading, so no draw is counted
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "could not be evaluated in exact arithmetic" in p.note, p.note
     p = _one(solve_for, law, route="derive")
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert "numpy.linalg.solve definition is stated over vectors" in p.note

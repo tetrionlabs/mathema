@@ -351,6 +351,22 @@ def relation_within(lv, rv, relation: str, declared=None,
     return held
 
 
+def allowance_text(value: float) -> str:
+    """An allowance or gap as a record shows it: three significant
+    digits, or `past float64's range` for one too large for a float."""
+    import math
+    return f"{value:.3g}" if math.isfinite(value) else "past float64's range"
+
+
+def _float_or_inf(value) -> float:
+    """`value` as a float, or infinity when its magnitude is past
+    float64's range."""
+    try:
+        return float(value)
+    except OverflowError:
+        return float("inf")
+
+
 def float_miss(lv, rv, relation: str, declared=None,
                input_scaled: float = 0.0, side: "int | None" = None
                ) -> "tuple | None":
@@ -396,10 +412,7 @@ def float_miss(lv, rv, relation: str, declared=None,
             gap = (abs(diff) if relation in ("==", "~=") else
                    max(Fraction(0), diff) if relation == "<=" else
                    max(Fraction(0), -diff))
-        try:
-            measured = (float(gap), float(tol))
-        except OverflowError:
-            measured = (float("inf"), float("inf"))
+        measured = (_float_or_inf(gap), _float_or_inf(tol))
         if best[0] is None or measured[0] > best[0][0]:
             best[0] = measured
         return True
@@ -423,7 +436,7 @@ def float_miss(lv, rv, relation: str, declared=None,
 
 def precision_miss(lv, rv, relation: str, declared=None,
                    side: "int | None" = None, kappa: "float | None" = None,
-                   inputs_scale: float = 0.0) -> "tuple | None":
+                   returned: float = 0.0) -> "tuple | None":
     """Intent:
         `(miss, precision, magnitude)`, all floats, for two computed
         sides at one point: how far they miss the relation itself, with
@@ -432,13 +445,15 @@ def precision_miss(lv, rv, relation: str, declared=None,
         passes ε, the bare `declared` tolerance else `DEFAULT_TOLERANCE`,
         and 0 for a relation they satisfy outright); float64's own
         precision at the point, `PRECISION_FACTOR` unit roundoffs of
-        `magnitude + kappa * inputs_scale`; and `magnitude`, that of the
+        `magnitude + kappa * returned`; and `magnitude`, that of the
         value compared against (the reference side's, `side`, else the
         larger side's; the largest entry over arrays). `kappa` is the
-        computation's condition number at the point and `inputs_scale`
-        its inputs' largest magnitude; with no `kappa` the inputs add
-        nothing. None when a side is not a finite real number, or the
-        tolerance is a tolerance kind.
+        computation's relative condition number at the point and
+        `returned` the magnitude of the value it returned there: a
+        relative input error u moves the result by about `kappa * u`
+        relative to it, so the absolute spread is `kappa * u *
+        returned`. With no `kappa` it adds nothing. None when a side is
+        not a finite real number, or the tolerance is a tolerance kind.
     """
     from ._tolerance import ToleranceKind
     from .probing import _is_matrix_value, plain_value
@@ -461,7 +476,7 @@ def precision_miss(lv, rv, relation: str, declared=None,
         magnitude = float(magnitude)
     except OverflowError:
         magnitude = float("inf")
-    spread = kappa * float(inputs_scale) if kappa is not None else 0.0
+    spread = kappa * float(returned) if kappa is not None else 0.0
     return (miss, PRECISION_FACTOR * UNIT_ROUNDOFF * (magnitude + spread),
             magnitude)
 
