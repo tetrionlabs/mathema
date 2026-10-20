@@ -244,6 +244,18 @@ Matrices and vectors are real in this release: a claim over `C^n` or
 `C^(m,n)` is refused as misspecified, with the reason "matrices and
 vectors are real-only in this release". Complex scalars are unaffected.
 
+A function may still return a vector or matrix of complex numbers, and
+that result is a value, read as a complex array with or without numpy.
+`is_finite` and `is_real` decide it by value, entry by entry, as they
+do a complex scalar. The structural properties (symmetric, triangular,
+diagonal, orthogonal, positive definite and the rest) are read over
+real matrices only, so on a complex result they leave the claim
+unknown with the reason "the result is a complex matrix, and
+is_symmetric is read over real matrices only in this release". With
+numpy installed, a real claim over `R^n` or `R^(m,n)` whose function
+returns a complex vector or matrix reads it as it reads a complex
+scalar: no real value there.
+
 ### Sugar
 
 Three math-paper spellings are accepted as sugar. Each is **ambiguous**

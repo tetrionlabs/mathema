@@ -4584,7 +4584,9 @@ def _matrix_output_probe(prop):
     inside the premises). A result that is not a number, nor a vector
     or matrix of numbers, leaves `is_finite` and `is_real` undecided:
     unless another point falsifies, the probe answers unknown with the
-    first such point and `matrices.NOT_A_NUMBER`."""
+    first such point and `matrices.NOT_A_NUMBER`. A complex result
+    leaves a structural property (every one but `is_finite` and
+    `is_real`) undecided the same way, with the reason."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
@@ -4596,7 +4598,7 @@ def _matrix_output_probe(prop):
                                          facts.params), "<claim>", "eval")
         except SyntaxError:
             return None
-        from .matrices import NOT_A_NUMBER, is_numeric
+        from .matrices import NOT_A_NUMBER, holds_complex, is_numeric
         draw = _structured_draws(fn, facts, cj, domain)
         held = _held_at_none(fn, facts, domain)
         # the arguments a witness names: the ones the claim's expression
@@ -4606,6 +4608,7 @@ def _matrix_output_probe(prop):
         shown = tuple(p for p in facts.params if p in read) or tuple(facts.params)
         checked = 0
         not_a_number = None
+        complex_matrix = None
         for _ in range(trials):
             point = _placed(dict(zip(facts.params, draw(rng))), rng)
             if point is None or not _admitted(point):
@@ -4625,6 +4628,13 @@ def _matrix_output_probe(prop):
                             f"{witness}: f raised "
                             f"{exception_name(raised[0])}, no value", None)
                 continue
+            if prop.level != "finite" and holds_complex(value):
+                # the structural families read real matrices only
+                if complex_matrix is None:
+                    complex_matrix = (f"{witness}: the result is a complex "
+                                      f"matrix, and {prop.name} is read over "
+                                      f"real matrices only in this release")
+                continue
             got = prop.check(value)
             if got is None:
                 if prop.level == "finite" and not_a_number is None \
@@ -4638,6 +4648,8 @@ def _matrix_output_probe(prop):
                         f"{prop.name[3:]}", None)
         if not_a_number is not None:
             return ("unknown", checked, not_a_number, None)
+        if complex_matrix is not None:
+            return ("unknown", checked, complex_matrix, None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)

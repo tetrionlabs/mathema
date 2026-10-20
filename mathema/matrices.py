@@ -158,6 +158,14 @@ def _entries(m) -> "list | None":
     return None if got is None else got[0]
 
 
+def holds_complex(value) -> bool:
+    """Whether `value` is a complex number, or a vector or matrix with a
+    complex entry (a complex numpy array included)."""
+    entries = _entries(value)
+    return entries is not None and any(isinstance(v, complex)
+                                       for v in entries)
+
+
 def is_numeric(value) -> bool:
     """Whether `value` is a number, or a vector, matrix or deeper
     rectangular nesting of numbers, the values `is_finite` and
@@ -218,6 +226,8 @@ def _pairwise(m, rel) -> "bool | None":
 
 
 def _check_symmetric(m) -> "bool | None":
+    if holds_complex(m):
+        return None      # a complex matrix: real matrices only
     np = _numpy()
     if np is not None:
         try:
@@ -231,6 +241,8 @@ def _check_symmetric(m) -> "bool | None":
 
 
 def _check_skew(m) -> "bool | None":
+    if holds_complex(m):
+        return None      # a complex matrix: real matrices only
     np = _numpy()
     if np is not None:
         try:
@@ -274,6 +286,8 @@ def _check_identity(m) -> "bool | None":
 
 
 def _check_orthogonal(m) -> "bool | None":
+    if holds_complex(m):
+        return None      # a complex matrix: real matrices only
     np = _numpy()
     if np is None:
         return None      # QᵀQ == I needs a matrix product; decline
@@ -287,6 +301,8 @@ def _check_orthogonal(m) -> "bool | None":
 
 
 def _check_positive_definite(m) -> "bool | None":
+    if holds_complex(m):
+        return None      # a complex matrix: real matrices only
     np = _numpy()
     if np is None:
         return None      # sound PD test needs eigen/Cholesky
@@ -306,6 +322,8 @@ def _check_positive_definite(m) -> "bool | None":
 
 
 def _check_positive_semidefinite(m) -> "bool | None":
+    if holds_complex(m):
+        return None      # a complex matrix: real matrices only
     np = _numpy()
     if np is None:
         return None

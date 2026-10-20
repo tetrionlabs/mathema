@@ -1364,6 +1364,10 @@ class ComplexResult(ArithmeticError):
 
 
 def _complex_text(value) -> str:
+    """A complex value as a witness writes it: a number as `a+bj`, a
+    vector or matrix of them entry by entry."""
+    if hasattr(value, "tolist") and getattr(value, "ndim", 0):
+        return _fmt_value(value.tolist())
     try:
         return _fmt_value(complex(value))
     except (TypeError, ValueError):
