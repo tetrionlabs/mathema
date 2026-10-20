@@ -1407,6 +1407,27 @@ def foreign_body(fn) -> bool:
     return False
 
 
+def docstring_of(fn) -> str:
+    """Intent:
+        The docstring `fn`'s claims, intent and documentation are read
+        from: the injected facts' own for a callable standing for a
+        function another frontend read (`foreign_body`), whose Python
+        `__doc__` is a wrapper's, else `inspect.getdoc(fn)`; "" when
+        there is none.
+    """
+    import inspect
+    if foreign_body(fn):
+        seen = 0
+        while fn is not None and seen < 16:
+            injected = getattr(fn, "__mathema_facts__", None)
+            if isinstance(injected, Facts):
+                return inspect.cleandoc(injected.docstring or "")
+            fn = getattr(fn, "__wrapped__", None)
+            seen += 1
+        return ""
+    return inspect.getdoc(fn) or ""
+
+
 def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:
     """Intent:
         Set, in place, the kind of each parameter whose first runtime

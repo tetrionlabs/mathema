@@ -28,6 +28,11 @@ WRAPPER = '''
 
 
     def growth(x, r):
+        """Wrapper text.
+
+        Claims:
+            wrapper_claim: f(1, 1) == 99
+        """
         assert x >= 0
         _CACHE[x] = r
         if r < -100:
@@ -55,7 +60,9 @@ def _foreign_facts():
     params = d.parameter_names
     return Facts(name=d.name, signature="(" + ", ".join(params) + ")", params=params,
                  param_kinds={p: "scalar" for p in params}, returns_kind="scalar",
-                 docstring=None, source="", effects=[], is_pure=True, loops=[],
+                 docstring="Growth of x at rate r.\n\nClaims:\n"
+                           "    nonneg: for x in [0, 10], r in [0, 1], f(x, r) >= 0\n",
+                 source="", effects=[], is_pure=True, loops=[],
                  comprehensions=[], recursion=False, branch_count=0,
                  call_groups={"math": [], "builtin": [], "external": []},
                  max_loop_depth=0, lines=0, form=koine_hash(d), sigh="0" * 12,
@@ -146,3 +153,18 @@ def test_a_foreign_callee_is_recorded_without_the_wrappers_file_and_line(wrapper
 def test_the_project_compendium_note_reads_no_wrapper_file(wrapper):
     from mathema.compendium import uninstalled_project_note
     assert uninstalled_project_note(wrapper.growth) is None
+
+
+def test_the_claims_come_from_the_injected_docstring(wrapper):
+    import mathema
+    names = {p.name for p in mathema.check(wrapper.growth).probes
+             if (p.meta or {}).get("mathema.surface") != "mathema"}
+    assert "nonneg" in names, names
+    assert "wrapper_claim" not in names, names
+
+
+def test_the_authored_reference_names_no_wrapper_line(wrapper):
+    from mathema.authoring import declared_from_function
+    (row,) = declared_from_function(wrapper.growth)
+    assert row["name"] == "nonneg"
+    assert ":L" not in row["authored"]["ref"], row["authored"]

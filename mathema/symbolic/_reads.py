@@ -197,11 +197,28 @@ def _held_read_succeeds(obj, node: ast.AST) -> bool:
     return False
 
 
+def _joined(kinds: list) -> "str | None":
+    """The number kind of an arithmetic result over operands of
+    `kinds`: None when any is unknown, else the widest."""
+    if not kinds or any(k is None for k in kinds):
+        return None
+    for wide in ("complex", "real", "int"):
+        if wide in kinds:
+            return wide
+    return None
+
+
 def read_checker(fn, facts, scope: dict):
     """Intent:
-        A function of one subscript or attribute-read node that returns
-        how the read can raise on some input (a short description), or
-        None where it cannot.
+        A function of one subscript, attribute-read or conversion node
+        that returns how it can raise on some input (a short
+        description), or None where it cannot. A conversion (`float`,
+        `complex`, `int`, `round`, `math.floor`, `math.ceil`,
+        `math.trunc`) is safe only where its argument's number kind
+        guarantees it: any number to `complex`, a whole or real number
+        to `float` or to `round` with places, a whole number to the
+        conversions to a whole number (a float raises there at an
+        infinity or a NaN, a string where it does not parse).
 
     Notes:
         A name the body assigns is a local whose type is not known, and
@@ -260,7 +277,119 @@ def read_checker(fn, facts, scope: dict):
                 return True, getattr(builtins, base.id)
         return False, None
 
+    kinds = dict(getattr(facts, "param_kinds", None) or {})
+    stores: dict = {}
+    for n in ast.walk(facts.tree):
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    stores.setdefault(t.id, []).append(n.value)
+                else:
+                    for e in ast.walk(t):
+                        if isinstance(e, ast.Name):
+                            stores.setdefault(e.id, []).append(None)
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            stores.setdefault(n.target.id, []).append(n.value)
+        elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+            stores.setdefault(n.target.id, []).append(
+                ast.BinOp(left=ast.Name(n.target.id, ast.Load()), op=n.op,
+                          right=n.value))
+        elif isinstance(n, (ast.For, ast.comprehension, ast.With,
+                            ast.NamedExpr)):
+            for e in ast.walk(getattr(n, "target", None) or ast.Pass()):
+                if isinstance(e, ast.Name):
+                    stores.setdefault(e.id, []).append(None)
+
+    def resolved(func: ast.AST):
+        import builtins
+        if isinstance(func, ast.Name) and func.id not in params \
+                and func.id not in assigned:
+            return scope.get(func.id, getattr(builtins, func.id, None))
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                and func.value.id not in params and func.value.id not in assigned:
+            holder = scope.get(func.value.id)
+            if inspect.ismodule(holder):
+                return getattr(holder, func.attr, None)
+        return None
+
+    def number_kind(node: ast.AST, seen: frozenset = frozenset()) -> "str | None":
+        if isinstance(node, ast.Constant):
+            v = node.value
+            return ("int" if isinstance(v, (bool, int)) else "real"
+                    if isinstance(v, float) else "complex"
+                    if isinstance(v, complex) else None)
+        if isinstance(node, ast.Name):
+            if node.id in params and node.id not in assigned:
+                hint = types_of.get(node.id)
+                if hint in (int, bool):
+                    return "int"
+                if hint is float:
+                    return "real"
+                if hint is complex:
+                    return "complex"
+                if hint is None:
+                    return {"int": "int", "bool": "int",
+                            "scalar": "real"}.get(kinds.get(node.id))
+                return None
+            if node.id in seen or node.id not in stores \
+                    or any(v is None for v in stores[node.id]):
+                return None
+            found = [number_kind(v, seen | {node.id}) for v in stores[node.id]]
+            return _joined(found)
+        if isinstance(node, ast.UnaryOp) and isinstance(
+                node.op, (ast.USub, ast.UAdd)):
+            return number_kind(node.operand, seen)
+        if isinstance(node, ast.BinOp):
+            left = number_kind(node.left, seen)
+            right = number_kind(node.right, seen)
+            joined = _joined([left, right])
+            if joined == "int" and isinstance(node.op, (ast.Div, ast.Pow)):
+                return "real"
+            return joined
+        if isinstance(node, ast.Call) and not node.keywords:
+            target = resolved(node.func)
+            if target in (int, len):
+                return "int"
+            if target is float:
+                return "real"
+            if target is round:
+                return "int" if len(node.args) == 1 else "real"
+            if target is abs and node.args:
+                return number_kind(node.args[0], seen)
+            import math
+            if target in (math.floor, math.ceil, math.trunc):
+                return "int"
+            from .._math_vocab import _SYMPY_FUNCS, _call_name
+            if getattr(target, "__module__", None) == "math" \
+                    or _call_name(node) in _SYMPY_FUNCS:
+                # a math function of the lifted vocabulary (`math.exp`,
+                # `np.exp`) gives a real number
+                return "real"
+        return None
+
+    def conversion(node: ast.Call) -> "str | None":
+        import math
+        target = resolved(node.func)
+        to_int = (int, math.floor, math.ceil, math.trunc)
+        if target not in (float, complex, *to_int, round) or not node.args:
+            return None
+        if node.keywords or len(node.args) > 2:
+            return f"a conversion {ast.unparse(node)}, whose argument is not read"
+        kind = number_kind(node.args[0])
+        if target is complex and kind is not None:
+            return None
+        if target is float and kind in ("int", "real"):
+            return None
+        if target is round and len(node.args) == 2 and kind in ("int", "real"):
+            return None
+        if (target in to_int or target is round) and kind == "int":
+            return None
+        return (f"a conversion {ast.unparse(node)}, which raises where its "
+                f"argument does not convert")
+
     def check(node: ast.AST) -> "str | None":
+        if isinstance(node, ast.Call):
+            return conversion(node)
         text = ast.unparse(node)
         if isinstance(node, ast.Attribute):
             is_held, obj = held(node)

@@ -373,15 +373,16 @@ def _compare_truth_literal(param: str, op: ast.AST, lit_node: ast.AST,
         return truth if isinstance(op, ast.In) else not truth
 
     if isinstance(op, (ast.Is, ast.IsNot)):
-        # identity is decidable EXACTLY over a discrete domain: evaluate
-        # `v is lit` for every stated value (True/False/None are
-        # singletons, so identity on real domain values is real Python
-        # semantics, not an equality approximation; `1 is True` and
-        # `True is True` genuinely differ, and a bool parameter's
-        # stated set carries the real False/True objects). An interval
-        # domain is left undecided: identity over synthesized numerics
-        # is not a fact about the code.
-        if not isinstance(dom, frozenset):
+        # identity is decidable EXACTLY over a discrete domain only
+        # against a singleton (None, True, False, Ellipsis): evaluate
+        # `v is lit` for every stated value (`1 is True` and `True is
+        # True` genuinely differ, and a bool parameter's stated set
+        # carries the real False/True objects). Against any other
+        # object (a string, a number) identity depends on how the
+        # runtime interns it, which no reading of the code settles, so
+        # it is left undecided, and so is an interval domain.
+        if not isinstance(dom, frozenset) \
+                or not any(lit is single for single in (None, True, False, ...)):
             return None
         results = {v is lit for v in dom}
         if len(results) != 1:
@@ -692,6 +693,17 @@ def _explain_branch(test: ast.AST, unmodified: set, affine_locals: dict | None =
                "(or a reassigned parameter), not an unmodified signature "
                "parameter, a bare name's truthiness isn't traced through "
                "affine locals, only a comparison is (see below)"}
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
+            and isinstance(test.ops[0], (ast.Is, ast.IsNot)) \
+            and not any(_literal_value(side)[0]
+                        and _literal_value(side)[1] is single
+                        for side in (test.left, test.comparators[0])
+                        for single in (None, True, False, ...)):
+        return {"kind": "blocked", "code": "unrecognized-shape",
+                "reason": "identity (is / is not) against an object that "
+                "is not None, True, False or Ellipsis depends on how the "
+                "runtime interns that object, so no domain decides it; "
+                "compare with == or != instead"}
     if isinstance(test, ast.Compare) and len(test.ops) == 1:
         left, right = test.left, test.comparators[0]
         left_name = left.id if isinstance(left, ast.Name) else None
@@ -914,7 +926,25 @@ def _exact_raise_guard(cond):
         return cond
     if exact.has(sympy.ConditionSet) or exact.free_symbols - {sym}:
         return cond
-    return exact
+    return _parameter_first(exact, sym)
+
+
+def _parameter_first(expr, sym):
+    """Intent:
+        `expr` with each relation written with `sym` on its left (`1 <
+        w` as `w > 1`), the same set of points.
+    """
+    def flip(rel):
+        if sym not in rel.lhs.free_symbols and sym in rel.rhs.free_symbols:
+            return rel.reversed
+        return rel
+    if isinstance(expr, sympy.core.relational.Relational):
+        return flip(expr)
+    try:
+        return expr.replace(
+            lambda e: isinstance(e, sympy.core.relational.Relational), flip)
+    except Exception:
+        return expr
 
 
 def lift_piecewise(fn, facts) -> "ConditionedLift | None":

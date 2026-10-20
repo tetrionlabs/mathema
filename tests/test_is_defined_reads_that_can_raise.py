@@ -18,6 +18,12 @@ where it is not an assignment (a branch condition, a returned value):
 the walk does not condition it on the trip, so it is decided by
 execution.
 
+A conversion is a read of the same kind: `float(s)` and `int(s)`
+raise ValueError on a string that does not parse, and `int(x)` of a
+float raises at an infinity or a NaN. It is safe where the argument's
+declared type guarantees it converts (a whole number to `int` or
+`float`, a real number to `float`, a value rounded to places).
+
 A read the parameter's declared type guarantees (a declared dataclass
 or NamedTuple field, a required TypedDict key, an index inside a
 fixed-length tuple annotation, an attribute every instance gets in
@@ -25,6 +31,8 @@ fixed-length tuple annotation, an attribute every instance gets in
 """
 from dataclasses import dataclass
 from typing import NamedTuple, TypedDict
+
+import pytest
 
 import mathema
 
@@ -98,6 +106,39 @@ def divides_in_a_loop_return(x: float, n: int) -> float:
     for _ in range(n):
         return 1 / (x - 1)
     return 0.0
+
+
+def float_of(s: str) -> float:
+    return float(s)
+
+
+def parsed(s: str) -> int:
+    return int(s) + 1
+
+
+def truncated(x: float) -> int:
+    return int(x) + 1
+
+
+def float_of_int(n: int) -> float:
+    return float(n) + 1.0
+
+
+def int_of_int(n: int) -> int:
+    return int(n) + 1
+
+
+def float_of_sum(x: float) -> float:
+    return float(x * 2 + 1)
+
+
+def rounded_to_places(x: float) -> float:
+    return round(x, 2)
+
+
+def float_of_exp(x: float) -> float:
+    import math
+    return float(math.exp(-x * x))
 
 
 class Account:
@@ -186,3 +227,22 @@ def test_a_division_in_a_loop_condition_is_not_proven_by_examination():
 def test_a_division_returned_from_a_loop_is_not_proven_by_examination():
     probe = _defined_row(divides_in_a_loop_return)
     assert probe.verdict == "falsified", (probe.verdict, probe.sketch)
+
+
+def test_a_string_that_does_not_parse_falsifies_float_of_it():
+    _assert_falsified_by_a_raising_witness(float_of, "ValueError")
+
+
+def test_a_string_that_does_not_parse_falsifies_int_of_it():
+    _assert_falsified_by_a_raising_witness(parsed, "ValueError")
+
+
+def test_int_of_a_float_is_not_proven_by_examination():
+    probe = _defined_row(truncated)
+    assert probe.route != "examine", (probe.verdict, probe.sketch)
+
+
+@pytest.mark.parametrize("fn", [float_of_int, int_of_int, float_of_sum,
+                                rounded_to_places, float_of_exp])
+def test_a_conversion_its_argument_type_guarantees_is_still_proven(fn):
+    assert _defined_row(fn).verdict == "proven"

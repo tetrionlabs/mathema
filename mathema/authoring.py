@@ -17,7 +17,6 @@ decorator or docstring claim without editing code.
 """
 from __future__ import annotations
 
-import inspect
 import re
 
 from .analysis import _read_block
@@ -44,8 +43,11 @@ def _authored_tag(fn, surface: str) -> str:
     than `inspect.getsourcelines()` because it needs no source file to be
     readable (a doc-only/compiled callable would raise there) and, unlike
     `getsourcelines`, resolves to the `def` line consistently regardless of
-    how many decorators sit above it."""
-    lineno = getattr(getattr(fn, "__code__", None), "co_firstlineno", None)
+    how many decorators sit above it. A callable standing for a function
+    another frontend read gets no line: its own is a wrapper's."""
+    from .analysis import foreign_body
+    lineno = (None if foreign_body(fn)
+              else getattr(getattr(fn, "__code__", None), "co_firstlineno", None))
     key = _fn_key(fn)
     return f"{key}:{surface}:L{lineno}" if lineno else f"{key}:{surface}"
 
@@ -186,7 +188,7 @@ def parse_docstring_claims(doc: str,
 def declared_from_function(fn) -> list[dict]:
     """Every claim declared directly on a live function object: decorator
     claims (`fn.__mathema_claims__`) plus docstring claims (parsed from
-    `inspect.getdoc(fn)`), merged by claim name.
+    `analysis.docstring_of(fn)`), merged by claim name.
 
     Precedence: **decorator wins over docstring** on a name collision. The
     decorator is structured data, parsed once at decoration time, the same
@@ -204,8 +206,9 @@ def declared_from_function(fn) -> list[dict]:
     decoration time.
     """
 
+    from .analysis import docstring_of
     from .types import matrix_param_names
-    doc_claims = parse_docstring_claims(inspect.getdoc(fn) or "",
+    doc_claims = parse_docstring_claims(docstring_of(fn),
                                         matrix_param_names(fn),
                                         owner=_fn_key(fn))
     decorator_claims = list(getattr(fn, "__mathema_claims__", []) or [])
