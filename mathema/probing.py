@@ -1410,6 +1410,28 @@ def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
                    for a in annotations)
 
 
+def _exact_shortfall(np, lv, rv, relation: str) -> float:
+    """Intent:
+        `ordering_shortfall` over arrays holding a number too large for
+        a float: each difference taken exactly, the largest positive one
+        that a float holds, 0.0 when there is none.
+    """
+    try:
+        diffs = (np.asarray(lv, dtype=object)
+                 - np.asarray(rv, dtype=object)).ravel().tolist()
+    except (ValueError, TypeError):
+        return 0.0
+    out = 0.0
+    for d in diffs:
+        try:
+            gap = float(d if relation == "<=" else -d)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if math.isfinite(gap) and gap > out:
+            out = gap
+    return out
+
+
 def ordering_shortfall(lv, rv, relation: str) -> float:
     """Intent:
         By how much `lv <relation> rv` fails when compared exactly, for
@@ -1444,6 +1466,8 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
     try:
         gaps = sign * (np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
         finite = gaps[np.isfinite(gaps)]
+    except OverflowError:
+        return _exact_shortfall(np, lv, rv, relation)
     except (ValueError, TypeError):
         return 0.0
     if finite.size == 0:

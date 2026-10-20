@@ -152,7 +152,8 @@ def as_array(value):
     """Intent:
         A drawn value as the claim evaluates it: a vector or matrix of
         numbers (a list, nested lists, an array) as a float numpy
-        array with NaN at each missing position, its positions still
+        array with NaN at each missing position (an object array
+        holding each number exactly when one is too large for a float), its positions still
         named when the list names them (`runtime_types.Labelled`), a
         dict of columns as a `Table` (a column of strings or booleans
         as an object array), anything else unchanged.
@@ -180,7 +181,33 @@ def as_array(value):
         def whole(v):
             # an int, which the float array holds only as a float
             return isinstance(v, int) and not isinstance(v, bool)
-        if all(isinstance(r, (list, tuple)) for r in value):
+
+        def beyond(v):
+            # an exact number too large for a float
+            if isinstance(v, bool) or is_missing(v):
+                return False
+            try:
+                float(v)
+            except OverflowError:
+                return True
+            except (TypeError, ValueError):
+                return False
+            return False
+        nested = all(isinstance(r, (list, tuple)) for r in value)
+        if any(beyond(v) for v in ([v for r in value for v in r] if nested
+                                   else value)):
+            # held exactly, entry by entry, as an object array
+            rows = ([[math.nan if is_missing(v) else v for v in r]
+                     for r in value] if nested
+                    else [math.nan if is_missing(v) else v for v in value])
+            exact = np.empty(np.shape(rows), dtype=object)
+            exact[...] = rows
+            return _holed(exact, ({(i, j): v for i, r in enumerate(value)
+                                   for j, v in enumerate(r) if kept(v)}
+                                  if nested else
+                                  {(k,): v for k, v in enumerate(value)
+                                   if kept(v)}))
+        if nested:
             cells = {(i, j): v for i, r in enumerate(value)
                      for j, v in enumerate(r)}
             held = {k: v for k, v in cells.items() if kept(v)} or {
