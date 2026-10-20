@@ -2111,6 +2111,14 @@ def _claim(law: str, name: str | None, source: str, route: str,
                       meta=dict(meta or {}), raw=law)
 
 
+def _reads_as_number(text: str) -> bool:
+    """Whether `text` reads as a finite number (`"1e-9"`)."""
+    try:
+        return math.isfinite(float(text))
+    except ValueError:
+        return False
+
+
 def _read_claim_tolerance(tolerance, relation: str, law: str,
                           sides: "tuple" = (), chained: bool = False):
     """Intent:
@@ -2121,12 +2129,20 @@ def _read_claim_tolerance(tolerance, relation: str, law: str,
         the claim's expressions, searched for `ε`.
 
     Raises:
-        InvalidConjecture: a mapping that is not one kind; a kind on a
+        InvalidConjecture: text that does not read as a number (a kind
+            written as a string, `"{abs: 0}"`); a mapping that is not
+            one kind; a kind on a
             chain, on a claim that is neither `=:=` nor `~=`, or on a
             claim whose text reads `ε` (`eps`, `epsilon`), the tolerance
             as one number.
     """
     from ._tolerance import read_tolerance
+    if isinstance(tolerance, str) and not _reads_as_number(tolerance):
+        raise InvalidConjecture(
+            f"the tolerance {tolerance!r} is text that is not a number; "
+            f"pass a number (tolerance=1e-9) or a mapping naming one kind "
+            f"(tolerance={{'abs': 0}}, written {{abs: 0}} in a claims "
+            f"file), in the claim {law.strip()!r}")
     try:
         read = read_tolerance(tolerance)
     except ValueError as e:
