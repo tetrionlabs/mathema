@@ -120,11 +120,14 @@ def table_corner_floor(corners: list, column_corners: "dict | None" = None) -> l
     """Intent:
         Floor items for a table's magnitude corners, one per corner,
         after `_DRAWS_BEFORE_CORNERS` items that pass the draw through:
-        every column set to the pair repeated to the column's length
-        (the pair itself for a column shorter than 2). A column in
-        `column_corners` meets its own corners instead, the k-th item
-        setting it to its own pair k (cycling through them), and keeps
-        its drawn value when it has none.
+        every column set to the pair repeated to the table's row count
+        (two rows for a table of fewer). A column in `column_corners`
+        meets its own corners instead, the k-th item setting it to its
+        own pair k (cycling through them), and keeps its drawn value
+        when it has none. A column that keeps its drawn value in a
+        table of one row is repeated to the two rows the corner needs,
+        so every column has one length; a table holding an empty column
+        that keeps its value passes through, since nothing lengthens it.
     """
     column_corners = column_corners or {}
     count = len(corners) or max((len(c) for c in column_corners.values()),
@@ -133,19 +136,34 @@ def table_corner_floor(corners: list, column_corners: "dict | None" = None) -> l
         return []
     items: list = [lambda base: base for _ in range(_DRAWS_BEFORE_CORNERS)]
 
-    def column(pair, col):
-        n = len(col) if isinstance(col, (list, tuple)) and len(col) > 1 else 2
+    def column(pair, n):
         return [pair[i % 2] for i in range(n)]
 
-    def cornered(k, name, col):
+    def kept(col, n):
+        if not isinstance(col, (list, tuple)) or not col:
+            return None
+        return [col[i % len(col)] for i in range(n)]
+
+    def cornered(k, name, col, n):
         own = column_corners.get(name)
         if own is not None:
-            return column(own[k % len(own)], col) if own else col
-        return column(corners[k], col) if k < len(corners) else col
+            return column(own[k % len(own)], n) if own else kept(col, n)
+        return column(corners[k], n) if k < len(corners) else kept(col, n)
+
+    def item(base, k):
+        if not isinstance(base, dict) or not base:
+            return None
+        n = max(2, *(len(col) if isinstance(col, (list, tuple)) else 0
+                     for col in base.values()))
+        out = {}
+        for c, col in base.items():
+            made = cornered(k, c, col, n)
+            if made is None:
+                return base
+            out[c] = made
+        return out
     for k in range(count):
-        items.append(lambda base, k=k: {c: cornered(k, c, col)
-                                        for c, col in base.items()}
-                     if isinstance(base, dict) and base else None)
+        items.append(lambda base, k=k: item(base, k))
     return items
 
 
@@ -185,22 +203,52 @@ def matrix_floor(holes: list, admits_zero: bool, absent: bool = False) -> list:
     return items
 
 
-def table_floor(holes: list, absent: bool = False) -> list:
+def table_floor(holes: list, absent: bool = False,
+                column_holes: "dict | None" = None) -> list:
     """Intent:
         The floor of a table parameter, as functions of the trial's
-        random draw `base` (a dict of equal-length column lists).
+        random draw `base` (a dict of equal-length column lists): a
+        hole first in every column, a column of holes, two holes in
+        one column. `column_holes` names, for a column whose binding
+        admits fewer, the holes that column admits; a hole goes only
+        into the columns admitting it, and an item no column admits
+        is skipped.
     """
+    from .domain import member_of
+    admitted = {c: {member_of(h) for h in hs}
+                for c, hs in (column_holes or {}).items()}
+
+    def admits(c, *hs) -> bool:
+        return c not in admitted or all(member_of(h) in admitted[c] for h in hs)
+
+    def first(base, *hs):
+        return next((c for c in base if admits(c, *hs)), None)
+
+    def every(base, h):
+        if not base or first(base, h) is None:
+            return None
+        return {c: ([h, *col[1:]] if admits(c, h) else list(col))
+                for c, col in base.items()}
+
+    def whole(base, h):
+        target = first(base, h) if base else None
+        if target is None:
+            return None
+        return {c: ([h] * len(col) if c == target else list(col))
+                for c, col in base.items()}
+
+    def pair(base, h, g):
+        target = first(base, h, g) if base else None
+        if target is None or len(next(iter(base.values()))) < 2:
+            return None
+        return {c: ([h, g, *col[2:]] if c == target else list(col))
+                for c, col in base.items()}
     items: list = []
     for h in holes:
-        items.append(lambda base, h=h: {c: [h, *col[1:]] for c, col in base.items()}
-                     if base else None)
-        items.append(lambda base, h=h: {c: ([h] * len(col) if k == 0 else list(col))
-                                        for k, (c, col) in enumerate(base.items())}
-                     if base else None)
+        items.append(lambda base, h=h: every(base, h))
+        items.append(lambda base, h=h: whole(base, h))
     for h, g in _pairs(holes):
-        items.append(lambda base, h=h, g=g: {c: ([h, g, *col[2:]] if k == 0 else list(col))
-                                             for k, (c, col) in enumerate(base.items())}
-                     if base and len(next(iter(base.values()))) > 1 else None)
+        items.append(lambda base, h=h, g=g: pair(base, h, g))
     if absent:
         items.append(lambda base: _ABSENT)
     return items
@@ -245,11 +293,14 @@ class ContainerDraws:
     """Intent:
         One container parameter's draws: the floor's items in order, one
         per trial, then random draws carrying holes at `HOLE_RATE`.
-        `shape` is `"vec"`, `"mat"` or `"table"`.
+        `shape` is `"vec"`, `"mat"` or `"table"`; a table's column named
+        in `column_holes` carries only the holes listed for it.
     """
 
-    def __init__(self, shape: str, floor: list, holes: list):
+    def __init__(self, shape: str, floor: list, holes: list,
+                 column_holes: "dict | None" = None):
         self.shape, self.floor, self.holes = shape, list(floor), list(holes)
+        self.column_holes = dict(column_holes or {})
         self.turn = 0
 
     def remaining(self) -> int:
@@ -272,6 +323,7 @@ class ContainerDraws:
         if isinstance(base, dict):
             out = {}
             for c, col in base.items():
-                out[c], self.turn = gapped(col, self.holes, rng, self.turn)
+                out[c], self.turn = gapped(col, self.column_holes.get(c, self.holes),
+                                           rng, self.turn)
             return out
         return base

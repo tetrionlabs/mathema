@@ -69,11 +69,14 @@ def test_raises_systemexit_is_decided_like_any_other_raise():
     assert exiting.verdict == raising.verdict, (exiting, raising)
 
 
-def test_raises_systemexit_reaches_the_verdict_an_ordinary_raise_reaches():
+def test_raises_systemexit_reaches_the_verdict_an_explicit_raise_reaches():
     exiting = _one(leave, "for code in [4, 9], raises(f(code), SystemExit)")
+    explicit = _one(leave_explicitly,
+                    "for code in [4, 9], raises(f(code), SystemExit)")
     raising = _one(leave_raising,
                    "for code in [4, 9], raises(f(code), json.JSONDecodeError)")
-    assert exiting.verdict == raising.verdict, (exiting, raising)
+    assert exiting.verdict == explicit.verdict == "proven", (exiting, explicit)
+    assert raising.verdict in ("proven", "holds"), raising
 
 
 def test_an_explicit_raise_systemexit_is_proven_over_a_finite_domain():

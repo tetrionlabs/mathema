@@ -2,7 +2,9 @@
 # Copyright 2026 Tetrion Ltd
 """A calculus claim on the probe route skips cleanly, with the reason
 in the sketch, never the old misleading 'could not resolve bound
-function d, bind one explicitly with funcs=' message."""
+function d, bind one explicitly with funcs=' message; a derivative
+written as a shape claim states it (`d(f(x), x) >= 0`) is decided by
+that claim's own probe."""
 from mathema.conjecture import claim, check_conjectures
 
 
@@ -14,11 +16,19 @@ def _p(law, route):
     return check_conjectures(sq, [claim(law, route=route)])[0]
 
 
-def test_derivative_on_probe_skips_with_reason_in_sketch():
+def test_derivative_sign_on_probe_is_decided_by_the_shape_claims_probe():
     p = _p("for x in [1,5], d(f(x),x) >= 0", "probe")
+    assert (p.verdict, p.route) == ("holds", "probe:algorithmic")
+    assert "as monotonic_increasing[x] does" in p.note
+    assert "bind one explicitly" not in (p.note or "") + (p.sketch or "")
+
+
+def test_another_derivative_on_probe_skips_with_reason_in_sketch():
+    p = _p("for x in [1,5], d(f(x),x) >= 1", "probe")
     assert p.verdict == "skipped"
     assert "not implemented on the probe route" in p.sketch
     assert "probe route: d" in p.sketch
+    assert "is not one of them" in p.sketch
     assert "bind one explicitly" not in (p.note or "") + (p.sketch or "")
 
 

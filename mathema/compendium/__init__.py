@@ -18,7 +18,11 @@ range its claims apply to with two file-level fields:
 mathema bundles such files for `math` and `numpy` beside this module;
 a project states its own wherever its ordinary claims files live
 (`claims/numpy.claims.yaml`), and a project file's row replaces its
-bundled namesake, the other bundled rows staying. A file applies only
+bundled namesake, the other bundled rows staying. An installed package
+ships its own through the `mathema.compendium` entry-point group
+(`package_sources`); its rows load after the bundled ones and before
+the project's, adding to a key by row name, and a row stating something
+other than its namesake is a conflict that neither side wins. A file applies only
 when the library is importable and its installed version is inside
 `versions` (`"*"`, `">=X"` or
 `">=X,<Y"`; the standard library counts as `"*"`); otherwise it
@@ -434,6 +438,156 @@ def _display_path(path: str, root: str) -> str:
     return os.path.relpath(path, root)
 
 
+#: the entry-point group an installed package declares its compendium
+#: files under: each entry is a callable returning a directory of
+#: claims files, or a list of such directories
+PACKAGE_GROUP = "mathema.compendium"
+
+#: the meta key naming the distribution, with its version, a package's
+#: library row comes from (`rowpack 1.3`)
+ROW_PACKAGE = "mathema.compendium_package"
+
+
+class PackageSource(NamedTuple):
+    """A directory of compendium files an installed distribution
+    provides: the distribution's name and version, the directory, and
+    the directory its files are shown relative to."""
+    distribution: str
+    version: str
+    directory: str
+    base: str
+
+    @property
+    def label(self) -> str:
+        """The distribution and its version, `rowpack 1.3`."""
+        return f"{self.distribution} {self.version}"
+
+
+#: the package sources found, by the `sys.path` they were found on
+_PACKAGES: dict = {}
+#: the entry points whose failure has been warned about
+_PACKAGE_WARNED: set = set()
+
+
+def _reset_package_discovery() -> None:
+    """Forget the package sources found and the failures warned about,
+    so the next read discovers afresh."""
+    _PACKAGES.clear()
+    _PACKAGE_WARNED.clear()
+
+
+def _distribution_order(name: str) -> str:
+    """A distribution name in its normalized spelling (lower case, runs
+    of `-`, `_` and `.` read as one `-`), the key packages load by."""
+    import re
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def package_sources() -> list:
+    """Intent:
+        The directories of compendium files the installed distributions
+        declare under `PACKAGE_GROUP`, as `PackageSource`s sorted by
+        distribution name, then directory. Read once for each
+        `sys.path`.
+
+    Notes:
+        An entry whose callable fails to import or raises, or which
+        names something that is not a directory, contributes nothing
+        and is warned about once.
+    """
+    key = tuple(sys.path)
+    if key not in _PACKAGES:
+        _PACKAGES.clear()
+        _PACKAGES[key] = _discover_packages()
+    return list(_PACKAGES[key])
+
+
+def _warn_package(ep, problem: str) -> None:
+    import warnings
+    if (ep.name, ep.value, problem) in _PACKAGE_WARNED:
+        return
+    _PACKAGE_WARNED.add((ep.name, ep.value, problem))
+    warnings.warn(f"mathema: compendium entry point {ep.value!r} registered "
+                  f"under {ep.name!r} in {PACKAGE_GROUP} {problem}; its "
+                  f"files are not read", stacklevel=3)
+
+
+def _discover_packages() -> list:
+    """The `PackageSource`s `package_sources` reports, looked up afresh."""
+    from importlib.metadata import entry_points
+    found: list = []
+    for ep in entry_points(group=PACKAGE_GROUP):
+        dist = getattr(ep, "dist", None)
+        name = (dist.metadata["Name"] if dist is not None
+                else ep.value.split(":")[0].split(".")[0])
+        version = dist.version if dist is not None else "unknown"
+        try:
+            provided = ep.load()()
+        except Exception as e:
+            _warn_package(ep, f"failed ({e!r})")
+            continue
+        many = provided if isinstance(provided, (list, tuple)) else [provided]
+        base = str(dist.locate_file("")) if dist is not None else None
+        for item in many:
+            path = (os.fspath(item) if isinstance(item, (str, os.PathLike))
+                    else str(item))
+            if not os.path.isdir(path):
+                _warn_package(ep, f"names {path!r}, which is not a directory")
+                continue
+            path = os.path.abspath(path)
+            found.append(PackageSource(
+                str(name), str(version), path,
+                os.path.abspath(base) if base else os.path.dirname(path)))
+    found.sort(key=lambda s: (_distribution_order(s.distribution),
+                              s.directory))
+    return found
+
+
+def _package_display(path: str, source: PackageSource) -> str:
+    """A package's claims file as the path below its distribution's
+    install directory, followed by the distribution:
+    `rowpack/claims/math.claims.yaml (from rowpack 1.3)`."""
+    real, base = os.path.realpath(path), os.path.realpath(source.base)
+    if not real.startswith(base + os.sep):
+        base = os.path.dirname(os.path.realpath(source.directory))
+    return f"{os.path.relpath(real, base)} (from {source.label})"
+
+
+def claims_sources(root: "str | None") -> list:
+    """Intent:
+        Every compendium candidate file in load order, as `(path,
+        origin, package)`: the bundled files (`"bundled"`), then each
+        installed package's (`"package"`, with its `PackageSource`),
+        then the project tree's (`"project"`), the latter two only when
+        `root` is given. A package's file the project tree's discovery
+        also reads (a package directory inside the tree, outside the
+        directories discovery skips, such as `.venv`) is read once, as
+        the project's.
+    """
+    from ..spec import claims_file_paths
+    bundled = _bundled_dir()
+    out: list = [(p, "bundled", None) for p in claims_file_paths(bundled)]
+    if root is None:
+        return out
+    project = claims_file_paths(root, exclude=(bundled,))
+    read = {os.path.realpath(p) for p in project}
+    for source in package_sources():
+        out += [(p, "package", source)
+                for p in claims_file_paths(source.directory)
+                if os.path.realpath(p) not in read]
+    out += [(p, "project", None) for p in project]
+    return out
+
+
+def source_display(path: str, root: "str | None",
+                   package: "PackageSource | None") -> str:
+    """The name a compendium file is shown by: `_package_display` for a
+    package's, `_display_path` otherwise."""
+    if package is not None:
+        return _package_display(path, package)
+    return _display_path(path, root or ".")
+
+
 def load_library_claims(root: "str | None" = ".") -> dict:
     """Intent:
         Every applicable library claim entry, keyed by dotted function
@@ -442,20 +596,28 @@ def load_library_claims(root: "str | None" = ".") -> dict:
         stamped as compendium testimony, `compendium` the library,
         `versions` the range the file declares, `source` the file it
         came from (the last file stating the key), `bundled` whether
-        every file stating it ships with mathema, and `replaced` the
-        bundled rows a project file replaces, `[{"source", "rows"}]`.
+        every file stating it ships with mathema, `replaced` the
+        bundled rows a project file replaces, `[{"source", "rows"}]`,
+        and, only on a key with one, `conflicts`, the rows of one name
+        that packages state differently (`add_package_rows`).
         `root=None` reads the bundled files only.
 
     Notes:
-        The bundled files are read first, then the project tree
-        (`root`), with the discovery `spec.load_declared` uses; only
-        files declaring `compendium:` count, and only when the library
-        is importable at a version inside the file's range. A project
-        file naming the project's own package (`names_own_package`)
-        does not count. Files stating one key merge by row name
-        (`merge_rows`): a later file's row replaces its earlier
-        namesake, every other row stays. Each row names its file
-        (`stamp_row_sources`).
+        The bundled files are read first, then each installed package's
+        (`package_sources`, by distribution name), then the project tree
+        (`root`), with the discovery `spec.load_declared` uses
+        (`claims_sources`); only files declaring `compendium:` count,
+        and only when the library is importable at a version inside the
+        file's range. A package or project file naming the project's own
+        package (`names_own_package`) does not count. A package's rows
+        add to a key by row name (`add_package_rows`): a row of a new
+        name joins, and a row whose namesake from an earlier file states
+        something else is a conflict, both rows left out of the entry.
+        A bundled or project file's row replaces its earlier namesake
+        (`merge_rows`), every other row staying. Each row names its file
+        (`stamp_row_sources`), and a package's row its distribution
+        (`ROW_PACKAGE`, and a `mathema.compendium` tag ending
+        `(from <distribution> <version>)`).
 
         Inside a run scope (`_run_scope.run_scope`) the files are read
         once for the run, and each call gets its own copy.
@@ -480,30 +642,29 @@ def _read_library_claims(root: "str | None") -> dict:
         `load_library_claims(root)` read from the claims files, with no
         run-scope sharing.
     """
-    from ..spec import (claims_file_paths, read_claims_file,
-                        stamp_library_rows)
-    bundled = _bundled_dir()
-    paths = claims_file_paths(bundled)
-    shipped = set(paths)
-    if root is not None:
-        paths += claims_file_paths(root, exclude=(bundled,))
+    from ..spec import read_claims_file, stamp_library_rows
     out: dict = {}
-    for path in paths:
-        where = _display_path(path, root or ".")
+    for path, origin, package in claims_sources(root):
+        where = source_display(path, root, package)
         data = read_claims_file(path, where)
         if not data or "compendium" not in data:
             continue
         library, versions, aliases = pop_library_fields(data)
-        if path not in shipped and names_own_package(library, root or "."):
+        if origin != "bundled" and names_own_package(library, root or "."):
             # the project's own package: its claims, not a library's
             continue
         data.pop("grammar", None)
         tag = applicable_tag(library, versions, aliases)
         if tag is None:
             continue
+        if package is not None:
+            clear_row_provenance(data)
+            tag = f"{tag} (from {package.label})"
         stamp_library_rows(data, tag)
         mark_row_versions(data, library, aliases)
         stamp_row_sources(data, where, versions)
+        if package is not None:
+            stamp_row_package(data, package.label)
         for key, entry in data.items():
             if isinstance(entry, dict) and not (entry.get("defines")
                                                 and not entry.get("claims")):
@@ -511,7 +672,11 @@ def _read_library_claims(root: "str | None") -> dict:
                 # (`defines:`) has no function claims to register
                 prior = out.get(key)
                 replaced = list((prior or {}).get("replaced") or [])
-                if prior is not None:
+                conflicts = list((prior or {}).get("conflicts") or [])
+                if prior is not None and package is not None:
+                    entry = add_package_rows(prior["entry"], entry,
+                                             conflicts)
+                elif prior is not None:
                     entry, gone = merge_rows(prior["entry"], entry)
                     for row in gone:
                         if row_is_bundled(row):
@@ -520,9 +685,11 @@ def _read_library_claims(root: "str | None") -> dict:
                                 "rows": [row.get("name")]})
                 out[key] = {"entry": entry, "compendium": library,
                             "versions": versions, "source": where,
-                            "bundled": path in shipped and (
+                            "bundled": origin == "bundled" and (
                                 prior is None or prior.get("bundled")),
                             "replaced": replaced}
+                if conflicts:
+                    out[key]["conflicts"] = conflicts
     return out
 
 
@@ -582,6 +749,85 @@ def merge_rows(earlier: dict, later: dict) -> "tuple[dict, list]":
     merged = {**earlier, **{k: v for k, v in later.items() if k != "claims"}}
     merged["claims"] = rows
     return merged, replaced
+
+
+def clear_row_provenance(data: dict) -> None:
+    """Intent:
+        Remove from every row of a package's compendium file the meta
+        keys the loader stamps (`mathema.compendium`, `ROW_SOURCE`,
+        `ROW_VERSIONS`, `ROW_PACKAGE`), so each row's provenance is the
+        file and distribution it was read from, whatever the file says.
+    """
+    for entry in data.values():
+        for row in (entry.get("claims") or []
+                    if isinstance(entry, dict) else []):
+            if isinstance(row, dict) and isinstance(row.get("meta"), dict):
+                row["meta"] = {k: v for k, v in row["meta"].items()
+                               if k not in ("mathema.compendium", ROW_SOURCE,
+                                            ROW_VERSIONS, ROW_PACKAGE)}
+
+
+def stamp_row_package(data: dict, label: str) -> None:
+    """Mark every row of a package's compendium file with the
+    distribution it comes from (`ROW_PACKAGE`, `rowpack 1.3`)."""
+    for entry in data.values():
+        for row in (entry.get("claims") or []
+                    if isinstance(entry, dict) else []):
+            if isinstance(row, dict):
+                row["meta"] = {**(row.get("meta") or {}), ROW_PACKAGE: label}
+
+
+def _row_statement(row: dict) -> str:
+    return str(row.get("statement") or row.get("law") or "")
+
+
+def _conflict_row(row: dict) -> dict:
+    """One side of a conflict: the row's statement, the file it comes
+    from, and its distribution (None for a bundled row)."""
+    meta = row.get("meta") or {}
+    return {"statement": _row_statement(row),
+            "source": meta.get(ROW_SOURCE),
+            "package": meta.get(ROW_PACKAGE)}
+
+
+def add_package_rows(earlier: dict, later: dict, conflicts: list) -> dict:
+    """Intent:
+        A package's entry for a library key added to the entry the
+        files before it give (`earlier`): a row with a new name joins at
+        the end, a row whose namesake states the same statement adds
+        nothing, and a row whose namesake states a different one is a
+        conflict. A conflict takes both rows out of the entry and is
+        appended to `conflicts` as `{"name", "rows": [{"statement",
+        "source", "package"}, ...]}`; a later row of a name already in
+        conflict joins that conflict's rows. Fields of `later` other
+        than `claims` fill only fields `earlier` lacks. Returns the
+        merged entry.
+    """
+    rows: list = list(earlier.get("claims") or [])
+    at = {r.get("name"): i for i, r in enumerate(rows)
+          if isinstance(r, dict) and r.get("name")}
+    known = {c["name"]: c for c in conflicts}
+    for row in later.get("claims") or []:
+        name = row.get("name") if isinstance(row, dict) else None
+        if name and name in known:
+            known[name]["rows"].append(_conflict_row(row))
+            continue
+        if not name or name not in at:
+            if name:
+                at[name] = len(rows)
+            rows.append(row)
+            continue
+        prior = rows[at[name]]
+        if _row_statement(prior) == _row_statement(row):
+            continue
+        conflict = {"name": name,
+                    "rows": [_conflict_row(prior), _conflict_row(row)]}
+        conflicts.append(conflict)
+        known[name] = conflict
+        rows[at[name]] = None
+    merged = {**{k: v for k, v in later.items() if k != "claims"}, **earlier}
+    merged["claims"] = [r for r in rows if r is not None]
+    return merged
 
 
 def compendium_functions(root: str = ".") -> dict:
@@ -850,7 +1096,42 @@ def external_premises(root: str = ".", verified: "dict | None" = None,
                     "compendium": tag}
             out[f"{key}.{name}"] = hint
             put_bare(name, dict(hint))
+
+    # a row name packages state in conflict satisfies nothing, whatever
+    # an earlier record says, until a row of the name applies again
+    for key, info in library_claims.items():
+        present = {c.get("name") for c in info["entry"].get("claims") or []
+                   if isinstance(c, dict)}
+        for conflict in info.get("conflicts") or []:
+            name = conflict["name"]
+            if name in present:
+                continue
+            hint = {"hint": conflict_hint(key, conflict), "key": key,
+                    "claimed": "holds", "conflict": True}
+            out[f"{key}.{name}"] = hint
+            prior = out.get(name)
+            if prior is None or prior.get("key") == key:
+                out[name] = dict(hint)
+            else:
+                put_bare(name, dict(hint))
     return out
+
+
+def conflict_hint(key: str, conflict: dict) -> str:
+    """Intent:
+        The text naming a conflict on a library key: the row name, each
+        statement with the file it comes from, that neither is used,
+        and how to settle it.
+    """
+    from .._missing_words import options
+    sides = "; ".join(f"{r['statement']!r} ({r['source']})"
+                      for r in conflict["rows"])
+    library = key.split(".")[0]
+    return (f"{key} has conflicting rows named {conflict['name']!r}: "
+            f"{sides}; neither is used as a fact or a premise:\n"
+            + options([f"to settle it, state the row in the project's own "
+                       f"compendium file (claims/{library}.claims.yaml), "
+                       f"where it replaces both"]))
 
 
 def _compendium_hint(tag: str, name: str, key: str,
@@ -1225,15 +1506,17 @@ def register_library_claims(root: "str | None" = ".") -> list:
             except _Unbuildable as e:
                 reason = str(e)
                 label = (key, str(row.get("name")), reason)
-                if reason != "shape" and not info.get("bundled"):
+                reported = _reported_unbuilt(info, row)
+                where = _unbuilt_source(info, row)
+                if reason != "shape" and reported:
                     unbuilt.append((key, str(row.get("name")),
-                                    info["source"], reason))
-                if (reason != "shape" and not info.get("bundled")
+                                    where, reason))
+                if (reason != "shape" and reported
                         and label not in _REPORTED and not _QUIET["on"]):
                     _REPORTED.add(label)
                     warnings.warn(
                         f"mathema: compendium row {row.get('name')!r} of "
-                        f"{key} ({info['source']}) registers no region: "
+                        f"{key} ({where}) registers no region: "
                         f"{reason}", stacklevel=2)
                 continue
             if region_row_kind(str(row.get("name") or "")) == "is_defined" \
@@ -1265,6 +1548,32 @@ def register_library_claims(root: "str | None" = ".") -> list:
     register_hazard_generator("compendium",
                               _boundary_generator(library_claims))
     return names
+
+
+def _reported_unbuilt(info: dict, row: dict) -> bool:
+    """Intent:
+        Whether a row of `info` whose region cannot be built is reported
+        (`unregistered_project_rows` and a warning): a row of a key not
+        every file of which ships with mathema, except a bundled row on
+        a key only bundled and package files state.
+    """
+    if info.get("bundled"):
+        return False
+    if not row_is_bundled(row):
+        return True
+    return any(not row_is_bundled(r)
+               and not (r.get("meta") or {}).get(ROW_PACKAGE)
+               for r in info["entry"].get("claims") or []
+               if isinstance(r, dict))
+
+
+def _unbuilt_source(info: dict, row: dict) -> str:
+    """The file a reported row is named by: a package row's own file,
+    otherwise the last file stating its key."""
+    meta = row.get("meta") or {}
+    if meta.get(ROW_PACKAGE):
+        return str(meta.get(ROW_SOURCE) or info["source"])
+    return info["source"]
 
 
 def _states_totality(row: dict) -> bool:
@@ -1328,6 +1637,10 @@ def uninstalled_project_note(fn) -> "str | None":
         states no compendium file, or its files are installed.
     """
     import inspect
+
+    from ..analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         path = inspect.getsourcefile(_engine_unwrapped(fn))
     except (TypeError, OSError):
@@ -1478,7 +1791,9 @@ def load_definitions(root: "str | None" = ".") -> dict:
         bundled compendium files first, then a project's compendium
         files, then its ordinary claims files. `root=None` reads the
         bundled files only. A bundled or project compendium file counts
-        only when its library applies, as its claims do.
+        only when its library applies, as its claims do. An installed
+        package's files (`package_sources`) define nothing: a definition
+        row is taken at face value, and a package's rows are testimony.
 
     Raises:
         spec.ClaimsFileError: a claims file that does not read, a

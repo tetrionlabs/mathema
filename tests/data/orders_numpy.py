@@ -32,6 +32,10 @@ def unannotated_values(x):
     return x.values
 
 
+def unannotated_shape(x):
+    return x.shape
+
+
 class Box:
     """A box whose `shape` is its side lengths."""
 

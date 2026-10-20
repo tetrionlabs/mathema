@@ -69,5 +69,5 @@ def test_a_chained_claim_keeps_the_gap_its_link_passed_within():
     (p,) = check_conjectures(a_hair_over_one, [claim(
         "for x in [0.5, 2], 0 <= f(x) <= 1", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "fails by 1e-12 at x = 2, within the default tolerance (1e-09)" in p.note, \
+    assert "fails by 1e-12 at x = 2, within the default tolerance (1.01e-07)" in p.note, \
         p.note

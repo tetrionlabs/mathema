@@ -184,6 +184,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # how far the float sides missed the relation at the last point
     # compared, and the allowance applied there (`_allowance.float_miss`)
     precision: list = [None]
+    # the largest gap a pass of `==`, `<=` or `>=` fell within, as
+    # `(gap, allowance, point)`
+    passed: list = [None]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -198,6 +201,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             miss[0] = largest_miss(lv, rv, side)
         precision[0] = float_miss(lv, rv, cj.relation, declared,
                                   input_scaled, side)
+        if held is True and cj.relation in ("==", "<=", ">=") \
+                and precision[0] is not None and precision[0][0] > 0 \
+                and (passed[0] is None or precision[0][0] > passed[0][0]):
+            passed[0] = (*precision[0], dict(point or {}))
         return held
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
@@ -1165,6 +1172,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `(miss, allowance)` of the float comparison at the last point
     # evaluated, None where no numbers were compared
     evaluate.last_precision = lambda: precision[0]  # type: ignore[attr-defined]
+    # the largest gap a pass fell within over every point evaluated,
+    # `(gap, allowance, point)`, None where every pass was exact
+    evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point
@@ -1343,7 +1353,8 @@ def _allowed_miss_words(deps, point) -> str:
 
 def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
                              proof, seq_names, found: "list | None" = None,
-                             reading: str = "executed values"):
+                             reading: str = "executed values",
+                             disagreed: "list | None" = None):
     """Intent:
         `(point, compared)`: `point` is the point derive named as its
         witness when the claim there, decided exactly, is false, else
@@ -1357,7 +1368,9 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         declares its own tolerance (which is then part of the claim),
         or derive's witness lies outside the domain. `found`, when
         given, receives the record of a violation (the reading, the
-        point's exact and computed sides).
+        point's exact and computed sides). `disagreed`, when given,
+        receives a sentence for each point where the float run and the
+        exact reading of the `mathematics` reading disagree.
 
     Notes:
         `~=` is `abs(lhs - rhs) <= ε`, compared exactly as that ordering
@@ -1390,7 +1403,10 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         point = {**named, **{n: deps["sample"](n, rng) for n in missing}}
         if not deps["admits"](point):
             continue
-        held, record = _exact_reading(cj, deps, cj_domain, point, reading)
+        held, record, disagreement = _exact_reading(cj, deps, cj_domain,
+                                                    point, reading)
+        if disagreement is not None and disagreed is not None:
+            disagreed.append(disagreement)
         if held is False:
             if found is not None:
                 found.append(record)
@@ -1404,17 +1420,24 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
 
 def _exact_reading(cj, deps, cj_domain, point, reading: str) -> tuple:
     """Intent:
-        `(holds, record)`: the claim at `point` decided exactly, by
-        `reading`. `mathematics`: each coordinate read as written, the
-        function run on those exact values (`evaluate.exact_as_written`)
-        under the fast wall-clock cap, the sides compared by
-        `conjecture._exact_relation`, and None where a side has no exact
-        value or a coordinate as written lies outside its bound.
-        `executed values`: the values the real code returned, compared
-        with none of the default allowance (the evaluator was built with
-        `exact`). `record` holds the reading and the two sides, as
-        decided (`exact`) and as the float computation gave them
-        (`computed`). `(None, None)` when the reading does not decide.
+        `(holds, record, disagreement)`: the claim at `point` decided
+        exactly, by `reading`. `executed values`: the values the real
+        code returned, compared with none of the default allowance (the
+        evaluator was built with `exact`). `mathematics`: two
+        independent readings of the point, the code's float run
+        (`evaluate`, compared as for `executed values`) and the exact
+        reading, each coordinate read as written, the function run on
+        those exact values (`evaluate.exact_as_written`) under the fast
+        wall-clock cap, the sides compared by
+        `conjecture._exact_relation`. Both run at every point, the float
+        run first; the exact reading decides, and is None where a side
+        has no exact value or a coordinate as written lies outside its
+        bound. A float run with no value leaves the exact reading to
+        decide. `record` holds the reading and the two sides, as decided
+        (`exact`) and as the float computation gave them (`computed`).
+        `disagreement` is a sentence for the note where both readings
+        decide and differ, else None. `(None, None, None)` when the
+        reading does not decide.
     """
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     from .conjecture import _exact_relation
@@ -1422,30 +1445,42 @@ def _exact_reading(cj, deps, cj_domain, point, reading: str) -> tuple:
     if reading == "executed values":
         held = evaluate(point)
         sides = computed = evaluate.sides()
-    else:
-        held = sides = None
-        if _written_inside(cj_domain, point):
-            try:
-                sides = _with_timeout(
-                    lambda: evaluate.exact_as_written(point),
-                    FAST_TIMEOUT_SECONDS)
-            except TimeoutError:
-                sides = None
-            if sides is not None:
-                try:
-                    held = _exact_relation(cj, sides[0], sides[1])
-                except (TypeError, ValueError, ArithmeticError):
-                    held = None
         if held is None:
-            return None, None
-        # the float sides at the point, for the record
-        evaluate(point)
-        computed = evaluate.sides()
+            return None, None, None
+        return held, {"reading": reading,
+                      "exact": _sides_text(sides, exact=False),
+                      "computed": _sides_text(computed, exact=False)}, None
+    float_held = evaluate(point)
+    computed = evaluate.sides()
+    held = sides = None
+    if _written_inside(cj_domain, point):
+        try:
+            sides = _with_timeout(
+                lambda: evaluate.exact_as_written(point),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            sides = None
+        if sides is not None:
+            try:
+                held = _exact_relation(cj, sides[0], sides[1])
+            except (TypeError, ValueError, ArithmeticError):
+                held = None
     if held is None:
-        return None, None
-    return held, {"reading": reading,
-                  "exact": _sides_text(sides, exact=reading == "mathematics"),
-                  "computed": _sides_text(computed, exact=False)}
+        return None, None, None
+    record = {"reading": reading,
+              "exact": _sides_text(sides, exact=True),
+              "computed": _sides_text(computed, exact=False)}
+    disagreement = None
+    if float_held is not None and float_held != held:
+        float_word, exact_word = (("holds", "makes the claim false")
+                                  if float_held else
+                                  ("makes the claim false", "holds"))
+        disagreement = (
+            f"the two readings of derive's witness disagree: the code's "
+            f"float run {float_word} there compared exactly "
+            f"({record['computed']}), the exact reading {exact_word} "
+            f"({record['exact']})")
+    return held, record, disagreement
 
 
 def _sides_text(sides, exact: bool) -> str:
@@ -1492,6 +1527,19 @@ def _written_inside(cj_domain, point) -> bool:
             except Undecided:
                 continue
     return True
+
+
+def _returned_calls(calls, facts) -> list:
+    """`(value, {param: argument})` for each call of f that returned, from
+    `(kind, outcome, args, kwargs)` records."""
+    out = []
+    for kind, value, args, kwargs in calls or ():
+        if kind != "returned":
+            continue
+        point = dict(zip(list(facts.params), args))
+        point.update(kwargs or {})
+        out.append((value, point))
+    return out
 
 
 def _capped_exact(exact_at, point):
@@ -1715,9 +1763,11 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"within its tolerance)").lstrip("; ")
         return falsified
     found = []
+    disagreed: list = []
     exact_point, _held = _exact_witness_violation(
         cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names,
-        found=found, reading="mathematics")
+        found=found, reading="mathematics", disagreed=disagreed)
+    disagreement_text = f"; {disagreed[-1]}" if disagreed else ""
     if exact_point is not None:
         record = _exact_witness_found(falsified, deps, fn, facts, exact_point,
                                       found[0])
@@ -1732,7 +1782,7 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"there ({record['exact']})"
             + (", while the float computation agrees within its allowance"
                if record["computation"] == "holds within its allowance"
-               else "")).lstrip("; ")
+               else "") + disagreement_text).lstrip("; ")
         return falsified
     falsified.verdict = "unknown"
     falsified.meta = {**(falsified.meta or {}),
@@ -1748,13 +1798,14 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"{falsified.note}; derive found this claim false, but "
             f"{C.EXACT_ARITHMETIC_ONLY_NOTE} (run at derive's "
             f"counterexample, the two sides come out equal), so the "
-            f"verdict stays unknown").lstrip("; ")
+            f"verdict stays unknown{disagreement_text}").lstrip("; ")
         return falsified
     falsified.note = (
         f"{falsified.note}; derive found this claim false, but no run of "
         f"the code inside the domain reproduced it ({result.checked} points "
         f"checked); a disproof nothing reproduces is probably a mathema "
-        f"bug worth reporting, so the verdict stays unknown")
+        f"bug worth reporting, so the verdict stays unknown"
+        f"{disagreement_text}")
     return falsified
 
 
@@ -2244,6 +2295,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             exact_at = getattr(deps["evaluate"], "exact_at", None)
             found = _conditioning.at_miss(
                 fn, facts, called, gap, reference, cj_domain,
+                calls=_returned_calls(deps["evaluate"].calls(), facts),
                 reduces=_conditioning.claim_reduces(cj),
                 exact_at=(lambda point: _capped_exact(exact_at, point))
                 if exact_at is not None else None)
@@ -2290,5 +2342,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(name, parent.statement, "skipped", route=float_route,
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
+    largest = deps["evaluate"].largest_pass()
+    if largest is not None:
+        from .conjecture import passed_within_words
+        gap, allowance, at = largest
+        what = f"{what}; " + passed_within_words(
+            cj.relation, gap, _fmt_point(at, deps["names"]) if at else None,
+            allowance, cj.tolerance)
     return Probe(name, parent.statement, "holds", route=float_route,
                  n=numbers, note=what, meta=tried_meta or None)

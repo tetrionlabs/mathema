@@ -102,8 +102,9 @@ def _np():
 
 
 def to_exact(value):
-    """A float read as the exact rational it holds, a float array or list
-    as an object array (or list) of them; anything else unchanged."""
+    """A float read as the exact rational it holds, a float array, list,
+    tuple or set as an object array (or the same container) of them;
+    anything else unchanged."""
     np = _np()
     if isinstance(value, bool):
         return value
@@ -120,10 +121,12 @@ def to_exact(value):
         return out
     if np is not None and isinstance(value, np.floating):
         return to_exact(float(value))
-    if isinstance(value, list) and value and all(isinstance(v, float) for v in value):
-        # a list stays a list, so the function receives the type it was
-        # called with (`xs + xs` concatenates)
-        return [to_exact(v) for v in value]
+    if isinstance(value, (list, tuple, set, frozenset)) and value \
+            and all(isinstance(v, float) for v in value):
+        # a list stays a list, a tuple a tuple and a set a set, so the
+        # function receives the type it was called with (`xs + xs`
+        # concatenates)
+        return type(value)(to_exact(v) for v in value)
     return value
 
 
@@ -137,8 +140,8 @@ def to_float(value):
         return int(value)
     if np is not None and isinstance(value, np.ndarray) and value.dtype == object:
         return value.astype(float)
-    if isinstance(value, list):
-        return [to_float(v) for v in value]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return type(value)(to_float(v) for v in value)
     return value
 
 

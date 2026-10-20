@@ -1017,7 +1017,10 @@ def ground_proof(cj, fn, facts, bound_funcs):
         `mathema.sweep_holds` when it holds but purity is not shown, or
         when its value has no exact reading (`mathema.sweep_inexact`).
         None when the claim is not ground or the evaluation cannot
-        decide it.
+        decide it. A result that is not `disproven` carries, under
+        `mathema.ground_pass_gap`, the gap its comparison passed with
+        and the allowance there, `(gap, allowance)`, when the gap is
+        not zero (`gates` evaluate's `largest_pass`).
 
     Notes:
         The relation is decided by the corroboration gate's point
@@ -1027,6 +1030,18 @@ def ground_proof(cj, fn, facts, bound_funcs):
         claim never reads is no coordinate of that point: each call
         binds what the claim passes it, and nothing is drawn.
     """
+    seen: dict = {}
+    result = _ground_proof(cj, fn, facts, bound_funcs, seen)
+    if result is not None and result.status != "disproven" \
+            and seen.get("largest") is not None:
+        gap, allowance, _at = seen["largest"]
+        result.meta["mathema.ground_pass_gap"] = (gap, allowance)
+    return result
+
+
+def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
+    """`ground_proof`, recording in `seen["largest"]` the largest gap a
+    pass of the comparison fell within."""
     if cj.relation not in _GROUND_RELATIONS or cj.links or cj.free_vars \
             or cj.domain or cj.assuming or not _calls_f(cj):
         return None
@@ -1036,6 +1051,7 @@ def ground_proof(cj, fn, facts, bound_funcs):
         return None
     evaluate = deps["evaluate"]
     verdict = evaluate({})
+    seen["largest"] = evaluate.largest_pass()
     calls = evaluate.calls()
     if verdict is None or not calls:
         return None

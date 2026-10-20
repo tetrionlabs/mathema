@@ -52,8 +52,13 @@ and `--concepts` accept the function's stated intent and concept tags.
   whatever its shape, with one exception. A proof's computation line
   (`<name>[float]`) is accepted alone only where its loss is inherent
   in the inputs, so that no float64 computation could do better at the
-  witness by the condition number its note gives. Where the code loses
-  more than that, or the conditioning could not be read, the
+  witness: the computed value is the exact result correctly rounded, or
+  the condition number its note gives is above 10 (the problem itself
+  amplifies rounding) and the loss is within what it explains. Where
+  the code loses more than that, where a well-conditioned result is not
+  the correctly rounded one (a different arrangement of the formula may
+  lose less), or where the conditioning could not be
+  read, the
   acceptance is refused with the cause and the ways out: fix the code,
   accept the whole claim as a discovery, or narrow the claim's domain
   knowingly, edit it and accept it `--as superseded`. Accepting the

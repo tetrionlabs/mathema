@@ -781,7 +781,16 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 
 <!-- example: write-spec repl -->
 ```
->>> mathema.write_spec(softmax, root='.')
+>>> record = mathema.write_spec(softmax, root='.')
+>>> record
+mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+  holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  sums_to_one  sum(f(scores)) = 1   holds
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  8 built-in checks: 3 proven, 3 holds, 2 falsified (record.render(families=True) prints them)
+>>> print(record.render(families=True))
 mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   is_deterministic  f(scores) = f(scores)   holds
@@ -808,13 +817,15 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
-`sums_to_one` came from the docstring `Claims:` block, and the rest are
+`sums_to_one` came from the docstring `Claims:` block, and the record
+prints those first, folding the rest into one line that counts their
+verdicts; `render(families=True)` prints every row. The rest are
 mathema's built-in battery: every function gets the determinism and
 state probes, a function computing a number from numbers gets the
 stability probe too, and a list-in, list-out function also gets the

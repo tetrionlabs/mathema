@@ -555,10 +555,12 @@ def is_missing(value) -> bool:
     sentinels, IEEE-754 NaN (self-inequality catches a Python `float`, a
     numpy `float64`, and a pandas float uniformly, all three being
     ordinary IEEE-754 under the hood, with no import of any of them
-    needed), or one of a small, extensible set of known missing-
+    needed), a `Decimal` NaN, quiet or signalling, or one of a small, extensible set of known missing-
     sentinel type names checked by name alone. This is the slot
     reading: a `None` held in a slot is the `null` hole."""
     if value is None or isinstance(value, _Sentinel):
+        return True
+    if _decimal_nan(value):
         return True
     try:
         if value != value:
@@ -574,6 +576,13 @@ def is_absent(value) -> bool:
     return value is None or (isinstance(value, _Sentinel) and value.kind == "absent")
 
 
+def _decimal_nan(value) -> bool:
+    """Whether `value` is a `Decimal` NaN, quiet or signalling: a
+    signalling one raises on comparison, so it is asked directly."""
+    import decimal
+    return isinstance(value, decimal.Decimal) and value.is_nan()
+
+
 def member_of(value) -> "str | None":
     """The member word a missing slot value is (`nan`, `NA`, `NaT`, and
     `null` for a `None` held in a slot), the sentinel's own word for a
@@ -585,6 +594,8 @@ def member_of(value) -> "str | None":
     name = _MEMBER_TYPE_NAMES.get(type(value).__name__)
     if name is not None:
         return name
+    if _decimal_nan(value):
+        return "nan"
     try:
         if value != value:
             return "nan"
@@ -1559,7 +1570,10 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
     annotation. A space domain (`dims` set) judges a container value by
     its shape first, the rank and every fixed axis, then every element
     against the element domain; a single number is judged as an
-    element."""
+    element. A number of another type (a `Decimal`, a `Fraction`, a
+    numpy scalar) is judged by the number it holds, an exact one
+    meeting every endpoint and member as written (`0.1` is 1/10), as
+    `number_member` reads it."""
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
     if isinstance(value, _Sentinel):
@@ -1588,10 +1602,70 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
         members = [p for p in dom.pieces if isinstance(p, frozenset)
                    and not _sentinel_piece(p)]
         return not members or any(value in p for p in members)
+    if _other_number(value):
+        # a Decimal, a Fraction or a numpy scalar is the number it
+        # holds, an exact one met by every endpoint as written
+        v, dom = _number_reading(value, dom)
+        if isinstance(v, bool) or not isinstance(
+                v, (int, float, complex, fractions.Fraction)):
+            return False
+        if isinstance(v, float) and math.isinf(v) and not dom.pieces \
+                and dom.base_type in ("R", "Z", "N"):
+            return False
+        if _safe_in(v, dom.excluded):
+            return False
+        return _number_contains(v, dom)
+    return _number_contains(value, dom)
+
+
+def _other_number(value) -> bool:
+    """Whether `value` is a number of a type other than the plain
+    `int`, `float`, `complex` and `bool`: a `Decimal`, a `Fraction`, a
+    numpy scalar."""
+    import numbers
+    return isinstance(value, numbers.Number) \
+        and type(value) not in (int, float, complex, bool) \
+        and not (type(value).__name__ in ("bool_", "bool")
+                 and type(value).__module__ == "numpy")
+
+
+def _number_reading(value, dom: "Domain") -> tuple:
+    """Intent:
+        `(number, domain)`: `value` as the plain number with exactly its
+        value (`plain_number`), and `dom` read the way that number meets
+        an endpoint. An exact number (an int, a numpy integer, a
+        Fraction, a Decimal) meets an endpoint written `0.1` as 1/10;
+        a numpy float narrower or wider than float64 meets the literal
+        parsed in its own type; a binary float meets the float the
+        literal parses to.
+    """
+    import decimal
+    import numbers
+    exact = (isinstance(value, (numbers.Rational, decimal.Decimal))
+             and not isinstance(value, bool))
+    v = plain_number(value)
+    if exact and isinstance(v, (int, fractions.Fraction)):
+        return v, _written_domain(dom)
+    float_type = type(value)
+    if (float_type.__module__ == "numpy" and float_type.__name__ != "float64"
+            and hasattr(value, "as_integer_ratio")
+            and isinstance(v, (float, fractions.Fraction))
+            and not (isinstance(v, float) and math.isinf(v))):
+        return v, _written_domain(dom, _in_float_type(float_type))
+    return v, dom
+
+
+def _number_contains(value, dom: "Domain") -> bool:
+    """Intent:
+        Membership of a plain value in a domain that is neither a
+        language nor the strings, once its missing-value policy and
+        exclusions have been answered (`domain_contains`).
+    """
     if dom.base_type == "C":
         # the complex plane: any number belongs (the reals embed);
         # discrete pieces and exclusions still apply below.
-        if not isinstance(value, (int, float, complex)) or isinstance(value, bool):
+        if not isinstance(value, (int, float, complex, fractions.Fraction)) \
+                or isinstance(value, bool):
             return False
         if not dom.pieces:
             return True
@@ -1640,6 +1714,8 @@ def plain_number(value):
     if isinstance(value, numbers.Integral):
         return int(value)
     if isinstance(value, decimal.Decimal):
+        if value.is_nan():
+            return math.nan
         if not value.is_finite():
             return float(value)
         exact = fractions.Fraction(value)
@@ -1739,10 +1815,6 @@ def number_member(value, bounds) -> "bool | None":
         endpoint beyond that type's range reads as its signed infinity,
         and an infinite argument still lies outside a finite endpoint.
     """
-    import decimal
-    import numbers
-    exact = (isinstance(value, (numbers.Rational, decimal.Decimal))
-             and not isinstance(value, bool))
     v = plain_number(value)
     if isinstance(v, bool):
         return False
@@ -1752,16 +1824,8 @@ def number_member(value, bounds) -> "bool | None":
     if (isinstance(v, float) and math.isinf(v) and not dom.pieces
             and dom.base_type in ("R", "Z", "N")):
         return False
-    if exact and isinstance(v, (int, fractions.Fraction)):
-        return domain_contains(v, _written_domain(bounds))
-    float_type = type(value)
-    if (float_type.__module__ == "numpy" and float_type.__name__ != "float64"
-            and hasattr(value, "as_integer_ratio")
-            and isinstance(v, (float, fractions.Fraction))
-            and not (isinstance(v, float) and math.isinf(v))):
-        return domain_contains(v, _written_domain(bounds,
-                                                  _in_float_type(float_type)))
-    return domain_contains(v, bounds)
+    v, read = _number_reading(value, dom)
+    return domain_contains(v, read)
 
 
 _TYPE_GLYPH = {"R": "ℝ", "Z": "ℤ", "N": "ℕ", "C": "ℂ"}

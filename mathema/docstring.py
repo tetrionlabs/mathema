@@ -741,7 +741,8 @@ def render_docstring(fn, root: str = ".") -> str:
     entry = rec["entry"]
     claims = entry.get("claims") or []
 
-    doc = inspect.getdoc(fn) or ""
+    from .analysis import docstring_of
+    doc = docstring_of(fn)
     text = _strip_block(doc, "Claims:")
 
     claim_lines = [f"    {c['name']}{_route_tag(c)}: {c['statement']}"
@@ -779,7 +780,8 @@ def generate_docstring(fn, key: str | None = None, root: str = ".") -> str | Non
     from .authoring import _fn_key, resolve_declared
     from .spec import load_verified
 
-    if (inspect.getdoc(fn) or "").strip():
+    from .analysis import docstring_of
+    if docstring_of(fn).strip():
         return None
     key = key or _fn_key(fn)
     declared = resolve_declared(fn, key=key, root=root)
@@ -821,7 +823,17 @@ def write_docstring(fn, text: str) -> str:
     The insertion is positional, not a reformat: the triple-quoted
     string goes on its own lines immediately before the function's
     first statement, at that statement's own indentation, and nothing
-    else in the file is touched."""
+    else in the file is touched. Refused with `ValueError` for a callable
+    standing for a function another frontend read
+    (`analysis.foreign_body`): its source file is a wrapper's, not where
+    that function is written."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        raise ValueError(
+            f"cannot write a docstring for {getattr(fn, '__qualname__', fn)!r}: "
+            f"it stands for a function written in another language, so its "
+            f"Python source is a wrapper's; add the docstring to that "
+            f"function's own source")
     path = inspect.getsourcefile(fn)
     if path is None:
         raise ValueError(f"no source file for {fn!r}")

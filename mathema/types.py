@@ -387,6 +387,24 @@ def _numpy_dtype_scalar(hint) -> "str | None":
     return None
 
 
+def _sequence_slots() -> dict:
+    """`{type: slot name}` for the built-in sequence and set types whose
+    elements are slots: a list, a tuple, a set and a frozenset, and the
+    abstract set types an annotation may name for a set."""
+    import collections.abc as abc
+    return {list: "list", tuple: "tuple", set: "set", frozenset: "frozenset",
+            abc.Set: "set", abc.MutableSet: "set"}
+
+
+#: the slot name of each built-in sequence or set type
+_SEQUENCE_SLOTS = _sequence_slots()
+
+#: the slot name of each set type's source spelling, lowercased
+_SEQUENCE_SLOT_NAMES = {"abstractset": "set", "mutableset": "set",
+                        "collections.abc.set": "set",
+                        "collections.abc.mutableset": "set"}
+
+
 def _policy_of_hint(hint, detection):
     """The missing-value defaults of one live annotation."""
     from .domain import NO_ANNOTATION, MissingDefaults
@@ -413,13 +431,13 @@ def _policy_of_hint(hint, detection):
                                resolve_missing(name), name,
                                absence=resolve_absence(name) or ("None",))
     origin = typing.get_origin(inner) or inner
-    if origin in (list, tuple):
+    container = _SEQUENCE_SLOTS.get(origin)
+    if container is not None:
         element = _element_policy(typing.get_args(inner))
         if element is not None:
             scalar, members = element
-            return MissingDefaults(optional, members,
-                                   f"{origin.__name__}[{scalar}]")
-        return MissingDefaults(optional, resolve_missing("list"), origin.__name__)
+            return MissingDefaults(optional, members, f"{container}[{scalar}]")
+        return MissingDefaults(optional, resolve_missing("list"), container)
     scalar = _scalar_slot_type(inner)
     if scalar is not None:
         return MissingDefaults(optional, resolve_missing(scalar), scalar)
@@ -442,8 +460,9 @@ def _policy_of_text(text: str):
     head = base.split("[", 1)[0]
     if head in ("float", "int", "bool", "str", "complex"):
         return MissingDefaults(optional, resolve_missing(head), head)
-    if head in ("list", "tuple"):
-        inner = base[len(head) + 1:-1] if "[" in base else ""
+    inner = base[len(head) + 1:-1] if "[" in base else ""
+    head = _SEQUENCE_SLOT_NAMES.get(head, head)
+    if head in ("list", "tuple", "set", "frozenset"):
         if inner in ("float", "int", "bool", "str", "complex"):
             return MissingDefaults(optional, resolve_missing(inner),
                                    f"{head}[{inner}]")
@@ -463,7 +482,8 @@ def missing_policy_from_signature(fn) -> dict:
         runtime type whose definition row states an absence) and the
         members of the hole class on its slots. A `float` slot holds
         `nan`, a datetime `NaT`, an `int`, `bool`, `str` or a class
-        nothing; a `list` element `null` and `nan`, `list[float]` `nan`,
+        nothing; a `list`, `tuple`, `set` or `frozenset` element `null`
+        and `nan`, `list[float]` `nan`,
         `list[int]` nothing; a runtime type (`numpy.ndarray`,
         `pandas.Series`, a registered adapter) the members its adapter
         and the definition rows give. A bound marker (`Probability`)
@@ -626,16 +646,17 @@ _TYPE_PROBE_TRIALS = 32   # default sample count for a Shape-derived probe,
                          # battery of algebraic laws needing broad coverage
 
 
-_SHAPE_MISMATCH_TRIALS = 3   # per shared dim, domain_enforced-sized, not the
-                            # full adaptive battery: this checks one specific
-                            # guard, the same scale as domain_enforced's own
-                            # fixed n=2 boundary check, not a law needing
-                            # broad coverage
-
-
 def _call(fn, sig, args: dict):
-    return fn(**args) if all(p in sig.parameters for p in args) \
-        else fn(*[args[p] for p in sig.parameters if p in args])
+    """Intent:
+        `fn` called with `args`, by name when the signature names every
+        one, else by position in signature order.
+
+    Raises:
+        ExitRaised: `fn` raised `SystemExit` (`_exits.call`).
+    """
+    from ._exits import call
+    return call(fn, **args) if all(p in sig.parameters for p in args) \
+        else call(fn, *[args[p] for p in sig.parameters if p in args])
 
 
 def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
@@ -667,25 +688,27 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
     rejected, accepted_examples, checked = 0, [], 0
     for dim in shared:
         candidates = [p for p, dims in param_dims.items() if dim in dims]
-        for _ in range(_SHAPE_MISMATCH_TRIALS):
-            sizes = {n: rng.randint(1, 4) for n in names}
-            sizes.update(fixed or {})
-            bad_param = rng.choice(candidates)
-            bad_sizes = dict(sizes)
-            bad_sizes[dim] = sizes[dim] + 1 + rng.randint(0, 2)
-            args = {p: _synth_nested(dims, bad_sizes if p == bad_param else sizes, rng)
-                   for p, dims in param_dims.items()}
-            checked += 1
-            try:
-                result = _call(fn, sig, args)
-            except Exception:
-                rejected += 1
-                continue
-            if result is None:
-                rejected += 1
-                continue
-            accepted_examples.append(f"{bad_param}[{dim}]={bad_sizes[dim]} "
-                                     f"vs {dim}={sizes[dim]} elsewhere")
+        others = [n for n in names if n != dim]
+        for bad_param in candidates:
+            for sizes, wrong in _mismatch_cases(dim, names, fixed):
+                if wrong == 0 and not _admits_zero(param_dims[bad_param], dim):
+                    continue
+                bad_sizes = {**sizes, dim: wrong}
+                args = {p: _synth_nested(dims, bad_sizes if p == bad_param else sizes, rng)
+                        for p, dims in param_dims.items()}
+                checked += 1
+                try:
+                    result = _call(fn, sig, args)
+                except Exception:
+                    rejected += 1
+                    continue
+                if result is None:
+                    rejected += 1
+                    continue
+                rest = ", ".join(f"{n}={sizes[n]}" for n in others)
+                accepted_examples.append(f"{bad_param}[{dim}]={wrong} "
+                                         f"vs {dim}={sizes[dim]} elsewhere"
+                                         + (f" ({rest})" if rest else ""))
     if rejected == checked:
         return Probe("dimensions_enforced", stmt, "holds", n=checked)
     # one truth, no mode: a declared shared dim the code silently
@@ -694,6 +717,65 @@ def _dimensions_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                  counterexample="; ".join(accepted_examples[:3]),
                  note="silently accepting a shape mismatch violates the "
                       "declared shared dims")
+
+
+#: the sizes a dimension takes where every parameter agrees on it, in a
+#: mismatch case
+_MISMATCH_BASES = (1, 2, 3)
+
+
+def _mismatch_cases(dim: str, names: tuple,
+                    fixed: "dict | None" = None) -> list:
+    """Intent:
+        Every mismatch on the shared dimension `dim` the enforcement
+        probe tries, as `(sizes, wrong)`: `sizes` the dimensions every
+        other parameter is drawn at, `wrong` the size the mismatched
+        parameter takes along `dim` instead. `dim` agrees at 1, 2 and 3
+        (at its fixed size when a binding fixes it), and `wrong` is one,
+        two and three larger, one smaller, 1 (where numpy broadcasts)
+        and 0. Each other dimension is drawn apart from both sizes,
+        then each one alone, and all together, at the wrong size, so a
+        function that accepts a mismatch only where it equals another
+        dimension is met there.
+    """
+    fixed = fixed or {}
+    free = [n for n in names if n != dim and n not in fixed]
+    cases: list = []
+    for agreed in ((fixed[dim],) if dim in fixed else _MISMATCH_BASES):
+        wrongs = dict.fromkeys(w for w in (agreed + 1, agreed - 1, 1, 0,
+                                           agreed + 2, agreed + 3)
+                               if w >= 0 and w != agreed)
+        for wrong in wrongs:
+            apart = next(v for v in range(1, 6) if v not in (agreed, wrong))
+            others = [dict.fromkeys(free, apart)]
+            others += [{**dict.fromkeys(free, apart), n: wrong}
+                       for n in free if wrong >= 1]
+            if len(free) > 1 and wrong >= 1:
+                others.append(dict.fromkeys(free, wrong))
+            for other in others:
+                cases.append(({**other, **fixed, dim: agreed}, wrong))
+    return cases
+
+
+def _admits_zero(dims: tuple, dim) -> bool:
+    """Whether a parameter of `dims` can be drawn as nested lists with
+    the axis named `dim` at size 0 and its shape still read back: a
+    vector, or a matrix along its last axis only (a matrix with no rows
+    has lost its column count)."""
+    return all(d != dim for d in dims[:-1])
+
+
+def _wrong_sizes(fixed: int, last_axis: bool) -> list:
+    """Intent:
+        The wrong sizes `size_enforced` tries on an axis a marker fixes
+        at `fixed`: one, two and three larger, one smaller, 1 (where
+        numpy broadcasts) and 0. Zero only on a vector or a matrix's
+        last axis, where nested lists keep the shape it has (a matrix
+        with no rows has lost its column count).
+    """
+    sizes = (fixed + 1, fixed + 2, fixed + 3, fixed - 1, 1, 0)
+    return [w for w in dict.fromkeys(sizes)
+            if w != fixed and w >= (0 if last_axis else 1)]
 
 
 def _returns_in_shape(fn, sig, param_dims: dict, names: tuple,
@@ -726,8 +808,9 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                          rng: random.Random, marker_dims: dict,
                          fixed: "dict | None" = None) -> Probe | None:
     """Does the real function reject a value of the wrong FIXED size (a
-    parameter marked `Mat(30, 15)` called with one axis a little
-    larger), the fixed-size counterpart of `_dimensions_enforced_probe`.
+    parameter marked `Mat(30, 15)` called with one axis larger, smaller,
+    at 1 or at 0, `_wrong_sizes`), the fixed-size counterpart of
+    `_dimensions_enforced_probe`.
     Only a size a MARKER states (`marker_dims`, the signature's own
     shapes) is asked about: a size stated only by a claim's binding is
     the declared `excluded_outside_domain(p)` claim's question. Every
@@ -748,18 +831,18 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                      note="no evaluable inputs: no call at consistent "
                           "shapes returned")
     rejected, checked = 0, 0
-    # the wrong sizes each parameter accepted, distinct, so the witness
-    # shows the smallest and the largest tried
+    # the wrong sizes each parameter accepted, per axis
     accepted: dict = {}
     for p, axes in targets.items():
+        dims = param_dims[p]
         for axis in axes:
-            for _ in range(_SHAPE_MISMATCH_TRIALS):
+            for wrong in _wrong_sizes(dims[axis], axis == len(dims) - 1):
                 sizes = {n: rng.randint(1, 4) for n in names}
                 sizes.update(fixed or {})
-                bumped = tuple(d + 1 + rng.randint(0, 2) if k == axis else d
-                               for k, d in enumerate(param_dims[p]))
-                args = {q: _synth_nested(bumped if q == p else dims, sizes, rng)
-                        for q, dims in param_dims.items()}
+                bumped = tuple(wrong if k == axis else d
+                               for k, d in enumerate(dims))
+                args = {q: _synth_nested(bumped if q == p else q_dims, sizes, rng)
+                        for q, q_dims in param_dims.items()}
                 checked += 1
                 try:
                     result = _call(fn, sig, args)
@@ -771,16 +854,18 @@ def _size_enforced_probe(fn, sig, param_dims: dict, names: tuple,
                     continue
                 tried = tuple(sizes[d] if isinstance(d, str) else d
                               for d in bumped)
-                accepted.setdefault(p, set()).add(tried)
+                accepted.setdefault((p, axis), []).append(tried)
     if rejected == checked:
         return Probe("size_enforced", stmt, "holds", n=checked)
+    # one witness per axis that accepted a wrong size: the size farthest
+    # from the fixed one, the larger on a tie
     examples = []
-    for p, sizes_tried in accepted.items():
-        ordered = sorted(sizes_tried)
-        for tried in dict.fromkeys((ordered[0], ordered[-1])):
-            examples.append(
-                f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
-                f"where the shape fixes {expected(param_dims[p])}")
+    for (p, axis), sizes_tried in accepted.items():
+        want = param_dims[p][axis]
+        tried = max(sizes_tried, key=lambda t: (abs(t[axis] - want), t[axis]))
+        examples.append(
+            f"{p} {'is' if len(tried) == 2 else 'has'} {words(tried)} "
+            f"where the shape fixes {expected(param_dims[p])}")
     return Probe("size_enforced", stmt, "falsified", n=checked,
                  counterexample="; ".join(examples),
                  note="silently accepting a wrong fixed size violates the "

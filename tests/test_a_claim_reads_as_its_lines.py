@@ -211,4 +211,4 @@ def test_a_line_that_passed_within_the_tolerance_prints_the_gap():
         "for x in [0.5, 2], 0 <= f(x) <= 1", name="unit", route="probe")])
     line = next(ln for ln in _lines(rec)
                 if ln.split()[:2] == ["holds", "computation"])
-    assert "fails by 1e-12 at x = 2, within the default tolerance (1e-09)" in line, line
+    assert "fails by 1e-12 at x = 2, within the default tolerance (1.01e-07)" in line, line

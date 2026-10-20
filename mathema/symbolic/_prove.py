@@ -1369,11 +1369,20 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
             if id(node) in exempt or not target_guards:
                 continue
             fixed = at_points.get(id(node), {})
+            # a bundled parameter (self, a dataclass) passed under its
+            # own name keeps its field symbols, shared with the claim's
+            # by name, so it needs no substitution
+            aggregate = getattr(target, "aggregate", None) or {}
+            shared = {i for i, (p, a) in enumerate(zip(target.sig_params,
+                                                       node.args))
+                      if aggregate.get(p) is not None
+                      and isinstance(a, ast.Name) and a.id == p}
             try:
-                args = [_law_to_sympy(a, lifted, param_names, aux)
-                        for a in node.args]
+                args = [None if i in shared
+                        else _law_to_sympy(a, lifted, param_names, aux)
+                        for i, a in enumerate(node.args)]
                 if fixed:
-                    args = [a if isinstance(a, (tuple, _SymbolicArray))
+                    args = [a if a is None or isinstance(a, (tuple, _SymbolicArray))
                             else sympy.sympify(a).subs(fixed,
                                                        simultaneous=True)
                             for a in args]
@@ -1382,7 +1391,9 @@ def _call_guard_conditions(lhs_src: str, rhs_src: str, lifted,
             except Exception:
                 return None
             subs = {}
-            for p, arg in zip(target.sig_params, args):
+            for i, (p, arg) in enumerate(zip(target.sig_params, args)):
+                if i in shared:
+                    continue
                 sym = target.params.get(p)
                 if sym is None or isinstance(arg, (tuple, _SymbolicArray)):
                     return None
@@ -1857,8 +1868,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
             from ._partiality import NO_VALUE
             fails = ("has no value" if exc == NO_VALUE
                      else f"raises {exc or 'an exception'}")
+            # the counterexample states what the executed call did when
+            # the sketch cannot: the value it returned where it has no
+            # value, and the exit code of an exit
             shown = (_returned_words(target, arg_exprs, witness)
-                     if exc == NO_VALUE and target is not None else "")
+                     if exc in (NO_VALUE, "SystemExit")
+                     and target is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"{call_text} {fails} inside the declared "

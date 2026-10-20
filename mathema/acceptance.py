@@ -2060,7 +2060,8 @@ def _function_item(key: str, entry: dict, fn) -> "dict | None":
         if not changed and not accepted.get("stale"):
             return None
     path = line = None
-    if fn is not None:
+    from .analysis import foreign_body
+    if fn is not None and not foreign_body(fn):
         try:
             path = inspect.getsourcefile(fn)
             body, first = inspect.getsourcelines(fn)
@@ -2134,12 +2135,17 @@ def pending_intents(root: str = ".") -> list:
             # a dotted key counts when it names a function whose source
             # is in the project: a library function (a compendium
             # record, a builtin) is not the project's to document, and
-            # a key that no longer resolves is a moved record
+            # a key that no longer resolves is a moved record; a
+            # function another frontend read, whose record the project
+            # keeps, counts, its Python file being a wrapper's
+            from .analysis import foreign_body
+            foreign = fn is not None and foreign_body(fn)
             try:
-                src = inspect.getsourcefile(fn) if fn is not None else None
+                src = (inspect.getsourcefile(fn)
+                       if fn is not None and not foreign else None)
             except TypeError:
                 src = None
-            if not _in_project(root_abs, src):
+            if not foreign and not _in_project(root_abs, src):
                 continue
             parts = (getattr(fn, "__module__", "") or "").split(".")
             scopes.update(".".join(parts[:i])
@@ -2185,7 +2191,6 @@ def reread_intent(root: str, item: dict) -> "dict | None":
     """
     import importlib
     import importlib.util
-    import inspect
     import os
     import sys
 
@@ -2217,8 +2222,9 @@ def reread_intent(root: str, item: dict) -> "dict | None":
     if fresh is None or fn is None:
         return fresh
     from .analysis import _intent_block_text
+    from .analysis import docstring_of
     from .intent import parse_doc
-    doc = inspect.getdoc(fn) or ""
+    doc = docstring_of(fn)
     live = (_intent_block_text(doc) or parse_doc(doc).summary or "").strip()
     if live and live != fresh["text"]:
         fresh["live_text"] = live

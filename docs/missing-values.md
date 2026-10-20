@@ -358,7 +358,7 @@ mathema.Record(log_return) · source, no side effects · form cdfe6bbcc84d
     proven     policy       f(nan)   raises(ValueError), from the guard on line 3
 mathema.Record(in_base_currency) · source, no side effects · form c0f6dfdbe44d
   scales  for amount in [0.0, 100.0] : float|missing, fx_rate in [0.5, 2.0] : float|absent|missing, in_base_currency(amount, fx_rate) = amount*fx_rate   holds
-    holds      computation  for amount in [0.0, 100.0] : float, fx_rate in [0.5, 2.0] : float, in_base_currency(amount, fx_rate) = amount*fx_rate   161 draws
+    holds      computation  for amount in [0.0, 100.0] : float, fx_rate in [0.5, 2.0] : float, in_base_currency(amount, fx_rate) = amount*fx_rate   161 draws; differs by 1.34e-14 at amount = 89.64787909445818, fx_rate = 1.5085973865860938, within the default tolerance (1.35e-05)
     holds      policy       f(amount=nan)   no missing policy stated; assumed propagates
     holds      policy       f(fx_rate=nan)   no missing policy stated; assumed propagates
     proven     policy       f(fx_rate=None)   drops, from the guard on line 3
