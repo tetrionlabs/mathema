@@ -27,7 +27,11 @@ only the base, so a subroute never changes what a verdict counts as, only
 says more precisely why. The `route` field follows the same convention:
 `derive:extensive`, `probe:semi_analytical`, `derive:brute_force` and
 `derive:brute_force:within_float64` name the mechanism that decided, the
-last also the representation the proof is capped at.
+last also the representation the proof is capped at. On `route: derive`,
+a proof over a domain too large to visit is decided again by the
+extensive rungs, and `derive:extensive` with a note naming the rung says
+they corroborated it; the `[float]` companion is the computation line,
+never that corroboration.
 
 **Accepted risk** is not a verdict. It is a person's recorded decision to
 own an `unknown` or `skipped` gap, with their name, the date and their

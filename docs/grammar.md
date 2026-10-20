@@ -956,9 +956,16 @@ code only. `derive` asks for derive's verdict: when the proof cannot
 settle the claim the probe still samples it, but only a counterexample
 it executes counts, and the claim is then `falsified` on the probe's
 route with derive's reason in the note. Draws that find no
-counterexample leave the claim `unknown`, never `holds`. A proof's
-`[float]` companion and a disproof's executed witness are the same on
-every route. See [Verdicts and exit codes](verdicts.md).
+counterexample leave the claim `unknown`, never `holds`. A proof on
+`derive` over a domain too large to visit point by point is decided
+again by the extensive rungs (root isolation, interval refinement, the
+rewrites and substitutions, the case split); when they decide it too,
+the route reads `derive:extensive` and the note names the rung that
+corroborated it. A proof over a finite domain rests on derive's own
+mechanisms, and a disproof on an executed witness, on every route. The
+`[float]` companion is the computation line, what the float64 run
+gives, and never corroborates the mathematics. See
+[Verdicts and exit codes](verdicts.md).
 
 ## When a claim will not parse
 

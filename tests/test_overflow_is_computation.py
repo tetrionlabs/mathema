@@ -53,7 +53,8 @@ def test_an_overflowing_exp_is_proven_and_its_computation_falsified(fn, law):
     for route in ("derive", "best"):
         proof, companion = _pair(fn, law, route=route)
         assert proof.verdict == "proven", (route, proof.verdict, proof.note)
-        assert proof.route == "derive", proof.route
+        assert proof.route == ("derive:extensive" if route == "derive"
+                               else "derive"), proof.route
         assert companion.verdict == "falsified", (route, companion.note)
         assert "raises OverflowError" in companion.sketch, companion.sketch
         assert _raises_overflow(fn, companion.counterexample), \

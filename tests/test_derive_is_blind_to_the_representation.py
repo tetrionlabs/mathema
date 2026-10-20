@@ -55,7 +55,7 @@ def test_a_square_is_proven_over_the_reals_with_or_without_a_pseudo_infinity(law
     bounded = _derive(sq, law, pseudo_infinity=1e100)
     for p in (plain, bounded):
         assert p.verdict == "proven", (p.verdict, p.note)
-        assert p.route == "derive", p.route
+        assert p.route == "derive:extensive", p.route
         assert p.condition.startswith("∀ x ∈ ℝ"), p.condition
         assert "e+" not in p.condition and "[" not in p.condition, p.condition
     assert (plain.verdict, plain.condition) == (bounded.verdict,

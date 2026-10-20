@@ -727,6 +727,29 @@ def _lengths_scope(cj, family, facts):
     return lengths_unjudged() if agreement else contextlib.nullcontext()
 
 
+def _corroboration_scope(cj, facts, cj_domain: dict):
+    """Intent:
+        The context a derive attempt runs in for corroboration: a claim
+        on route "derive" whose domain the exhaustive sweep does not
+        cover (a parameter unbounded, real or too wide to visit) has a
+        proof the fast attempt closes decided again by the extensive
+        rungs (`symbolic._prove.corroborating`); any other claim runs as
+        it is.
+    """
+    import contextlib
+
+    from ._brute_force import BRUTE_FORCE_POINT_BUDGET, _sweep_grid
+    from .symbolic._prove import corroborating
+    if cj.route != "derive":
+        return contextlib.nullcontext()
+    try:
+        swept = _sweep_grid(list(facts.params), cj_domain or {},
+                            BRUTE_FORCE_POINT_BUDGET)
+    except Exception:
+        swept = None
+    return contextlib.nullcontext() if swept is not None else corroborating()
+
+
 def _resolve_func_ref(ref: str, *, root: str = "."):
     """A dotted `module.qualname` string (a mathema-internal helper, or
     any other importable function, the same shape a spec key already
@@ -10535,7 +10558,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                  domain=cj_domain)
     else:
         exact_law = True
-        with _lengths_scope(cj, family, facts):
+        with _lengths_scope(cj, family, facts), _corroboration_scope(
+                cj, facts, cj_domain):
             proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
                               exact_literal_text(cj.rhs), cj.relation,
                               domain=cj_domain, tolerance=cj.tolerance,
@@ -10642,10 +10666,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             route = f"derive:{mechanism}"
             if mechanism.endswith(":within_float64"):
                 note = f"{note}; {proof.sketch}".lstrip("; ")
+        elif proof.meta.get("mathema.corroborated_by") is not None:
+            # a fast proof the extensive rungs decided again
+            route = "derive:extensive"
         else:
             route = ("derive:extensive"
                     if mechanism is not None and mechanism != "domain_split"
                     else "derive")
+        corroborated_by = proof.meta.get("mathema.corroborated_by")
+        if corroborated_by is not None:
+            note = (f"{note}; the fast proof is corroborated by the "
+                    f"extensive rungs ({corroborated_by})").lstrip("; ")
+        elif proof.meta.get("mathema.corroboration_tried"):
+            note = (f"{note}; the extensive rungs did not corroborate it: "
+                    f"{proof.meta['mathema.corroboration_tried']}").lstrip("; ")
         meta = _provenance_meta(proof)
         derive_lines = _derive_line_coverage(fn, facts, cj_domain)
         if derive_lines is not None:

@@ -89,10 +89,11 @@ def _unit(x):
 def test_body_chained_comparison_is_derivable():
     inside = _verdict(_unit, "for x in [0.2, 0.8], f(x) == 1")
     assert inside.verdict == "proven"
-    assert inside.route == "derive"
+    # route derive: the fast proof is decided again by the extensive rungs
+    assert inside.route == "derive:extensive"
     outside = _verdict(_unit, "for x in [2, 5], f(x) == 0")
     assert outside.verdict == "proven"
-    assert outside.route == "derive"
+    assert outside.route == "derive:extensive"
 
 
 @pytest.mark.needs_full_proof_budget

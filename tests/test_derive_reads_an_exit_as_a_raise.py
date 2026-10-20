@@ -158,8 +158,12 @@ def test_the_raise_region_matches_the_raise_spelling(fn):
 def test_derive_verdicts_match_the_raise_spelling(text, verdict):
     exiting = _one(via_sys_exit, text)
     raising = _one(via_raise, text)
+    # a proof over the reals on route derive is decided again by the
+    # extensive rungs
+    route = "derive:extensive" if verdict == "proven" and "raises" not in text \
+        else "derive"
     assert (exiting.verdict, exiting.route) == (raising.verdict, raising.route) \
-        == (verdict, "derive"), (exiting, raising)
+        == (verdict, route), (exiting, raising)
     assert exiting.sketch == raising.sketch
 
 
