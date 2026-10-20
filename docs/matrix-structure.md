@@ -441,8 +441,10 @@ A function that calls numpy is read through numpy's
 `f(a, b) ~= solve(a, b)` where `det(a) != 0`, is stated over a matrix
 and a vector together, which a proof through definition rows does not
 read, so a claim about a function calling it is decided by sampling.
-The same identity in the grammar's own words, `A @ solve(A, b) ~= b`,
-is proven (see the vocabulary above).
+There `A @ f(A, b) == b` is `unknown`: each sampled solution meets `b`
+only within the computation's allowance, and numpy's result has no exact
+reading, so no draw is counted. The same identity in the grammar's own
+words, `A @ solve(A, b) ~= b`, is proven (see the vocabulary above).
 
 <!-- example: numpy-functions run requires=numpy -->
 ```python
@@ -463,7 +465,7 @@ for A in R^(n,n), f(A) == A   # falsified
 
 <!-- example: numpy-functions verdicts fn=solve_for -->
 ```
-for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
+for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # unknown
 for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, f(A, b) == b   # falsified
 ```
 

@@ -7,12 +7,11 @@ of at most 8 unit roundoffs (u = 2^-53) of the value compared against,
 plus the condition number times the inputs' largest magnitude where the
 condition number can be read at the point; where it cannot, the inputs
 lend nothing, so a body that never computes with a large input gets no
-credit for it. A larger miss inside
-the allowance's absolute floor is evidence, `holds` on
-`derive:brute_force`, never a proof; a miss that only the relative part
-of the allowance admits, at a point with no exact reading, is not
-counted, and such a sweep decides nothing (`unknown`), as on the probe
-route; a miss past the allowance falsifies as before. The same holds for a ground claim at its own call.
+credit for it. A larger miss rests on the default allowance alone and,
+at a point with no exact reading, is not counted, so such a sweep
+decides nothing (`unknown`), as on the probe route; inside a declared
+tolerance it is evidence, `holds` on `derive:brute_force`, never a
+proof; a miss past the allowance falsifies as before. The same holds for a ground claim at its own call.
 
 Each body runs a `while` loop so derive cannot read it and the sweep
 decides the claim."""
@@ -116,8 +115,17 @@ def test_a_ground_call_passing_only_the_relative_allowance_is_not_counted():
     (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
     (constant_global, "f([]) == 0"),
 ])
-def test_a_miss_beyond_float64_precision_holds_and_is_not_proven(fn, law):
+def test_a_miss_beyond_float64_precision_is_not_counted(fn, law):
     p = _check(fn, law)
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("fn,law", [
+    (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
+    (constant_global, "f([]) == 0"),
+])
+def test_a_miss_beyond_float64_inside_a_declared_tolerance_holds(fn, law):
+    (p,) = check_conjectures(fn, [claim(law, tolerance=1e-9)])
     assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
     assert p.route == "derive:brute_force", p.route
     assert "mathema.sweep_inexact" in p.meta, p.meta
@@ -138,7 +146,8 @@ def test_a_miss_within_float64_precision_is_proven_within_float64(fn, law):
 
 
 def test_the_sketch_names_the_point_and_its_precision():
-    p = _check(offset_global, "for n in {1, 2, 3}, f(n) == n")
+    (p,) = check_conjectures(offset_global, [claim(
+        "for n in {1, 2, 3}, f(n) == n", tolerance=1e-9)])
     # 1 + 5e-10 misses 1 by 5e-10 in float64; 8 * 2^-53 * 1 = 8.9e-16
     assert "at n = 1 the float64 computation misses the relation by 5e-10" \
         in p.sketch, p.sketch
@@ -161,6 +170,7 @@ def test_the_sketch_names_the_point_and_its_precision():
     (tenth_cancelled, "for x in {1000000}, f(x) == 0"),
 ])
 def test_a_miss_the_values_compared_do_not_explain_is_not_proven(fn, law):
+    # beyond float64's precision, inside only the default allowance, no
+    # exact reading: not counted
     p = _check(fn, law)
-    assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
-    assert p.route == "derive:brute_force", p.route
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)

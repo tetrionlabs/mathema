@@ -165,12 +165,13 @@ a module constant, which has no exact reading, leaves such a draw
 inconclusive and uncounted. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
-it, with no relative tolerance on top. On `==`, as on a function
-equivalence `f =:= g`, the tolerance governs the computation line alone,
-since the mathematics line is exact: `x + 1e-6 == x` with a tolerance of
-1e-3 is falsified by its exact gap, and "close enough mathematically" is
-`~=`, as [Multi-function claims](multi-function-claims.md) describes for
-`=:=`. A single `a ~= b`, and an `f =:= g`, may also name the
+it, with no relative tolerance on top. On `==`, `<=`, `>=` and `!=`, as
+on a function equivalence `f =:= g`, the tolerance governs the
+computation line alone, since the mathematics line is exact: `x + 1e-6
+== x` with a tolerance of 1e-3 is falsified by its exact gap, as is `x +
+1e-10 <= x` with a tolerance of 1e-9, and "close enough mathematically"
+is `~=`, as [Multi-function claims](multi-function-claims.md) describes
+for `=:=`. A single `a ~= b`, and an `f =:= g`, may also name the
 tolerance's kind (see [Tolerance kinds](#tolerance-kinds) below), while
 every other relation takes a bare number.
 
@@ -216,7 +217,13 @@ only within the allowance (inside its absolute part as well as through
 its relative part) is decided again in exact arithmetic wherever the
 body can be read exactly, its literals as the decimals written: false
 there falsifies, with that draw as the witness, so the allowance never
-carries a claim that is false at a point the probe ran.
+carries a claim that is false at a point the probe ran. Where the body
+cannot be read exactly (a float it reads from outside, a library's
+value), such a pass is no evidence either way: it is not counted, and a
+claim with no other draw ends `unknown` with the note "N draws passed
+only within the tolerance and could not be evaluated in exact
+arithmetic, so they are not counted". A declared tolerance makes such a
+pass count, since the claim asks for that allowance.
 
 Every computation line that holds with a gap the tolerance absorbed says
 so in its note, for `==` as for `<=` and `>=`, on every route (a probe
@@ -256,8 +263,9 @@ derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```
 
-A tolerance declared on an ordering is part of the claim, so it stays in
-force on both routes; on `==` it binds the computation line only. Where the executed code rounds the difference away, the body is
+A declared tolerance binds the computation line only: the probe
+compares the floats within it, and derive's disproof stands on the exact
+gap however small. Where the executed code rounds the difference away, the body is
 read exactly at derive's witness: a literal is the decimal written, so
 `x + 1e-20` is `x + 1/10^20` and the claim is falsified on the
 mathematics, the record noting that the float computation holds within
