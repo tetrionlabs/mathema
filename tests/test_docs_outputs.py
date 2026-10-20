@@ -6,8 +6,9 @@ A page that shows code next to its output makes two promises: the code
 runs, and it prints what the page says. This module holds the pages to
 the second one. It reads the markdown, runs each marked example in a
 fresh temporary directory, and compares what came out with what the
-page shows, allowing only timing figures, absolute paths and the date
-a run writes to differ.
+page shows, allowing only timing figures, absolute paths, the date
+a run writes, and the gap clause's float digits on a holds computation
+line to differ.
 
 Marking an example
 ------------------
@@ -215,20 +216,36 @@ def inventory():
 
 _DURATION = re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|sec|seconds)\b")
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+#: a holds computation line of a printed record
+_HOLDS_COMPUTATION = re.compile(r"^\s*holds\s+computation\s")
+#: the gap clause such a line carries: the largest gap and the point it
+#: was measured at, then the tolerance it fell within
+_GAP = re.compile(r"\b(differs|fails) by \S+?(?: at [^;]*?)?, within the "
+                  r"(default tolerance \([^)]*\)|tolerance \(declared [^)]*\))")
+
+
+def _gap_masked(match) -> str:
+    within = match.group(2)
+    if within.startswith("default"):
+        within = "default tolerance (<allowance>)"
+    return f"{match.group(1)} by <gap>, within the {within}"
 
 
 def normalise(text, workdir):
     """Intent:
         The text with what legitimately differs between runs replaced:
-        the working directory's absolute path, timing figures and the
-        ISO date a run writes. Trailing whitespace and surrounding blank
-        lines are dropped.
+        the working directory's absolute path, timing figures, the ISO
+        date a run writes, and on a holds computation line the gap clause's
+        largest gap, its point and the default allowance there (float
+        results whose last digits differ with the platform's libm).
+        Trailing whitespace and surrounding blank lines are dropped.
     """
     for d in {workdir, os.path.realpath(workdir)}:
         text = text.replace(d, "<tmp>")
     text = _DURATION.sub("<time>", text)
     text = _DATE.sub("<date>", text)
-    lines = [ln.rstrip() for ln in text.splitlines()]
+    lines = [(_GAP.sub(_gap_masked, ln) if _HOLDS_COMPUTATION.match(ln)
+              else ln).rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip("\n")
 
 
@@ -615,6 +632,28 @@ def test_only_timing_and_paths_are_allowed_to_differ():
     assert normalise("wrote /t/w/x.yaml in 0.42s", "/t/w") == shown
     assert normalise("wrote /t/w/x.yaml in 3 ms", "/t/w") == shown
     assert normalise("proven, n=12", "/t/w") != normalise("proven, n=13", "/t/w")
+
+
+def test_a_holds_computation_lines_gap_and_its_point_are_allowed_to_differ():
+    line = ("    holds      computation  sum(f(scores)) = 1   857 entries across "
+            "190 draws; differs by {gap} at scores = {at}, within the default "
+            "tolerance ({allowance})")
+    here = line.format(gap="1.56e-16", at="[-6.302472719152528, 0]",
+                       allowance="1.01e-07")
+    there = line.format(gap="3.6e-16", at="[-3.07, 6.97, 1.5]",
+                        allowance="1.02e-07")
+    assert normalise(here, "/t/w") == normalise(there, "/t/w")
+    # the count, and a declared tolerance, still have to match
+    assert normalise(here, "/t/w") != normalise(
+        here.replace("190 draws", "191 draws"), "/t/w")
+    declared = here.replace("the default tolerance (1.01e-07)",
+                            "the tolerance (declared 1e-12)")
+    assert normalise(declared, "/t/w") != normalise(
+        declared.replace("1e-12", "1e-11"), "/t/w")
+    # a gap printed anywhere else is compared as it is
+    note = "        fails by 1e-10 at x = 0, within the default tolerance (1e-09)"
+    assert normalise(note, "/t/w") != normalise(
+        note.replace("1e-10", "2e-10"), "/t/w")
 
 
 def test_the_date_a_run_writes_is_allowed_to_differ():
