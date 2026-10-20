@@ -1778,7 +1778,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         elif lock_state(key, (form := analyze(fn).form), locks,
                         {}) == "changed":
             lk = locks.get(key) or {}
-            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+            msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
                    f"is now {form}; there is no record to "
                    f"compare. Restore the function, or a human runs: "
                    f"mathema unlock {key}")
@@ -2017,7 +2017,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # remedy. Restoring the function, or a human unlocking,
             # are the two ways forward.
             lk = locks.get(key) or {}
-            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+            msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
                    f"is now {facts_now.form}; the record is unchanged. "
                    f"Restore the function, or a human runs: "
                    f"mathema unlock {key}")
@@ -2043,8 +2043,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 stamped = (verified_entry.get("locked") or {}).get("form")
                 lk = locks.get(key) or {}
                 msg = (f"{key}: .mathema/meta/locks.yaml pins form "
-                       f"{lk.get('form')} but the record was locked at "
-                       f"{stamped}; the lock was moved without `mathema "
+                       f"{namespaced_form(lk.get('form'))} but the record was locked at "
+                       f"{namespaced_form(stamped)}; the lock was moved without `mathema "
                        f"unlock {key}`, and the record is unchanged "
                        f"(restore the entry, or a human unlocks and "
                        f"re-locks)")

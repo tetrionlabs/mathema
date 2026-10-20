@@ -619,6 +619,7 @@ def pending_decisions(root: str = ".") -> dict:
                          f"a human runs `mathema accept {item['key']} "
                          f"--intent`, or `mathema accept --intent` for "
                          f"all"])
+    from mathema.identity import namespaced_form, same_form
     from mathema.locks import load_locks
     from mathema.targets import resolve_function
     for key, lk in sorted(load_locks(root).items()):
@@ -628,9 +629,9 @@ def pending_decisions(root: str = ".") -> dict:
             current = analyze(fn).form
         except Exception:
             current = None
-        if current is not None and current != lk.get("form"):
+        if current is not None and not same_form(current, lk.get("form")):
             rows.append([key, None, "locked-changed",
-                         f"locked at {lk.get('form')}, code is now "
+                         f"locked at {namespaced_form(lk.get('form'))}, code is now "
                          f"{current}; restore the body, or a human runs "
                          f"`mathema unlock {key}`"])
     return {"cols": ["key", "claim", "kind", "detail"], "rows": rows}
