@@ -662,6 +662,33 @@ def _derivative_family_decides(cj, fn, facts) -> bool:
     return facts.param_kinds.get(param) == "scalar"
 
 
+def _derivative_outside_the_family_forms(ctx, facts) -> "str | None":
+    """Intent:
+        The reason the probe leaves a derivative claim undecided when it
+        is written in none of the derivative-sign families' spellings
+        (`d(f(x), x) >= 1`, `d(f(x), x) > 0`, `0 <= d(f(x), x)`): the
+        probe evaluates `d` only in those spellings, and this one is not
+        among them; with derive unable to lift the body, it says so too.
+        None for a claim whose only form the probe lacks is not `d`, one
+        binding its own `d`, or one written in a family's spelling.
+    """
+    cj = ctx.cj
+    if routes.unsupported_forms("probe", cj) != ["d"] or "d" in (cj.funcs or {}):
+        return None
+    if any(_states_derivative_form(cj, base, param, facts)
+           for base in _DERIVATIVE_FAMILY_FORMS for param in facts.params):
+        return None
+    why = ("the probe decides a derivative claim only as the shape claims "
+           "state it (a first derivative compared with 0 by <= or >=, a "
+           "second derivative compared with 0 by ==, <= or >=), and "
+           f"{cj.lhs} {cj.relation} {cj.rhs} is not one of them")
+    status = ((ctx.derive_undecided.meta or {}).get("mathema.derive_status")
+              if ctx.derive_undecided is not None else None)
+    if status == "unliftable":
+        why += ", while derive could not read the body"
+    return why
+
+
 def _how_the_family_checks(family_name: str) -> str:
     """Intent:
         The sentence a claim decided by a derivative-sign family's probe
@@ -10964,6 +10991,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     cj_domain, _approximated = _operational_domain(
         cj_domain, pinf if pinf is not None else (-reach_max, reach_max),
         bare=bare)
+    other_spelling = _derivative_outside_the_family_forms(ctx, facts)
+    if other_spelling is not None:
+        return Probe(cj.name, statement, "skipped", route=None,
+                     note=other_spelling,
+                     meta={"mathema.invalid_conjecture": True})
     try:
         if cj.relation == "raises" or cj.rhs_bound is not None:
             code_l, aux_names = _validate(cj.lhs, set(kinds), extra)
