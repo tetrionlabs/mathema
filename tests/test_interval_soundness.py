@@ -167,17 +167,44 @@ def test_the_cauchy_schwarz_trio_resolves_the_way_the_algebra_does(
         return p.verdict, p.note
 
     for route in ("derive", "probe"):
-        true_v, note = verdict("f(x, y) <= 0", route)
-        # true over the reals; the loop's float products overflow at a
-        # corner draw (y holding 1e300), a carrier failure that falsifies
-        # the computation, which is the probe route's line here (rulings
-        # of 2026-10-01 and 2026-10-05). A false proven never appears.
-        assert true_v == "falsified", (route, true_v, note)
-        (p,) = mathema.claims.check_conjectures(
-            fn, [mathema.claim("assuming len(x) == len(y), f(x, y) <= 0",
-                               route=route)])
-        assert "e+300" in p.counterexample and "returned nan" in p.counterexample, \
-            p.counterexample
+        if route == "derive":
+            # derive gives up and the probe stands in for it: the body
+            # read exactly holds at the 1e300 corner, so the overflow
+            # there goes on the float line (ruling of 2026-10-05), which
+            # is falsified, and so is the claim's headline (a claim is
+            # falsified when any of its lines is)
+            rows = mathema.claims.check_conjectures(
+                fn, [mathema.claim("assuming len(x) == len(y), f(x, y) <= 0",
+                                   route=route, name="cs")],
+                float_companions=True)
+            by_name = {p.name: p for p in rows}
+            assert by_name["cs"].verdict == "holds", by_name["cs"].note
+            computation = by_name["cs[float]"]
+            assert computation.verdict == "falsified", computation.note
+            assert "e+300" in computation.counterexample \
+                and "returned nan" in computation.counterexample, \
+                computation.counterexample
+            assert "holds in exact arithmetic" in computation.note, \
+                computation.note
+            rec = mathema.check(fn, claims=[mathema.claim(
+                "assuming len(x) == len(y), f(x, y) <= 0", route=route,
+                name="cs")])
+            head = next(line for line in repr(rec).splitlines()
+                        if line.startswith("  cs  "))
+            assert "falsified at x = [1e+300" in head, head
+        else:
+            true_v, note = verdict("f(x, y) <= 0", route)
+            # true over the reals; the loop's float products overflow at
+            # a corner draw (y holding 1e300), a carrier failure that
+            # falsifies the computation, which is the probe route's line
+            # here (rulings of 2026-10-01 and 2026-10-05). A false
+            # proven never appears.
+            assert true_v == "falsified", (route, true_v, note)
+            (p,) = mathema.claims.check_conjectures(
+                fn, [mathema.claim("assuming len(x) == len(y), f(x, y) <= 0",
+                                   route=route)])
+            assert "e+300" in p.counterexample \
+                and "returned nan" in p.counterexample, p.counterexample
         for false_law in ("f(x, y) <= -1", "f(x, y) >= 1"):
             v, note = verdict(false_law, route)
             assert v != "proven", (route, false_law, v, note)
