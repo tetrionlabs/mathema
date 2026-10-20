@@ -656,14 +656,20 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
 
         policies = _policies_from_declared_claims(fn, key, root)
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def _check(args, kwargs):
+            """The arguments bound to `fn`'s parameters, raising
+            `DomainError` at the first outside its domain."""
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             for name, value in bound.arguments.items():
                 problem = _violation(name, value)
                 if problem is not None:
                     raise DomainError(f"{fn.__name__}(): {name}{problem}")
+            return bound
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound = _check(args, kwargs)
             if policies:
                 # a policy that says f raises on a missing or absent input
                 # rejects it here; drops and propagates are checked on the
@@ -680,6 +686,10 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
+        if not policies:
+            # the check the wrapper makes before calling `fn`, which then
+            # returns as it is
+            wrapper.__mathema_domain_check__ = _check
         _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
         return wrapper
     return decorator

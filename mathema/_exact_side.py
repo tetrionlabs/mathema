@@ -577,7 +577,8 @@ def exact_literals(code, written: bool = True):
 
 def exact_sides(code_l, code_r, env: dict, callees: dict,
                 exact_calls: bool = False,
-                opaque_results: bool = False) -> "tuple | None":
+                opaque_results: bool = False,
+                computed_env: "dict | None" = None) -> "tuple | None":
     """Intent:
         `(left, right)` evaluated exactly at the point `env` holds, the
         names in `callees` (the function under test and any function the
@@ -591,9 +592,43 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         callee's result holding no number (a string, a bool, None) is
         exact as it is (`wrap`'s `opaque`), and so is a side holding no
         number.
+
+    Notes:
+        With `exact_calls`, the claim is first evaluated as the
+        computation evaluates it, on `computed_env` (the point's floats;
+        by default `env`'s values as the computation holds them,
+        `_exact_body._as_computed`), so each call of a function read
+        exactly (`_exact_body.exact_callee`) is checked against the
+        computation's own call in the same order (`_exact_body.paired`);
+        a side is None when the exact evaluation does not make every
+        call the computation made.
     """
-    from ._math_vocab import MATH_CONSTANTS
     callees = _aliased_callees(callees, (code_l, code_r))
+    if not exact_calls:
+        return _exact_sides(code_l, code_r, env, callees, False,
+                            opaque_results)
+    from ._exact_body import _as_computed, paired
+
+    def computation():
+        floats = ({k: _as_computed(v) for k, v in env.items()}
+                  if computed_env is None else dict(computed_env))
+        floats.update(callees)
+        floats["__builtins__"] = {}
+        eval(code_l, floats)
+        if code_r is not None:
+            eval(code_r, floats)
+    with paired(computation) as session:
+        sides = _exact_sides(code_l, code_r, env, callees, True,
+                             opaque_results)
+        if sides is not None and not session.complete():
+            return None
+        return sides
+
+
+def _exact_sides(code_l, code_r, env: dict, callees: dict,
+                 exact_calls: bool, opaque_results: bool) -> "tuple | None":
+    """`exact_sides` evaluated, its callees already aliased."""
+    from ._math_vocab import MATH_CONSTANTS
     # a named constant (pi, e) keeps its float, which no exact side
     # survives
     exact_env = {k: (wrap(callees[k], exact_calls, opaque_results)
