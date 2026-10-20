@@ -682,6 +682,64 @@ def annotated_container(fn, param: str) -> "type | None":
     return _ANNOTATED_CONTAINERS.get(head)
 
 
+def annotated_element(fn, param: str) -> "str | None":
+    """Intent:
+        The scalar type the elements of `param` have, as its annotation
+        states it: `int` for `list[int]`, `tuple[int, ...]`,
+        `Sequence[Optional[int]]` or `NDArray[np.int64]`, likewise
+        `float`, `bool`, `str` and `complex`; None when the annotation
+        is no container of one scalar type, or there is none.
+    """
+    import collections.abc as abc
+
+    from ..types import _numpy_dtype_scalar, _optional_parts, _scalar_slot_type
+    try:
+        hint = typing.get_type_hints(inspect.unwrap(fn)).get(param)
+    except Exception:
+        return None
+    if hint is None:
+        return None
+    _optional, inner = _optional_parts(hint)
+    origin = typing.get_origin(inner)
+    if origin is None:
+        return None
+    module = getattr(origin, "__module__", "") or ""
+    if module.split(".")[0] == "numpy":
+        return _numpy_dtype_scalar(inner)
+    if origin not in (list, tuple, set, frozenset, abc.Sequence,
+                      abc.MutableSequence, abc.Set, abc.MutableSet,
+                      abc.Collection, abc.Iterable):
+        return None
+    scalars = {_scalar_slot_type(_optional_parts(a)[1])
+               for a in typing.get_args(inner) if a is not Ellipsis}
+    if len(scalars) != 1:
+        return None
+    return scalars.pop()
+
+
+def as_element_type(value, element: "str | None"):
+    """Intent:
+        `value`, a drawn list, tuple, set or frozenset, with each float
+        element held as the member of `element` it equals: a whole
+        number as that int when `element` is `int`, 0.0 and 1.0 as
+        False and True when it is `bool`; `value` unchanged for any
+        other element type or value.
+    """
+    if element not in ("int", "bool") \
+            or not isinstance(value, (list, tuple, set, frozenset)):
+        return value
+
+    def typed(v):
+        if not isinstance(v, float):
+            return v
+        if element == "int" and v.is_integer():
+            return int(v)
+        if element == "bool" and v in (0.0, 1.0):
+            return v == 1.0
+        return v
+    return type(value)(typed(v) for v in value)
+
+
 def annotated_containers(fn, facts) -> dict:
     """`{param: container}` for each sequence parameter of `fn` whose
     annotation names a set, a frozenset or a tuple
@@ -1172,7 +1230,8 @@ __all__ = [
     "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
     "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
-    "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
+    "abstract_of", "adapter", "adapters", "annotated_element",
+    "as_element_type", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",
     "installed", "library_version", "module_imports", "observe",
     "observed_plain", "plain", "promotions", "realise",

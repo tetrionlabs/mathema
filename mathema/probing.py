@@ -2067,6 +2067,58 @@ def _synth(kind: str, rng: random.Random, bounds=None,
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
 
 
+def bound_element_type(bound) -> "str | None":
+    """Intent:
+        The type a bound holds its members as, when it is not the
+        reals: `int` for the integers, the naturals, an integer-typed
+        domain or a finite set of ints, `bool` for a finite set of
+        bools; None otherwise.
+    """
+    from .domain import is_sentinel
+    if bound in ("Z", "N"):
+        return "int"
+    if isinstance(bound, Domain):
+        if bound.base_type in ("Z", "N"):
+            return "int"
+        if bound.base_type != "R" or not bound.pieces \
+                or not all(isinstance(p, frozenset) for p in bound.pieces):
+            return None
+        bound = frozenset(v for p in bound.pieces for v in p)
+    if isinstance(bound, frozenset):
+        members = [v for v in bound if not is_sentinel(v) and v is not None]
+        if members and all(isinstance(v, bool) for v in members):
+            return "bool"
+        if members and all(isinstance(v, int) and not isinstance(v, bool)
+                           for v in members):
+            return "int"
+    return None
+
+
+def _element_typed_bound(fn, param: str, bound):
+    """Intent:
+        The bound a sequence parameter's elements are drawn from, held
+        to the element type its annotation states: with no bound, the
+        integers, the two bools or the type of strings for `int`,
+        `bool` or `str` elements; a real binding that states no type,
+        completed to the integers for `int` elements (`[0, 1]^n` on
+        `list[int]`); any other bound as it is.
+    """
+    from .runtime_types import annotated_element
+    element = annotated_element(fn, param)
+    if bound is None:
+        if element == "int":
+            return "Z"
+        if element == "bool":
+            return frozenset({False, True})
+        if element == "str":
+            return Domain(base_type="S", explicit_type=True, clause=True)
+        return None
+    if element == "int":
+        from .conjecture import _int_completed
+        return _int_completed(bound, "list[int]")
+    return bound
+
+
 def _annotation_text(param) -> str:
     """A signature parameter's annotation as source text, or ''."""
     import inspect
@@ -2831,6 +2883,8 @@ def probe(fn, facts, domain: dict | None = None,
     except _dims.DimensionConflict:
         resolver = None
 
+    from .runtime_types import as_element_type
+
     def value_for(p, k, sizes):
         param = signature.get(p)
         if (param is not None and p not in domain
@@ -2858,14 +2912,19 @@ def probe(fn, facts, domain: dict | None = None,
         length = None
         if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
             length = sizes.get(resolver.key(p, 0))
-        drawn = _synth(k, rng, domain.get(p), specials=specials,
+        bound = (_element_typed_bound(fn, p, domain.get(p))
+                 if k in SEQUENCE_KINDS else domain.get(p))
+        drawn = _synth(k, rng, bound, specials=specials,
                        extra=critical_hints.get(p),
                        extra_cycle=extra_cycles.get(p), length=length)
         if inputs_missing([drawn]):
             # the smoke call asks whether f can be called with a value;
             # a claim's own missing points are its own to execute
-            return _synth(k, rng, None, specials=specials, length=length)
-        return drawn
+            drawn = _synth(k, rng, _element_typed_bound(fn, p, None)
+                           if k in SEQUENCE_KINDS else None,
+                           specials=specials, length=length)
+        return as_element_type(drawn, bound_element_type(bound)) \
+            if k in SEQUENCE_KINDS else drawn
 
     def args_for() -> "tuple[list, dict]":
         sizes = resolver.draw_sizes(rng) if resolver is not None else {}
