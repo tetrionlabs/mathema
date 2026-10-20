@@ -776,6 +776,68 @@ def _pole_exclusion_proof(fn, facts, domain: dict, params,
     return ProofResult("proven", sketch=proven_sketch)
 
 
+def _certified_pole(fn, facts, domain: dict, param: str, pole_text: str):
+    """Intent:
+        The pole `param = pole_text` as an exact witness: `disproven`,
+        with the certificate as `mathema.witness_certified`, when a
+        region of the body where it has no value at a zero (a divisor,
+        `Eq(x*x - 2, 0)`, or a call's no-value region, `Eq(cos(x), 0)`
+        for tan) over `param` alone is zero at the pole exactly and
+        interval arithmetic certifies a zero there inside the domain,
+        independently of the solver that found it. None otherwise.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import ProofResult
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    from .symbolic._prove import _certified_guard
+    try:
+        pole = sympy.sympify(pole_text)
+        guards, _unread = partiality_walk(fn, facts, domain)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        # the zero itself, and the path condition reaching the operation
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        if len(zeros) != 1:
+            continue
+        cond = zeros[0]
+        free = list(cond.free_symbols)
+        if len(free) != 1 or str(free[0]) != param \
+                or guard.free_symbols != cond.free_symbols:
+            continue
+        sym = free[0]
+        try:
+            zero = _with_timeout(
+                lambda c=cond, s=sym, g=guard: sympy.simplify(
+                    (c.lhs - c.rhs).subs(s, pole)) == 0
+                and all(bool(p.subs(s, pole)) is True
+                        for p in (g.args if isinstance(g, sympy.And) else ())
+                        if p is not c),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            continue
+        except Exception:
+            continue
+        if not zero:
+            continue
+        text = _certified_guard(cond, {sym: pole}, {param: sym}, domain)
+        if text is not None:
+            return ProofResult(
+                "disproven",
+                sketch=f"{param} = {pole_text} is a pole inside the "
+                       f"declared domain; {text}",
+                counterexample=f"{param} = {pole_text}",
+                meta={"mathema.witness_certified": text})
+    return None
+
+
 def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     """Intent:
         The pole-containment disproof as it may be reported: the real
@@ -787,8 +849,12 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
         An irrational pole (sqrt(2)) has no exact float spelling, so
         the call lands beside it, where the code may well return a
         large finite value: the pole exists in exact arithmetic and
-        floating point does not reproduce it, so the disproof is not
-        reported as one, and its reason says so.
+        floating point does not reproduce it. It is then `disproven` by
+        its exact witness when interval arithmetic certifies that a
+        divisor of the body, or a no-value region of a call it makes,
+        is zero there (`_certified_pole`), as `is_defined` certifies the
+        same point; otherwise the uncorroborated `undecided`, with a
+        reason saying so.
     """
     import sympy
     from .hazards import _admitted_spelling
@@ -800,6 +866,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     except Exception:
         value = None
     if value is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         return _uncorroborated_family_disproof(
             sketch, f"the pole {pole_text} is not a value a float can "
                     f"hold inside the domain, so the code could not be "
@@ -807,6 +876,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         from .corroboration import (EXACT_ARITHMETIC_ONLY,
                                     EXACT_ARITHMETIC_ONLY_NOTE)
         return _uncorroborated_family_disproof(
@@ -1224,12 +1296,81 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     domain = domain or {}
     if not isinstance(domain.get(param), tuple):
         return None
-    return _pole_exclusion_proof(
+    result = _pole_exclusion_proof(
         fn, facts, domain, [param],
         proven_sketch=f"the declared domain for {param} excludes every "
                       f"pole of {facts.name} that mathema found (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
+    if result is not None and result.status == "disproven":
+        return result
+    inside, settled = _guard_poles(fn, facts, domain, param)
+    if inside:
+        return _witnessed_pole(fn, facts, domain, param, inside[0])
+    if result is not None and result.status == "proven" and not settled:
+        return None
+    return result
+
+
+def _guard_poles(fn, facts, domain: dict, param: str) -> tuple:
+    """Intent:
+        `(inside, settled)`: the points of `param`'s declared interval
+        where the body's raise-region reading puts an isolated point
+        with no value over `param` alone (a divisor's zero, `x*x - 2 ==
+        0`, or a call's no-value point, `cos(x) == 0` for tan), as exact
+        texts, and whether every such region was solved. The same
+        regions `is_defined` reads, so the two families name the same
+        poles.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import bound_to_sympy_set
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    try:
+        guards, _unread = partiality_walk(fn, facts, domain)
+        region = bound_to_sympy_set(domain[param])
+    except TimeoutError:
+        raise
+    except Exception:
+        return [], False
+    inside: list = []
+    settled = True
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        free = list(guard.free_symbols)
+        if len(zeros) != 1 or len(free) != 1 or str(free[0]) != param:
+            continue
+        cond, sym = zeros[0], free[0]
+        try:
+            roots = _with_timeout(
+                lambda c=cond, v=sym: sympy.solveset(c, v, region),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            settled = False
+            continue
+        except Exception:
+            settled = False
+            continue
+        if roots is sympy.S.EmptySet:
+            continue
+        if not isinstance(roots, sympy.FiniteSet):
+            settled = False
+            continue
+        for r in sorted(roots, key=lambda r: float(r)):
+            # the operation is reached at the root only where the path
+            # condition holds there
+            reached = [bool(c.subs(sym, r)) if c.subs(sym, r) in
+                       (sympy.true, sympy.false) else None
+                       for c in parts if c is not cond]
+            if None in reached:
+                settled = False
+            elif all(reached) and str(r) not in inside:
+                inside.append(str(r))
+    return inside, settled
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
