@@ -826,6 +826,25 @@ def _path_bound(p: str, path: str, fields: dict, cj_domain: dict):
     return None if isinstance(node, (dict, list)) else node
 
 
+def _categorical_levels(bound) -> "frozenset | None":
+    """Intent:
+        The levels of a categorical field: its bound as a finite set of
+        strings (a set, or a domain whose one piece is that set and
+        which admits no missing value), else None.
+    """
+    from .domain import Domain
+    if isinstance(bound, Domain):
+        if bound.dims or bound.excluded or len(bound.pieces) != 1 \
+                or not isinstance(bound.pieces[0], frozenset) \
+                or getattr(bound, "absent", False) or getattr(bound, "members", ()):
+            return None
+        bound = bound.pieces[0]
+    if isinstance(bound, frozenset) and bound \
+            and all(isinstance(v, str) for v in bound):
+        return bound
+    return None
+
+
 def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
     """Intent:
         `(field_domain, reason)`: the `p.field` and `p.field.len`
@@ -833,7 +852,10 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
         the fields the body reads, or `(None, reason)` naming the first
         parameter or field with no symbolic reading: a parameter whose
         language states no fields, or a field read as a value that is
-        not a number (a categorical, text read as text).
+        not a number (text read as text, a categorical whose levels
+        neither the claim nor the language states). A categorical field
+        whose levels are stated (`_categorical_levels`) is bound to that
+        set of strings, for the derive route to split on.
     """
     from .domain import LanguageRef
     from .symbolic._base import field_reads
@@ -852,6 +874,10 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
                           "running the code")
         for f in plain:
             bound = _path_bound(p, f, schema[p], cj_domain)
+            levels = _categorical_levels(bound)
+            if levels is not None:
+                out[f"{p}.{f}"] = levels
+                continue
             if not _is_numeric_bound(bound):
                 return None, (f"derive cannot read the function's field "
                               f"{p}.{f}, which is not a number, so the "
@@ -864,6 +890,56 @@ def _row_lift_domain(fn, facts, cj_domain: dict) -> "tuple[dict | None, str]":
                               "is not a text field")
             out[f"{p}.{f}.len"] = _length_domain(bound)
     return out, ""
+
+
+#: the most cases a split on categorical fields' levels proves one by one
+_MAX_LEVEL_CASES = 16
+
+
+def _level_split_proof(levels: dict, prove_case):
+    """Intent:
+        A proof by cases over categorical fields: `levels` maps each
+        field to its finite set of levels, and `prove_case(case)` proves
+        the claim with each field bound to one level. Proven when every
+        combination is proven by the same mechanism (equal meta), the
+        sketch naming each case; otherwise undecided, naming the first
+        case that is not proven, or the count past `_MAX_LEVEL_CASES`.
+    """
+    import itertools
+
+    from .symbolic._proof_support import ProofResult
+    keys = sorted(levels)
+    combos = list(itertools.product(*(sorted(levels[k]) for k in keys)))
+    split = " and ".join(keys)
+    if len(combos) > _MAX_LEVEL_CASES:
+        return ProofResult(
+            "undecided",
+            sketch=f"derive would split on {split} into {len(combos)} cases, "
+                   f"more than the {_MAX_LEVEL_CASES} it proves one by one")
+    proved = []
+    for combo in combos:
+        case = {k: frozenset({v}) for k, v in zip(keys, combo)}
+        named = ", ".join(f"{k} = {v!r}" for k, v in zip(keys, combo))
+        result = prove_case(case)
+        if result.status != "proven":
+            return ProofResult(
+                "undecided",
+                sketch=f"split on {split}: the case {named} is not proven "
+                       f"({result.status}: {result.sketch})")
+        proved.append((named, result))
+    first_meta = dict(proved[0][1].meta or {})
+    if any(dict(r.meta or {}) != first_meta for _n, r in proved[1:]):
+        return ProofResult(
+            "undecided",
+            sketch=f"split on {split}: every case is proven, by different "
+                   f"mechanisms, so no one route states the proof")
+    quantifiers = {r.quantifier for _n, r in proved}
+    return ProofResult(
+        "proven",
+        sketch=f"split on {split} over its levels: "
+               + "; ".join(f"{n}: {r.sketch}" for n, r in proved),
+        quantifier=quantifiers.pop() if len(quantifiers) == 1 else None,
+        meta=first_meta)
 
 
 def _ref_resolves(ref, resolve) -> bool:
@@ -9839,19 +9915,29 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # domain, a claim-level `o.field` binding overriding, and the
         # ordinary prover runs
         from .symbolic._base import row_fields
-        # each row-bound parameter expands into exactly the field keys
-        # bounded above, whatever class its rows are
-        with row_fields({p: [k for k in row_domain if k.startswith(f"{p}.")]
-                         for p in language_params}):
-            exact_law = True
-            proof = try_prove(fn, facts, exact_literal_text(cj.lhs),
-                              exact_literal_text(cj.rhs), cj.relation,
-                              domain={**row_domain, **cj_domain},
-                              tolerance=cj.tolerance,
-                              extensive=extensive, funcs=bound_funcs or None,
-                              assumption=assumption,
-                              assume_defined=ctx.assume_defined,
-                              exclude_own_guards=ctx.exclude_own_guards)
+        # a categorical field is not a symbol: the proof is split on its
+        # levels, one case per combination, each case binding the field
+        # to its one level so the branches reading it settle
+        levels = {k: v for k, v in row_domain.items()
+                  if _categorical_levels(v) is not None}
+        numeric = {k: v for k, v in row_domain.items() if k not in levels}
+
+        def prove_case(case: dict):
+            # each row-bound parameter expands into exactly the numeric
+            # field keys bounded above, whatever class its rows are
+            with row_fields({p: [k for k in numeric if k.startswith(f"{p}.")]
+                             for p in language_params}):
+                return try_prove(fn, facts, exact_literal_text(cj.lhs),
+                                 exact_literal_text(cj.rhs), cj.relation,
+                                 domain={**numeric, **cj_domain, **case},
+                                 tolerance=cj.tolerance,
+                                 extensive=extensive, funcs=bound_funcs or None,
+                                 assumption=assumption,
+                                 assume_defined=ctx.assume_defined,
+                                 exclude_own_guards=ctx.exclude_own_guards)
+        exact_law = True
+        proof = (prove_case({}) if not levels
+                 else _level_split_proof(levels, prove_case))
     elif language_params:
         # a string or structured value has no symbolic reading, and a
         # real symbol standing in for one would prove real-only facts
