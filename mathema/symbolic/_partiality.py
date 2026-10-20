@@ -288,6 +288,7 @@ def _lemmas_for_call(node: ast.Call, scope: dict) -> list:
 #: lemma leaves the definedness region unknown
 _TOTAL_CALLS = frozenset({
     "builtins.abs", "builtins.float", "builtins.int", "builtins.round",
+    "builtins.complex",
     "builtins.bool", "builtins.len", "builtins.isinstance",
     "builtins.callable",
     "math.exp", "math.expm1", "math.exp2", "math.sin", "math.cos",
@@ -426,6 +427,28 @@ _CALLEE_PATH: contextvars.ContextVar = contextvars.ContextVar(
 # self parameter
 _SELF_OF: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_self_of", default=(None, None))
+
+# whether the function's return annotation admits a complex number, so
+# a complex result is one of its values
+_RETURNS_COMPLEX: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_returns_complex", default=False)
+
+
+def returns_complex(fn) -> bool:
+    """Whether f's return annotation admits a complex number (`complex`,
+    `Optional[complex]`, `float | complex`)."""
+    import inspect
+    import re
+    try:
+        annotation = inspect.signature(fn).return_annotation
+    except (TypeError, ValueError):
+        return False
+    if annotation is inspect.Signature.empty:
+        return False
+    text = annotation if isinstance(annotation, str) else (
+        getattr(annotation, "__name__", None) or repr(annotation))
+    return bool(re.search(r"\bcomplex\b", str(text)))
+
 
 # the names of the parameters the walk's domain binds to C
 _COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
@@ -817,9 +840,11 @@ def _power_guards(node: ast.BinOp, env: dict, path_cond, out: list,
     if complex_out is not None and exponent.is_number:
         complex_out.append(sympy.And(path_cond, negative))
     opaque = _OPAQUE_OUT.get()
-    if opaque is not None or not exponent.is_number:
+    if (opaque is not None or not exponent.is_number) \
+            and not _RETURNS_COMPLEX.get():
         # the definedness walk reads it as a guard; a value claim reads
-        # a constant exponent's region through `complex_out`
+        # a constant exponent's region through `complex_out`; where f
+        # returns complex numbers a complex result is one of its values
         out.append((sympy.And(path_cond, negative), NO_VALUE))
     if opaque is not None and not exponent.is_number:
         opaque.append(f"line {getattr(node, 'lineno', '?')}: a power whose "
@@ -1426,12 +1451,14 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
     int_token = _INT_SYMS.set(int_syms)
     self_token = _SELF_OF.set(_self_of(fn, facts))
     domain_token = _WALK_DOMAIN.set(domain or None)
+    returns_token = _RETURNS_COMPLEX.set(returns_complex(fn))
     names_token = _COMPLEX_NAMES.set(frozenset(
         name for name, bound in (domain or {}).items()
         if bound == "C" or getattr(bound, "base_type", None) == "C"))
     try:
         walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
     finally:
+        _RETURNS_COMPLEX.reset(returns_token)
         _COMPLEX_NAMES.reset(names_token)
         _SELF_OF.reset(self_token)
         _WALK_DOMAIN.reset(domain_token)

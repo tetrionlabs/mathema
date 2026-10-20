@@ -3351,8 +3351,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         return True
 
     from .probing import _bound_is_complex
-    # over real arguments a complex result is no value
-    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
+    from .symbolic._partiality import returns_complex
+    # over real arguments a complex result is no value, unless f's own
+    # return annotation admits a complex number
+    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values()) \
+        and not returns_complex(fn)
     executed = 0
     caught: dict = {}
 

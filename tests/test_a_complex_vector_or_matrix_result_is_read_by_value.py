@@ -161,9 +161,14 @@ def test_a_real_matrix_claim_names_the_complex_value_returned():
 
 @pytest.mark.parametrize("law", ["trace(f(x)) >= 4", "trace(f(x)) <= 4",
                                  "det(f(x)) >= -100"])
-def test_an_ordering_on_a_complex_value_is_not_decided(rows, law):
+def test_an_ordering_on_a_complex_value_is_not_decided(rows, law, request):
+    # the trace and determinant of this matrix are complex numbers, which
+    # have no order: the claim is misspecified; without numpy the claim's
+    # trace and det cannot be computed at all, so it stays unknown
     verdict, _, note, _ = rows[f"complex_symmetric: {law}"]
-    assert verdict == "unknown", (law, note)
+    expected = ("unknown" if "numpy blocked" in request.node.callspec.id
+                else "skipped:misspecified")
+    assert verdict == expected, (law, note)
 
 
 def test_the_norm_of_a_complex_vector_is_real(rows):

@@ -7510,7 +7510,8 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     # exhaustive-coverage sketch), so it supersedes like any evidence;
     # a probe that found no value to compare says why, which is the
     # reason the claim stays open
-    winner = (probed if probed.verdict in ("proven", "holds", "falsified")
+    winner = (probed if probed.verdict in ("proven", "holds", "falsified",
+                                           "skipped:misspecified")
               or (probed.meta or {}).get("mathema.missing_unknown")
               else fallback)
     # the note leads with the deciding route's own sentence; the route
@@ -12934,10 +12935,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # sample; skip, as the derive route refuses the same.
             # Equality and closeness over complex values are answered.
             if is_complex_value(lv) or is_complex_value(rv):
-                why = (f"; ordering ({cj.relation}) over complex values "
-                       f"isn't meaningful ({type(lv).__name__} vs "
-                       f"{type(rv).__name__}), only equality and "
-                       f"closeness are")
+                # the complex numbers have no order: the claim is not
+                # well formed, on every route
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=None,
+                             note=note + (
+                                 f"; ordering ({cj.relation}) over complex "
+                                 f"values isn't meaningful "
+                                 f"({type(lv).__name__} vs "
+                                 f"{type(rv).__name__}), only equality "
+                                 f"and closeness are"))
             else:
                 why = (f"; {cj.relation} over {type(lv).__name__} vs "
                        f"{type(rv).__name__} values isn't meaningful as a "

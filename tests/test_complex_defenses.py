@@ -74,5 +74,5 @@ def test_probe_ordering_over_complex_returns_skips_cleanly():
     (p,) = check_conjectures(rotate, [claim("for x in [1, 5], f(x) <= 5")])
     # best-route cascade: derive declines (complex return), and the
     # probe's ordering-over-complex refusal is carried in the trail
-    assert p.verdict in ("skipped", "unknown")
+    assert p.verdict == "skipped:misspecified", (p.verdict, p.note)
     assert "isn't meaningful" in p.note
