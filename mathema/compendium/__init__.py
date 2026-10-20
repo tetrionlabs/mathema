@@ -1637,6 +1637,10 @@ def uninstalled_project_note(fn) -> "str | None":
         states no compendium file, or its files are installed.
     """
     import inspect
+
+    from ..analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         path = inspect.getsourcefile(_engine_unwrapped(fn))
     except (TypeError, OSError):

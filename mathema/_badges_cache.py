@@ -255,9 +255,16 @@ class Reach:
 
     def _source_file(self, obj) -> "str | None":
         """Intent:
-            The real path of the file `obj` is defined in, or None.
+            The real path of the file `obj` is defined in, or None, as
+            for a callable standing for a function another frontend
+            read (`analysis.foreign_body`), whose Python file is a
+            wrapper's.
         """
         import inspect
+
+        from .analysis import foreign_body
+        if foreign_body(obj):
+            return None
         try:
             path = inspect.getsourcefile(obj)
         except TypeError:

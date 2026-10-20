@@ -231,6 +231,39 @@ def _method_ctx_fields(fn, facts) -> tuple:
     return None, None
 
 
+def _module_function(func: ast.Attribute, globals_ns: dict):
+    """Intent:
+        The function a call names through modules alone
+        (`helpers.g`, `h.g` for an aliased import, `pkg.sub.g`): the
+        name the chain starts from resolves in `globals_ns` to a
+        module, each step after it but the last is a module, and the
+        last is a plain Python function whose source lies outside the
+        installed library paths. None for anything else (a method of
+        an object a module holds, a class, a library function).
+    """
+    steps: list = []
+    node: ast.AST = func
+    while isinstance(node, ast.Attribute):
+        steps.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    holder = globals_ns.get(node.id)
+    for attr in reversed(steps):
+        if not inspect.ismodule(holder):
+            return None
+        holder = getattr(holder, attr, None)
+    if not inspect.isfunction(holder):
+        return None
+    import os
+
+    from .._examine import _INSTALLED
+    path = os.path.abspath(holder.__code__.co_filename)
+    if any(path.startswith(p + os.sep) for p in _INSTALLED):
+        return None
+    return holder
+
+
 def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
                        opaque: "OpaqueRegistry | None" = None):
     """Attempt to inline a call to a plain, bare-name function this one
@@ -249,8 +282,9 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
     the caller's registry rather than getting a fresh one. Declines
     (returns None, never raises, the caller falls back to its own
     ordinary unsupported-call error) whenever the attempt wouldn't be
-    honest: a module-qualified or method call (`obj.method(...)`, only a
-    bare `name(...)` is attempted), keyword arguments, the depth budget
+    honest: a method call (`obj.method(...)`; a bare `name(...)`, a
+    call through modules to a project function (`_module_function`)
+    and a sibling method through self are attempted), keyword arguments, the depth budget
     exhausted or the callee already on this path (seen), the name not
     resolving to a real Python function, the callee itself failing to
     lift (unconditionally, or under a derived domain), a callee whose
@@ -278,6 +312,8 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
             callee, self_call = member.__func__, "static"
         else:
             callee, self_call = member, "instance"
+    elif isinstance(node.func, ast.Attribute):
+        callee = _module_function(node.func, ctx.globals_ns)
     else:
         return None
     if callee is None or not inspect.isfunction(callee) or id(callee) in ctx.seen:

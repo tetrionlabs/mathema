@@ -271,6 +271,10 @@ def _reading(fn) -> tuple:
     fn = _plain(fn)
     if not isinstance(fn, types.FunctionType):
         return None, f"{getattr(fn, '__name__', fn)!s} is not a Python function"
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None, (f"{fn.__qualname__} stands for a function another "
+                      f"frontend read, and its Python source is a wrapper's")
     try:
         return _TWINS[fn]
     except KeyError:

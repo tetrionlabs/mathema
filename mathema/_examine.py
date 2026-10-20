@@ -319,7 +319,12 @@ _INSTALLED = _installed_paths()
 
 def _project_source(fn) -> "ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | None":
     """The parsed definition of a project function (Python source outside
-    the standard library and the installed packages), or None."""
+    the standard library and the installed packages), or None, as for a
+    callable standing for a function another frontend read
+    (`analysis.foreign_body`)."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None
     code = getattr(fn, "__code__", None)
     if code is None:
         return None

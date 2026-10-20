@@ -322,11 +322,6 @@ def adjudicate(ctx: EquivalenceContext, fn,
 #: the note on a pair across runtimes that no family adjudicated
 _ACROSS_RUNTIMES = "equivalence across runtimes needs the equivalence family"
 
-#: form-hash namespaces the Python frontend and the documentation-only
-#: fallback write; a bare hash is the Python frontend's own form
-_PYTHON_FORM_NAMESPACES = frozenset({"py", "doc"})
-
-
 def _joined(note: str, text: str) -> str:
     return f"{note}; {text}" if note else text
 
@@ -338,17 +333,8 @@ def _read_elsewhere(facts) -> bool:
         mapping, or as a string), or, with no frontend named, their form
         hash is namespaced (`"<frontend>:<sha>"`) outside `py` and `doc`.
     """
-    stated = getattr(facts, "provenance", None) or {}
-    frontend = stated.get("frontend") if isinstance(stated, dict) else None
-    if isinstance(frontend, dict):
-        frontend = frontend.get("name")
-    from .koine.frontends import PYTHON
-    if frontend:
-        return frontend != PYTHON
-    form = getattr(facts, "form", None) or ""
-    if ":" not in form:
-        return False
-    return form.split(":", 1)[0] not in _PYTHON_FORM_NAMESPACES
+    from .analysis import written_elsewhere
+    return written_elsewhere(facts)
 
 
 def _family_verdict(case: _Case) -> Probe | None:

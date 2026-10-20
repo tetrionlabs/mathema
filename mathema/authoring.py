@@ -759,11 +759,17 @@ def _range_from_exit_asserts(fn) -> "tuple[list, set]":
     """Intent:
         `(checks, lines)`: the `(relation, bound)` checks the asserts
         just before the body's final `return <name>` state on that name,
-        and the source lines those asserts sit on.
+        and the source lines those asserts sit on. None for a callable
+        standing for a function another frontend read
+        (`analysis.foreign_body`), whose Python source is a wrapper's.
     """
     import ast
     import inspect
     import textwrap
+
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return [], set()
     try:
         lines, start = inspect.getsourcelines(fn)
         tree = ast.parse(textwrap.dedent("".join(lines)))
@@ -916,7 +922,10 @@ def _domain_from_entry_asserts(fn) -> dict:
     import math
     import textwrap
 
+    from .analysis import foreign_body
     from .domain import Interval
+    if foreign_body(fn):
+        return {}
     try:
         lines, _start = inspect.getsourcelines(fn)
         tree = ast.parse(textwrap.dedent("".join(lines)))
