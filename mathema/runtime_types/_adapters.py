@@ -469,8 +469,12 @@ def _pandas_typed_column(abstract: AbstractVec, options: dict, index):
     pandas' own string dtype or `bool`; a hole held as `nan` (the
     string dtype, or `object` for booleans), `None` (`object`) or
     `pd.NA` (`string`, `boolean`); holes of more than one member in an
-    `object` Series. A column of holes only, or of no rows, keeps the
-    dtype of its type."""
+    `object` Series. A column of holes only, or of no rows, has no
+    value to show its type, so it takes a dtype that states it: pandas'
+    string dtype where pandas has one as its default (pandas 3), else
+    the nullable `string`, and `boolean`, a hole there held as that
+    dtype holds one; holes spelled `None` stay `None` in an `object`
+    Series."""
     import pandas as pd
     element = element_type(abstract)
     spellings = {"nan": lambda: math.nan, "null": lambda: None,
@@ -479,7 +483,16 @@ def _pandas_typed_column(abstract: AbstractVec, options: dict, index):
     per = _per_position(options, spellings, "nan", abstract)
     values = _missing_to(abstract.values, abstract.missing, fill, per)
     strings = pd.Series(["s"]).dtype
-    if not abstract.missing:
+    if len(abstract.missing) == len(abstract.values) and not per \
+            and fill is not None:
+        # no value to show the type: a dtype that states it, pandas'
+        # own string dtype where it has one, else the nullable `string`
+        # or `boolean`
+        if element == "str":
+            dtype = strings if isinstance(strings, pd.StringDtype) else "string"
+        else:
+            dtype = "boolean"
+    elif not abstract.missing:
         dtype = strings if element == "str" else bool
     elif per or fill is None:
         dtype = object

@@ -163,3 +163,17 @@ def test_a_vector_of_strings_is_realised_as_a_string_series(fn):
         fn, [claim('for s in {"uu", "v"}^n \\ {missing}, f(s) >= dim(s)')])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
                                               p.counterexample)
+
+
+@pytest.mark.parametrize("detection", [_PANDAS, _POLARS],
+                         ids=["pandas", "polars"])
+@pytest.mark.parametrize("element", ["str", "bool"])
+def test_a_column_of_no_value_keeps_its_drawn_type_on_every_library_version(
+        detection, element):
+    for drawn in (AbstractVec((math.nan, math.nan), frozenset({0, 1}),
+                              element=element),
+                  AbstractVec((), element=element)):
+        frame = realise(AbstractTable({"k": drawn, "x": AbstractVec(
+            tuple(0.5 for _ in drawn.values))}), detection)
+        assert column_types(frame) == {"k": element, "x": "float"}, frame
+        assert column(frame, "k").missing == drawn.missing
