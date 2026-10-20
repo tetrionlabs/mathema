@@ -608,12 +608,12 @@ def exact_sides(code_l, code_r, env: dict, callees: dict,
         return _exact_sides(code_l, code_r, env, callees, False,
                             opaque_results)
     from ._exact_body import _as_computed, paired
-    floats = ({k: _as_computed(v) for k, v in env.items()}
-              if computed_env is None else dict(computed_env))
-    floats.update(callees)
-    floats["__builtins__"] = {}
 
     def computation():
+        floats = ({k: _as_computed(v) for k, v in env.items()}
+                  if computed_env is None else dict(computed_env))
+        floats.update(callees)
+        floats["__builtins__"] = {}
         eval(code_l, floats)
         if code_r is not None:
             eval(code_r, floats)

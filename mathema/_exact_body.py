@@ -294,9 +294,13 @@ def exact_callee(fn):
         if session is not None and session.mode == "exact":
             computation = session.take(fn)
         else:
-            computation = _computed(
-                fn, tuple(_as_computed(a) for a in args),
-                {k: _as_computed(v) for k, v in kwargs.items()})
+            try:
+                floats = (tuple(_as_computed(a) for a in args),
+                          {k: _as_computed(v) for k, v in kwargs.items()})
+            except OverflowError:
+                _not_exact("an argument has no float the computation "
+                           "could hold")
+            computation = _computed(fn, *floats)
         return _against(twin, computation, args, kwargs)
     return run
 
