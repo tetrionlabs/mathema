@@ -254,3 +254,21 @@ def test_an_undrawable_receiver_names_its_constructor_argument():
     (p,) = check_conjectures(TakesList.inv, [claim("f(self) > 0")])
     assert p.verdict == "skipped", (p.verdict, p.note)
     assert "its constructor takes xs (list[float])" in p.note, p.note
+
+
+def test_derive_reads_the_constructor_refusals_as_guards():
+    from mathema.runtime_types._receivers import constructor_premises
+    assert constructor_premises(Positive, "self") == [("self.k", ">", "0")]
+    assert constructor_premises(PositiveRecord, "self") == [("self.k", ">", "0")]
+    assert constructor_premises(Squared, "self") is None
+    for fn in (Positive.root, PositiveRecord.root):
+        (p,) = check_conjectures(fn, [claim("f(self) >= 0", route="derive")])
+        assert p.verdict == "proven", (p.verdict, p.note)
+        assert "derive reads self over the instances its class builds" in p.note
+
+
+def test_a_false_claim_on_constructible_instances_has_a_constructible_witness():
+    (p,) = check_conjectures(Positive.root, [claim("f(self) >= 1")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    k = float(p.counterexample.split("Positive(k=", 1)[1].split(")", 1)[0])
+    assert 0 < k < 1, p.counterexample

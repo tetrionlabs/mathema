@@ -652,9 +652,12 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
         cgrammar = c.get("grammar", grammar)
         statement = (c.get("statement") or c.get("law") or "").strip()
         if cgrammar == "mathema":
+            from ._annotation_text import complex_parameters
+            from .grammar import complex_in_view
             from .sync import _completed
-            statement = fingerprint_text(_completed(
-                _declared_conjecture(c, grammar), fn))
+            with complex_in_view(complex_parameters(fn)):
+                statement = fingerprint_text(_completed(
+                    _declared_conjecture(c, grammar), fn))
         parts.append(f"{c.get('name', '')}|{statement}|{c.get('route', 'best')}"
                      f"|{cgrammar}|{c.get('tolerance')}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
@@ -3048,10 +3051,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
         body = f"{cj.lhs} {cj.rhs}".strip()
         stated = parse_policy((f"{cj.assuming}, " if cj.assuming else "") + body)
         return policy_text(stated) if stated is not None else body
-    from .grammar import _BAR_MATRICES, bars_over_matrices
+    from .grammar import _BAR_MATRICES, bars_over_matrices, complex_in_view
     from .linalg import declared_matrix_names
     mats = declared_matrix_names(cj.domain) | _BAR_MATRICES.get()
-    with bars_over_matrices(mats):
+    over_c = {p for p, b in (cj.domain or {}).items()
+              if b == "C" or getattr(b, "base_type", None) == "C"}
+    with bars_over_matrices(mats), complex_in_view(over_c):
         return _render_claim_text(cj, unicode=unicode,
                                   long_param_threshold=long_param_threshold,
                                   canonical=canonical,

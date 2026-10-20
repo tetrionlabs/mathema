@@ -2112,6 +2112,32 @@ def bars_over_matrices(names):
 _ORDERED_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
     "ordered_matrices", default=frozenset())
 
+#: the names read as complex numbers while a claim is rendered (a
+#: parameter annotated `complex` or bound to C): each is a complex
+#: symbol, so `abs(z) ** 2` keeps its bars rather than folding to `z ** 2`
+_COMPLEX_NAMES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "complex_names", default=frozenset())
+
+
+@contextlib.contextmanager
+def complex_in_view(names):
+    """Within the block, the claim grammar reads `names` as complex
+    numbers as well as the names already in view."""
+    token = _COMPLEX_NAMES.set(_COMPLEX_NAMES.get() | frozenset(names))
+    try:
+        yield
+    finally:
+        _COMPLEX_NAMES.reset(token)
+
+
+def _name_symbol(name: str):
+    """A claim name as a sympy symbol: complex when it is in view as a
+    complex number, real otherwise."""
+    if name in _COMPLEX_NAMES.get():
+        return sympy.Symbol(name, complex=True)
+    return sympy.Symbol(name, real=True)
+
+
 #: math-constant names (`pi`, `oo`, `inf`, `infinity`) that a real
 #: parameter shadows while a claim is rendered: each stays a symbol
 _SHADOWED_CONSTANTS: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
@@ -2856,7 +2882,7 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if node.id in _ORDERED_MATRICES.get():
             # a matrix: its products keep their written order
             return sympy.Symbol(node.id, commutative=False)
-        return sympy.Symbol(node.id, real=True)
+        return _name_symbol(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v

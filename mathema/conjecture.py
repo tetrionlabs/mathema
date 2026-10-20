@@ -5342,10 +5342,12 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
         value claims, then the stated policy rows, then the gates.
     """
     from . import policy as _policy
-    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
+    from ._annotation_text import complex_parameters
+    from .grammar import (_BAR_MATRICES, bars_over_matrices, complex_in_view,
+                          matrices_in_view)
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
-            _policy.exceptions_of(fn):
+            _policy.exceptions_of(fn), complex_in_view(complex_parameters(fn)):
         out = _around_failing_languages(lambda claims: _check_conjectures(
             fn, claims, domain=domain, trials=trials,
             trials_scale=trials_scale, facts=facts, extensive=extensive,
@@ -9181,6 +9183,21 @@ def _complex_reads(node, complex_names: set, result: "str | None" = None) -> set
     return out
 
 
+def _receiver_premises(fn, facts) -> list:
+    """Intent:
+        The premises a method's receiver satisfies by construction,
+        `[(lhs, relation, rhs), ...]` over its fields
+        (`_receivers.constructor_premises`): what its class's
+        constructor admits. Empty for any other function, or a
+        constructor that cannot be read that way.
+    """
+    from .runtime_types._receivers import constructor_premises, method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0]:
+        return []
+    return constructor_premises(receiver[1], receiver[0]) or []
+
+
 def _receiver_witness_held(gated: "Probe", proof, fn) -> "Probe":
     """Intent:
         A derive disproof held to the instances the receiver's class
@@ -10250,6 +10267,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    built = _receiver_premises(fn, facts)
+    if built:
+        # derive ranges over the instances the receiver's class builds
+        assumption = (assumption or []) + built
+        note = (f"{note}; derive reads {facts.params[0]} over the instances "
+                f"its class builds ("
+                + ", ".join(f"{a} {r} {b}" for a, r, b in built) + ")").lstrip("; ")
     refused = _guard_refuses_part_of_the_claim(ctx, fn, facts)
     if refused is not None:
         # the guard is the function's domain: a claim reaching inputs it

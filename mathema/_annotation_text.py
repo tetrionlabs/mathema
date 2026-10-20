@@ -75,3 +75,24 @@ def int_completed(bound, kind: "str | None"):
                    for piece in dom.pieces):
         return bound
     return replace(dom, base_type="Z", explicit_type=True)
+
+
+def complex_parameters(fn) -> frozenset:
+    """Intent:
+        The parameters of `fn` annotated `complex` (or `Optional[complex]`),
+        the names a claim about it reads as complex numbers; empty when
+        the signature cannot be read.
+    """
+    import inspect
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return frozenset()
+    out = set()
+    for p in params:
+        ann = p.annotation
+        args = [a for a in typing.get_args(ann) if a is not type(None)] \
+            if _is_union(ann) else [ann]
+        if len(args) == 1 and args[0] in (complex, "complex"):
+            out.add(p.name)
+    return frozenset(out)
