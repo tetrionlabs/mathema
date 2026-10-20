@@ -81,6 +81,13 @@ narrows a domain away from `nan`/`inf`, fast via numpy. On an expression
 every other claim, and a raise from `f` at a point inside it falsifies
 the claim, naming the exception.
 
+Both `is_finite` and `is_real` also read a result that is a single
+number, with or without numpy installed. A number is finite when it is
+neither an infinity nor a NaN, a complex number when both its parts
+are, and a bool is a finite real number. `is_real` reads the value,
+not its type: a complex number with a zero imaginary part, such as
+`1 + 0j`, is real, and a vector or matrix is real when every entry is.
+
 ## Narrowing the domain
 
 A structure marker, or an `assuming` premise, narrows the matrices a

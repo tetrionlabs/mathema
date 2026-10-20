@@ -3,8 +3,10 @@
 """`is_finite(f(x))` and `is_real(f(x))` on a function that returns a
 number are decided the same way whether numpy is installed or not: a
 real number is finite when it is neither an infinity nor a NaN, a
-complex number when both its parts are, and a real number is real
-where a complex one is not."""
+complex number when both its parts are, and a bool is a finite real
+number. `is_real` reads the value, not its type: a complex number is
+real when its imaginary part is zero, and a vector or matrix is real
+when every entry is."""
 
 import json
 import math
@@ -24,6 +26,7 @@ import json, math, sys
 if BLOCK:
     sys.modules["numpy"] = None
 from mathema.conjecture import check_conjectures, claim
+from mathema.types import Mat, Vec
 
 
 def guarded_sqrt(variance: float) -> float:
@@ -48,6 +51,26 @@ def complex_infinite(x: float) -> complex:
     return complex(x, math.inf)
 
 
+def complex_on_the_axis(x: float) -> complex:
+    return complex(x, 0.0)
+
+
+def positive(x: float) -> bool:
+    return x > 0
+
+
+def vector_on_the_axis(xs: Vec("n")) -> list:
+    return [complex(v, 0.0) for v in xs]
+
+
+def vector_off_the_axis(xs: Vec("n")) -> list:
+    return [complex(v, 1.0) for v in xs]
+
+
+def matrix_on_the_axis(a: Mat("n", "n")) -> list:
+    return [[complex(v, 0.0) for v in row] for row in a]
+
+
 rows = [
     (guarded_sqrt, "is_finite(f(variance))"),
     (doubled, "is_finite(f(x))"),
@@ -56,6 +79,13 @@ rows = [
     (complex_infinite, "is_finite(f(x))"),
     (doubled, "is_real(f(x))"),
     (as_complex, "is_real(f(x))"),
+    (complex_on_the_axis, "is_real(f(x))"),
+    (complex_on_the_axis, "is_finite(f(x))"),
+    (positive, "is_finite(f(x))"),
+    (positive, "is_real(f(x))"),
+    (vector_on_the_axis, "is_real(f(xs))"),
+    (vector_off_the_axis, "is_real(f(xs))"),
+    (matrix_on_the_axis, "is_real(f(a))"),
 ]
 out = {}
 for fn, text in rows:
@@ -121,12 +151,46 @@ def test_a_real_scalar_result_is_real_and_a_complex_one_is_not(rows):
     assert "result is not real" in witness, witness
 
 
+def test_a_complex_result_on_the_real_axis_is_real(rows):
+    for key in ("complex_on_the_axis: is_real(f(x))",
+                "complex_on_the_axis: is_finite(f(x))"):
+        verdict, route, note, _ = rows[key]
+        assert (verdict, route) == ("holds", "probe:algorithmic"), (key, note)
+
+
+@pytest.fixture(scope="module")
+def numpy_free_rows(tmp_path_factory):
+    got = _run(True, tmp_path_factory.mktemp("claims"))
+    assert got["numpy"] is False
+    return got["rows"]
+
+
+def test_without_numpy_a_complex_vector_or_matrix_is_real_on_the_axis(
+        numpy_free_rows):
+    for key in ("vector_on_the_axis: is_real(f(xs))",
+                "matrix_on_the_axis: is_real(f(a))"):
+        verdict, route, note, _ = numpy_free_rows[key]
+        assert (verdict, route) == ("holds", "probe:algorithmic"), (key, note)
+    verdict, _, note, witness = \
+        numpy_free_rows["vector_off_the_axis: is_real(f(xs))"]
+    assert verdict == "falsified", note
+    assert "result is not real" in witness, witness
+
+
+def test_a_bool_result_is_finite_and_real(rows):
+    for key in ("positive: is_finite(f(x))", "positive: is_real(f(x))"):
+        verdict, route, note, _ = rows[key]
+        assert (verdict, route) == ("holds", "probe:algorithmic"), (key, note)
+
+
 _SCALARS = [
     (3, True, True), (2.5, True, True), (-0.0, True, True),
+    (True, True, True), (False, True, True),
     (math.nan, False, True), (math.inf, False, True),
     (-math.inf, False, True),
-    (1 + 2j, True, False), (1 + 0j, True, False),
-    (complex(math.inf, 0.0), False, False),
+    (1 + 2j, True, False), (1 + 0j, True, True),
+    (complex(math.inf, 0.0), False, True),
+    (complex(math.nan, 0.0), False, True),
     (complex(0.0, math.nan), False, False),
 ]
 
@@ -140,23 +204,28 @@ def test_the_pure_python_checks_decide_a_number(monkeypatch, value,
     assert M.PROPERTIES["is_real"].check(value) is real
 
 
-_VECTORS = [[1.0, 2.0], [1, 2.5], [1.0, 2j], [[1.0, 0.0], [0.0, 1.0]],
-            [[1.0, 1j], [0.0, 1.0]]]
+_VECTORS = [
+    ([1.0, 2.0], True, True), ([1, 2.5], True, True),
+    ([True, 2.0], True, True), ([[True, False], [0.0, 1.0]], True, True),
+    ([1.0, math.inf], False, True), ([[False, math.nan], [0.0, 1.0]], False, True),
+    ([1.0, 2j], None, False), ([1.0, 0j], None, True),
+    ([[1.0, 0.0], [0.0, 1.0]], True, True),
+    ([[1.0, 1j], [0.0, 1.0]], None, False),
+    ([[1.0, 0j], [0.0, 1.0]], None, True),
+]
 
 
-@pytest.mark.parametrize("value", _VECTORS, ids=[repr(v) for v in _VECTORS])
-def test_the_pure_python_is_real_reads_a_vector_or_matrix(monkeypatch,
-                                                          value):
+@pytest.mark.parametrize("value,finite,real", _VECTORS,
+                         ids=[repr(v[0]) for v in _VECTORS])
+def test_the_pure_python_checks_read_a_vector_or_matrix(monkeypatch, value,
+                                                        finite, real):
     monkeypatch.setattr(M, "_numpy", lambda: None)
-    flat = value if not isinstance(value[0], list) else \
-        [v for row in value for v in row]
-    assert M.PROPERTIES["is_real"].check(value) is \
-        (not any(isinstance(v, complex) for v in flat))
+    assert M.PROPERTIES["is_finite"].check(value) is finite
+    assert M.PROPERTIES["is_real"].check(value) is real
 
 
-@pytest.mark.parametrize("value", [v for v, _, _ in _SCALARS] + _VECTORS,
-                         ids=[repr(v) for v, _, _ in _SCALARS]
-                         + [repr(v) for v in _VECTORS])
+@pytest.mark.parametrize("value", [v for v, _, _ in _SCALARS + _VECTORS],
+                         ids=[repr(v) for v, _, _ in _SCALARS + _VECTORS])
 def test_numpy_and_pure_python_agree_on_numbers(monkeypatch, value):
     pytest.importorskip("numpy")
     with_numpy = {n: M.PROPERTIES[n].check(value)
