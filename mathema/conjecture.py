@@ -3114,6 +3114,13 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
         if cuts:
             unbound["guards"] = cuts
         return unbound
+    if cj.relation == "is_defined":
+        from .claim_families import _claim_bound, _is_defined_working
+        if not _is_defined_working(fn, facts,
+                                   set(cj.domain or {})
+                                   | _claim_bound(fn, domain), domain):
+            # the claim binds the domain a guard reads: no working domain
+            return {}
     cuts = guard_cut_texts(fn, facts)
     enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
     listed_texts = _finite_guard_texts(facts, domain)
@@ -3126,6 +3133,9 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
         if domain.get(p) is None:
             out[p] = _render_bound(values)
     read = _names_in_claim(cj)
+    if (cj.lhs or "").strip() == "f" and "f" not in facts.params:
+        # a predicate on f itself (`is_defined(f)`) reads every parameter
+        read |= set(facts.params)
     for p in facts.params:
         bound = domain.get(p)
         if bound is None:

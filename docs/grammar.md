@@ -578,7 +578,11 @@ A function's own guards cut its working domain: a conditional raise,
 `@enforce_domain` (an assert at the top of the body feeds it) and an
 entry check of `@enforce_dimensions` reject a call on purpose, so
 `is_defined(f)` and the families judge only the calls the guards let
-through, and the record names each guard by its condition. A bare
+through, and the record names each guard by its condition. A domain the
+claim binds itself is the domain: `for x in [-1, 1], is_defined(f)`
+states that f has a value at every point of [-1, 1], so a guard
+refusing a call inside it falsifies the claim there, while
+`is_defined(f)` with no binding reads the working domain. A bare
 `assert` is not a guard: a failed assert counts against `is_defined`, and
 so does a `RangeError` from `@enforce_range` (a result outside its
 declared range). Nor is a nan or an infinity the body returns

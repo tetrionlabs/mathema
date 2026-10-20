@@ -36,6 +36,13 @@ def test_a_claim_binding_its_own_domain_states_no_working_domain():
     _states_no_working_domain(p)
 
 
+def test_is_defined_binding_its_own_domain_states_no_working_domain():
+    p = _one("for variance in [-1, 1], is_defined(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.counterexample.startswith("variance = -"), p.counterexample
+    _states_no_working_domain(p)
+
+
 def test_excluded_outside_domain_states_no_working_domain():
     _states_no_working_domain(_one("excluded_outside_domain(variance)"))
 
@@ -52,7 +59,7 @@ def test_a_row_judged_over_the_working_domain_states_it():
                                               p.note)
     assert "the working domain is variance in [0, oo)" in (p.note or ""), \
         p.note
-    p = _one("for variance in [-1, 1], is_defined(f)")
+    p = _one("is_defined(f)")
     assert p.verdict == "proven", (p.verdict, p.note)
-    assert "the working domain is variance in [0, 1]" in (p.note or ""), \
+    assert "the working domain is variance in [0, oo)" in (p.note or ""), \
         p.note

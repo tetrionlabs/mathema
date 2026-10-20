@@ -3512,6 +3512,142 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
         meta=meta)
 
 
+def _is_defined_working(fn, facts, bound, domain=None) -> bool:
+    """Intent:
+        Whether the bare `is_defined` is read over the working domain
+        f's own guards leave. True when the claim (or its call) binds no
+        domain any guard refuses a point of: a domain it binds is the
+        domain, so where a guard (a conditional raise, an exit, a guard
+        to a set of strings, `@enforce_domain`) refuses a call inside
+        it, that call has no value and the working domain is not read.
+
+    Notes:
+        A refusal is ruled out only where it is shown: the guard's
+        condition, over one bound parameter, has no solution in the
+        bound domain; the bound strings all lie in the guard's set; the
+        bound domain lies inside the enforced one. A guard whose
+        condition does not lift, a raise branch true at every input and
+        a body that raises before any return refuse somewhere in any
+        bound domain.
+    """
+    import ast as _ast
+
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _body_always_raises, _own_guard_conditions
+    from .domain import bound_to_sympy_set
+    from .hazards import finite_guard_sets
+    bound = set(bound or ()) & set(facts.params)
+    if not bound:
+        return True
+    domain = domain or {}
+
+    def as_set(b):
+        try:
+            return bound_to_sympy_set(b)
+        except Exception:
+            return None
+
+    conds = _own_guard_conditions(fn, facts)
+    listed = finite_guard_sets(facts)
+    raises = facts.tree is not None and any(
+        isinstance(n, _ast.Raise) for n in _ast.walk(facts.tree))
+    if (raises and not conds and not listed) \
+            or any(c is _sympy.true for c in conds) \
+            or _body_always_raises(facts):
+        return False
+    for cond in conds:
+        names = {str(sym) for sym in getattr(cond, "free_symbols", ())}
+        if not names & bound:
+            continue
+        free = list(cond.free_symbols)
+        region = as_set(domain.get(str(free[0]))) if len(free) == 1 else None
+        if region is None:
+            return False
+        try:
+            refused = _with_timeout(
+                lambda c=cond, v=free[0], r=region: _sympy.solveset(c, v, r),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return False
+        except Exception:
+            return False
+        if refused is not _sympy.S.EmptySet:
+            return False
+    for p, allowed in listed.items():
+        if p not in bound:
+            continue
+        here = domain.get(p)
+        if not isinstance(here, (set, frozenset)) or not set(here) <= set(allowed):
+            return False
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        if p not in bound or domain.get(p) is guard:
+            continue
+        here, admitted = as_set(domain.get(p)), as_set(guard)
+        if here is None or admitted is None or not here.is_subset(admitted):
+            return False
+    return True
+
+
+def _claim_bound(fn, domain) -> set:
+    """The parameters a claim or its call binds a domain for; the domain
+    `@enforce_domain` states is f's own guard, not a binding."""
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    return {p for p, b in (domain or {}).items()
+            if b is not None and (p not in enforced or b is not enforced[p])}
+
+
+def _enforced_refusal(fn, facts, domain: dict):
+    """Intent:
+        The `is_defined` disproof where a domain the claim binds reaches
+        outside the domain `@enforce_domain` admits: the call at a point
+        of the bound domain the decorator refuses, executed; `disproven`
+        with that witness when it raises, None when no such point is
+        found or the call returns.
+    """
+    import sympy as _sympy
+
+    from .domain import bound_to_sympy_set
+    from .symbolic import ProofResult
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        bound = (domain or {}).get(p)
+        if bound is None or bound is guard or p not in facts.params:
+            continue
+        try:
+            outside = bound_to_sympy_set(bound) - bound_to_sympy_set(guard)
+        except Exception:
+            continue
+        pieces = (outside.args if isinstance(outside, _sympy.Union)
+                  else (outside,))
+        for piece in pieces:
+            if isinstance(piece, _sympy.Interval):
+                point = (piece.start + piece.end) / 2 \
+                    if piece.start.is_finite and piece.end.is_finite \
+                    else None
+            elif isinstance(piece, _sympy.FiniteSet) and piece.args:
+                point = piece.args[0]
+            else:
+                point = None
+            if point is None:
+                continue
+            what, _calls = _executed_family_witness(
+                fn, facts, p, float(point), domain or {})
+            if what is not None:
+                return ProofResult(
+                    "disproven",
+                    sketch=f"is_defined: the claim's domain for {p} reaches "
+                           f"outside the domain @enforce_domain admits, "
+                           f"and the call there has no value",
+                    counterexample=f"{p} = {_fmt_coordinate(float(point))}: "
+                                   f"f {what}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+    return None
+
+
 def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                        relation: str, domain: dict | None = None,
                        tolerance: float | None = None,
@@ -3557,14 +3693,18 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .conjecture import _definedness_region_structured, guard_cut_texts
     from .symbolic._base import REL_TEXT as rel_of
     # the bare predicate reads the working domain: the function's own
-    # guards cut it, and only a failure inside it counts (decision A)
+    # guards cut it, and only a failure inside it counts (decision A);
+    # a domain the claim binds for a parameter a guard reads is the
+    # domain itself, and a guard refusing inside it is no value there
     bare = relation == "is_defined"
+    working = bare and _is_defined_working(fn, facts,
+                                           _claim_bound(fn, domain), domain)
     structured = _definedness_region_structured(fn, facts, region_gaps,
-                                                working=bare, domain=domain)
-    cuts = guard_cut_texts(fn, facts) if bare else []
+                                                working=working, domain=domain)
+    cuts = guard_cut_texts(fn, facts) if working else []
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
                 f"cuts the working domain)" if cuts else "")
-    if bare:
+    if working:
         domain = _working_bounds(fn, domain)
     computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
                 for rel in structured]
@@ -3596,14 +3736,14 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     def disproof(sketch: str, gaps: list, says_defined):
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
-                                   domain, premises, working=bare)
+                                   domain, premises, working=working)
 
     def incomplete(sketch: str, gaps: list, says_defined):
         # the computed region is not the whole definedness region: only
         # an executed disagreement decides
         point, _executed = _definedness_witness(fn, facts, gaps,
                                                 says_defined, domain,
-                                                premises, working=bare)
+                                                premises, working=working)
         if point is not None:
             return ProofResult(
                 "disproven", sketch=sketch,
@@ -3623,6 +3763,9 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         # region at all; falsified when it has one and a point in the
         # domain executes and raises. A stated region falls through
         # to the restriction reading below.
+        refused = None if working else _enforced_refusal(fn, facts, domain)
+        if refused is not None:
+            return refused
         if region_gaps:
             return incomplete(
                 "is_defined: f is not defined everywhere, an executed "
@@ -4506,6 +4649,12 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             yield draw()
 
     from .conjecture import deliberate_raise, guard_cut_texts
+    # the plane a complex parameter no binding names is drawn over is
+    # not a binding
+    reads_working = _is_defined_working(fn, facts, set(cj.domain or {}) | {
+        p for p in _claim_bound(fn, domain)
+        if not (domain.get(p) == "C" and (cj.domain or {}).get(p) is None
+                and facts.param_kinds.get(p) == "complex")}, domain)
     checked = n_in = n_out = cut = 0
     seen: set = set()
     for point in candidates():
@@ -4525,7 +4674,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
-            if kind == "is_defined" and bare and deliberate_raise(exc, fn):
+            if kind == "is_defined" and bare and reads_working \
+                    and deliberate_raise(exc, fn):
                 # the function's own guard rejects the call: outside its
                 # working domain (decision A), no trial
                 cut += 1
