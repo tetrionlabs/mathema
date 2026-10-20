@@ -4470,7 +4470,10 @@ def _matrix_output_probe(prop):
     evaluable value has the property, falsifies with the witnessing
     arguments when one does not, skips when the property could not be
     decided on any value (a spectral check with no numpy, or no point
-    inside the premises)."""
+    inside the premises). A result that is not a number, nor a vector
+    or matrix of numbers, leaves `is_finite` and `is_real` undecided:
+    unless another point falsifies, the probe answers unknown with the
+    first such point and `matrices.NOT_A_NUMBER`."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
@@ -4482,8 +4485,10 @@ def _matrix_output_probe(prop):
                                          facts.params), "<claim>", "eval")
         except SyntaxError:
             return None
+        from .matrices import NOT_A_NUMBER, is_numeric
         draw = _structured_draws(fn, facts, cj, domain)
         checked = 0
+        not_a_number = None
         for _ in range(trials):
             point = _placed(dict(zip(facts.params, draw(rng))), rng)
             if point is None or not _admitted(point):
@@ -4504,12 +4509,18 @@ def _matrix_output_probe(prop):
                 continue
             got = prop.check(value)
             if got is None:
+                if prop.level == "finite" and not_a_number is None \
+                        and not is_numeric(value):
+                    not_a_number = (f"{_fmt(tuple(filled), tuple(facts.params))}: "
+                                    f"{NOT_A_NUMBER}")
                 continue
             checked += 1
             if got is not True:
                 return ("falsified", checked,
                         f"{_fmt(tuple(filled), tuple(facts.params))}: result is not "
                         f"{prop.name[3:]}", None)
+        if not_a_number is not None:
+            return ("unknown", checked, not_a_number, None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
