@@ -90,4 +90,4 @@ def test_a_raising_boundary_point_is_never_proven(tmp_path, name, value):
     (p,) = check_conjectures(
         fn, [claim(f"for x in [{value}, {value}], f(x) == 0",
                    route="derive")])
-    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)

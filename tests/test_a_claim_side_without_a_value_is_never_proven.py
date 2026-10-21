@@ -55,7 +55,8 @@ def shifted_reciprocal_square(x: float) -> float:
 ])
 def test_a_claim_side_with_no_value_in_the_domain_is_not_proven(fn, text):
     (p,) = check_conjectures(fn, [claim(text, route="derive")])
-    assert p.verdict != "proven", (text, p.verdict, p.sketch)
+    assert p.verdict == "falsified", (text, p.verdict, p.sketch)
+    assert p.counterexample, (text, p.note)
 
 
 @pytest.mark.needs_full_proof_budget

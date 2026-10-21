@@ -23,14 +23,14 @@ def _one(fn, law):
 def test_a_swapped_call_is_not_proven_symmetric():
     # h(0.5, -0.5) = 0 and h(-0.5, 0.5) = 1
     p = _one(h, "for x in [0, 1], y in [-1, 0], f(x, y) == f(y, x)")
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
 
 
 def test_a_swapped_call_is_not_proven_negative():
     p = _one(first, "for a in [0, 1], b in [-1, -0.5], f(b, a) < 0")
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
     q = _one(first, "for a in [0, 1], b in [-1, -0.5], f(b, a) == b")
-    assert q.verdict != "proven"
+    assert q.verdict == "falsified", (q.verdict, q.note)
 
 
 def test_the_same_call_in_its_own_order_still_proves():

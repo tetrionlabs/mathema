@@ -39,7 +39,7 @@ def _all(law, route="best"):
 def test_minus_one_is_never_the_closed_form_read_at_minus_one():
     (p, *_rest) = _all(_N + "f(cx, cy, a, b, n)[0][-1] == "
                        "cx + a*cos(2*pi*(-1)/(n-1))", "derive")
-    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
 
 
 @pytest.mark.needs_full_proof_budget
@@ -51,10 +51,10 @@ def test_minus_one_is_the_last_element():
 def test_an_index_past_the_end_is_not_proven():
     (p, *_rest) = _all("for n in [5, 5] subset Z, "
                        "f(cx, cy, a, b, n)[0][9] == cx", "derive")
-    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
     (p, *_rest) = _all(_N + "f(cx, cy, a, b, n)[0][9] == "
                        "cx + a*cos(2*pi*9/(n-1))", "derive")
-    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
 
 
 def test_an_index_past_the_end_is_falsified_and_its_computation_too():

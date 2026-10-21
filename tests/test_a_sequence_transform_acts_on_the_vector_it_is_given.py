@@ -72,7 +72,8 @@ def _verdict(fn, law):
 ])
 def test_a_false_transform_identity_is_never_proven(fn, law):
     p = _verdict(fn, law)
-    assert p.verdict != "proven", (law, p.verdict, p.sketch)
+    assert p.verdict == "falsified", (law, p.verdict, p.sketch)
+    assert p.counterexample, (law, p.note)
 
 
 @pytest.mark.needs_full_proof_budget

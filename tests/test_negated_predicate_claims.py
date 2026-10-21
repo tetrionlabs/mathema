@@ -19,7 +19,8 @@ def test_check_reports_the_negation_not_the_positive_claim():
     rec = mathema.check(total, claims=["not is_defined(f)"])
     negated = [p for p in rec.probes if p.name == claim("not is_defined(f)").name]
     assert len(negated) == 1
-    assert negated[0].verdict != "proven"
+    assert negated[0].verdict == "falsified", (negated[0].verdict,
+                                               negated[0].note)
 
 
 def test_a_declared_negation_round_trips():

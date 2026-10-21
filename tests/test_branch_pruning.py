@@ -137,6 +137,7 @@ def test_ordinary_claim_names_both_params_for_a_two_param_guard():
     assert "needs a domain specific enough for x1, x2" in results[0].note
 
 
+@pytest.mark.needs_full_proof_budget
 def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_blocked():
     # non-affine guard (x*y) over a domain where its hull straddles the
     # compared literal: neither corner evaluation nor interval
@@ -154,10 +155,12 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
     assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
-    # on the default route the extensive ladder settles the (true) claim
+    # on the default route the extensive ladder settles the claim, true
+    # because divides is 1/y > 0 for x != 0 and 0 at x = 0
     results = check_conjectures(
         divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0")])
-    assert results[0].verdict in ("proven", "holds")
+    assert results[0].verdict == "proven", (results[0].verdict,
+                                            results[0].note)
 
 
 def test_nonaffine_guard_still_prunes_when_the_interval_settles_it():
@@ -220,15 +223,14 @@ def test_raises_claim_falsified_when_pinned_branch_actually_returns():
     assert results[0].verdict == "falsified"
 
 
-def test_raises_claim_with_no_domain_adjudicates_empirically():
-    # derive needs a domain that pins the raising branch; a set of
-    # scales none of which is a known one leaves it to probing, and
-    # every sample takes the raise path, empirical support for the
-    # raises claim
+def test_raises_claim_over_unknown_scales_is_proven_for_every_r():
+    # neither "nope" nor "bad" is "info" or "linear", so every call
+    # reaches the final raise whatever r is, and r needs no domain
     results = check_conjectures(
         strength_to_distance,
         [claim('for scale in {"nope", "bad"}, raises(f(r, scale))', route="derive")])
-    assert results[0].verdict in ("holds", "proven")
+    assert results[0].verdict == "proven", (results[0].verdict,
+                                            results[0].note)
 
 
 def test_negative_literal_guard_proven_when_domain_pins_the_raising_branch():
@@ -332,7 +334,8 @@ def test_boolop_condition_with_no_domain_stays_unliftable():
         [claim("f(x, x_discrete, y_discrete) >= 0", route="derive")])
     # derive stays blocked without a domain; the probe fallback then
     # supplies (weak, sampling-limited) empirical evidence
-    assert results[0].verdict in ("holds", "falsified")
+    assert results[0].verdict == "falsified", (results[0].verdict,
+                                               results[0].note)
     trail = results[0].meta["mathema.routes_attempted"]
     assert "routes attempted" in trail
     assert "derive: underivable" in trail

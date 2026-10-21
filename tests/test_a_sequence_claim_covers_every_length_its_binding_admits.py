@@ -84,7 +84,8 @@ def _derive(fn, law):
 ])
 def test_a_claim_whose_domain_admits_a_raising_call_is_not_proven(fn, law):
     p = _derive(fn, law)
-    assert p.verdict != "proven", (law, p.verdict, p.sketch, p.note)
+    assert p.verdict == "falsified", (law, p.verdict, p.sketch, p.note)
+    assert p.counterexample, (law, p.note)
 
 
 def test_two_lengths_that_differ_are_an_executed_witness():
