@@ -93,8 +93,12 @@ def test_derive_declines_a_language_bound_parameter_unless_finite(tmp_path, rout
             return abs(len(s))
     ''')
     p = _one(mod.size, "for s in L[letters], f(s) >= 0", route=route)
-    # never proven: the only positive evidence is sampled
-    assert p.verdict == "holds" and p.route == "probe"
+    # never proven: the only positive evidence is sampled, and the
+    # derive route alone has none
+    if route == "derive":
+        assert (p.verdict, p.route) == ("unknown", "derive")
+    else:
+        assert p.verdict == "holds" and p.route == "probe"
     assert p.meta["mathema.derive_status"] == "unliftable"
     assert "language domain" in p.note
 

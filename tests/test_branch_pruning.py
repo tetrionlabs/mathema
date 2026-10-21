@@ -151,11 +151,13 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
 
     results = check_conjectures(
         divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0", route="derive")])
-    # the structural diagnosis stays (in the note, since probing then
-    # adjudicates the, true, claim empirically: 1/y > 0 on [1, 5])
-    assert results[0].verdict == "holds"
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
+    # on the default route the extensive ladder settles the (true) claim
+    results = check_conjectures(
+        divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0")])
+    assert results[0].verdict in ("proven", "holds")
 
 
 def test_nonaffine_guard_still_prunes_when_the_interval_settles_it():

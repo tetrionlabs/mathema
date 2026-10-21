@@ -30,8 +30,8 @@ def logpoly(x: float) -> float:
     return math.log(x) ** 2 - 2.0 * math.log(x) + 1.5
 
 
-def _one(fn, law, extensive=False):
-    (p,) = check_conjectures(fn, [claim(law, route="derive")],
+def _one(fn, law, extensive=False, route="derive"):
+    (p,) = check_conjectures(fn, [claim(law, route=route)],
                              extensive=extensive)
     return p
 
@@ -41,8 +41,7 @@ def test_refinement_proves_what_a_single_hull_straddles():
     # x*sin(x) on [-1, 1]: one box straddles zero (the dependency
     # problem), two half-boxes certify. Fast path stays honest.
     fast = _one(xsin, "for x in [-1, 1], f(x) >= 0")
-    assert fast.verdict == "holds"   # fast derive declines; probed instead
-    assert fast.route == "probe"
+    assert (fast.verdict, fast.route) == ("unknown", "derive")   # fast derive declines
     p = _one(xsin, "for x in [-1, 1], f(x) >= 0", extensive=True)
     assert p.verdict == "proven"
     assert p.route == "derive:extensive"
@@ -75,7 +74,7 @@ def test_root_isolation_settles_a_quartic_exactly():
 @pytest.mark.needs_full_proof_budget
 def test_ladder_closes_a_logarithmic_polynomial():
     fast = _one(logpoly, "for x in [0.1, 100], f(x) >= 0")
-    assert fast.verdict == "holds"   # fast derive declines; probed instead
+    assert (fast.verdict, fast.route) == ("unknown", "derive")   # fast derive declines
     p = _one(logpoly, "for x in [0.1, 100], f(x) >= 0", extensive=True)
     assert p.verdict == "proven"
     assert p.route == "derive:extensive"
@@ -143,8 +142,12 @@ def test_undecided_extensive_run_names_what_it_tried():
     # hit infinitely often) that no rung settles: the record must say
     # what was attempted rather than a bare unknown.
     p = _one(xsin, "f(x) >= -x^2", extensive=True)
-    # every rung declines; the probe fallback then supplies empirical
-    # support, with the attempted-rungs account preserved in the note
+    # every rung declines, and the attempted-rungs account is the note
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert "extensive attempts did not settle it" in p.note
+    # on the default route the probe fallback then supplies empirical
+    # support, with the account preserved in the note
+    p = _one(xsin, "f(x) >= -x^2", route="best")
     assert p.verdict == "holds"
     assert "extensive attempts did not settle it" in p.note
 

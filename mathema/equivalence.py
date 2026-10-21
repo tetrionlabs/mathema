@@ -310,6 +310,13 @@ def adjudicate(ctx: EquivalenceContext, fn,
     state = _LadderState()
     for name, rung in RUNGS:
         probe = rung(case, state)
+        if name == "sampled" and cj.route == "derive" and probe is not None \
+                and probe.verdict == "holds":
+            # on the derive route sampling falsifies only: shared points
+            # that agree are no verdict
+            state.sampling_meta = {k: v for k, v in (probe.meta or {}).items()
+                                   if k != "mathema.equivalence.rung"}
+            continue
         if probe is None:
             continue
         if name in _MATHEMATICS_RUNGS and probe.verdict in ("proven",
@@ -1239,11 +1246,16 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
     """Nothing decided. The route reports the strongest mechanism that
     actually produced information: derive when a proof attempt
     returned a result, probe when points executed, None when no
-    mechanism engaged at all."""
+    mechanism engaged at all; a claim on the derive route reports
+    derive. On the derive route the sampled rung falsifies only, and the
+    note says how many points agreed."""
     meta = state.sampling_meta or dict(case.annotations)
     sampling = meta.get("mathema.equivalence.sampling") or {}
     checked = sampling.get("checked", 0)
-    if state.proof is not None and state.proof.status != "unliftable":
+    if case.cj.route == "derive":
+        # the derive route reports its own unknown, as for any claim
+        route = "derive"
+    elif state.proof is not None and state.proof.status != "unliftable":
         # the symbolic mechanism genuinely engaged (undecided or an
         # uncorroborated disproof already handled upstream); unliftable
         # means it never got to reason at all
@@ -1252,12 +1264,19 @@ def _fallthrough(case: _Case, state: _LadderState) -> Probe:
         route = "probe"
     else:
         route = None
+    if case.cj.route == "derive":
+        said = (f"neither the canonical forms nor the symbolic difference "
+                f"could settle equivalence, and the {checked} shared points "
+                f"sampled found no disagreement, which on the derive route "
+                f"is not a verdict")
+    else:
+        said = (f"neither the canonical forms, the symbolic difference, "
+                f"nor sampling ({checked} evaluable points) could settle "
+                f"equivalence")
     return Probe(case.cj.name, case.statement, "unknown", route=route,
                  sketch=(state.proof.sketch if state.proof is not None
                          else None),
-                 note=f"{case.note}; neither the canonical forms, the "
-                      f"symbolic difference, nor sampling ({checked} "
-                      f"evaluable points) could settle equivalence"
+                 note=f"{case.note}; {said}"
                       + (f"; {state.raise_note}" if state.raise_note
                          else ""),
                  meta=meta)

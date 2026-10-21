@@ -89,7 +89,7 @@ def test_loop_body_temporary_inlines(tmp_path):
     lifted = lift_fold(mod.with_temp, analyze(mod.with_temp))
     assert lifted is not None, "temp inlining did not reach the fold recognizer"
     (p,) = check_conjectures(mod.with_temp, [claim(
-        "for xs in [0, 10], f(xs) >= 0", route="derive")])
+        "for xs in [0, 10], f(xs) >= 0")])
     # the sign of a symbolic-length sum stays a prover gap; the pin
     # here is the LIFT (above) plus honest evidence with the sampler
     # respecting the element domain (this used to falsify falsely)

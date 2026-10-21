@@ -73,11 +73,19 @@ def test_explicit_domain_wins_over_an_inferred_one():
     # back proven. Under the explicit domain derive reads code in
     # [1, 5], never reaches the guard, and disproves the raise; that
     # disproof has no executed witness (the literal call f(50, 0) does
-    # raise), so it is reported uncorroborated rather than falsified,
-    # and the probe route, which runs the call, holds.
+    # raise), so it is reported uncorroborated rather than falsified:
+    # unknown on the derive route, and on the default route the probe,
+    # which runs the call, holds.
     (p,) = check_conjectures(
         price_with_discount,
         [claim("for code in [1, 5], raises(f(50, 0), ValueError)", route="derive")])
+    assert p.verdict != "proven"
+    assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert "code=" not in p.note
+    (p,) = check_conjectures(
+        price_with_discount,
+        [claim("for code in [1, 5], raises(f(50, 0), ValueError)")])
     assert p.verdict != "proven"
     assert (p.meta or {}).get("mathema.corroboration") == "uncorroborated"
     assert p.verdict == "holds" and p.route == "probe"

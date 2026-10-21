@@ -718,8 +718,13 @@ def test_conjecture_derive_route_unliftable_is_skipped():
     from mathema import Conjecture, check_conjectures
     results = check_conjectures(
         looped, [Conjecture("scale", "f(xs) * 2", "f(xs) * 2", route="derive")])
-    # the loop stays unliftable (named in the note); the tautology then
-    # holds empirically via the probe fallback
+    # the loop stays unliftable (named in the note)
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "not derivable" in results[0].note
+    # on the default route the tautology then holds empirically via the
+    # probe fallback
+    results = check_conjectures(
+        looped, [Conjecture("scale", "f(xs) * 2", "f(xs) * 2")])
     assert results[0].verdict == "holds"
     assert "not derivable" in results[0].note
 
