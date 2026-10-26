@@ -134,7 +134,7 @@ FAIL math.log: library claims from mathema/compendium/math.claims.yaml; no
            --as trusted
        (ii) to decide it, restate the row, then run: mathema check math.log
            --claim "..."
-FAIL fees.discounted: no baseline record; 1 proven, 0 holds, 1 falsified  <- 1
+FAIL fees.discounted: no baseline record; 1 proven, 2 holds, 1 falsified  <- 1
     falsified claim(s)
 ok   fees.late_fee: no baseline record; 1 proven, 2 holds, 0 falsified
 0 unchanged since the last run (not run again), 3 checked, 2 problem(s)

@@ -1477,14 +1477,24 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of,
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
                                           None, "") if open_case(c)]
             undecided = [c for c in _undecided_at(current, p, kind) if open_case(c)]
-            if not calls and kind == "absent" and sig.annotated and sig.absent \
-                    and not mine:
-                # what f does at None is judged for every Optional
-                # parameter: where no claim's draw reached it (a text
-                # parameter no claim samples), the row calls f there
-                # itself
+            if not calls and not mine and (
+                    (kind == "absent" and sig.annotated and sig.absent)
+                    or (not undecided and not optional_only
+                        and current is not None
+                        and (p, kind) in current.origins
+                        and facts.param_kinds.get(p) != "table")):
+                # what f does at a kind a parameter admits is judged
+                # whatever the claims' draws found: for every Optional
+                # parameter, and for every kind a claim's domain admits,
+                # where no claim's draw reached it (a text parameter no
+                # claim samples, a claim falsified at its first draw),
+                # the row calls f there itself; a table's holes are
+                # placed by the columns its claims bind, so a table is
+                # left to them
+                words = (["None"] if kind == "absent"
+                         else list(sig.members or NO_ANNOTATION.members))
                 calls, unread = _split_undecided(_run_floor(
-                    fn, facts, _floor_points(fn, facts, p, kind, ["None"], domain),
+                    fn, facts, _floor_points(fn, facts, p, kind, words, domain),
                     domain))
                 undecided += unread
             if not calls and undecided:
