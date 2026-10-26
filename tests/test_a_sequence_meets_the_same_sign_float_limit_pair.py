@@ -6,6 +6,7 @@ pair `[M, -M]`: a sum of the pair overflows to an infinity although the
 mean is M. The probe and the computation line under a proven claim both
 draw them, as the scalar `(a + b) / 2` meets `a = b = M` at its box
 corners."""
+import math
 import sys
 
 import mathema
@@ -26,8 +27,11 @@ def test_the_corners_of_an_unbounded_sequence_hold_both_same_sign_pairs():
 
 
 def test_the_corners_of_a_range_near_the_limit_hold_its_same_sign_ends():
+    # the floats nearest 1.5e308 and -1e308 lie past the ends as written,
+    # so the ends are the floats just inside them
     corners = sequence_corners((-1e308, 1.5e308))
-    assert [1.5e308, 1.5e308] in corners and [-1e308, -1e308] in corners, corners
+    hi, lo = math.nextafter(1.5e308, 0), math.nextafter(-1e308, 0)
+    assert [hi, hi] in corners and [lo, lo] in corners, corners
 
 
 def test_a_small_range_has_no_same_sign_pair():

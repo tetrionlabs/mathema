@@ -388,6 +388,17 @@ def _short_value(v: Any, argument: bool = True) -> str:
     return f"{shown[:40]}...{size}"
 
 
+def _written_inside(piece) -> tuple:
+    """An interval piece's ends, each written end (not a reach the
+    piece marks) moved to the nearest float inside the interval as
+    written (`_sampling._inside_as_written`)."""
+    from ._sampling import _inside_as_written
+    lo, hi = piece[0], piece[1]
+    moved_lo, moved_hi = _inside_as_written(lo, hi)
+    return (lo if getattr(piece, "reach_lo", False) else moved_lo,
+            hi if getattr(piece, "reach_hi", False) else moved_hi)
+
+
 def _interval_ends(bounds) -> "tuple[float, float] | None":
     """Intent:
         The finite interval hull of a sampling bound: a plain `(lo, hi)`
@@ -397,14 +408,14 @@ def _interval_ends(bounds) -> "tuple[float, float] | None":
         rectangle).
     """
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset):
-        return _finite_bounds(*bounds)
+        return _finite_bounds(*_written_inside(bounds))
     if isinstance(bounds, Domain) and bounds.pieces:
         spans = [p for p in bounds.pieces
                  if isinstance(p, tuple) and not isinstance(p, frozenset)
                  and not any(isinstance(v, complex) for v in p)]
         if len(spans) != len(bounds.pieces):
             return None
-        ends = [_finite_bounds(*p) for p in spans]
+        ends = [_finite_bounds(*_written_inside(p)) for p in spans]
         return min(lo for lo, _ in ends), max(hi for _, hi in ends)
     return None
 

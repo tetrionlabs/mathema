@@ -289,6 +289,11 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 # an undeclared direction has no corner: its reach is
                 # visited by the sampler's far draws
                 return []
+            # a float end lies inside the interval as written
+            from ._sampling import _inside_as_written
+            moved_lo, moved_hi = _inside_as_written(lo, hi)
+            lo = lo if getattr(piece, "reach_lo", False) else moved_lo
+            hi = hi if getattr(piece, "reach_hi", False) else moved_hi
             if getattr(piece, "closed_lo", True):
                 ends.append(lo)
             if getattr(piece, "closed_hi", True):

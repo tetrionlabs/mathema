@@ -174,16 +174,16 @@ mathema.Record(sharpe) · source, no side effects · form py:099872a2a5ee
   leverage_invariant  assuming std(returns, ddof=1) > 0, let s =
       mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n :
       float, f(s(returns, c)) ~= f(returns)   falsified at returns =
-      [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
-      -0.02405627255486045, -0.024056272554860453], c = 10
+      [-0.02405627255486044, -0.024056272554860435, -0.02405627255486044,
+      -0.024056272554860435, -0.02405627255486044], c = 10
     proven     mathematics  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
         ⊂ ℝ, f(s(returns, c)) ~= f(returns)
     falsified  computation  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
         : float, f(s(returns, c)) ~= f(returns)   counterexample returns =
-        [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
-        -0.02405627255486045, -0.024056272554860453], c = 10
+        [-0.02405627255486044, -0.024056272554860435, -0.02405627255486044,
+        -0.024056272554860435, -0.02405627255486044], c = 10
                             conditioning unknown here: derive cannot read f, so
                                 whether this loss is inherent is not decided
                             possible fixes:
@@ -287,7 +287,7 @@ print(record.probes[0].counterexample)
 <!-- example: pandas output -->
 ```text
 falsified
-returns = [-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998]; c = 4.72: 1164.6923472459507 vs -4.339350392263282
+returns = [-0.03634407021233441, 0.03649461504266753, 0.02979742176821469, -0.09999979999999999]; c = 4.72: 1164.6923472459507 vs -4.339350392263283
 ```
 
 Four days of returns, each shifted up by 4.72: a Sharpe ratio of about
