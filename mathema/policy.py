@@ -200,6 +200,13 @@ def active_batch() -> "Batch | None":
     return _BATCH.get()
 
 
+#: set while a claim whose remit is the mathematics alone
+#: (`derive:math_only`) is adjudicated: the calls it makes are filed
+#: nowhere
+OUTSIDE_REMIT: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_policy_outside_remit", default=False)
+
+
 @contextmanager
 def claim_scope(name: "str | None"):
     """Calls made inside are filed under the claim `name`."""
@@ -217,7 +224,7 @@ def record_call(point: dict, output=None, raised: "str | None" = None,
     """File one call at a missing input into the active batch, under
     `undecided` when `others` names the arguments its raise stayed with."""
     current = _BATCH.get()
-    if current is None:
+    if current is None or OUTSIDE_REMIT.get():
         return
     made = Call(dict(point), output, raised, _CLAIM.get(),
                 list(keys) if keys is not None else None, behaviour,
@@ -229,7 +236,7 @@ def record_call(point: dict, output=None, raised: "str | None" = None,
 def record_unrepeatable(point: dict, first: tuple, second: tuple) -> None:
     """File a call that answered otherwise when made again."""
     current = _BATCH.get()
-    if current is not None:
+    if current is not None and not OUTSIDE_REMIT.get():
         current.unrepeatable.append((dict(point), first, second))
 
 
@@ -252,7 +259,7 @@ def unrepeated_witness(current: "Batch | None") -> "str | None":
 def record_introduced(point: dict) -> None:
     """File one call where f gave None back from present inputs."""
     current = _BATCH.get()
-    if current is None:
+    if current is None or OUTSIDE_REMIT.get():
         return
     current.introduced.append(Call(dict(point), None, None, _CLAIM.get()))
 
