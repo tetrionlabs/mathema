@@ -243,11 +243,13 @@ def test_reachable_raise_region_falsifies(tmp_path):
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_avoided_raise_region_still_proves(tmp_path):
+    # rate >= 0.5 avoids the raise, and f is rate * n * (n + 1) / 2 > 0
     mod = _mod(tmp_path, _BODY, "bl_j")
     p = _run(mod.shipping,
              "for n in [1,10], rate in [0.5,5], f(n,rate) > 0")
-    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    assert p.verdict == "proven", (p.verdict, p.note)
 
 
 # --- designed declines, pinned ----------------------------------------------
@@ -292,7 +294,7 @@ def test_conditional_update_inside_a_branch_leaf_lifts_exactly(tmp_path):
 def test_sequence_parameters_stay_out_of_this_slice(tmp_path):
     mod = _mod(tmp_path, _BODY, "bl_m")
     p = _run(mod.seq_branchy, "for pick in [1,5], f(xs, pick) >= 0")
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
 
 
 # --- the lift itself, inspected ---------------------------------------------

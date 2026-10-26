@@ -2,7 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """A sample of claims with a bare-number tolerance or none, over every
 relation that reads a tolerance and each route, and the rows they give
-(`records`), for tests/test_a_bare_tolerance_reads_as_before.py."""
+(`records`), for tests/test_a_bare_tolerance_keeps_its_meaning.py."""
 import math
 
 import mathema

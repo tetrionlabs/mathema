@@ -92,18 +92,19 @@ def test_lead_guard_strips_and_gates_for_the_sum_shape(tmp_path):
     (p,) = check_conjectures(mod.guarded_scaled, [claim(
         "for scale in [0.5, 5], f(values, scale) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.note)
-    # a domain reaching the guard never proves: pedantic raise verdict
-    # (falsified with an executed witness) or the honest guidance
+    # scale <= 0 makes the guard raise, and [-1, 5] holds such scales,
+    # so the claim is false there: a raise inside the stated domain
     (p,) = check_conjectures(mod.guarded_scaled, [claim(
         "for scale in [-1, 5], f(values, scale) >= 0", route="derive")])
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
 
 
 def test_accumulator_condition_declines_honestly(tmp_path):
     mod = _mod(tmp_path, _BODY, "condf_d")
     (p,) = check_conjectures(mod.acc_condition, [claim(
         "f(values) >= -1000000", route="derive")])
-    assert p.verdict != "proven"
+    # false: values = [-2000000.0] sums to -2000000 < -1000000
+    assert p.verdict == "falsified", (p.verdict, p.note)
     assert "guarded-fold" in (p.note or "")
 
 

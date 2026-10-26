@@ -37,7 +37,7 @@ def test_a_guard_that_also_reads_another_parameter_covers_nothing():
     assert ("x", "absent", "None") not in guard_policies(analyze(raise_unless_y))
     gate = _rows(raise_unless_y, "for x in [0, 1], y in [0, 1], f(x, y) >= 0",
                  "is_absent_safe(f)")["is_absent_safe[f]"]
-    assert gate.verdict != "proven", gate.note
+    assert gate.verdict == "falsified", (gate.verdict, gate.note)
 
 
 def test_a_guard_joined_by_or_covers_each_of_its_tests():
@@ -96,7 +96,8 @@ def test_a_stated_row_is_tried_with_the_other_parameter_at_its_corners():
     assert rows["missing_f_x_propagates"].verdict == "falsified"
     assert rows["missing_f_x_propagates"].counterexample == \
         "f(x=nan, y=1.0) returns 0.0"
-    assert rows["is_missing_safe[f]"].verdict != "proven"
+    assert rows["is_missing_safe[f]"].verdict == "falsified", (
+        rows["is_missing_safe[f]"].verdict, rows["is_missing_safe[f]"].note)
 
 
 # --- the empty input -------------------------------------------------------
