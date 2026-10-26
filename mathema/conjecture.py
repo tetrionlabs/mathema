@@ -4290,14 +4290,21 @@ def _instance_bundles(fn, facts) -> dict:
         class samples the fields the body reads and builds the
         instance as `object.__new__(cls)` + setattr, the declared
         `param.field` domains are the validity contract, exactly as a
-        scalar parameter's declared domain already is.
+        scalar parameter's declared domain already is. A receiver a
+        runtime type carries (a pandas Series) is no bundle: it is drawn
+        as its type's values.
     """
     import dataclasses as _dc
 
     from .runtime_types._receivers import method_receiver, receiver_fields
     from .symbolic._base import _dataclass_field_names
+    from .runtime_types import realised_parameters
     out: dict = {}
     receiver = method_receiver(fn)
+    if receiver is not None and receiver[0] in realised_parameters(facts):
+        # a receiver a runtime type carries (a pandas Series, a numpy
+        # array) is drawn as that type's values and realised by its adapter
+        receiver = None
     if receiver is not None and facts.params and facts.params[0] == receiver[0]:
         # a method's receiver: an instance of its class, drawn by the
         # fields it is known to hold, a dataclass's even without source
@@ -12362,7 +12369,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[p] = v
                     args.append(v)
                     continue
-                if p in bundles:
+                if p in bundles and (cj_domain.get(p) is None or getattr(
+                        cj_domain.get(p), "base_type", None) == "L"):
+                    # an instance of the class, unless the claim binds the
+                    # parameter to values itself: the binding is the draw
                     v = narrowed(p, lambda p=p: _synth_instance(
                         bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
