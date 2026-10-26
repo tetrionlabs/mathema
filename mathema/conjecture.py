@@ -12104,10 +12104,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     array_names = [p for p in array_ranks
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
-    # a witness over vectors or matrices names each argument
+    # a witness names each argument the claim reads or passes, by name,
+    # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    if as_arrays:
-        arg_names, shown_names = tuple(kinds), None
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+                                  if p in kinds}
+                   if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts, _declared_elements(cj_domain))
