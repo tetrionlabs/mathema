@@ -133,8 +133,8 @@ def unpack_in_leaf(n: int, theta: float) -> float:
 """
 
 
-def _run(mod_fn, law, extensive=False):
-    (p,) = check_conjectures(mod_fn, [claim(law, route="derive")],
+def _run(mod_fn, law, extensive=False, route="derive"):
+    (p,) = check_conjectures(mod_fn, [claim(law, route=route)],
                              extensive=extensive)
     return p
 
@@ -212,7 +212,7 @@ def geometric(n: int, y: float, face: float) -> float:
 """, "bl_f2").geometric, [claim(
         "for n in [1,10], y in [0.01,0.2], face in [50,100], "
         "f(n,y,face) == (1 - (1+y)**(-n))/y + face*(1+y)**(-n)",
-        route="derive")])
+        route="best")])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 
@@ -284,7 +284,8 @@ def test_conditional_update_inside_a_branch_leaf_lifts_exactly(tmp_path):
                     - set(pw.params.values())), (
             "a Sum dummy leaked into a top-level arm condition", pw.expr)
     p = _run(mod.branch_in_loop_branch,
-             "for n in [1,10] subset Z, u in [1,5], f(n,u) >= 0")
+             "for n in [1,10] subset Z, u in [1,5], f(n,u) >= 0",
+             route="best")
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 

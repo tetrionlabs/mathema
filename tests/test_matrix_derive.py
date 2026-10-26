@@ -97,17 +97,20 @@ def test_orthogonal_marker_gives_identity(mats):
 
 
 def test_unmarked_matrix_is_not_symmetric(mats):
-    # no marker, no premise: A.T == A is not an identity, so the derive
-    # route stays honest: unknown on the strict route.
+    # no marker, no premise: A.T == A is not an identity, so derive
+    # proves nothing, and on the derive route the probe's sampling, a
+    # falsifier only, finds the asymmetric matrix
     pr = _one(mats.one, "A.T == A", route="derive")
-    assert pr.verdict == "unknown"
-    assert pr.route == "derive"
+    assert pr.verdict == "falsified"
+    assert pr.route == "probe"
+    assert "derive could not decide" in pr.note
 
 
-def test_false_identity_strict_derive_is_unknown(mats):
+def test_false_identity_on_derive_is_falsified_by_the_probes_sampling(mats):
     pr = _one(mats.f, "det(A @ B) == det(A) + det(B)", route="derive")
-    assert pr.verdict == "unknown"
-    assert pr.route == "derive"
+    assert pr.verdict == "falsified"
+    assert pr.route == "probe"
+    assert pr.counterexample
 
 
 def test_false_identity_best_falsifies_with_witness(mats):
@@ -310,7 +313,8 @@ def test_a_vector_quadratic_form_is_not_proven_for_any_matrix():
 
     (p,) = mathema.claims.check_conjectures(
         quad_form, [mathema.claim("x.T @ A @ x >= 0", route="derive")])
-    assert p.verdict == "unknown", (p.verdict, p.sketch)
+    assert p.verdict != "proven", (p.verdict, p.sketch)
+    assert p.verdict == "falsified", (p.verdict, p.sketch)
 
 
 def test_the_remedy_the_decline_suggests_actually_works():

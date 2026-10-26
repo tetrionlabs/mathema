@@ -36,8 +36,8 @@ def triangular(n):
     return triangular(n - 1) + n
 
 
-def _verdict(fn, law):
-    return check_conjectures(fn, [claim(law, route="derive")])[0]
+def _verdict(fn, law, route="derive"):
+    return check_conjectures(fn, [claim(law, route=route)])[0]
 
 
 def test_fibonacci_recurrence_claim_proven():
@@ -72,6 +72,9 @@ def test_real_domain_is_gated_with_the_subset_z_remedy():
     # construction) recurrence identity empirically at real points, and
     # the remedy survives in the note
     r = _verdict(fib, "for n in [2, 30], f(n) == f(n-1) + f(n-2)")
+    assert (r.verdict, r.route) == ("unknown", "derive")
+    assert "subset Z" in r.note
+    r = _verdict(fib, "for n in [2, 30], f(n) == f(n-1) + f(n-2)", route="best")
     assert r.verdict == "holds"
     assert "subset Z" in r.note
 

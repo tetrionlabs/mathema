@@ -88,10 +88,9 @@ def test_floor_division_lifts():
 def test_holds_rescued_derive_gap_carries_a_reason_code():
     from mathema.reason_codes import ClaimReasonCode, claim_reason_code
 
-    def tri(a, b):
-        return abs(a) + abs(b) - abs(a + b)
-    (p,) = check_conjectures(tri, [claim(
-        "for a in [-50,50], b in [-50,50], f(a,b) >= 0", route="derive")])
+    def xsin(x):
+        return x * math.sin(x)
+    (p,) = check_conjectures(xsin, [claim("f(x) >= -x^2")])
     assert p.verdict == "holds"
     assert claim_reason_code(p) == ClaimReasonCode.DERIVE_GAP_EMPIRICAL
 

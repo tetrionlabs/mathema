@@ -40,7 +40,13 @@ def test_derive_route_degrades_honestly_with_no_tree():
     (p,) = check_conjectures(_double, [claim("for x in [0, 4], f(x) == 2*x",
                                              route="derive")],
                              facts=_foreign_facts())
-    # no body to lift: the empirical fallback rescues the claim as
+    # no body to lift: on the derive route the claim is unknown, the gap
+    # stated in the record
+    assert (p.verdict, p.route) == ("unknown", "derive"), (p.verdict, p.note)
+    assert "underivable" in p.meta["mathema.routes_attempted"]
+    (p,) = check_conjectures(_double, [claim("for x in [0, 4], f(x) == 2*x")],
+                             facts=_foreign_facts())
+    # on the default route the empirical fallback rescues the claim as
     # evidence, never proof, with the derive gap stated in the record
     # (route supersession: a probe holds supersedes a derive unknown)
     assert p.verdict == "holds", (p.verdict, p.note)

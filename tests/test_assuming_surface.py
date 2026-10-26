@@ -13,8 +13,8 @@ def prod2(x, y):
     return x * y
 
 
-def _v(law, extensive=False):
-    return check_conjectures(prod2, [claim(law, route="derive")],
+def _v(law, extensive=False, route="derive"):
+    return check_conjectures(prod2, [claim(law, route=route)],
                              extensive=extensive)[0]
 
 
@@ -45,7 +45,7 @@ def test_awkward_surface_still_gets_real_samples():
     # clause"
     law = ("assuming x + y == 2.7182, for x in [0,3], y in [0,3], "
            "f(x,y) <= 1.9")
-    p = _v(law)
+    p = _v(law, route="probe")
     assert p.verdict == "holds"
     assert p.n and p.n > 10
 

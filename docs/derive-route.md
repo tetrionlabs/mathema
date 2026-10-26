@@ -17,7 +17,8 @@ shows the two side by side.
 Lifting is honest, not clever: it never guesses at a closed form.
 Anything not covered below is `underivable` on the derive route
 (the record's note names the likely reason), never a false `proven`,
-and the claim falls through to the probe route. Probe-route claims
+and the claim falls through to the probe route (which, for a claim
+pinned to `route: derive`, can only falsify it). Probe-route claims
 remain viable regardless of any of this, see [CDD in one page](cdd.md).
 
 ## What's liftable
