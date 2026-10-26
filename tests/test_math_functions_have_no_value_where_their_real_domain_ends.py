@@ -108,7 +108,7 @@ def test_a_value_claim_over_a_point_that_raises_is_falsified(fn, text):
 
 
 @pytest.mark.needs_full_proof_budget
-def test_a_value_claim_over_a_pole_of_tan_is_not_proven():
+def test_a_value_claim_over_a_pole_of_tan_is_falsified_at_the_pole():
     # tan has no value at -pi/2 and pi/2, both inside [-2, 2]; the float
     # call never raises there, and the exact witness x = -pi/2 is where
     # cos(x) is zero

@@ -92,8 +92,8 @@ def test_lead_guard_strips_and_gates_for_the_sum_shape(tmp_path):
     (p,) = check_conjectures(mod.guarded_scaled, [claim(
         "for scale in [0.5, 5], f(values, scale) >= 0", route="derive")])
     assert p.verdict == "proven", (p.verdict, p.note)
-    # a domain reaching the guard never proves: pedantic raise verdict
-    # (falsified with an executed witness) or the honest guidance
+    # scale <= 0 makes the guard raise, and [-1, 5] holds such scales,
+    # so the claim is false there: a raise inside the stated domain
     (p,) = check_conjectures(mod.guarded_scaled, [claim(
         "for scale in [-1, 5], f(values, scale) >= 0", route="derive")])
     assert p.verdict == "falsified", (p.verdict, p.note)

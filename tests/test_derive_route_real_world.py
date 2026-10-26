@@ -254,6 +254,18 @@ def test_sample_variance_two_pass_proves():
     assert results[0].verdict == "proven"
 
 
+@pytest.mark.xfail(strict=True, reason="[multiple-accumulators-per-loop] two running totals (sum_x, "
+                        "sum_x2) updated in the same loop body; the sum lifter reads one "
+                        "statement per loop level")
+def test_sample_second_moment_single_pass_is_nonnegative():
+    # the population variance is the mean squared deviation from the
+    # mean, a mean of squares, so it is never negative
+    (p,) = check_conjectures(
+        sample_second_moment_single_pass,
+        [claim("for xs in [-10, 10]^n, f(xs) >= 0", route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
 def test_sample_second_moment_single_pass_is_not_identically_zero():
     # [multiple-accumulators-per-loop] f is the population variance
     # sum(x^2)/n - (sum(x)/n)^2, zero only on a constant list, so
@@ -359,6 +371,17 @@ def test_dot_weights_proves():
     assert results[0].verdict == "proven"
 
 
+@pytest.mark.xfail(strict=True, reason="[vector-valued] xs (parameter) and the list-comprehension "
+                        "return value are both array-valued; lift() reads scalar parameters "
+                        "and scalar returns only")
+def test_normalize_by_max_peaks_at_one():
+    # with every x >= 1, m = max(xs) > 0 and max(x / m) = m / m = 1
+    (p,) = check_conjectures(
+        normalize_by_max,
+        [claim("for xs in [1, 10]^n, max(f(xs)) == 1", route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
 def test_normalize_by_max_is_not_the_identity():
     # [vector-valued] f(xs) is xs / max(xs): no value where max(xs) is 0,
     # and different from xs wherever max(xs) is not 1 and some x is not 0
@@ -398,6 +421,19 @@ def test_distance_2d_proves():
         [claim("for x1 in [0, 1], y1 in [0, 1], x2 in [0, 1], y2 in [0, 1], "
               "f(x1, y1, x2, y2) == sqrt((x2-x1)**2 + (y2-y1)**2)", route="derive")])
     assert results[0].verdict == "proven"
+
+
+@pytest.mark.xfail(strict=True, reason="[indexed-multi-sequence-fold] xs, ys consumed together via a "
+                        "shared, modular (i+1) % n index, a non-trivial index expression "
+                        "rather than a plain range(len(...))")
+def test_polygon_area_shoelace_is_nonnegative_on_lists_of_one_length():
+    # xs and ys share the length n, so every index is in range, and
+    # abs(area) / 2 is never negative
+    (p,) = check_conjectures(
+        polygon_area_shoelace,
+        [claim("for xs in [-10, 10]^n, ys in [-10, 10]^n, f(xs, ys) >= 0",
+               route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
 
 
 def test_polygon_area_shoelace_raises_on_lists_of_different_lengths():

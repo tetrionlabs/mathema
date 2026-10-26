@@ -40,7 +40,7 @@ def ratio(returns: pd.Series) -> float:
 
 
 @pytest.mark.needs_full_proof_budget
-def test_a_restriction_naming_part_of_the_region_is_not_proven():
+def test_a_restriction_naming_part_of_the_region_is_falsified():
     # log(x + 3) needs x > -3, gamma(x) has no value at 0, -1 and -2
     (p,) = check_conjectures(log_and_gamma, [
         claim("x + 3 > 0", name="is_defined", route="derive")])

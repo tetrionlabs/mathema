@@ -83,7 +83,7 @@ def test_the_lifted_raise_region_is_the_guard_exactly(tmp_path, name):
     ("closed_square_band", "-1"),
     ("closed_low_strict_high", "-1"),
 ])
-def test_a_raising_boundary_point_is_never_proven(tmp_path, name, value):
+def test_a_raising_boundary_point_falsifies_the_claim(tmp_path, name, value):
     condition, _points = _GUARDS[name]
     assert _exact(condition, value)
     fn = _function(tmp_path, name, condition)

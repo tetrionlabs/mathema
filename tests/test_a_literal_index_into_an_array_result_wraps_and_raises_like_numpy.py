@@ -48,7 +48,7 @@ def test_minus_one_is_the_last_element():
     assert p.verdict == "proven", (p.verdict, p.sketch)
 
 
-def test_an_index_past_the_end_is_not_proven():
+def test_an_index_past_the_end_falsifies_on_route_derive():
     (p, *_rest) = _all("for n in [5, 5] subset Z, "
                        "f(cx, cy, a, b, n)[0][9] == cx", "derive")
     assert p.verdict == "falsified", (p.verdict, p.sketch)

@@ -35,7 +35,7 @@ def test_a_claim_side_pole_in_the_domain_falsifies_the_claim():
         assert float(head.split("=")[-1]) == 0.0, law
 
 
-def test_a_claim_side_root_of_a_negative_is_not_proven():
+def test_a_claim_side_root_of_a_negative_falsifies_the_claim():
     p = _one(zero, "for x in [-1, 1], f(x) <= sqrt(x) + 1")
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "no real value" in p.counterexample, p.counterexample
