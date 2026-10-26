@@ -12000,6 +12000,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # allowance there and the arguments it happened at
     passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
+    # whether the claim writes a literal with more digits than a double
+    # carries, which its float evaluation reads rounded
+    long_literals = bool(overlong_literals(" ".join(
+        str(part) for part in (cj.lhs, cj.rhs,
+                               *(side for link in (cj.links or ())
+                                 for side in (link[0], link[2])))
+        if part)))
     # the draws where the claim's own float arithmetic overflowed and
     # its sides have no exact reading, and the first of them
     overflowed, overflowed_at = 0, None
@@ -13091,6 +13098,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   and relation_within(compare_l, compare_r, cj.relation,
                                       _exact_slack(cj), 0.0, side)
                   is not True)
+        # a pass that rests on a literal the parse rounded to a double
+        # (one with more digits than a double carries) is decided on the
+        # number written
+        inside = inside or (ok is True and cj.tolerance is None
+                            and cj.relation in ("==", "<=", ">=", "<", ">",
+                                                "!=")
+                            and long_literals)
         exactly_false = False
         if within or inside:
             # a draw that passes only within a tolerance is decided in
