@@ -86,6 +86,18 @@ def test_an_undeclared_none_falsifies_the_value_claim_with_no_row_of_its_own():
     assert "absent(f) introduces" not in shown, shown
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "derive-undeclared-none-exit-proven: derive reads f's `return None` as an "
+    "opaque value and proves f(x) == f(x) by reflexivity, so the mathematics "
+    "row stays proven where f has no value"))
+def test_an_undeclared_none_falsifies_the_mathematics_row_on_route_derive():
+    # f(x: float) -> float returns None everywhere: by decision D a None the
+    # return type does not declare is no value, and a value claim fails at a
+    # point where its side has no value, as the nan twin is falsified at 1/2
+    (p,) = check_conjectures(none_undeclared, [claim(_REFLEXIVE, route="derive")])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.sketch)
+
+
 def test_a_declared_none_is_legitimate_and_the_headline_is_not_falsified():
     rows = _probes(none_declared, _REFLEXIVE)
     assert rows["c"].verdict in ("proven", "holds"), rows["c"].verdict
