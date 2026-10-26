@@ -1630,12 +1630,14 @@ def _certified_point_witness(cj, deps, proof, cj_domain) -> "str | None":
         return None
 
 
-def _exact_witness_found(falsified, deps, fn, facts, point, record) -> dict:
+def _exact_witness_found(falsified, deps, fn, facts, point, record,
+                         named: bool = True) -> dict:
     """Intent:
         Mark `falsified` reproduced at `point`, a witness the claim is
         false at exactly, and return its `mathema.exact_witness` record:
         `record` (the reading and the sides) with the point as `at` (a
-        claim with no coordinate named by its own calls) and
+        claim with no coordinate named by its own calls, written as
+        calls when `named` is False) and
         `computation`, the float computation there judged within its
         allowance as the probe route judges it (`holds within its
         allowance`, `fails past its allowance`, or `undecided`). The
@@ -1646,7 +1648,8 @@ def _exact_witness_found(falsified, deps, fn, facts, point, record) -> dict:
     if not pt and deps["evaluate"].calls():
         # a claim with no coordinate is witnessed by its own calls
         from ._brute_force import _ground_witness
-        pt = _ground_witness(fn, facts, deps["evaluate"].calls())
+        pt = _ground_witness(fn, facts, deps["evaluate"].calls(),
+                             named=named)
     record = {"at": pt, **record, "computation": (
         "holds within its allowance" if computation is True else
         "fails past its allowance" if computation is False else
@@ -1737,8 +1740,15 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         falsified.meta = {**(falsified.meta or {}),
                           "mathema.corroboration": "reproduced"}
         pt = _fmt_point(result.point, deps["names"])
+        named = bool(pt)
+        if not named:
+            # a claim with no coordinate is witnessed by its own calls,
+            # which carry what failed there
+            from ._brute_force import call_witness
+            pt = call_witness(fn, facts, deps, result.point,
+                              named=not cj.domain) or ""
         falsified.counterexample = pt or falsified.counterexample
-        detail = deps["probe_finite"](result.point)
+        detail = deps["probe_finite"](result.point) if named else None
         if pt and isinstance(detail, str) and \
                 detail.startswith("the claim's own"):
             # the witness carries why the claim fails there: its own
@@ -1775,7 +1785,8 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names,
         found=found)
     if exact_point is not None:
-        _exact_witness_found(falsified, deps, fn, facts, exact_point, found[0])
+        _exact_witness_found(falsified, deps, fn, facts, exact_point, found[0],
+                             named=not cj.domain)
         falsified.note = (
             f"{falsified.note}; reproduced exactly at derive's witness: "
             f"{_allowed_miss_words(deps, exact_point)}, and compared "
@@ -1804,7 +1815,7 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
     disagreement_text = f"; {disagreed[-1]}" if disagreed else ""
     if exact_point is not None:
         record = _exact_witness_found(falsified, deps, fn, facts, exact_point,
-                                      found[0])
+                                      found[0], named=not cj.domain)
         pt = record["at"]
         if pt:
             falsified.counterexample = (

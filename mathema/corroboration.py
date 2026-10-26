@@ -77,6 +77,12 @@ class StabilitySweep:
     undecided_detail: str = ""
 
 
+def _is_truth_value(v) -> bool:
+    """Whether `v` is a bool (Python's or numpy's), a member of a bool
+    domain rather than a number to perturb."""
+    return isinstance(v, bool) or type(v).__name__ == "bool_"
+
+
 def _is_number(v) -> bool:
     try:
         float(v)
@@ -120,8 +126,8 @@ def _seed_points(witness: dict | None, names: list[str]) -> list[dict]:
 
     Notes:
         Numeric witness coordinates are used and perturbed; any other
-        coordinate (a sequence parameter's list, a language's member, a
-        record) is carried into every seed unchanged; a coordinate
+        coordinate (a bool, a sequence parameter's list, a language's
+        member, a record) is carried into every seed unchanged; a coordinate
         absent from the witness is left to the sampler. Empty witness
         -> [].
     """
@@ -129,7 +135,7 @@ def _seed_points(witness: dict | None, names: list[str]) -> list[dict]:
         return []
     base = {n: float(witness[n]) for n in names
             if n in witness and not isinstance(witness[n], (list, tuple))
-            and _is_number(witness[n])}
+            and not _is_truth_value(witness[n]) and _is_number(witness[n])}
     fixed = {n: (list(witness[n]) if isinstance(witness[n], (list, tuple))
                  else witness[n])
              for n in names if n in witness and n not in base}
