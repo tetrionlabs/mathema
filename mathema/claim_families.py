@@ -5626,10 +5626,27 @@ def _tree_children(fn, facts, cj, domain: dict, names) -> list:
                 out.append(claim(f"{name}(f)", name=f"{name}[f]",
                                  route="best"))
             continue
-        for target in family.suggest_targets(fn, facts):
+        targets = list(family.suggest_targets(fn, facts))
+        if name == "is_overflow_safe" and "f" not in targets \
+                and _computes_numbers(facts):
+            # an overflow can come from any arithmetic, not only the
+            # powers and functions the suggestion gate names: the
+            # whole-function claim runs too
+            targets.append("f")
+        for target in targets:
             out.append(claim(f"{name}({target})",
                              name=f"{name}[{target}]", route="best"))
     return _over_parent(out, cj, domain)
+
+
+def _computes_numbers(facts) -> bool:
+    """Whether a function takes no parameter or a scalar number: one
+    whose float64 run can overflow on its own arithmetic."""
+    params = list(facts.params or [])
+    return not params or any(
+        facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string", "bool",
+                                         "table")
+        for p in params)
 
 
 def _tree_probe(names):
