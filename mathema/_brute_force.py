@@ -1213,11 +1213,14 @@ def _written_call(args: tuple, kwargs: dict) -> str:
     return f"f({', '.join(parts)})"
 
 
-def _ground_witness(fn, facts, calls: list) -> str:
+def _ground_witness(fn, facts, calls: list, named: bool = True) -> str:
     """Intent:
         The calls a ground claim's evaluation made, as its witness: the
         raising call when one raised, else the one call made (`xs =
-        []`), else every distinct call as written (`f(1), f(2)`).
+        []`), else every distinct call as written (`f(1), f(2)`). With
+        `named` False every call is written as a call, never as a point
+        of f's parameters: the form for a claim that binds a variable of
+        the same name its calls never read.
     """
     raised = [c for c in calls if c[0] == "raised"]
     shown = raised[-1:] if raised else calls
@@ -1226,11 +1229,50 @@ def _ground_witness(fn, facts, calls: list) -> str:
         key = (repr(args), repr(sorted(kwargs.items())))
         if key not in [k for k, _a, _kw in distinct]:
             distinct.append((key, args, kwargs))
-    if len(distinct) == 1:
+    if len(distinct) == 1 and named:
         _key, args, kwargs = distinct[0]
         return _call_text(fn, facts, args, kwargs)
     return ", ".join(_written_call(args, kwargs)
                      for _key, args, kwargs in distinct)
+
+
+def _ground_failure(deps, point: dict) -> str:
+    """Intent:
+        What the evaluation at `point` just run by `deps["evaluate"]`
+        saw fail: the raise of its last raising call, else the two sides
+        it compared (`3 vs -3`, noting a nan), else what the point's
+        finite check reports.
+    """
+    evaluate = deps["evaluate"]
+    raised = [c for c in evaluate.calls() if c[0] == "raised"]
+    sides = evaluate.sides()
+    if raised:
+        return f"raised {raised[-1][1]}"
+    if sides is not None:
+        from .probing import holds_nan
+        return f"{sides[0]!r} vs {sides[1]!r}" + (
+            ", and a nan is no value" if any(holds_nan(v) for v in sides)
+            else "")
+    found = deps["probe_finite"](point)
+    return found if isinstance(found, str) else "the claim fails"
+
+
+def call_witness(fn, facts, deps, point: dict,
+                 named: bool = True) -> "str | None":
+    """Intent:
+        The witness of a failing point that names no coordinate of the
+        claim: the evaluation re-run at `point`, its calls with what
+        failed (`x = -3: 3 vs -3`, or with `named` False the calls as
+        written, `f(-3): 3 vs -3`). None when the evaluation makes no
+        call or does not fail there.
+    """
+    if deps["evaluate"](point) is not False:
+        return None
+    calls = deps["evaluate"].calls()
+    if not calls:
+        return None
+    witness = _ground_witness(fn, facts, calls, named=named)
+    return f"{witness}: {_ground_failure(deps, point)}"
 
 
 def ground_proof(cj, fn, facts, bound_funcs):
@@ -1286,18 +1328,7 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
         return None
     witness = _ground_witness(fn, facts, calls)
     if verdict is False:
-        raised = [c for c in calls if c[0] == "raised"]
-        sides = evaluate.sides()
-        if raised:
-            detail = f"raised {raised[-1][1]}"
-        elif sides is not None:
-            from .probing import holds_nan
-            detail = f"{sides[0]!r} vs {sides[1]!r}" + (
-                ", and a nan is no value" if any(holds_nan(v) for v in sides)
-                else "")
-        else:
-            found = deps["probe_finite"]({})
-            detail = found if isinstance(found, str) else "the claim fails"
+        detail = _ground_failure(deps, {})
         return ProofResult(
             "disproven",
             sketch=f"the claim fails at its own call, {witness}",

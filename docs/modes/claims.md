@@ -103,6 +103,9 @@ adopted is_deterministic into ./claims/adopted.claims.yaml: f(scores) == f(score
 $ mathema claims functions.softmax
 functions.softmax: 1 declared claim(s)
   - is_deterministic: f(scores) == f(scores)  [route best]
+functions.softmax: 1 policy row about scores
+  confirmed by the code (to write these, run: mathema claims functions.softmax --write):
+    holds     missing[scores]: missing(f, scores) propagates   [default for a list[float] slot that may be nan; confirmed on 4 calls. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims functions.softmax --write]
 ```
 
 The adopted stanza is plain declared-claims YAML, so it's yours to

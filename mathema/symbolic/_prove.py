@@ -2667,7 +2667,8 @@ def _premise_refuses(fn, facts, point: dict, claim_terms: dict) -> bool:
         A premise that cannot be evaluated at the point refuses nothing.
     """
     names = {p: sympy.Symbol(p, real=True) for p in facts.params}
-    at = {names[p]: sympy.nsimplify(v) for p, v in point.items()
+    at = {names[p]: sympy.Integer(int(v)) if isinstance(v, bool)
+          else sympy.nsimplify(v) for p, v in point.items()
           if p in names and isinstance(v, (int, float))}
 
     def false_at(relation) -> bool:

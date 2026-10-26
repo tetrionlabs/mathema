@@ -12104,10 +12104,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     array_names = [p for p in array_ranks
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
-    # a witness over vectors or matrices names each argument
+    # a witness names each argument the claim reads or passes, by name,
+    # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    if as_arrays:
-        arg_names, shown_names = tuple(kinds), None
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+                                  if p in kinds}
+                   if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts, _declared_elements(cj_domain))
@@ -12923,7 +12925,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None f returned from present inputs is the absence policy
             # line's fact: declared by the return type, or flagged there
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             if any(o is None for o in f_call.outputs()):
                 if declared_return:
                     executed_record.returned_absent(dict(zip(kinds, args)),
@@ -12931,6 +12934,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else:
                     from .policy import record_introduced
                     record_introduced(dict(zip(kinds, args)))
+                    if absence_agrees(lv, rv, cj.relation):
+                        # a None the return type does not declare is no
+                        # value, though both sides are that None
+                        checked += 1
+                        cx = (f"{_point_text(args)}: "
+                              f"{undeclared_none_words(fn)}")
+                        break
             if absence_agrees(lv, rv, cj.relation):
                 # absence compares as absence: None agrees with None
                 checked += 1
