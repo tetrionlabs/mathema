@@ -7146,6 +7146,41 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     return _exact_relation(cj, exact[0], exact[1])
 
 
+def _overflowed_sides(code_l, code_r, env, sides) -> bool:
+    """Intent:
+        Whether every side holding an infinity in `sides`, the claim's
+        float evaluation, names no infinity itself (`inf`, `oo`, a
+        constant bound to one): its infinity is then the float
+        arithmetic's overflow of finite values, not one the claim
+        writes.
+    """
+    import math as _math
+
+    from .probing import holds_inf
+    sympy = sys.modules.get("sympy")
+
+    def infinite(value) -> bool:
+        if isinstance(value, float):
+            return _math.isinf(value)
+        return sympy is not None and isinstance(value, sympy.Basic) \
+            and value in (sympy.oo, -sympy.oo, sympy.zoo)
+
+    def writes_infinity(code) -> bool:
+        names = set()
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            names.update(c.co_names)
+            stack.extend(k for k in c.co_consts if hasattr(k, "co_names"))
+        return any(infinite(env.get(n)) or n in ("inf", "oo", "infinity")
+                   for n in names)
+
+    for code, side in ((code_l, sides[0]), (code_r, sides[1])):
+        if code is not None and holds_inf(side) and writes_infinity(code):
+            return False
+    return True
+
+
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
@@ -11938,6 +11973,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # allowance there and the arguments it happened at
     passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
+    # the draws where the claim's own float arithmetic overflowed and
+    # its sides have no exact reading, and the first of them
+    overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
@@ -12977,6 +13015,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         call_raised[0] = call_nan[0] = call_inf[0] = None
         compare_l, compare_r = (exact_now if exact_now is not None
                                 else (lv, rv))
+        if exact_now is None and call_inf[0] is None \
+                and (holds_inf(lv) or holds_inf(rv)) \
+                and _overflowed_sides(code_l, code_r, env, (lv, rv)):
+            # an infinity only the claim's own float arithmetic produced
+            # from finite values (no call returned one, the side names
+            # no infinity), with no exact reading of both sides:
+            # the point is not evaluable, and not counted
+            checked -= 1
+            overflowed += 1
+            if overflowed_at is None:
+                overflowed_at = _point_text(args)
+            continue
         ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
         hidden_by_float = exact_now is not None and ok is False and \
@@ -13245,6 +13295,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         f"within the tolerance and could not be evaluated in exact "
         f"arithmetic, so {'they are' if inconclusive != 1 else 'it is'} "
         f"not counted")
+    if overflowed:
+        note = (f"{note}; {overflowed} draw{'s' if overflowed != 1 else ''} "
+                f"where the claim's own arithmetic overflowed float64 and "
+                f"its sides have no exact reading, first at "
+                f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
+                f"not counted").lstrip("; ")
     if checked == 0 and inconclusive:
         return Probe(cj.name, statement, "unknown", route="probe",
                      note=f"{note}; {inconclusive_words}".lstrip("; "),
