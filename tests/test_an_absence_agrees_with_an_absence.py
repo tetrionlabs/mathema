@@ -8,11 +8,11 @@ a side fails; and None against None under `!=` fails too, since the two
 sides agree. A NaN keeps its own rule: from present inputs it is no
 value and agrees with nothing.
 
-Whether f may return None from present inputs is the absence policy
-line's question, not the comparison's: a return type that declares it
-(`-> Optional[float]`) makes the None legitimate, and a return type that
-does not gets a falsified policy line, so the claim's headline is never
-a bare proven over a None the type does not admit. The wording names
+A None f returns from present inputs is legitimate only where the
+return type declares it (`-> Optional[float]`). Where it does not, the
+None is no value and the value claim fails there, even where both sides
+are that None: the computation line is falsified with the call as its
+witness, and no separate policy row is made for it. The wording names
 absence, never a nan, for a None.
 """
 from __future__ import annotations
@@ -67,24 +67,23 @@ def test_a_json_null_round_trip_agrees_on_both_sides():
 _REFLEXIVE = "for x in [0, 1] \\ {missing}, f(x) == f(x)"
 
 
-def test_an_undeclared_none_agrees_on_the_value_line_and_is_flagged_on_the_policy_line():
+def test_an_undeclared_none_falsifies_the_value_claim_with_no_row_of_its_own():
     rows = _probes(none_undeclared, _REFLEXIVE)
-    assert rows["c"].verdict in ("proven", "holds"), (rows["c"].verdict, rows["c"].note)
-    assert rows["c[float]"].verdict == "holds", (rows["c[float]"].verdict,
-                                                 rows["c[float]"].counterexample)
+    computation = rows["c[float]"]
+    assert computation.verdict == "falsified", (computation.verdict, computation.note)
+    assert computation.counterexample.startswith(
+        "x = 0: f returned None from present inputs, and its return type "
+        "(float) does not declare it"), computation.counterexample
+    assert "Optional[float]" in computation.counterexample, computation.counterexample
+    assert "nan" not in computation.counterexample.lower(), computation.counterexample
     flagged = [p for p in rows.values()
                if ((p.meta or {}).get("mathema.policy") or {}).get("kind") == "absent"
                and p.meta["mathema.policy"].get("parameter") is None]
-    assert flagged, sorted(rows)
-    (row,) = flagged
-    assert row.verdict == "falsified", (row.verdict, row.note)
-    assert "does not declare" in (row.note or ""), row.note
-    assert "nan" not in (row.note or "").lower(), row.note
+    assert not flagged, [(p.name, p.verdict) for p in flagged]
     shown = repr(mathema.check(none_undeclared, claims=[claim(_REFLEXIVE, name="c")]))
     head = next(line for line in shown.splitlines() if line.startswith("  c "))
-    assert head.rstrip().endswith("falsified at x = 0.0"), head
-    assert "falsified  policy       absent(f) introduces" in shown, shown
-    assert "declare it in the return type: Optional[float]" in shown, shown
+    assert head.rstrip().endswith("falsified at x = 0"), head
+    assert "absent(f) introduces" not in shown, shown
 
 
 def test_a_declared_none_is_legitimate_and_the_headline_is_not_falsified():

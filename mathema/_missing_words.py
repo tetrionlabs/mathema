@@ -356,6 +356,29 @@ def declared_optional_return(fn) -> "str | None":
     return None
 
 
+def undeclared_none_words(fn) -> str:
+    """Why a None f returned from present inputs is no value: its return
+    type does not declare the absence, with the two ways to settle it
+    (`f returned None from present inputs, and its return type (float)
+    does not declare it; declare Optional[float] if None is an answer f
+    gives, or make f return a value`)."""
+    import inspect
+
+    from ._annotation_text import annotation_text
+    try:
+        ann = inspect.signature(fn).return_annotation
+    except (TypeError, ValueError):
+        ann = inspect.Signature.empty
+    if ann is inspect.Signature.empty:
+        shown, optional = "no annotation", "Optional[...]"
+    else:
+        shown = annotation_text(ann)
+        optional = f"Optional[{shown}]"
+    return (f"f returned None from present inputs, and its return type "
+            f"({shown}) does not declare it; declare {optional} if None is "
+            f"an answer f gives, or make f return a value")
+
+
 class DrawTally:
     """The shapes of the containers a row executed, for its count: the
     smallest and largest shape drawn, rows then columns, and the entries

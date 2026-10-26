@@ -12925,7 +12925,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None f returned from present inputs is the absence policy
             # line's fact: declared by the return type, or flagged there
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             if any(o is None for o in f_call.outputs()):
                 if declared_return:
                     executed_record.returned_absent(dict(zip(kinds, args)),
@@ -12933,6 +12934,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else:
                     from .policy import record_introduced
                     record_introduced(dict(zip(kinds, args)))
+                    if absence_agrees(lv, rv, cj.relation):
+                        # a None the return type does not declare is no
+                        # value, though both sides are that None
+                        checked += 1
+                        cx = (f"{_point_text(args)}: "
+                              f"{undeclared_none_words(fn)}")
+                        break
             if absence_agrees(lv, rv, cj.relation):
                 # absence compares as absence: None agrees with None
                 checked += 1

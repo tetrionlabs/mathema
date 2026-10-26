@@ -301,6 +301,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
                    for p, v in point.items())
 
+    def _f_returned_none() -> bool:
+        # whether a call of the function under test at this point
+        # returned None
+        return any(kind == "returned" and out is None
+                   for kind, out, _a, _kw in point_calls)
+
     def _record_returned_none(point, lv, rv):
         # a None f returned from present inputs: filed for the absence
         # policy line, as declared by the return type or as introduced
@@ -511,7 +517,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             from ._missing_words import absence_agrees
             _record_returned_none(point, lv, rv)
             if absence_agrees(lv, rv, cj.relation):
-                return True
+                # both sides absent agree, unless f's own None is one the
+                # return type does not declare, which is no value
+                return not (not declared_return and _f_returned_none())
             if declared_return and (lv is None or rv is None):
                 return None
             return False
@@ -649,8 +657,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             _record_returned_none(point, lv, rv)
+            if absence_agrees(lv, rv, cj.relation) and not declared_return \
+                    and _f_returned_none():
+                return undeclared_none_words(fn)
             if absence_agrees(lv, rv, cj.relation) or declared_return:
                 return None
             return (f"the computation returns None here "
@@ -2329,6 +2341,15 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                        f"claim is false in exact arithmetic as well as in "
                        f"the computation ({sweep.detail})",
                 meta={"mathema.proof_contradicted": pt})
+        if sweep.detail.startswith("f returned None from present inputs"):
+            # a None the return type does not declare: no value, whatever
+            # the mathematics says; the witness carries the call and why
+            return Probe(
+                name, parent.statement, "falsified", route=float_route,
+                n=numbers, counterexample=f"{pt}: {sweep.detail}", note=what,
+                sketch=f"{parent.name} is proven, but its computation gives "
+                       f"no value at {pt}: {sweep.detail}",
+                meta=tried_meta or None)
         relation_failed = sweep.detail.startswith("the relation fails")
         found = None
         if relation_failed:
