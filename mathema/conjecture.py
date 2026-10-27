@@ -7161,6 +7161,27 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
 _OVERFLOW_THRESHOLD = 2 ** 1024 - 2 ** 970
 
 
+def _within_an_ulp(left, right) -> bool:
+    """Intent:
+        Whether two compared sides lie within one unit in the last place
+        of the larger, so that moving a literal to a neighbouring double
+        could flip the comparison; True for sides that are not two real
+        numbers, which this does not measure.
+    """
+    import math as _math
+    from fractions import Fraction
+    if isinstance(left, bool) or isinstance(right, bool) \
+            or not isinstance(left, (int, float, Fraction)) \
+            or not isinstance(right, (int, float, Fraction)):
+        return True
+    try:
+        a, b = Fraction(left), Fraction(right)
+        unit = _math.ulp(max(abs(float(a)), abs(float(b))))
+    except (OverflowError, ValueError):
+        return True
+    return abs(a - b) <= Fraction(unit)
+
+
 def _overflowed_last(text, env) -> bool:
     """Intent:
         Whether the claim side written `text`, evaluated in `env`,
@@ -13194,8 +13215,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
-        if ok is False and long_literals and cj.tolerance is None:
-            # a fail resting on a literal the parse rounded to a double is
+        if ok is False and long_literals and cj.tolerance is None \
+                and _within_an_ulp(compare_l, compare_r):
+            # a fail that could rest on a literal the parse rounded to a
+            # double (the sides within one unit in the last place) is
             # decided on the number written: a witness must fail there
             decided = _exact_verdict(cj, code_l, code_r, env,
                                      *_exact_calls())
@@ -13219,13 +13242,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   and relation_within(compare_l, compare_r, cj.relation,
                                       _exact_slack(cj), 0.0, side)
                   is not True)
-        # a pass that rests on a literal the parse rounded to a double
-        # (one with more digits than a double carries) is decided on the
-        # number written
+        # a pass that could rest on a literal the parse rounded to a
+        # double (one with more digits than a double carries, the sides
+        # within one unit in the last place) is decided on the number
+        # written
         inside = inside or (ok is True and cj.tolerance is None
                             and cj.relation in ("==", "<=", ">=", "<", ">",
                                                 "!=")
-                            and long_literals)
+                            and long_literals
+                            and _within_an_ulp(compare_l, compare_r))
         exactly_false = False
         if within or inside:
             # a draw that passes only within a tolerance is decided in
