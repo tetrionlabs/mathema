@@ -2355,6 +2355,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                 n=numbers, counterexample=f"{pt}: {sweep.detail}", note=what,
                 sketch=f"{parent.name} is proven, but its computation gives "
                        f"no value at {pt}: {sweep.detail}",
+                stratum={"mathematics": "sound", "blame": "implementation",
+                         "cause": "implementation:absent", "witness": pt},
                 meta=tried_meta or None)
         relation_failed = sweep.detail.startswith("the relation fails")
         found = None

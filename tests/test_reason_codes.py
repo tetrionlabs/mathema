@@ -365,3 +365,14 @@ def test_diagnostic_report_known_key_set_guard(tmp_path):
     assert not_liftable["operations_of_interest"] == {}
     assert not_liftable["domain_hazards"] == []
 
+
+def test_an_absence_against_the_declared_return_type_has_its_own_code():
+    from mathema.reason_codes import describe_code
+    entry = describe_code("implementation:absent")
+    assert entry is not None
+    assert entry["id"] == "5.9"
+    assert entry["meaning"] == (
+        "the call returned an absent value (None) from present inputs where "
+        "the declared return type promises one")
+    assert entry["hint"] == ("declare Optional[T] if None is an answer the "
+                             "function gives, or return a value")
