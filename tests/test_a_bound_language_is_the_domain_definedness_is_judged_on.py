@@ -21,14 +21,19 @@ from mathema.languages import (StringLanguage, register_language,
 
 DIGITS = StringLanguage("digits", char_ok=str.isdigit, pool="0123456789",
                         outside_pool="ab")
+#: the strings over the ASCII digits 0 to 9, the empty string included
+ASCII_DIGITS = StringLanguage("ascii_digits", char_ok=lambda c: c in "0123456789",
+                              pool="0123456789", outside_pool="ab")
 
 
 def setup_module(module):
     register_language("digits", DIGITS)
+    register_language("ascii_digits", ASCII_DIGITS)
 
 
 def teardown_module(module):
     unregister_language("digits")
+    unregister_language("ascii_digits")
 
 
 def to_int(s: str) -> int:
@@ -50,8 +55,10 @@ def counts(s: str) -> int:
     return len(s)
 
 
-def strict_int(s: str) -> int:
-    return int(s or "0")
+def digit_sum(s: str) -> int:
+    if not all(c in "0123456789" for c in s):
+        raise ValueError("not a string of ASCII digits")
+    return sum(int(c) for c in s)
 
 
 def parsed(s: str) -> int:
@@ -86,7 +93,11 @@ def test_a_value_returned_for_a_non_member_falsifies():
 
 
 def test_a_function_answering_members_and_refusing_the_rest_holds():
-    p = _v(strict_int, "for s in L[digits], is_language_defined(s)")
+    # true: every member of L[ascii_digits] (the empty string included)
+    # passes the all-digits test, and int of one ASCII digit never
+    # raises, so each member gets a return; every non-member holds a
+    # character outside 0..9, so the test fails and ValueError refuses it
+    p = _v(digit_sum, "for s in L[ascii_digits], is_language_defined(s)")
     assert p.verdict == "holds", (p.verdict, p.counterexample)
 
 
