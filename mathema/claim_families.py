@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 import math
 import numbers
 import random
+import sys
 from decimal import Decimal
 from fractions import Fraction
 
@@ -4324,6 +4325,26 @@ def _compiled_links(links: list, params: list) -> list:
     return out
 
 
+def _divides_by_zero(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` reaches a numpy division
+        by zero: run again with numpy's divide error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(divide="raise"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4837,7 +4858,13 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if ok == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
-        if bare:
+        pole = (kind == "is_overflow_safe" and raised is None
+                and _divides_by_zero(fn, call_args, call_kwargs))
+        if pole:
+            cx = (f"{at}: f {what} at a pole (numpy reports a division by "
+                  f"zero), not an overflow; the computation has no finite "
+                  f"value there")
+        elif bare:
             cx = f"{at}: f {what}, {words['bare']}"
         elif where:
             cx = f"{at}: inside the stated region, f {what}"

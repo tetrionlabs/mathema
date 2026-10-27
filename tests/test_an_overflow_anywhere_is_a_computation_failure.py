@@ -52,3 +52,16 @@ def test_the_float_companion_carries_the_overflow():
     rows = {p.name: p for p in rec.probes}
     assert rows["f_x_ge_0"].verdict == "proven", rows["f_x_ge_0"]
     assert rows["f_x_ge_0[float]"].verdict == "falsified", rows["f_x_ge_0[float]"]
+
+
+def logged(x: float) -> float:
+    import numpy as np
+    return float(np.log(x))
+
+
+def test_a_pole_infinity_is_named_as_a_pole_not_an_overflow():
+    # np.log(0) is -inf: the logarithm has a pole at 0, no overflow
+    p = _v(logged, "for x in [0, 2], is_computation_safe(f)")
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "at a pole" in p.counterexample, p.counterexample
+    assert "not an overflow" in p.counterexample, p.counterexample
