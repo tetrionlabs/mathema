@@ -64,7 +64,8 @@ from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
-from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
+from .probing import (ComplexResult, _close, _fmt, _fmt_coordinate,
+                      _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       classified, holds_nan, inputs_missing, missing_class,
@@ -13148,7 +13149,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                          *_exact_calls())
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        # a witness names each `let` draw at the value the claim ran with;
+        # a finding's prose reads it to three digits
         aux_part = ("; " + ", ".join(
+            f"{a} = {_fmt_coordinate(env[a])}" if isinstance(env[a], (int, float))
+            else f"{a} = {env[a]!r}" for a in aux) if aux else "")
+        aux_words = ("; " + ", ".join(
             f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
             else f"{a} = {env[a]!r}" for a in aux) if aux else "")
         if not ok:
@@ -13212,7 +13218,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                             ctx.companion_witness = dict(zip(kinds, args))
                     elif computation_finding is None:
                         computation_finding = (
-                            f"{words} at {_point_text(args)}{aux_part}, where "
+                            f"{words} at {_point_text(args)}{aux_words}, where "
                             f"the claim holds in exact arithmetic: a finding "
                             f"about the computation")
                     call_raised[0] = call_nan[0] = call_inf[0] = None

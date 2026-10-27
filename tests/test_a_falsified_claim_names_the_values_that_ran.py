@@ -67,3 +67,15 @@ def test_an_exact_witness_with_no_coordinate_is_written_as_its_call(route):
     assert p.counterexample.startswith("f(1e-20): 1 vs 1, false here in "
                                        "exact arithmetic"), p.counterexample
     assert p.meta["mathema.exact_witness"]["at"] == "f(1e-20)"
+
+
+def test_a_let_bound_draw_in_the_witness_is_printed_in_full():
+    # `let c be [0.1, 10]` draws c; the witness prints the value the
+    # claim ran with, so the comparison replays from the printed text
+    (p,) = check_conjectures(identity, [claim(
+        "for x in [1, 2], let c be [0.1, 10], f(x) * c <= 1", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    point, said = p.counterexample.split(": ", 1)
+    drawn = dict(part.split(" = ") for part in re.split(r"[;,] ", point))
+    lhs = float(drawn["x"]) * float(drawn["c"])
+    assert said.split(" vs ")[0] == repr(lhs), (p.counterexample, lhs)

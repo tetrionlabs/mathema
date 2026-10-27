@@ -293,10 +293,10 @@ print(record.probes[0].counterexample)
 <!-- example: pandas output -->
 ```text
 falsified
-returns = pandas.Series([-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998], index=pandas.bdate_range('2020-01-01', periods=4)); c = 4.72: 1164.6923472459507 vs -4.339350392263282
+returns = pandas.Series([-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998], index=pandas.bdate_range('2020-01-01', periods=4)); c = 4.718034171081078: 1164.6923472459507 vs -4.339350392263282
 ```
 
-Four days of returns, each shifted up by 4.72: a Sharpe ratio of about
+Four days of returns, each shifted up by about 4.72: a Sharpe ratio of about
 1,165 against the original's -4.3. Sampling is seeded, so the same
 witness comes back on every run.
 
