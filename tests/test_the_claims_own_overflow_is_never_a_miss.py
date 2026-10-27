@@ -57,3 +57,22 @@ def test_an_overflow_against_a_written_infinity_is_a_finite_value():
     (p,) = check_conjectures(scaled, [claim(
         "c * trace(A) != inf", route="probe")])
     assert p.verdict == "holds", (p.verdict, p.counterexample)
+
+
+def test_an_overflow_in_an_inner_step_bounds_nothing():
+    # c * (c * trace(A)) / c is c * trace(A) exactly; the product
+    # c * (c * trace(A)) can overflow on the way while the side's value
+    # is finite and small, so the infinity says nothing about it
+    (p,) = check_conjectures(scaled, [claim(
+        "for c in [1e200, 1e201], c * (c * trace(A)) / c ~= c * trace(A)",
+        route="probe")])
+    assert p.verdict != "falsified", (p.verdict, p.counterexample)
+
+
+def test_an_overflow_decides_against_the_largest_float():
+    # float64 overflows only past 2**1024 - 2**970, beyond the largest
+    # float, so abs(c * trace(A)) <= 1.7976931348623157e308 is false
+    # wherever the left side overflows (c = 1.5e308, A = [[10.0]])
+    (p,) = check_conjectures(scaled, [claim(
+        "abs(c * trace(A)) <= 1.7976931348623157e308", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)

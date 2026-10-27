@@ -7155,17 +7155,86 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     return _exact_relation(cj, exact[0], exact[1])
 
 
-def _overflow_reading(code_l, code_r, env, sides) -> "tuple | None":
+#: the magnitude past which float64 rounds a value to an infinity
+#: (round to nearest: the largest float plus half its unit in the last
+#: place)
+_OVERFLOW_THRESHOLD = 2 ** 1024 - 2 ** 970
+
+
+def _overflowed_last(text, env) -> bool:
+    """Intent:
+        Whether the claim side written `text`, evaluated in `env`,
+        reaches its infinity at its last operation from finite operands:
+        through any `abs(...)`, unary `-` or `+` wrapping it, the
+        outermost operation whose operands are all finite numbers. False
+        when an operand is itself infinite (the overflow was in an inner
+        step), the side is a name or a literal, or it cannot be read.
+    """
+    import ast as _ast
+    import math as _math
+    if not text:
+        return False
+    try:
+        node = _ast.parse(str(text), mode="eval").body
+    except SyntaxError:
+        return False
+    while True:
+        if isinstance(node, _ast.UnaryOp) and isinstance(
+                node.op, (_ast.USub, _ast.UAdd)):
+            node = node.operand
+        elif isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name) \
+                and node.func.id == "abs" and len(node.args) == 1 \
+                and not node.keywords:
+            node = node.args[0]
+        else:
+            break
+    if isinstance(node, _ast.BinOp):
+        operands = [node.left, node.right]
+    elif isinstance(node, _ast.Call):
+        operands = [*node.args, *(k.value for k in node.keywords)]
+    else:
+        return False
+
+    def value(expr):
+        code = compile(_ast.Expression(body=expr), "<claim side>", "eval")
+        return eval(code, {"__builtins__": {}}, env)
+
+    for operand in operands:
+        try:
+            v = value(operand)
+        except Exception:
+            return False
+        try:
+            if not _math.isfinite(float(v)):
+                return False
+        except (TypeError, ValueError, OverflowError):
+            # a matrix or other value: finite when every entry is
+            try:
+                import numpy as _np
+                if not _np.all(_np.isfinite(_np.asarray(v, dtype=float))):
+                    return False
+            except Exception:
+                return False
+    return True
+
+
+def _overflow_reading(code_l, code_r, env, sides,
+                      texts=(None, None)) -> "tuple | None":
     """Intent:
         The sides of a draw with each infinity the claim's own float
         arithmetic produced from finite values (a side holding one that
         names no infinity itself: `inf`, `oo`, a constant bound to one)
-        read as what it stands for, a finite value of that sign beyond
-        every float (sign times 2**1024): against a finite side, or an
-        infinity the claim writes, that decides the relation by sign.
-        None when the point is not evaluable: both sides overflowed, the
-        other side is an exact number past float range itself, or a side
-        is not a single number. `sides` unchanged when nothing
+        read as what it stands for, a finite value of that sign at or
+        past float64's overflow threshold, 2**1024 - 2**970: against a
+        finite side below that threshold, or an infinity the claim
+        writes, that decides the relation by sign. This holds only when
+        the overflowing operation is the side's last one, up to `abs`
+        and a sign (`_overflowed_last`, reading the side's source in
+        `texts`): an overflow in an inner step leaves the side's value
+        unknown. None when the point is not evaluable: both sides
+        overflowed, the overflow is not the side's last operation, the
+        other side is an exact number at or past the threshold itself,
+        or a side is not a single number. `sides` unchanged when nothing
         overflowed.
     """
     import math as _math
@@ -7202,12 +7271,14 @@ def _overflow_reading(code_l, code_r, env, sides) -> "tuple | None":
     mine, other = sides[i], sides[1 - i]
     if not isinstance(mine, float):
         return None
+    if not _overflowed_last(texts[i], env):
+        return None
     if isinstance(other, bool) or not isinstance(other, (int, float,
                                                          Fraction)):
         return None
     if not (isinstance(other, float) and _math.isinf(other)):
         try:
-            if abs(Fraction(other)) >= Fraction(sys.float_info.max):
+            if abs(Fraction(other)) >= Fraction(_OVERFLOW_THRESHOLD):
                 return None
         except (TypeError, ValueError, OverflowError):
             return None
@@ -13083,7 +13154,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # value beyond every float: compared by its sign, or, where
             # the other side may lie past float range too, the point is
             # not evaluable and not counted
-            read = _overflow_reading(code_l, code_r, env, (lv, rv))
+            read = _overflow_reading(code_l, code_r, env, (lv, rv),
+                                     (cj.lhs, cj.rhs))
             if read is None:
                 checked -= 1
                 overflowed += 1
@@ -13091,7 +13163,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     overflowed_at = _point_text(args)
                 continue
             compare_l, compare_r = read
-        ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
+        # an overflowed side stands for a value at or past the overflow
+        # threshold, a bound rather than a value: the relation is decided
+        # by its sign alone, with no allowance
+        overflow_read = (compare_l is not lv and exact_now is None) or \
+            (compare_r is not rv and exact_now is None)
+        ok = relation_within(compare_l, compare_r, cj.relation,
+                             _exact_slack(cj) if overflow_read
+                             else cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
         hidden_by_float = exact_now is not None and ok is False and \
             relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
