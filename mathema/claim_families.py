@@ -2406,23 +2406,35 @@ def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+#: the refused strings a record of an unbound is_language_defined names
+_REFUSALS_SHOWN = 6
+
+
 def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                            trials: int):
     """Empirical half of is_language_defined[s]: feed the target
     string parameter every edge case in the corpus (empty, whitespace,
     control chars, combining/zero-width marks, non-ascii, a very long
     string, injection-/format-/path-shaped strings) plus a few random
-    draws, every other parameter freshly sampled. An ACCIDENTAL-type
-    exception (TypeError/IndexError/UnicodeError/RecursionError/
-    AttributeError/KeyError/OverflowError) raised with NO validating
-    guard on the parameter is a crash: the minimal triggering string is
-    found by shrinking and returned as the witness. A raise the function
-    GUARDS (a validating `if ...: raise`/`assert`), or any other
-    exception type (a deliberate ValueError), is accepted; a normal
-    return is fine. When the domain's language declares a
-    `DefinedAnswer`, a member must get that answer instead: any other
-    raise, or a return the answer does not cover, falsifies with the
-    shrunk member, the answer declared and what the call did."""
+    draws, every other parameter freshly sampled.
+
+    With a language bound, the language is the declared domain: a
+    member must get an answer, a return or an exit status (the
+    statuses a declared `DefinedAnswer` names, when it names them), so
+    any other raise on a member falsifies, guarded or not and of any
+    type; a non-member must get the declared `Refusal`, else any raise
+    (an exit included), so a value returned for it falsifies. The
+    witness is shrunk inside (or outside) the language.
+
+    With no language bound, the function's refusals define its
+    language: an exit, a raise the function GUARDS (a validating
+    `if ...: raise`/`assert`) and a deliberate exception type (a
+    ValueError) refuse the string, and the record's note states the
+    strings refused and how. Only an ACCIDENTAL-type exception
+    (TypeError/IndexError/UnicodeError/RecursionError/AttributeError/
+    KeyError/OverflowError) raised with NO validating guard is a crash:
+    the minimal triggering string is found by shrinking and returned as
+    the witness."""
     from ._sampling import _STRING_SPECIALS, _synth_string
     from ._shrink import shrink
     from .analysis import _guards
@@ -2441,14 +2453,24 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                and _guards(facts.tree, facts.params).get(target) in ("raise", "assert"))
     unreadable: dict = {}
 
+    # the last call's refusal (an exit, a guarded raise or a deliberate
+    # one), by name, for the record of the boundary the function draws
+    last: dict = {}
+
     def crash_on(args, value):
+        last.pop("refused", None)
         try:
             with _pinned_float_env():
                 _call_with_target(fn, facts, target, args, value)
         except _ACCIDENTAL_CRASHES as exc:
-            return None if guarded else type(exc).__name__
-        except Exception:
-            return None       # a deliberate/other exception is not a crash
+            if guarded:
+                last["refused"] = exception_name(exc)
+                return None
+            return type(exc).__name__
+        except Exception as exc:
+            # a deliberate/other exception, an exit included, refuses
+            last["refused"] = exception_name(exc)
+            return None
         return None
 
     answers = _declared(bound, "defined_answer") if language_bound else []
@@ -2489,11 +2511,60 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]]
     state = {"i": 0}
 
+    from ._exits import exiting_as_raise
+    called = exiting_as_raise(fn)
+    refusals = _declared(bound, "refusal") if language_bound else []
+
+    def outcome_of(args, value):
+        """What the call does: `("raised", exc)`, an exit included, or
+        `("returned", value)`."""
+        try:
+            with _pinned_float_env():
+                out = _call_with_target(called, facts, target, args, value)
+        except Exception as exc:
+            return ("raised", exc)
+        return ("returned", out)
+
+    def failed_in_language(args, value, side):
+        """None when the call does what the language asks of a member
+        (an answer: a return or an exit status) or a non-member (the
+        declared refusal, else any raise), else what it did."""
+        outcome = outcome_of(args, value)
+        kind, what = outcome
+        if side == "inside":
+            if kind == "returned" or isinstance(what, SystemExit):
+                return None
+            return _outcome_text(outcome)
+        if refusals:
+            return None if _matches(refusals, outcome) else _outcome_text(outcome)
+        return None if kind == "raised" else _outcome_text(outcome)
+
     def trial(args):
         if state["i"] >= len(corpus):
             return True
         value, side = corpus[state["i"]]
         state["i"] += 1
+        if language_bound and not (answers and side == "inside"):
+            # the language is the declared domain: a member must get an
+            # answer, a non-member a refusal
+            did = failed_in_language(args, value, side)
+            if did is None:
+                return True
+            inside_now = side == "inside"
+            minimal = _shrink_in_language(
+                value, lambda s: (failed_in_language(args, s, side) is not None
+                                  and bool(domain_contains(s, bound)) == inside_now),
+                bound)
+            did = failed_in_language(args, minimal, side) or did
+            if inside_now:
+                return (f"{target} = {_witness_value(minimal)} (inside {names}) "
+                        f"{did}, where a member of the language its domain "
+                        f"declares gets an answer (a return or an exit "
+                        f"status)")
+            expected = (_declared_text(refusals) if refusals
+                        else "a raise or an exit")
+            return (f"{target} = {_witness_value(minimal)} (outside {names}) "
+                    f"{did}, where a non-member is refused ({expected})")
         if answers and side == "inside":
             if unanswered(args, value) is None:
                 return True
@@ -2505,6 +2576,11 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     f"language declares ({_declared_text(answers)})")
         exc = crash_on(args, value)
         if exc is None:
+            if "refused" in last and len(refused) < _REFUSALS_SHOWN \
+                    and all(v != value for v, _ in refused):
+                refused.append((value, last["refused"]))
+            elif "refused" in last:
+                refused_more[0] += 1
             return True
         if unread:
             if "said" in unreadable:
@@ -2543,12 +2619,24 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 
+    refused: list = []
+    refused_more = [0]
     verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
                                          max(trials, len(corpus)), trial)
     if unreadable and verdict != "falsified":
         return ("unknown", checked, unreadable["said"])
+    meta: dict = {}
     if sampled is not None:
-        return verdict, checked, cx, {"mathema.sampled": sampled}
+        meta["mathema.sampled"] = sampled
+    if refused and not language_bound:
+        # with no language bound, the function's refusals draw the
+        # boundary of its language: the record states it
+        shown = ", ".join(f"{_witness_value(v)} ({name})" for v, name in refused)
+        more = (f" and {refused_more[0]} more" if refused_more[0] else "")
+        meta["mathema.caveat"] = (f"the function's refusals define its "
+                                  f"language here; refused: {shown}{more}")
+    if meta:
+        return verdict, checked, cx, meta
     return verdict, checked, cx
 
 

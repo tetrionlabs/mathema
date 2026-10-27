@@ -196,7 +196,8 @@ outside it and what counts as answering a member, as two optional
 attributes: `refusal`, a `Refusal`, and `defined_answer`, a
 `DefinedAnswer`. `excluded_outside_domain` then holds an outside draw
 to the declared refusal instead of any raise, and `is_language_defined`
-holds a member to the declared answer instead of no unguarded crash.
+holds a member to the declared answer instead of any return or exit
+status, and a non-member to the declared refusal instead of any raise.
 Each names the exception classes that count (optionally narrowed by a
 `when` test on the exception) and a `returns` test on a returned value,
 and its `text` is how a witness names it. `Refusal.exit(2)` and

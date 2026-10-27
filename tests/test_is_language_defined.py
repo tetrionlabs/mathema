@@ -74,7 +74,12 @@ def test_a_value_the_claim_excludes_is_labelled_outside(tmp_path):
         pr = _one(mod.first_char, 'for s in L[letters] \\ {""}, is_language_defined(s)')
         assert pr.verdict == "falsified"
         assert '(outside L[letters] \\ {""})' in pr.counterexample, pr.counterexample
-        assert "''" in pr.counterexample and "(inside" not in pr.counterexample
+        # the language is the domain: a non-member is refused, and
+        # first_char returns ' ' for ' ', which is not a letter; the
+        # IndexError on '' is a raise, a refusal
+        assert "' ' (outside" in pr.counterexample and "returned" in pr.counterexample, \
+            pr.counterexample
+        assert "(inside" not in pr.counterexample
     finally:
         unregister_language("letters")
 
