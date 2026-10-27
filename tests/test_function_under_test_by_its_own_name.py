@@ -32,4 +32,4 @@ def test_the_own_name_proves_what_f_proves():
 def test_the_own_name_disproves_what_f_disproves():
     (p,) = check_conjectures(sum_fields, [claim("sum_fields(cfg) == cfg.a - cfg.b",
                                                 route="derive")])
-    assert p.verdict != "proven", p.note
+    assert p.verdict == "falsified", (p.verdict, p.note)

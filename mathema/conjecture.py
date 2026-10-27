@@ -4295,14 +4295,21 @@ def _instance_bundles(fn, facts) -> dict:
         class samples the fields the body reads and builds the
         instance as `object.__new__(cls)` + setattr, the declared
         `param.field` domains are the validity contract, exactly as a
-        scalar parameter's declared domain already is.
+        scalar parameter's declared domain already is. A receiver a
+        runtime type carries (a pandas Series) is no bundle: it is drawn
+        as its type's values.
     """
     import dataclasses as _dc
 
     from .runtime_types._receivers import method_receiver, receiver_fields
     from .symbolic._base import _dataclass_field_names
+    from .runtime_types import realised_parameters
     out: dict = {}
     receiver = method_receiver(fn)
+    if receiver is not None and receiver[0] in realised_parameters(facts):
+        # a receiver a runtime type carries (a pandas Series, a numpy
+        # array) is drawn as that type's values and realised by its adapter
+        receiver = None
     if receiver is not None and facts.params and facts.params[0] == receiver[0]:
         # a method's receiver: an instance of its class, drawn by the
         # fields it is known to hold, a dataclass's even without source
@@ -12273,10 +12280,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     array_names = [p for p in array_ranks
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
-    # a witness over vectors or matrices names each argument
+    # a witness names each argument the claim reads or passes, by name,
+    # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    if as_arrays:
-        arg_names, shown_names = tuple(kinds), None
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+                                  if p in kinds}
+                   if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts, _declared_elements(cj_domain))
@@ -12531,7 +12540,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[p] = v
                     args.append(v)
                     continue
-                if p in bundles:
+                if p in bundles and (cj_domain.get(p) is None or getattr(
+                        cj_domain.get(p), "base_type", None) == "L"):
+                    # an instance of the class, unless the claim binds the
+                    # parameter to values itself: the binding is the draw
                     v = narrowed(p, lambda p=p: _synth_instance(
                         bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
@@ -13092,7 +13104,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None f returned from present inputs is the absence policy
             # line's fact: declared by the return type, or flagged there
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             if any(o is None for o in f_call.outputs()):
                 if declared_return:
                     executed_record.returned_absent(dict(zip(kinds, args)),
@@ -13100,6 +13113,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else:
                     from .policy import record_introduced
                     record_introduced(dict(zip(kinds, args)))
+                    if absence_agrees(lv, rv, cj.relation):
+                        # a None the return type does not declare is no
+                        # value, though both sides are that None
+                        checked += 1
+                        cx = (f"{_point_text(args)}: "
+                              f"{undeclared_none_words(fn)}")
+                        break
             if absence_agrees(lv, rv, cj.relation):
                 # absence compares as absence: None agrees with None
                 checked += 1

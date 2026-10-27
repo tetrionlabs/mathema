@@ -207,9 +207,18 @@ fold claims this way, on `derive:induction`.
 
 Two built-in claims ask how a function treats its language.
 `excluded_outside_domain(s)` asks that every value outside the domain is
-refused, and by default any raise refuses. `is_language_defined(s)` asks
-that every member gets an answer, and by default an answer is anything
-but an unguarded crash (a `TypeError`, an `IndexError` and the like). A
+refused, and by default any raise refuses. `is_language_defined(s)`
+reads the language as the declared domain: every member gets an
+answer, by default a return or an exit status, so any other raise on a
+member falsifies it, whether or not the function guards it and whatever
+its type; and every non-member is refused, by default by any raise (an
+exit included), so a value returned for one falsifies it too. With no
+language bound (a plain `str` parameter), the function's refusals
+define its language: an exit, a guarded raise and a deliberate one
+(a `ValueError`) refuse the string, the record's note lists the strings
+refused and how, and only an accidental unguarded crash (a `TypeError`,
+an `IndexError` and the like) falsifies. Whether f is defined on every
+string is `is_defined`'s question. A
 command-line program says both things differently: it refuses a bad
 argument list by exiting with code 2, and it answers with exit code 0
 or 1. A language can declare both, and the two claims then read the
@@ -275,11 +284,12 @@ parity is_language_defined[s] holds
 parity_by_hand excluded_outside_domain[s] falsified
     s = 'á' (outside L[count] at [0]: count alphabet) is outside the declared domain and was not refused the way the language declares (SystemExit (exit code 2)): the call raised ValueError
 parity_by_hand is_language_defined[s] falsified
-    s = '77' (inside L[count] \ {""}) raised SystemExit (exit code 2), not the defined answer the language declares (a return, or SystemExit (exit code 0 or 1))
+    s = '' (outside L[count] \ {""}) raised ValueError, where a non-member is refused (SystemExit (exit code 2))
 ```
 
 `parity` refuses anything that is not a count with exit code 2 and
 answers every count with 0 or 1, so both claims hold. `parity_by_hand` lets `int` raise a
 `ValueError` on a value outside the language, which is a crash rather
-than the refusal the language declares, and exits 2 on `"77"`, a
-member, which is not an answer.
+than the refusal the language declares, as the empty string the claim
+removes shows; it also exits 2 on `"77"`, a member, which is not an
+answer.

@@ -94,6 +94,7 @@ derive           one        proven
 derive           one[float] falsified x = -1.7976931348623157e+308
 derive           missing[x] holds
 derive:math_only one        proven
+derive:math_only missing[x] holds
 ```
 
 `(x + 1) - x` is `1` for every real `x`, so all three proofs stand.

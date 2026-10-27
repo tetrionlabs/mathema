@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Bugs found running mathema over a real repository.
-
-Each test here is a report from the field, kept in its own file so the
-provenance stays obvious: these are not shapes anyone designed, they
-are what real code did.
+"""Shapes ordinary code takes, each checked as written: a module global
+with no equality, an array return compared elementwise, a chained
+comparison and a bounded free variable kept through the store, a
+claim's inline quantifier as the derive context, an absolute value
+whose sign the domain fixes, a conjunction over a finite set, a claims
+file row passed at the call site, and domain variants of one law.
 """
 import pytest
 
@@ -32,10 +33,8 @@ def association_matrix(xs: list):
 def test_state_safety_ignores_a_global_that_cannot_compare_to_its_copy():
     """A module with `from __future__ import annotations` carries an
     `annotations` global bound to a `__future__._Feature`, which defines
-    no `__eq__`. The check deep-copies module globals and compares, so
-    the copy could never equal the original and every such module was
-    reported as mutating it, with a witness whose before and after
-    printed identically.
+    no `__eq__`, so a deep copy of it never compares equal to the
+    original. is_state_safe does not read that as a write.
 
     This module has that import (numpy's namespace does too), so the
     check is live here."""
@@ -57,9 +56,8 @@ def test_an_elementwise_comparison_adjudicates_across_the_matrix():
 
 
 def test_a_chained_comparison_survives_the_store():
-    """`0 <= f(x) < 1` was persisted as `0 <= f(x)`, so `adjudicate_target`
-    falsified the claim while `verify_project`, reading the record,
-    proved the weaker one that was stored."""
+    """`0 <= f(x) < 1` is stored with both links, so what verify reads
+    back from the record is the claim that was checked."""
     from mathema.spec import declare, entry_claims
 
     original = claim("for mi in [0,100], 0 <= f(mi) < 1")
@@ -69,8 +67,8 @@ def test_a_chained_comparison_survives_the_store():
 
 
 def test_a_free_variable_keeps_its_bound_through_the_store():
-    """`let c be [a,b]` lost its bound in the record, so the probe route
-    sampled from +-1e6 and falsified with an out-of-domain error."""
+    """`let c be [a,b]` keeps its bound in the record, so a claim read
+    back draws c from [a, b] only."""
     from mathema.spec import declare, entry_claims
 
     restored = entry_claims({"claims": [declare(
@@ -97,12 +95,9 @@ def test_both_halves_of_a_chain_are_adjudicated(law):
 def test_a_claim_quantifier_supplies_the_derive_context(tmp_path, monkeypatch):
     """`derivable` asks what the derive route can do given the declared
     domain, and a claim declares its domain inline, `for theta in
-    [0, 100], f(theta) >= 0`, which is the spelling the grammar
-    teaches and every example uses. The context was being read off the
-    claim dict's `domain` key instead, which only a claim mathema
-    itself wrote ever has, so the common case supplied no context at
-    all and a branchy function read underivable while its claims
-    proved."""
+    [0, 100], f(theta) >= 0`, the spelling the grammar teaches. That
+    inline quantifier is the context, so a branchy function whose
+    claims prove reads derivable."""
     from mathema.audit import _claim_domain, audit_rows
 
     pkg = tmp_path / "geopkg"
@@ -165,19 +160,12 @@ def _lag_overlap(n, lag):
 
 
 def test_an_absolute_value_takes_the_sign_the_domain_fixes():
-    """Reported as the one engine defect in a real run: a step claim on
-    a lag-overlap function left `Abs(lag) - Abs(lag + 1) + 1` for the
-    decider, sympy's `.equals()` answered "nonzero" (right for the whole
-    real line, wrong for `lag >= 0`), a seeded numeric check contradicted
-    it, and the corroboration guard correctly refused the disproof,
-    leaving a real identity undecided.
-
-    Two guards were working against each other: a transformed call
-    argument (`f(n, lag + 1)`) turns the sign bake off, because
-    pre-collapsing the body under it produces false disproofs, and the
-    sign then never reached `Abs`. Resolving the absolute values on the
-    already-formed difference is safe for the same reason baking is
-    not, and closes the identity."""
+    """A step claim on a lag-overlap function leaves
+    `Abs(lag) - Abs(lag + 1) + 1` to decide. It is nonzero somewhere on
+    the real line but zero for every `lag >= 0`, where both absolute
+    values take the sign the domain fixes: |lag + 1| = |lag| + 1. The
+    absolute values are resolved on the formed difference, so the
+    identity is proven over that domain."""
     proven = check_conjectures(_lag_overlap, [claim(
         "for n in [1,100], lag in [0,10], f(n, lag+1) == f(n, lag) - 1",
         route="derive")])[0]
@@ -197,15 +185,13 @@ def test_the_same_claim_over_a_signed_domain_still_falsifies():
 
 
 def test_a_conjunction_over_a_finite_set_never_falsifies_without_a_witness(tmp_path):
-    """Field report L3: `for r in [0,1], scale in {"info","linear"},
-    d(f(r, scale), r) <= 0` came back refuted with no counterexample,
-    while both single-scale restrictions proved and the property is
-    numerically true. The rule stands: `falsified` requires an
-    executed witness; an uncorroborated symbolic disproof downgrades
-    to unknown. This pins the whole shape family on the derive route:
-    the true conjunction proves piecewise, a false claim's
-    falsification names its witness (and its sub-domain), and the
-    undecidable variant says unknown rather than inventing a refutation."""
+    """`for r in [0,1], scale in {"info","linear"}, d(f(r, scale), r) <= 0`
+    is true on each scale (-1 and -2r), so the conjunction proves piece
+    by piece. `falsified` requires an executed witness; an
+    uncorroborated symbolic disproof is unknown. On the derive route the
+    true conjunction proves piecewise, a false claim's falsification
+    names its witness (and its sub-domain), and a variant derive cannot
+    decide gives no refutation without a witness."""
     import textwrap
 
     mod = tmp_path / "l3mod.py"
@@ -251,11 +237,10 @@ def test_a_conjunction_over_a_finite_set_never_falsifies_without_a_witness(tmp_p
 
 
 def test_call_site_claims_accept_the_claims_file_row_shape():
-    """Field report L9: `check(claims=[{"name", "statement", "route"}])`
-    died with `AttributeError: 'dict' object has no attribute 'links'`
-    from inside spec.declare. A dict now goes through the same
-    construction a claims.yaml row does (spec._declared_conjecture),
-    side `domain` field included, and gates like any call-site claim."""
+    """`check(claims=[{"name", "statement", "route"}])` takes a dict as a
+    claims.yaml row: it is built the way a claims file row is
+    (spec._declared_conjecture), side `domain` field included, and gates
+    like any call-site claim."""
     import mathema
 
     def halve(x: float) -> float:
@@ -278,7 +263,7 @@ def test_call_site_claims_accept_the_claims_file_row_shape():
 
 
 def test_domain_variants_of_one_law_keep_distinct_rows(tmp_path):
-    # L5: four domain-variants of one law auto-name alike (f_mi_ge_0,
+    # four domain-variants of one law auto-name alike (f_mi_ge_0,
     # the name is built from the domain-stripped statement); they must
     # not collapse to one row under the name-keyed merge, so unnamed
     # they are refused, and named they are four rows.
