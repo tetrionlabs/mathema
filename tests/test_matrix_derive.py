@@ -106,13 +106,11 @@ def test_unmarked_matrix_is_not_symmetric(mats):
     assert "derive could not decide" in pr.note
 
 
-def test_false_identity_on_derive_needs_an_exact_reading_to_falsify(mats):
-    # the float run misses det(A @ B) == det(A) + det(B), but numpy's
-    # det has no exact reading, so on the derive route that miss is no
-    # counterexample: unknown, the miss named in the note
+def test_false_identity_on_derive_is_falsified_by_the_probes_sampling(mats):
     pr = _one(mats.f, "det(A @ B) == det(A) + det(B)", route="derive")
-    assert (pr.verdict, pr.route) == ("unknown", "derive")
-    assert "has no exact reading" in pr.note
+    assert pr.verdict == "falsified"
+    assert pr.route == "probe"
+    assert pr.counterexample
 
 
 def test_false_identity_best_falsifies_with_witness(mats):
