@@ -955,8 +955,13 @@ running the code when the proof cannot settle the claim, so a sampled
 code only. `derive` asks for derive's verdict: when the proof cannot
 settle the claim the probe still samples it, but only a counterexample
 it executes counts, and the claim is then `falsified` on the probe's
-route with derive's reason in the note. Draws that find no
-counterexample leave the claim `unknown`, never `holds`. A proof's
+route with derive's reason in the note. A point counts only where the
+claim read exactly fails: a float miss or an overflow where the exact
+reading holds is a finding about the computation, and a miss found by
+sampling derive's own reconstruction of the function
+(`probe:lifted_numeric`) counts only where the code, run at that point,
+fails the relation exactly. Draws that find no counterexample leave the
+claim `unknown`, never `holds`. A proof's
 `[float]` companion and a disproof's executed witness are the same on
 every route. See [Verdicts and exit codes](verdicts.md).
 

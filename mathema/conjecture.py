@@ -6387,9 +6387,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                note=f"{ctx.note}; no evaluable inputs: "
                                     f"{refused}".lstrip("; "),
                                meta={"mathema.probe_gap": "input-synthesis"})
-            if cj.route == "derive" and probed.verdict != "falsified":
+            not_a_witness = (
+                _lifted_miss_unexecuted(ctx, fn, facts, probed)
+                if cj.route == "derive" and probed.verdict == "falsified"
+                and probed.route == "probe:lifted_numeric" else None)
+            if cj.route == "derive" and (probed.verdict != "falsified"
+                                         or not_a_witness is not None):
                 ctx.derive_undecided = stashed
-                probed = _derive_alone(ctx, raw if raw is not None else probed)
+                probed = _derive_alone(ctx, raw if raw is not None else probed,
+                                       not_a_witness=not_a_witness)
 
             def probed_with(bound, cj=cj):
                 # the claim on the probe route under `let |inf| be bound`:
@@ -10967,14 +10973,56 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                        "mathema.recursion_depth": dict(info)})
 
 
-def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
+def _lifted_miss_unexecuted(ctx: "_ClaimContext", fn, facts,
+                            lifted: "Probe") -> "str | None":
+    """Intent:
+        Whether a miss the sampling of derive's reconstructed formula
+        found (`probe:lifted_numeric`) is a witness: None when the code,
+        run exactly at its point, fails the claim; otherwise the sentence
+        saying why the point is no witness (the claim has forms the code
+        cannot evaluate, the point cannot be read back, or the code run
+        there does not fail the relation exactly).
+    """
+    from ._exact_body import exact_callee
+    from .runtime_types import calling
+    cj = ctx.cj
+    where = f"derive's reconstruction misses the claim at {lifted.counterexample}"
+    point = _point_of(lifted.counterexample)
+    if not point:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    names = set(facts.params)
+    try:
+        code_l, _aux_l = _validate(cj.lhs, names, ctx.extra)
+        code_r, _aux_r = _validate(cj.rhs, names, ctx.extra)
+    except InvalidConjecture:
+        return (f"{where}, but the code cannot evaluate the claim there (its "
+                f"forms are read only by the reconstruction), so that point "
+                f"is no witness")
+    try:
+        env = {name: float(value) for name, value in point.items()}
+    except ValueError:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    bound = {name: exact_callee(v) for name, v in _bound_funcs_of(cj).items()}
+    exact = _exact_verdict(cj, code_l, code_r, env,
+                           calling(exact_callee(fn), facts), bound)
+    if exact is False:
+        return None
+    return (f"{where}, but the code run there "
+            f"{'satisfies it exactly' if exact else 'has no exact reading of it'}"
+            f", so that point is no witness")
+
+
+def _derive_alone(ctx: "_ClaimContext", probed: "Probe",
+                  not_a_witness: "str | None" = None) -> "Probe":
     """Intent:
         The row of a route="derive" claim neither derive nor the probe's
         falsifier settled: unknown on the derive route, the derive
         attempt's own report when one was kept (`ctx.derive_undecided`),
         its reason in the note, then what the probe found: how many
         draws found no counterexample (a sampled pass is no verdict on
-        this route), or why it could not run them.
+        this route), or why it could not run them, or, for a miss of
+        derive's reconstruction, why that point is no witness
+        (`not_a_witness`).
         `mathema.routes_attempted` names both attempts.
     """
     cj = ctx.cj
@@ -10988,7 +11036,9 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
         note = f"{note} ({fallen.sketch})" if note.endswith(
             "derive could not decide it") else f"{note}; {fallen.sketch}"
     finding = (probed.meta or {}).get("mathema.computation_finding")
-    if probed.verdict in ("holds", "proven"):
+    if not_a_witness is not None:
+        said = not_a_witness
+    elif probed.verdict in ("holds", "proven"):
         drawn = probed.n or 0
         said = (f"the probe's {drawn} draw{'s' if drawn != 1 else ''} found "
                 f"no counterexample, and on the derive route a sampled pass "

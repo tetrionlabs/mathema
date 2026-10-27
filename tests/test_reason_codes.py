@@ -133,12 +133,14 @@ def test_build_issue_record_multiple_failure_nodes():
     cj1 = claim("for hour in [0, 15], f(hour) == hour", route="derive", name="clock_wraps")
     cj2 = claim("for hour in [0, 100], Sum(f(hour), k, 1, 3) <= 32",
                 route="derive", name="stays_small")
-    # stays_small now FALSIFIES through the lifted-numeric fallback
-    # (3*Mod(hour,12) reaches 33 > 32, an executed witness on the
-    # resolved intermediate), so no OPEN unknown remains and the
-    # lenient record is empty; strict reports both falsifications
+    # the lifted-numeric sampling of the resolved intermediate finds
+    # 3*Mod(hour,12) reaching 33 > 32, but on route derive a miss of
+    # derive's reconstruction falsifies only where the code, run there,
+    # fails the relation, and the code cannot evaluate a Sum(...) law:
+    # stays_small stays an OPEN unknown, which the lenient record
+    # reports; strict reports both
     lenient = build_issue_record(clock_hour, [cj1, cj2])
-    assert lenient is None
+    assert lenient["meta"]["mathema.issue"]["failing_claims"] == ["stays_small"]
     record = build_issue_record(clock_hour, [cj1, cj2], include_falsified=True)
     failing = set(record["meta"]["mathema.issue"]["failing_claims"])
     assert failing == {"clock_wraps", "stays_small"}
