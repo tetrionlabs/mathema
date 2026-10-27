@@ -85,8 +85,11 @@ def test_is_defined_on_two_parameters_reads_the_exit_as_a_raise(mod):
 
 
 def test_an_argparse_error_is_a_raise_of_the_function(mod):
-    rows = _rows(mod.parsed, "is_language_defined(s)")
-    assert rows and all(r.verdict for r in rows)
+    # with no language bound, parsed's exits are its refusals: '' is no
+    # int, argparse exits with status 2, and the record says so
+    (row,) = _rows(mod.parsed, "is_language_defined(s)")
+    assert row.verdict == "holds", (row.verdict, row.counterexample)
+    assert "refused: '' (SystemExit (exit code 2))" in row.note, row.note
 
 
 def test_the_bare_check_completes_on_a_function_that_exits(mod):
