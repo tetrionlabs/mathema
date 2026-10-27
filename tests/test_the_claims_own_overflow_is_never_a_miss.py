@@ -40,3 +40,20 @@ def test_an_infinity_the_claim_writes_is_compared_as_written(law):
     (p,) = check_conjectures(ident, [claim(law, route="probe")])
     assert p.verdict == "holds", (p.verdict, p.note)
     assert "overflowed" not in (p.note or ""), p.note
+
+
+def test_an_overflow_against_a_finite_side_decides_by_its_sign():
+    # an infinity from finite operands stands for a value beyond every
+    # float: against a finite side it decides the relation by its sign,
+    # so abs(c trace(A)) <= 1e308 is false wherever c trace(A) > 1e308
+    # (c = 1.5e308, A = [[1.0]] is such a point)
+    (p,) = check_conjectures(scaled, [claim(
+        "abs(c * trace(A)) <= 1e308", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+
+
+def test_an_overflow_against_a_written_infinity_is_a_finite_value():
+    # c trace(A) is finite for every c and A, so it is never inf
+    (p,) = check_conjectures(scaled, [claim(
+        "c * trace(A) != inf", route="probe")])
+    assert p.verdict == "holds", (p.verdict, p.counterexample)

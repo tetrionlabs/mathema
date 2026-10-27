@@ -7155,15 +7155,21 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     return _exact_relation(cj, exact[0], exact[1])
 
 
-def _overflowed_sides(code_l, code_r, env, sides) -> bool:
+def _overflow_reading(code_l, code_r, env, sides) -> "tuple | None":
     """Intent:
-        Whether every side holding an infinity in `sides`, the claim's
-        float evaluation, names no infinity itself (`inf`, `oo`, a
-        constant bound to one): its infinity is then the float
-        arithmetic's overflow of finite values, not one the claim
-        writes.
+        The sides of a draw with each infinity the claim's own float
+        arithmetic produced from finite values (a side holding one that
+        names no infinity itself: `inf`, `oo`, a constant bound to one)
+        read as what it stands for, a finite value of that sign beyond
+        every float (sign times 2**1024): against a finite side, or an
+        infinity the claim writes, that decides the relation by sign.
+        None when the point is not evaluable: both sides overflowed, the
+        other side is an exact number past float range itself, or a side
+        is not a single number. `sides` unchanged when nothing
+        overflowed.
     """
     import math as _math
+    from fractions import Fraction
 
     from .probing import holds_inf
     sympy = sys.modules.get("sympy")
@@ -7184,10 +7190,31 @@ def _overflowed_sides(code_l, code_r, env, sides) -> bool:
         return any(infinite(env.get(n)) or n in ("inf", "oo", "infinity")
                    for n in names)
 
-    for code, side in ((code_l, sides[0]), (code_r, sides[1])):
-        if code is not None and holds_inf(side) and writes_infinity(code):
-            return False
-    return True
+    overflowed = [i for i, (code, side) in enumerate(((code_l, sides[0]),
+                                                      (code_r, sides[1])))
+                  if code is not None and holds_inf(side)
+                  and not writes_infinity(code)]
+    if not overflowed:
+        return sides
+    if len(overflowed) == 2:
+        return None
+    i = overflowed[0]
+    mine, other = sides[i], sides[1 - i]
+    if not isinstance(mine, float):
+        return None
+    if isinstance(other, bool) or not isinstance(other, (int, float,
+                                                         Fraction)):
+        return None
+    if not (isinstance(other, float) and _math.isinf(other)):
+        try:
+            if abs(Fraction(other)) >= Fraction(sys.float_info.max):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    beyond = Fraction(2) ** 1024 * (1 if mine > 0 else -1)
+    out = list(sides)
+    out[i] = beyond
+    return tuple(out)
 
 
 def _exact_relation(cj, left, right) -> "bool | None":
@@ -13050,17 +13077,20 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         compare_l, compare_r = (exact_now if exact_now is not None
                                 else (lv, rv))
         if exact_now is None and call_inf[0] is None \
-                and (holds_inf(lv) or holds_inf(rv)) \
-                and _overflowed_sides(code_l, code_r, env, (lv, rv)):
+                and (holds_inf(lv) or holds_inf(rv)):
             # an infinity only the claim's own float arithmetic produced
-            # from finite values (no call returned one, the side names
-            # no infinity), with no exact reading of both sides:
-            # the point is not evaluable, and not counted
-            checked -= 1
-            overflowed += 1
-            if overflowed_at is None:
-                overflowed_at = _point_text(args)
-            continue
+            # from finite values (no call returned one) stands for a
+            # value beyond every float: compared by its sign, or, where
+            # the other side may lie past float range too, the point is
+            # not evaluable and not counted
+            read = _overflow_reading(code_l, code_r, env, (lv, rv))
+            if read is None:
+                checked -= 1
+                overflowed += 1
+                if overflowed_at is None:
+                    overflowed_at = _point_text(args)
+                continue
+            compare_l, compare_r = read
         ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
         hidden_by_float = exact_now is not None and ok is False and \
@@ -13339,7 +13369,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     if overflowed:
         note = (f"{note}; {overflowed} draw{'s' if overflowed != 1 else ''} "
                 f"where the claim's own arithmetic overflowed float64 and "
-                f"its sides have no exact reading, first at "
+                f"the other side may lie past float range too, first at "
                 f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
                 f"not counted").lstrip("; ")
     if checked == 0 and inconclusive:
