@@ -76,6 +76,11 @@ def test_an_undeclared_none_falsifies_the_value_claim_with_no_row_of_its_own():
         "(float) does not declare it"), computation.counterexample
     assert "Optional[float]" in computation.counterexample, computation.counterexample
     assert "nan" not in computation.counterexample.lower(), computation.counterexample
+    # the failure is the implementation's: an absence where the declared
+    # return type promises a value
+    assert computation.stratum == {
+        "mathematics": "sound", "blame": "implementation",
+        "cause": "implementation:absent", "witness": "x = 0"}, computation.stratum
     flagged = [p for p in rows.values()
                if ((p.meta or {}).get("mathema.policy") or {}).get("kind") == "absent"
                and p.meta["mathema.policy"].get("parameter") is None]

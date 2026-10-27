@@ -199,8 +199,9 @@ def test_a_norm_is_not_positive_at_the_zero_vector():
     p = _one(norm_of, law, extensive=True)
     assert p.verdict == "falsified", (p.verdict, p.note)
     point = p.counterexample.split(":")[0]
-    assert point.startswith("x = [") and set(
-        point[len("x = ["):].rstrip("]").replace(" ", "").split(",")) == {"0"}, \
+    assert point.startswith("x = numpy.array([") and set(
+        point[len("x = numpy.array(["):].rstrip("])").replace(" ", "")
+        .split(",")) == {"0.0"}, \
         p.counterexample
 
 

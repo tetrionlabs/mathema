@@ -47,3 +47,34 @@ def test_an_optional_parameter_keeps_both_its_lines():
     # 2 * None raises TypeError and nothing states that it may
     assert rows["absent[x]"].verdict == "falsified", rows["absent[x]"].note
     assert "policy       f(nan)" in shown and "policy       f(None)" in shown, shown
+
+
+def shifted_one(x: float) -> float:
+    return (x + 1) - x
+
+
+def test_a_mathematics_only_claim_carries_no_policy_lines():
+    # derive:math_only reports the mathematics line alone: what the
+    # computation does, a missing input included, is outside its remit
+    rec = mathema.check(shifted_one, claims=[mathema.claim(
+        "f(x) == 1", name="one", route="derive:math_only")])
+    rows = {p.name: p for p in rec.probes}
+    assert rows["one"].verdict == "proven", rows["one"].note
+    assert sorted(rows) == ["one"], sorted(rows)
+
+
+def test_a_mathematics_only_claim_beside_a_computed_one_leaves_its_rows_to_it():
+    rec = mathema.check(doubled_plus_one, claims=[
+        mathema.claim("for x in [0, 1], f(x) >= 1", name="computed"),
+        mathema.claim("for x in [0, 1], f(x) <= 3", name="maths",
+                      route="derive:math_only")])
+    rows = {p.name: p for p in rec.probes}
+    assert rows["maths"].verdict == "proven", rows["maths"].note
+    assert rows["missing[x]"].verdict == "holds", rows["missing[x]"].note
+
+
+def test_a_mathematics_only_claim_judges_no_optional_absence():
+    rec = mathema.check(optional_doubled, claims=[mathema.claim(
+        "for x in [0, 1], f(x) >= 1", name="maths", route="derive:math_only")])
+    rows = {p.name: p for p in rec.probes}
+    assert sorted(rows) == ["maths"], sorted(rows)

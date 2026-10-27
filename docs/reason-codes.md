@@ -58,6 +58,7 @@ id is never renumbered.
 | 5.6 | `implementation:sub-epsilon-boundary` | N/A | a raise at a floating-point boundary; the same inputs nudged within epsilon evaluate cleanly | a clamp at the raising operation's argument removes the fragility |
 | 5.7 | `implementation:representation` | N/A | machine spellings of one mathematical point disagree (int versus float versus bool) | normalize the input representation at entry, or state the intended representation in the claim |
 | 5.8 | `implementation:accidental-crash` | N/A | an unguarded crash on arbitrary input, not a deliberate rejection | guard the input and raise the declared exception, or narrow the claim to the inputs the function accepts |
+| 5.9 | `implementation:absent` | N/A | the call returned an absent value (None) from present inputs where the declared return type promises one | declare Optional[T] if None is an answer the function gives, or return a value |
 | 1.5 | `internal-error` | limitation | the derivability analysis itself failed | worth reporting: describe --issue builds the payload |
 | 2.19 | `loop:additive-constant-update` | limitation | the linear update carries a constant term | a pure linear combination of item and accumulator is recognized today; the constant-term extension is tractable but not built |
 | 2.5 | `loop:branch-elsewhere` | limitation | a non-guard branch outside the loop | leading raise-guards are stripped and proved around; any other branching alongside a loop blocks the fold read |

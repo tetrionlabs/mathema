@@ -64,7 +64,8 @@ from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
-from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
+from .probing import (ComplexResult, _close, _fmt, _fmt_coordinate,
+                      _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       classified, holds_nan, inputs_missing, missing_class,
@@ -1658,7 +1659,8 @@ def claim(law: str, name: str | None = None, source: str = "user",
     legacy spelling of "best"). A derive proof is the mathematics in
     exact arithmetic; `mathema.check` pairs it with a `<name>[float]`
     companion claim about the computation, and "derive:math_only"
-    asks for the proof alone, with no companion. the safety predicates always adjudicate on the examine route
+    reports the mathematics line only: the computation and its policy
+    rows are outside its remit. the safety predicates always adjudicate on the examine route
     regardless of the route passed in. A
     leading `let name = expr, ...` (see grammar.extract_let_bindings)
     substitutes each name for `(expr)` everywhere later in the law,
@@ -5260,8 +5262,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     the mathematics in exact arithmetic, and the companion is the same
     relation executed against the real code in float (see
     `gates._float_companion`). A claim authored with route
-    `derive:math_only` adjudicates as a derive claim and spawns none,
-    which its proof's meta states. `check()`, and so every CLI and
+    `derive:math_only` adjudicates as a derive claim and reports the
+    mathematics line only: no companion (which its proof's meta states)
+    and no policy row, the computation being outside its remit. `check()`, and so every CLI and
     store path, asks for companions; the default here keeps the
     adjudicator at one probe per claim.
 
@@ -5350,14 +5353,23 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn), complex_in_view(complex_parameters(fn)):
-        out = _around_failing_languages(lambda claims: _check_conjectures(
-            fn, claims, domain=domain, trials=trials,
-            trials_scale=trials_scale, facts=facts, extensive=extensive,
-            known_premises=known_premises,
-            float_companions=float_companions,
-            pseudo_infinity=pseudo_infinity), values) if values else []
+        remit = _policy.OUTSIDE_REMIT.set(_policy.OUTSIDE_REMIT.get())
+        try:
+            out = _around_failing_languages(lambda claims: _check_conjectures(
+                fn, claims, domain=domain, trials=trials,
+                trials_scale=trials_scale, facts=facts, extensive=extensive,
+                known_premises=known_premises,
+                float_companions=float_companions,
+                pseudo_infinity=pseudo_infinity), values) if values else []
+        finally:
+            _policy.OUTSIDE_REMIT.reset(remit)
+        # a derive:math_only claim reports the mathematics line alone;
+        # what the computation does with a missing input is outside it
+        from .gates import MATH_ONLY_ROUTE
+        math_only = {c.name for c in values
+                     if getattr(c, "route", None) == MATH_ONLY_ROUTE}
         for p in out:
-            _policy.note_draws(p.name, p.n,
+            _policy.note_draws(p.name, p.n, None if p.name in math_only else
                                ((p.meta or {}).get("mathema.missing") or {}).get("origin"))
         if stated and facts is None:
             from . import analyze as _analyze
@@ -5906,9 +5918,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        if [c.name for c in conjectures].count(name) > 1}
     overflow_links = overflow_safe_links(conjectures)
     from .policy import _CLAIM as _policy_claim
+    from .policy import OUTSIDE_REMIT as _outside_remit
     adjudicating = _ADJUDICATING.get()
+    # the calls a derive:math_only claim makes (a falsifier's draws) are
+    # no evidence for a policy row: computation is outside its remit
+    outer_remit = _outside_remit.get()
+    from ._called_text import forget_realised
     for cj in ordered:
         _policy_claim.set(cj.name)
+        forget_realised()
+        _outside_remit.set(outer_remit or cj.route == MATH_ONLY_ROUTE)
         if adjudicating is not None:
             adjudicating["cj"] = cj
         if overflow_links and not cj.overflow_safe \
@@ -13130,7 +13149,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                          *_exact_calls())
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        # a witness names each `let` draw at the value the claim ran with;
+        # a finding's prose reads it to three digits
         aux_part = ("; " + ", ".join(
+            f"{a} = {_fmt_coordinate(env[a])}" if isinstance(env[a], (int, float))
+            else f"{a} = {env[a]!r}" for a in aux) if aux else "")
+        aux_words = ("; " + ", ".join(
             f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
             else f"{a} = {env[a]!r}" for a in aux) if aux else "")
         if not ok:
@@ -13194,7 +13218,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                             ctx.companion_witness = dict(zip(kinds, args))
                     elif computation_finding is None:
                         computation_finding = (
-                            f"{words} at {_point_text(args)}{aux_part}, where "
+                            f"{words} at {_point_text(args)}{aux_words}, where "
                             f"the claim holds in exact arithmetic: a finding "
                             f"about the computation")
                     call_raised[0] = call_nan[0] = call_inf[0] = None
