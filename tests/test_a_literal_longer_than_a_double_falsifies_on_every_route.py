@@ -29,3 +29,17 @@ def test_a_long_literal_the_claim_meets_holds_or_is_proven(route):
     (p,) = check_conjectures(ident, [claim(
         "for x in [0, 1], f(x) <= 1.0000000000000000001", route=route)])
     assert p.verdict in ("proven", "holds"), (route, p.verdict, p.note)
+
+
+@pytest.mark.parametrize("route", ["probe", "derive", "best"])
+@pytest.mark.parametrize("law", [
+    # 1 < 1 + 10**-19, though the double of the literal is 1.0
+    "for x in [0, 1], f(x) < 1.0000000000000000001",
+    # 1 != 1 - 10**-20, though the double of the literal is 1.0
+    "for x in [1, 1], f(x) != 0.99999999999999999999",
+])
+def test_a_fail_resting_on_the_rounding_of_a_long_literal_is_no_witness(
+        route, law):
+    (p,) = check_conjectures(ident, [claim(law, route=route)])
+    assert p.verdict in ("proven", "holds"), (route, p.verdict,
+                                              p.counterexample)

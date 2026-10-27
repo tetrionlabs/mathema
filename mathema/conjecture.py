@@ -13115,6 +13115,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        if ok is False and long_literals and cj.tolerance is None:
+            # a fail resting on a literal the parse rounded to a double is
+            # decided on the number written: a witness must fail there
+            decided = _exact_verdict(cj, code_l, code_r, env,
+                                     *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if decided is None:
+                checked -= 1
+                inconclusive += 1
+                continue
+            if decided is True:
+                ok = True
         # `within`: an `==` or `~=` pass beyond the allowance's absolute
         # floor, through its relative part or a draw's round-off;
         # `inside`: a pass of `==`, `<=` or `>=` the compared sides
