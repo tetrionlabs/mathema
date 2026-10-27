@@ -1299,6 +1299,12 @@ def _fmt_point(point, names):
             # arguments
             parts.append(f"{n} = {capped}")
             continue
+        from ._called_text import called_text, received_as
+        called = called_text(received_as(n, v))
+        if called is not None:
+            # the argument as the call received it
+            parts.append(f"{n} = {called}")
+            continue
         parts.append(f"{n} = {_fmt_coordinate(v)}" if isinstance(v, float)
                      else f"{n} = {v!r}")
     return ", ".join(parts)

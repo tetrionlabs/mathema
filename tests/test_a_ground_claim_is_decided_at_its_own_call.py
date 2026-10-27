@@ -86,11 +86,12 @@ def test_the_probe_route_runs_the_call_once(fn):
 
 
 @pytest.mark.parametrize("route", ROUTES)
-@pytest.mark.parametrize("fn,got", [(total, "0"), (series_total, "0.0")])
-def test_a_fixed_input_that_fails_names_only_its_call(fn, got, route):
+@pytest.mark.parametrize("fn,shown,got", [
+    (total, "[]", "0"), (series_total, "pandas.Series([], dtype='float64')", "0.0")])
+def test_a_fixed_input_that_fails_names_only_its_call(fn, shown, got, route):
     p = _one(fn, "f([]) == 1", route)
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert p.counterexample == f"xs = []: {got} vs 1", p.counterexample
+    assert p.counterexample == f"xs = {shown}: {got} vs 1", p.counterexample
 
 
 @pytest.mark.parametrize("route", ROUTES)

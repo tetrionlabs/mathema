@@ -5922,8 +5922,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     # the calls a derive:math_only claim makes (a falsifier's draws) are
     # no evidence for a policy row: computation is outside its remit
     outer_remit = _outside_remit.get()
+    from ._called_text import forget_realised
     for cj in ordered:
         _policy_claim.set(cj.name)
+        forget_realised()
         _outside_remit.set(outer_remit or cj.route == MATH_ONLY_ROUTE)
         if adjudicating is not None:
             adjudicating["cj"] = cj
