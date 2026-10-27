@@ -57,3 +57,29 @@ def test_a_fail_far_from_the_long_literal_is_decided_as_the_float_says(route):
     (p,) = check_conjectures(by_text, [claim(
         "for x in [0, 1], f(x) <= 0.99999999999999999999", route=route)])
     assert p.verdict == "falsified", (route, p.verdict, p.note)
+
+
+@pytest.mark.parametrize("route", ["probe", "derive", "best"])
+def test_a_rounded_literal_far_from_the_float_side_is_still_read_as_written(
+        route):
+    # (1.00000000000000000001 - 1) * 1e20 is exactly 1 (the double of the
+    # literal is 1.0, which makes it 0): at x = 1 the left side is 1 > 0.5
+    (p,) = check_conjectures(ident, [claim(
+        "for x in [0, 1], f(x) * (1.00000000000000000001 - 1) * 1e20 <= 0.5",
+        route=route)])
+    assert p.verdict == "falsified", (route, p.verdict, p.note)
+    assert p.counterexample.startswith("x = 1"), p.counterexample
+
+
+@pytest.mark.parametrize("route", ["probe", "derive", "best"])
+@pytest.mark.parametrize("law", [
+    # exactly x * 1 >= x - 0.5 at every x
+    "for x in [0, 1], f(x) * (1.00000000000000000001 - 1) * 1e20 >= f(x) - 0.5",
+    # 1 / (1.0000000000000000001 - 1) is exactly 10**19 >= 1; the double
+    # of the literal is 1.0, which divides by zero
+    "for x in [0, 1], f(x) <= 1/(1.0000000000000000001 - 1)",
+])
+def test_a_true_claim_on_a_rounded_literal_is_not_falsified(route, law):
+    (p,) = check_conjectures(ident, [claim(law, route=route)])
+    assert p.verdict in ("proven", "holds"), (route, p.verdict,
+                                              p.counterexample)

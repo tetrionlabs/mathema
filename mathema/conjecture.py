@@ -12759,6 +12759,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                          if call_inf[0] is not None else "f returned nan")
                       + ", and no value for a finite input")
                 break
+            if not call_raised[0] and long_literals and cj.tolerance is None:
+                # the claim's own side raised on its float evaluation,
+                # which reads a long literal rounded: decided on the
+                # number written where the sides can be read exactly
+                written = _exact_verdict(cj, code_l, code_r, env,
+                                         *_exact_calls())
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                if written is True:
+                    checked += 1
+                    continue
+                if written is False:
+                    checked += 1
+                    cx = (f"{_point_text(args)}: the claim is false here, "
+                          f"its own side read exactly as written")
+                    break
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
@@ -13188,7 +13204,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         call_raised[0] = call_nan[0] = call_inf[0] = None
         compare_l, compare_r = (exact_now if exact_now is not None
                                 else (lv, rv))
-        if exact_now is None and call_inf[0] is None \
+        # a claim writing a literal with more digits than a double
+        # carries is decided on the number written wherever its sides
+        # can be read exactly, whatever its float sides say: the parse
+        # rounded the literal, and a float gap or a no value may rest on
+        # that rounding alone
+        ll_decided = None
+        if long_literals and cj.tolerance is None:
+            ll_decided = _exact_verdict(cj, code_l, code_r, env,
+                                        *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if ll_decided is None and exact_now is None and call_inf[0] is None \
                 and (holds_inf(lv) or holds_inf(rv)):
             # an infinity only the claim's own float arithmetic produced
             # from finite values (no call returned one) stands for a
@@ -13213,6 +13239,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              _exact_slack(cj) if overflow_read
                              else cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
+        ll_false = ll_decided is False and ok is True
+        if ll_decided is not None:
+            ok = ll_decided
+        elif long_literals and cj.tolerance is None and ok is not None \
+                and _within_an_ulp(compare_l, compare_r):
+            # no exact reading, and the float sides within one unit in
+            # the last place, where the rounded literal could flip the
+            # decision: no evidence either way, not counted
+            checked -= 1
+            inconclusive += 1
+            continue
         hidden_by_float = exact_now is not None and ok is False and \
             relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
                             exact_inequality=cj.tolerance is None) is True
@@ -13235,20 +13272,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
-        if ok is False and long_literals and cj.tolerance is None \
-                and _within_an_ulp(compare_l, compare_r):
-            # a fail that could rest on a literal the parse rounded to a
-            # double (the sides within one unit in the last place) is
-            # decided on the number written: a witness must fail there
-            decided = _exact_verdict(cj, code_l, code_r, env,
-                                     *_exact_calls())
-            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-            if decided is None:
-                checked -= 1
-                inconclusive += 1
-                continue
-            if decided is True:
-                ok = True
         # `within`: an `==` or `~=` pass beyond the allowance's absolute
         # floor, through its relative part or a draw's round-off;
         # `inside`: a pass of `==`, `<=` or `>=` the compared sides
@@ -13262,16 +13285,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   and relation_within(compare_l, compare_r, cj.relation,
                                       _exact_slack(cj), 0.0, side)
                   is not True)
-        # a pass that could rest on a literal the parse rounded to a
-        # double (one with more digits than a double carries, the sides
-        # within one unit in the last place) is decided on the number
-        # written
-        inside = inside or (ok is True and cj.tolerance is None
-                            and cj.relation in ("==", "<=", ">=", "<", ">",
-                                                "!=")
-                            and long_literals
-                            and _within_an_ulp(compare_l, compare_r))
-        exactly_false = False
+        if ll_decided is not None:
+            # decided on the number written already
+            within = inside = False
+        exactly_false = ll_false
         if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
