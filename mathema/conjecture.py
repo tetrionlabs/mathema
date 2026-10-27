@@ -7311,14 +7311,19 @@ def _stands_in_for_derive(ctx: "_ClaimContext") -> bool:
     """Intent:
         Whether this probe stands in for a derive attempt that could not
         settle the mathematics (the wall clock, or sympy unable to close
-        the identity). Its draws then judge the mathematics, so a failure
+        the identity), or for any derive attempt that did not settle a
+        claim on route "derive", whose probe is a falsifier of the
+        mathematics. Its draws then judge the mathematics, so a failure
         of the float computation at a point where the claim holds exactly
         belongs to the computation line. Where derive does not apply at
-        all (an unliftable or unsupported claim) the probe is the
-        computation line itself, and such a point falsifies it.
+        all (an unliftable or unsupported claim) on another route the
+        probe is the computation line itself, and such a point falsifies
+        it.
     """
     fallen = ctx.derive_undecided
-    return fallen is not None and \
+    if fallen is None:
+        return False
+    return ctx.cj.route == "derive" or \
         (fallen.meta or {}).get("mathema.derive_status") == "undecided"
 
 
@@ -10982,11 +10987,14 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
     if fallen.sketch and fallen.sketch not in note:
         note = f"{note} ({fallen.sketch})" if note.endswith(
             "derive could not decide it") else f"{note}; {fallen.sketch}"
+    finding = (probed.meta or {}).get("mathema.computation_finding")
     if probed.verdict in ("holds", "proven"):
         drawn = probed.n or 0
         said = (f"the probe's {drawn} draw{'s' if drawn != 1 else ''} found "
                 f"no counterexample, and on the derive route a sampled pass "
                 f"is not a verdict")
+        if finding:
+            said = f"{said}; {finding}"
     else:
         said = _probe_said(probed)
     fallen.note = f"{note}; {said}".lstrip("; ")
@@ -10994,6 +11002,8 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
                    "mathema.routes_attempted":
                        f"routes attempted, {_derive_attempt_label(fallen)}; "
                        f"{_probe_attempt_label(probed)}"}
+    if finding and probed.verdict in ("holds", "proven"):
+        fallen.meta["mathema.computation_finding"] = finding
     return fallen
 
 
@@ -12032,6 +12042,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     computation_meta: dict = {}
     computation_finding = None
     stands_in = _stands_in_for_derive(ctx)
+    # on route "derive" the probe falsifies the mathematics only: a point
+    # counts against the claim only where its exact reading fails it
+    derive_falsifier = cj.route == "derive" and ctx.derive_undecided is not None
     # a library definition row: a failure only at a magnitude corner is a
     # finding about the library's computation, and the row stands
     from .compendium import library_key_of
@@ -12857,9 +12870,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 corner_finding = _drawn_text(args)
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
+        exact_at = (_exact_verdict(cj, code_l, code_r, env, *_exact_calls())
+                    if float_gave_out and (ctx.companion_mode == "spawn"
+                                           or stands_in) else None)
+        # on the derive route an infinity from finite inputs at a point
+        # with no exact reading is an overflow or a pole the exact reading
+        # cannot tell apart, and so no counterexample to the mathematics;
+        # a nan or a hole there is no value in any reading, and stays one
+        overflowed = (derive_falsifier and exact_at is None
+                      and call_inf[0] is not None and call_nan[0] is None
+                      and call_hole[0] is None)
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and _exactly_holds_at(cj, code_l, code_r, env,
-                                      *_exact_calls()):
+                and (exact_at is True or overflowed):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the
@@ -12883,7 +12905,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"the {_representation_word(cj_domain, facts)} computation "
                     f"gave no value at {_point_text(args)} ({gave}), where the "
                     f"claim holds in exact arithmetic: a finding about the "
-                    f"computation")
+                    f"computation" if exact_at is True else
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), where the "
+                    f"claim has no exact reading to tell an overflow from a "
+                    f"pole, so on the derive route that point is no "
+                    f"counterexample")
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if not missing_in and call_hole[0] is not None:
@@ -13201,6 +13228,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     call_hole[0] = None
                     continue
                 miss_conditioning = found
+            if derive_falsifier and not exactly_false \
+                    and mathematics is True:
+                # the exact reading holds here: on the derive route the
+                # miss is the computation's, never a counterexample to the
+                # mathematics
+                checked += 1
+                if computation_finding is None:
+                    computation_finding = (
+                        f"the float computation misses the claim at "
+                        f"{_point_text(args)}{aux_part}, where the claim "
+                        f"holds in exact arithmetic: a finding about the "
+                        f"computation")
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                continue
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"

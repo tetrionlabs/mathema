@@ -163,3 +163,28 @@ def test_an_uncorroborated_derive_disproof_is_unknown_with_the_flag(monkeypatch)
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
     assert "mathema bug" in p.note
     assert _NO_VERDICT in p.note
+
+
+def doubled_until(x: float) -> float:
+    out = 1.0
+    k = 0
+    while k < x:
+        out = out * 2.0
+        k += 1
+    return out
+
+
+def test_a_float_overflow_where_the_claim_holds_exactly_is_no_counterexample():
+    # 2**ceil(x) >= 1 holds for every x in [0, 2000]; the float run
+    # overflows to inf past x = 1024, a fact about the computation, not
+    # a counterexample to the mathematics derive was asked for
+    text = "for x in [0, 2000], f(x) >= 1"
+    (p,) = check_conjectures(doubled_until, [claim(text, name="c",
+                                                   route="derive")])
+    assert (p.verdict, p.route) == ("unknown", "derive"), p
+    assert "where the claim holds in exact arithmetic" in p.note
+    assert p.meta["mathema.computation_finding"]
+    # on the default route the probe is the computation line, and the
+    # overflow falsifies it
+    (q,) = check_conjectures(doubled_until, [claim(text, name="c")])
+    assert q.verdict == "falsified"
