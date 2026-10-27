@@ -961,7 +961,10 @@ reading holds is a finding about the computation, and a miss found by
 sampling derive's own reconstruction of the function
 (`probe:lifted_numeric`) counts only where the code, run at that point,
 fails the relation exactly. Draws that find no counterexample leave the
-claim `unknown`, never `holds`. A proof's
+claim `unknown`, never `holds`. Over a finite domain, a sweep that runs
+every point and finds the claim exact at each is `proven` on
+`derive:brute_force`; a sweep that passes only inexactly, or runs part
+of the domain, leaves the claim `unknown` on this route. A proof's
 `[float]` companion and a disproof's executed witness are the same on
 every route. See [Verdicts and exit codes](verdicts.md).
 

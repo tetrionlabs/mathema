@@ -10712,6 +10712,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return witnessed
     elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
+        if swept is not None and swept.meta.get("mathema.sweep_holds") \
+                and swept.meta.get("mathema.sweep_inexact") \
+                and cj.route == "derive":
+            # every point executed and agreed, but some only inexactly:
+            # no proof, and on the derive route no holds either; the
+            # probe's falsifier still runs
+            ctx.derive_undecided = Probe(
+                cj.name, statement, "unknown", route="derive",
+                sketch=swept.sketch,
+                note=(f"{note + '; ' if note else ''}the sweep ran every "
+                      f"point of the finite domain and is no proof"),
+                meta={"mathema.derive_status": "undecided",
+                      **_provenance_meta(swept)})
+            return None
         if swept is not None and swept.meta.get("mathema.sweep_holds"):
             # every point executed and agreed, over a function the strict
             # examination could not show pure: holds, never proven
