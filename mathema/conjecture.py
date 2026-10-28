@@ -292,7 +292,9 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 return []
             # a float end lies inside the interval as written
             from ._sampling import _inside_as_written
-            moved_lo, moved_hi = _inside_as_written(lo, hi)
+            moved_lo, moved_hi = _inside_as_written(
+                lo, hi, getattr(piece, "exact_lo", None),
+                getattr(piece, "exact_hi", None))
             lo = lo if getattr(piece, "reach_lo", False) else moved_lo
             hi = hi if getattr(piece, "reach_hi", False) else moved_hi
             if getattr(piece, "closed_lo", True):

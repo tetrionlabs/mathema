@@ -395,7 +395,9 @@ def _written_inside(piece) -> tuple:
     written (`_sampling._inside_as_written`)."""
     from ._sampling import _inside_as_written
     lo, hi = piece[0], piece[1]
-    moved_lo, moved_hi = _inside_as_written(lo, hi)
+    moved_lo, moved_hi = _inside_as_written(
+        lo, hi, getattr(piece, "exact_lo", None),
+        getattr(piece, "exact_hi", None))
     return (lo if getattr(piece, "reach_lo", False) else moved_lo,
             hi if getattr(piece, "reach_hi", False) else moved_hi)
 
