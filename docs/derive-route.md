@@ -10,8 +10,9 @@ current reference for what that subset is.
 A `proven` is the mathematics, and only the mathematics. Whether the
 computation in float64 carries it is a second claim, `<name>[float]`,
 which every proof spawns and which runs the real code at the domain's
-corners and at sampled points; `route="derive:math_only"` asks for the
-proof alone. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)
+corners and at sampled points; `route="derive:math_only"` reports the
+mathematics line only, with the computation and its policies outside its
+remit. [The evidence ladder](evidence-ladder.md#a-proof-is-the-mathematics-float-is-the-computation)
 shows the two side by side.
 
 Lifting is honest, not clever: it never guesses at a closed form.

@@ -2289,6 +2289,10 @@ def _fmt_value(v) -> str:
 
 
 def _fmt_value_of(v) -> str:
+    from ._called_text import called_text, received
+    called = called_text(received(v))
+    if called is not None:
+        return called
     if isinstance(v, float):
         return f"{v:.6g}"
     if isinstance(v, complex):
@@ -2318,9 +2322,16 @@ def _fmt_coordinate(v) -> str:
         six-digit spelling when that reads back as the same float, and
         otherwise prints every digit it needs (`exact_float_text`), so
         a point read back from the record is the point that was
-        checked. Containers recurse; anything else is `_fmt_value`.
+        checked. Containers recurse; a pandas, polars or numpy argument
+    is written as the call received it (`_called_text`); anything else
+    is `_fmt_value`.
     """
+    from ._called_text import called_text, received
     from ._float_text import exact_float_text
+    called = called_text(received(v))
+    if called is not None:
+        # the argument as the call received it (`pandas.Series([0.0])`)
+        return called
     if isinstance(v, float):
         return exact_float_text(v, f"{v:.6g}")
     if isinstance(v, complex):
@@ -2351,8 +2362,10 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None,
             pairs = [(n, a) for n, a in pairs if n in shown]
         # a large vector or matrix prints its shape, a first row and a
         # count; the full value rides in the counterexample's arguments
+        from ._called_text import received_as
         return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
-                         else f"{n} = {_fmt_coordinate(a)}" for n, a in pairs)
+                         else f"{n} = {_fmt_coordinate(received_as(n, a))}"
+                         for n, a in pairs)
     return "(" + ", ".join(witness_text(a) or _fmt_coordinate(a) for a in args) + ")"
 
 

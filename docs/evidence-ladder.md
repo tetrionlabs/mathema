@@ -24,7 +24,7 @@ and it never lets a weaker result be reported as a stronger one.
 
 | Rung | Verdict | What established it |
 |---|---|---|
-| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and no float companion was asked for (`math_only`). |
+| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and the record reports that line alone, with the computation and what it does with a missing input outside its remit (`math_only`). |
 | `examine` | `proven` | A proof from the function's structure, with nothing lifted: a guard that rejects before the body runs, or a body that writes nothing outside itself. |
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
 | `derive:brute_force:within_float64` | `proven` | Every point of a finite domain was run and the claim held at each to within float64's precision: at a point with no exact value the float64 result misses the relation by at most 8 unit roundoffs of the value compared against, plus the function's relative condition number times the magnitude of the value it returned there, where both can be read, and a larger miss is not this rung: not counted, so `unknown`, or a `holds` on `derive:brute_force` under a declared tolerance; the record states the largest delta. A point lands here when it has no exact value, including when a decision the body takes on a float (a comparison, a branch, a rounding, a dict key) goes one way in the exact reading and the other in the function's own float run; where every decision goes the same way, the point stays exact. Nothing was left untried, which puts it above sampling; a difference smaller than the stated delta would not show, which puts it below an exact proof. |
@@ -94,7 +94,6 @@ derive           one        proven
 derive           one[float] falsified x = -1.7976931348623157e+308
 derive           missing[x] holds
 derive:math_only one        proven
-derive:math_only missing[x] holds
 ```
 
 `(x + 1) - x` is `1` for every real `x`, so all three proofs stand.
@@ -116,8 +115,10 @@ one acceptance, the witness kept, and the claim no longer counts as
 proven), to narrow the claim's domain knowingly (edit it, then accept
 it `--as superseded`), or to
 state the claim with `route="derive:math_only"` (`[derive:math_only]` in
-a docstring), which proves the mathematics alone, spawns no companion,
-and records the opt-out on the proof's row. Where the loss is inherent
+a docstring), which reports the mathematics line only, leaves the
+computation and its policies (what f does with a missing input) outside
+its remit, and records the opt-out on the proof's row, which is why the
+last block above has a single row. Where the loss is inherent
 in the inputs instead (no float64 computation could do better at the
 witness), the companion may be accepted alone as a discovery with
 `mathema accept`.

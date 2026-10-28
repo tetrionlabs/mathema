@@ -672,11 +672,13 @@ class _Realising:
             if name in bound.arguments:
                 bound.arguments[name] = as_element_type(bound.arguments[name],
                                                         element)
+        from .._called_text import file_realised
         for name, detection in self._bindings.items():
             if name in bound.arguments:
-                bound.arguments[name] = realise(bound.arguments[name],
-                                                detection,
+                drawn = bound.arguments[name]
+                bound.arguments[name] = realise(drawn, detection,
                                                 declared=self._declared.get(name))
+                file_realised(drawn, bound.arguments[name], name)
         for name, cls in self._enums.items():
             if name in bound.arguments:
                 bound.arguments[name] = as_enum_member(bound.arguments[name], cls)

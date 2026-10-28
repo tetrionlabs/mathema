@@ -44,14 +44,35 @@ def test_a_scalar_claim_leaving_out_a_defaulted_parameter_never_names_it():
     assert "k = " not in p.counterexample, p.counterexample
 
 
-def test_a_library_methods_defaulted_parameters_stay_out_of_its_witness():
+def _replayed_arguments(witness: str, namespace: dict) -> dict:
+    # `a = <value>, b = <value>: what f did`, each value read back as
+    # written
+    import re
+    point = witness.split(": f returned", 1)[0]
+    parts = re.split(r", (?=[A-Za-z_]\w* = )", point)
+    return {name: eval(value, dict(namespace))
+            for name, value in (part.split(" = ", 1) for part in parts)}
+
+
+def test_a_library_methods_witness_replays_as_written():
     pd = pytest.importorskip("pandas")
+    np = pytest.importorskip("numpy")
     (p,) = check_conjectures(pd.Series.corr, [claim(
         "for self in R^n, other in R^n, abs(f(self, other)) <= 1 + 1e-9",
         route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
+    # the defaulted parameters the claim leaves out ran at their defaults
     assert "method = " not in p.counterexample, p.counterexample
     assert "min_periods = " not in p.counterexample, p.counterexample
+    args = _replayed_arguments(p.counterexample, {
+        "pandas": pd, "numpy": np, "nan": math.nan, "inf": math.inf})
+    assert all(isinstance(v, pd.Series) for v in args.values()), args
+    printed = p.counterexample.split(": f returned ", 1)[1]
+    replayed = pd.Series.corr(**args)
+    if printed == "nan":
+        assert math.isnan(replayed), replayed
+    else:
+        assert replayed == float(printed), (replayed, printed)
 
 
 def test_a_library_functions_held_defaults_are_named_at_the_values_they_ran_at():
