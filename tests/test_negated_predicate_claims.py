@@ -22,7 +22,7 @@ def test_check_reports_the_negation_not_the_positive_claim():
     # 2x + 1 has a value at every real x, so the negation is false. A
     # negated universal is an existential, which no single point can
     # refute: the witness is the proof of the positive claim over the
-    # whole domain (ruling of 2026-10-26)
+    # whole domain
     p = negated[0]
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "is_defined" in (p.counterexample or ""), p.counterexample
