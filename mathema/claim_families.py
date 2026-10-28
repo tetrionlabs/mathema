@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 import math
 import numbers
 import random
+import sys
 from decimal import Decimal
 from fractions import Fraction
 
@@ -388,6 +389,17 @@ def _short_value(v: Any, argument: bool = True) -> str:
     return f"{shown[:40]}...{size}"
 
 
+def _written_inside(piece) -> tuple:
+    """An interval piece's ends, each written end (not a reach the
+    piece marks) moved to the nearest float inside the interval as
+    written (`_sampling._inside_as_written`)."""
+    from ._sampling import _inside_as_written
+    lo, hi = piece[0], piece[1]
+    moved_lo, moved_hi = _inside_as_written(lo, hi)
+    return (lo if getattr(piece, "reach_lo", False) else moved_lo,
+            hi if getattr(piece, "reach_hi", False) else moved_hi)
+
+
 def _interval_ends(bounds) -> "tuple[float, float] | None":
     """Intent:
         The finite interval hull of a sampling bound: a plain `(lo, hi)`
@@ -397,14 +409,14 @@ def _interval_ends(bounds) -> "tuple[float, float] | None":
         rectangle).
     """
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset):
-        return _finite_bounds(*bounds)
+        return _finite_bounds(*_written_inside(bounds))
     if isinstance(bounds, Domain) and bounds.pieces:
         spans = [p for p in bounds.pieces
                  if isinstance(p, tuple) and not isinstance(p, frozenset)
                  and not any(isinstance(v, complex) for v in p)]
         if len(spans) != len(bounds.pieces):
             return None
-        ends = [_finite_bounds(*p) for p in spans]
+        ends = [_finite_bounds(*_written_inside(p)) for p in spans]
         return min(lo for lo, _ in ends), max(hi for _, hi in ends)
     return None
 
@@ -4401,6 +4413,26 @@ def _compiled_links(links: list, params: list) -> list:
     return out
 
 
+def _divides_by_zero(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` reaches a numpy division
+        by zero: run again with numpy's divide error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(divide="raise"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4914,7 +4946,13 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if ok == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
-        if bare:
+        pole = (kind == "is_overflow_safe" and raised is None
+                and _divides_by_zero(fn, call_args, call_kwargs))
+        if pole:
+            cx = (f"{at}: f {what} at a pole (numpy reports a division by "
+                  f"zero), not an overflow; the computation has no finite "
+                  f"value there")
+        elif bare:
             cx = f"{at}: f {what}, {words['bare']}"
         elif where:
             cx = f"{at}: inside the stated region, f {what}"
@@ -5714,10 +5752,27 @@ def _tree_children(fn, facts, cj, domain: dict, names) -> list:
                 out.append(claim(f"{name}(f)", name=f"{name}[f]",
                                  route="best"))
             continue
-        for target in family.suggest_targets(fn, facts):
+        targets = list(family.suggest_targets(fn, facts))
+        if name == "is_overflow_safe" and "f" not in targets \
+                and _computes_numbers(facts):
+            # an overflow can come from any arithmetic, not only the
+            # powers and functions the suggestion gate names: the
+            # whole-function claim runs too
+            targets.append("f")
+        for target in targets:
             out.append(claim(f"{name}({target})",
                              name=f"{name}[{target}]", route="best"))
     return _over_parent(out, cj, domain)
+
+
+def _computes_numbers(facts) -> bool:
+    """Whether a function takes no parameter or a scalar number: one
+    whose float64 run can overflow on its own arithmetic."""
+    params = list(facts.params or [])
+    return not params or any(
+        facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string", "bool",
+                                         "table")
+        for p in params)
 
 
 def _tree_probe(names):
