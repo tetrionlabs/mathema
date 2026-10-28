@@ -63,6 +63,25 @@ _STRING_SPECIALS = [
 ]
 
 
+def _inside_as_written(lo, hi) -> tuple:
+    """Intent:
+        `(lo, hi)` with each finite float end moved inward to the
+        nearest float inside the interval read as written, each end the
+        shortest decimal that reads back as it (`repr`): the float
+        nearest 0.29 is 0.28999999999999998, below 29/100, so a lower
+        end of 0.29 becomes the next float up. An end that is not a
+        float, or whose float lies inside, is unchanged.
+    """
+    from fractions import Fraction
+    if isinstance(lo, float) and math.isfinite(lo) \
+            and Fraction(lo) < Fraction(repr(lo)):
+        lo = math.nextafter(lo, math.inf)
+    if isinstance(hi, float) and math.isfinite(hi) \
+            and Fraction(hi) > Fraction(repr(hi)):
+        hi = math.nextafter(hi, -math.inf)
+    return lo, hi
+
+
 def _finite_bounds(lo: float, hi: float) -> tuple[float, float]:
     if math.isinf(lo) and math.isinf(hi):
         return -_LARGE, _LARGE
@@ -78,11 +97,17 @@ def _reach_ends(bounds) -> tuple[float, float, bool, bool]:
         An interval's finite ends and which of them is unbounded: an
         infinite end reads as the number representation's reach, and
         an end a `ReachInterval` marks already holds its reach. A real domain
-        contains no infinity, so no end is ever infinite here.
+        contains no infinity, so no end is ever infinite here. A finite
+        written end lies inside the interval as written
+        (`_inside_as_written`).
     """
     lo, hi = float(bounds[0]), float(bounds[1])
     un_lo = math.isinf(lo) or bool(getattr(bounds, "reach_lo", False))
     un_hi = math.isinf(hi) or bool(getattr(bounds, "reach_hi", False))
+    # a written end, not a reach, lies inside the interval as written
+    moved_lo, moved_hi = _inside_as_written(lo, hi)
+    lo = lo if un_lo else moved_lo
+    hi = hi if un_hi else moved_hi
     reach = representation_reach()
     return (-reach if math.isinf(lo) else lo,
             reach if math.isinf(hi) else hi, un_lo, un_hi)

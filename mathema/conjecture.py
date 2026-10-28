@@ -290,6 +290,11 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 # an undeclared direction has no corner: its reach is
                 # visited by the sampler's far draws
                 return []
+            # a float end lies inside the interval as written
+            from ._sampling import _inside_as_written
+            moved_lo, moved_hi = _inside_as_written(lo, hi)
+            lo = lo if getattr(piece, "reach_lo", False) else moved_lo
+            hi = hi if getattr(piece, "reach_hi", False) else moved_hi
             if getattr(piece, "closed_lo", True):
                 ends.append(lo)
             if getattr(piece, "closed_hi", True):
@@ -7176,6 +7181,160 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     return _exact_relation(cj, exact[0], exact[1])
 
 
+#: the magnitude past which float64 rounds a value to an infinity
+#: (round to nearest: the largest float plus half its unit in the last
+#: place)
+_OVERFLOW_THRESHOLD = 2 ** 1024 - 2 ** 970
+
+
+def _within_an_ulp(left, right) -> bool:
+    """Intent:
+        Whether two compared sides lie within one unit in the last place
+        of the larger, so that moving a literal to a neighbouring double
+        could flip the comparison; True for sides that are not two real
+        numbers, which this does not measure.
+    """
+    import math as _math
+    from fractions import Fraction
+    if isinstance(left, bool) or isinstance(right, bool) \
+            or not isinstance(left, (int, float, Fraction)) \
+            or not isinstance(right, (int, float, Fraction)):
+        return True
+    try:
+        a, b = Fraction(left), Fraction(right)
+        unit = _math.ulp(max(abs(float(a)), abs(float(b))))
+    except (OverflowError, ValueError):
+        return True
+    return abs(a - b) <= Fraction(unit)
+
+
+def _overflowed_last(text, env) -> bool:
+    """Intent:
+        Whether the claim side written `text`, evaluated in `env`,
+        reaches its infinity at its last operation from finite operands:
+        through any `abs(...)`, unary `-` or `+` wrapping it, the
+        outermost operation whose operands are all finite numbers. False
+        when an operand is itself infinite (the overflow was in an inner
+        step), the side is a name or a literal, or it cannot be read.
+    """
+    import ast as _ast
+    import math as _math
+    if not text:
+        return False
+    try:
+        node = _ast.parse(str(text), mode="eval").body
+    except SyntaxError:
+        return False
+    while True:
+        if isinstance(node, _ast.UnaryOp) and isinstance(
+                node.op, (_ast.USub, _ast.UAdd)):
+            node = node.operand
+        elif isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name) \
+                and node.func.id == "abs" and len(node.args) == 1 \
+                and not node.keywords:
+            node = node.args[0]
+        else:
+            break
+    if isinstance(node, _ast.BinOp):
+        operands = [node.left, node.right]
+    elif isinstance(node, _ast.Call):
+        operands = [*node.args, *(k.value for k in node.keywords)]
+    else:
+        return False
+
+    def value(expr):
+        code = compile(_ast.Expression(body=expr), "<claim side>", "eval")
+        return eval(code, {"__builtins__": {}}, env)
+
+    for operand in operands:
+        try:
+            v = value(operand)
+        except Exception:
+            return False
+        try:
+            if not _math.isfinite(float(v)):
+                return False
+        except (TypeError, ValueError, OverflowError):
+            # a matrix or other value: finite when every entry is
+            try:
+                import numpy as _np
+                if not _np.all(_np.isfinite(_np.asarray(v, dtype=float))):
+                    return False
+            except Exception:
+                return False
+    return True
+
+
+def _overflow_reading(code_l, code_r, env, sides,
+                      texts=(None, None)) -> "tuple | None":
+    """Intent:
+        The sides of a draw with each infinity the claim's own float
+        arithmetic produced from finite values (a side holding one that
+        names no infinity itself: `inf`, `oo`, a constant bound to one)
+        read as what it stands for, a finite value of that sign at or
+        past float64's overflow threshold, 2**1024 - 2**970: against a
+        finite side below that threshold, or an infinity the claim
+        writes, that decides the relation by sign. This holds only when
+        the overflowing operation is the side's last one, up to `abs`
+        and a sign (`_overflowed_last`, reading the side's source in
+        `texts`): an overflow in an inner step leaves the side's value
+        unknown. None when the point is not evaluable: both sides
+        overflowed, the overflow is not the side's last operation, the
+        other side is an exact number at or past the threshold itself,
+        or a side is not a single number. `sides` unchanged when nothing
+        overflowed.
+    """
+    import math as _math
+    from fractions import Fraction
+
+    from .probing import holds_inf
+    sympy = sys.modules.get("sympy")
+
+    def infinite(value) -> bool:
+        if isinstance(value, float):
+            return _math.isinf(value)
+        return sympy is not None and isinstance(value, sympy.Basic) \
+            and value in (sympy.oo, -sympy.oo, sympy.zoo)
+
+    def writes_infinity(code) -> bool:
+        names = set()
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            names.update(c.co_names)
+            stack.extend(k for k in c.co_consts if hasattr(k, "co_names"))
+        return any(infinite(env.get(n)) or n in ("inf", "oo", "infinity")
+                   for n in names)
+
+    overflowed = [i for i, (code, side) in enumerate(((code_l, sides[0]),
+                                                      (code_r, sides[1])))
+                  if code is not None and holds_inf(side)
+                  and not writes_infinity(code)]
+    if not overflowed:
+        return sides
+    if len(overflowed) == 2:
+        return None
+    i = overflowed[0]
+    mine, other = sides[i], sides[1 - i]
+    if not isinstance(mine, float):
+        return None
+    if not _overflowed_last(texts[i], env):
+        return None
+    if isinstance(other, bool) or not isinstance(other, (int, float,
+                                                         Fraction)):
+        return None
+    if not (isinstance(other, float) and _math.isinf(other)):
+        try:
+            if abs(Fraction(other)) >= Fraction(_OVERFLOW_THRESHOLD):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    beyond = Fraction(2) ** 1024 * (1 if mine > 0 else -1)
+    out = list(sides)
+    out[i] = beyond
+    return tuple(out)
+
+
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
@@ -11986,6 +12145,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # allowance there and the arguments it happened at
     passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
+    # whether the claim writes a literal with more digits than a double
+    # carries, which its float evaluation reads rounded
+    long_literals = bool(overlong_literals(" ".join(
+        str(part) for part in (cj.lhs, cj.rhs,
+                               *(side for link in (cj.links or ())
+                                 for side in (link[0], link[2])))
+        if part)))
+    # the draws where the claim's own float arithmetic overflowed and
+    # its sides have no exact reading, and the first of them
+    overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
@@ -12609,6 +12778,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                          if call_inf[0] is not None else "f returned nan")
                       + ", and no value for a finite input")
                 break
+            if not call_raised[0] and long_literals and cj.tolerance is None:
+                # the claim's own side raised on its float evaluation,
+                # which reads a long literal rounded: decided on the
+                # number written where the sides can be read exactly
+                written = _exact_verdict(cj, code_l, code_r, env,
+                                         *_exact_calls())
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                if written is True:
+                    checked += 1
+                    continue
+                if written is False:
+                    checked += 1
+                    cx = (f"{_point_text(args)}: the claim is false here, "
+                          f"its own side read exactly as written")
+                    break
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
@@ -13038,8 +13223,52 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         call_raised[0] = call_nan[0] = call_inf[0] = None
         compare_l, compare_r = (exact_now if exact_now is not None
                                 else (lv, rv))
-        ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
+        # a claim writing a literal with more digits than a double
+        # carries is decided on the number written wherever its sides
+        # can be read exactly, whatever its float sides say: the parse
+        # rounded the literal, and a float gap or a no value may rest on
+        # that rounding alone
+        ll_decided = None
+        if long_literals and cj.tolerance is None:
+            ll_decided = _exact_verdict(cj, code_l, code_r, env,
+                                        *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if ll_decided is None and exact_now is None and call_inf[0] is None \
+                and (holds_inf(lv) or holds_inf(rv)):
+            # an infinity only the claim's own float arithmetic produced
+            # from finite values (no call returned one) stands for a
+            # value beyond every float: compared by its sign, or, where
+            # the other side may lie past float range too, the point is
+            # not evaluable and not counted
+            read = _overflow_reading(code_l, code_r, env, (lv, rv),
+                                     (cj.lhs, cj.rhs))
+            if read is None:
+                checked -= 1
+                overflowed += 1
+                if overflowed_at is None:
+                    overflowed_at = _point_text(args)
+                continue
+            compare_l, compare_r = read
+        # an overflowed side stands for a value at or past the overflow
+        # threshold, a bound rather than a value: the relation is decided
+        # by its sign alone, with no allowance
+        overflow_read = (compare_l is not lv and exact_now is None) or \
+            (compare_r is not rv and exact_now is None)
+        ok = relation_within(compare_l, compare_r, cj.relation,
+                             _exact_slack(cj) if overflow_read
+                             else cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
+        ll_false = ll_decided is False and ok is True
+        if ll_decided is not None:
+            ok = ll_decided
+        elif long_literals and cj.tolerance is None and ok is not None \
+                and _within_an_ulp(compare_l, compare_r):
+            # no exact reading, and the float sides within one unit in
+            # the last place, where the rounded literal could flip the
+            # decision: no evidence either way, not counted
+            checked -= 1
+            inconclusive += 1
+            continue
         hidden_by_float = exact_now is not None and ok is False and \
             relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
                             exact_inequality=cj.tolerance is None) is True
@@ -13075,7 +13304,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   and relation_within(compare_l, compare_r, cj.relation,
                                       _exact_slack(cj), 0.0, side)
                   is not True)
-        exactly_false = False
+        if ll_decided is not None:
+            # decided on the number written already
+            within = inside = False
+        exactly_false = ll_false
         if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
@@ -13311,6 +13543,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         f"within the tolerance and could not be evaluated in exact "
         f"arithmetic, so {'they are' if inconclusive != 1 else 'it is'} "
         f"not counted")
+    if overflowed:
+        note = (f"{note}; {overflowed} draw{'s' if overflowed != 1 else ''} "
+                f"where the claim's own arithmetic overflowed float64 and "
+                f"the other side may lie past float range too, first at "
+                f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
+                f"not counted").lstrip("; ")
     if checked == 0 and inconclusive:
         return Probe(cj.name, statement, "unknown", route="probe",
                      note=f"{note}; {inconclusive_words}".lstrip("; "),
