@@ -2530,6 +2530,17 @@ class _Exact(ast.NodeTransformer):
             return ast.copy_location(ast.Call(
                 func=ast.Name(_LITERAL, ast.Load()),
                 args=[ast.Constant(text)], keywords=[]), node)
+        if self.exact and isinstance(value, float) and math.isinf(value):
+            # a literal written past float range (`1e309`) parses to an
+            # infinity; as written it is the finite number it states
+            text = ast.get_source_segment(self.src, node)
+            try:
+                Fraction(text or "")
+            except (ValueError, ZeroDivisionError):
+                return node
+            return ast.copy_location(ast.Call(
+                func=ast.Name(_LITERAL, ast.Load()),
+                args=[ast.Constant(text)], keywords=[]), node)
         return node
 
     def _operator(self, op, left, right, at):

@@ -453,8 +453,10 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
         does not admit. `value` is `_REFUSED` when the function's own
         guard rejected the call or the call raised at a missing
         argument, and `_OVERFLOWED` when the float64 run overflowed (an
-        OverflowError, or an infinity returned): an overflow is the
-        computation's, never a shape claim's counterexample.
+        OverflowError, or an infinity returned that the body does not
+        write, `_infinity_is_written`): an overflow is the
+        computation's, never a shape claim's counterexample. An
+        infinity the body writes is no value.
 
     Raises:
         PremiseRejected: the call lies outside the claim's premises.
@@ -486,10 +488,36 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
                        "admit")
     scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
     if scalar and _is_nonfinite(value):
-        if not _no_overflow(value, None):
+        if not _no_overflow(value, None) \
+                and not _infinity_is_written(fn, facts, target, args, x):
             return _OVERFLOWED, None
         return value, f"returned {value_shown(value)}"
     return value, None
+
+
+def _infinity_is_written(fn, facts, target: str, args: list, x) -> bool:
+    """Intent:
+        Whether an infinity the call returned is the body's own (a
+        literal such as `math.inf` on the path taken), not an overflow:
+        the body read exactly (`_exact_body.exact_callee`) on the call's
+        exact arguments returns an infinity too. An overflow reads as a
+        finite value there; a body the reading cannot follow is not
+        shown to write one.
+    """
+    import math as _math
+
+    from ._exact_body import exact_callee
+    from ._exact_side import to_exact
+    try:
+        out = _call_with_target(exact_callee(fn), facts, target,
+                                [to_exact(a) for a in args], to_exact(x))
+    except Exception:
+        return False
+    if isinstance(out, float):
+        return _math.isinf(out)
+    sympy = sys.modules.get("sympy")
+    return sympy is not None and isinstance(out, sympy.Basic) \
+        and out in (sympy.oo, -sympy.oo)
 
 
 def _with_overflow_reason(result, target: str, overflowed: dict):
