@@ -101,8 +101,11 @@ def test_build_issue_record_explicit_claims_override_suggest_claims():
     cj = claim("for hour in [0, 15], f(hour) == hour", route="derive", name="clock_wraps")
     assert build_issue_record(clock_hour, [cj]) is None
     record = build_issue_record(clock_hour, [cj], include_falsified=True)
-    assert [c["name"] for c in record["claims"]] == ["clock_wraps"]
+    # the claim, and the policy row for hour's nan its record carries
+    # however early the claim falls (hour % 12 of nan is nan: propagates)
+    assert [c["name"] for c in record["claims"]] == ["clock_wraps", "missing[hour]"]
     assert record["claims"][0]["verdict"] == "falsified"
+    assert record["claims"][1]["verdict"] == "holds"
     assert record["meta"]["mathema.issue"]["failing_claims"] == ["clock_wraps"]
 
 
@@ -363,3 +366,15 @@ def test_diagnostic_report_known_key_set_guard(tmp_path):
     assert set(not_liftable) - {"liftable_note"} == expected
     assert not_liftable["operations_of_interest"] == {}
     assert not_liftable["domain_hazards"] == []
+
+
+def test_an_absence_against_the_declared_return_type_has_its_own_code():
+    from mathema.reason_codes import describe_code
+    entry = describe_code("implementation:absent")
+    assert entry is not None
+    assert entry["id"] == "5.9"
+    assert entry["meaning"] == (
+        "the call returned an absent value (None) from present inputs where "
+        "the declared return type promises one")
+    assert entry["hint"] == ("declare Optional[T] if None is an answer the "
+                             "function gives, or return a value")

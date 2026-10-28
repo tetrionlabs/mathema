@@ -127,11 +127,13 @@ print(record)
 mathema.Record(sharpe) · source, no side effects · form py:099872a2a5ee
   leverage_invariant  let s = mathema.f.scale_seq, let c be [0.1, 10.0], for
       returns in [-0.1, 0.1]^n : float, f(s(returns, c)) ~= f(returns)
-      falsified at returns = [0.0], c = 4.2636586502253655
+      falsified at returns = pandas.Series([0.0],
+      index=pandas.bdate_range('2020-01-01', periods=1)), c = 4.2636586502253655
     falsified  mathematics  let s = mathema.f.scale_seq, let c be [0.1, 10.0],
         for returns in [-0.1, 0.1]^n ⊂ ℝ, f(s(returns, c)) ~= f(returns)
-        counterexample returns = [0.0], c = 4.2636586502253655: the computation
-        returns NaN here (f returned nan)
+        counterexample returns = pandas.Series([0.0],
+        index=pandas.bdate_range('2020-01-01', periods=1)), c =
+        4.2636586502253655: the computation returns NaN here (f returned nan)
     falsified  policy       f([])   f(returns) returns nan at returns = []: no
         value for no data, and no empty policy is stated
                             possible fixes:
@@ -145,7 +147,9 @@ came from. The `mathematics` line is falsified at that point; the
 `policy` line covers the empty series, tried separately, and is
 falsified too: the Sharpe ratio of no returns is `nan`.
 
-Read the witness. `returns = [0.0]` is a series of one day. Its standard
+Read the witness. `returns = pandas.Series([0.0], index=pandas.bdate_range('2020-01-01', periods=1))`
+is a series of one day, written as the call received it, so pasting it
+back into Python replays the call. Its standard
 deviation with `ddof=1` is undefined, pandas returns NaN, and `sharpe`
 returns NaN with it. NaN is no value, so the claim has no value at that
 point, and a claim with no value at a point inside its domain is
@@ -174,16 +178,18 @@ mathema.Record(sharpe) · source, no side effects · form py:099872a2a5ee
   leverage_invariant  assuming std(returns, ddof=1) > 0, let s =
       mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n :
       float, f(s(returns, c)) ~= f(returns)   falsified at returns =
-      [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
-      -0.02405627255486045, -0.024056272554860453], c = 10
+      pandas.Series([-0.024056272554860453, -0.02405627255486045,
+      -0.024056272554860453, -0.02405627255486045, -0.024056272554860453],
+      index=pandas.bdate_range('2020-01-01', periods=5)), c = 10
     proven     mathematics  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
         ⊂ ℝ, f(s(returns, c)) ~= f(returns)
     falsified  computation  assuming std(returns, ddof=1) > 0, let s =
         mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n
         : float, f(s(returns, c)) ~= f(returns)   counterexample returns =
-        [-0.024056272554860453, -0.02405627255486045, -0.024056272554860453,
-        -0.02405627255486045, -0.024056272554860453], c = 10
+        pandas.Series([-0.024056272554860453, -0.02405627255486045,
+        -0.024056272554860453, -0.02405627255486045, -0.024056272554860453],
+        index=pandas.bdate_range('2020-01-01', periods=5)), c = 10
                             conditioning unknown here: derive cannot read f, so
                                 whether this loss is inherent is not decided
                             possible fixes:
@@ -287,10 +293,10 @@ print(record.probes[0].counterexample)
 <!-- example: pandas output -->
 ```text
 falsified
-returns = [-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998]; c = 4.72: 1164.6923472459507 vs -4.339350392263282
+returns = pandas.Series([-0.03634407021233441, 0.03649461504266754, 0.029797421768214698, -0.0999998], index=pandas.bdate_range('2020-01-01', periods=4)); c = 4.718034171081078: 1164.6923472459507 vs -4.339350392263282
 ```
 
-Four days of returns, each shifted up by 4.72: a Sharpe ratio of about
+Four days of returns, each shifted up by about 4.72: a Sharpe ratio of about
 1,165 against the original's -4.3. Sampling is seeded, so the same
 witness comes back on every run.
 

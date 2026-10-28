@@ -27,7 +27,7 @@ def test_a_bound_series_receiver_meets_the_premise_it_is_drawn_under():
     witness = p.counterexample or ""
     if p.verdict == "falsified":
         drawn = witness.split("self = ", 1)[1].split("], ", 1)[0]
-        assert drawn.startswith("[") and drawn.count(",") >= 2, witness
+        assert drawn.startswith("pandas.Series([") and drawn.count(",") >= 2, witness
     assert "Series([]" not in witness, witness
 
 

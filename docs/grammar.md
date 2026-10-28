@@ -546,7 +546,7 @@ that failed, and the fix is usually one of the ones below.
 | `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
-| `is_language_defined(s)` | no string input makes the function crash by accident: every member of the input's language reaches a branch that returns or raises on purpose | validate the input and raise the exception you mean |
+| `is_language_defined(s)` | over a language: every member gets an answer (a return or an exit status) and every non-member is refused; over a plain string: no input makes the function crash by accident, its exits and deliberate raises being its refusals, which the note lists | answer every member of the language; validate the rest and refuse it |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
 | `is_dimension_safe(f)` | every operand and the result have shapes that fit (no `matmul` of mismatched matrices, no result breaking its `Vec`/`Mat` marker) | fix the shapes, or guard them with `@enforce_dimensions` |
 | `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |

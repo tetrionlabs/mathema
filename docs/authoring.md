@@ -325,8 +325,11 @@ derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
 the exception, swept point by point and proven or falsified with the
-member. `is_language_defined(text)` keeps fuzzing a string
-parameter for accidental crashes as before.
+member. `is_language_defined(text)` over a language holds each member
+to an answer (a return or an exit status) and each non-member to a
+refusal; over a plain string it fuzzes the parameter, reads exits and
+deliberate or guarded raises as the function's refusals, which the
+note lists, and falsifies only on an accidental unguarded crash.
 
 Without the package installed, a claim over `L[unicode]` is not wrong,
 only unresolved: it is `unknown`, with a note saying it needs mathema-language,

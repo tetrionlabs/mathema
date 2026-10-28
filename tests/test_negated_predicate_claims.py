@@ -19,11 +19,14 @@ def test_check_reports_the_negation_not_the_positive_claim():
     rec = mathema.check(total, claims=["not is_defined(f)"])
     negated = [p for p in rec.probes if p.name == claim("not is_defined(f)").name]
     assert len(negated) == 1
-    # 2x + 1 has a value at every real x, so the negation is false; its
-    # exact verdict waits on whether a proof of the positive claim, with
-    # no executed witness, falsifies the negation
-    assert negated[0].verdict != "proven", (negated[0].verdict,
-                                            negated[0].note)
+    # 2x + 1 has a value at every real x, so the negation is false. A
+    # negated universal is an existential, which no single point can
+    # refute: the witness is the proof of the positive claim over the
+    # whole domain (ruling of 2026-10-26)
+    p = negated[0]
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "is_defined" in (p.counterexample or ""), p.counterexample
+    assert "defined on the whole domain" in p.counterexample, p.counterexample
 
 
 def test_a_declared_negation_round_trips():
