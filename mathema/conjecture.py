@@ -6416,8 +6416,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 _lifted_miss_unexecuted(ctx, fn, facts, probed)
                 if probed.verdict == "falsified"
                 and probed.route == "probe:lifted_numeric" else None)
+            # a negation proven at an executed point is a witness, as a
+            # falsification is
+            witnessed = probed.verdict == "falsified" or (
+                cj.negated and probed.verdict == "proven"
+                and (probed.route or "").startswith("probe"))
             if not_a_witness is not None or (cj.route == "derive"
-                                             and probed.verdict != "falsified"):
+                                             and not witnessed):
                 ctx.derive_undecided = stashed
                 probed = _derive_alone(ctx, raw if raw is not None else probed,
                                        not_a_witness=not_a_witness)
@@ -7032,7 +7037,9 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{cj.relation}(f) covers the numeric "
                           f"parameters, and this function has none")
-    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]")
+    # a negation is the positive over the whole function, inverted: each
+    # parameter's claim is the positive one
+    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]", negated=False)
                for p in numeric]
     probes = check_conjectures(fn, sub_cjs, domain=domain, trials=trials,
                                trials_downscale=trials_scale, facts=facts,
@@ -7045,7 +7052,45 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
                    if p.verdict == "falsified" and "[" in p.name), None)
         if at:
             combined.note = f"is_missing_safe(f) is false: see {at}."
+    if cj.negated:
+        combined = _negation_of(combined)
+        combined.statement = f"not {statement.strip()}"
     return combined
+
+
+def _negation_of(row: "Probe") -> "Probe":
+    """Intent:
+        The row of a negated predicate from the row its positive claim
+        got. The negation states that the positive fails somewhere: a
+        point where the positive failed when the code ran there is a
+        witness, and the negation is proven; a proven positive
+        falsifies the negation, its proof the witness; a positive that
+        held at every sampled point says nothing about whether it fails
+        elsewhere, so the negation is unknown. Any other verdict is
+        kept.
+    """
+    def _replace(old, **changes):
+        new = _dc_replace(old, **changes)
+        if hasattr(old, "_caveat"):
+            new._caveat = old._caveat
+        return new
+    if row.verdict == "falsified":
+        return _replace(
+            row, verdict="proven", counterexample=None, stratum=None,
+            sketch=(f"the positive claim fails at {row.counterexample}, a "
+                    f"point the code ran at, which proves its negation"))
+    if row.verdict == "proven":
+        return _replace(
+            row, verdict="falsified",
+            counterexample=("the positive claim is proven"
+                            + (f": {row.sketch}" if row.sketch else "")))
+    if row.verdict == "holds":
+        return _replace(
+            row, verdict="unknown",
+            note=(f"{row.note or ''}; the positive claim held at every "
+                  f"sampled point, which says nothing about whether it "
+                  f"fails elsewhere").lstrip("; "))
+    return row
 
 
 #: why derive leaves a function's raise statements to the probe
@@ -11729,9 +11774,11 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           f"number written".lstrip("; "))
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     try:
-        return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
+        row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
+    # a negated predicate's probe ran the positive claim
+    return _negation_of(row) if ctx.cj.negated else row
 
 
 def _literals_beyond_float(cj) -> list:
