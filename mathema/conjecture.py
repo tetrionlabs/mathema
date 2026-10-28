@@ -7444,6 +7444,23 @@ def _magnitude_corner(args) -> bool:
                for v in values)
 
 
+def _as_written_words(cj, code_l, code_r, env, calls) -> str:
+    """Intent:
+        The words a witness carries when a claim with a literal longer
+        than a double is false read as written while its float64 sides
+        pass: that the sides were in float64, then the sides read as
+        written and the relation between them, false; or, where the
+        sides cannot be shown, that it is false read as written.
+    """
+    from ._brute_force import _exact_text
+    sides = _exact_point_sides(code_l, code_r, env, *calls)({})
+    if sides is None:
+        return " in float64, and false with its literals read as written"
+    left, right = (_exact_text(v) for v in sides)
+    return (f" in float64; read as written the sides are {left} and "
+            f"{right}, and {left} {cj.relation} {right} is false")
+
+
 def _exact_point_sides(code_l, code_r, env, fn, bound_funcs):
     """A function of a point (`{param: exact value}`) evaluating the
     claim's sides with `fn` and `bound_funcs` (the functions as the exact
@@ -13460,7 +13477,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
-            if exactly_false:
+            if ll_false and not as_arrays:
+                # the claim's long literal, read as written, decides
+                cx += _as_written_words(cj, code_l, code_r, env,
+                                        _exact_calls())
+            elif exactly_false:
                 cx += (", within the float tolerance but false here in "
                        "exact arithmetic")
             elif hidden_by_float:

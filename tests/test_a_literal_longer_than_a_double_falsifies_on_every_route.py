@@ -83,3 +83,16 @@ def test_a_true_claim_on_a_rounded_literal_is_not_falsified(route, law):
     (p,) = check_conjectures(ident, [claim(law, route=route)])
     assert p.verdict in ("proven", "holds"), (route, p.verdict,
                                               p.counterexample)
+
+
+def test_a_witness_across_a_wide_float_gap_states_both_readings():
+    # in float64 the left side is 0.0 (the literal reads 1.0), within no
+    # tolerance of 0.5; read as written it is 1, and 1 <= 0.5 is false
+    (p,) = check_conjectures(ident, [claim(
+        "for x in [0, 1], f(x) * (1.00000000000000000001 - 1) * 1e20 <= 0.5",
+        route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "within the float tolerance" not in p.counterexample, p.counterexample
+    assert ("x = 1: 0.0 vs 0.5 in float64; read as written the sides are "
+            "1 and 1/2, and 1 <= 1/2 is false") in p.counterexample, \
+        p.counterexample
