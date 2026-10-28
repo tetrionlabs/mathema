@@ -11762,16 +11762,6 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         a hole of the runtime its containers are realised in (see
         `_null_is_a_hole`).
     """
-    beyond = _literals_beyond_float(ctx.cj)
-    if beyond:
-        # the probe compares in float64, where such a literal is an
-        # infinity, not the number the claim writes
-        cj = ctx.cj
-        return Probe(cj.name, ctx.statement, "unknown", route="probe",
-                     note=f"{ctx.note}; the literal {', '.join(beyond)} is "
-                          f"beyond float64, which reads it as an infinity, "
-                          f"so the probe compares no point against the "
-                          f"number written".lstrip("; "))
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     try:
         row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
@@ -12286,11 +12276,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     inconclusive = 0
     # whether the claim writes a literal with more digits than a double
     # carries, which its float evaluation reads rounded
+    # a literal float64 cannot carry (more digits than a double, or past
+    # its range, where it reads as an infinity): each draw is decided on
+    # the number as written, exactly
     long_literals = bool(overlong_literals(" ".join(
         str(part) for part in (cj.lhs, cj.rhs,
                                *(side for link in (cj.links or ())
                                  for side in (link[0], link[2])))
-        if part)))
+        if part))) or bool(_literals_beyond_float(cj))
     # the draws where the claim's own float arithmetic overflowed and
     # its sides have no exact reading, and the first of them
     overflowed, overflowed_at = 0, None
