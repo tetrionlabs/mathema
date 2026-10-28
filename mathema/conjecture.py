@@ -13482,6 +13482,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                        else abs(lv - rv))
                 if gap > relative_absorbed:
                     relative_absorbed, relative_at = gap, _point_text(args)
+        if derive_falsifier and ok is True and cj.tolerance is not None \
+                and not isinstance(cj.tolerance, ToleranceKind) \
+                and relation_within(compare_l, compare_r, cj.relation,
+                                    _exact_slack(cj), 0.0, side) is not True:
+            # a declared tolerance binds the computation line only: on the
+            # derive route a draw it alone admits is decided again on the
+            # body read exactly, and false there falsifies the mathematics
+            exact_ok = _exact_verdict(cj, code_l, code_r, env,
+                                      *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if exact_ok is False:
+                ok, exactly_false = False, True
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
