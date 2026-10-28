@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 import math
 import numbers
+import inspect
 import random
 import sys
 from decimal import Decimal
@@ -2420,6 +2421,19 @@ def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _plain_str_parameter(fn, target: str) -> bool:
+    """Intent:
+        Whether `fn`'s parameter `target` is annotated plain `str` (or
+        the text `"str"`), the annotation mathema reads as every string,
+        rather than a language marker or an adaptor's type.
+    """
+    try:
+        annotation = inspect.signature(fn).parameters[target].annotation
+    except (KeyError, TypeError, ValueError):
+        return False
+    return annotation is str or annotation == "str"
+
+
 #: the refused strings a record of an unbound is_language_defined names
 _REFUSALS_SHOWN = 6
 
@@ -2456,9 +2470,17 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     target = cj.lhs
     bound = domain.get(target)
-    language_bound = getattr(bound, "base_type", None) == "L"
+    # a language the claim binds, or one the parameter's annotation
+    # names, is the declared domain; the strings mathema reads a plain
+    # `str` annotation as (every string) are no declaration, and leave
+    # the function's refusals to define its language
+    language_bound = (getattr(bound, "base_type", None) == "L"
+                      and (target in (cj.domain or {})
+                           or not _plain_str_parameter(fn, target)))
     if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
+    if not language_bound and getattr(bound, "base_type", None) == "L":
+        bound = None
     # with no body there is no guard to read: an accidental-type raise
     # is then neither a declared rejection nor a crash, and the run is
     # unknown with the reason
