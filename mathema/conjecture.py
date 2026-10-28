@@ -6400,8 +6400,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # claim unknown with derive's reason (`_derive_alone`).
             from .runtime_types._receivers import ReceiverRefused
             import copy
-            stashed = (copy.deepcopy(ctx.derive_undecided)
-                       if cj.route == "derive" else None)
+            stashed = copy.deepcopy(ctx.derive_undecided)
             raw = None
             try:
                 raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
@@ -6411,12 +6410,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                note=f"{ctx.note}; no evaluable inputs: "
                                     f"{refused}".lstrip("; "),
                                meta={"mathema.probe_gap": "input-synthesis"})
+            # a miss of derive's reconstruction falsifies, on every route,
+            # only where the code run at its point fails the claim exactly
             not_a_witness = (
                 _lifted_miss_unexecuted(ctx, fn, facts, probed)
-                if cj.route == "derive" and probed.verdict == "falsified"
+                if probed.verdict == "falsified"
                 and probed.route == "probe:lifted_numeric" else None)
-            if cj.route == "derive" and (probed.verdict != "falsified"
-                                         or not_a_witness is not None):
+            if not_a_witness is not None or (cj.route == "derive"
+                                             and probed.verdict != "falsified"):
                 ctx.derive_undecided = stashed
                 probed = _derive_alone(ctx, raw if raw is not None else probed,
                                        not_a_witness=not_a_witness)
@@ -13162,11 +13163,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # with no exact reading is an overflow or a pole the exact reading
         # cannot tell apart, and so no counterexample to the mathematics;
         # a nan or a hole there is no value in any reading, and stays one
-        overflowed = (derive_falsifier and exact_at is None
-                      and call_inf[0] is not None and call_nan[0] is None
-                      and call_hole[0] is None)
+        derive_overflow = (derive_falsifier and exact_at is None
+                           and call_inf[0] is not None and call_nan[0] is None
+                           and call_hole[0] is None)
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and (exact_at is True or overflowed):
+                and (exact_at is True or derive_overflow):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the

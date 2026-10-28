@@ -100,20 +100,20 @@ def test_true_derivative_claim_gathers_lifted_numeric_evidence():
 def test_unclosable_integral_gets_quad_backed_evidence():
     # sympy has no closed form for this integrand, so the intermediate
     # stays an Integral; the quad backend (sympy evalf -> mpmath
-    # quadrature, no new dependency) supplies executed evidence. The
-    # FALSE bound falsifies with a genuine numerically-integrated
-    # witness, which exercises the whole pipeline in one adjudication.
+    # quadrature, no new dependency) samples it. The bound is FALSE (the
+    # integrand is at most e, so the integral over [0, a], a <= 2, is at
+    # most 2e < 10), and the quadrature finds the miss on derive's
+    # reconstruction; on every route that miss falsifies only where the
+    # code, run at its point, fails the claim, and the code cannot
+    # evaluate an integral, so the point is no witness: unknown, the
+    # reconstruction's miss named in the note
     def carrier(a):
         return a
-    (p,) = check_conjectures(carrier, [claim(
-        "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10")])
-    assert p.verdict == "falsified"
-    assert p.route == "probe:lifted_numeric"
-    assert p.counterexample
-    # on route derive the reconstruction's miss is no witness: the code
-    # cannot evaluate the integral at that point
-    (p,) = check_conjectures(carrier, [claim(
-        "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10",
-        route="derive")])
-    assert (p.verdict, p.route) == ("unknown", "derive")
-    assert "is no witness" in p.note
+    for route in ("best", "derive"):
+        (p,) = check_conjectures(carrier, [claim(
+            "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10",
+            route=route)])
+        assert (p.verdict, p.route) == ("unknown", "derive"), (route, p.verdict,
+                                                               p.route, p.note)
+        assert "derive's reconstruction misses the claim" in p.note
+        assert "is no witness" in p.note

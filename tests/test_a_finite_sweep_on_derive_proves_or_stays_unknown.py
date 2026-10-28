@@ -41,3 +41,38 @@ def test_an_inexact_sweep_stays_unknown_on_derive():
     # the default route keeps the sweep's holds
     (q,) = check_conjectures(offset_read, [claim(law, tolerance=1e-9)])
     assert (q.verdict, q.route) == ("holds", "derive:brute_force")
+
+
+pd = None
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover
+    pass
+
+
+def exposure_percent(active: int, periods: int) -> int:
+    """Whole percent of periods with exposure; integer arithmetic only."""
+    if periods <= 0 or pd.isna(active):
+        return 0
+    return active * 100 // periods
+
+
+def test_a_sweep_over_a_function_not_shown_pure_says_what_would_prove_it():
+    # every point passes; the examination cannot read pandas.isna, and
+    # the exact reading cannot follow that call either, so the sweep is
+    # no proof: holds on the default route, unknown on derive (inexact),
+    # each saying what would make the sweep a proof
+    import pytest
+    if pd is None:
+        pytest.skip("pandas is not installed")
+    law = ("for active in [0, 20] : int, periods in [1, 20] : int, "
+           "assuming active <= periods, f(active, periods) <= 100 * active / periods")
+    (p,) = check_conjectures(exposure_percent, [claim(law)])
+    assert (p.verdict, p.route) == ("holds", "derive:brute_force"), (p.verdict,
+                                                                     p.note)
+    (q,) = check_conjectures(exposure_percent, [claim(law, route="derive")])
+    assert (q.verdict, q.route) == ("unknown", "derive"), (q.verdict, q.note)
+    for row in (p, q):
+        assert "proven needs the function to be shown pure" in row.note
+        assert "pandas.isna" in row.note
+        assert "would make the sweep a proof" in row.note
