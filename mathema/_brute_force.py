@@ -427,6 +427,27 @@ class _Kappa:
         return kappa, returned
 
 
+def _a_side_is_f(cj) -> bool:
+    """Intent:
+        Whether a side of the claim is a bare call of f (`f(x)`), whose
+        value is f's own: the condition number times the magnitude f
+        returned then measures that side in its own units. A side that
+        scales or combines f's value (`f(x) / 1e10`) is in other units.
+    """
+    import ast
+    for text in (getattr(cj, "lhs", None), getattr(cj, "rhs", None)):
+        if not text:
+            continue
+        try:
+            node = ast.parse(str(text), mode="eval").body
+        except SyntaxError:
+            continue
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "f":
+            return True
+    return False
+
+
 def _float64_at(cj, computed, point: dict,
                 kappa: "_Kappa | None" = None,
                 returned=None) -> "tuple | None":
@@ -437,8 +458,9 @@ def _float64_at(cj, computed, point: dict,
         `PRECISION_FACTOR` unit roundoffs of the value compared against
         (the claim's own side where exactly one side runs no code), plus
         the function's relative condition number times the magnitude of
-        the value it returned there, where the miss needs it and `kappa`
-        reads both; that precision's reading in words; and `detail`,
+        the value it returned there, where the miss needs it, a side is
+        f's own value (`_a_side_is_f`) and `kappa` reads both; that
+        precision's reading in words; and `detail`,
         the record of it (`bound`, `factor`, `magnitude`, `kappa` and
         `returned`, the last two None where not read). With
         `returned`, the claim's sides on exact values the code returned
@@ -467,7 +489,7 @@ def _float64_at(cj, computed, point: dict,
     words = f"{PRECISION_FACTOR} unit roundoffs of {short(magnitude)}"
     detail = {"bound": bound, "factor": PRECISION_FACTOR,
               "magnitude": magnitude, "kappa": None, "returned": None}
-    if miss > bound and kappa is not None:
+    if miss > bound and kappa is not None and _a_side_is_f(cj):
         read = kappa.at(point, magnitude)
         if read is not None:
             k, returned = read
