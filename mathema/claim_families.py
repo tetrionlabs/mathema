@@ -3472,8 +3472,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         pairs). Only scalar parameters are searched, and only a
         function whose signature binds them. With `working`, a call the
         function's own guard rejects (`deliberate_raise`) is outside its
-        working domain and no trial. The whole search runs
-        under the fast wall-clock cap; a cap that fires ends it.
+        working domain and no trial. A call that overflows (other than
+        by a raise the body writes), or returns an infinity or a nan
+        `_nonfinite_cause` does not read as no value, is no trial
+        either. The whole search runs under the fast
+        wall-clock cap; a cap that fires ends it.
     """
     import itertools
 
@@ -3576,13 +3579,23 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     # the function's own guard: outside its working
                     # domain, no trial
                     continue
+                out, raised = None, exc
                 returned = False
                 from .authoring import RangeError
                 caught["range"] = isinstance(exc, RangeError)
             else:
+                raised = None
                 caught["range"] = False
                 returned = _has_value(out, None) and not (
                     real_only and isinstance(out, complex) and out.imag != 0)
+            if not returned and (
+                    (raised is None and _holds_infinity_or_nan(out))
+                    or (raised is not None and not _no_overflow(None, raised)
+                        and not deliberate_raise(raised, fn))) \
+                    and _nonfinite_cause(fn, out, raised, (), call) != "no value":
+                # an overflow of the computation, or an infinity or a nan
+                # nothing tells from one: the point shows no missing value
+                continue
             if returned != claimed:
                 return call
         return None
@@ -4551,20 +4564,22 @@ def _exact_reading(fn, args, kwargs) -> "str | None":
         "overflow" when the reading's value is exact and finite (an int,
         a Fraction, a finite sympy real); "no value" when the body's own
         mathematics has none there (the reading raises ZeroDivisionError
-        or ValueError, gives a sympy infinity or nan, or returns an
-        infinity the body's code writes, `_code_writes_infinity`); None
-        otherwise: the reading cannot follow the body (`NotExact`), its
-        own machinery fails (any other raise), or it returns a float the
-        twin computed, finite or not.
+        or ValueError, gives a sympy infinity or nan, or returns a float
+        infinity or nan on a run that executed a write of one,
+        `_run_writing_nonfinite`); None otherwise: the reading cannot
+        follow the body (`NotExact`), its own machinery fails (any other
+        raise), or it returns a float the twin computed, finite or not.
     """
     from fractions import Fraction
 
     from . import _exact_body
     from ._exact_side import to_exact
+    twin = _exact_body.exact_callee(fn)
     try:
-        out = _exact_body.exact_callee(fn)(
-            *[to_exact(a) for a in args],
-            **{k: to_exact(v) for k, v in kwargs.items()})
+        exact_args = [to_exact(a) for a in args]
+        exact_kwargs = {k: to_exact(v) for k, v in kwargs.items()}
+        out, written = _run_writing_nonfinite(
+            lambda: twin(*exact_args, **exact_kwargs))
     except _exact_body.NotExact:
         return None
     except (ZeroDivisionError, ValueError):
@@ -4576,7 +4591,7 @@ def _exact_reading(fn, args, kwargs) -> "str | None":
     if isinstance(out, (int, Fraction)):
         return "overflow"
     if isinstance(out, float):
-        if not math.isfinite(out) and _code_writes_infinity(fn):
+        if not math.isfinite(out) and written:
             return "no value"
         return None
     sympy = sys.modules.get("sympy")
@@ -4588,42 +4603,119 @@ def _exact_reading(fn, args, kwargs) -> "str | None":
     return None
 
 
-def _code_writes_infinity(fn, depth: int = 3) -> bool:
-    """Intent:
-        Whether `fn`'s code, or the code of a function it names from its
-        module (to `depth` levels), writes an infinity: a name `inf` or
-        `infinity`, a global holding an infinity, or the text `"inf"` /
-        `"infinity"` a `float(...)` call reads.
-    """
-    seen: set = set()
-
-    def writes(f, level: int) -> bool:
-        code = getattr(f, "__code__", None)
-        if code is None or id(code) in seen or level > depth:
-            return False
-        seen.add(id(code))
-        found = getattr(f, "__globals__", {}) or {}
-        stack = [code]
-        while stack:
-            c = stack.pop()
-            for name in c.co_names:
-                if name in ("inf", "infinity"):
-                    return True
-                value = found.get(name)
-                if isinstance(value, float) and math.isinf(value):
-                    return True
-                if callable(value) and writes(value, level + 1):
-                    return True
-            for const in c.co_consts:
-                if hasattr(const, "co_names"):
-                    stack.append(const)
-                elif isinstance(const, str) and const.strip().lower().lstrip(
-                        "+-") in ("inf", "infinity"):
-                    return True
-                elif isinstance(const, float) and math.isinf(const):
-                    return True
+def _writes_nonfinite(instruction, names: dict) -> bool:
+    """Whether a bytecode instruction writes an infinity or a nan: it
+    loads a name or attribute `inf`, `infinity` or `nan` (any case), a
+    global of `names` holding a float infinity or nan, such a constant,
+    or the text `"inf"`, `"infinity"` or `"nan"`."""
+    op, value = instruction.opname, instruction.argval
+    if op in ("LOAD_ATTR", "LOAD_METHOD", "LOAD_GLOBAL", "LOAD_NAME",
+              "LOAD_DEREF", "LOAD_CLASSDEREF", "LOAD_FROM_DICT_OR_GLOBALS"):
+        if isinstance(value, str) and value.lower() in _NONFINITE_WORDS:
+            return True
+        if op != "LOAD_ATTR" and isinstance(value, str):
+            held = names.get(value)
+            return isinstance(held, float) and not math.isfinite(held)
         return False
-    return writes(fn, 0)
+    if op == "LOAD_CONST":
+        if isinstance(value, float):
+            return not math.isfinite(value)
+        if isinstance(value, str):
+            return value.strip().lower().lstrip("+-") in _NONFINITE_WORDS
+    return False
+
+
+#: the names and texts that write an infinity or a nan
+_NONFINITE_WORDS = ("inf", "infinity", "nan")
+
+
+def _run_writing_nonfinite(call) -> "tuple[Any, bool]":
+    """Intent:
+        `call()`'s result, with whether the run executed an instruction
+        that writes an infinity or a nan (`_writes_nonfinite`) in a body the exact
+        reading compiled (a file of `_exact_body._READ_FILES`): the
+        branch taken writes one, not merely the code somewhere.
+
+    Raises:
+        Whatever `call()` raises.
+
+    Notes:
+        Instructions are watched through `sys.monitoring` where Python
+        has it (3.12 on), else through opcode tracing (`sys.settrace`).
+        With every monitoring tool id taken, no write is seen.
+    """
+    import dis
+
+    from . import _exact_body
+    written = [False]
+    marks: dict = {}
+
+    def marked(code, names) -> set:
+        if code not in marks:
+            filename = code.co_filename
+            marks[code] = set() if (
+                filename not in _exact_body._READ_FILES
+                or filename == _exact_body.__file__) else {
+                    i.offset for i in dis.get_instructions(code)
+                    if _writes_nonfinite(i, names)}
+        return marks[code]
+
+    monitoring = getattr(sys, "monitoring", None)
+    if monitoring is None:
+        def local(frame, event, arg):
+            if event == "opcode" and frame.f_lasti in marks[frame.f_code]:
+                written[0] = True
+            return local
+
+        def tracer(frame, event, arg):
+            if not marked(frame.f_code, frame.f_globals):
+                return None
+            frame.f_trace_opcodes = True
+            return local
+
+        before = sys.gettrace()
+        sys.settrace(tracer)
+        try:
+            out = call()
+        finally:
+            sys.settrace(before)
+        return out, written[0]
+
+    events = monitoring.events
+    tool = None
+    for candidate in range(6):
+        try:
+            monitoring.use_tool_id(candidate, "mathema.written_nonfinite")
+        except ValueError:
+            continue
+        tool = candidate
+        break
+    if tool is None:
+        return call(), False
+    watched: list = []
+
+    def started(code, offset):
+        if marked(code, sys._getframe(1).f_globals):
+            monitoring.set_local_events(tool, code, events.INSTRUCTION)
+            watched.append(code)
+
+    def stepped(code, offset):
+        if offset in marks.get(code, ()):
+            written[0] = True
+
+    monitoring.register_callback(tool, events.PY_START, started)
+    monitoring.register_callback(tool, events.INSTRUCTION, stepped)
+    monitoring.set_events(tool, events.PY_START)
+    try:
+        out = call()
+    finally:
+        monitoring.set_events(tool, 0)
+        for code in watched:
+            monitoring.set_local_events(tool, code, 0)
+        monitoring.register_callback(tool, events.PY_START, None)
+        monitoring.register_callback(tool, events.INSTRUCTION, None)
+        monitoring.free_tool_id(tool)
+    return out, written[0]
 
 
 def _numpy_overflows(fn, args, kwargs) -> bool:
