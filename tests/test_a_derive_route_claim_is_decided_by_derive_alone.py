@@ -188,3 +188,36 @@ def test_a_float_overflow_where_the_claim_holds_exactly_is_no_counterexample():
     # overflow falsifies it
     (q,) = check_conjectures(doubled_until, [claim(text, name="c")])
     assert q.verdict == "falsified"
+
+
+np = pytest.importorskip("numpy")
+
+
+def numpy_reciprocal(x: float) -> float:
+    return np.divide(1.0, x)
+
+
+def numpy_scaled(x: float) -> float:
+    i = 0
+    while i < 1:
+        i += 1
+    return float(np.float64(x) * np.float64(1e308))
+
+
+def test_an_infinity_at_a_pole_numpy_reports_falsifies_on_derive():
+    # 1/x has no value at x = 0, and numpy's divide flag says so
+    with np.errstate(divide="ignore"):
+        (p,) = check_conjectures(numpy_reciprocal, [
+            claim("for x in [-1, 1], f(x) <= 1e308", route="derive")])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+    assert "x = 0" in (p.counterexample or ""), p.counterexample
+
+
+def test_an_infinity_numpy_reports_as_an_overflow_is_a_computation_finding():
+    # x * 1e308 is finite at every real x; past x = 1.8 the float run
+    # overflows to inf, and numpy's overflow flag says so
+    with np.errstate(over="ignore", invalid="ignore"):
+        (p,) = check_conjectures(numpy_scaled, [
+            claim("for x in [0, 10], f(x) - f(x) == 0", route="derive")])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)
+    assert "overflow" in (p.note or ""), p.note
