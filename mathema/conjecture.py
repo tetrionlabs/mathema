@@ -7085,11 +7085,12 @@ def _negation_of(row: "Probe") -> "Probe":
             counterexample=("the positive claim is proven"
                             + (f": {row.sketch}" if row.sketch else "")))
     if row.verdict == "holds":
+        said = ("the positive claim held at every sampled point, which "
+                "says nothing about whether it fails elsewhere")
         return _replace(
             row, verdict="unknown",
-            note=(f"{row.note or ''}; the positive claim held at every "
-                  f"sampled point, which says nothing about whether it "
-                  f"fails elsewhere").lstrip("; "))
+            sketch=f"{said} ({row.note})" if row.note else said,
+            note=f"{row.note or ''}; {said}".lstrip("; "))
     return row
 
 

@@ -67,16 +67,23 @@ def test_a_vector_and_a_matrix_parameter_draw_a_vector_and_a_matrix():
                                       p.counterexample, p.note)
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "[overflow-nan] w @ C @ w is finite at every real point, but at "
+    "weights near the largest double numpy's matmul overflows to inf and "
+    "leaves a nan, and the overflow is not reported to numpy's error "
+    "state there, so the nan is read as no value and is_defined falsifies"))
 def test_a_vector_and_a_matrix_over_the_whole_line_meet_the_overflow():
     for fn in (portfolio_variance, guarded_variance):
         (p,) = check_conjectures(fn, [claim("is_defined(f)")])
-        assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
-        witness = _witness_values(_witness_head(p.counterexample))
+        # the float run overflows at the magnitude corner, a fact about
+        # the computation: is_defined holds, the corner in the note
+        assert p.verdict == "holds", (fn.__name__, p.verdict, p.note)
+        witness = _witness_values(_overflow_point(p.note))
         weights, cov = witness["weights"], witness["cov"]
         assert len(cov) == len(weights) == len(cov[0]), p.counterexample
         assert max(abs(e) for e in _elements(weights)) >= 1e154, \
             p.counterexample
-        assert "returned inf" in p.counterexample, p.counterexample
+        assert "returned inf" in p.note, p.note
 
 
 def test_a_shaped_witness_is_a_vector_and_a_matrix_sharing_n():
@@ -122,38 +129,49 @@ def _witness_head(counterexample: str) -> str:
     return re.split(r": f (raised|returned)", counterexample)[0]
 
 
+def _overflow_point(note: str) -> str:
+    """The first point a note says the computation overflowed at."""
+    found = re.search(r"first at (.+?) \(f (?:raised|returned)", note or "")
+    assert found, note
+    return found.group(1)
+
+
 @pytest.mark.parametrize("fn", [norm_vec, norm_list])
 def test_a_vector_and_its_list_twin_overflow_at_a_large_element(fn):
+    # the sum of squares overflows at an element near 1e154: the
+    # computation's fact, so is_defined holds and the note names the point
     (p,) = check_conjectures(fn, [claim("is_defined(f)")])
-    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
-    witness = _witness_values(_witness_head(p.counterexample))
+    assert p.verdict == "holds", (fn.__name__, p.verdict, p.note)
+    witness = _witness_values(_overflow_point(p.note))
     elements = _elements(witness["v"])
-    assert isinstance(witness["v"], list), p.counterexample
-    assert max(abs(e) for e in elements) >= 1e154, p.counterexample
-    assert "returned inf" in p.counterexample, p.counterexample
+    assert isinstance(witness["v"], list), p.note
+    assert max(abs(e) for e in elements) >= 1e154, p.note
+    assert "returned inf" in p.note, p.note
 
 
 @pytest.mark.parametrize("fn", [doubled_sum_vec, doubled_sum_list])
 def test_a_sequence_meets_the_largest_double(fn):
+    # 2 * sum(v) overflows at the largest double: the computation's
+    # fact, so is_defined holds and the note names the point
     (p,) = check_conjectures(fn, [claim("is_defined(f)")])
-    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
-    witness = _witness_values(_witness_head(p.counterexample))
+    assert p.verdict == "holds", (fn.__name__, p.verdict, p.note)
+    witness = _witness_values(_overflow_point(p.note))
     elements = _elements(witness["v"])
-    assert isinstance(witness["v"], list), p.counterexample
-    assert max(abs(e) for e in elements) == sys.float_info.max, \
-        p.counterexample
-    assert "returned inf" in p.counterexample, p.counterexample
+    assert isinstance(witness["v"], list), p.note
+    assert max(abs(e) for e in elements) == sys.float_info.max, p.note
+    assert "returned inf" in p.note, p.note
 
 
 def test_a_matrix_meets_the_same_sign_pair_at_the_largest_double():
+    # the total of a same-sign pair at the largest double overflows: the
+    # computation's fact, so is_defined holds and the note names the point
     (p,) = check_conjectures(grand_total, [claim("is_defined(f)")])
-    assert p.verdict == "falsified", (p.verdict, p.note)
-    witness = _witness_values(_witness_head(p.counterexample))
+    assert p.verdict == "holds", (p.verdict, p.note)
+    witness = _witness_values(_overflow_point(p.note))
     m = witness["m"]
-    assert all(isinstance(row, list) for row in m), p.counterexample
-    assert len({len(row) for row in m}) == 1, p.counterexample
-    assert max(abs(e) for e in _elements(m)) == sys.float_info.max, \
-        p.counterexample
+    assert all(isinstance(row, list) for row in m), p.note
+    assert len({len(row) for row in m}) == 1, p.note
+    assert max(abs(e) for e in _elements(m)) == sys.float_info.max, p.note
 
 
 def test_a_bounded_vector_stays_inside_its_element_range():

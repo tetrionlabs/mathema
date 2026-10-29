@@ -4433,6 +4433,80 @@ def _divides_by_zero(fn, args, kwargs) -> bool:
     return False
 
 
+def _writes_infinity(fn) -> bool:
+    """Intent:
+        Whether `fn`'s own code writes an infinity: a name `inf`,
+        `infinity` or `oo`, a global holding an infinity, or the text
+        `"inf"` / `"infinity"` a `float(...)` call reads. Its nested code
+        (comprehensions, inner functions) is read too; a callee is not.
+    """
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return False
+    found = getattr(fn, "__globals__", {}) or {}
+    stack = [code]
+    while stack:
+        c = stack.pop()
+        for name in c.co_names:
+            if name in ("inf", "infinity", "oo"):
+                return True
+            value = found.get(name)
+            if isinstance(value, float) and math.isinf(value):
+                return True
+        for const in c.co_consts:
+            if hasattr(const, "co_names"):
+                stack.append(const)
+            elif isinstance(const, str) and const.strip().lower().lstrip(
+                    "+-") in ("inf", "infinity"):
+                return True
+            elif isinstance(const, float) and math.isinf(const):
+                return True
+    return False
+
+
+def _overflowed(fn, out, raised, args, kwargs) -> bool:
+    """Intent:
+        Whether a call's missing value is an overflow of the computation
+        from finite inputs: an `OverflowError` (or a `FloatingPointError`
+        reporting one), an infinity returned that is neither a numpy
+        division by zero (a pole, `_divides_by_zero`) nor one the
+        function's own code writes (`_writes_infinity`), or a nan whose
+        call overflows in numpy (`_numpy_overflows`).
+    """
+    from .probing import holds_inf, holds_nan
+    if raised is not None:
+        return isinstance(raised, OverflowError) or (
+            isinstance(raised, FloatingPointError)
+            and "overflow" in str(raised).lower())
+    if holds_nan(out):
+        # a nan an overflowed step left behind (inf - inf), where numpy
+        # reports the overflow
+        return _numpy_overflows(fn, args, kwargs)
+    if not holds_inf(out):
+        return False
+    return not _divides_by_zero(fn, args, kwargs) and not _writes_infinity(fn)
+
+
+def _numpy_overflows(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` overflows in numpy: run
+        again with numpy's overflow error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(over="raise", divide="ignore", invalid="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4908,6 +4982,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if not (domain.get(p) == "C" and (cj.domain or {}).get(p) is None
                 and facts.param_kinds.get(p) == "complex")}, domain)
     checked = n_in = n_out = cut = 0
+    # the draws where f's computation overflowed, and the first of them:
+    # is_computation_safe's fact, no trial of definedness
+    overflows, overflow_at = 0, None
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
@@ -4937,9 +5014,17 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         else:
             raised = None
             what = f"returned {_fmt_value(out)}"
+        ok = safe(out, raised)
+        if kind == "is_defined" and not ok \
+                and _overflowed(fn, out, raised, call_args, call_kwargs):
+            # 2x has a value at every real x where its float run
+            # overflows: the computation's fact, not a missing value
+            overflows += 1
+            if overflow_at is None:
+                overflow_at = (_fmt_point(point, params), what)
+            continue
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        ok = safe(out, raised)
         if kind == "is_defined" and raised is None and out is None and not declared_none:
             # None under a return type that does not admit it is no value
             ok, what = False, "returned None, which its return type does not admit"
@@ -4959,15 +5044,20 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         else:
             cx = f"{at}: f {what}, {words['outside']}"
         found = {"mathema.witness_executed": True}
-        if kind == "is_defined" and not overflow_texts \
-                and not _no_overflow(out, raised):
-            # the missing value is an overflow of the computation
-            found["mathema.sampled"] = (
-                "the computation overflows there; state the region where "
-                "it stays in float range as an is_overflow_safe claim "
-                "and is_defined is sampled inside it")
         return ("falsified", checked, cx, None, found)
+    overflow_words = None
+    if overflows:
+        at, what = overflow_at
+        overflow_words = (
+            f"the computation overflowed at {overflows} drawn point"
+            f"{'s' if overflows != 1 else ''}, first at {at} (f {what}), "
+            f"where the inputs are finite: a finding for "
+            f"is_computation_safe (is_overflow_safe), not a point where f "
+            f"has no value, so not a trial of is_defined")
     if checked == 0:
+        if overflow_words:
+            return ("skipped", 0, overflow_words, None,
+                    {"mathema.sampled": overflow_words})
         return "skipped", 0, None
     sampled = (words["sampled_bare"] if bare else
                words["sampled_conjunct"] if conjunct else
@@ -4975,6 +5065,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                         n_out=n_out)
     if reach_note:
         sampled = f"{sampled}; {reach_note}"
+    if overflow_words:
+        sampled = f"{sampled}; {overflow_words}"
     if cut:
         cuts = guard_cut_texts(fn, facts)
         sampled = (f"{sampled}; {cut} drawn points lie where f's own guard "

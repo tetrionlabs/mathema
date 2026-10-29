@@ -21,6 +21,10 @@ def total(x: float) -> float:
     return 2.0 * x + 1.0
 
 
+def recip(x: float) -> float:
+    return 1.0 / x
+
+
 def ratio(x: float, y: float) -> float:
     return x / y
 
@@ -39,12 +43,27 @@ def test_a_sampled_pass_of_the_positive_leaves_the_negation_open(fn, text,
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])
-def test_an_executed_failure_of_the_positive_proves_the_negation(route):
-    # by_text overflows to -inf at x = -1.8e308: f has no value there
-    (p,) = check_conjectures(by_text, [claim("not is_defined(f)", route=route)])
+def test_a_failure_of_the_positive_proves_the_negation(route):
+    # 1/x has no value at x = 0, which [-1, 1] contains
+    (p,) = check_conjectures(recip, [claim("for x in [-1, 1], not is_defined(f)",
+                                           route=route)])
     assert p.verdict == "proven", (route, p.verdict, p.counterexample, p.note)
     assert p.counterexample is None
-    assert "-1.7976931348623157e+308" in (p.sketch or ""), p.sketch
+    assert "x = 0" in (p.sketch or ""), p.sketch
+
+
+@pytest.mark.parametrize("route", ["probe", "best", "derive"])
+def test_an_overflow_is_no_failure_of_definedness(route):
+    # 2x has a value at every real x; the float run of float(str(x)) * 2.0
+    # overflows to -inf at x = -1.8e308, a fact about the computation
+    # (is_computation_safe), not a point where f has no value: the
+    # positive is never falsified there, and the negation stays open
+    (p,) = check_conjectures(by_text, [claim("is_defined(f)", route=route)])
+    assert p.verdict != "falsified", (route, p.verdict, p.counterexample)
+    assert "overflow" in (p.note or ""), p.note
+    (q,) = check_conjectures(by_text, [claim("not is_defined(f)", route=route)])
+    assert q.verdict == "unknown", (route, q.verdict, q.sketch, q.note)
+    assert "overflow" in (q.note or ""), q.note
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])
