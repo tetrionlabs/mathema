@@ -5,6 +5,8 @@ direction, a sequence's elements included: the computation line's
 magnitude corners for a list (the cancelling pairs, the range's ends)
 run to B and no further, as a scalar's corners do. A declared finite
 end is the claim's own and stays."""
+import math
+
 from mathema.analysis import analyze_source
 from mathema.conjecture import claim
 from mathema.gates import _point_evaluator
@@ -63,6 +65,12 @@ def test_a_draw_past_the_declared_inf_is_not_executed():
     assert _admits("let |inf| be 1e21, f(xs, y0) == f(xs, 0) + y0",
                    {"xs": [1e21, -1e21, 2.0], "y0": 1.0})
     assert _admits("f(xs, y0) == f(xs, 0) + y0", point)
-    # a declared finite end is the claim's own
+    # a declared finite end is the claim's own, read as written: the
+    # float 1e300 is 10^300 + 5.3e283, outside [-10^300, 10^300], and the
+    # float just below it is the largest element inside
+    inside = math.nextafter(1e300, 0.0)
     assert _admits("let |inf| be 1e21, for xs in [-1e300, 1e300]^n, "
-                   "f(xs, y0) == f(xs, 0) + y0", point)
+                   "f(xs, y0) == f(xs, 0) + y0",
+                   {"xs": [inside, -inside, 2.0], "y0": 1.0})
+    assert not _admits("let |inf| be 1e21, for xs in [-1e300, 1e300]^n, "
+                       "f(xs, y0) == f(xs, 0) + y0", point)
