@@ -190,7 +190,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # whether a Decimal operation rounded at the last point evaluated
     # (`_decimal_rounding.watched`)
     rounded: list = [False]
-    from ._decimal_rounding import watched
+    from ._decimal_rounding import beyond_rounding, watched
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -502,7 +502,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if watch.rounded:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the point is undecided
+            # unless the relation fails by more than the rounding can
+            # account for
             rounded[0] = True
+            if beyond_rounding(
+                    lv, rv, cj.relation, watch.precision,
+                    lambda a, b: relation_within(
+                        a, b, cj.relation, declared, 0.0, claim_side,
+                        exact_inequality=cj.tolerance is None)):
+                return False
             return None
         if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
                 and _nan_unread(point, lv, rv):
@@ -1230,7 +1238,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # `(gap, allowance, point)`, None where every pass was exact
     evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
     # whether a Decimal operation rounded at the last point evaluated,
-    # which then decided nothing
+    # which then decided nothing unless it failed beyond the rounding
     evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
 
     def last_args():

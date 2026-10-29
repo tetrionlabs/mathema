@@ -7597,7 +7597,17 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
     if watch.rounded:
-        # a Decimal operation rounded: the point decides nothing
+        # a Decimal operation rounded: the point decides nothing, unless
+        # the sides miss by more than the rounding can account for
+        from ._allowance import relation_within
+        from ._decimal_rounding import beyond_rounding
+        if beyond_rounding(lv, rv, cj.relation, watch.precision,
+                           lambda a, b: relation_within(
+                               a, b, cj.relation, cj.tolerance, 0.0, None,
+                               exact_inequality=cj.tolerance is None)):
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
+                    f"a Decimal operation rounded, by more than rounding to "
+                    f"{watch.precision} digits can account for")
         return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
@@ -12199,7 +12209,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the draws where a Decimal operation rounded, and the first of them
     # (`_decimal_rounding.ROUNDED`)
     rounded, rounded_at = 0, None
-    from ._decimal_rounding import ROUNDED, watched
+    from ._decimal_rounding import ROUNDED, beyond_rounding, watched
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -13045,6 +13055,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                            "witness": _point_text(args)}
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
+            break
+        if watch.rounded and beyond_rounding(
+                lv, rv, cj.relation, watch.precision,
+                lambda a, b: relation_within(
+                    a, b, cj.relation, cj.tolerance, 0.0, claim_side,
+                    exact_inequality=cj.tolerance is None)):
+            # the executed sides miss by more than rounding to the
+            # context's precision can account for: a witness
+            checked += 1
+            cx = (f"{_point_text(args)}: {lv!r} vs {rv!r}, where a Decimal "
+                  f"operation rounded, by more than rounding to "
+                  f"{watch.precision} digits can account for")
             break
         if watch.rounded:
             # a Decimal operation rounded: the sides are neither the

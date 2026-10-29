@@ -81,3 +81,20 @@ def test_a_point_where_no_decimal_operation_rounds_still_falsifies():
     p = _v(third_back, "for x in {1, 3}, f(x) < x")
     assert p.verdict == "falsified" and "x = 3" in (p.counterexample or ""), \
         (p.verdict, p.route, p.counterexample)
+
+
+def third(x: int):
+    i = 0
+    while i < 3:
+        i += 1
+    return Decimal(x) / 3
+
+
+def test_a_miss_rounding_cannot_account_for_still_falsifies():
+    # Decimal(1) / 3 is 0.3333333333333333333333333333, rounded, and 100
+    # is further from it than 8u(|a| + |b|), u = 10^-27 / 2, rounding to
+    # 28 digits can account for: the executed miss is a witness
+    p = _v(third, "for x in {1, 4}, f(x) == 100")
+    said = f"{p.note or ''} {p.sketch or ''} {p.counterexample or ''}"
+    assert p.verdict == "falsified" and "Decimal operation rounded" in said, \
+        (p.verdict, p.route, p.sketch, p.counterexample)
