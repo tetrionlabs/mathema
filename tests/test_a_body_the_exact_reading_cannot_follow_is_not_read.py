@@ -199,8 +199,9 @@ REFUSED = [via_str, via_repr, via_format, via_fstring, via_percent,
 ANSWERED = [typed, by_class, is_not_type, guarded]
 
 #: the refused bodies a finite sweep runs: `id(x)` is a hidden read to
-#: the strict examination, which declines the sweep before any reading
-SWEPT = [fn for fn in REFUSED if fn is not via_id]
+#: the strict examination, which declines the sweep before any reading,
+#: and `Decimal(x)` of the point's coordinate is read exactly
+SWEPT = [fn for fn in REFUSED if fn not in (via_id, via_decimal)]
 
 #: points the computation takes the float branch at (an integer-valued
 #: set reaches a function as ints, and `typed(1)` is 100.0 in Python)
@@ -252,9 +253,19 @@ def test_a_hidden_read_declines_the_sweep_before_any_reading():
 
 #: bodies building an exact number from a float (`Fraction(x)`,
 #: `Decimal(x)`): the construction is read, and declined when it runs on
-#: a number standing for a float, which has no exact reading beyond its
-#: own value
+#: a float the reading holds, which has no exact reading beyond its own
+#: value
 BUILT_FROM_A_FLOAT = [via_decimal, via_local_fraction]
+
+
+def test_a_decimal_of_the_coordinate_is_proven_exactly():
+    # Decimal(x) of 0.5, 1.5 or 2.5 is the coordinate itself, a dyadic
+    # rational every Decimal holds exactly; halved and read back it is
+    # x / 2 at each point
+    p = _check(via_decimal, _FLOATS)
+    assert (p.verdict, p.route) == ("proven", "derive:brute_force"), \
+        (p.verdict, p.route, p.sketch)
+    assert "mathema.sweep_inexact" not in p.meta, p.meta
 
 
 @pytest.mark.parametrize("fn", [fn for fn in REFUSED

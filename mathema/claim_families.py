@@ -2456,15 +2456,40 @@ def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
 def _plain_str_parameter(fn, target: str) -> bool:
     """Intent:
-        Whether `fn`'s parameter `target` is annotated plain `str` (or
-        the text `"str"`), the annotation mathema reads as every string,
-        rather than a language marker or an adaptor's type.
+        Whether `fn`'s parameter `target` is annotated plain `str`, or
+        `str` with None admitted (`Optional[str]`, `str | None`,
+        `Union[str, None]`), as a type or as its text: the annotation
+        mathema reads as every string, rather than a language marker or
+        an adaptor's type.
     """
     try:
         annotation = inspect.signature(fn).parameters[target].annotation
     except (KeyError, TypeError, ValueError):
         return False
-    return annotation is str or annotation == "str"
+    if isinstance(annotation, str):
+        import typing
+        names = {**getattr(fn, "__globals__", {}), "typing": typing,
+                 "Optional": typing.Optional, "Union": typing.Union}
+        try:
+            annotation = eval(annotation, names)
+        except Exception:
+            return annotation.replace(" ", "") in (
+                "str", "str|None", "None|str", "Optional[str]",
+                "typing.Optional[str]", "Union[str,None]", "Union[None,str]",
+                "typing.Union[str,None]", "typing.Union[None,str]")
+    return _str_or_none(annotation)
+
+
+def _str_or_none(annotation) -> bool:
+    """Whether `annotation` is `str`, or a union of `str` with None."""
+    import types
+    import typing
+    if annotation is str:
+        return True
+    union_types = (typing.Union, getattr(types, "UnionType", typing.Union))
+    if typing.get_origin(annotation) in union_types:
+        return set(typing.get_args(annotation)) == {str, type(None)}
+    return False
 
 
 #: the refused strings a record of an unbound is_language_defined names

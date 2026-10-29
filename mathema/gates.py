@@ -189,8 +189,15 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     passed: list = [None]
     # whether a Decimal operation rounded at the last point evaluated
     # (`_decimal_rounding.watched`)
-    rounded: list = [False]
-    from ._decimal_rounding import beyond_rounding, watched
+    rounded: list = [None]
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
+    # whether a point's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods, and whether
+    # the last point evaluated is the first to show it does
+    touches_decimal = [may_touch_decimal(fn, *(bound_funcs or {}).values())]
+    learned: list = [False]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -476,12 +483,28 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False
         return _within(lv, rv, point=point)
 
+    def _reads_exactly(point) -> bool:
+        # whether the claim's sides read exactly at the point, the calls
+        # the computation made there kept
+        from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+        made = (list(f_calls.calls), calls_raised[0], calls_nonfinite[0])
+        try:
+            sides = _with_timeout(lambda: exact_as_written(point),
+                                  FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            sides = None
+        f_calls.calls = made[0]
+        calls_raised[0], calls_nonfinite[0] = made[1], made[2]
+        return sides is not None
+
     def evaluate(point):
+        learned[0] = False
         _reset()
         precision[0] = None
-        rounded[0] = False
+        rounded[0] = None
         try:
-            with watched() as watch:
+            with watched(touches_decimal[0] or holds_decimal(
+                    list(point.values()))) as watch:
                 lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
@@ -499,12 +522,29 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 else None
         if _classify(point, False, (lv, rv)):
             return None
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later point is read
+            touched_decimal(fn, *(bound_funcs or {}).values())
+            touches_decimal[0] = learned[0] = True
         if watch.rounded:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the point is undecided
             # unless the relation fails by more than the rounding can
             # account for
-            rounded[0] = True
+            rounded[0] = watch.reason
+            if beyond_rounding(
+                    lv, rv, cj.relation, watch.precision,
+                    lambda a, b: relation_within(
+                        a, b, cj.relation, declared, 0.0, claim_side,
+                        exact_inequality=cj.tolerance is None)):
+                return False
+            return None
+        if (holds_decimal(lv) or holds_decimal(rv)) \
+                and not _reads_exactly(point):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read, and is
+            # read as a rounded one at the smallest precision watched
+            rounded[0] = UNSEEN
             if beyond_rounding(
                     lv, rv, cj.relation, watch.precision,
                     lambda a, b: relation_within(
@@ -1237,9 +1277,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the largest gap a pass fell within over every point evaluated,
     # `(gap, allowance, point)`, None where every pass was exact
     evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
-    # whether a Decimal operation rounded at the last point evaluated,
-    # which then decided nothing unless it failed beyond the rounding
+    # why the last point evaluated is not counted for its Decimal
+    # arithmetic (`_decimal_rounding.REASONS`), None when it is; such a
+    # point decided nothing unless it failed beyond the rounding
     evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
+    # whether the last point evaluated was the first to return a Decimal
+    # from a run not read, after which every point is read
+    evaluate.learned_decimal = lambda: learned[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point

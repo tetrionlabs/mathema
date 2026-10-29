@@ -6,6 +6,8 @@ is falsified with that point as its witness, whatever arithmetic
 overflowed (a product, a literal past float64's range, a power), and a
 value claim's `[float]` companion carries the same failure while its
 mathematics line stands."""
+import pytest
+
 import mathema
 from mathema.conjecture import check_conjectures, claim
 
@@ -60,7 +62,10 @@ def logged(x: float) -> float:
 
 
 def test_a_pole_infinity_is_named_as_a_pole_not_an_overflow():
-    # np.log(0) is -inf: the logarithm has a pole at 0, no overflow
+    # np.log(0) is -inf: the logarithm has a pole at 0, no overflow. Pure
+    # Python has no pole infinity (math.log(0) and 1/0 raise), so the
+    # case needs numpy
+    pytest.importorskip("numpy")
     p = _v(logged, "for x in [0, 2], is_computation_safe(f)")
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "at a pole" in p.counterexample, p.counterexample

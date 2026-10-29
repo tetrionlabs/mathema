@@ -150,7 +150,10 @@ subtraction, multiplication, comparison); one that rounds to the
 decimal context's precision (a division, a square root) leaves the
 point undecided (`_without_decimal_rounding`); built from a
 float, or from a `Fraction` (which may stand for one), the point is
-undecided when the call runs (`_exact_constructor`).
+undecided when the call runs (`_exact_constructor`). A decimal context
+the body installs or computes in (`localcontext`, `setcontext`, a
+`Context` it builds, one of the module's contexts) rounds where that
+trap does not reach, and is refused.
 
 Text whose only reach is an exception's message is not refused: an
 f-string, `"..." % x`, `"...".format(...)`, `str(...)` or `repr(...)`
@@ -950,6 +953,8 @@ def _refused_callables() -> frozenset:
               float.hex, float.as_integer_ratio]
     if hasattr(math, "ulp"):
         values.append(math.ulp)
+    import decimal
+    values += [decimal.localcontext, decimal.setcontext, decimal.Context]
     return frozenset(id(v) for v in values)
 
 
@@ -968,17 +973,27 @@ def _exact_constructor(func):
         `Fraction` or `Decimal` as the reading calls it: built as the
         computation builds it when every argument is exact by
         construction (an int, a string, a `Decimal`), in the twin's run
-        and in its shadow alike.
+        and in its shadow alike. In the twin's run `Decimal(v)` of an
+        exact rational `v` the twin holds (the point's coordinate, a
+        float the computation holds standing for the dyadic rational it
+        is) is the `Decimal` of that rational, which converts exactly
+        when its denominator divides a power of ten (`_decimal_of`), as
+        the computation's `Decimal(float)` converts exactly.
 
     Raises:
         NotExact: in a run of the twin, an argument is anything else: a
-            float, which has no exact reading beyond its own value, or a
-            `Fraction`, which may stand for one.
+            float, which has no exact reading beyond its own value, a
+            `Fraction` passed to `Fraction` (it may stand for a float),
+            or a rational with no finite decimal expansion.
     """
     import decimal
 
     def call(*args, **kwargs):
         if _STATE.mode != "float":
+            if func is decimal.Decimal and len(args) == 1 and not kwargs \
+                    and isinstance(args[0], Fraction) \
+                    and not isinstance(args[0], bool):
+                return _decimal_of(args[0])
             for arg in (*args, *kwargs.values()):
                 if isinstance(arg, (int, str, decimal.Decimal)):
                     continue
@@ -986,6 +1001,27 @@ def _exact_constructor(func):
                            f"not read exactly")
         return func(*args, **kwargs)
     return call
+
+
+def _decimal_of(value: Fraction):
+    """Intent:
+        The `Decimal` equal to the rational `value`, built from its
+        digits without rounding: n/d with d dividing 10^k is
+        n * (10^k / d) * 10^-k.
+
+    Raises:
+        NotExact: d has a prime factor other than 2 and 5, so no
+            `Decimal` equals `value`.
+    """
+    import decimal
+    d, k = value.denominator, 0
+    while 10 ** k % d:
+        if k > 4 * d.bit_length() + 4:
+            _not_exact(f"{value} has no finite decimal expansion")
+        k += 1
+    scaled = value.numerator * (10 ** k // d)
+    digits = tuple(int(c) for c in str(abs(scaled)))
+    return decimal.Decimal((1 if scaled < 0 else 0, digits, -k))
 
 
 def _refused_modules() -> frozenset:
@@ -1179,7 +1215,22 @@ class _Scan(ast.NodeVisitor):
             self._refuse(node)
         elif id(self._resolve(node.value)) in self.modules:
             self._refuse(node)
+        elif self._is_context(node):
+            self._refuse(node)
         self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if self._is_context(node):
+            self._refuse(node)
+        self.generic_visit(node)
+
+    def _is_context(self, node) -> bool:
+        # a decimal context other than the current one (`DefaultContext`,
+        # `ExtendedContext`, one the module built), which computes with
+        # its own precision and flags
+        import decimal
+        return isinstance(node.ctx, ast.Load) \
+            and isinstance(self._resolve(node), decimal.Context)
 
     def visit_Compare(self, node):
         # a type compared by identity is answered only under its bare
@@ -1518,8 +1569,8 @@ def _opaque(func, owner=None):
         class), run as itself.
 
     Raises:
-        NotExact: an exact number standing for a float is among its
-            arguments; or, outside a shadow run, a float with no exact
+        NotExact: an exact number standing for a float, or a decimal
+            context, is among its arguments; or, outside a shadow run, a float with no exact
             reading (`_raw`) is among its arguments or is `owner`, the
             value whose method it is, and the result is anything but
             such floats (`math.isfinite(y)`, `y.is_integer()`): a
@@ -1532,6 +1583,9 @@ def _opaque(func, owner=None):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        if any(_decimal_context(a) for a in (*args, *kwargs.values())):
+            _not_exact(f"{_named(func)} is given a decimal context, which "
+                       f"rounds where the reading does not see")
         raw = not exception and _STATE.mode != "float" and (
             _raw(owner) or _holds_raw(args) or _holds_raw(kwargs))
         args, kwargs = _read_args(args, kwargs)
@@ -2243,6 +2297,9 @@ def _callee(func, site=None):
         return _builtin(func)
     if isinstance(func, _C_CALLABLES):
         owner = getattr(func, "__self__", None)
+        if _decimal_context(owner):
+            return _refuser(f"{name} is a method of a decimal context, "
+                            f"which rounds where the reading does not see")
         if _stands_for_float(owner):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
@@ -2250,6 +2307,13 @@ def _callee(func, site=None):
         return _opaque(func, owner)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
+
+
+def _decimal_context(value) -> bool:
+    """Whether `value` is a decimal context, whose methods compute at its
+    own precision."""
+    module = sys.modules.get("decimal")
+    return module is not None and isinstance(value, module.Context)
 
 
 def _shadow_callee(func, site=None):
@@ -2891,14 +2955,18 @@ class _FloatMeta(type):
 
 class ExactFloat(metaclass=_FloatMeta):
     """`float` as the exact reading sees it: an int (a bool included)
-    as the Fraction of the same value, the identity on a Fraction, a
-    sympy number or an algebraic number, Python's `float` on anything
-    else (a string, a float, a library's number). Named `float`, as
-    `type(x).__name__` reads it in the computation."""
+    or a finite `Decimal` as the Fraction of the same value, the
+    identity on a Fraction, a sympy number or an algebraic number,
+    Python's `float` on anything else (a string, a float, a library's
+    number). Named `float`, as `type(x).__name__` reads it in the
+    computation."""
 
     def __new__(cls, x=0):
+        import decimal
         if isinstance(x, bool):
             return Fraction(int(x))
+        if isinstance(x, decimal.Decimal) and x.is_finite():
+            return Fraction(x)
         if _STATE.guard and isinstance(x, int):
             # an int past float range overflows as the computation's does
             float(x)

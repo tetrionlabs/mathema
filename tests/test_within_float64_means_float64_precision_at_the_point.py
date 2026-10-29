@@ -238,3 +238,21 @@ def test_the_condition_number_term_is_not_credited_to_a_side_scaling_f(law):
     assert not (p.verdict == "proven"
                 and p.route == "derive:brute_force:within_float64"), \
         (p.verdict, p.route, p.sketch)
+
+
+def squared_drift(x: float) -> float:
+    return x * x + DRIFT
+
+
+@pytest.mark.parametrize("law", [
+    "for x in {10000000000, 20000000000}, f(x / 1e10) == g(x / 1e10) ** 2",
+    "for x in {10000000000, 20000000000}, f(x / 1e10) <= g(x / 1e10) ** 2",
+])
+def test_the_condition_number_term_is_read_where_f_is_called(law):
+    # f(1) = 1 + 1e-7 against g(1) ** 2 = 1: a relative miss of 1e-7, no
+    # float64 rounding. f runs at x / 1e10, not at the point x = 1e10,
+    # where the condition number and |f| are 1e20 times larger
+    (p,) = check_conjectures(squared_drift, [claim(law, funcs={"g": by_text})])
+    assert not (p.verdict == "proven"
+                and p.route == "derive:brute_force:within_float64"), \
+        (p.verdict, p.route, p.sketch)

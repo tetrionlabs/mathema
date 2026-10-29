@@ -7105,9 +7105,8 @@ _RAISES_UNREAD = ("derive cannot read the function's raise statements, so "
 def _last_clause(note: str) -> str:
     """The last `; `-separated clause of a note, a `; ` inside
     parentheses not counting as a separator, nor the one inside the
-    Decimal rounding clause (`_decimal_rounding.ROUNDED`)."""
-    from ._decimal_rounding import ROUNDED
-    inner = ROUNDED.index(";")
+    Decimal arithmetic clauses (`_decimal_rounding.REASONS`)."""
+    from ._decimal_rounding import REASONS
     depth, cut = 0, 0
     for i, ch in enumerate(note):
         if ch in "([":
@@ -7115,7 +7114,9 @@ def _last_clause(note: str) -> str:
         elif ch in ")]":
             depth = max(depth - 1, 0)
         elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " " \
-                and not (i >= inner and note.startswith(ROUNDED, i - inner)):
+                and not any(i >= r.index(";")
+                            and note.startswith(r, i - r.index(";"))
+                            for r in REASONS):
             cut = i + 2
     return note[cut:]
 
@@ -7136,13 +7137,14 @@ def _derive_attempt_label(fallback: "Probe") -> str:
 
 
 def _last_probe_clause(note: str) -> str:
-    """The last `; `-separated clause of a probe's note, the Decimal
-    rounding clause (`_decimal_rounding.ROUNDED`, which holds a `; ` of
-    its own) kept whole when it ends the note."""
-    from ._decimal_rounding import ROUNDED
-    _head, found, tail = note.rpartition(ROUNDED)
-    if found and "; " not in tail:
-        return ROUNDED + tail
+    """The last `; `-separated clause of a probe's note, a Decimal
+    arithmetic clause (`_decimal_rounding.REASONS`, each holding a `; `
+    of its own) kept whole when it ends the note."""
+    from ._decimal_rounding import REASONS
+    for reason in REASONS:
+        _head, found, tail = note.rpartition(reason)
+        if found and "; " not in tail:
+            return reason + tail
     return note.rsplit("; ", 1)[-1]
 
 
@@ -7639,12 +7641,14 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from ._decimal_rounding import watched
+    from ._decimal_rounding import holds_decimal, may_touch_decimal, watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
+    hooked = holds_decimal(list(args)) or may_touch_decimal(
+        *(v for v in env.values() if callable(v)))
     try:
-        with watched() as watch:
+        with watched(hooked) as watch:
             lv = eval(code_l, {"__builtins__": {}}, trial_env)
             rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
@@ -7654,6 +7658,9 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
+    if watch.unread(lv, rv):
+        from ._decimal_rounding import touched_decimal
+        touched_decimal(*(v for v in env.values() if callable(v)))
     if watch.rounded:
         # a Decimal operation rounded: the point decides nothing, unless
         # the sides miss by more than the rounding can account for
@@ -7666,6 +7673,21 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
             return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
                     f"a Decimal operation rounded, by more than rounding of the final "
                     f"values to {watch.precision} digits can account for")
+        return None
+    if holds_decimal(lv) or holds_decimal(rv):
+        # a Decimal no watched context rounded may have rounded where no
+        # flag was read: a failure only past the rounding bound
+        from ._allowance import relation_within
+        from ._decimal_rounding import beyond_rounding
+        precision = watch.precision
+        if beyond_rounding(lv, rv, cj.relation, precision,
+                           lambda a, b: relation_within(
+                               a, b, cj.relation, cj.tolerance, 0.0, None,
+                               exact_inequality=cj.tolerance is None)):
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
+                    f"a Decimal operation may have rounded unseen, by more "
+                    f"than rounding of the final values to {precision} "
+                    f"digits can account for")
         return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
@@ -12322,10 +12344,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
-    # the draws where a Decimal operation rounded, and the first of them
-    # (`_decimal_rounding.ROUNDED`)
-    rounded, rounded_at = 0, None
-    from ._decimal_rounding import ROUNDED, beyond_rounding, watched
+    # the draws not counted for their Decimal arithmetic, the first of
+    # them, and why (`_decimal_rounding.REASONS`)
+    rounded, rounded_at, rounded_why = 0, None, None
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
+    # whether a draw's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods
+    touches_decimal = may_touch_decimal(fn, *bound_funcs.values())
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -12927,7 +12954,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            with watched() as watch:
+            with watched(touches_decimal or holds_decimal(list(args))) \
+                    as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:
@@ -13176,6 +13204,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
             break
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later draw is read
+            touched_decimal(fn, *bound_funcs.values())
+            touches_decimal = True
         if watch.rounded and beyond_rounding(
                 lv, rv, cj.relation, watch.precision,
                 lambda a, b: relation_within(
@@ -13188,12 +13220,36 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"operation rounded, by more than rounding of the final values to "
                   f"{watch.precision} digits can account for")
             break
-        if watch.rounded:
+        unseen = False
+        if not watch.rounded and (holds_decimal(lv) or holds_decimal(rv)):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read
+            made = list(f_call.calls)
+            unseen = _exact_verdict(cj, code_l, code_r, env,
+                                    *_exact_calls()) is None
+            f_call.calls = made
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if unseen and beyond_rounding(
+                lv, rv, cj.relation, watch.precision,
+                lambda a, b: relation_within(
+                    a, b, cj.relation, cj.tolerance, 0.0, claim_side,
+                    exact_inequality=cj.tolerance is None)):
+            # a Decimal that may have rounded unseen, missing by more than
+            # rounding to the smallest precision watched can account
+            # for: the executed values are a witness
+            checked += 1
+            cx = (f"{_point_text(args)}: {lv!r} vs {rv!r}, where a Decimal "
+                  f"operation may have rounded unseen, by more than rounding "
+                  f"of the final values to {watch.precision} digits can "
+                  f"account for")
+            break
+        if watch.rounded or unseen:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the draw is not counted
             rounded += 1
             if rounded_at is None:
                 rounded_at = _point_text(args)
+                rounded_why = watch.reason if watch.rounded else UNSEEN
             continue
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
@@ -13804,7 +13860,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
                 f"not counted").lstrip("; ")
     if rounded:
-        note = (f"{note}; {ROUNDED} at {rounded} draw"
+        note = (f"{note}; {rounded_why} at {rounded} draw"
                 f"{'s' if rounded != 1 else ''}, first at {rounded_at}, so "
                 f"{'they are' if rounded != 1 else 'it is'} not "
                 f"counted").lstrip("; ")

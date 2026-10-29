@@ -182,6 +182,18 @@ def invert_conjecture(statement: str, claim_name: str) -> "tuple[str | None, str
     return None, f"relation {cj.relation!r} has no mechanical inverse"
 
 
+def _asked_route(row: dict) -> "str | None":
+    """Intent:
+        The route a claim row was asked on: the route its author wrote
+        (`authored.route`), else the route its record names. A record's
+        `route` is the mechanism that decided the row (`derive` for a
+        claim asked on best and settled by derive), which is no request.
+    """
+    authored = row.get("authored")
+    asked = authored.get("route") if isinstance(authored, dict) else None
+    return asked or row.get("route")
+
+
 def _adjudicate_candidate(root: str, key: str, statement: str,
                           route: "str | None", tolerance=None):
     """Intent:
@@ -1101,7 +1113,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         c_verdict = c_n = None
         if candidate:
             probe, err = _adjudicate_candidate(root, key, candidate,
-                                               target.get("route"),
+                                               _asked_route(target),
                                                tolerance=c_tolerance)
             if probe is None:
                 if stated:
