@@ -955,13 +955,20 @@ running the code when the proof cannot settle the claim, so a sampled
 code only. `derive` asks for derive's verdict: when the proof cannot
 settle the claim the probe still samples it, but only a counterexample
 it executes counts, and the claim is then `falsified` on the probe's
-route with derive's reason in the note. A point counts only where the
-claim read exactly fails: a float miss or an overflow where the exact
-reading holds is a finding about the computation. Draws that find no counterexample leave the
-claim `unknown`, never `holds`. Over a finite domain, a sweep that runs
-every point and finds the claim exact at each is `proven` on
-`derive:brute_force`; a sweep that passes only inexactly, or runs part
-of the domain, leaves the claim `unknown` on this route. A proof's
+route with derive's reason in the note. A float miss or an overflow at
+a point where the claim read exactly holds is no counterexample: the
+note records it as a finding about the computation. An infinity at a
+point with no exact reading is no counterexample either, since an
+overflow and a pole cannot be told apart there. A NaN, a hole, or a
+plain miss at a point with no exact reading still falsifies. Draws that
+find no counterexample leave the claim `unknown`, never `holds`. Over a
+finite domain, a sweep that runs every point and finds the claim exact
+at each is `proven` on `derive:brute_force`; a sweep that passes only
+inexactly, or runs part of the domain, leaves the claim `unknown` on
+this route. The one `holds` on this route is a sweep that runs every
+point and finds the claim exact at each over a function the examination
+cannot show pure: it is `holds` on `derive:brute_force`, and the note
+names what stops the proof and what would make the sweep one. A proof's
 `[float]` companion and a disproof's executed witness are the same on
 every route. On every route, a miss found by sampling derive's own
 reconstruction of the function (`probe:lifted_numeric`, for a claim the
