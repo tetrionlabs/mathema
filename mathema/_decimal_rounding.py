@@ -16,8 +16,10 @@ The rounding is read from the contexts a point's computation runs in
 installs through `localcontext` or `setcontext`. A computation can
 round in a context none of these is (one built earlier and used through
 its own methods, `ctx.divide(a, b)`), so a side holding a `Decimal`
-that has no exact reading is not counted either, though no watched
-context rounded (`UNSEEN`), and no bound applies to it.
+that has no exact reading is read as a rounded one, though no watched
+context rounded (`UNSEEN`): not counted, unless it misses by more than
+rounding to the smallest precision watched can account for, which the
+executed values witness.
 """
 from __future__ import annotations
 
@@ -28,14 +30,16 @@ import sys
 from fractions import Fraction
 
 __all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNSEEN",
-           "beyond_rounding", "holds_decimal", "watched"]
+           "beyond_rounding", "context_precision", "holds_decimal",
+           "watched"]
 
 #: why a point where a `Decimal` operation rounded is not counted
 ROUNDED = "a Decimal operation rounded; the exact reading declined"
 #: why a point whose side holds a `Decimal` with no exact reading, where
-#: no watched context rounded, is not counted
-UNSEEN = ("a Decimal operation rounded in a context the reading did not "
-          "see; the exact reading declined")
+#: no watched context rounded, is not counted unless it misses past the
+#: rounding bound
+UNSEEN = ("a Decimal operation may have rounded in a context the reading "
+          "did not see; the exact reading declined")
 #: every reason a point is not counted for its Decimal arithmetic
 REASONS = (ROUNDED, UNSEEN)
 
@@ -154,6 +158,41 @@ def watched():
         if any(c.flags[decimal.Inexact] or c.flags[decimal.Rounded]
                for c in installed):
             watch.rounded, watch.reason = True, ROUNDED
+
+
+def context_precision(run) -> "int | None":
+    """Intent:
+        Run `run()` and return the smallest precision of a decimal
+        context whose own method it called (`ctx.divide(a, b)`, or a
+        Decimal method given `context=ctx`), which computes at that
+        context's precision outside every watched context; None when it
+        called none. A raise from `run` ends the run.
+    """
+    found: list = []
+
+    def profile(frame, event, arg):
+        if event != "c_call":
+            return
+        owner = getattr(arg, "__self__", None)
+        if isinstance(owner, decimal.Context):
+            found.append(owner.prec)
+        elif frame is not None:
+            # a context passed to a Decimal method (`context=ctx`) is
+            # read from the calling frame's own names
+            for value in frame.f_locals.values():
+                if isinstance(value, decimal.Context):
+                    found.append(value.prec)
+
+    previous = sys.getprofile()
+    with _LOCALCONTEXT():
+        sys.setprofile(profile)
+        try:
+            run()
+        except Exception:
+            pass
+        finally:
+            sys.setprofile(previous)
+    return min(found) if found else None
 
 
 def holds_decimal(value) -> bool:

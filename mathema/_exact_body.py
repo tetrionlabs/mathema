@@ -1559,8 +1559,8 @@ def _opaque(func, owner=None):
         class), run as itself.
 
     Raises:
-        NotExact: an exact number standing for a float is among its
-            arguments; or, outside a shadow run, a float with no exact
+        NotExact: an exact number standing for a float, or a decimal
+            context, is among its arguments; or, outside a shadow run, a float with no exact
             reading (`_raw`) is among its arguments or is `owner`, the
             value whose method it is, and the result is anything but
             such floats (`math.isfinite(y)`, `y.is_integer()`): a
@@ -1573,6 +1573,9 @@ def _opaque(func, owner=None):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        if any(_decimal_context(a) for a in (*args, *kwargs.values())):
+            _not_exact(f"{_named(func)} is given a decimal context, which "
+                       f"rounds where the reading does not see")
         raw = not exception and _STATE.mode != "float" and (
             _raw(owner) or _holds_raw(args) or _holds_raw(kwargs))
         args, kwargs = _read_args(args, kwargs)
@@ -2284,6 +2287,9 @@ def _callee(func, site=None):
         return _builtin(func)
     if isinstance(func, _C_CALLABLES):
         owner = getattr(func, "__self__", None)
+        if _decimal_context(owner):
+            return _refuser(f"{name} is a method of a decimal context, "
+                            f"which rounds where the reading does not see")
         if _stands_for_float(owner):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
@@ -2291,6 +2297,13 @@ def _callee(func, site=None):
         return _opaque(func, owner)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
+
+
+def _decimal_context(value) -> bool:
+    """Whether `value` is a decimal context, whose methods compute at its
+    own precision."""
+    module = sys.modules.get("decimal")
+    return module is not None and isinstance(value, module.Context)
 
 
 def _shadow_callee(func, site=None):

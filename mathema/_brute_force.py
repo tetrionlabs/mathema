@@ -543,15 +543,18 @@ def _returned_at(evaluate, point: dict):
         return None
 
 
-def _rounded_miss_words(sides) -> str:
+def _rounded_miss_words(sides, reason=None) -> str:
     """Intent:
         The clause a witness at a point where a Decimal operation
-        rounded carries: the executed sides, and that they miss by more
-        than the rounding can account for.
+        rounded, or may have rounded unseen (`reason` the
+        `_decimal_rounding.UNSEEN` text), carries: the executed sides,
+        and that they miss by more than the rounding can account for.
     """
+    from ._decimal_rounding import UNSEEN
     shown = (f" ({sides[0]!r} vs {sides[1]!r})"
              if isinstance(sides, tuple) and len(sides) == 2 else "")
-    return (f", where a Decimal operation rounded{shown}, by more than "
+    did = "may have rounded" if reason == UNSEEN else "rounded"
+    return (f", where a Decimal operation {did}{shown}, by more than "
             f"rounding of the final values to the context's precision can account for")
 
 
@@ -1095,7 +1098,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
-                       + (_rounded_miss_words(evaluate.sides())
+                       + (_rounded_miss_words(evaluate.sides(),
+                                              evaluate.decimal_rounded())
                           if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else

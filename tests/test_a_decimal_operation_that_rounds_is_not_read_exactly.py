@@ -207,3 +207,78 @@ def test_a_decimal_context_on_a_branch_not_taken_hides_no_miss(route):
     (p,) = check_conjectures(off_by_one_text,
                              [claim("for x in [0, 10], f(x) == x", route=route)])
     assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+def direct_context_plus_one(x: int):
+    with decimal.localcontext(decimal.Context(prec=10)):
+        return Decimal(x) + 1
+
+
+def _plus_one(x):
+    with decimal.localcontext(decimal.Context(prec=10)):
+        return Decimal(x) + 1
+
+
+def helper_context_plus_one(x: int):
+    return _plus_one(x)
+
+
+def text_plus_one(x: float):
+    return Decimal(str(x)) + 1
+
+
+def text_price(x: float):
+    return Decimal(str(x)) * Decimal("1.2")
+
+
+@pytest.mark.parametrize("fn,law", [
+    # x + 1 against x: a miss of 1, past any rounding to 10 digits
+    (direct_context_plus_one, "for x in {1, 4}, f(x) == x"),
+    (helper_context_plus_one, "for x in {1, 4}, f(x) == x"),
+    # Decimal('1.0') against 0.0 at x = 0
+    (text_plus_one, "for x in [0, 10], f(x) == x"),
+    # 1.2 x against 1.1 x: a miss of x / 10 for x >= 1
+    (text_price, "for x in [1, 10], f(x) <= x * 1.1"),
+])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_decimal_with_no_exact_reading_still_fails_past_its_rounding(
+        fn, law, route):
+    # nothing rounds, but the exact reading declines each body (a
+    # context of its own, a Decimal built from text): the executed miss
+    # is far past what rounding to the smallest precision watched can
+    # account for, so it is a witness
+    (p,) = check_conjectures(fn, [claim(law, route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+def root_in_context(x: int):
+    return Decimal(x).sqrt(context=_PREC10) ** 2
+
+
+def context_by_default(x: int, ctx=_PREC10):
+    return ctx.divide(Decimal(x), Decimal(3)) * 3
+
+
+@pytest.mark.parametrize("fn,law", [
+    # 1/3 in 10 digits, times 3: 0.9999999999 against 1, a miss rounding
+    # to 10 digits accounts for; it is no witness
+    (module_context, "for x in {1, 4}, f(x) == x"),
+    (context_by_default, "for x in {1, 4}, f(x) == x"),
+    (context_by_default, "for x in {1, 4}, f(x) < x"),
+    # sqrt(n) in 10 digits, squared: n up to rounding at 10 digits
+    (root_in_context, "for x in {2, 3}, f(x) == x"),
+])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_objects_own_arithmetic_rounds_at_its_precision(
+        fn, law, route):
+    (p,) = check_conjectures(fn, [claim(law, route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_objects_result_far_from_the_claim_falsifies(route):
+    # 0.9999999999 or 3.999999999 against 100: past any rounding
+    (p,) = check_conjectures(module_context,
+                             [claim("for x in {1, 4}, f(x) == 100",
+                                    route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
