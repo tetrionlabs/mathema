@@ -4546,28 +4546,39 @@ def _holds_infinity_or_nan(out) -> bool:
 def _exact_reading(fn, args, kwargs) -> "str | None":
     """Intent:
         The body read exactly (`_exact_body.exact_callee`, the functions
-        it calls read the same way) on the call's exact arguments:
-        "overflow" when that value is finite, "no value" when it is an
-        infinity or a nan or the reading raises (no real value there),
-        None when the reading cannot follow the body (`NotExact`).
+        it calls read the same way) on the call's exact arguments, as
+        evidence of what an infinity or a nan the call returned is:
+        "overflow" when the reading's value is exact and finite (an int,
+        a Fraction, a finite sympy real); "no value" when the body's own
+        mathematics has none there (the reading raises ZeroDivisionError
+        or ValueError, gives a sympy infinity or nan, or returns an
+        infinity the body's code writes, `_code_writes_infinity`); None
+        otherwise: the reading cannot follow the body (`NotExact`), its
+        own machinery fails (any other raise), or it returns a float the
+        twin computed, finite or not.
     """
     from fractions import Fraction
 
-    from ._exact_body import NotExact, exact_callee
+    from . import _exact_body
     from ._exact_side import to_exact
     try:
-        out = exact_callee(fn)(*[to_exact(a) for a in args],
-                               **{k: to_exact(v) for k, v in kwargs.items()})
-    except NotExact:
+        out = _exact_body.exact_callee(fn)(
+            *[to_exact(a) for a in args],
+            **{k: to_exact(v) for k, v in kwargs.items()})
+    except _exact_body.NotExact:
         return None
-    except Exception:
+    except (ZeroDivisionError, ValueError):
         return "no value"
+    except Exception:
+        return None
     if isinstance(out, bool):
         return None
     if isinstance(out, (int, Fraction)):
         return "overflow"
     if isinstance(out, float):
-        return "overflow" if math.isfinite(out) else "no value"
+        if not math.isfinite(out) and _code_writes_infinity(fn):
+            return "no value"
+        return None
     sympy = sys.modules.get("sympy")
     if sympy is not None and isinstance(out, sympy.Basic):
         if out.is_real and out.is_finite:
@@ -4575,6 +4586,44 @@ def _exact_reading(fn, args, kwargs) -> "str | None":
         if out in (sympy.oo, -sympy.oo, sympy.zoo, sympy.nan):
             return "no value"
     return None
+
+
+def _code_writes_infinity(fn, depth: int = 3) -> bool:
+    """Intent:
+        Whether `fn`'s code, or the code of a function it names from its
+        module (to `depth` levels), writes an infinity: a name `inf` or
+        `infinity`, a global holding an infinity, or the text `"inf"` /
+        `"infinity"` a `float(...)` call reads.
+    """
+    seen: set = set()
+
+    def writes(f, level: int) -> bool:
+        code = getattr(f, "__code__", None)
+        if code is None or id(code) in seen or level > depth:
+            return False
+        seen.add(id(code))
+        found = getattr(f, "__globals__", {}) or {}
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            for name in c.co_names:
+                if name in ("inf", "infinity"):
+                    return True
+                value = found.get(name)
+                if isinstance(value, float) and math.isinf(value):
+                    return True
+                if callable(value) and writes(value, level + 1):
+                    return True
+            for const in c.co_consts:
+                if hasattr(const, "co_names"):
+                    stack.append(const)
+                elif isinstance(const, str) and const.strip().lower().lstrip(
+                        "+-") in ("inf", "infinity"):
+                    return True
+                elif isinstance(const, float) and math.isinf(const):
+                    return True
+        return False
+    return writes(fn, 0)
 
 
 def _numpy_overflows(fn, args, kwargs) -> bool:

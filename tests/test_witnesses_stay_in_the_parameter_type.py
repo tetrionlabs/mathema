@@ -162,15 +162,10 @@ def test_a_sequence_meets_the_largest_double(fn):
     assert "returned inf" in p.note, p.note
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "[overflow-evidence] the total is finite at every real matrix, but its "
-    "float run overflows at the largest double with no positive evidence "
-    "of an overflow: no OverflowError, no numpy overflow flag, and the "
-    "exact reading does not follow the nested sum, so the infinity reads "
-    "as no value"))
 def test_a_matrix_meets_the_same_sign_pair_at_the_largest_double():
-    # the total of a same-sign pair at the largest double overflows: the
-    # computation's fact, so is_defined holds and the note names the point
+    # the total of a same-sign pair at the largest double overflows; the
+    # body read exactly, row by row, is finite there: the computation's
+    # fact, so is_defined holds and the note names the point
     (p,) = check_conjectures(grand_total, [claim("is_defined(f)")])
     assert p.verdict == "holds", (p.verdict, p.note)
     witness = _witness_values(_overflow_point(p.note))

@@ -12,6 +12,7 @@ import math
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
+from mathema.types import Mat
 
 
 def by_text(x: float) -> float:
@@ -43,6 +44,11 @@ def doubled_by_loop(x: float) -> float:
         t = t * 2.0
         i += 1
     return t
+
+
+def grand_total(m: Mat("n", "k")) -> float:
+    # the total of a matrix: a finite value at every real matrix
+    return sum(sum(row) for row in m)
 
 
 def recip(x: float) -> float:
@@ -132,3 +138,46 @@ def test_a_negated_predicate_over_the_whole_function_is_inverted(route):
     (p,) = check_conjectures(ratio, [claim("not is_pole_safe(f)", route=route)])
     assert p.verdict == "proven", (route, p.verdict, p.counterexample, p.note)
     assert p.statement.startswith("not "), p.statement
+
+
+@pytest.mark.parametrize("route", ["probe", "best", "derive"])
+def test_a_finite_total_at_the_largest_doubles_is_never_no_value(route):
+    # [[M, M], [M, M]] with M the largest double totals 4M, a finite real;
+    # its float run overflows to inf, and the body read exactly, nested
+    # rows included, is finite there: an overflow, never a missing value
+    (p,) = check_conjectures(grand_total, [claim("is_defined(f)", route=route)])
+    assert p.verdict == "holds", (route, p.verdict, p.counterexample, p.note)
+    (q,) = check_conjectures(grand_total, [claim("not is_defined(f)", route=route)])
+    assert q.verdict == "unknown", (route, q.verdict, q.note)
+
+
+def test_an_exact_reading_is_evidence_only_when_its_value_is_exact(monkeypatch):
+    from fractions import Fraction
+
+    from mathema import _exact_body
+    from mathema.claim_families import _exact_reading
+
+    def plain(x):
+        return x * 2.0
+
+    def twin_of(result):
+        def make(fn):
+            def run(*args, **kwargs):
+                if isinstance(result, BaseException):
+                    raise result
+                return result
+            return run
+        return make
+
+    cases = [
+        (Fraction(4), "overflow"),
+        (float("inf"), None),       # a float the twin computed is no reading
+        (1.5, None),
+        (ZeroDivisionError("division by zero"), "no value"),
+        (ValueError("math domain error"), "no value"),
+        (TypeError("unsupported operand"), None),   # the twin's machinery
+        (AttributeError("no attribute"), None),
+    ]
+    for result, expected in cases:
+        monkeypatch.setattr(_exact_body, "exact_callee", twin_of(result))
+        assert _exact_reading(plain, (1.0,), {}) == expected, (result, expected)
