@@ -390,9 +390,11 @@ mathema.Record(fee_rate) · source, no side effects · form py:c1cba0e35dda
 
 `-> Optional[float]` declares that the result may be absent, so the
 `None` at `tier = 0` is recorded and not judged, and `absent(f)
-introduces` comes from the return type. The same body annotated `->
-float` fails the claim at that point: a `None` from inputs that were all
-there is no value.
+introduces` comes from the return type. `float | None` declares it the
+same way, and so do the types that admit `None` themselves (`-> None`,
+`-> Any`, `-> object`). The same body annotated `-> float`, or with no
+return annotation at all, fails the claim at that point: a `None` from
+inputs that were all there is no value.
 
 ## Containers: lists, arrays and series
 

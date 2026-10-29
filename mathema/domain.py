@@ -308,6 +308,18 @@ def _set_value(s: str, *, in_element: bool = False, on_field: bool = False):
     return _bound(s)
 
 
+def _exact_bound(s: str):
+    """Intent:
+        An interval end's text as the exact rational it writes (`1/3`,
+        `0.29`, `-2`, `1e-5`), or None where it writes no rational (a
+        named constant, an infinity, an expression).
+    """
+    try:
+        return fractions.Fraction(s.strip())
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def _bound(s: str):
     s = s.strip()
     if s in _BOUND_CONSTS:
@@ -2301,7 +2313,12 @@ def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False)
             lo, hi = _bound(m.group(2)), _bound(m.group(3))
         except ValueError:
             return None
-        return Interval(lo, hi, closed_lo=m.group(1) == "[", closed_hi=m.group(4) == "]")
+        piece = Interval(lo, hi, closed_lo=m.group(1) == "[",
+                         closed_hi=m.group(4) == "]")
+        # each end as written, exactly, where it is a rational number
+        piece.exact_lo = _exact_bound(m.group(2))
+        piece.exact_hi = _exact_bound(m.group(3))
+        return piece
     m = _PIECE_SET.match(text)
     if m is not None:
         try:

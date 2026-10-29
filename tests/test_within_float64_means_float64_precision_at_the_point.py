@@ -213,3 +213,28 @@ def test_the_record_carries_float64_precision_at_the_point():
     assert abs(precision["bound"] - 8 * 2.0 ** -53 * 7) < 1e-30, precision
     assert precision["kappa"] is None and precision["returned"] is None, \
         precision
+
+
+DRIFT = 1e-7
+
+
+def drifted(x: float) -> float:
+    return x + DRIFT
+
+
+def by_text(x):
+    return float(str(x))
+
+
+@pytest.mark.parametrize("law", [
+    "for x in {1, 2}, f(x) / 1e10 == g(x) / 1e10",
+    "for x in {1, 2}, g(x) / 1e10 >= f(x) / 1e10",
+])
+def test_the_condition_number_term_is_not_credited_to_a_side_scaling_f(law):
+    # f(x) / 1e10 misses g(x) / 1e10 by a relative 1e-7: the condition
+    # number times |f(x)| is in f's units, 1e10 times the side's, and
+    # credits it no precision
+    (p,) = check_conjectures(drifted, [claim(law, funcs={"g": by_text})])
+    assert not (p.verdict == "proven"
+                and p.route == "derive:brute_force:within_float64"), \
+        (p.verdict, p.route, p.sketch)
