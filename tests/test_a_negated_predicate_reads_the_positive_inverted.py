@@ -7,6 +7,8 @@ at every sampled point says nothing about whether it fails elsewhere,
 so the negation stays unknown; a proven positive falsifies the
 negation, the proof its witness. This holds on every route, and for a
 predicate over the whole function as for one over a parameter."""
+import math
+
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -19,6 +21,28 @@ def by_text(x: float) -> float:
 
 def total(x: float) -> float:
     return 2.0 * x + 1.0
+
+
+def _capped(x):
+    # an infinity written for |x| >= 1e300: no value there
+    if abs(x) >= 1e300:
+        return math.inf
+    return x
+
+
+def far_written(x: float) -> float:
+    return _capped(float(str(x)))
+
+
+def doubled_by_loop(x: float) -> float:
+    # 2x by a loop: a value at every real x, its float run overflowing
+    # past 9e307
+    t = x
+    i = 0
+    while i < 1:
+        t = t * 2.0
+        i += 1
+    return t
 
 
 def recip(x: float) -> float:
@@ -54,16 +78,27 @@ def test_a_failure_of_the_positive_proves_the_negation(route):
 
 @pytest.mark.parametrize("route", ["probe", "best", "derive"])
 def test_an_overflow_is_no_failure_of_definedness(route):
-    # 2x has a value at every real x; the float run of float(str(x)) * 2.0
-    # overflows to -inf at x = -1.8e308, a fact about the computation
-    # (is_computation_safe), not a point where f has no value: the
-    # positive is never falsified there, and the negation stays open
-    (p,) = check_conjectures(by_text, [claim("is_defined(f)", route=route)])
+    # 2x has a value at every real x; its float run overflows to inf at
+    # the largest doubles, which the body read exactly shows finite: a
+    # fact about the computation (is_computation_safe), so the positive
+    # is never falsified there, and the negation stays open
+    (p,) = check_conjectures(doubled_by_loop, [claim("is_defined(f)", route=route)])
     assert p.verdict != "falsified", (route, p.verdict, p.counterexample)
     assert "overflow" in (p.note or ""), p.note
-    (q,) = check_conjectures(by_text, [claim("not is_defined(f)", route=route)])
+    (q,) = check_conjectures(doubled_by_loop, [claim("not is_defined(f)",
+                                                     route=route)])
     assert q.verdict == "unknown", (route, q.verdict, q.sketch, q.note)
     assert "overflow" in (q.note or ""), q.note
+
+
+@pytest.mark.parametrize("route", ["probe", "best"])
+def test_an_infinity_a_helper_writes_is_no_value(route):
+    # _capped writes an infinity for |x| >= 1e300: f has no value there,
+    # whatever function body wrote it
+    (p,) = check_conjectures(far_written, [claim("is_defined(f)", route=route)])
+    assert p.verdict == "falsified", (route, p.verdict, p.note)
+    (q,) = check_conjectures(far_written, [claim("not is_defined(f)", route=route)])
+    assert q.verdict == "proven", (route, q.verdict, q.note)
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])

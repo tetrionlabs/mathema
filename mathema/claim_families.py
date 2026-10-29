@@ -4433,58 +4433,53 @@ def _divides_by_zero(fn, args, kwargs) -> bool:
     return False
 
 
-def _writes_infinity(fn) -> bool:
-    """Intent:
-        Whether `fn`'s own code writes an infinity: a name `inf`,
-        `infinity` or `oo`, a global holding an infinity, or the text
-        `"inf"` / `"infinity"` a `float(...)` call reads. Its nested code
-        (comprehensions, inner functions) is read too; a callee is not.
-    """
-    code = getattr(fn, "__code__", None)
-    if code is None:
-        return False
-    found = getattr(fn, "__globals__", {}) or {}
-    stack = [code]
-    while stack:
-        c = stack.pop()
-        for name in c.co_names:
-            if name in ("inf", "infinity", "oo"):
-                return True
-            value = found.get(name)
-            if isinstance(value, float) and math.isinf(value):
-                return True
-        for const in c.co_consts:
-            if hasattr(const, "co_names"):
-                stack.append(const)
-            elif isinstance(const, str) and const.strip().lower().lstrip(
-                    "+-") in ("inf", "infinity"):
-                return True
-            elif isinstance(const, float) and math.isinf(const):
-                return True
-    return False
-
-
 def _overflowed(fn, out, raised, args, kwargs) -> bool:
     """Intent:
-        Whether a call's missing value is an overflow of the computation
-        from finite inputs: an `OverflowError` (or a `FloatingPointError`
-        reporting one), an infinity returned that is neither a numpy
-        division by zero (a pole, `_divides_by_zero`) nor one the
-        function's own code writes (`_writes_infinity`), or a nan whose
-        call overflows in numpy (`_numpy_overflows`).
+        Whether a call's missing value is shown to be an overflow of the
+        computation from finite inputs, by positive evidence only: an
+        `OverflowError` (or a `FloatingPointError` reporting one) was
+        raised; or the call returned an infinity or a nan and either
+        numpy reports an overflow during it (`_numpy_overflows`) or the
+        body read exactly at that point, its helpers included, has a
+        finite value (`_exact_value_is_finite`). An infinity with none
+        of these is no value.
     """
     from .probing import holds_inf, holds_nan
     if raised is not None:
         return isinstance(raised, OverflowError) or (
             isinstance(raised, FloatingPointError)
             and "overflow" in str(raised).lower())
-    if holds_nan(out):
-        # a nan an overflowed step left behind (inf - inf), where numpy
-        # reports the overflow
-        return _numpy_overflows(fn, args, kwargs)
-    if not holds_inf(out):
+    if not (holds_inf(out) or holds_nan(out)):
         return False
-    return not _divides_by_zero(fn, args, kwargs) and not _writes_infinity(fn)
+    return _numpy_overflows(fn, args, kwargs) \
+        or _exact_value_is_finite(fn, args, kwargs)
+
+
+def _exact_value_is_finite(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the body read exactly (`_exact_body.exact_callee`, the
+        functions it calls read the same way) on the call's exact
+        arguments has a finite value. False when the reading cannot
+        follow the body or the call raises.
+    """
+    from fractions import Fraction
+
+    from ._exact_body import exact_callee
+    from ._exact_side import to_exact
+    try:
+        out = exact_callee(fn)(*[to_exact(a) for a in args],
+                               **{k: to_exact(v) for k, v in kwargs.items()})
+    except Exception:
+        return False
+    if isinstance(out, bool):
+        return False
+    if isinstance(out, (int, Fraction)):
+        return True
+    if isinstance(out, float):
+        return math.isfinite(out)
+    sympy = sys.modules.get("sympy")
+    return sympy is not None and isinstance(out, sympy.Basic) \
+        and bool(getattr(out, "is_finite", False)) and bool(out.is_real)
 
 
 def _numpy_overflows(fn, args, kwargs) -> bool:
