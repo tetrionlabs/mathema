@@ -4646,6 +4646,27 @@ def _numpy_overflows(fn, args, kwargs) -> bool:
     return False
 
 
+def _constant_pair(bound, reach=None) -> "list | None":
+    """Intent:
+        The constant pair of a sequence whose elements range over
+        `bound`: two equal elements, at 1.0 when the range holds it, else
+        at the range's midpoint, else (a midpoint of zero) at half its
+        upper end. None when the elements are not one real interval.
+    """
+    from .probing import _element_range
+    span = _element_range(bound, reach)
+    if span is None:
+        return None
+    lo, hi = span
+    if lo <= 1.0 <= hi:
+        value = 1.0
+    else:
+        value = lo / 2 + hi / 2
+        if value == 0.0 and hi > 0:
+            value = hi / 2
+    return [value, value]
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4977,6 +4998,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             for pair in sequence_corners(
                     bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
+            if containers.get(p) not in (set, frozenset):
+                flat = _constant_pair(bound, pinf)
+                if flat is not None:
+                    # two equal elements: a spread of zero
+                    yield draw((p, flat))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
