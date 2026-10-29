@@ -586,7 +586,10 @@ deliberate error) has two children, `is_language_defined` and
 `is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
 rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
 `is_finite_over_floats(f)` is a view rather than a node: poles and
-overflow together. Each roll-up runs every child that applies to the
+overflow together. An overflow is never a point where `is_defined`
+finds no value, and an infinity nothing tells from an overflow (no
+overflow error, no numpy flag, a body the exact reading cannot follow)
+leaves `is_defined` `unknown` at that point. Each roll-up runs every child that applies to the
 function and is declared by the author, never suggested; its note
 names each child's verdict. A falsified child falsifies the roll-up with
 that child's name and witness; the roll-up is `proven` when every child

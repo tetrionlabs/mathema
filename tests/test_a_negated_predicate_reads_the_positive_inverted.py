@@ -92,13 +92,38 @@ def test_an_overflow_is_no_failure_of_definedness(route):
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])
-def test_an_infinity_a_helper_writes_is_no_value(route):
-    # _capped writes an infinity for |x| >= 1e300: f has no value there,
-    # whatever function body wrote it
+def test_a_helper_written_infinity_under_an_unreadable_body_is_undecidable(route):
+    # _capped writes an infinity for |x| >= 1e300, but float(str(x))
+    # stops the exact reading, so nothing tells that infinity from an
+    # overflow of the computation: the point decides nothing either way
     (p,) = check_conjectures(far_written, [claim("is_defined(f)", route=route)])
-    assert p.verdict == "falsified", (route, p.verdict, p.note)
+    assert p.verdict == "unknown", (route, p.verdict, p.note)
+    assert "cannot be told from an overflow" in p.note, p.note
     (q,) = check_conjectures(far_written, [claim("not is_defined(f)", route=route)])
-    assert q.verdict == "proven", (route, q.verdict, q.note)
+    assert q.verdict == "unknown", (route, q.verdict, q.note)
+
+
+@pytest.mark.parametrize("route", ["probe", "best"])
+def test_an_unreadable_body_infinity_leaves_definedness_open(route):
+    # float(str(x)) * 2.0: 2x has a value at every real x, but the body
+    # cannot be read exactly and Python's float multiply sets no flag, so
+    # the -inf at x = -1.8e308 cannot be told from a missing value
+    (p,) = check_conjectures(by_text, [claim("is_defined(f)", route=route)])
+    assert p.verdict == "unknown", (route, p.verdict, p.note)
+    assert "-1.7976931348623157e+308" in p.note, p.note
+    assert "cannot be told from an overflow" in p.note, p.note
+    (q,) = check_conjectures(by_text, [claim("not is_defined(f)", route=route)])
+    assert q.verdict == "unknown", (route, q.verdict, q.note)
+    # is_overflow_safe and is_finite read the value returned: an infinity
+    # at the largest doubles is neither overflow-safe nor finite
+    (r,) = check_conjectures(by_text, [claim("is_overflow_safe(x)", route=route)])
+    assert r.verdict == "falsified", (route, r.verdict, r.note)
+    assert "1.7976931348623157e+308" in r.counterexample, r.counterexample
+    (s,) = check_conjectures(by_text, [claim(
+        "for x in [-1.7976931348623157e308, 1.7976931348623157e308], "
+        "is_finite(f(x))", route=route)])
+    assert s.verdict == "falsified", (route, s.verdict, s.note)
+    assert "not finite" in s.counterexample, s.counterexample
 
 
 @pytest.mark.parametrize("route", ["probe", "best"])
