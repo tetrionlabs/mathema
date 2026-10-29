@@ -4433,53 +4433,96 @@ def _divides_by_zero(fn, args, kwargs) -> bool:
     return False
 
 
-def _overflowed(fn, out, raised, args, kwargs) -> bool:
+def _nonfinite_cause(fn, out, raised, args, kwargs) -> "str | None":
     """Intent:
-        Whether a call's missing value is shown to be an overflow of the
-        computation from finite inputs, by positive evidence only: an
-        `OverflowError` (or a `FloatingPointError` reporting one) was
-        raised; or the call returned an infinity or a nan and either
-        numpy reports an overflow during it (`_numpy_overflows`) or the
-        body read exactly at that point, its helpers included, has a
-        finite value (`_exact_value_is_finite`). An infinity with none
-        of these is no value.
+        What a call's missing value is, from positive evidence only:
+        "overflow" for an overflow of the computation from finite inputs
+        (an `OverflowError` or a `FloatingPointError` reporting one, a
+        numpy overflow during the call, or the body read exactly at that
+        point, helpers included, finite); "no value" for a value the
+        mathematics does not have there (a numpy division by zero, a
+        pole, or an exact reading that is itself infinite, a nan, or
+        raises); None when the call returned an infinity or a nan and
+        none of these tells which (`_exact_reading` cannot follow the
+        body, no error and no numpy flag).
     """
-    from .probing import holds_inf, holds_nan
     if raised is not None:
-        return isinstance(raised, OverflowError) or (
-            isinstance(raised, FloatingPointError)
-            and "overflow" in str(raised).lower())
-    if not (holds_inf(out) or holds_nan(out)):
-        return False
-    return _numpy_overflows(fn, args, kwargs) \
-        or _exact_value_is_finite(fn, args, kwargs)
+        if isinstance(raised, OverflowError) or (
+                isinstance(raised, FloatingPointError)
+                and "overflow" in str(raised).lower()):
+            return "overflow"
+        return "no value"
+    if _numpy_overflows(fn, args, kwargs):
+        return "overflow"
+    if _divides_by_zero(fn, args, kwargs) or _numpy_invalid(fn, args, kwargs):
+        return "no value"
+    return _exact_reading(fn, args, kwargs)
 
 
-def _exact_value_is_finite(fn, args, kwargs) -> bool:
+def _numpy_invalid(fn, args, kwargs) -> bool:
     """Intent:
-        Whether the body read exactly (`_exact_body.exact_callee`, the
-        functions it calls read the same way) on the call's exact
-        arguments has a finite value. False when the reading cannot
-        follow the body or the call raises.
+        Whether numpy reports an invalid operation (a square root of a
+        negative, 0/0, the mean of nothing) during the call `fn(*args,
+        **kwargs)`: run again with numpy's invalid error raised, it
+        raises `FloatingPointError`. False without numpy, or when the
+        call raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(invalid="raise", over="ignore", divide="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _holds_infinity_or_nan(out) -> bool:
+    """Whether a returned value is, or holds, an infinity or a nan."""
+    from .probing import holds_inf, holds_nan
+    if out is None or isinstance(out, (bool, str)):
+        return False
+    try:
+        return bool(holds_inf(out) or holds_nan(out))
+    except Exception:
+        return False
+
+
+def _exact_reading(fn, args, kwargs) -> "str | None":
+    """Intent:
+        The body read exactly (`_exact_body.exact_callee`, the functions
+        it calls read the same way) on the call's exact arguments:
+        "overflow" when that value is finite, "no value" when it is an
+        infinity or a nan or the reading raises (no real value there),
+        None when the reading cannot follow the body (`NotExact`).
     """
     from fractions import Fraction
 
-    from ._exact_body import exact_callee
+    from ._exact_body import NotExact, exact_callee
     from ._exact_side import to_exact
     try:
         out = exact_callee(fn)(*[to_exact(a) for a in args],
                                **{k: to_exact(v) for k, v in kwargs.items()})
+    except NotExact:
+        return None
     except Exception:
-        return False
+        return "no value"
     if isinstance(out, bool):
-        return False
+        return None
     if isinstance(out, (int, Fraction)):
-        return True
+        return "overflow"
     if isinstance(out, float):
-        return math.isfinite(out)
+        return "overflow" if math.isfinite(out) else "no value"
     sympy = sys.modules.get("sympy")
-    return sympy is not None and isinstance(out, sympy.Basic) \
-        and bool(getattr(out, "is_finite", False)) and bool(out.is_real)
+    if sympy is not None and isinstance(out, sympy.Basic):
+        if out.is_real and out.is_finite:
+            return "overflow"
+        if out in (sympy.oo, -sympy.oo, sympy.zoo, sympy.nan):
+            return "no value"
+    return None
 
 
 def _numpy_overflows(fn, args, kwargs) -> bool:
@@ -4980,6 +5023,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
     # the draws where f's computation overflowed, and the first of them:
     # is_computation_safe's fact, no trial of definedness
     overflows, overflow_at = 0, None
+    # the draws whose infinity or nan nothing tells from an overflow
+    undecidable, undecidable_at = 0, None
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
@@ -5010,13 +5055,24 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             raised = None
             what = f"returned {_fmt_value(out)}"
         ok = safe(out, raised)
-        if kind == "is_defined" and not ok \
-                and _overflowed(fn, out, raised, call_args, call_kwargs):
+        cause = (_nonfinite_cause(fn, out, raised, call_args, call_kwargs)
+                 if kind == "is_defined" and not ok
+                 and (raised is None or not _no_overflow(None, raised))
+                 and (raised is not None or _holds_infinity_or_nan(out))
+                 else "no value")
+        if cause == "overflow":
             # 2x has a value at every real x where its float run
             # overflows: the computation's fact, not a missing value
             overflows += 1
             if overflow_at is None:
                 overflow_at = (_fmt_point(point, params), what)
+            continue
+        if cause is None:
+            # an infinity or a nan nothing tells from an overflow: the
+            # point decides nothing either way
+            undecidable += 1
+            if undecidable_at is None:
+                undecidable_at = (_fmt_point(point, params), what)
             continue
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
@@ -5049,6 +5105,17 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             f"where the inputs are finite: a finding for "
             f"is_computation_safe (is_overflow_safe), not a point where f "
             f"has no value, so not a trial of is_defined")
+    if undecidable:
+        at, what = undecidable_at
+        why = (f"f {what} at {at}{f' and at {undecidable - 1} more drawn point' if undecidable > 1 else ''}"
+               f"{'s' if undecidable > 2 else ''}, a value that cannot be told "
+               f"from an overflow of the computation or a point where f has "
+               f"no value, which an exact reading of the body and the "
+               f"functions it calls, an overflow error, or numpy's overflow "
+               f"flag would decide, so the claim is not decided there")
+        if overflow_words:
+            why = f"{why}, while {overflow_words}"
+        return "unknown", checked, why
     if checked == 0:
         if overflow_words:
             return ("skipped", 0, overflow_words, None,
