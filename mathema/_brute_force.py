@@ -530,7 +530,7 @@ def _rounded_miss_words(sides) -> str:
     shown = (f" ({sides[0]!r} vs {sides[1]!r})"
              if isinstance(sides, tuple) and len(sides) == 2 else "")
     return (f", where a Decimal operation rounded{shown}, by more than "
-            f"rounding to the context's precision can account for")
+            f"rounding of the final values to the context's precision can account for")
 
 
 def _uncounted_at(cj, measured) -> bool:

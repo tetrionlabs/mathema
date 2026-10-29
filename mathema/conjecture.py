@@ -7606,8 +7606,8 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
                                a, b, cj.relation, cj.tolerance, 0.0, None,
                                exact_inequality=cj.tolerance is None)):
             return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
-                    f"a Decimal operation rounded, by more than rounding to "
-                    f"{watch.precision} digits can account for")
+                    f"a Decimal operation rounded, by more than rounding of the final "
+                    f"values to {watch.precision} digits can account for")
         return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
@@ -13065,7 +13065,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # context's precision can account for: a witness
             checked += 1
             cx = (f"{_point_text(args)}: {lv!r} vs {rv!r}, where a Decimal "
-                  f"operation rounded, by more than rounding to "
+                  f"operation rounded, by more than rounding of the final values to "
                   f"{watch.precision} digits can account for")
             break
         if watch.rounded:
