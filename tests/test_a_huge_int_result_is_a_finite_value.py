@@ -95,9 +95,9 @@ def test_an_ordering_against_a_float_is_decided_exactly(fn, law):
 
 
 def test_a_literal_beyond_float_is_not_compared_as_an_infinity():
+    # 1e400 is 10**400 exactly, decided on the number as written
     (p,) = check_conjectures(constant, [claim("f(2) == 1e400", route="probe")])
-    assert p.verdict == "unknown", (p.verdict, p.counterexample)
-    assert "the literal 1e400 is beyond float64" in p.note, p.note
+    assert p.verdict == "holds", (p.verdict, p.counterexample)
     (p,) = check_conjectures(constant, [claim("f(2) == 1e400")])
     assert p.verdict == "proven", (p.verdict, p.note)
 

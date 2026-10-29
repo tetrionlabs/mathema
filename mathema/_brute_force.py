@@ -1167,7 +1167,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             "undecided",
             sketch=(f"{_holds_at(total, judged, _Scope(cj, names))}{outside}; every point "
                     f"executed; proven needs the function to be shown "
-                    f"pure: {unexamined}"),
+                    f"pure: {unexamined}; a body whose every call the "
+                    f"examination reads, or a purity entry for that call, "
+                    f"would make the sweep a proof"),
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.sweep_holds": True, **_tried(grid),
                                 **counted, **no_exact},

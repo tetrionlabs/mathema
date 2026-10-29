@@ -129,9 +129,14 @@ def test_nonlinear_recurrence_declines_to_the_ordinary_report():
     # a falsification; and the nonlinear lifter must not be what
     # decided it, so a plain symbolic "derive" is equally wrong here.
     # (The nine integer points are settled by the brute-force sweep,
-    # which is a different mechanism from the lifter entirely.)
+    # which is a different mechanism from the lifter entirely; a nested
+    # function has no exact reading, so on route derive that inexact
+    # sweep is no proof and the claim stays unknown with its reason.)
     assert r.verdict != "falsified", (r.verdict, r.sketch)
-    assert r.route != "derive", (r.route, r.sketch)
+    assert (r.verdict, r.route) == ("unknown", "derive"), (r.verdict, r.route,
+                                                           r.sketch)
+    assert "the sweep ran every point of the finite domain and is no proof" \
+        in r.note, r.note
 
 
 def test_disproof_corroboration_respects_an_integer_domain():

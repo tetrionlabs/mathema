@@ -182,7 +182,11 @@ Consumption paths:
   The same rule holds for every function checked by execution, your own
   included: an `is_overflow_safe` claim in its claims file keeps the
   `is_defined` sampling inside that region, and without one an overflow
-  at the reach is no value, with a note pointing at `is_overflow_safe`.
+  at the reach is a finding about the computation in the note, pointing
+  at `is_overflow_safe`, never a point where f has no value. An infinity
+  or a nan nothing tells from an overflow (no overflow error, no numpy
+  flag, and a body the exact reading cannot follow) decides nothing:
+  `is_defined` is then `unknown`, the note naming the point.
 - Claims may be named as premises: `assuming clip_lower holds`, or
   qualified, `assuming numpy.clip.clip_lower holds`.
 

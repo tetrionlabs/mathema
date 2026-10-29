@@ -3472,8 +3472,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         pairs). Only scalar parameters are searched, and only a
         function whose signature binds them. With `working`, a call the
         function's own guard rejects (`deliberate_raise`) is outside its
-        working domain and no trial. The whole search runs
-        under the fast wall-clock cap; a cap that fires ends it.
+        working domain and no trial. A call that overflows (other than
+        by a raise the body writes), or returns an infinity or a nan
+        `_nonfinite_cause` does not read as no value, is no trial
+        either. The whole search runs under the fast
+        wall-clock cap; a cap that fires ends it.
     """
     import itertools
 
@@ -3576,13 +3579,23 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     # the function's own guard: outside its working
                     # domain, no trial
                     continue
+                out, raised = None, exc
                 returned = False
                 from .authoring import RangeError
                 caught["range"] = isinstance(exc, RangeError)
             else:
+                raised = None
                 caught["range"] = False
                 returned = _has_value(out, None) and not (
                     real_only and isinstance(out, complex) and out.imag != 0)
+            if not returned and (
+                    (raised is None and _holds_infinity_or_nan(out))
+                    or (raised is not None and not _no_overflow(None, raised)
+                        and not deliberate_raise(raised, fn))) \
+                    and _nonfinite_cause(fn, out, raised, (), call) != "no value":
+                # an overflow of the computation, or an infinity or a nan
+                # nothing tells from one: the point shows no missing value
+                continue
             if returned != claimed:
                 return call
         return None
@@ -4485,6 +4498,267 @@ def _divides_by_zero(fn, args, kwargs) -> bool:
     return False
 
 
+def _nonfinite_cause(fn, out, raised, args, kwargs) -> "str | None":
+    """Intent:
+        What a call's missing value is, from positive evidence only:
+        "overflow" for an overflow of the computation from finite inputs
+        (an `OverflowError` or a `FloatingPointError` reporting one, a
+        numpy overflow during the call, or the body read exactly at that
+        point, helpers included, finite); "no value" for a value the
+        mathematics does not have there (a numpy division by zero, a
+        pole, or an exact reading that is itself infinite, a nan, or
+        raises); None when the call returned an infinity or a nan and
+        none of these tells which (`_exact_reading` cannot follow the
+        body, no error and no numpy flag).
+    """
+    if raised is not None:
+        if isinstance(raised, OverflowError) or (
+                isinstance(raised, FloatingPointError)
+                and "overflow" in str(raised).lower()):
+            return "overflow"
+        return "no value"
+    if _numpy_overflows(fn, args, kwargs):
+        return "overflow"
+    if _divides_by_zero(fn, args, kwargs) or _numpy_invalid(fn, args, kwargs):
+        return "no value"
+    return _exact_reading(fn, args, kwargs)
+
+
+def _numpy_invalid(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether numpy reports an invalid operation (a square root of a
+        negative, 0/0, the mean of nothing) during the call `fn(*args,
+        **kwargs)`: run again with numpy's invalid error raised, it
+        raises `FloatingPointError`. False without numpy, or when the
+        call raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(invalid="raise", over="ignore", divide="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _holds_infinity_or_nan(out) -> bool:
+    """Whether a returned value is, or holds, an infinity or a nan."""
+    from .probing import holds_inf, holds_nan
+    if out is None or isinstance(out, (bool, str)):
+        return False
+    try:
+        return bool(holds_inf(out) or holds_nan(out))
+    except Exception:
+        return False
+
+
+def _exact_reading(fn, args, kwargs) -> "str | None":
+    """Intent:
+        The body read exactly (`_exact_body.exact_callee`, the functions
+        it calls read the same way) on the call's exact arguments, as
+        evidence of what an infinity or a nan the call returned is:
+        "overflow" when the reading's value is exact and finite (an int,
+        a Fraction, a finite sympy real); "no value" when the body's own
+        mathematics has none there (the reading raises ZeroDivisionError
+        or ValueError, gives a sympy infinity or nan, or returns a float
+        infinity or nan on a run that executed a write of one,
+        `_run_writing_nonfinite`); None otherwise: the reading cannot
+        follow the body (`NotExact`), its own machinery fails (any other
+        raise), or it returns a float the twin computed, finite or not.
+    """
+    from fractions import Fraction
+
+    from . import _exact_body
+    from ._exact_side import to_exact
+    twin = _exact_body.exact_callee(fn)
+    try:
+        exact_args = [to_exact(a) for a in args]
+        exact_kwargs = {k: to_exact(v) for k, v in kwargs.items()}
+        out, written = _run_writing_nonfinite(
+            lambda: twin(*exact_args, **exact_kwargs))
+    except _exact_body.NotExact:
+        return None
+    except (ZeroDivisionError, ValueError):
+        return "no value"
+    except Exception:
+        return None
+    if isinstance(out, bool):
+        return None
+    if isinstance(out, (int, Fraction)):
+        return "overflow"
+    if isinstance(out, float):
+        if not math.isfinite(out) and written:
+            return "no value"
+        return None
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(out, sympy.Basic):
+        if out.is_real and out.is_finite:
+            return "overflow"
+        if out in (sympy.oo, -sympy.oo, sympy.zoo, sympy.nan):
+            return "no value"
+    return None
+
+
+def _writes_nonfinite(instruction, names: dict) -> bool:
+    """Whether a bytecode instruction writes an infinity or a nan: it
+    loads a name or attribute `inf`, `infinity` or `nan` (any case), a
+    global of `names` holding a float infinity or nan, such a constant,
+    or the text `"inf"`, `"infinity"` or `"nan"`."""
+    op, value = instruction.opname, instruction.argval
+    if op in ("LOAD_ATTR", "LOAD_METHOD", "LOAD_GLOBAL", "LOAD_NAME",
+              "LOAD_DEREF", "LOAD_CLASSDEREF", "LOAD_FROM_DICT_OR_GLOBALS"):
+        if isinstance(value, str) and value.lower() in _NONFINITE_WORDS:
+            return True
+        if op != "LOAD_ATTR" and isinstance(value, str):
+            held = names.get(value)
+            return isinstance(held, float) and not math.isfinite(held)
+        return False
+    if op == "LOAD_CONST":
+        if isinstance(value, float):
+            return not math.isfinite(value)
+        if isinstance(value, str):
+            return value.strip().lower().lstrip("+-") in _NONFINITE_WORDS
+    return False
+
+
+#: the names and texts that write an infinity or a nan
+_NONFINITE_WORDS = ("inf", "infinity", "nan")
+
+
+def _run_writing_nonfinite(call) -> "tuple[Any, bool]":
+    """Intent:
+        `call()`'s result, with whether the run executed an instruction
+        that writes an infinity or a nan (`_writes_nonfinite`) in a body the exact
+        reading compiled (a file of `_exact_body._READ_FILES`): the
+        branch taken writes one, not merely the code somewhere.
+
+    Raises:
+        Whatever `call()` raises.
+
+    Notes:
+        Instructions are watched through `sys.monitoring` where Python
+        has it (3.12 on), else through opcode tracing (`sys.settrace`).
+        With every monitoring tool id taken, no write is seen.
+    """
+    import dis
+
+    from . import _exact_body
+    written = [False]
+    marks: dict = {}
+
+    def marked(code, names) -> set:
+        if code not in marks:
+            filename = code.co_filename
+            marks[code] = set() if (
+                filename not in _exact_body._READ_FILES
+                or filename == _exact_body.__file__) else {
+                    i.offset for i in dis.get_instructions(code)
+                    if _writes_nonfinite(i, names)}
+        return marks[code]
+
+    monitoring = getattr(sys, "monitoring", None)
+    if monitoring is None:
+        def local(frame, event, arg):
+            if event == "opcode" and frame.f_lasti in marks[frame.f_code]:
+                written[0] = True
+            return local
+
+        def tracer(frame, event, arg):
+            if not marked(frame.f_code, frame.f_globals):
+                return None
+            frame.f_trace_opcodes = True
+            return local
+
+        before = sys.gettrace()
+        sys.settrace(tracer)
+        try:
+            out = call()
+        finally:
+            sys.settrace(before)
+        return out, written[0]
+
+    events = monitoring.events
+    tool = None
+    for candidate in range(6):
+        try:
+            monitoring.use_tool_id(candidate, "mathema.written_nonfinite")
+        except ValueError:
+            continue
+        tool = candidate
+        break
+    if tool is None:
+        return call(), False
+    watched: list = []
+
+    def started(code, offset):
+        if marked(code, sys._getframe(1).f_globals):
+            monitoring.set_local_events(tool, code, events.INSTRUCTION)
+            watched.append(code)
+
+    def stepped(code, offset):
+        if offset in marks.get(code, ()):
+            written[0] = True
+
+    monitoring.register_callback(tool, events.PY_START, started)
+    monitoring.register_callback(tool, events.INSTRUCTION, stepped)
+    monitoring.set_events(tool, events.PY_START)
+    try:
+        out = call()
+    finally:
+        monitoring.set_events(tool, 0)
+        for code in watched:
+            monitoring.set_local_events(tool, code, 0)
+        monitoring.register_callback(tool, events.PY_START, None)
+        monitoring.register_callback(tool, events.INSTRUCTION, None)
+        monitoring.free_tool_id(tool)
+    return out, written[0]
+
+
+def _numpy_overflows(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` overflows in numpy: run
+        again with numpy's overflow error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(over="raise", divide="ignore", invalid="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _constant_pair(bound, reach=None) -> "list | None":
+    """Intent:
+        The constant pair of a sequence whose elements range over
+        `bound`: two equal elements, at 1.0 when the range holds it, else
+        at the range's midpoint, else (a midpoint of zero) at half its
+        upper end. None when the elements are not one real interval.
+    """
+    from .probing import _element_range
+    span = _element_range(bound, reach)
+    if span is None:
+        return None
+    lo, hi = span
+    if lo <= 1.0 <= hi:
+        value = 1.0
+    else:
+        value = lo / 2 + hi / 2
+        if value == 0.0 and hi > 0:
+            value = hi / 2
+    return [value, value]
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4816,6 +5090,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             for pair in sequence_corners(
                     bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
+            if containers.get(p) not in (set, frozenset):
+                flat = _constant_pair(bound, pinf)
+                if flat is not None:
+                    # two equal elements: a spread of zero
+                    yield draw((p, flat))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
@@ -4960,6 +5239,11 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if not (domain.get(p) == "C" and (cj.domain or {}).get(p) is None
                 and facts.param_kinds.get(p) == "complex")}, domain)
     checked = n_in = n_out = cut = 0
+    # the draws where f's computation overflowed, and the first of them:
+    # is_computation_safe's fact, no trial of definedness
+    overflows, overflow_at = 0, None
+    # the draws whose infinity or nan nothing tells from an overflow
+    undecidable, undecidable_at = 0, None
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
@@ -4989,9 +5273,28 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         else:
             raised = None
             what = f"returned {_fmt_value(out)}"
+        ok = safe(out, raised)
+        cause = (_nonfinite_cause(fn, out, raised, call_args, call_kwargs)
+                 if kind == "is_defined" and not ok
+                 and (raised is None or not _no_overflow(None, raised))
+                 and (raised is not None or _holds_infinity_or_nan(out))
+                 else "no value")
+        if cause == "overflow":
+            # 2x has a value at every real x where its float run
+            # overflows: the computation's fact, not a missing value
+            overflows += 1
+            if overflow_at is None:
+                overflow_at = (_fmt_point(point, params), what)
+            continue
+        if cause is None:
+            # an infinity or a nan nothing tells from an overflow: the
+            # point decides nothing either way
+            undecidable += 1
+            if undecidable_at is None:
+                undecidable_at = (_fmt_point(point, params), what)
+            continue
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        ok = safe(out, raised)
         if kind == "is_defined" and raised is None and out is None and not declared_none:
             # None under a return type that does not admit it is no value
             ok, what = False, "returned None, which its return type does not admit"
@@ -5011,15 +5314,31 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         else:
             cx = f"{at}: f {what}, {words['outside']}"
         found = {"mathema.witness_executed": True}
-        if kind == "is_defined" and not overflow_texts \
-                and not _no_overflow(out, raised):
-            # the missing value is an overflow of the computation
-            found["mathema.sampled"] = (
-                "the computation overflows there; state the region where "
-                "it stays in float range as an is_overflow_safe claim "
-                "and is_defined is sampled inside it")
         return ("falsified", checked, cx, None, found)
+    overflow_words = None
+    if overflows:
+        at, what = overflow_at
+        overflow_words = (
+            f"the computation overflowed at {overflows} drawn point"
+            f"{'s' if overflows != 1 else ''}, first at {at} (f {what}), "
+            f"where the inputs are finite: a finding for "
+            f"is_computation_safe (is_overflow_safe), not a point where f "
+            f"has no value, so not a trial of is_defined")
+    if undecidable:
+        at, what = undecidable_at
+        why = (f"f {what} at {at}{f' and at {undecidable - 1} more drawn point' if undecidable > 1 else ''}"
+               f"{'s' if undecidable > 2 else ''}, a value that cannot be told "
+               f"from an overflow of the computation or a point where f has "
+               f"no value, which an exact reading of the body and the "
+               f"functions it calls, an overflow error, or numpy's overflow "
+               f"flag would decide, so the claim is not decided there")
+        if overflow_words:
+            why = f"{why}, while {overflow_words}"
+        return "unknown", checked, why
     if checked == 0:
+        if overflow_words:
+            return ("skipped", 0, overflow_words, None,
+                    {"mathema.sampled": overflow_words})
         return "skipped", 0, None
     sampled = (words["sampled_bare"] if bare else
                words["sampled_conjunct"] if conjunct else
@@ -5027,6 +5346,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                         n_out=n_out)
     if reach_note:
         sampled = f"{sampled}; {reach_note}"
+    if overflow_words:
+        sampled = f"{sampled}; {overflow_words}"
     if cut:
         cuts = guard_cut_texts(fn, facts)
         sampled = (f"{sampled}; {cut} drawn points lie where f's own guard "

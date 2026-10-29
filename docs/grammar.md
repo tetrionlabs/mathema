@@ -586,7 +586,10 @@ deliberate error) has two children, `is_language_defined` and
 `is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
 rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
 `is_finite_over_floats(f)` is a view rather than a node: poles and
-overflow together. Each roll-up runs every child that applies to the
+overflow together. An overflow is never a point where `is_defined`
+finds no value, and an infinity nothing tells from an overflow (no
+overflow error, no numpy flag, a body the exact reading cannot follow)
+leaves `is_defined` `unknown` at that point. Each roll-up runs every child that applies to the
 function and is declared by the author, never suggested; its note
 names each child's verdict. A falsified child falsifies the roll-up with
 that child's name and witness; the roll-up is `proven` when every child
@@ -955,10 +958,27 @@ running the code when the proof cannot settle the claim, so a sampled
 code only. `derive` asks for derive's verdict: when the proof cannot
 settle the claim the probe still samples it, but only a counterexample
 it executes counts, and the claim is then `falsified` on the probe's
-route with derive's reason in the note. Draws that find no
-counterexample leave the claim `unknown`, never `holds`. A proof's
+route with derive's reason in the note. A float miss or an overflow at
+a point where the claim read exactly holds is no counterexample: the
+note records it as a finding about the computation. An infinity at a
+point with no exact reading is no counterexample either, since an
+overflow and a pole cannot be told apart there. A NaN, a hole, or a
+plain miss at a point with no exact reading still falsifies. Draws that
+find no counterexample leave the claim `unknown`, never `holds`. Over a
+finite domain, a sweep that runs every point and finds the claim exact
+at each is `proven` on `derive:brute_force`; a sweep that passes only
+inexactly, or runs part of the domain, leaves the claim `unknown` on
+this route. The one `holds` on this route is a sweep that runs every
+point and finds the claim exact at each over a function the examination
+cannot show pure: it is `holds` on `derive:brute_force`, and the note
+names what stops the proof and what would make the sweep one. A proof's
 `[float]` companion and a disproof's executed witness are the same on
-every route. See [Verdicts and exit codes](verdicts.md).
+every route. On every route, a miss found by sampling derive's own
+reconstruction of the function (`probe:lifted_numeric`, for a claim the
+code cannot evaluate, such as a derivative or an integral) falsifies the
+claim only where the code, run at that point, fails the relation
+exactly; otherwise the claim is `unknown`, the note naming the point and
+why it is no witness. See [Verdicts and exit codes](verdicts.md).
 
 ## When a claim will not parse
 

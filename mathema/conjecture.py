@@ -6402,8 +6402,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # claim unknown with derive's reason (`_derive_alone`).
             from .runtime_types._receivers import ReceiverRefused
             import copy
-            stashed = (copy.deepcopy(ctx.derive_undecided)
-                       if cj.route == "derive" else None)
+            stashed = copy.deepcopy(ctx.derive_undecided)
             raw = None
             try:
                 raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
@@ -6413,9 +6412,22 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                note=f"{ctx.note}; no evaluable inputs: "
                                     f"{refused}".lstrip("; "),
                                meta={"mathema.probe_gap": "input-synthesis"})
-            if cj.route == "derive" and probed.verdict != "falsified":
+            # a miss of derive's reconstruction falsifies, on every route,
+            # only where the code run at its point fails the claim exactly
+            not_a_witness = (
+                _lifted_miss_unexecuted(ctx, fn, facts, probed)
+                if probed.verdict == "falsified"
+                and probed.route == "probe:lifted_numeric" else None)
+            # a negation proven at an executed point is a witness, as a
+            # falsification is
+            witnessed = probed.verdict == "falsified" or (
+                cj.negated and probed.verdict == "proven"
+                and (probed.route or "").startswith("probe"))
+            if not_a_witness is not None or (cj.route == "derive"
+                                             and not witnessed):
                 ctx.derive_undecided = stashed
-                probed = _derive_alone(ctx, raw if raw is not None else probed)
+                probed = _derive_alone(ctx, raw if raw is not None else probed,
+                                       not_a_witness=not_a_witness)
 
             def probed_with(bound, cj=cj):
                 # the claim on the probe route under `let |inf| be bound`:
@@ -7027,7 +7039,9 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{cj.relation}(f) covers the numeric "
                           f"parameters, and this function has none")
-    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]")
+    # a negation is the positive over the whole function, inverted: each
+    # parameter's claim is the positive one
+    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]", negated=False)
                for p in numeric]
     probes = check_conjectures(fn, sub_cjs, domain=domain, trials=trials,
                                trials_downscale=trials_scale, facts=facts,
@@ -7040,7 +7054,46 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
                    if p.verdict == "falsified" and "[" in p.name), None)
         if at:
             combined.note = f"is_missing_safe(f) is false: see {at}."
+    if cj.negated:
+        combined = _negation_of(combined)
+        combined.statement = f"not {statement.strip()}"
     return combined
+
+
+def _negation_of(row: "Probe") -> "Probe":
+    """Intent:
+        The row of a negated predicate from the row its positive claim
+        got. The negation states that the positive fails somewhere: a
+        point where the positive failed when the code ran there is a
+        witness, and the negation is proven; a proven positive
+        falsifies the negation, its proof the witness; a positive that
+        held at every sampled point says nothing about whether it fails
+        elsewhere, so the negation is unknown. Any other verdict is
+        kept.
+    """
+    def _replace(old, **changes):
+        new = _dc_replace(old, **changes)
+        if hasattr(old, "_caveat"):
+            new._caveat = old._caveat
+        return new
+    if row.verdict == "falsified":
+        return _replace(
+            row, verdict="proven", counterexample=None, stratum=None,
+            sketch=(f"the positive claim fails at {row.counterexample}, a "
+                    f"point the code ran at, which proves its negation"))
+    if row.verdict == "proven":
+        return _replace(
+            row, verdict="falsified",
+            counterexample=("the positive claim is proven"
+                            + (f": {row.sketch}" if row.sketch else "")))
+    if row.verdict == "holds":
+        said = ("the positive claim held at every sampled point, which "
+                "says nothing about whether it fails elsewhere")
+        return _replace(
+            row, verdict="unknown",
+            sketch=f"{said} ({row.note})" if row.note else said,
+            note=f"{row.note or ''}; {said}".lstrip("; "))
+    return row
 
 
 #: why derive leaves a function's raise statements to the probe
@@ -7523,14 +7576,19 @@ def _stands_in_for_derive(ctx: "_ClaimContext") -> bool:
     """Intent:
         Whether this probe stands in for a derive attempt that could not
         settle the mathematics (the wall clock, or sympy unable to close
-        the identity). Its draws then judge the mathematics, so a failure
+        the identity), or for any derive attempt that did not settle a
+        claim on route "derive", whose probe is a falsifier of the
+        mathematics. Its draws then judge the mathematics, so a failure
         of the float computation at a point where the claim holds exactly
         belongs to the computation line. Where derive does not apply at
-        all (an unliftable or unsupported claim) the probe is the
-        computation line itself, and such a point falsifies it.
+        all (an unliftable or unsupported claim) on another route the
+        probe is the computation line itself, and such a point falsifies
+        it.
     """
     fallen = ctx.derive_undecided
-    return fallen is not None and \
+    if fallen is None:
+        return False
+    return ctx.cj.route == "derive" or \
         (fallen.meta or {}).get("mathema.derive_status") == "undecided"
 
 
@@ -10928,6 +10986,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return witnessed
     elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
+        if swept is not None and swept.meta.get("mathema.sweep_holds") \
+                and swept.meta.get("mathema.sweep_inexact") \
+                and cj.route == "derive":
+            # every point executed and agreed, but some only inexactly:
+            # no proof, and on the derive route no holds either; the
+            # probe's falsifier still runs
+            ctx.derive_undecided = Probe(
+                cj.name, statement, "unknown", route="derive",
+                sketch=swept.sketch,
+                note=(f"{note + '; ' if note else ''}the sweep ran every "
+                      f"point of the finite domain and is no proof"),
+                meta={"mathema.derive_status": "undecided",
+                      **_provenance_meta(swept)})
+            return None
         if swept is not None and swept.meta.get("mathema.sweep_holds"):
             # every point executed and agreed, over a function the strict
             # examination could not show pure: holds, never proven
@@ -11189,14 +11261,56 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                        "mathema.recursion_depth": dict(info)})
 
 
-def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
+def _lifted_miss_unexecuted(ctx: "_ClaimContext", fn, facts,
+                            lifted: "Probe") -> "str | None":
+    """Intent:
+        Whether a miss the sampling of derive's reconstructed formula
+        found (`probe:lifted_numeric`) is a witness: None when the code,
+        run exactly at its point, fails the claim; otherwise the sentence
+        saying why the point is no witness (the claim has forms the code
+        cannot evaluate, the point cannot be read back, or the code run
+        there does not fail the relation exactly).
+    """
+    from ._exact_body import exact_callee
+    from .runtime_types import calling
+    cj = ctx.cj
+    where = f"derive's reconstruction misses the claim at {lifted.counterexample}"
+    point = _point_of(lifted.counterexample)
+    if not point:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    names = set(facts.params)
+    try:
+        code_l, _aux_l = _validate(cj.lhs, names, ctx.extra)
+        code_r, _aux_r = _validate(cj.rhs, names, ctx.extra)
+    except InvalidConjecture:
+        return (f"{where}, but the code cannot evaluate the claim there (its "
+                f"forms are read only by the reconstruction), so that point "
+                f"is no witness")
+    try:
+        env = {name: float(value) for name, value in point.items()}
+    except ValueError:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    bound = {name: exact_callee(v) for name, v in _bound_funcs_of(cj).items()}
+    exact = _exact_verdict(cj, code_l, code_r, env,
+                           calling(exact_callee(fn), facts), bound)
+    if exact is False:
+        return None
+    return (f"{where}, but the code run there "
+            f"{'satisfies it exactly' if exact else 'has no exact reading of it'}"
+            f", so that point is no witness")
+
+
+def _derive_alone(ctx: "_ClaimContext", probed: "Probe",
+                  not_a_witness: "str | None" = None) -> "Probe":
     """Intent:
         The row of a route="derive" claim neither derive nor the probe's
         falsifier settled: unknown on the derive route, the derive
         attempt's own report when one was kept (`ctx.derive_undecided`),
         its reason in the note, then what the probe found: how many
         draws found no counterexample (a sampled pass is no verdict on
-        this route), or why it could not run them.
+        this route), or why it could not run them, or, for a miss of
+        derive's reconstruction, why that point is no witness
+        (`not_a_witness`).
         `mathema.routes_attempted` names both attempts.
     """
     cj = ctx.cj
@@ -11209,11 +11323,16 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
     if fallen.sketch and fallen.sketch not in note:
         note = f"{note} ({fallen.sketch})" if note.endswith(
             "derive could not decide it") else f"{note}; {fallen.sketch}"
-    if probed.verdict in ("holds", "proven"):
+    finding = (probed.meta or {}).get("mathema.computation_finding")
+    if not_a_witness is not None:
+        said = not_a_witness
+    elif probed.verdict in ("holds", "proven"):
         drawn = probed.n or 0
         said = (f"the probe's {drawn} draw{'s' if drawn != 1 else ''} found "
                 f"no counterexample, and on the derive route a sampled pass "
                 f"is not a verdict")
+        if finding:
+            said = f"{said}; {finding}"
     else:
         said = _probe_said(probed)
     fallen.note = f"{note}; {said}".lstrip("; ")
@@ -11221,6 +11340,8 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe") -> "Probe":
                    "mathema.routes_attempted":
                        f"routes attempted, {_derive_attempt_label(fallen)}; "
                        f"{_probe_attempt_label(probed)}"}
+    if finding and probed.verdict in ("holds", "proven"):
+        fallen.meta["mathema.computation_finding"] = finding
     return fallen
 
 
@@ -11674,21 +11795,13 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         a hole of the runtime its containers are realised in (see
         `_null_is_a_hole`).
     """
-    beyond = _literals_beyond_float(ctx.cj)
-    if beyond:
-        # the probe compares in float64, where such a literal is an
-        # infinity, not the number the claim writes
-        cj = ctx.cj
-        return Probe(cj.name, ctx.statement, "unknown", route="probe",
-                     note=f"{ctx.note}; the literal {', '.join(beyond)} is "
-                          f"beyond float64, which reads it as an infinity, "
-                          f"so the probe compares no point against the "
-                          f"number written".lstrip("; "))
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     try:
-        return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
+        row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
+    # a negated predicate's probe ran the positive claim
+    return _negation_of(row) if ctx.cj.negated else row
 
 
 def _literals_beyond_float(cj) -> list:
@@ -12196,11 +12309,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     inconclusive = 0
     # whether the claim writes a literal with more digits than a double
     # carries, which its float evaluation reads rounded
+    # a literal float64 cannot carry (more digits than a double, or past
+    # its range, where it reads as an infinity): each draw is decided on
+    # the number as written, exactly
     long_literals = bool(overlong_literals(" ".join(
         str(part) for part in (cj.lhs, cj.rhs,
                                *(side for link in (cj.links or ())
                                  for side in (link[0], link[2])))
-        if part)))
+        if part))) or bool(_literals_beyond_float(cj))
     # the draws where the claim's own float arithmetic overflowed and
     # its sides have no exact reading, and the first of them
     overflowed, overflowed_at = 0, None
@@ -12273,6 +12389,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     computation_meta: dict = {}
     computation_finding = None
     stands_in = _stands_in_for_derive(ctx)
+    # on route "derive" the probe falsifies the mathematics only: a point
+    # counts against the claim only where its exact reading fails it
+    derive_falsifier = cj.route == "derive" and ctx.derive_undecided is not None
     # a library definition row: a failure only at a magnitude corner is a
     # finding about the library's computation, and the row stands
     from .compendium import library_key_of
@@ -13134,9 +13253,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 corner_finding = _drawn_text(args)
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
+        exact_at = (_exact_verdict(cj, code_l, code_r, env, *_exact_calls())
+                    if float_gave_out and (ctx.companion_mode == "spawn"
+                                           or stands_in) else None)
+        # on the derive route an infinity from finite inputs at a point
+        # with no exact reading is an overflow or a pole the exact reading
+        # cannot tell apart, and so no counterexample to the mathematics;
+        # a nan or a hole there is no value in any reading, and stays one
+        derive_overflow = (derive_falsifier and exact_at is None
+                           and call_inf[0] is not None and call_nan[0] is None
+                           and call_hole[0] is None)
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and _exactly_holds_at(cj, code_l, code_r, env,
-                                      *_exact_calls()):
+                and (exact_at is True or derive_overflow):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the
@@ -13160,7 +13288,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"the {_representation_word(cj_domain, facts)} computation "
                     f"gave no value at {_point_text(args)} ({gave}), where the "
                     f"claim holds in exact arithmetic: a finding about the "
-                    f"computation")
+                    f"computation" if exact_at is True else
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), where the "
+                    f"claim has no exact reading to tell an overflow from a "
+                    f"pole, so on the derive route that point is no "
+                    f"counterexample")
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if not missing_in and call_hole[0] is not None:
@@ -13406,6 +13539,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                        else abs(lv - rv))
                 if gap > relative_absorbed:
                     relative_absorbed, relative_at = gap, _point_text(args)
+        if derive_falsifier and ok is True and cj.tolerance is not None \
+                and not isinstance(cj.tolerance, ToleranceKind) \
+                and relation_within(compare_l, compare_r, cj.relation,
+                                    _exact_slack(cj), 0.0, side) is not True:
+            # a declared tolerance binds the computation line only: on the
+            # derive route a draw it alone admits is decided again on the
+            # body read exactly, and false there falsifies the mathematics
+            exact_ok = _exact_verdict(cj, code_l, code_r, env,
+                                      *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if exact_ok is False:
+                ok, exactly_false = False, True
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -13530,6 +13675,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     call_hole[0] = None
                     continue
                 miss_conditioning = found
+            if derive_falsifier and not exactly_false \
+                    and mathematics is True:
+                # the exact reading holds here: on the derive route the
+                # miss is the computation's, never a counterexample to the
+                # mathematics
+                checked += 1
+                if computation_finding is None:
+                    computation_finding = (
+                        f"the float computation misses the claim at "
+                        f"{_point_text(args)}{aux_part}, where the claim "
+                        f"holds in exact arithmetic: a finding about the "
+                        f"computation")
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                continue
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"

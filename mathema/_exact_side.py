@@ -122,12 +122,19 @@ def to_exact(value):
     if np is not None and isinstance(value, np.floating):
         return to_exact(float(value))
     if isinstance(value, (list, tuple, set, frozenset)) and value \
-            and all(isinstance(v, float) for v in value):
+            and all(isinstance(v, float) or _rows_of_floats(v) for v in value):
         # a list stays a list, a tuple a tuple and a set a set, so the
         # function receives the type it was called with (`xs + xs`
-        # concatenates)
+        # concatenates); a list of rows of floats is read row by row
         return type(value)(to_exact(v) for v in value)
     return value
+
+
+def _rows_of_floats(value) -> bool:
+    """Whether `value` is a non-empty list or tuple whose entries are
+    floats, or are themselves such lists or tuples."""
+    return isinstance(value, (list, tuple)) and bool(value) and all(
+        isinstance(v, float) or _rows_of_floats(v) for v in value)
 
 
 def to_float(value):
