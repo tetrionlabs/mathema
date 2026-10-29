@@ -251,7 +251,9 @@ class _State(threading.local):
     shadow run (`log` gathering its decisions), `"exact"` for a twin
     run checked against a shadow run's decisions (`reference`);
     `session`, the claim evaluation pairing the calls of the
-    computation with those of the exact reading (`paired`)."""
+    computation with those of the exact reading (`paired`); `memo`, the
+    calls of pure functions the current run has made (`_memoised`), None
+    outside a run."""
     depth = 0
     guard = 0
     taint: "str | None" = None
@@ -259,6 +261,7 @@ class _State(threading.local):
     log: "list | None" = None
     reference: "_Reference | None" = None
     session: "_Session | None" = None
+    memo: "dict | None" = None
 
 
 _STATE = _State()
@@ -420,9 +423,10 @@ def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
             return _Computed(None, error=as_raise(e))
         except Exception as e:
             return _Computed(None, error=e)
-    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard)
-    _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = (
-        "float", [], None, 0)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard,
+             _STATE.memo)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard, _STATE.memo = (
+        "float", [], None, 0, {})
     log = _STATE.log
     try:
         return _Computed(log, value=shadow(*args, **kwargs))
@@ -432,7 +436,8 @@ def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
     except Exception as e:
         return _Computed(log, error=e, where=_where(e))
     finally:
-        _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = saved
+        (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard,
+         _STATE.memo) = saved
 
 
 def _raised_words(error, where) -> str:
@@ -475,10 +480,11 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     if computation.log is None:
         _not_exact("the function's float run cannot be followed decision "
                    "by decision")
-    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint,
+             _STATE.memo)
     reference = _Reference(computation.log)
-    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint = (
-        "exact", None, reference, None)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint, _STATE.memo = (
+        "exact", None, reference, None, {})
     from ._exits import as_raise
     raised = None
     try:
@@ -515,6 +521,7 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
         taint = _STATE.taint
         _STATE.mode, _STATE.log, _STATE.reference = saved[:3]
         _STATE.taint = saved[3] if saved[3] is not None else taint
+        _STATE.memo = saved[4]
 
 
 class _Session:
@@ -797,37 +804,58 @@ def _shadow_of(fn):
 
 def _domain_guarded(fn) -> "tuple | None":
     """`(check, inner)` for a function `enforce_domain` wraps with no
-    policy on its result: `check(args, kwargs)` raises where the
-    wrapper raises before calling `inner`, the function it wraps; None
-    for any other function."""
-    check = getattr(fn, "__mathema_domain_check__", None)
+    policy on its result, or `enforce_dimensions` wraps: `check(args,
+    kwargs)` raises where the wrapper raises before calling `inner`, the
+    function it wraps, and returns how the wrapper checks the result
+    (`leave(result)`, raising where the wrapper raises after the call),
+    or None when it does not; None for any other function."""
     inner = getattr(fn, "__wrapped__", None)
-    if check is None or not isinstance(inner, types.FunctionType):
+    if not isinstance(inner, types.FunctionType):
         return None
-    return check, inner
+    check = getattr(fn, "__mathema_domain_check__", None)
+    if check is not None:
+        return (lambda args, kwargs: (check(args, kwargs), None)[1]), inner
+    dimensions = getattr(fn, "__mathema_dimension_check__", None)
+    if dimensions is not None:
+        entry, leave = dimensions
+
+        def checked(args, kwargs):
+            bound_names = entry(args, kwargs)
+            return lambda result: leave(bound_names, result)
+        # a dimension check reads the arguments' shapes, never their
+        # numbers
+        checked.reads_numbers = False  # type: ignore[attr-defined]
+        return checked, inner
+    return None
 
 
 def _checked_first(fn, check, body):
     """Intent:
-        `fn`, a function `enforce_domain` wraps, as a reading runs it:
-        the domain check on the arguments, a decision (`_decide`) whose
-        outcome is that it passes or the exception it raises, then
-        `body`, the reading of the function it wraps.
+        `fn`, a function `enforce_domain` or `enforce_dimensions` wraps,
+        as a reading runs it: the wrapper's check on the arguments, a
+        decision (`_decide`) whose outcome is that it passes or the
+        exception it raises, then `body`, the reading of the function it
+        wraps, then the wrapper's check of the result when it makes one.
 
     Raises:
         NotExact: in a twin run on its own, an argument holds a number
-            standing for a float, whose membership is a decision.
+            standing for a float, whose membership is a decision (a
+            dimension check, which reads shapes alone, excepted).
     """
     site = (fn.__code__.co_filename, 0, 0, 0, 0, f"domain {fn.__qualname__}")
 
     @functools.wraps(body)
     def checked(*args, **kwargs):
-        if _STATE.mode is None and (_holds_stand_in(args)
-                                    or _holds_stand_in(kwargs)):
+        if getattr(check, "reads_numbers", True) and _STATE.mode is None \
+                and (_holds_stand_in(args) or _holds_stand_in(kwargs)):
             _not_exact(f"the domain check of {fn.__qualname__} on a number "
                        f"standing for a float is not taken exactly")
-        _decide(site, lambda: check(args, kwargs) and None)
-        return body(*args, **kwargs)
+        leave = []
+        _decide(site, lambda: leave.append(check(args, kwargs)))
+        out = body(*args, **kwargs)
+        if leave and leave[0] is not None:
+            leave[0](out)
+        return out
     return checked
 
 
@@ -921,6 +949,7 @@ def _build(fn, exact: bool, decorated: bool = False) -> tuple:
             del env[fn.__name__]
     twin.__qualname__ = fn.__qualname__
     twin.__module__ = fn.__module__
+    twin.__mathema_read_from__ = fn  # type: ignore[attr-defined]
     twin.__doc__ = fn.__doc__
     twin.__annotations__ = dict(getattr(fn, "__annotations__", {}) or {})
     return twin, None
@@ -1384,6 +1413,74 @@ def _library(fn) -> bool:
     return "site-packages" in parts or "dist-packages" in parts
 
 
+def _numpy_lifted(func):
+    """Intent:
+        numpy's `asarray`, `asanyarray`, `array`, `dot` and `matmul` as
+        the reading calls them: on arguments holding an exact number
+        standing for a float, an array of exact numbers
+        (`_exact_array`), or the product of two such arrays, whose
+        products and sums are Python's exact arithmetic on the elements;
+        on any other arguments, as a module's C function (`_opaque`).
+        None for any other callable, or without numpy.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return None
+    kind = None
+    for candidate, what in ((np.asarray, "array"), (np.asanyarray, "array"),
+                            (np.array, "array"), (np.dot, "product"),
+                            (np.matmul, "product")):
+        if func is candidate:
+            kind = what
+    if kind is None:
+        return None
+    plain = _opaque(func)
+    name = _named(func)
+
+    def call(*args, **kwargs):
+        if not (_holds_stand_in(args) or _holds_stand_in(kwargs)):
+            return plain(*args, **kwargs)
+        if kind == "array":
+            if len(args) != 1 or any(k != "dtype" or v is not None
+                                     for k, v in kwargs.items()):
+                _not_exact(f"{name} is called on exact numbers with "
+                           f"arguments the reading does not follow")
+            return _exact_array(args[0], copy=func is np.array)
+        if len(args) != 2 or kwargs:
+            _not_exact(f"{name} is called on exact numbers with arguments "
+                       f"the reading does not follow")
+        return func(_exact_array(args[0]), _exact_array(args[1]))
+    return call
+
+
+def _exact_array(value, copy: bool = False):
+    """Intent:
+        `value` (a number, nested lists or tuples of numbers, or an
+        array) as a numpy array of exact numbers (object dtype), each
+        element an int or an exact number standing for a float; an
+        object array is returned as itself unless `copy`.
+
+    Raises:
+        NotExact: an element is anything else (a float with no exact
+            reading, a numpy float, a string), or the nesting is not
+            rectangular.
+    """
+    np = sys.modules["numpy"]
+    if isinstance(value, np.ndarray) and value.dtype == object and not copy:
+        array = value
+    else:
+        try:
+            array = np.array(value, dtype=object)
+        except (ValueError, TypeError):
+            _not_exact("an array of exact numbers is not rectangular")
+    for element in array.flat:
+        if isinstance(element, bool) or not (
+                isinstance(element, int) or _stands_for_float(element)):
+            _not_exact("an array holds a value the exact reading does not "
+                       "read as an exact number")
+    return array
+
+
 def _refuser(reason: str):
     """A callable that leaves the point undecided with `reason`."""
     def refused(*args, **kwargs):
@@ -1533,6 +1630,131 @@ def _read_args(args: tuple, kwargs: dict) -> tuple:
             {k: read(v) for k, v in kwargs.items()})
 
 
+def _memoised(run):
+    """Intent:
+        `run`, a twin or a shadow (`_build`), as a run calls it: when the
+        function it reads (`__mathema_read_from__`) is shown pure
+        (`shown_pure`), each call is kept in the current run's `memo` by
+        its arguments (`memo_key`), with the decisions it took
+        (`_event`), and a later call on the same arguments in the same
+        run returns the kept value: in a shadow run its decisions are
+        recorded again; in an exact run they are checked against the
+        computation's at the place reached, and where they differ the
+        call runs as written. A call whose arguments or value have no
+        key, that raises, or that taints the run is not kept.
+    """
+    original = getattr(run, "__mathema_read_from__", None)
+    if original is None or not shown_pure(original):
+        return run
+    try:
+        return _MEMOISED[run]
+    except (KeyError, TypeError):
+        pass
+
+    @functools.wraps(run)
+    def call(*args, **kwargs):
+        memo = _STATE.memo
+        key = memo_key((args, tuple(sorted(kwargs.items())))) \
+            if memo is not None else None
+        if key is None:
+            return run(*args, **kwargs)
+        mode = _STATE.mode
+        key = (run.__code__, mode, key)
+        kept = memo.get(key)
+        if kept is not None:
+            segment, value = kept
+            if mode == "float":
+                _STATE.log.extend(segment)
+                return value
+            if mode == "exact":
+                reference = _STATE.reference
+                at = reference.at
+                if reference.log[at:at + len(segment)] == segment:
+                    reference.at = at + len(segment)
+                    return value
+                return run(*args, **kwargs)
+            return value
+        if mode == "float":
+            start = len(_STATE.log)
+        elif mode == "exact":
+            start = _STATE.reference.at
+        else:
+            start = 0
+        tainted = _STATE.taint
+        value = run(*args, **kwargs)
+        if _STATE.taint is not tainted or memo_key(value) is None:
+            return value
+        if mode == "float":
+            segment = list(_STATE.log[start:])
+        elif mode == "exact":
+            segment = list(_STATE.reference.log[start:_STATE.reference.at])
+        else:
+            segment = []
+        memo[key] = (segment, value)
+        return value
+    try:
+        _MEMOISED[run] = call
+    except TypeError:
+        pass
+    return call
+
+
+#: each memoising call of a twin or a shadow (`_memoised`)
+_MEMOISED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+#: whether a function is shown pure (`shown_pure`), per function
+_PURE: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def shown_pure(fn) -> bool:
+    """Intent:
+        Whether the examination (`_examine.examine`) shows `fn` pure: no
+        write, no hidden read, no order-sensitive step, no call or name
+        it cannot read, no write to an argument, and no module-level
+        value read or written, so a call's value and its decisions are
+        those of its arguments alone. Cached per function.
+    """
+    try:
+        return _PURE[fn]
+    except (KeyError, TypeError):
+        pass
+    from ._examine import examine
+    try:
+        found = examine(fn)
+        pure = not (found.writes or found.hidden_reads
+                    or found.order_sensitive or found.unknowns
+                    or found.unknown_writes or found.arg_writes
+                    or found.module_reads or found.module_writes)
+    except Exception:
+        pure = False
+    try:
+        _PURE[fn] = pure
+    except TypeError:
+        pass
+    return pure
+
+
+def memo_key(value):
+    """Intent:
+        A key under which `value` is the same value for a call that reads
+        it: None, a bool, an int, a str and a Fraction as themselves with
+        their type, a float by its text (so -0.0 and 0.0 differ, and a
+        nan is the same nan), a sympy number by its structure, a tuple
+        element by element; None when `value` holds anything else.
+    """
+    if value is None or isinstance(value, (bool, int, str, Fraction)):
+        return (type(value), value)
+    if isinstance(value, float):
+        return (float, repr(value))
+    if isinstance(value, tuple):
+        keys = tuple(memo_key(v) for v in value)
+        return None if any(k is None for k in keys) else (tuple, keys)
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(value, sympy.Basic) \
+            and value.is_number:
+        return ("sympy", sympy.srepr(value))
+    return None
+
+
 def _helper(fn):
     """Intent:
         A Python function the twin's body calls, as the twin calls it:
@@ -1547,6 +1769,8 @@ def _helper(fn):
     if twin is None:
         call = _refuser(reason or f"{_named(fn)} is not read exactly")
     else:
+        twin = _memoised(twin)
+
         def call(*args, **kwargs):
             if _STATE.depth >= _MAX_DEPTH:
                 _not_exact(f"the calls nest deeper than {_MAX_DEPTH}")
@@ -1583,6 +1807,9 @@ def _opaque(func, owner=None):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        if owner is not None and _holds_stand_in(owner):
+            _not_exact(f"{_named(func)} is a method of an array of exact "
+                       f"numbers the reading does not follow")
         if any(_decimal_context(a) for a in (*args, *kwargs.values())):
             _not_exact(f"{_named(func)} is given a decimal context, which "
                        f"rounds where the reading does not see")
@@ -2272,10 +2499,13 @@ def _callee(func, site=None):
         exact = None
     if exact is not None and _MATH_NATIVE.get(id(func)) is func:
         return exact
+    lifted = _numpy_lifted(func)
+    if lifted is not None:
+        return lifted
     name = _named(func)
     if isinstance(func, types.FunctionType):
         if func.__globals__.get(_TWIN_MARK) is True:
-            return func
+            return _memoised(func)
         if _library(func):
             return _refuser(f"{name} is a library function the reading "
                             f"does not follow")
@@ -2332,11 +2562,12 @@ def _shadow_callee(func, site=None):
         if sited is not None:
             return sited
     if isinstance(func, types.FunctionType):
-        if func.__globals__.get(_SHADOW_MARK) is True or _own(func) \
-                or _library(func):
+        if func.__globals__.get(_SHADOW_MARK) is True:
+            return _memoised(func)
+        if _own(func) or _library(func):
             return func
         shadow = _shadow_of(func)
-        return func if shadow is None else shadow
+        return func if shadow is None else _memoised(shadow)
     if isinstance(func, type):
         return _builtin(func) if func.__module__ == "builtins" else func
     if isinstance(func, types.BuiltinFunctionType) \

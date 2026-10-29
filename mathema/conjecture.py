@@ -5361,6 +5361,7 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
             _policy.exceptions_of(fn), complex_in_view(complex_parameters(fn)):
         remit = _policy.OUTSIDE_REMIT.set(_policy.OUTSIDE_REMIT.get())
+        decisions = _EXACT_DECISIONS.set({})
         try:
             out = _around_failing_languages(lambda claims: _check_conjectures(
                 fn, claims, domain=domain, trials=trials,
@@ -5369,6 +5370,8 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
                 float_companions=float_companions,
                 pseudo_infinity=pseudo_infinity), values) if values else []
         finally:
+            _EXACT_DECISIONS.get().clear()
+            _EXACT_DECISIONS.reset(decisions)
             _policy.OUTSIDE_REMIT.reset(remit)
         # a derive:math_only claim reports the mathematics line alone;
         # what the computation does with a missing input is outside it
@@ -7240,6 +7243,11 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     if not _inside_as_written(cj, env):
         return None
+    decided = _EXACT_DECISIONS.get()
+    key = (_exact_decision_key(cj, code_l, code_r, env, fn, bound_funcs)
+           if decided is not None else None)
+    if key is not None and key in decided and decided[key][0] is cj:
+        return decided[key][1]
     try:
         exact = _with_timeout(
             lambda: exact_sides(code_l, code_r, env,
@@ -7248,9 +7256,53 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return None
-    if exact is None:
+    verdict = (None if exact is None
+               else _exact_relation(cj, exact[0], exact[1]))
+    if key is not None:
+        # the claim is held with its decision, so no other claim takes
+        # its id while the check runs
+        decided[key] = (cj, verdict)
+    return verdict
+
+
+#: the exact decisions (`_exact_verdict`) one check has taken, each with
+#: its claim, by claim, point and functions (`_exact_decision_key`), None
+#: outside a check
+_EXACT_DECISIONS: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_exact_decisions", default=None)
+
+
+def _exact_decision_key(cj, code_l, code_r, env, fn, bound_funcs):
+    """Intent:
+        The key under which the exact decision of claim `cj` at the point
+        `env` is the same decision wherever it is taken in one check: the
+        claim, its relation, tolerance and negation, its two sides, the
+        point's values (`_exact_body.memo_key`; the vocabulary's functions
+        the point also carries are the same throughout the check)
+        and the functions the sides call, each read from a function shown
+        pure (`_exact_body.shown_pure`). None when a value has no key or
+        a function is not a reading of one shown pure, so the decision is
+        taken again.
+    """
+    from ._exact_body import memo_key, shown_pure
+    point = memo_key(tuple(sorted(
+        (k, v) for k, v in env.items()
+        if k != "__builtins__" and not callable(v))))
+    if point is None:
         return None
-    return _exact_relation(cj, exact[0], exact[1])
+    readings = []
+    for name, f in sorted({"f": fn, **(bound_funcs or {})}.items()):
+        inner = f
+        while getattr(inner, "__mathema_read_from__", None) is None \
+                and getattr(inner, "__wrapped__", None) is not None:
+            inner = inner.__wrapped__
+        original = getattr(inner, "__mathema_read_from__", None)
+        if original is None or not shown_pure(original):
+            return None
+        readings.append((name, id(original)))
+    return (id(cj), cj.relation, repr(cj.tolerance),
+            bool(getattr(cj, "negated", False)), code_l, code_r, point,
+            tuple(readings))
 
 
 #: the magnitude past which float64 rounds a value to an infinity
