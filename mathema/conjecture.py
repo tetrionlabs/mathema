@@ -7641,12 +7641,14 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from ._decimal_rounding import holds_decimal, watched
+    from ._decimal_rounding import holds_decimal, may_touch_decimal, watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
+    hooked = holds_decimal(list(args)) or may_touch_decimal(
+        *(v for v in env.values() if callable(v)))
     try:
-        with watched() as watch:
+        with watched(hooked) as watch:
             lv = eval(code_l, {"__builtins__": {}}, trial_env)
             rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
@@ -12343,7 +12345,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # them, and why (`_decimal_rounding.REASONS`)
     rounded, rounded_at, rounded_why = 0, None, None
     from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
-                                    watched)
+                                    may_touch_decimal, watched)
+    # whether a draw's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods
+    touches_decimal = may_touch_decimal(fn, *bound_funcs.values())
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -12944,7 +12949,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            with watched() as watch:
+            with watched(touches_decimal or holds_decimal(list(args))) \
+                    as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:

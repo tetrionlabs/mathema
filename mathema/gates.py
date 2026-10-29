@@ -191,7 +191,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # (`_decimal_rounding.watched`)
     rounded: list = [None]
     from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
-                                    watched)
+                                    may_touch_decimal, watched)
+    # whether a point's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods
+    touches_decimal = may_touch_decimal(fn, *(bound_funcs or {}).values())
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -496,7 +499,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         precision[0] = None
         rounded[0] = None
         try:
-            with watched() as watch:
+            with watched(touches_decimal or holds_decimal(
+                    list(point.values()))) as watch:
                 lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a

@@ -33,7 +33,8 @@ import sys
 from fractions import Fraction
 
 __all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNBOUND", "UNSEEN",
-           "beyond_rounding", "holds_decimal", "watched"]
+           "beyond_rounding", "holds_decimal", "may_touch_decimal",
+           "watched"]
 
 #: why a point where a `Decimal` operation rounded is not counted
 ROUNDED = "a Decimal operation rounded; the exact reading declined"
@@ -130,7 +131,7 @@ def _setcontext(context):
 
 
 @contextlib.contextmanager
-def watched():
+def watched(hooked: bool = True):
     """Intent:
         Run the block in a copy of the current decimal context with its
         flags cleared (the same precision, rounding mode and traps), and
@@ -142,7 +143,10 @@ def watched():
         any of them held.
 
     Notes:
-        A context reached otherwise (one built before the block and
+        With `hooked` (`may_touch_decimal`), a profiler reads the block's
+        calls for the decimal contexts' own methods (`_called`); it is
+        set for the block only and the previous profiler is restored
+        when the block ends. A context reached otherwise (one built before the block and
         used through its own methods, `localcontext` bound under another
         name before the block) is not watched: a `Decimal` it rounded
         reads as unrounded here (`UNSEEN`).
@@ -165,11 +169,13 @@ def watched():
         _localcontext, _setcontext)
     _SETCONTEXT(context)
     previous = sys.getprofile()
-    sys.setprofile(profile)
+    if hooked:
+        sys.setprofile(profile)
     try:
         yield watch
     finally:
-        sys.setprofile(previous)
+        if hooked:
+            sys.setprofile(previous)
         _SETCONTEXT(outer)
         decimal.localcontext, decimal.setcontext = saved  # type: ignore[assignment]
         _INSTALLED.pop()
@@ -214,6 +220,128 @@ def _called(watch: RoundingWatch, installed: list, reached: dict, frame,
         reached[key] = unwatched(list(frame.f_globals.values()))
     if reached[key] or unwatched(list(frame.f_locals.values())):
         watch.unbound = True
+
+
+#: the names through which code reaches decimal arithmetic
+_DECIMAL_NAMES = frozenset({"decimal", "Decimal", "Context", "localcontext",
+                            "setcontext", "getcontext"})
+#: `may_touch_decimal`'s answer per code object
+_TOUCHES: dict = {}
+
+
+def may_touch_decimal(*callees) -> bool:
+    """Intent:
+        Whether running `callees` can reach decimal arithmetic: the
+        decimal module is loaded, and a callee, or a Python function it
+        reaches through its globals, closure cells and default arguments
+        (six calls deep), lives in a module whose globals hold the
+        decimal module or an object of it, or names one of
+        `_DECIMAL_NAMES` in its code. A callee with no Python code is
+        read as reaching none; mathema's own wrappers are read through
+        their closures only. Answered once per code object.
+    """
+    if "decimal" not in sys.modules and "_decimal" not in sys.modules:
+        return False
+    return any(_reaches_decimal(c) for c in callees)
+
+
+def _reaches_decimal(callee) -> bool:
+    seen: set = set()
+    todo = [(f, 0) for f in _functions_in(callee)]
+    while todo:
+        fn, level = todo.pop()
+        code = fn.__code__
+        if id(code) in seen:
+            continue
+        seen.add(id(code))
+        known = _TOUCHES.get(code)
+        if known is True:
+            return True
+        module = getattr(fn, "__module__", None) or ""
+        if module.startswith("mathema.") and not module.startswith(
+                "mathema.lexicon"):
+            continue
+        names: set = set()
+        for nested in _codes(code):
+            names.update(nested.co_names)
+        if names & _DECIMAL_NAMES or _globals_hold_decimal(fn.__globals__):
+            _TOUCHES[code] = True
+            return True
+        if level >= 6:
+            continue
+        reached = [fn.__globals__.get(n) for n in names]
+        reached += list(fn.__defaults__ or ())
+        reached += list((fn.__kwdefaults__ or {}).values())
+        for value in reached:
+            if value is not None and not isinstance(value, type(sys)):
+                todo.extend((f, level + 1) for f in _functions_in(value))
+    return False
+
+
+_GLOBALS: dict = {}
+
+
+def _globals_hold_decimal(env: dict) -> bool:
+    """Whether a module's globals hold the decimal module or an object
+    of it (`Decimal`, a context); a module found to is remembered."""
+    key = id(env)
+    if _GLOBALS.get(key) is env:
+        return True
+    held = any(v is decimal or getattr(type(v), "__module__", None)
+               in ("decimal", "_decimal")
+               or getattr(v, "__module__", None) in ("decimal", "_decimal")
+               for v in list(env.values()))
+    if held:
+        _GLOBALS[key] = env
+    return held
+
+
+def _codes(code):
+    """`code` and every code object nested in it."""
+    yield code
+    for const in code.co_consts:
+        if hasattr(const, "co_consts"):
+            yield from _codes(const)
+
+
+def _functions_in(value) -> list:
+    """The Python functions `value` stands for: itself, what it wraps
+    (`__wrapped__`, a bound method's function, an object's `__call__`,
+    a class's own methods), and the functions its closure holds."""
+    import types
+    found: list = []
+    stack = [value]
+    while stack:
+        v = stack.pop()
+        if any(v is f for f in found):
+            continue
+        if isinstance(v, types.MethodType):
+            stack.append(v.__func__)
+            continue
+        if isinstance(v, types.FunctionType):
+            found.append(v)
+            for cell in v.__closure__ or ():
+                try:
+                    stack.append(cell.cell_contents)
+                except ValueError:
+                    pass
+        elif isinstance(v, type):
+            if getattr(v, "__module__", "") not in ("builtins",):
+                stack.extend(f for f in vars(v).values()
+                             if isinstance(f, (types.FunctionType,
+                                               staticmethod, classmethod)))
+            continue
+        elif isinstance(v, (staticmethod, classmethod)):
+            stack.append(v.__func__)
+            continue
+        elif callable(v):
+            call = getattr(type(v), "__call__", None)
+            if isinstance(call, types.FunctionType):
+                stack.append(call)
+        wrapped = getattr(v, "__wrapped__", None)
+        if wrapped is not None:
+            stack.append(wrapped)
+    return found
 
 
 def holds_decimal(value) -> bool:
