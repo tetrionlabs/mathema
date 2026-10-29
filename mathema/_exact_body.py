@@ -144,7 +144,11 @@ with the text. An `import math` inside the body reaches the exact
 defined by `exec`) or a decorated function is refused the same way:
 nothing vouches for it. `Fraction(...)` and `Decimal(...)` built from
 exact arguments (an int, a string, a `Decimal`) are exact by
-construction and read as the computation builds them; built from a
+construction and read as the computation builds them, and a `Decimal`
+stays exact through the operations that do not round (addition,
+subtraction, multiplication, comparison); one that rounds to the
+decimal context's precision (a division, a square root) leaves the
+point undecided (`_without_decimal_rounding`); built from a
 float, or from a `Fraction` (which may stand for one), the point is
 undecided when the call runs (`_exact_constructor`).
 
@@ -425,6 +429,23 @@ def _raised_words(error, where) -> str:
     return f"raised {type(error).__name__}{at}"
 
 
+def _without_decimal_rounding(twin, args: tuple, kwargs: dict):
+    """Intent:
+        `twin(*args, **kwargs)` with the decimal context trapping every
+        rounding: a `Decimal` operation that would round to the
+        context's precision (a division, a square root, a result with
+        more digits than the context keeps) raises `decimal.Inexact` or
+        `decimal.Rounded` instead of returning a number the mathematics
+        does not have. The computation's own run rounds as ever, so the
+        two runs then differ and the point is not read exactly.
+    """
+    import decimal
+    with decimal.localcontext() as context:
+        context.traps[decimal.Inexact] = True
+        context.traps[decimal.Rounded] = True
+        return twin(*args, **kwargs)
+
+
 def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     """Intent:
         The twin's run on the exact `args` and `kwargs`, each decision
@@ -451,7 +472,7 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     raised = None
     try:
         try:
-            out = twin(*args, **kwargs)
+            out = _without_decimal_rounding(twin, args, kwargs)
         except NotExact:
             raise
         except (Exception, SystemExit) as e:
@@ -2506,6 +2527,17 @@ class _Exact(ast.NodeTransformer):
         value = node.value
         if self.exact and isinstance(value, float) and math.isfinite(value):
             text = ast.get_source_segment(self.src, node) or repr(value)
+            return ast.copy_location(ast.Call(
+                func=ast.Name(_LITERAL, ast.Load()),
+                args=[ast.Constant(text)], keywords=[]), node)
+        if self.exact and isinstance(value, float) and math.isinf(value):
+            # a literal written past float range (`1e309`) parses to an
+            # infinity; as written it is the finite number it states
+            text = ast.get_source_segment(self.src, node)
+            try:
+                Fraction(text or "")
+            except (ValueError, ZeroDivisionError):
+                return node
             return ast.copy_location(ast.Call(
                 func=ast.Name(_LITERAL, ast.Load()),
                 args=[ast.Constant(text)], keywords=[]), node)

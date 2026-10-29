@@ -40,3 +40,19 @@ def test_every_draw_lies_inside_the_interval_as_written(law, lo, hi):
     assert drawn, p
     outside = [b for b in drawn if not lo <= Fraction(b) <= hi]
     assert outside == [], outside
+
+
+@pytest.mark.parametrize("law,lo,hi", [
+    ("for b in [1/3, 1], f(b) >= 0", Fraction(1, 3), Fraction(1)),
+    ("for b in [0, 2/3], f(b) >= 0", Fraction(0), Fraction(2, 3)),
+])
+def test_an_end_written_as_a_fraction_is_that_fraction(law, lo, hi):
+    # float(1/3) = 0.333...3148 lies below 1/3, outside [1/3, 1];
+    # float(2/3) = 0.666...6297 lies below 2/3, inside [0, 2/3]: every
+    # draw lies inside the interval the fractions write
+    SEEN.clear()
+    (p,) = check_conjectures(recorded, [claim(law, route="probe")])
+    drawn = [b for b in SEEN if isinstance(b, float) and b == b]
+    assert drawn, p
+    outside = [b for b in drawn if not lo <= Fraction(b) <= hi]
+    assert outside == [], outside

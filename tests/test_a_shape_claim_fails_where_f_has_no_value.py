@@ -142,3 +142,19 @@ def test_an_integer_past_the_float_range_never_ends_the_check():
              "convex[x]")
     assert p.verdict != "proven", (p.verdict, p.sketch)
     assert "inf" not in (p.counterexample or ""), p.counterexample
+
+
+def inf_right(x: float) -> float:
+    import math
+    return x if x <= 0 else math.inf
+
+
+def test_an_infinity_the_body_returns_is_no_value_not_an_overflow():
+    # the body writes math.inf for x > 0: no value there (decision A),
+    # never an overflow of the float64 run, so the monotone claim fails
+    # where f has no value
+    from mathema.conjecture import check_conjectures, claim
+    (p,) = check_conjectures(inf_right, [claim(
+        "for x in [-10, 10], d(f(x), x) >= 0", route="probe")])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "overflow" not in (p.note or ""), p.note

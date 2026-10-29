@@ -427,6 +427,27 @@ class _Kappa:
         return kappa, returned
 
 
+def _a_side_is_f(cj) -> bool:
+    """Intent:
+        Whether a side of the claim is a bare call of f (`f(x)`), whose
+        value is f's own: the condition number times the magnitude f
+        returned then measures that side in its own units. A side that
+        scales or combines f's value (`f(x) / 1e10`) is in other units.
+    """
+    import ast
+    for text in (getattr(cj, "lhs", None), getattr(cj, "rhs", None)):
+        if not text:
+            continue
+        try:
+            node = ast.parse(str(text), mode="eval").body
+        except SyntaxError:
+            continue
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "f":
+            return True
+    return False
+
+
 def _float64_at(cj, computed, point: dict,
                 kappa: "_Kappa | None" = None,
                 returned=None) -> "tuple | None":
@@ -437,8 +458,9 @@ def _float64_at(cj, computed, point: dict,
         `PRECISION_FACTOR` unit roundoffs of the value compared against
         (the claim's own side where exactly one side runs no code), plus
         the function's relative condition number times the magnitude of
-        the value it returned there, where the miss needs it and `kappa`
-        reads both; that precision's reading in words; and `detail`,
+        the value it returned there, where the miss needs it, a side is
+        f's own value (`_a_side_is_f`) and `kappa` reads both; that
+        precision's reading in words; and `detail`,
         the record of it (`bound`, `factor`, `magnitude`, `kappa` and
         `returned`, the last two None where not read). With
         `returned`, the claim's sides on exact values the code returned
@@ -467,7 +489,7 @@ def _float64_at(cj, computed, point: dict,
     words = f"{PRECISION_FACTOR} unit roundoffs of {short(magnitude)}"
     detail = {"bound": bound, "factor": PRECISION_FACTOR,
               "magnitude": magnitude, "kappa": None, "returned": None}
-    if miss > bound and kappa is not None:
+    if miss > bound and kappa is not None and _a_side_is_f(cj):
         read = kappa.at(point, magnitude)
         if read is not None:
             k, returned = read
@@ -497,6 +519,18 @@ def _returned_at(evaluate, point: dict):
         return _with_timeout(lambda: returned(point), FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return None
+
+
+def _rounded_miss_words(sides) -> str:
+    """Intent:
+        The clause a witness at a point where a Decimal operation
+        rounded carries: the executed sides, and that they miss by more
+        than the rounding can account for.
+    """
+    shown = (f" ({sides[0]!r} vs {sides[1]!r})"
+             if isinstance(sides, tuple) and len(sides) == 2 else "")
+    return (f", where a Decimal operation rounded{shown}, by more than "
+            f"rounding to the context's precision can account for")
 
 
 def _uncounted_at(cj, measured) -> bool:
@@ -1003,6 +1037,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # agrees within its allowance
     inexact: list = []
     exact_miss = None
+    # the points where a Decimal operation rounded
+    # (`_decimal_rounding.ROUNDED`)
+    rounded: list = []
     # how far the floats missed over the points compared
     precision = _Precision()
     kappa = _Kappa(cj, fn, facts)
@@ -1020,6 +1057,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             # a raise or a missing output at a missing input: classified
             # into the executed, not judged
             continue
+        if verdict is None and evaluate.decimal_rounded():
+            # neither read exactly nor a float64 value: not counted
+            rounded.append(point)
+            continue
         if verdict is None:
             return None
         if verdict is False:
@@ -1032,6 +1073,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
+                       + (_rounded_miss_words(evaluate.sides())
+                          if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else
                           f", found among the points run "
@@ -1092,6 +1135,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                  "mathema.exact_witness": {
                      **witness, "computation": "holds within its allowance"}},
                 executed_missing(deps)))
+    if rounded:
+        from ._decimal_rounding import ROUNDED
+        n = len(rounded)
+        return ProofResult(
+            "undecided",
+            sketch=(f"{ROUNDED} at {n} point{'s' if n != 1 else ''}, first "
+                    f"at {_fmt_point(rounded[0], names)}, so "
+                    f"{'they are' if n != 1 else 'it is'} not counted and "
+                    f"the sweep decides nothing"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid), **counted},
+                               executed_missing(deps)))
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
         # clean pass over no points proves nothing while looking like a

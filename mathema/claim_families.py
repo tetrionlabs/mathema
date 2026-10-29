@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 import math
 import numbers
+import inspect
 import random
 import sys
 from decimal import Decimal
@@ -395,7 +396,9 @@ def _written_inside(piece) -> tuple:
     written (`_sampling._inside_as_written`)."""
     from ._sampling import _inside_as_written
     lo, hi = piece[0], piece[1]
-    moved_lo, moved_hi = _inside_as_written(lo, hi)
+    moved_lo, moved_hi = _inside_as_written(
+        lo, hi, getattr(piece, "exact_lo", None),
+        getattr(piece, "exact_hi", None))
     return (lo if getattr(piece, "reach_lo", False) else moved_lo,
             hi if getattr(piece, "reach_hi", False) else moved_hi)
 
@@ -450,8 +453,10 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
         does not admit. `value` is `_REFUSED` when the function's own
         guard rejected the call or the call raised at a missing
         argument, and `_OVERFLOWED` when the float64 run overflowed (an
-        OverflowError, or an infinity returned): an overflow is the
-        computation's, never a shape claim's counterexample.
+        OverflowError, or an infinity returned that the body does not
+        write, `_infinity_is_written`): an overflow is the
+        computation's, never a shape claim's counterexample. An
+        infinity the body writes is no value.
 
     Raises:
         PremiseRejected: the call lies outside the claim's premises.
@@ -483,10 +488,36 @@ def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
                        "admit")
     scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
     if scalar and _is_nonfinite(value):
-        if not _no_overflow(value, None):
+        if not _no_overflow(value, None) \
+                and not _infinity_is_written(fn, facts, target, args, x):
             return _OVERFLOWED, None
         return value, f"returned {value_shown(value)}"
     return value, None
+
+
+def _infinity_is_written(fn, facts, target: str, args: list, x) -> bool:
+    """Intent:
+        Whether an infinity the call returned is the body's own (a
+        literal such as `math.inf` on the path taken), not an overflow:
+        the body read exactly (`_exact_body.exact_callee`) on the call's
+        exact arguments returns an infinity too. An overflow reads as a
+        finite value there; a body the reading cannot follow is not
+        shown to write one.
+    """
+    import math as _math
+
+    from ._exact_body import exact_callee
+    from ._exact_side import to_exact
+    try:
+        out = _call_with_target(exact_callee(fn), facts, target,
+                                [to_exact(a) for a in args], to_exact(x))
+    except Exception:
+        return False
+    if isinstance(out, float):
+        return _math.isinf(out)
+    sympy = sys.modules.get("sympy")
+    return sympy is not None and isinstance(out, sympy.Basic) \
+        and out in (sympy.oo, -sympy.oo)
 
 
 def _with_overflow_reason(result, target: str, overflowed: dict):
@@ -2418,6 +2449,19 @@ def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _plain_str_parameter(fn, target: str) -> bool:
+    """Intent:
+        Whether `fn`'s parameter `target` is annotated plain `str` (or
+        the text `"str"`), the annotation mathema reads as every string,
+        rather than a language marker or an adaptor's type.
+    """
+    try:
+        annotation = inspect.signature(fn).parameters[target].annotation
+    except (KeyError, TypeError, ValueError):
+        return False
+    return annotation is str or annotation == "str"
+
+
 #: the refused strings a record of an unbound is_language_defined names
 _REFUSALS_SHOWN = 6
 
@@ -2454,9 +2498,17 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     target = cj.lhs
     bound = domain.get(target)
-    language_bound = getattr(bound, "base_type", None) == "L"
+    # a language the claim binds, or one the parameter's annotation
+    # names, is the declared domain; the strings mathema reads a plain
+    # `str` annotation as (every string) are no declaration, and leave
+    # the function's refusals to define its language
+    language_bound = (getattr(bound, "base_type", None) == "L"
+                      and (target in (cj.domain or {})
+                           or not _plain_str_parameter(fn, target)))
     if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
+    if not language_bound and getattr(bound, "base_type", None) == "L":
+        bound = None
     # with no body there is no guard to read: an accidental-type raise
     # is then neither a declared rejection nor a crash, and the run is
     # unknown with the reason
