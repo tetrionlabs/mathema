@@ -67,12 +67,13 @@ def test_a_vector_and_a_matrix_parameter_draw_a_vector_and_a_matrix():
                                       p.counterexample, p.note)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "[overflow-nan] w @ C @ w is finite at every real point, but at "
-    "weights near the largest double numpy's matmul overflows to inf and "
-    "leaves a nan, and the overflow is not reported to numpy's error "
-    "state there, so the nan is read as no value and is_defined falsifies"))
 def test_a_vector_and_a_matrix_over_the_whole_line_meet_the_overflow():
+    # w @ C @ w is finite at every real point. Near the largest double
+    # numpy's matmul overflows to inf or leaves a nan, and whether it
+    # reports the overflow to numpy's error state differs by platform;
+    # the body read exactly (the matrix product of exact numbers) is
+    # finite there on every platform, so the point is the computation's
+    # overflow
     for fn in (portfolio_variance, guarded_variance):
         (p,) = check_conjectures(fn, [claim("is_defined(f)")])
         # the float run overflows at the magnitude corner, a fact about

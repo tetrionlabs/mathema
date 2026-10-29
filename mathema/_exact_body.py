@@ -797,37 +797,58 @@ def _shadow_of(fn):
 
 def _domain_guarded(fn) -> "tuple | None":
     """`(check, inner)` for a function `enforce_domain` wraps with no
-    policy on its result: `check(args, kwargs)` raises where the
-    wrapper raises before calling `inner`, the function it wraps; None
-    for any other function."""
-    check = getattr(fn, "__mathema_domain_check__", None)
+    policy on its result, or `enforce_dimensions` wraps: `check(args,
+    kwargs)` raises where the wrapper raises before calling `inner`, the
+    function it wraps, and returns how the wrapper checks the result
+    (`leave(result)`, raising where the wrapper raises after the call),
+    or None when it does not; None for any other function."""
     inner = getattr(fn, "__wrapped__", None)
-    if check is None or not isinstance(inner, types.FunctionType):
+    if not isinstance(inner, types.FunctionType):
         return None
-    return check, inner
+    check = getattr(fn, "__mathema_domain_check__", None)
+    if check is not None:
+        return (lambda args, kwargs: (check(args, kwargs), None)[1]), inner
+    dimensions = getattr(fn, "__mathema_dimension_check__", None)
+    if dimensions is not None:
+        entry, leave = dimensions
+
+        def checked(args, kwargs):
+            bound_names = entry(args, kwargs)
+            return lambda result: leave(bound_names, result)
+        # a dimension check reads the arguments' shapes, never their
+        # numbers
+        checked.reads_numbers = False  # type: ignore[attr-defined]
+        return checked, inner
+    return None
 
 
 def _checked_first(fn, check, body):
     """Intent:
-        `fn`, a function `enforce_domain` wraps, as a reading runs it:
-        the domain check on the arguments, a decision (`_decide`) whose
-        outcome is that it passes or the exception it raises, then
-        `body`, the reading of the function it wraps.
+        `fn`, a function `enforce_domain` or `enforce_dimensions` wraps,
+        as a reading runs it: the wrapper's check on the arguments, a
+        decision (`_decide`) whose outcome is that it passes or the
+        exception it raises, then `body`, the reading of the function it
+        wraps, then the wrapper's check of the result when it makes one.
 
     Raises:
         NotExact: in a twin run on its own, an argument holds a number
-            standing for a float, whose membership is a decision.
+            standing for a float, whose membership is a decision (a
+            dimension check, which reads shapes alone, excepted).
     """
     site = (fn.__code__.co_filename, 0, 0, 0, 0, f"domain {fn.__qualname__}")
 
     @functools.wraps(body)
     def checked(*args, **kwargs):
-        if _STATE.mode is None and (_holds_stand_in(args)
-                                    or _holds_stand_in(kwargs)):
+        if getattr(check, "reads_numbers", True) and _STATE.mode is None \
+                and (_holds_stand_in(args) or _holds_stand_in(kwargs)):
             _not_exact(f"the domain check of {fn.__qualname__} on a number "
                        f"standing for a float is not taken exactly")
-        _decide(site, lambda: check(args, kwargs) and None)
-        return body(*args, **kwargs)
+        leave = []
+        _decide(site, lambda: leave.append(check(args, kwargs)))
+        out = body(*args, **kwargs)
+        if leave and leave[0] is not None:
+            leave[0](out)
+        return out
     return checked
 
 
@@ -1384,6 +1405,74 @@ def _library(fn) -> bool:
     return "site-packages" in parts or "dist-packages" in parts
 
 
+def _numpy_lifted(func):
+    """Intent:
+        numpy's `asarray`, `asanyarray`, `array`, `dot` and `matmul` as
+        the reading calls them: on arguments holding an exact number
+        standing for a float, an array of exact numbers
+        (`_exact_array`), or the product of two such arrays, whose
+        products and sums are Python's exact arithmetic on the elements;
+        on any other arguments, as a module's C function (`_opaque`).
+        None for any other callable, or without numpy.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return None
+    kind = None
+    for candidate, what in ((np.asarray, "array"), (np.asanyarray, "array"),
+                            (np.array, "array"), (np.dot, "product"),
+                            (np.matmul, "product")):
+        if func is candidate:
+            kind = what
+    if kind is None:
+        return None
+    plain = _opaque(func)
+    name = _named(func)
+
+    def call(*args, **kwargs):
+        if not (_holds_stand_in(args) or _holds_stand_in(kwargs)):
+            return plain(*args, **kwargs)
+        if kind == "array":
+            if len(args) != 1 or any(k != "dtype" or v is not None
+                                     for k, v in kwargs.items()):
+                _not_exact(f"{name} is called on exact numbers with "
+                           f"arguments the reading does not follow")
+            return _exact_array(args[0], copy=func is np.array)
+        if len(args) != 2 or kwargs:
+            _not_exact(f"{name} is called on exact numbers with arguments "
+                       f"the reading does not follow")
+        return func(_exact_array(args[0]), _exact_array(args[1]))
+    return call
+
+
+def _exact_array(value, copy: bool = False):
+    """Intent:
+        `value` (a number, nested lists or tuples of numbers, or an
+        array) as a numpy array of exact numbers (object dtype), each
+        element an int or an exact number standing for a float; an
+        object array is returned as itself unless `copy`.
+
+    Raises:
+        NotExact: an element is anything else (a float with no exact
+            reading, a numpy float, a string), or the nesting is not
+            rectangular.
+    """
+    np = sys.modules["numpy"]
+    if isinstance(value, np.ndarray) and value.dtype == object and not copy:
+        array = value
+    else:
+        try:
+            array = np.array(value, dtype=object)
+        except (ValueError, TypeError):
+            _not_exact("an array of exact numbers is not rectangular")
+    for element in array.flat:
+        if isinstance(element, bool) or not (
+                isinstance(element, int) or _stands_for_float(element)):
+            _not_exact("an array holds a value the exact reading does not "
+                       "read as an exact number")
+    return array
+
+
 def _refuser(reason: str):
     """A callable that leaves the point undecided with `reason`."""
     def refused(*args, **kwargs):
@@ -1583,6 +1672,9 @@ def _opaque(func, owner=None):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        if owner is not None and _holds_stand_in(owner):
+            _not_exact(f"{_named(func)} is a method of an array of exact "
+                       f"numbers the reading does not follow")
         if any(_decimal_context(a) for a in (*args, *kwargs.values())):
             _not_exact(f"{_named(func)} is given a decimal context, which "
                        f"rounds where the reading does not see")
@@ -2272,6 +2364,9 @@ def _callee(func, site=None):
         exact = None
     if exact is not None and _MATH_NATIVE.get(id(func)) is func:
         return exact
+    lifted = _numpy_lifted(func)
+    if lifted is not None:
+        return lifted
     name = _named(func)
     if isinstance(func, types.FunctionType):
         if func.__globals__.get(_TWIN_MARK) is True:
