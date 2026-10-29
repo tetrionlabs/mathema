@@ -18,7 +18,8 @@ absence, never a nan, for a None.
 from __future__ import annotations
 
 import json
-from typing import Optional
+import typing
+from typing import Any, Optional
 
 import pytest
 
@@ -147,3 +148,52 @@ def test_a_nan_from_present_inputs_still_agrees_with_nothing():
                                                      route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.note)
     assert "nan" in (p.counterexample or ""), p.counterexample
+
+
+def none_annotated_none(x: float) -> None:
+    return None
+
+
+def none_annotated_any(x: float) -> Any:
+    return None
+
+
+def none_annotated_object(x: float) -> object:
+    return None
+
+
+def none_quoted_any(x: float) -> "typing.Any":
+    return None
+
+
+def none_unannotated(x: float):
+    return None
+
+
+@pytest.mark.parametrize("fn, declared", [
+    (none_annotated_none, "None"), (none_annotated_any, "Any"),
+    (none_annotated_object, "object"), (none_quoted_any, "Any")])
+def test_a_return_type_that_admits_none_declares_the_absence(fn, declared):
+    # None, Any and object all admit None: the absence is declared, judged
+    # by the absent policy row, and never a failure of the value claim
+    rows = _probes(fn, _REFLEXIVE)
+    assert rows["c"].verdict in ("proven", "holds"), (rows["c"].verdict, rows["c"].note)
+    assert rows["c[float]"].verdict == "holds", rows["c[float]"].counterexample
+    declared_rows = [p for p in rows.values()
+                     if ((p.meta or {}).get("mathema.policy") or {}).get("kind") == "absent"
+                     and p.meta["mathema.policy"].get("parameter") is None]
+    assert declared_rows and all(p.verdict == "proven" for p in declared_rows), \
+        [(p.name, p.verdict) for p in declared_rows]
+    assert f"from the return type {declared}:" in declared_rows[0].note, \
+        declared_rows[0].note
+    shown = repr(mathema.check(fn, claims=[claim(_REFLEXIVE, name="c")]))
+    assert "Optional[None]" not in shown and "Optional[Any]" not in shown \
+        and "Optional[object]" not in shown, shown
+
+
+def test_an_unannotated_return_does_not_declare_the_absence():
+    rows = _probes(none_unannotated, _REFLEXIVE)
+    computation = rows["c[float]"]
+    assert computation.verdict == "falsified", (computation.verdict, computation.note)
+    assert "its return type (no annotation) does not declare it" in \
+        computation.counterexample, computation.counterexample
