@@ -97,7 +97,10 @@ def test_a_witness_lies_inside_the_definedness_premise(route):
     assert 2 < _x(p) <= 3, p.counterexample
 
 
-@pytest.mark.parametrize("route", ["best", "derive"])
+# on best each piece is proven under the premise x * x >= 9 by the
+# extensive ladder's nlsat rung, which needs z3 (mathema[smt])
+@pytest.mark.parametrize("route", [pytest.param("best", marks=pytest.mark.needs_smt),
+                                   "derive"])
 def test_a_piece_a_nonlinear_premise_rules_out_is_left_out(route):
     # x * x >= 9 admits x <= -3 and x >= 3; the split's piece x = 2 is
     # outside it, where f(2) = 0
