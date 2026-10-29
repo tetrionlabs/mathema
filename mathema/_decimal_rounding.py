@@ -19,7 +19,10 @@ its own methods, `ctx.divide(a, b)`), so a side holding a `Decimal`
 that has no exact reading is read as a rounded one, though no watched
 context rounded (`UNSEEN`): not counted, unless it misses by more than
 rounding to the smallest precision watched can account for, which the
-executed values witness.
+executed values witness. A context's own method read during the run
+(`ctx.divide(a, b)`) adds its precision; a `Decimal` method run beside
+a context the block does not watch may compute in it (`context=ctx`),
+and the point's rounding is then unbounded (`UNBOUND`).
 """
 from __future__ import annotations
 
@@ -29,9 +32,8 @@ import math
 import sys
 from fractions import Fraction
 
-__all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNSEEN",
-           "beyond_rounding", "context_precision", "holds_decimal",
-           "watched"]
+__all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNBOUND", "UNSEEN",
+           "beyond_rounding", "holds_decimal", "watched"]
 
 #: why a point where a `Decimal` operation rounded is not counted
 ROUNDED = "a Decimal operation rounded; the exact reading declined"
@@ -40,21 +42,31 @@ ROUNDED = "a Decimal operation rounded; the exact reading declined"
 #: rounding bound
 UNSEEN = ("a Decimal operation may have rounded in a context the reading "
           "did not see; the exact reading declined")
+#: why a point where a Decimal method ran beside a decimal context the
+#: reading does not watch is not counted, its rounding unbounded
+UNBOUND = ("a Decimal operation may have rounded in a context the reading "
+           "could not bound; the exact reading declined")
 #: every reason a point is not counted for its Decimal arithmetic
-REASONS = (ROUNDED, UNSEEN)
+REASONS = (ROUNDED, UNSEEN, UNBOUND)
 
 
 class RoundingWatch:
     """The outcome of one `watched` block: `rounded` is True once a
     `Decimal` operation inside it raised the `Inexact` or `Rounded` flag
-    of a watched context; `precision` is the smallest precision any
-    watched context held, the one the rounding bound reads; `reason` is
-    `ROUNDED` once it rounded, else None."""
+    of a watched context, or once a `Decimal` method ran beside a
+    context the block does not watch (`UNBOUND`); `precision` is the
+    smallest precision any watched context, or any context whose own
+    method the block called, held, 1 when unbounded: the one the
+    rounding bound reads; `reason` is why the point is not counted,
+    None while it is."""
 
     def __init__(self) -> None:
         self.rounded = False
         self.precision: "int | None" = decimal.getcontext().prec
         self.reason: "str | None" = None
+        #: the precisions of the contexts whose own methods ran
+        self.called: list = []
+        self.unbound = False
 
 
 class _Watched(decimal.Context):
@@ -136,6 +148,11 @@ def watched():
         reads as unrounded here (`UNSEEN`).
     """
     watch = RoundingWatch()
+    reached: dict = {}
+
+    def profile(frame, event, arg):
+        if event == "c_call":
+            _called(watch, installed, reached, frame, arg)
     outer = decimal.getcontext()
     context = _Watched(prec=outer.prec, rounding=outer.rounding,
                        Emin=outer.Emin, Emax=outer.Emax,
@@ -147,52 +164,56 @@ def watched():
     decimal.localcontext, decimal.setcontext = (  # type: ignore[assignment]
         _localcontext, _setcontext)
     _SETCONTEXT(context)
+    previous = sys.getprofile()
+    sys.setprofile(profile)
     try:
         yield watch
     finally:
+        sys.setprofile(previous)
         _SETCONTEXT(outer)
         decimal.localcontext, decimal.setcontext = saved  # type: ignore[assignment]
         _INSTALLED.pop()
-        watch.precision = min(getattr(c, "lowest", c.prec) if c is context
-                              else c.prec for c in installed)
-        if any(c.flags[decimal.Inexact] or c.flags[decimal.Rounded]
-               for c in installed):
+        watch.precision = min([getattr(c, "lowest", c.prec) if c is context
+                               else c.prec for c in installed]
+                              + watch.called)
+        if watch.unbound:
+            watch.rounded, watch.reason, watch.precision = True, UNBOUND, 1
+        elif any(c.flags[decimal.Inexact] or c.flags[decimal.Rounded]
+                 for c in installed):
             watch.rounded, watch.reason = True, ROUNDED
 
 
-def context_precision(run) -> "int | None":
+def _called(watch: RoundingWatch, installed: list, reached: dict, frame,
+            function) -> None:
     """Intent:
-        Run `run()` and return the smallest precision of a decimal
-        context whose own method it called (`ctx.divide(a, b)`, or a
-        Decimal method given `context=ctx`), which computes at that
-        context's precision outside every watched context; None when it
-        called none. A raise from `run` ends the run.
+        Read one call of a C function in a watched block: a method of a
+        decimal context the block does not watch adds that context's
+        precision to `watch.called`; a `Decimal` method called from a
+        frame that reaches such a context (its locals, closure cells and
+        arguments, or its module's globals) sets `watch.unbound`, since
+        the method may compute in it (`context=ctx`). Calls made from
+        mathema's own code are not read.
     """
-    found: list = []
+    owner = getattr(function, "__self__", None)
+    if isinstance(owner, decimal.Context):
+        if not any(owner is c for c in installed):
+            watch.called.append(owner.prec)
+        return
+    if not isinstance(owner, decimal.Decimal) or frame is None:
+        return
+    module = frame.f_globals.get("__name__", "") or ""
+    if module.startswith("mathema.") and not module.startswith(
+            "mathema.lexicon"):
+        return
 
-    def profile(frame, event, arg):
-        if event != "c_call":
-            return
-        owner = getattr(arg, "__self__", None)
-        if isinstance(owner, decimal.Context):
-            found.append(owner.prec)
-        elif frame is not None:
-            # a context passed to a Decimal method (`context=ctx`) is
-            # read from the calling frame's own names
-            for value in frame.f_locals.values():
-                if isinstance(value, decimal.Context):
-                    found.append(value.prec)
-
-    previous = sys.getprofile()
-    with _LOCALCONTEXT():
-        sys.setprofile(profile)
-        try:
-            run()
-        except Exception:
-            pass
-        finally:
-            sys.setprofile(previous)
-    return min(found) if found else None
+    def unwatched(values) -> bool:
+        return any(isinstance(v, decimal.Context)
+                   and not any(v is c for c in installed) for v in values)
+    key = id(frame.f_globals)
+    if key not in reached:
+        reached[key] = unwatched(list(frame.f_globals.values()))
+    if reached[key] or unwatched(list(frame.f_locals.values())):
+        watch.unbound = True
 
 
 def holds_decimal(value) -> bool:

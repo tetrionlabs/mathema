@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""A decimal context held as an object (a module's `Context(prec=10)`,
+one passed as a default argument or as `context=`) computes at its own
+precision, outside the context a point runs in. Its own methods
+(`ctx.divide`, `ctx.sqrt`) round at that precision, which bounds the
+point; a Decimal method run beside such a context may compute in it,
+and the point's rounding is then unbounded. Either way a true claim is
+never falsified on the rounding, and a miss past it still is. The
+contexts live in this module, apart from the bodies that compute in the
+current context only."""
+import decimal
+from decimal import Decimal
+
+import pytest
+
+from mathema.conjecture import check_conjectures, claim
+
+_PREC10 = decimal.Context(prec=10)
+
+
+def module_context(x: int):
+    return _PREC10.divide(Decimal(x), Decimal(3)) * 3
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_division_in_a_modules_context_is_not_counted(route):
+    # 1/3 in 10 digits, times 3: 0.9999999999 below 1, so f(x) < x
+    # holds only on the rounding
+    (p,) = check_conjectures(module_context,
+                             [claim("for x in {1, 4}, f(x) < x", route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.note)
+
+
+def root_in_context(x: int):
+    return Decimal(x).sqrt(context=_PREC10) ** 2
+
+
+def context_by_default(x: int, ctx=_PREC10):
+    return ctx.divide(Decimal(x), Decimal(3)) * 3
+
+
+@pytest.mark.parametrize("fn,law", [
+    # 1/3 in 10 digits, times 3: 0.9999999999 against 1, a miss rounding
+    # to 10 digits accounts for; it is no witness
+    (module_context, "for x in {1, 4}, f(x) == x"),
+    (context_by_default, "for x in {1, 4}, f(x) == x"),
+    (context_by_default, "for x in {1, 4}, f(x) < x"),
+    # sqrt(n) in 10 digits, squared: n up to rounding at 10 digits
+    (root_in_context, "for x in {2, 3}, f(x) == x"),
+])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_objects_own_arithmetic_rounds_at_its_precision(
+        fn, law, route):
+    (p,) = check_conjectures(fn, [claim(law, route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_objects_result_far_from_the_claim_falsifies(route):
+    # 0.9999999999 or 3.999999999 against 100: past any rounding
+    (p,) = check_conjectures(module_context,
+                             [claim("for x in {1, 4}, f(x) == 100",
+                                    route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+_CTX4 = decimal.Context(prec=4)
+
+
+def root_squared_ctx(x: int):
+    # sqrt rounded to 4 digits in a module's context, squared in the
+    # current one: sqrt(2) is 1.414, squared 1.999396
+    return Decimal(x).sqrt(context=_CTX4) ** 2
+
+
+_COUNTED: list = []
+
+
+def counted_sqrt(x: int):
+    # the first call at each x computes in 4 digits, the next in 28
+    _COUNTED.append(x)
+    ctx = decimal.Context(prec=4 if _COUNTED.count(x) % 2 == 1 else 28)
+    return ctx.sqrt(Decimal(x)) ** 2
+
+
+@pytest.mark.parametrize("fn", [root_squared_ctx, counted_sqrt])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_true_claim_rounded_in_a_context_not_watched_is_not_falsified(
+        fn, route):
+    # sqrt(n) ** 2 == n is true; the code's 1.999396 at x = 2 is the
+    # rounding of a context the call reaches, not a witness
+    (p,) = check_conjectures(fn, [claim("for x in {2, 3}, f(x) == x",
+                                        route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)

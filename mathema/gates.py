@@ -190,8 +190,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # whether a Decimal operation rounded at the last point evaluated
     # (`_decimal_rounding.watched`)
     rounded: list = [None]
-    from ._decimal_rounding import (UNSEEN, beyond_rounding,
-                                    context_precision, holds_decimal,
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
                                     watched)
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
@@ -492,17 +491,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         calls_raised[0], calls_nonfinite[0] = made[1], made[2]
         return sides is not None
 
-    def _unseen_precision(point, watch) -> int:
-        # the smallest precision watched at the point, or of a decimal
-        # context whose own methods the computation called there, the
-        # point's calls kept
-        made = (list(f_calls.calls), list(point_calls), last_sides[0],
-                calls_raised[0], calls_nonfinite[0])
-        called = context_precision(lambda: _values(point))
-        f_calls.calls, point_calls[:] = made[0], made[1]
-        last_sides[0], calls_raised[0], calls_nonfinite[0] = made[2:]
-        return min(p for p in (watch.precision, called) if p is not None)
-
     def evaluate(point):
         _reset()
         precision[0] = None
@@ -546,7 +534,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # read as a rounded one at the smallest precision watched
             rounded[0] = UNSEEN
             if beyond_rounding(
-                    lv, rv, cj.relation, _unseen_precision(point, watch),
+                    lv, rv, cj.relation, watch.precision,
                     lambda a, b: relation_within(
                         a, b, cj.relation, declared, 0.0, claim_side,
                         exact_inequality=cj.tolerance is None)):

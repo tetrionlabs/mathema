@@ -7673,13 +7673,8 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         # a Decimal no watched context rounded may have rounded where no
         # flag was read: a failure only past the rounding bound
         from ._allowance import relation_within
-        from ._decimal_rounding import beyond_rounding, context_precision
-        called = context_precision(lambda: (
-            eval(code_l, {"__builtins__": {}}, trial_env),
-            eval(code_r, {"__builtins__": {}}, trial_env)
-            if code_r is not None else None))
-        precision = min(p for p in (watch.precision, called)
-                        if p is not None)
+        from ._decimal_rounding import beyond_rounding
+        precision = watch.precision
         if beyond_rounding(lv, rv, cj.relation, precision,
                            lambda a, b: relation_within(
                                a, b, cj.relation, cj.tolerance, 0.0, None,
@@ -12347,8 +12342,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the draws not counted for their Decimal arithmetic, the first of
     # them, and why (`_decimal_rounding.REASONS`)
     rounded, rounded_at, rounded_why = 0, None, None
-    from ._decimal_rounding import (UNSEEN, beyond_rounding,
-                                    context_precision, holds_decimal,
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
                                     watched)
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
@@ -13220,18 +13214,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                     *_exact_calls()) is None
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-        if unseen:
-            # a decimal context whose own methods the computation called
-            # rounds at its precision, outside every watched context
-            made = list(f_call.calls)
-            called = context_precision(lambda: (
-                eval(code_l, {"__builtins__": {}}, env),
-                eval(code_r, {"__builtins__": {}}, env)
-                if code_r is not None else None))
-            f_call.calls = made
-            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
-            if called is not None and called < watch.precision:
-                watch.precision = called
         if unseen and beyond_rounding(
                 lv, rv, cj.relation, watch.precision,
                 lambda a, b: relation_within(
