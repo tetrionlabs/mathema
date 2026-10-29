@@ -137,6 +137,13 @@ def test_ordinary_claim_names_both_params_for_a_two_param_guard():
     assert "needs a domain specific enough for x1, x2" in results[0].note
 
 
+def _divides(x: float, y: float) -> float:
+    denom = x * y
+    if denom == 0.0:
+        return 0.0
+    return x / denom
+
+
 @pytest.mark.needs_full_proof_budget
 def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_blocked():
     # non-affine guard (x*y) over a domain where its hull straddles the
@@ -144,21 +151,21 @@ def test_ordinary_claim_reports_a_structural_reason_not_a_domain_hint_when_block
     # evaluation settles it, and the message must name that structural
     # reason, not the misleading "needs a domain" phrasing used for the
     # genuinely resolvable case above.
-    def divides(x: float, y: float) -> float:
-        denom = x * y
-        if denom == 0.0:
-            return 0.0
-        return x / denom
-
     results = check_conjectures(
-        divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0", route="derive")])
+        _divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0", route="derive")])
     assert (results[0].verdict, results[0].route) == ("unknown", "derive")
     assert "isn't affine" in results[0].meta["mathema.routes_attempted"]
     assert "needs a domain" not in results[0].note
-    # on the default route the extensive ladder settles the claim, true
-    # because divides is 1/y > 0 for x != 0 and 0 at x = 0
+
+
+@pytest.mark.needs_full_proof_budget
+@pytest.mark.needs_smt
+def test_the_default_route_proves_the_blocked_claim_by_nlsat():
+    # true because divides is 1/y > 0 for x != 0 and 0 at x = 0; on the
+    # default route the extensive ladder settles it through its nlsat
+    # rung, which needs z3 (mathema[smt])
     results = check_conjectures(
-        divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0")])
+        _divides, [claim("for x in [-1, 5], y in [1, 5], f(x, y) >= 0")])
     assert results[0].verdict == "proven", (results[0].verdict,
                                             results[0].note)
 
