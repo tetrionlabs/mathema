@@ -7051,14 +7051,18 @@ _RAISES_UNREAD = ("derive cannot read the function's raise statements, so "
 
 def _last_clause(note: str) -> str:
     """The last `; `-separated clause of a note, a `; ` inside
-    parentheses not counting as a separator."""
+    parentheses not counting as a separator, nor the one inside the
+    Decimal rounding clause (`_decimal_rounding.ROUNDED`)."""
+    from ._decimal_rounding import ROUNDED
+    inner = ROUNDED.index(";")
     depth, cut = 0, 0
     for i, ch in enumerate(note):
         if ch in "([":
             depth += 1
         elif ch in ")]":
             depth = max(depth - 1, 0)
-        elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " ":
+        elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " " \
+                and not (i >= inner and note.startswith(ROUNDED, i - inner)):
             cut = i + 2
     return note[cut:]
 
@@ -7078,6 +7082,17 @@ def _derive_attempt_label(fallback: "Probe") -> str:
     return f"derive: {display}" + (f" ({reason})" if reason else "")
 
 
+def _last_probe_clause(note: str) -> str:
+    """The last `; `-separated clause of a probe's note, the Decimal
+    rounding clause (`_decimal_rounding.ROUNDED`, which holds a `; ` of
+    its own) kept whole when it ends the note."""
+    from ._decimal_rounding import ROUNDED
+    _head, found, tail = note.rpartition(ROUNDED)
+    if found and "; " not in tail:
+        return ROUNDED + tail
+    return note.rsplit("; ", 1)[-1]
+
+
 def _probe_attempt_label(probed: "Probe") -> str:
     """A short 'probe: <status>' label for the attempt log."""
     if probed.verdict in ("holds", "falsified", "proven"):
@@ -7085,7 +7100,7 @@ def _probe_attempt_label(probed: "Probe") -> str:
     if probed.verdict == "skipped" and probed.sketch \
             and "not implemented" in probed.sketch:
         return f"probe: {probed.sketch.split(', ')[0]}"
-    reason = (probed.sketch or (probed.note or "").rsplit("; ", 1)[-1] or "").strip()
+    reason = (probed.sketch or _last_probe_clause(probed.note or "") or "").strip()
     if reason.startswith("conjectured by"):
         reason = "inconclusive"
     return f"probe: {probed.verdict}" + (f" ({reason})" if reason else "")
@@ -7095,7 +7110,7 @@ def _probe_said(probed: "Probe") -> str:
     """Why running the code did not settle a claim either, in words:
     `the probe could not decide it either (no point of the claim could
     be drawn)`."""
-    reason = (probed.sketch or (probed.note or "").rsplit("; ", 1)[-1] or "").strip()
+    reason = (probed.sketch or _last_probe_clause(probed.note or "") or "").strip()
     if not reason or reason.startswith("conjectured by"):
         return "the probe could not decide it either"
     return f"the probe could not decide it either ({reason})"
@@ -7566,12 +7581,14 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
+    from ._decimal_rounding import watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
     try:
-        lv = eval(code_l, {"__builtins__": {}}, trial_env)
-        rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
+        with watched() as watch:
+            lv = eval(code_l, {"__builtins__": {}}, trial_env)
+            rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
         if inputs_missing(args) and cj.relation not in ("in", "not in"):
             # a raise at a missing input is classified, not judged
@@ -7579,6 +7596,9 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
+    if watch.rounded:
+        # a Decimal operation rounded: the point decides nothing
+        return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
             sizes = _shapes.axis_sizes(cj.domain or {}, dict(zip(kinds, args)))
@@ -12176,6 +12196,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
+    # the draws where a Decimal operation rounded, and the first of them
+    # (`_decimal_rounding.ROUNDED`)
+    rounded, rounded_at = 0, None
+    from ._decimal_rounding import ROUNDED, watched
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -12773,8 +12797,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            lv = eval(code_l, {"__builtins__": {}}, env)
-            rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
+            with watched() as watch:
+                lv = eval(code_l, {"__builtins__": {}}, env)
+                rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:
                 # a 1-by-1 result (`x.T @ A @ x` over a column) is the
                 # number it holds
@@ -13021,6 +13046,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
             break
+        if watch.rounded:
+            # a Decimal operation rounded: the sides are neither the
+            # mathematics nor float64 values, and the draw is not counted
+            rounded += 1
+            if rounded_at is None:
+                rounded_at = _point_text(args)
+            continue
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
                 and classified(args, f_call.outputs() or [lv, rv]):
@@ -13572,6 +13604,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"the other side may lie past float range too, first at "
                 f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
                 f"not counted").lstrip("; ")
+    if rounded:
+        note = (f"{note}; {ROUNDED} at {rounded} draw"
+                f"{'s' if rounded != 1 else ''}, first at {rounded_at}, so "
+                f"{'they are' if rounded != 1 else 'it is'} not "
+                f"counted").lstrip("; ")
+    if checked == 0 and rounded and not inconclusive:
+        return Probe(cj.name, statement, "unknown", route="probe",
+                     note=note, meta=dict(missing_meta))
     if checked == 0 and inconclusive:
         return Probe(cj.name, statement, "unknown", route="probe",
                      note=f"{note}; {inconclusive_words}".lstrip("; "),

@@ -187,6 +187,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the largest gap a pass of `==`, `<=` or `>=` fell within, as
     # `(gap, allowance, point)`
     passed: list = [None]
+    # whether a Decimal operation rounded at the last point evaluated
+    # (`_decimal_rounding.watched`)
+    rounded: list = [False]
+    from ._decimal_rounding import watched
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -475,8 +479,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def evaluate(point):
         _reset()
         precision[0] = None
+        rounded[0] = False
         try:
-            lv, rv = _values(point)
+            with watched() as watch:
+                lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
@@ -492,6 +498,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                              or isinstance(e, (IndexError, ZeroDivisionError))) \
                 else None
         if _classify(point, False, (lv, rv)):
+            return None
+        if watch.rounded:
+            # a Decimal operation rounded: the sides are neither the
+            # mathematics nor float64 values, and the point is undecided
+            rounded[0] = True
             return None
         if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
                 and _nan_unread(point, lv, rv):
@@ -1218,6 +1229,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the largest gap a pass fell within over every point evaluated,
     # `(gap, allowance, point)`, None where every pass was exact
     evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
+    # whether a Decimal operation rounded at the last point evaluated,
+    # which then decided nothing
+    evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point

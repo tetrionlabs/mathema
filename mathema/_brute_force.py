@@ -1025,6 +1025,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # agrees within its allowance
     inexact: list = []
     exact_miss = None
+    # the points where a Decimal operation rounded
+    # (`_decimal_rounding.ROUNDED`)
+    rounded: list = []
     # how far the floats missed over the points compared
     precision = _Precision()
     kappa = _Kappa(cj, fn, facts)
@@ -1041,6 +1044,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         if verdict is None and executed is not None and executed.last_classified:
             # a raise or a missing output at a missing input: classified
             # into the executed, not judged
+            continue
+        if verdict is None and evaluate.decimal_rounded():
+            # neither read exactly nor a float64 value: not counted
+            rounded.append(point)
             continue
         if verdict is None:
             return None
@@ -1114,6 +1121,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                  "mathema.exact_witness": {
                      **witness, "computation": "holds within its allowance"}},
                 executed_missing(deps)))
+    if rounded:
+        from ._decimal_rounding import ROUNDED
+        n = len(rounded)
+        return ProofResult(
+            "undecided",
+            sketch=(f"{ROUNDED} at {n} point{'s' if n != 1 else ''}, first "
+                    f"at {_fmt_point(rounded[0], names)}, so "
+                    f"{'they are' if n != 1 else 'it is'} not counted and "
+                    f"the sweep decides nothing"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid), **counted},
+                               executed_missing(deps)))
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
         # clean pass over no points proves nothing while looking like a
