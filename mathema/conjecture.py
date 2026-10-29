@@ -12377,8 +12377,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a Decimal NaN), as `(label, member)`
     call_hole: list = [None]
     # the LABEL and sign of the first callee to return an infinity for
-    # finite arguments
-    call_inf: list = [None, 0]
+    # finite arguments, with that callee and the arguments it was called
+    # with
+    call_inf: list = [None, 0, None]
     # the first point where the float computation gave no value, or
     # missed the result beyond its precision, while the claim holds
     # there in exact arithmetic: the `[float]` line's witness, with the
@@ -12454,7 +12455,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if sign and not any(
                         is_missing(v) or holds_nan(v) or holds_inf(v)
                         for v in (*a, *k.values())):
-                    call_inf[0], call_inf[1] = label, sign
+                    call_inf[:] = [label, sign, (callee, a, k)]
             return value
         return _wrapped
 
@@ -13257,12 +13258,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     if float_gave_out and (ctx.companion_mode == "spawn"
                                            or stands_in) else None)
         # on the derive route an infinity from finite inputs at a point
-        # with no exact reading is an overflow or a pole the exact reading
-        # cannot tell apart, and so no counterexample to the mathematics;
-        # a nan or a hole there is no value in any reading, and stays one
-        derive_overflow = (derive_falsifier and exact_at is None
-                           and call_inf[0] is not None and call_nan[0] is None
-                           and call_hole[0] is None)
+        # with no exact reading of the claim is read from the callee's
+        # own evidence (`_nonfinite_cause`): no value (a pole numpy
+        # reports, the body's own infinity) is a counterexample, an
+        # overflow is a finding about the computation, and an infinity
+        # nothing tells either way is no counterexample; a nan or a hole
+        # there is no value in any reading, and stays one
+        inf_cause = "no value"
+        if (derive_falsifier and exact_at is None
+                and call_inf[0] is not None and call_nan[0] is None
+                and call_hole[0] is None):
+            from .claim_families import _nonfinite_cause
+            callee, inf_args, inf_kwargs = call_inf[2]
+            inf_cause = _nonfinite_cause(callee, math.inf * call_inf[1],
+                                         None, inf_args, inf_kwargs)
+        derive_overflow = inf_cause != "no value"
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
                 and (exact_at is True or derive_overflow):
             # the float computation gave no value (an overflow to inf or
@@ -13289,6 +13299,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"gave no value at {_point_text(args)} ({gave}), where the "
                     f"claim holds in exact arithmetic: a finding about the "
                     f"computation" if exact_at is True else
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), an "
+                    f"overflow of the computation from finite inputs (an "
+                    f"overflow error, numpy's overflow flag, or {call_inf[0]} "
+                    f"read exactly there is finite), so on the derive route "
+                    f"that point is no counterexample"
+                    if inf_cause == "overflow" else
                     f"the {_representation_word(cj_domain, facts)} computation "
                     f"gave no value at {_point_text(args)} ({gave}), where the "
                     f"claim has no exact reading to tell an overflow from a "

@@ -174,6 +174,7 @@ import copy
 import functools
 import inspect
 import math
+import operator
 import sys
 import textwrap
 import threading
@@ -206,6 +207,13 @@ _MOD, _GUARD = "__mathema_mod__", "__mathema_guard__"
 #: globals
 _COMPARE, _DECIDED = "__mathema_compare__", "__mathema_decided__"
 _SUB, _DICT = "__mathema_sub__", "__mathema_dict__"
+#: the names the rewritten body calls for a product and an in-place
+#: product
+_MUL, _IMUL = "__mathema_mul__", "__mathema_imul__"
+#: the most bits an exact rational the reading builds by a product or a
+#: power may hold (numerator and denominator together); past it the
+#: reading declines
+_EXACT_BITS = 2 ** 20
 _SHADOW_MARK = "__mathema_shadow__"
 
 #: the most calls of other functions' twins nested inside one another
@@ -1239,6 +1247,7 @@ def _globals_of(fn) -> "dict | None":
     env[_LITERAL] = _literal
     env[_DIV] = _div
     env[_POW] = _pow
+    env[_MUL], env[_IMUL] = _mul, _imul
     env[_CLASS] = _class
     env[_CALLEE] = _callee
     env.update(_deciding_names())
@@ -1275,6 +1284,7 @@ def _shadow_globals(fn) -> "dict | None":
             return None
     env[_DIV] = _plain_div
     env[_POW] = pow
+    env[_MUL], env[_IMUL] = operator.mul, operator.imul
     env[_CALLEE] = _shadow_callee
     env.update(_deciding_names())
     env[_SHADOW_MARK] = True
@@ -2543,8 +2553,10 @@ class _Exact(ast.NodeTransformer):
                 args=[ast.Constant(text)], keywords=[]), node)
         return node
 
-    def _operator(self, op, left, right, at):
+    def _operator(self, op, left, right, at, augmented=False):
         name = _operator_name(op)
+        if name == _MUL and augmented:
+            name = _IMUL
         if name is None:
             return None
         args = [left, right]
@@ -2562,7 +2574,8 @@ class _Exact(ast.NodeTransformer):
         self.generic_visit(node)
         read = copy.deepcopy(node.target)
         read.ctx = ast.Load()
-        call = self._operator(node.op, read, node.value, node)
+        call = self._operator(node.op, read, node.value, node,
+                              augmented=True)
         if call is None:
             return node
         return ast.copy_location(
@@ -2623,6 +2636,8 @@ def _operator_name(op) -> "str | None":
         return _FLOORDIV
     if isinstance(op, ast.Pow):
         return _POW
+    if isinstance(op, ast.Mult):
+        return _MUL
     if isinstance(op, ast.Mod):
         return _MOD
     return None
@@ -2794,6 +2809,7 @@ def _pow(a, b, mod=None):
     if _is_rational(a) and _is_rational(b):
         exponent = Fraction(b)
         if exponent.denominator == 1:
+            _within_exact_bits(_bits(a) * abs(int(exponent)))
             if isinstance(a, int) and isinstance(b, int) and exponent >= 0:
                 return a ** int(exponent)
             return Fraction(a) ** int(exponent)
@@ -2806,6 +2822,43 @@ def _pow(a, b, mod=None):
             raise ZeroDivisionError("0 cannot be raised to a negative power")
         return _settled(base ** exponent)
     return a ** b
+
+
+def _bits(value) -> int:
+    """The bits an exact rational holds: an int's bit length, a
+    Fraction's numerator's and denominator's together."""
+    if isinstance(value, Fraction):
+        return value.numerator.bit_length() + value.denominator.bit_length()
+    return int(value).bit_length()
+
+
+def _within_exact_bits(bits: int) -> None:
+    """Intent:
+        Decline (`NotExact`) an exact value of more than `_EXACT_BITS`
+        bits before it is built.
+
+    Raises:
+        NotExact: `bits` passes `_EXACT_BITS`.
+    """
+    if bits > _EXACT_BITS:
+        _not_exact(f"an exact value would hold more than {_EXACT_BITS} "
+                   f"bits")
+
+
+def _mul(a, b):
+    """`a * b`, declining (`NotExact`) a product of two exact rationals
+    whose size would pass `_EXACT_BITS`."""
+    if _is_rational(a) and _is_rational(b):
+        _within_exact_bits(_bits(a) + _bits(b))
+    return a * b
+
+
+def _imul(a, b):
+    """`a *= b` (`operator.imul`, in place for a mutable sequence), with
+    `_mul`'s bound on two exact rationals."""
+    if _is_rational(a) and _is_rational(b):
+        _within_exact_bits(_bits(a) + _bits(b))
+    return operator.imul(a, b)
 
 
 def _stands_for_float(value) -> bool:

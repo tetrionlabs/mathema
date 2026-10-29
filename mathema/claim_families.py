@@ -501,16 +501,21 @@ def _infinity_is_written(fn, facts, target: str, args: list, x) -> bool:
         literal such as `math.inf` on the path taken), not an overflow:
         the body read exactly (`_exact_body.exact_callee`) on the call's
         exact arguments returns an infinity too. An overflow reads as a
-        finite value there; a body the reading cannot follow is not
-        shown to write one.
+        finite value there; a body the reading cannot follow, or does
+        not finish within the fast wall-clock cap, is not shown to write
+        one.
     """
     import math as _math
 
     from ._exact_body import exact_callee
     from ._exact_side import to_exact
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     try:
-        out = _call_with_target(exact_callee(fn), facts, target,
-                                [to_exact(a) for a in args], to_exact(x))
+        out = _with_timeout(
+            lambda: _call_with_target(exact_callee(fn), facts, target,
+                                      [to_exact(a) for a in args],
+                                      to_exact(x)),
+            FAST_TIMEOUT_SECONDS)
     except Exception:
         return False
     if isinstance(out, float):
@@ -4567,19 +4572,26 @@ def _exact_reading(fn, args, kwargs) -> "str | None":
         or ValueError, gives a sympy infinity or nan, or returns a float
         infinity or nan on a run that executed a write of one,
         `_run_writing_nonfinite`); None otherwise: the reading cannot
-        follow the body (`NotExact`), its own machinery fails (any other
-        raise), or it returns a float the twin computed, finite or not.
+        follow the body (`NotExact`, an exact value past
+        `_exact_body._EXACT_BITS`), it does not finish within the fast
+        wall-clock cap, its own machinery fails (any other raise), or it
+        returns a float the twin computed, finite or not.
     """
     from fractions import Fraction
 
     from . import _exact_body
     from ._exact_side import to_exact
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     twin = _exact_body.exact_callee(fn)
     try:
         exact_args = [to_exact(a) for a in args]
         exact_kwargs = {k: to_exact(v) for k, v in kwargs.items()}
-        out, written = _run_writing_nonfinite(
-            lambda: twin(*exact_args, **exact_kwargs))
+        out, written = _with_timeout(
+            lambda: _run_writing_nonfinite(
+                lambda: twin(*exact_args, **exact_kwargs)),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
     except _exact_body.NotExact:
         return None
     except (ZeroDivisionError, ValueError):
