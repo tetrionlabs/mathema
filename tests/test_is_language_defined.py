@@ -132,6 +132,32 @@ def test_a_guarded_rejection_holds(tmp_path):
     assert pr.route == "probe:minimal_example"
 
 
+@pytest.mark.parametrize("future", [False, True])
+@pytest.mark.parametrize("annotation", [
+    "Optional[str]", "str | None", "None | str", "Union[str, None]",
+    "typing.Optional[str]",
+])
+def test_a_string_or_none_parameter_binds_no_language(tmp_path, annotation,
+                                                      future):
+    # str with None admitted is plain str for the language: the guarded
+    # rejection reads as it does on `s: str`, with the language extra
+    # installed or not
+    mod = _load(tmp_path, ("from __future__ import annotations\n"
+                           if future else "") + f'''
+import typing
+from typing import Optional, Union
+
+def guarded(s: {annotation}) -> str:
+    """Rejects empty input deliberately."""
+    if not s:
+        raise ValueError("empty")
+    return s[0]
+''')
+    pr = _one(mod.guarded)
+    assert (pr.verdict, pr.route) == ("holds", "probe:minimal_example"), \
+        (pr.verdict, pr.route, pr.note)
+
+
 def test_a_total_function_holds(tmp_path):
     mod = _load(tmp_path, '''
         def length(s: str) -> int:
