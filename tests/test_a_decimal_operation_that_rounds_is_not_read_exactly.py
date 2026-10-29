@@ -123,3 +123,87 @@ def test_a_context_the_function_installs_is_not_read_as_exact(fn, route):
     (p,) = check_conjectures(fn, [claim("for x in {1, 4}, f(x) < x",
                                         route=route)])
     assert p.verdict == "unknown", (p.verdict, p.route, p.note, p.sketch)
+
+
+def _h5(x):
+    with decimal.localcontext(decimal.Context(prec=10)):
+        return Decimal(x) / Decimal(3) * 3
+
+
+def _h4(x):
+    return _h5(x)
+
+
+def _h3(x):
+    return _h4(x)
+
+
+def _h2(x):
+    return _h3(x)
+
+
+def _h1(x):
+    return _h2(x)
+
+
+def deep_context(x: int):
+    return _h1(x)
+
+
+def via_default_arg(x: int, compute=own_context_third):
+    return compute(x)
+
+
+_TABLE = {"third": own_context_third}
+
+
+def via_table(x: int):
+    return _TABLE["third"](x)
+
+
+def mutate_current(x: int):
+    decimal.getcontext().prec = 10
+    try:
+        return Decimal(x) / Decimal(3) * 3
+    finally:
+        decimal.getcontext().prec = 28
+
+
+_PREC10 = decimal.Context(prec=10)
+
+
+def module_context(x: int):
+    return _PREC10.divide(Decimal(x), Decimal(3)) * 3
+
+
+@pytest.mark.parametrize("fn", [deep_context, via_default_arg, via_table,
+                                mutate_current, module_context])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_rounding_however_the_context_is_reached_is_not_counted(fn, route):
+    # each computes 1/3 * 3 in 10 digits, 0.9999999999 below 1, through a
+    # context five calls down, a default argument, a module's table, the
+    # current context's precision lowered, or a module's own context:
+    # f(x) < x is false, and only the rounding supports it
+    (p,) = check_conjectures(fn, [claim("for x in {1, 4}, f(x) < x",
+                                        route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.note, p.sketch)
+
+
+def _money(v):
+    with decimal.localcontext(decimal.Context(prec=10)):
+        return Decimal(v).quantize(Decimal("0.01"))
+
+
+def off_by_one_text(x: float) -> float:
+    if x < -100:
+        return float(_money(x))
+    return float(str(x)) + 1
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_decimal_context_on_a_branch_not_taken_hides_no_miss(route):
+    # x >= 0 never reaches the helper: f(0) is 1.0 against 0, a miss no
+    # Decimal arithmetic took part in
+    (p,) = check_conjectures(off_by_one_text,
+                             [claim("for x in [0, 10], f(x) == x", route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)

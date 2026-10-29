@@ -965,17 +965,27 @@ def _exact_constructor(func):
         `Fraction` or `Decimal` as the reading calls it: built as the
         computation builds it when every argument is exact by
         construction (an int, a string, a `Decimal`), in the twin's run
-        and in its shadow alike.
+        and in its shadow alike. In the twin's run `Decimal(v)` of an
+        exact rational `v` the twin holds (the point's coordinate, a
+        float the computation holds standing for the dyadic rational it
+        is) is the `Decimal` of that rational, which converts exactly
+        when its denominator divides a power of ten (`_decimal_of`), as
+        the computation's `Decimal(float)` converts exactly.
 
     Raises:
         NotExact: in a run of the twin, an argument is anything else: a
-            float, which has no exact reading beyond its own value, or a
-            `Fraction`, which may stand for one.
+            float, which has no exact reading beyond its own value, a
+            `Fraction` passed to `Fraction` (it may stand for a float),
+            or a rational with no finite decimal expansion.
     """
     import decimal
 
     def call(*args, **kwargs):
         if _STATE.mode != "float":
+            if func is decimal.Decimal and len(args) == 1 and not kwargs \
+                    and isinstance(args[0], Fraction) \
+                    and not isinstance(args[0], bool):
+                return _decimal_of(args[0])
             for arg in (*args, *kwargs.values()):
                 if isinstance(arg, (int, str, decimal.Decimal)):
                     continue
@@ -983,6 +993,27 @@ def _exact_constructor(func):
                            f"not read exactly")
         return func(*args, **kwargs)
     return call
+
+
+def _decimal_of(value: Fraction):
+    """Intent:
+        The `Decimal` equal to the rational `value`, built from its
+        digits without rounding: n/d with d dividing 10^k is
+        n * (10^k / d) * 10^-k.
+
+    Raises:
+        NotExact: d has a prime factor other than 2 and 5, so no
+            `Decimal` equals `value`.
+    """
+    import decimal
+    d, k = value.denominator, 0
+    while 10 ** k % d:
+        if k > 4 * d.bit_length() + 4:
+            _not_exact(f"{value} has no finite decimal expansion")
+        k += 1
+    scaled = value.numerator * (10 ** k // d)
+    digits = tuple(int(c) for c in str(abs(scaled)))
+    return decimal.Decimal((1 if scaled < 0 else 0, digits, -k))
 
 
 def _refused_modules() -> frozenset:
@@ -2858,14 +2889,18 @@ class _FloatMeta(type):
 
 class ExactFloat(metaclass=_FloatMeta):
     """`float` as the exact reading sees it: an int (a bool included)
-    as the Fraction of the same value, the identity on a Fraction, a
-    sympy number or an algebraic number, Python's `float` on anything
-    else (a string, a float, a library's number). Named `float`, as
-    `type(x).__name__` reads it in the computation."""
+    or a finite `Decimal` as the Fraction of the same value, the
+    identity on a Fraction, a sympy number or an algebraic number,
+    Python's `float` on anything else (a string, a float, a library's
+    number). Named `float`, as `type(x).__name__` reads it in the
+    computation."""
 
     def __new__(cls, x=0):
+        import decimal
         if isinstance(x, bool):
             return Fraction(int(x))
+        if isinstance(x, decimal.Decimal) and x.is_finite():
+            return Fraction(x)
         if _STATE.guard and isinstance(x, int):
             # an int past float range overflows as the computation's does
             float(x)

@@ -9,46 +9,43 @@ precision). The rounded value is another number than the mathematics,
 and it is no float64 value either, so neither the exact reading nor
 float64's precision bound speaks for it: a point where one rounded is
 not counted (`ROUNDED`), unless the relation fails there by more than
-the context's rounding can account for (`beyond_rounding`). A function
-that installs a decimal context of its own (`localcontext`,
-`setcontext`, a `Context` it builds or one of the module's contexts)
-rounds where no flag is read, so every point it computes is not
-counted (`OWN_CONTEXT`, `installs_context`).
+the context's rounding can account for (`beyond_rounding`).
+
+The rounding is read from the contexts a point's computation runs in
+(`watched`): the current context, and every context the computation
+installs through `localcontext` or `setcontext`. A computation can
+round in a context none of these is (one built earlier and used through
+its own methods, `ctx.divide(a, b)`), so a side holding a `Decimal`
+that has no exact reading is not counted either, though no watched
+context rounded (`UNSEEN`), and no bound applies to it.
 """
 from __future__ import annotations
 
 import contextlib
 import decimal
-import inspect
 import math
-import types
+import sys
 from fractions import Fraction
 
-__all__ = ["OWN_CONTEXT", "REASONS", "ROUNDED", "RoundingWatch",
-           "beyond_rounding", "installs_context", "watched"]
+__all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNSEEN",
+           "beyond_rounding", "holds_decimal", "watched"]
 
 #: why a point where a `Decimal` operation rounded is not counted
 ROUNDED = "a Decimal operation rounded; the exact reading declined"
-#: why a point a function with a decimal context of its own computes is
-#: not counted
-OWN_CONTEXT = ("the function installs a decimal context of its own, whose "
-               "rounding is not read; the exact reading declined")
+#: why a point whose side holds a `Decimal` with no exact reading, where
+#: no watched context rounded, is not counted
+UNSEEN = ("a Decimal operation rounded in a context the reading did not "
+          "see; the exact reading declined")
 #: every reason a point is not counted for its Decimal arithmetic
-REASONS = (ROUNDED, OWN_CONTEXT)
-#: the names through which a function reaches a decimal context other
-#: than the current one
-_CONTEXT_NAMES = frozenset({"localcontext", "setcontext", "Context",
-                            "DefaultContext", "BasicContext",
-                            "ExtendedContext"})
+REASONS = (ROUNDED, UNSEEN)
 
 
 class RoundingWatch:
     """The outcome of one `watched` block: `rounded` is True once a
-    `Decimal` operation inside it raised the context's `Inexact` or
-    `Rounded` flag, or when a function it ran installs a context of its
-    own; `precision` is the context's precision in digits, None for a
-    context of the function's own; `reason` is why the point is not
-    counted (`REASONS`), None while it is."""
+    `Decimal` operation inside it raised the `Inexact` or `Rounded` flag
+    of a watched context; `precision` is the smallest precision any
+    watched context held, the one the rounding bound reads; `reason` is
+    `ROUNDED` once it rounded, else None."""
 
     def __init__(self) -> None:
         self.rounded = False
@@ -56,127 +53,119 @@ class RoundingWatch:
         self.reason: "str | None" = None
 
 
+class _Watched(decimal.Context):
+    """The current context of a `watched` block: a decimal context that
+    keeps the smallest precision it is given (`lowest`), so a body that
+    lowers the precision and restores it is read at the lower one."""
+
+    def __setattr__(self, name, value):
+        if name == "prec" and isinstance(value, int):
+            super().__setattr__("lowest",
+                                min(getattr(self, "lowest", value), value))
+        super().__setattr__(name, value)
+
+
+#: the contexts the computations being watched installed, one list per
+#: open `watched` block
+_INSTALLED: list = []
+
+
+def _from_mathema() -> bool:
+    """Whether the call two frames up is mathema's own (its exact
+    reading installs contexts of its own), the lexicon's examples
+    aside."""
+    name = sys._getframe(2).f_globals.get("__name__", "")
+    return name.startswith("mathema.") and not name.startswith(
+        "mathema.lexicon")
+
+
+def _record(context) -> None:
+    for installed in _INSTALLED:
+        installed.append(context)
+
+
+class _Entered:
+    """A `localcontext` manager whose entered context is recorded."""
+
+    def __init__(self, manager) -> None:
+        self.manager = manager
+
+    def __enter__(self):
+        context = self.manager.__enter__()
+        _record(context)
+        return context
+
+    def __exit__(self, *exc):
+        return self.manager.__exit__(*exc)
+
+
+_LOCALCONTEXT, _SETCONTEXT = decimal.localcontext, decimal.setcontext
+
+
+def _localcontext(ctx=None, **kwargs):
+    manager = _LOCALCONTEXT(ctx, **kwargs)
+    return manager if _from_mathema() else _Entered(manager)
+
+
+def _setcontext(context):
+    _SETCONTEXT(context)
+    if not _from_mathema():
+        _record(context)
+
+
 @contextlib.contextmanager
-def watched(own: bool = False):
+def watched():
     """Intent:
         Run the block in a copy of the current decimal context with its
-        flags cleared, and yield a `RoundingWatch` whose `rounded` is
-        set when the block ends (by a return or a raise) if a `Decimal`
-        operation in it rounded, or if `own` (a function the block runs
-        installs a context of its own, `installs_context`), where the
-        flags are not this context's.
-        The copy keeps the precision, the rounding mode and the traps,
-        so the block computes as it would outside.
+        flags cleared (the same precision, rounding mode and traps), and
+        yield a `RoundingWatch` set when the block ends (by a return or
+        a raise): `rounded` if a `Decimal` operation in it raised the
+        `Inexact` or `Rounded` flag of that context or of a context the
+        block installed through `decimal.localcontext` or
+        `decimal.setcontext`, and `precision` the smallest precision
+        any of them held.
+
+    Notes:
+        A context reached otherwise (one built before the block and
+        used through its own methods, `localcontext` bound under another
+        name before the block) is not watched: a `Decimal` it rounded
+        reads as unrounded here (`UNSEEN`).
     """
     watch = RoundingWatch()
-    with decimal.localcontext() as context:
-        context.clear_flags()
-        watch.precision = context.prec
-        try:
-            yield watch
-        finally:
-            if own:
-                watch.rounded, watch.precision = True, None
-                watch.reason = OWN_CONTEXT
-            elif context.flags[decimal.Inexact] \
-                    or context.flags[decimal.Rounded]:
-                watch.rounded, watch.reason = True, ROUNDED
-
-
-def _functions_in(value):
-    """The Python functions `value` stands for: itself, what it wraps
-    (`__wrapped__`, a bound method's function), and the functions its
-    closure holds."""
-    seen: list = []
-    stack = [value]
-    while stack:
-        v = stack.pop()
-        if any(v is s for s in seen):
-            continue
-        if isinstance(v, types.MethodType):
-            stack.append(v.__func__)
-            continue
-        if isinstance(v, types.FunctionType):
-            seen.append(v)
-            stack.extend(c.cell_contents for c in (v.__closure__ or ())
-                         if _filled(c))
-        wrapped = getattr(v, "__wrapped__", None)
-        if wrapped is not None:
-            stack.append(wrapped)
-        if callable(v) and not isinstance(v, (types.FunctionType, type)):
-            call = getattr(type(v), "__call__", None)
-            if isinstance(call, types.FunctionType):
-                stack.append(call)
-    return [v for v in seen if isinstance(v, types.FunctionType)]
-
-
-def _filled(cell) -> bool:
+    outer = decimal.getcontext()
+    context = _Watched(prec=outer.prec, rounding=outer.rounding,
+                       Emin=outer.Emin, Emax=outer.Emax,
+                       capitals=outer.capitals, clamp=outer.clamp, flags=[],
+                       traps=[s for s, on in outer.traps.items() if on])
+    installed: list = [context]
+    _INSTALLED.append(installed)
+    saved = (decimal.localcontext, decimal.setcontext)
+    decimal.localcontext, decimal.setcontext = (  # type: ignore[assignment]
+        _localcontext, _setcontext)
+    _SETCONTEXT(context)
     try:
-        cell.cell_contents
-    except ValueError:
-        return False
-    return True
+        yield watch
+    finally:
+        _SETCONTEXT(outer)
+        decimal.localcontext, decimal.setcontext = saved  # type: ignore[assignment]
+        _INSTALLED.pop()
+        watch.precision = min(getattr(c, "lowest", c.prec) if c is context
+                              else c.prec for c in installed)
+        if any(c.flags[decimal.Inexact] or c.flags[decimal.Rounded]
+               for c in installed):
+            watch.rounded, watch.reason = True, ROUNDED
 
 
-def _codes(code: types.CodeType):
-    """`code` and every code object nested in it (a nested function, a
-    lambda, a comprehension)."""
-    yield code
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType):
-            yield from _codes(const)
-
-
-def _names_a_context(fn: types.FunctionType, names: set) -> bool:
-    """Whether a name `fn`'s code reads reaches a decimal context other
-    than the current one: a global bound to `localcontext`,
-    `setcontext`, `Context` or a `Context` instance, or one of their
-    names read as an attribute or imported where the code reads the
-    `decimal` module."""
-    targets = (decimal.localcontext, decimal.setcontext, decimal.Context)
-    for name in names:
-        value = fn.__globals__.get(name)
-        if any(value is t for t in targets) \
-                or isinstance(value, decimal.Context):
-            return True
-    reads_decimal = "decimal" in names or any(
-        fn.__globals__.get(n) is decimal for n in names)
-    return reads_decimal and bool(names & _CONTEXT_NAMES)
-
-
-def installs_context(callee, depth: int = 4) -> bool:
-    """Intent:
-        Whether `callee`, or a Python function it reaches through its
-        globals within `depth` calls, reads a decimal context other
-        than the current one (`_names_a_context`): one it installs or
-        computes in, whose flags a `watched` block does not read.
-        A callee with no Python code (a builtin) is read as installing
-        none, and so is mathema's own code, a wrapper's closure read for
-        the function it calls.
-    """
-    seen: set = set()
-    todo = [(f, 0) for f in _functions_in(callee)]
-    while todo:
-        fn, level = todo.pop()
-        if id(fn.__code__) in seen:
-            continue
-        seen.add(id(fn.__code__))
-        if (fn.__module__ or "").split(".")[0] == "mathema":
-            # the harness's own wrappers, whose closures hold the
-            # function they call (`_functions_in`)
-            continue
-        names: set = set()
-        for code in _codes(fn.__code__):
-            names.update(code.co_names)
-        if _names_a_context(fn, names):
-            return True
-        if level >= depth:
-            continue
-        for name in names:
-            value = fn.__globals__.get(name)
-            if value is not None and not inspect.ismodule(value):
-                todo.extend((f, level + 1) for f in _functions_in(value)
-                            if f is not fn)
+def holds_decimal(value) -> bool:
+    """Whether `value` is a finite `Decimal`, or a list, tuple or dict
+    holding one at any depth. A NaN or an infinity is no value, read as
+    such whatever its type."""
+    if isinstance(value, decimal.Decimal):
+        return value.is_finite()
+    if isinstance(value, (list, tuple)):
+        return any(holds_decimal(v) for v in value)
+    if isinstance(value, dict):
+        return any(holds_decimal(v) for v in value.values())
     return False
 
 

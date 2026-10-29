@@ -3,9 +3,12 @@
 """A body that builds an exact number from exact arguments
 (`Fraction(1, 3)`, `Fraction(n, 4)`, `Decimal("0.1")`, `Decimal(n)`) is
 read exactly: the number is exact by construction, so the exact reading
-builds the same one. Built from a float (`Fraction(x)` or `Decimal(x)`
-with `x` a float), it has no exact reading beyond the float's own
-value, and the point is not read exactly."""
+builds the same one. `Decimal(x)` of a float `x` is exact too: a float
+is a dyadic rational, which a Decimal holds digit for digit, so the
+reading builds the Decimal of the point's coordinate; a rational with no
+finite decimal expansion has none. `Fraction(x)` of a float `x` has no
+exact reading beyond the float's own value, and the point is not read
+exactly."""
 from decimal import Decimal
 from fractions import Fraction
 
@@ -77,7 +80,15 @@ def test_an_exactly_false_claim_on_an_exact_construction_falsifies():
     assert witness["reading"] == "mathematics", witness
 
 
-@pytest.mark.parametrize("fn", [from_float, decimal_from_float])
+@pytest.mark.parametrize("fn", [from_float])
 def test_a_construction_from_a_float_is_not_read_exactly(fn):
     with pytest.raises(NotExact):
         exact_callee(fn)(Fraction(1, 10))
+
+
+def test_a_decimal_of_the_points_coordinate_is_read_exactly():
+    # Decimal(1/10) is 0.1 exactly, halved 0.05: f(1/10) is 1/20
+    assert exact_callee(decimal_from_float)(Fraction(1, 10)) == Fraction(1, 20)
+    # 1/3 has no finite decimal expansion, so no Decimal equals it
+    with pytest.raises(NotExact):
+        exact_callee(decimal_from_float)(Fraction(1, 3))

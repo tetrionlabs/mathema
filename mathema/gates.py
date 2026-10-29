@@ -190,11 +190,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # whether a Decimal operation rounded at the last point evaluated
     # (`_decimal_rounding.watched`)
     rounded: list = [None]
-    from ._decimal_rounding import beyond_rounding, installs_context, watched
-    # whether the function or a bound function computes in a decimal
-    # context of its own
-    own_context = any(installs_context(c)
-                      for c in (fn, *(bound_funcs or {}).values()))
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    watched)
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -480,12 +477,26 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False
         return _within(lv, rv, point=point)
 
+    def _reads_exactly(point) -> bool:
+        # whether the claim's sides read exactly at the point, the calls
+        # the computation made there kept
+        from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+        made = (list(f_calls.calls), calls_raised[0], calls_nonfinite[0])
+        try:
+            sides = _with_timeout(lambda: exact_as_written(point),
+                                  FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            sides = None
+        f_calls.calls = made[0]
+        calls_raised[0], calls_nonfinite[0] = made[1], made[2]
+        return sides is not None
+
     def evaluate(point):
         _reset()
         precision[0] = None
         rounded[0] = None
         try:
-            with watched(own_context) as watch:
+            with watched() as watch:
                 lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
@@ -515,6 +526,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                         a, b, cj.relation, declared, 0.0, claim_side,
                         exact_inequality=cj.tolerance is None)):
                 return False
+            return None
+        if (holds_decimal(lv) or holds_decimal(rv)) \
+                and not _reads_exactly(point):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read
+            rounded[0] = UNSEEN
             return None
         if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
                 and _nan_unread(point, lv, rv):

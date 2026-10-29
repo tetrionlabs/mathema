@@ -7641,13 +7641,12 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from ._decimal_rounding import installs_context, watched
+    from ._decimal_rounding import holds_decimal, watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
-    own = any(installs_context(v) for v in env.values() if callable(v))
     try:
-        with watched(own) as watch:
+        with watched() as watch:
             lv = eval(code_l, {"__builtins__": {}}, trial_env)
             rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
@@ -7669,6 +7668,10 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
             return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
                     f"a Decimal operation rounded, by more than rounding of the final "
                     f"values to {watch.precision} digits can account for")
+        return None
+    if holds_decimal(lv) or holds_decimal(rv):
+        # a Decimal no watched context rounded may have rounded where no
+        # flag was read: no failure is read from it here
         return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
@@ -12328,11 +12331,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # the draws not counted for their Decimal arithmetic, the first of
     # them, and why (`_decimal_rounding.REASONS`)
     rounded, rounded_at, rounded_why = 0, None, None
-    from ._decimal_rounding import beyond_rounding, installs_context, watched
-    # whether the function or a bound function computes in a decimal
-    # context of its own
-    own_context = any(installs_context(c)
-                      for c in (fn, *bound_funcs.values()))
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    watched)
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -12933,7 +12933,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            with watched(own_context) as watch:
+            with watched() as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:
@@ -13194,12 +13194,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                   f"operation rounded, by more than rounding of the final values to "
                   f"{watch.precision} digits can account for")
             break
-        if watch.rounded:
+        unseen = False
+        if not watch.rounded and (holds_decimal(lv) or holds_decimal(rv)):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read
+            made = list(f_call.calls)
+            unseen = _exact_verdict(cj, code_l, code_r, env,
+                                    *_exact_calls()) is None
+            f_call.calls = made
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if watch.rounded or unseen:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the draw is not counted
             rounded += 1
             if rounded_at is None:
-                rounded_at, rounded_why = _point_text(args), watch.reason
+                rounded_at = _point_text(args)
+                rounded_why = watch.reason if watch.rounded else UNSEEN
             continue
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
