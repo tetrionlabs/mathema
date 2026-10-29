@@ -189,8 +189,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     passed: list = [None]
     # whether a Decimal operation rounded at the last point evaluated
     # (`_decimal_rounding.watched`)
-    rounded: list = [False]
-    from ._decimal_rounding import beyond_rounding, watched
+    rounded: list = [None]
+    from ._decimal_rounding import beyond_rounding, installs_context, watched
+    # whether the function or a bound function computes in a decimal
+    # context of its own
+    own_context = any(installs_context(c)
+                      for c in (fn, *(bound_funcs or {}).values()))
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -479,9 +483,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     def evaluate(point):
         _reset()
         precision[0] = None
-        rounded[0] = False
+        rounded[0] = None
         try:
-            with watched() as watch:
+            with watched(own_context) as watch:
                 lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
@@ -504,7 +508,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # mathematics nor float64 values, and the point is undecided
             # unless the relation fails by more than the rounding can
             # account for
-            rounded[0] = True
+            rounded[0] = watch.reason
             if beyond_rounding(
                     lv, rv, cj.relation, watch.precision,
                     lambda a, b: relation_within(
@@ -1237,8 +1241,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # the largest gap a pass fell within over every point evaluated,
     # `(gap, allowance, point)`, None where every pass was exact
     evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
-    # whether a Decimal operation rounded at the last point evaluated,
-    # which then decided nothing unless it failed beyond the rounding
+    # why the last point evaluated is not counted for its Decimal
+    # arithmetic (`_decimal_rounding.REASONS`), None when it is; such a
+    # point decided nothing unless it failed beyond the rounding
     evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
 
     def last_args():

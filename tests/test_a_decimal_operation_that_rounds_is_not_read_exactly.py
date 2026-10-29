@@ -8,7 +8,10 @@ mathematics, and a Decimal result is no float64 value: a point where one
 rounds is neither read exactly nor credited within float64's precision.
 It is not counted, and a claim resting on such points alone is
 unknown."""
+import decimal
 from decimal import Decimal
+
+import pytest
 
 from mathema.conjecture import check_conjectures, claim
 
@@ -98,3 +101,25 @@ def test_a_miss_rounding_cannot_account_for_still_falsifies():
     said = f"{p.note or ''} {p.sketch or ''} {p.counterexample or ''}"
     assert p.verdict == "falsified" and "Decimal operation rounded" in said, \
         (p.verdict, p.route, p.sketch, p.counterexample)
+
+
+def own_context_third(x: int):
+    with decimal.localcontext(decimal.Context(prec=10)):
+        return Decimal(x) / Decimal(3) * 3
+
+
+def imported_context_third(x: int):
+    from decimal import Context, localcontext
+    with localcontext(Context(prec=10)):
+        return Decimal(x) / Decimal(3) * 3
+
+
+@pytest.mark.parametrize("fn", [own_context_third, imported_context_third])
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_the_function_installs_is_not_read_as_exact(fn, route):
+    # in a context of 10 digits 1/3 * 3 is 0.9999999999, below 1, yet
+    # (x/3) * 3 is exactly x: f(x) < x is false, and nothing but the
+    # rounding in the function's own context supports it
+    (p,) = check_conjectures(fn, [claim("for x in {1, 4}, f(x) < x",
+                                        route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.note, p.sketch)

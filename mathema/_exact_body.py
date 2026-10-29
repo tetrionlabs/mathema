@@ -150,7 +150,10 @@ subtraction, multiplication, comparison); one that rounds to the
 decimal context's precision (a division, a square root) leaves the
 point undecided (`_without_decimal_rounding`); built from a
 float, or from a `Fraction` (which may stand for one), the point is
-undecided when the call runs (`_exact_constructor`).
+undecided when the call runs (`_exact_constructor`). A decimal context
+the body installs or computes in (`localcontext`, `setcontext`, a
+`Context` it builds, one of the module's contexts) rounds where that
+trap does not reach, and is refused.
 
 Text whose only reach is an exception's message is not refused: an
 f-string, `"..." % x`, `"...".format(...)`, `str(...)` or `repr(...)`
@@ -942,6 +945,8 @@ def _refused_callables() -> frozenset:
               float.hex, float.as_integer_ratio]
     if hasattr(math, "ulp"):
         values.append(math.ulp)
+    import decimal
+    values += [decimal.localcontext, decimal.setcontext, decimal.Context]
     return frozenset(id(v) for v in values)
 
 
@@ -1171,7 +1176,22 @@ class _Scan(ast.NodeVisitor):
             self._refuse(node)
         elif id(self._resolve(node.value)) in self.modules:
             self._refuse(node)
+        elif self._is_context(node):
+            self._refuse(node)
         self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if self._is_context(node):
+            self._refuse(node)
+        self.generic_visit(node)
+
+    def _is_context(self, node) -> bool:
+        # a decimal context other than the current one (`DefaultContext`,
+        # `ExtendedContext`, one the module built), which computes with
+        # its own precision and flags
+        import decimal
+        return isinstance(node.ctx, ast.Load) \
+            and isinstance(self._resolve(node), decimal.Context)
 
     def visit_Compare(self, node):
         # a type compared by identity is answered only under its bare

@@ -7105,9 +7105,8 @@ _RAISES_UNREAD = ("derive cannot read the function's raise statements, so "
 def _last_clause(note: str) -> str:
     """The last `; `-separated clause of a note, a `; ` inside
     parentheses not counting as a separator, nor the one inside the
-    Decimal rounding clause (`_decimal_rounding.ROUNDED`)."""
-    from ._decimal_rounding import ROUNDED
-    inner = ROUNDED.index(";")
+    Decimal arithmetic clauses (`_decimal_rounding.REASONS`)."""
+    from ._decimal_rounding import REASONS
     depth, cut = 0, 0
     for i, ch in enumerate(note):
         if ch in "([":
@@ -7115,7 +7114,9 @@ def _last_clause(note: str) -> str:
         elif ch in ")]":
             depth = max(depth - 1, 0)
         elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " " \
-                and not (i >= inner and note.startswith(ROUNDED, i - inner)):
+                and not any(i >= r.index(";")
+                            and note.startswith(r, i - r.index(";"))
+                            for r in REASONS):
             cut = i + 2
     return note[cut:]
 
@@ -7136,13 +7137,14 @@ def _derive_attempt_label(fallback: "Probe") -> str:
 
 
 def _last_probe_clause(note: str) -> str:
-    """The last `; `-separated clause of a probe's note, the Decimal
-    rounding clause (`_decimal_rounding.ROUNDED`, which holds a `; ` of
-    its own) kept whole when it ends the note."""
-    from ._decimal_rounding import ROUNDED
-    _head, found, tail = note.rpartition(ROUNDED)
-    if found and "; " not in tail:
-        return ROUNDED + tail
+    """The last `; `-separated clause of a probe's note, a Decimal
+    arithmetic clause (`_decimal_rounding.REASONS`, each holding a `; `
+    of its own) kept whole when it ends the note."""
+    from ._decimal_rounding import REASONS
+    for reason in REASONS:
+        _head, found, tail = note.rpartition(reason)
+        if found and "; " not in tail:
+            return reason + tail
     return note.rsplit("; ", 1)[-1]
 
 
@@ -7639,12 +7641,13 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
-    from ._decimal_rounding import watched
+    from ._decimal_rounding import installs_context, watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
+    own = any(installs_context(v) for v in env.values() if callable(v))
     try:
-        with watched() as watch:
+        with watched(own) as watch:
             lv = eval(code_l, {"__builtins__": {}}, trial_env)
             rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
@@ -12322,10 +12325,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
-    # the draws where a Decimal operation rounded, and the first of them
-    # (`_decimal_rounding.ROUNDED`)
-    rounded, rounded_at = 0, None
-    from ._decimal_rounding import ROUNDED, beyond_rounding, watched
+    # the draws not counted for their Decimal arithmetic, the first of
+    # them, and why (`_decimal_rounding.REASONS`)
+    rounded, rounded_at, rounded_why = 0, None, None
+    from ._decimal_rounding import beyond_rounding, installs_context, watched
+    # whether the function or a bound function computes in a decimal
+    # context of its own
+    own_context = any(installs_context(c)
+                      for c in (fn, *bound_funcs.values()))
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -12926,7 +12933,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            with watched() as watch:
+            with watched(own_context) as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:
@@ -13192,7 +13199,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # mathematics nor float64 values, and the draw is not counted
             rounded += 1
             if rounded_at is None:
-                rounded_at = _point_text(args)
+                rounded_at, rounded_why = _point_text(args), watch.reason
             continue
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
@@ -13787,7 +13794,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
                 f"not counted").lstrip("; ")
     if rounded:
-        note = (f"{note}; {ROUNDED} at {rounded} draw"
+        note = (f"{note}; {rounded_why} at {rounded} draw"
                 f"{'s' if rounded != 1 else ''}, first at {rounded_at}, so "
                 f"{'they are' if rounded != 1 else 'it is'} not "
                 f"counted").lstrip("; ")
