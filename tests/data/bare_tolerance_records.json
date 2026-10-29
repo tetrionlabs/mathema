@@ -249,6 +249,29 @@
     "route": "probe:semi_analytical",
     "tolerance": 1e-13,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.exact_offset --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": 1e-13
@@ -407,6 +430,29 @@
     "route": "probe:semi_analytical",
     "tolerance": null,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.sin3 --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims mathema.lexicon.sin3 --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": null
@@ -665,6 +711,29 @@
     "route": "probe",
     "tolerance": 1e-07,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": 1e-07
@@ -708,6 +777,29 @@
     "route": "derive",
     "tolerance": 1e-05,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.near_identity --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": 1e-05
@@ -765,6 +857,29 @@
     "route": "probe",
     "tolerance": null,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": null
@@ -808,6 +923,29 @@
     "route": "derive",
     "tolerance": 0.001,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.scaled --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": 0.001
@@ -1477,6 +1615,29 @@
     "route": "probe",
     "tolerance": 0.001,
     "verdict": "falsified"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.square --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
+    "verdict": "holds"
    }
   ],
   "tolerance": 0.001
@@ -1552,6 +1713,29 @@
     "note": "the float64 computation of f_equiv_g ran both functions at 96 shared points, and they agree within tolerance at every one (sampling, never proof)",
     "route": "probe",
     "tolerance": 0.0001,
+    "verdict": "holds"
+   },
+   {
+    "counterexample": null,
+    "meta": {
+     "mathema.policy": {
+      "behaviour": "propagates",
+      "evidence": "confirmed on 1 call",
+      "exception": null,
+      "kind": "missing",
+      "member": null,
+      "parameter": "x",
+      "premise": "",
+      "reason": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.identity --write",
+      "source": "default"
+     },
+     "mathema.surface": "mathema"
+    },
+    "n": 1,
+    "name": "missing[x]",
+    "note": "default for a float, which may be nan; confirmed on 1 call. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims tests._bare_tolerance_sample.identity --write",
+    "route": "probe:counterfactual",
+    "tolerance": null,
     "verdict": "holds"
    }
   ],
