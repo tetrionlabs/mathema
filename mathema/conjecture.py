@@ -7658,6 +7658,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
+    watch.unread(lv, rv)
     if watch.rounded:
         # a Decimal operation rounded: the point decides nothing, unless
         # the sides miss by more than the rounding can account for
@@ -13199,6 +13200,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
             break
+        watch.unread(lv, rv)
         if watch.rounded and beyond_rounding(
                 lv, rv, cj.relation, watch.precision,
                 lambda a, b: relation_within(

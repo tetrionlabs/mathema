@@ -93,3 +93,35 @@ def test_a_true_claim_rounded_in_a_context_not_watched_is_not_falsified(
     (p,) = check_conjectures(fn, [claim("for x in {2, 3}, f(x) == x",
                                         route=route)])
     assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)
+
+
+HIGH = decimal.Context(prec=50)
+
+
+def rounded_to_cents(x: float):
+    # HIGH sits in this module unused; quantize is given no context
+    return (Decimal(str(x)) + 1).quantize(Decimal("0.01"))
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_the_call_is_not_given_bounds_nothing(route):
+    # x + 1 to cents against x: 1.00 against 0.0 at x = 0, a miss no
+    # context the method computes in can account for
+    (p,) = check_conjectures(rounded_to_cents,
+                             [claim("for x in [0, 10], f(x) == x",
+                                    route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+def root_given_positionally(x: int):
+    return Decimal.sqrt(Decimal(x), _CTX4) ** 2
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_context_given_positionally_or_unbound_is_read(route):
+    # sqrt in 4 digits through the class's own method, the context passed
+    # by position: sqrt(n) ** 2 == n is true, 1.999396 is its rounding
+    (p,) = check_conjectures(root_given_positionally,
+                             [claim("for x in {2, 3}, f(x) == x",
+                                    route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)

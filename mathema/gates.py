@@ -518,6 +518,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 else None
         if _classify(point, False, (lv, rv)):
             return None
+        watch.unread(lv, rv)
         if watch.rounded:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the point is undecided

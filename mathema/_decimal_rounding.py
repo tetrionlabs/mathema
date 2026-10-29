@@ -20,9 +20,9 @@ that has no exact reading is read as a rounded one, though no watched
 context rounded (`UNSEEN`): not counted, unless it misses by more than
 rounding to the smallest precision watched can account for, which the
 executed values witness. A context's own method read during the run
-(`ctx.divide(a, b)`) adds its precision; a `Decimal` method run beside
-a context the block does not watch may compute in it (`context=ctx`),
-and the point's rounding is then unbounded (`UNBOUND`).
+(`ctx.divide(a, b)`) adds its precision; a `Decimal` method given a
+context at its call site (`d.sqrt(context=ctx)`) computes in it, and the
+point's rounding is then unbounded (`UNBOUND`).
 """
 from __future__ import annotations
 
@@ -43,8 +43,8 @@ ROUNDED = "a Decimal operation rounded; the exact reading declined"
 #: rounding bound
 UNSEEN = ("a Decimal operation may have rounded in a context the reading "
           "did not see; the exact reading declined")
-#: why a point where a Decimal method ran beside a decimal context the
-#: reading does not watch is not counted, its rounding unbounded
+#: why a point where a Decimal method was given a decimal context is not
+#: counted, its rounding unbounded
 UNBOUND = ("a Decimal operation may have rounded in a context the reading "
            "could not bound; the exact reading declined")
 #: every reason a point is not counted for its Decimal arithmetic
@@ -54,8 +54,8 @@ REASONS = (ROUNDED, UNSEEN, UNBOUND)
 class RoundingWatch:
     """The outcome of one `watched` block: `rounded` is True once a
     `Decimal` operation inside it raised the `Inexact` or `Rounded` flag
-    of a watched context, or once a `Decimal` method ran beside a
-    context the block does not watch (`UNBOUND`); `precision` is the
+    of a watched context, or once a `Decimal` method was given a
+    context at its call site (`UNBOUND`); `precision` is the
     smallest precision any watched context, or any context whose own
     method the block called, held, 1 when unbounded: the one the
     rounding bound reads; `reason` is why the point is not counted,
@@ -68,6 +68,14 @@ class RoundingWatch:
         #: the precisions of the contexts whose own methods ran
         self.called: list = []
         self.unbound = False
+        #: whether the profiler read the block's calls
+        self.hooked = False
+
+    def unread(self, *sides) -> None:
+        """Read a point whose sides hold a Decimal from a block the
+        profiler did not read as unbounded: its contexts are unknown."""
+        if not self.hooked and any(holds_decimal(s) for s in sides):
+            self.rounded, self.reason, self.precision = True, UNBOUND, 1
 
 
 class _Watched(decimal.Context):
@@ -152,11 +160,9 @@ def watched(hooked: bool = True):
         reads as unrounded here (`UNSEEN`).
     """
     watch = RoundingWatch()
-    reached: dict = {}
-
     def profile(frame, event, arg):
         if event == "c_call":
-            _called(watch, installed, reached, frame, arg)
+            _called(watch, installed, frame, arg)
     outer = decimal.getcontext()
     context = _Watched(prec=outer.prec, rounding=outer.rounding,
                        Emin=outer.Emin, Emax=outer.Emax,
@@ -169,6 +175,7 @@ def watched(hooked: bool = True):
         _localcontext, _setcontext)
     _SETCONTEXT(context)
     previous = sys.getprofile()
+    watch.hooked = hooked
     if hooked:
         sys.setprofile(profile)
     try:
@@ -189,15 +196,16 @@ def watched(hooked: bool = True):
             watch.rounded, watch.reason = True, ROUNDED
 
 
-def _called(watch: RoundingWatch, installed: list, reached: dict, frame,
+def _called(watch: RoundingWatch, installed: list, frame,
             function) -> None:
     """Intent:
         Read one call of a C function in a watched block: a method of a
         decimal context the block does not watch adds that context's
-        precision to `watch.called`; a `Decimal` method called from a
-        frame that reaches such a context (its locals, closure cells and
-        arguments, or its module's globals) sets `watch.unbound`, since
-        the method may compute in it (`context=ctx`). Calls made from
+        precision to `watch.called`; a `Decimal` method given a context
+        at its call site (`d.sqrt(context=ctx)`, `d.sqrt(ctx)`,
+        `Decimal.sqrt(d, ctx)`, or arguments the site spreads with `*`
+        or `**`) sets `watch.unbound`, since it computes in a context
+        the block may not watch (`_given_context`). Calls made from
         mathema's own code are not read.
     """
     owner = getattr(function, "__self__", None)
@@ -205,21 +213,78 @@ def _called(watch: RoundingWatch, installed: list, reached: dict, frame,
         if not any(owner is c for c in installed):
             watch.called.append(owner.prec)
         return
-    if not isinstance(owner, decimal.Decimal) or frame is None:
+    if isinstance(owner, decimal.Decimal):
+        receivers = 0
+    elif getattr(function, "__objclass__", None) is decimal.Decimal:
+        # the class's own method, its Decimal passed first
+        receivers = 1
+    else:
+        return
+    if frame is None:
         return
     module = frame.f_globals.get("__name__", "") or ""
     if module.startswith("mathema.") and not module.startswith(
             "mathema.lexicon"):
         return
-
-    def unwatched(values) -> bool:
-        return any(isinstance(v, decimal.Context)
-                   and not any(v is c for c in installed) for v in values)
-    key = id(frame.f_globals)
-    if key not in reached:
-        reached[key] = unwatched(list(frame.f_globals.values()))
-    if reached[key] or unwatched(list(frame.f_locals.values())):
+    if _given_context(frame, getattr(function, "__name__", ""), receivers):
         watch.unbound = True
+
+
+#: `_given_context`'s answer per call site, `(code, instruction)`
+_CALL_SITES: dict = {}
+
+
+def _context_position(name: str) -> "int | None":
+    """The position of the `context` parameter of the `Decimal` method
+    `name`, its receiver not counted, as the module's pure-Python
+    reading declares it; None for a method that takes none."""
+    import inspect
+    try:
+        import _pydecimal
+        method = getattr(_pydecimal.Decimal, name)
+        params = list(inspect.signature(method).parameters)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return 0
+    if "context" not in params:
+        return None
+    return params.index("context") - 1
+
+
+def _given_context(frame, name: str, receivers: int) -> bool:
+    """Intent:
+        Whether the call the frame is making to the `Decimal` method
+        `name` is given a context, read from the call's own source text:
+        a `context=` keyword, a positional argument at or past the
+        context's position (`receivers` the arguments standing before
+        the method's own), or a `*` or `**` spread. True where the call
+        site cannot be read. Answered once per call site.
+    """
+    import ast
+    import linecache
+    key = (frame.f_code, frame.f_lasti)
+    if key in _CALL_SITES:
+        return _CALL_SITES[key]
+    position = _context_position(name)
+    given = True
+    if position is None:
+        given = False
+    else:
+        try:
+            line, end, col, end_col = list(
+                frame.f_code.co_positions())[frame.f_lasti // 2]
+            lines = linecache.getlines(frame.f_code.co_filename)[line - 1:end]
+            text = (lines[0][col:end_col] if line == end else
+                    lines[0][col:] + "".join(lines[1:-1])
+                    + lines[-1][:end_col])
+            call = ast.parse(text.strip(), mode="eval").body
+        except (TypeError, IndexError, SyntaxError, ValueError):
+            call = None
+        if isinstance(call, ast.Call):
+            given = (any(k.arg in (None, "context") for k in call.keywords)
+                     or any(isinstance(a, ast.Starred) for a in call.args)
+                     or len(call.args) > position + receivers)
+    _CALL_SITES[key] = given
+    return given
 
 
 #: the names through which code reaches decimal arithmetic
@@ -231,42 +296,66 @@ _TOUCHES: dict = {}
 
 def may_touch_decimal(*callees) -> bool:
     """Intent:
-        Whether running `callees` can reach decimal arithmetic: the
-        decimal module is loaded, and a callee, or a Python function it
-        reaches through its globals, closure cells and default arguments
-        (six calls deep), lives in a module whose globals hold the
-        decimal module or an object of it, or names one of
-        `_DECIMAL_NAMES` in its code. A callee with no Python code is
-        read as reaching none; mathema's own wrappers are read through
-        their closures only. Answered once per code object.
+        Whether running `callees` can reach decimal arithmetic, which
+        decides only whether a point's calls are read through the
+        profiler (`watched`): the decimal module is loaded, and a
+        callee, or a Python function it reaches through its globals,
+        closure cells and default arguments (six calls deep, at most
+        `_WALK_CAP` functions, past which the answer is True), lives in a
+        module whose globals hold the decimal module or an object of it,
+        or names one of `_DECIMAL_NAMES` in its code. A callee with no
+        Python code is read as reaching none; mathema's own wrappers are
+        read through their closures only. Answered once per function's
+        code.
+
+    Notes:
+        A Decimal reached otherwise (through a module the walk does not
+        enter, an object's method) comes from a run the profiler did not
+        read, and a point whose side holds one is not counted
+        (`RoundingWatch.unread`).
     """
     if "decimal" not in sys.modules and "_decimal" not in sys.modules:
         return False
-    return any(_reaches_decimal(c) for c in callees)
+    return any(_reaches_decimal(f) for c in callees
+               for f in _functions_in(c) if not _from_mathema_module(f))
 
 
-def _reaches_decimal(callee) -> bool:
+#: the most functions one `may_touch_decimal` walk reads
+_WALK_CAP = 2000
+
+
+def _from_mathema_module(fn) -> bool:
+    module = getattr(fn, "__module__", None) or ""
+    return module.startswith("mathema.") and not module.startswith(
+        "mathema.lexicon")
+
+
+def _reaches_decimal(root) -> bool:
+    """`may_touch_decimal` for one Python function, remembered per code
+    object."""
+    known = _TOUCHES.get(root.__code__)
+    if known is not None:
+        return known
     seen: set = set()
-    todo = [(f, 0) for f in _functions_in(callee)]
+    todo = [(root, 0)]
+    answer = False
     while todo:
         fn, level = todo.pop()
         code = fn.__code__
         if id(code) in seen:
             continue
         seen.add(id(code))
-        known = _TOUCHES.get(code)
-        if known is True:
-            return True
-        module = getattr(fn, "__module__", None) or ""
-        if module.startswith("mathema.") and not module.startswith(
-                "mathema.lexicon"):
+        if len(seen) > _WALK_CAP or _TOUCHES.get(code) is True:
+            answer = True
+            break
+        if _from_mathema_module(fn):
             continue
         names: set = set()
         for nested in _codes(code):
             names.update(nested.co_names)
         if names & _DECIMAL_NAMES or _globals_hold_decimal(fn.__globals__):
-            _TOUCHES[code] = True
-            return True
+            answer = True
+            break
         if level >= 6:
             continue
         reached = [fn.__globals__.get(n) for n in names]
@@ -275,24 +364,26 @@ def _reaches_decimal(callee) -> bool:
         for value in reached:
             if value is not None and not isinstance(value, type(sys)):
                 todo.extend((f, level + 1) for f in _functions_in(value))
-    return False
+    _TOUCHES[root.__code__] = answer
+    return answer
 
 
+#: `_globals_hold_decimal`'s answer per module, `(globals, answer)`
 _GLOBALS: dict = {}
 
 
 def _globals_hold_decimal(env: dict) -> bool:
     """Whether a module's globals hold the decimal module or an object
-    of it (`Decimal`, a context); a module found to is remembered."""
+    of it (`Decimal`, a context), remembered per module."""
     key = id(env)
-    if _GLOBALS.get(key) is env:
-        return True
+    known = _GLOBALS.get(key)
+    if known is not None and known[0] is env:
+        return known[1]
     held = any(v is decimal or getattr(type(v), "__module__", None)
                in ("decimal", "_decimal")
                or getattr(v, "__module__", None) in ("decimal", "_decimal")
                for v in list(env.values()))
-    if held:
-        _GLOBALS[key] = env
+    _GLOBALS[key] = (env, held)
     return held
 
 
@@ -310,11 +401,13 @@ def _functions_in(value) -> list:
     a class's own methods), and the functions its closure holds."""
     import types
     found: list = []
+    visited: set = set()
     stack = [value]
     while stack:
         v = stack.pop()
-        if any(v is f for f in found):
+        if id(v) in visited:
             continue
+        visited.add(id(v))
         if isinstance(v, types.MethodType):
             stack.append(v.__func__)
             continue
