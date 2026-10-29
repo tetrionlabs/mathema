@@ -7658,7 +7658,9 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
-    watch.unread(lv, rv)
+    if watch.unread(lv, rv):
+        from ._decimal_rounding import touched_decimal
+        touched_decimal(*(v for v in env.values() if callable(v)))
     if watch.rounded:
         # a Decimal operation rounded: the point decides nothing, unless
         # the sides miss by more than the rounding can account for
@@ -12346,7 +12348,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # them, and why (`_decimal_rounding.REASONS`)
     rounded, rounded_at, rounded_why = 0, None, None
     from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
-                                    may_touch_decimal, watched)
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
     # whether a draw's computation can reach decimal arithmetic, so its
     # calls are read for the decimal contexts' own methods
     touches_decimal = may_touch_decimal(fn, *bound_funcs.values())
@@ -13200,7 +13203,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
             break
-        watch.unread(lv, rv)
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later draw is read
+            touched_decimal(fn, *bound_funcs.values())
+            touches_decimal = True
         if watch.rounded and beyond_rounding(
                 lv, rv, cj.relation, watch.precision,
                 lambda a, b: relation_within(

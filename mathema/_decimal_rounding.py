@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import contextlib
 import decimal
+import functools
 import math
 import sys
 from fractions import Fraction
 
 __all__ = ["REASONS", "ROUNDED", "RoundingWatch", "UNBOUND", "UNSEEN",
            "beyond_rounding", "holds_decimal", "may_touch_decimal",
-           "watched"]
+           "touched_decimal", "watched"]
 
 #: why a point where a `Decimal` operation rounded is not counted
 ROUNDED = "a Decimal operation rounded; the exact reading declined"
@@ -71,11 +72,14 @@ class RoundingWatch:
         #: whether the profiler read the block's calls
         self.hooked = False
 
-    def unread(self, *sides) -> None:
+    def unread(self, *sides) -> bool:
         """Read a point whose sides hold a Decimal from a block the
-        profiler did not read as unbounded: its contexts are unknown."""
+        profiler did not read as unbounded: its contexts are unknown.
+        True when it was such a point."""
         if not self.hooked and any(holds_decimal(s) for s in sides):
             self.rounded, self.reason, self.precision = True, UNBOUND, 1
+            return True
+        return False
 
 
 class _Watched(decimal.Context):
@@ -154,15 +158,26 @@ def watched(hooked: bool = True):
         With `hooked` (`may_touch_decimal`), a profiler reads the block's
         calls for the decimal contexts' own methods (`_called`); it is
         set for the block only and the previous profiler is restored
-        when the block ends. A context reached otherwise (one built before the block and
-        used through its own methods, `localcontext` bound under another
-        name before the block) is not watched: a `Decimal` it rounded
-        reads as unrounded here (`UNSEEN`).
+        when the block ends. A function of the block that hands a value
+        to a C callable which may carry a context into a `Decimal`
+        method (a `functools.partial`, `map`, a callable argument) and
+        reaches a context the block does not watch leaves the point
+        unbounded (`_returned`). A context reached otherwise is not
+        watched: a `Decimal` it rounded reads as unrounded here
+        (`UNSEEN`).
     """
     watch = RoundingWatch()
+
     def profile(frame, event, arg):
-        if event == "c_call":
-            _called(watch, installed, frame, arg)
+        # the reading never raises into the computation: a failure of
+        # its own leaves the point unbounded
+        try:
+            if event == "c_call":
+                _called(watch, installed, frame, arg)
+            elif event == "return":
+                _returned(watch, installed, frame)
+        except Exception:
+            watch.unbound = True
     outer = decimal.getcontext()
     context = _Watched(prec=outer.prec, rounding=outer.rounding,
                        Emin=outer.Emin, Emax=outer.Emax,
@@ -250,17 +265,46 @@ def _context_position(name: str) -> "int | None":
     return params.index("context") - 1
 
 
+def _site_text(frame) -> "tuple[str, bool]":
+    """Intent:
+        The source text of the call the frame is making: the call's own
+        span where the code records instruction positions
+        (`co_positions`, Python 3.11 on), else the frame's whole current
+        line, with whether it is the whole line.
+
+    Raises:
+        LookupError, ValueError: the source cannot be read.
+    """
+    import linecache
+    code = frame.f_code
+    positions = getattr(code, "co_positions", None)
+    if positions is None:
+        line = linecache.getline(code.co_filename, frame.f_lineno)
+        if not line:
+            raise LookupError("no source line")
+        return line, True
+    line, end, col, end_col = list(positions())[frame.f_lasti // 2]
+    lines = linecache.getlines(code.co_filename)[line - 1:end]
+    if not lines or col is None or end_col is None:
+        raise LookupError("no call position")
+    text = (lines[0][col:end_col] if line == end else
+            lines[0][col:] + "".join(lines[1:-1]) + lines[-1][:end_col])
+    return text, False
+
+
 def _given_context(frame, name: str, receivers: int) -> bool:
     """Intent:
         Whether the call the frame is making to the `Decimal` method
-        `name` is given a context, read from the call's own source text:
-        a `context=` keyword, a positional argument at or past the
-        context's position (`receivers` the arguments standing before
-        the method's own), or a `*` or `**` spread. True where the call
-        site cannot be read. Answered once per call site.
+        `name` is given a context, read from the call's own source text
+        (`_site_text`): a `context=` keyword, a positional argument at
+        or past the context's position (`receivers` the arguments
+        standing before the method's own), or a `*` or `**` spread.
+        Where only the whole line is known, the one call on it naming
+        `name` is read. True where the call site cannot be read, or the
+        line holds no such call or more than one. Answered once per call
+        site.
     """
     import ast
-    import linecache
     key = (frame.f_code, frame.f_lasti)
     if key in _CALL_SITES:
         return _CALL_SITES[key]
@@ -269,15 +313,20 @@ def _given_context(frame, name: str, receivers: int) -> bool:
     if position is None:
         given = False
     else:
+        call = None
         try:
-            line, end, col, end_col = list(
-                frame.f_code.co_positions())[frame.f_lasti // 2]
-            lines = linecache.getlines(frame.f_code.co_filename)[line - 1:end]
-            text = (lines[0][col:end_col] if line == end else
-                    lines[0][col:] + "".join(lines[1:-1])
-                    + lines[-1][:end_col])
-            call = ast.parse(text.strip(), mode="eval").body
-        except (TypeError, IndexError, SyntaxError, ValueError):
+            text, whole_line = _site_text(frame)
+            node = ast.parse(text.strip(), mode="exec" if whole_line
+                             else "eval")
+            if whole_line:
+                named = [n for n in ast.walk(node) if isinstance(n, ast.Call)
+                         and (isinstance(n.func, ast.Attribute)
+                              and n.func.attr == name)]
+                call = named[0] if len(named) == 1 else None
+            else:
+                call = getattr(node, "body", None)
+        except (LookupError, SyntaxError, ValueError, TypeError,
+                IndexError, AttributeError):
             call = None
         if isinstance(call, ast.Call):
             given = (any(k.arg in (None, "context") for k in call.keywords)
@@ -285,6 +334,133 @@ def _given_context(frame, name: str, receivers: int) -> bool:
                      or len(call.args) > position + receivers)
     _CALL_SITES[key] = given
     return given
+
+
+#: `_hands_over`'s answer per code object
+_HANDS_OVER: dict = {}
+#: C callables that call a function they are given
+_HIGHER_ORDER_NAMES = frozenset({"map", "filter", "reduce", "starmap",
+                                 "methodcaller", "partial", "sorted", "min",
+                                 "max", "accumulate"})
+
+
+def _returned(watch: RoundingWatch, installed: list, frame) -> None:
+    """Intent:
+        Read one function of a watched block as it returns: one whose
+        code may hand a context to a `Decimal` method through a C
+        callable (`_hands_over`) sets `watch.unbound` when its locals
+        (one level into a list, tuple, set or dict) or its module's
+        globals hold a decimal context the block does not watch. Code of
+        mathema's own is not read.
+    """
+    module = frame.f_globals.get("__name__", "") or ""
+    if module.startswith("mathema.") and not module.startswith(
+            "mathema.lexicon"):
+        return
+    if not _hands_over(frame):
+        return
+
+    def unwatched(values) -> bool:
+        for v in values:
+            items = (list(v.values()) if isinstance(v, dict) else list(v)
+                     if isinstance(v, (list, tuple, set, frozenset)) else [v])
+            for item in items:
+                if isinstance(item, functools.partial):
+                    item = [*item.args, *item.keywords.values()]
+                    if unwatched(item):
+                        return True
+                    continue
+                if isinstance(item, decimal.Context) and not any(
+                        item is c for c in installed):
+                    return True
+        return False
+    if unwatched(list(frame.f_locals.values())) or unwatched(
+            list(frame.f_globals.values())):
+        watch.unbound = True
+
+
+def _hands_over(frame) -> bool:
+    """Intent:
+        Whether the frame's code holds a call through which a context
+        could reach a `Decimal` method unseen by the profiler: a call of
+        a `functools.partial`, of a C callable that calls what it is
+        given (`map`, `functools.reduce`, `operator.methodcaller`, ...),
+        of a C callable given a callable or a spread, or of a callable
+        the code names in a way the reading cannot resolve (a local, a
+        subscript, a call's result) other than a `Decimal` method by
+        name. True where the source cannot be read. Answered once per
+        code object.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import types
+    code = frame.f_code
+    if code in _HANDS_OVER:
+        return _HANDS_OVER[code]
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        _HANDS_OVER[code] = True
+        return True
+    env = frame.f_globals
+    builtins = env.get("__builtins__")
+    builtins = (builtins if isinstance(builtins, dict)
+                else getattr(builtins, "__dict__", {}))
+
+    def resolve(node):
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            return builtins.get(node.id, _UNRESOLVED)
+        if isinstance(node, ast.Attribute):
+            base = resolve(node.value)
+            if base is _UNRESOLVED:
+                return _UNRESOLVED
+            return getattr(base, node.attr, _UNRESOLVED)
+        return _UNRESOLVED
+
+    def python_code(value) -> bool:
+        return isinstance(value, (types.FunctionType, types.MethodType)) \
+            or (isinstance(value, type) and getattr(
+                value, "__module__", "") not in ("builtins", "decimal",
+                                                 "_decimal"))
+    decimal_methods = set(dir(decimal.Decimal))
+    found = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        target = resolve(func)
+        if target is _UNRESOLVED:
+            if isinstance(func, ast.Attribute) \
+                    and func.attr in decimal_methods:
+                continue
+            if isinstance(func, ast.Name) and func.id in (
+                    "Decimal", "str", "float", "int", "len", "abs", "round",
+                    "repr", "isinstance", "list", "tuple", "dict", "set"):
+                continue
+            found = True
+            break
+        if target is decimal.Decimal or isinstance(target, decimal.Context) \
+                or python_code(target):
+            continue
+        if isinstance(target, functools.partial) or getattr(
+                target, "__name__", "") in _HIGHER_ORDER_NAMES:
+            found = True
+            break
+        given = [*node.args, *(k.value for k in node.keywords)]
+        if any(isinstance(a, (ast.Starred, ast.Lambda)) for a in node.args) \
+                or any(k.arg is None for k in node.keywords) \
+                or any(callable(resolve(a)) and not isinstance(
+                    resolve(a), type) for a in given):
+            found = True
+            break
+    _HANDS_OVER[code] = found
+    return found
+
+
+_UNRESOLVED = object()
 
 
 #: the names through which code reaches decimal arithmetic
@@ -318,6 +494,18 @@ def may_touch_decimal(*callees) -> bool:
         return False
     return any(_reaches_decimal(f) for c in callees
                for f in _functions_in(c) if not _from_mathema_module(f))
+
+
+def touched_decimal(*callees) -> None:
+    """Intent:
+        Remember that running `callees` reached decimal arithmetic (a
+        Decimal came back from a run the profiler did not read), so
+        `may_touch_decimal` answers True for them from then on.
+    """
+    for callee in callees:
+        for fn in _functions_in(callee):
+            if not _from_mathema_module(fn):
+                _TOUCHES[fn.__code__] = True
 
 
 #: the most functions one `may_touch_decimal` walk reads

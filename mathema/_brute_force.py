@@ -1077,6 +1077,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             continue
         total += 1
         verdict = evaluate(point)
+        if verdict is None and evaluate.learned_decimal():
+            # its Decimal came from a run not read, and every run from
+            # here on is: the point is run again, read
+            verdict = evaluate(point)
         executed = executed_missing(deps)
         if verdict is None and executed is not None and executed.last_classified:
             # a raise or a missing output at a missing input: classified

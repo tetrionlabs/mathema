@@ -13,6 +13,7 @@ import time
 import pytest
 
 import tests._decimal_helper as dec_helper
+import tests._decimal_text_lib as text_lib
 from mathema._decimal_rounding import may_touch_decimal
 from mathema.conjecture import check_conjectures, claim
 
@@ -71,3 +72,32 @@ def test_the_reach_of_a_wide_dispatcher_is_answered_quickly():
     start = time.perf_counter()
     may_touch_decimal(env["dispatch"])
     assert time.perf_counter() - start < 0.05
+
+
+def via_text_lib(x: float):
+    return text_lib.plus_one(x)
+
+
+@pytest.mark.parametrize("route", ["derive", "best", "probe"])
+def test_a_decimal_seen_once_unread_is_read_from_then_on(route):
+    # the first Decimal from the library came from an unread run; every
+    # later run is read, and x + 1 against x misses by 1 with no context
+    # the library computes in
+    (p,) = check_conjectures(via_text_lib,
+                             [claim("for x in [0, 10], f(x) == x", route=route)])
+    assert p.verdict == "falsified", (p.verdict, p.route, p.note)
+
+
+def test_the_watch_never_raises_into_the_function(monkeypatch):
+    # a failure inside the watch's own reading (here the call-site text)
+    # leaves the point unbounded; the function's own call is untouched
+    import mathema._decimal_rounding as rounding
+
+    def broken(*args, **kwargs):
+        raise AttributeError("no positions")
+    monkeypatch.setattr(rounding, "_site_text", broken)
+    (p,) = check_conjectures(text_lib.plus_one,
+                             [claim("for x in {1.25, 2.5}, f(x) == x + 1",
+                                    route="probe")])
+    assert p.verdict != "falsified", (p.verdict, p.counterexample)
+    assert "AttributeError" not in (p.counterexample or ""), p.counterexample

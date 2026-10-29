@@ -10,6 +10,7 @@ never falsified on the rounding, and a miss past it still is. The
 contexts live in this module, apart from the bodies that compute in the
 current context only."""
 import decimal
+import functools
 from decimal import Decimal
 
 import pytest
@@ -124,4 +125,49 @@ def test_a_context_given_positionally_or_unbound_is_read(route):
     (p,) = check_conjectures(root_given_positionally,
                              [claim("for x in {2, 3}, f(x) == x",
                                     route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)
+
+
+_SQRT4 = functools.partial(Decimal.sqrt, context=_CTX4)
+
+
+def alias_positional(x: int):
+    c = _CTX4
+    return Decimal(x).sqrt(c) ** 2
+
+
+def spread_kwargs(x: int):
+    kw = {"context": _CTX4}
+    return Decimal(x).sqrt(**kw) ** 2
+
+
+def via_partial(x: int):
+    return _SQRT4(Decimal(x)) ** 2
+
+
+def via_getattr_positional(x: int):
+    name = "sq" + "rt"
+    return getattr(Decimal(x), name)(_CTX4) ** 2
+
+
+def multi_line(x: int):
+    return Decimal(x).sqrt(
+        context=_CTX4,
+    ) ** 2
+
+
+def via_map(x: int):
+    return list(map(Decimal.sqrt, [Decimal(x)], [_CTX4]))[0] ** 2
+
+
+@pytest.mark.parametrize("fn", [alias_positional, spread_kwargs, via_partial,
+                                via_getattr_positional, multi_line, via_map],
+                         ids=lambda f: f.__name__)
+@pytest.mark.parametrize("route", ["best", "probe"])
+def test_a_context_handed_over_any_way_is_read(fn, route):
+    # each takes sqrt(x) in 4 digits and squares it, by an alias, a
+    # spread, a partial, a looked-up method, a call over several lines or
+    # map: sqrt(n) ** 2 == n is true, and 2.999824 at x = 3 is rounding
+    (p,) = check_conjectures(fn, [claim("for x in {2, 3}, f(x) == x",
+                                        route=route)])
     assert p.verdict == "unknown", (p.verdict, p.route, p.counterexample)

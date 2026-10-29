@@ -191,10 +191,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # (`_decimal_rounding.watched`)
     rounded: list = [None]
     from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
-                                    may_touch_decimal, watched)
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
     # whether a point's computation can reach decimal arithmetic, so its
-    # calls are read for the decimal contexts' own methods
-    touches_decimal = may_touch_decimal(fn, *(bound_funcs or {}).values())
+    # calls are read for the decimal contexts' own methods, and whether
+    # the last point evaluated is the first to show it does
+    touches_decimal = [may_touch_decimal(fn, *(bound_funcs or {}).values())]
+    learned: list = [False]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -495,11 +498,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return sides is not None
 
     def evaluate(point):
+        learned[0] = False
         _reset()
         precision[0] = None
         rounded[0] = None
         try:
-            with watched(touches_decimal or holds_decimal(
+            with watched(touches_decimal[0] or holds_decimal(
                     list(point.values()))) as watch:
                 lv, rv = _values(point)
         except Exception as e:
@@ -518,7 +522,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 else None
         if _classify(point, False, (lv, rv)):
             return None
-        watch.unread(lv, rv)
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later point is read
+            touched_decimal(fn, *(bound_funcs or {}).values())
+            touches_decimal[0] = learned[0] = True
         if watch.rounded:
             # a Decimal operation rounded: the sides are neither the
             # mathematics nor float64 values, and the point is undecided
@@ -1274,6 +1281,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # arithmetic (`_decimal_rounding.REASONS`), None when it is; such a
     # point decided nothing unless it failed beyond the rounding
     evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
+    # whether the last point evaluated was the first to return a Decimal
+    # from a run not read, after which every point is read
+    evaluate.learned_decimal = lambda: learned[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point
