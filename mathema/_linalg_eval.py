@@ -1382,8 +1382,68 @@ def _number_of(value):
     return item if isinstance(item, complex) else float(item)
 
 
+def _plain_rows(A) -> "list | None":
+    """Intent:
+        A matrix given as nested lists or tuples of numbers (an int, a
+        float, a complex or a Fraction), as its list of rows, when numpy
+        is not installed; None for any other value, or when numpy is.
+    """
+    import numbers
+    if _numpy() is not None or not isinstance(A, (list, tuple)) or not A:
+        return None
+    rows = [list(r) for r in A if isinstance(r, (list, tuple))]
+    if len(rows) != len(A) or len({len(r) for r in rows}) != 1:
+        return None
+    if not all(isinstance(v, numbers.Number) for r in rows for v in r):
+        return None
+    return rows
+
+
+def _square(rows: list) -> list:
+    """`rows` when they form a square matrix.
+
+    Raises:
+        ValueError: the matrix is not square.
+    """
+    if len(rows) != len(rows[0]):
+        raise ValueError(f"needs a square matrix, got shape "
+                         f"({len(rows)}, {len(rows[0])})")
+    return rows
+
+
+def _plain_det(rows: list):
+    """Intent:
+        The determinant of a square matrix of numbers without numpy:
+        exact for finite real entries and rounded once, by Gaussian
+        elimination with partial pivoting otherwise (a complex entry, an
+        infinity or a NaN).
+    """
+    from fractions import Fraction
+    rows = _square(rows)
+    if all(not _is_complex(v) and math.isfinite(v) for r in rows for v in r):
+        return _rounded(_exact_det([[Fraction(v) for v in r] for r in rows]))
+    m = [[complex(v) for v in r] for r in rows]
+    n, det = len(m), complex(1.0)
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda i: abs(m[i][col]))
+        if m[pivot][col] == 0:
+            return complex(0.0)
+        if pivot != col:
+            m[col], m[pivot] = m[pivot], m[col]
+            det = -det
+        det *= m[col][col]
+        for i in range(col + 1, n):
+            factor = m[i][col] / m[col][col]
+            m[i] = [a - factor * b for a, b in zip(m[i], m[col])]
+    return det if det.imag != 0 or any(_is_complex(v) for r in rows for v in r) \
+        else det.real
+
+
 def _det(A):
     """The determinant of a square matrix, exact and rounded once."""
+    plain = _plain_rows(A)
+    if plain is not None:
+        return _plain_det(plain)
     rows = _square_rows(A)
     if rows is None:
         return _number_of(_np().linalg.det(_matrix(A)))
@@ -1420,11 +1480,16 @@ def _inv(A):
 def _trace(A):
     """Intent:
         The sum of a square matrix's diagonal entries, exact and
-        rounded once.
+        rounded once, read from nested lists without numpy.
 
     Raises:
-        numpy.linalg.LinAlgError: the matrix is not square.
+        numpy.linalg.LinAlgError: the matrix is not square (ValueError
+            without numpy).
     """
+    plain = _plain_rows(A)
+    if plain is not None:
+        plain = _square(plain)
+        return _exact_sum([plain[i][i] for i in range(len(plain))])
     a = _matrix(A)
     if a.ndim != 2 or a.shape[0] != a.shape[1]:
         raise _np().linalg.LinAlgError(

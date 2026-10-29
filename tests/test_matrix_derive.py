@@ -97,6 +97,8 @@ def test_orthogonal_marker_gives_identity(mats):
 
 
 def test_unmarked_matrix_is_not_symmetric(mats):
+    # the probe evaluates the claim's own `A.T` on numpy arrays
+    pytest.importorskip("numpy")
     # no marker, no premise: A.T == A is not an identity, so derive
     # proves nothing, and on the derive route the probe's sampling, a
     # falsifier only, finds the asymmetric matrix
@@ -107,6 +109,8 @@ def test_unmarked_matrix_is_not_symmetric(mats):
 
 
 def test_false_identity_on_derive_is_falsified_by_the_probes_sampling(mats):
+    # the probe evaluates the claim's own `A @ B` on numpy arrays
+    pytest.importorskip("numpy")
     pr = _one(mats.f, "det(A @ B) == det(A) + det(B)", route="derive")
     assert pr.verdict == "falsified"
     assert pr.route == "probe"
@@ -304,6 +308,8 @@ def test_the_undeclared_operand_reason_reaches_the_verdict():
 def test_a_vector_quadratic_form_is_not_proven_for_any_matrix():
     """A `Vec("n")` lifts as a vector, so `x.T @ A @ x` is a number;
     it is not nonnegative for every A, so no proof."""
+    # the probe evaluates the claim's own `x.T @ A @ x` on numpy arrays
+    pytest.importorskip("numpy")
     import mathema
     from mathema.types import Mat, Vec
 
