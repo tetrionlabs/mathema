@@ -17,7 +17,6 @@ decorator or docstring claim without editing code.
 """
 from __future__ import annotations
 
-import inspect
 import re
 
 from .analysis import _read_block
@@ -44,8 +43,11 @@ def _authored_tag(fn, surface: str) -> str:
     than `inspect.getsourcelines()` because it needs no source file to be
     readable (a doc-only/compiled callable would raise there) and, unlike
     `getsourcelines`, resolves to the `def` line consistently regardless of
-    how many decorators sit above it."""
-    lineno = getattr(getattr(fn, "__code__", None), "co_firstlineno", None)
+    how many decorators sit above it. A callable standing for a function
+    another frontend read gets no line: its own is a wrapper's."""
+    from .analysis import foreign_body
+    lineno = (None if foreign_body(fn)
+              else getattr(getattr(fn, "__code__", None), "co_firstlineno", None))
     key = _fn_key(fn)
     return f"{key}:{surface}:L{lineno}" if lineno else f"{key}:{surface}"
 
@@ -142,25 +144,38 @@ _CLAIM_LINE = re.compile(
 
 
 def parse_docstring_claims(doc: str,
-                           matrix_names: frozenset = frozenset()) -> list[dict]:
+                           matrix_names: frozenset = frozenset(),
+                           owner: "str | None" = None) -> list[dict]:
     """Parse a `Claims:` block out of a docstring into declared-dict shape
     (the same shape `spec.declare()` produces). No `Claims:` section, or an
     empty/missing docstring, returns `[]`, never an error; most docstrings
     have no claims in them at all. `matrix_names` are the function's
     matrix parameters (from its signature), so a docstring claim reads
     the matrix sugar (`A^T`, `|A|`) the right way, exactly as
-    `check_conjectures` resolves it at adjudication time."""
+    `check_conjectures` resolves it at adjudication time.
+
+    A claim line that does not parse raises InvalidConjecture naming the
+    claim, the docstring, and `owner` (the function's dotted key) when
+    given, with the parser's message."""
+    from .conjecture import InvalidConjecture
     lines = _read_block(doc, _CLAIMS_HEADER)
     if lines is None:
         return []
     out: list[dict] = []
+    where = (f"the docstring Claims: block of {owner}" if owner
+             else "a docstring Claims: block")
     for line in lines:
         m = _CLAIM_LINE.match(line)
         if m is None:
             continue   # not a recognizable claim line; skip, don't error
-        cj = _claim(m.group("statement"), name=m.group("name"),
-                   route=m.group("route") or "best", source="docstring",
-                   matrix_names=matrix_names)
+        try:
+            cj = _claim(m.group("statement"), name=m.group("name"),
+                        route=m.group("route") or "best", source="docstring",
+                        matrix_names=matrix_names)
+        except InvalidConjecture as e:
+            raise InvalidConjecture(
+                f"claim {m.group('name')!r} in {where} does not parse ({e})"
+            ) from e
         out.append(_declare(cj))
     return out
 
@@ -173,7 +188,7 @@ def parse_docstring_claims(doc: str,
 def declared_from_function(fn) -> list[dict]:
     """Every claim declared directly on a live function object: decorator
     claims (`fn.__mathema_claims__`) plus docstring claims (parsed from
-    `inspect.getdoc(fn)`), merged by claim name.
+    `analysis.docstring_of(fn)`), merged by claim name.
 
     Precedence: **decorator wins over docstring** on a name collision. The
     decorator is structured data, parsed once at decoration time, the same
@@ -191,9 +206,11 @@ def declared_from_function(fn) -> list[dict]:
     decoration time.
     """
 
+    from .analysis import docstring_of
     from .types import matrix_param_names
-    doc_claims = parse_docstring_claims(inspect.getdoc(fn) or "",
-                                        matrix_param_names(fn))
+    doc_claims = parse_docstring_claims(docstring_of(fn),
+                                        matrix_param_names(fn),
+                                        owner=_fn_key(fn))
     decorator_claims = list(getattr(fn, "__mathema_claims__", []) or [])
     tag = _authored_entry(fn, "docstring")
     for c in doc_claims:
@@ -656,14 +673,20 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
 
         policies = _policies_from_declared_claims(fn, key, root)
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def _check(args, kwargs):
+            """The arguments bound to `fn`'s parameters, raising
+            `DomainError` at the first outside its domain."""
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             for name, value in bound.arguments.items():
                 problem = _violation(name, value)
                 if problem is not None:
                     raise DomainError(f"{fn.__name__}(): {name}{problem}")
+            return bound
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound = _check(args, kwargs)
             if policies:
                 # a policy that says f raises on a missing or absent input
                 # rejects it here; drops and propagates are checked on the
@@ -680,6 +703,10 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
+        if not policies:
+            # the check the wrapper makes before calling `fn`, which then
+            # returns as it is
+            wrapper.__mathema_domain_check__ = _check
         _declare_exclusions(wrapper, fn, sorted(merged_domain), "enforce_domain")
         return wrapper
     return decorator
@@ -745,11 +772,17 @@ def _range_from_exit_asserts(fn) -> "tuple[list, set]":
     """Intent:
         `(checks, lines)`: the `(relation, bound)` checks the asserts
         just before the body's final `return <name>` state on that name,
-        and the source lines those asserts sit on.
+        and the source lines those asserts sit on. None for a callable
+        standing for a function another frontend read
+        (`analysis.foreign_body`), whose Python source is a wrapper's.
     """
     import ast
     import inspect
     import textwrap
+
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return [], set()
     try:
         lines, start = inspect.getsourcelines(fn)
         tree = ast.parse(textwrap.dedent("".join(lines)))
@@ -902,7 +935,10 @@ def _domain_from_entry_asserts(fn) -> dict:
     import math
     import textwrap
 
+    from .analysis import foreign_body
     from .domain import Interval
+    if foreign_body(fn):
+        return {}
     try:
         lines, _start = inspect.getsourcelines(fn)
         tree = ast.parse(textwrap.dedent("".join(lines)))
@@ -1106,8 +1142,10 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
             plan, numbers_judged_elsewhere=frozenset(
                 covered & set(plan.elements)))
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def entry(args, kwargs):
+            # the dimensions of the arguments: raises where they disagree
+            # with the markers or a declared premise, else the names the
+            # call bound
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             av = bound.arguments
@@ -1133,11 +1171,21 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                         f"{fn.__name__}: dim({left[0]}, {left[1]})={lval} "
                         f"violates the declared premise "
                         f"dim({left[0]}, {left[1]}) {rel} {rdesc}")
-            result = fn(*args, **kwargs)
+            return bound_names
+
+        def leave(bound_names, result):
+            # the dimensions of the result: raises where they disagree
+            # with the return marker
             problem = _shapes.exit_problem(plan, bound_names, result,
                                            fn.__name__)
             if problem is not None:
                 raise DimensionError(problem, at_exit=True)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound_names = entry(args, kwargs)
+            result = fn(*args, **kwargs)
+            leave(bound_names, result)
             return result
 
         # what the guard checks, read back by every sampler as the
@@ -1145,6 +1193,8 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
         # never the draws the guard rejects
         wrapper.__mathema_enforced_dimensions__ = {
             p: dims for p, (dims, _source) in plan.params.items()}
+        # the checks the wrapper makes before and after calling `fn`
+        wrapper.__mathema_dimension_check__ = (entry, leave)
         _declare_exclusions(wrapper, fn, sorted(plan.params),
                             "enforce_dimensions")
         return wrapper
@@ -1173,6 +1223,10 @@ def enforce_structure(key: str | None = None, root: str = "."):
     `PositiveDefinite` marker also enforces symmetry. A property the
     registry cannot decide for an argument (a spectral check with no
     numpy) is skipped rather than raising, never a false rejection.
+    `Finite` and `Real` are the exception: an argument that is not a
+    number, nor a vector or matrix of numbers (None, a string, a list
+    holding None), does not have the declared structure and raises,
+    with or without numpy.
 
     Like `@enforce_domain`, it makes the function REJECT inputs the
     claim was never about and auto-declares the matching
@@ -1217,10 +1271,16 @@ def enforce_structure(key: str | None = None, root: str = "."):
                     continue
                 value = bound.arguments[param]
                 for prop in sorted(props):
-                    if _mtx.PROPERTIES[prop].check(value) is False:
+                    got = _mtx.PROPERTIES[prop].check(value)
+                    numberless = (got is None
+                                  and _mtx.PROPERTIES[prop].level == "finite"
+                                  and not _mtx.is_numeric(value))
+                    if got is False or numberless:
                         raise ValueError(
                             f"{fn.__name__}: {param} is not "
-                            f"{prop} ({prop[3:].replace('_', ' ')})")
+                            f"{prop} ({prop[3:].replace('_', ' ')})"
+                            + (", the value is not a number"
+                               if numberless else ""))
             return fn(*args, **kwargs)
 
         # auto-declare the matching predicate claims, as enforce_domain

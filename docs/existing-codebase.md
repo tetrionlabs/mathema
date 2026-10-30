@@ -181,7 +181,7 @@ mathema check billing.fees.discounted --root .
 
 <!-- example: codebase output -->
 ```text
-FAIL billing.fees.discounted: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL billing.fees.discounted: source, no side effects; claims 3/3 checked (0 proven, 2 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified. The witness says why:
@@ -261,11 +261,12 @@ mathema audit billing --root . --filter unclaimed --cols key,claims
 
 <!-- example: codebase output -->
 ```text
-ok   billing.fees.discounted: no baseline record; 2 proven (1 claim, 1 built-in), 0 holds, 0 falsified
+ok   billing.fees.discounted: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
 ok   billing.fees.late_fee: no baseline record; 1 proven, 0 holds, 0 falsified
 ok   billing.fees.settle: no baseline record; 2 proven (1 claim, 1 built-in), 2 holds, 0 falsified
 0 unchanged since the last run (not run again), 3 checked, 0 problem(s)
 grammars detected: mathema; verified by this run: mathema
+4 intents to accept (1 package, 3 functions): mathema accept --intent
 {"prefix":"billing.fees.","cols":["key","claims"],"rows":[["late_fee",0]]}
 ```
 
@@ -274,7 +275,8 @@ Both claims proved on the derive route, and every record also carries
 depends on has not moved; that is the second `proven` on the two claimed
 functions and the only one on `late_fee`. The `2 holds` on `settle` are
 the proof's computation line, the same claim run through the real code
-in floating point, and its policy line for a `nan` input. `--filter unclaimed` is the list of what is left, as
+in floating point, and its policy line for a `nan` input; the `2 holds`
+on `discounted` are its policy lines for a `nan` price and a `nan` rate. `--filter unclaimed` is the list of what is left, as
 data, cut to two columns with `--cols`: one function. The records under
 `.mathema/verified/` are the evidence, and they are meant to be committed
 with the code.

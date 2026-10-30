@@ -98,7 +98,12 @@ class FunctionCoverage:
 
 def _line_range(fn) -> tuple[str, int, int] | None:
     """`(abspath, first_line, last_line)` of fn's source, or None when
-    the source is unavailable (a builtin, a C extension, exec'd code)."""
+    the source is unavailable (a builtin, a C extension, exec'd code) or
+    is a wrapper's, for a callable standing for a function another
+    frontend read (`analysis.foreign_body`)."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         src_file = inspect.getsourcefile(fn)
         lines, start = inspect.getsourcelines(fn)
@@ -335,7 +340,11 @@ def _is_mathema_own(fn) -> bool:
     such a function runs mathema's own machinery, which may call the same
     function while parsing or adjudicating the claim, so its traced lines
     cannot be told apart from probe execution and earn no probe credit.
-    Derive and test lines are unaffected."""
+    Derive and test lines are unaffected. A callable standing for a
+    function another frontend read is not mathema's own."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return False
     try:
         path = os.path.abspath(inspect.getsourcefile(fn) or "")
     except TypeError:

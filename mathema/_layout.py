@@ -130,7 +130,9 @@ def _did(counterexample: str) -> str:
     calls (`f(None) raises TypeError; f(1.0) returns 1.0`) as it is."""
     if (counterexample or "").startswith("f("):
         return counterexample
-    said = (counterexample or "").split(": ", 1)[-1]
+    from ._called_text import split_witness
+    point, said = split_witness(counterexample or "")
+    said = said if said else point
     said = re.sub(r"^f raised ", "raises ", said)
     return re.sub(r"^f returned ", "returns ", said)
 
@@ -151,7 +153,8 @@ def _reached(witness: str, kind: str) -> str:
     (absent)` for an absence and `(hole)` for a hole at a null; from an
     older witness, the text before its colon."""
     if not witness.startswith("f("):
-        return witness.split(": ", 1)[0]
+        from ._called_text import split_witness
+        return split_witness(witness)[0]
     call = _first_call(witness)
     if " with " not in call:
         return ""
@@ -253,22 +256,27 @@ def _return_fixes(pol: dict) -> str:
     return "possible fixes:\n" + "\n".join(f"  {line}" for line in nxt.splitlines())
 
 
-def _conditioning_lines(p, key: str) -> list:
+def _conditioning_lines(p, key: str, whole: bool = False) -> list:
     """What the conditioning says under a falsified computation line, and
-    the fixes it offers: a narrower domain where float64 can honour the
-    claim, or accepting the discovery."""
+    the fixes it offers: a `let |inf| be B` a run showed holding, a
+    narrower domain where float64 can honour the claim, or accepting the
+    discovery. `whole` is whether the claim the line is the computation
+    of is proven, so it can be accepted whole."""
+    from .conjecture import INFINITY_OFFER
     found = (p.meta or {}).get("mathema.conditioning")
-    if not found:
+    offer = ((p.meta or {}).get(INFINITY_OFFER) or {}).get("words")
+    if not found and not offer:
         return []
+    from ._conditioning import fixes as conditioning_fixes
     from ._missing_words import options
-    fixes = []
-    if found.get("narrow"):
-        fixes.append("if inputs this large are out of scope, narrow the "
-                     f"domain: {found['narrow']}")
-    name = str(p.name).split("[", 1)[0]
-    fixes.append(f"if the loss is accepted, run: mathema accept {key} "
-                 f"{name} --as discovery")
-    return [" " * 28 + found["words"],
+    from .gates import computation_line_of
+    fixes = conditioning_fixes(found, str(p.name), key,
+                               computation_line_of(p.meta), whole=whole,
+                               offer=offer)
+    words = (found or {}).get("words") or (
+        "no conditioning was read at its witness, so whether the loss is "
+        "inherent is not decided")
+    return [" " * 28 + words,
             " " * 28 + "possible fixes:",
             *(" " * 30 + line for line in options(fixes).splitlines())]
 
@@ -329,7 +337,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             continue
         lines = []
         falsified = []
-        if meta.get("mathema.empty_input"):
+        folded = _folded(main, under)
+        if meta.get("mathema.empty_input") and folded:
+            # the claim was falsified by its empty-input line, and its
+            # finding over non-empty inputs, a stand-in's draws, is
+            # carried by its `[float]` row
+            pass
+        elif meta.get("mathema.empty_input"):
             # the claim was falsified by its empty-input line; the
             # mathematics over non-empty inputs is printed as it was found
             found = meta.get("mathema.mathematics") or {}
@@ -342,6 +356,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             # a verdict reached by running the code is the computation's
             aspect = "computation" if _ran(found.get("route")) else "mathematics"
             lines.append(_row(verdict, aspect, _shown(main.statement, aspect), detail))
+        elif folded:
+            # the stand-in's draws are carried by its `[float]` row, the
+            # claim's one computation line
+            if _verdict(main) == "falsified":
+                falsified.append(main.counterexample)
+                lines += _split_lines(main, key)
+                lines += _conditioning_lines(main, key)
         else:
             aspect = _aspect(main)
             lines.append(_row(_verdict(main), aspect, _shown(main.statement, aspect),
@@ -367,11 +388,13 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 if (c.condition or "").startswith("let |inf| be ") and "|inf|" not in shown:
                     # the pseudo-infinity that bounded the computation
                     shown = f"{c.condition.split(', ', 1)[0]}, {shown}"
-                lines.append(_row(_verdict(c), "computation", shown,
-                                  _detail(c, count_words)))
+                detail = (_folded_detail(main, c, count_words)
+                          if folded else _detail(c, count_words))
+                lines.append(_row(_verdict(c), "computation", shown, detail))
                 lines += _extras(c)
                 if _verdict(c) == "falsified":
-                    lines += _conditioning_lines(c, key)
+                    lines += _conditioning_lines(
+                        c, key, whole=_verdict(main) == "proven")
             if _verdict(c) == "falsified":
                 falsified.append(c.counterexample)
             used.add(id(c))
@@ -414,9 +437,12 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         if falsified and (falsified[0] or "").startswith("f("):
             # a witness written as calls is named by its first call
             head = f"falsified at {_first_call(falsified[0])}"
+        elif falsified and _LINK.match(falsified[0] or ""):
+            head = _link_head(falsified[0])
         elif falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
-            head = head.split(": ", 1)[0] if ": " in head else head
+            from ._called_text import split_witness
+            head = split_witness(head)[0]
         else:
             # the weakest line: proven only when every line is proven
             head = min((ln.split()[0] for ln in lines if ln.split()
@@ -426,6 +452,65 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
         out[id(main)] = [f"  {main.name}  {main.statement}   {head}", *lines]
     out["used"] = used
     return out
+
+
+#: a chained comparison's witness: the link, its comparison, then the
+#: point and what was found there
+_LINK = re.compile(r"link \d+: (.+?): (.+)$", re.S)
+
+
+def _link_head(witness: str) -> str:
+    """A chained comparison's falsified headline from its witness
+    (`link 1: 0 < f(x): x = -30: 0 vs -1.0`): the comparison that
+    failed and the point, `falsified: 0 < f(x) fails at x = -30`. The
+    link's number stays in the witness on the line below."""
+    found = _LINK.match(witness)
+    comparison, rest = found.group(1), found.group(2)
+    from ._called_text import split_witness
+    point = split_witness(rest)[0]
+    return f"falsified: {comparison} fails at {point}"
+
+
+def _folded(main, under: list) -> bool:
+    """Whether `main` is a probe that stood in for an undecided derive,
+    with a `[float]` row under it carrying its draws
+    (`conjecture._fold_stand_in_draws`): the claim then prints one
+    computation line, that row's."""
+    return _ran(_own(main)["route"]) and any(
+        (c.meta or {}).get("mathema.family") == _COMPUTATION for c in under)
+
+
+def _own(main) -> dict:
+    """A claim row's own finding over non-empty inputs: `route`,
+    `verdict`, `note` and `counterexample`, from
+    `meta["mathema.mathematics"]` when its empty-input line falsified
+    it (its counterexample is then that line's), else the row's own."""
+    meta = main.meta or {}
+    if meta.get("mathema.empty_input"):
+        found = meta.get("mathema.mathematics") or {}
+        return {"route": found.get("route"), "note": found.get("note"),
+                "verdict": (found.get("verdict") or "unknown").split(":", 1)[0],
+                "counterexample": None}
+    return {"route": main.route, "note": main.note, "verdict": _verdict(main),
+            "counterexample": main.counterexample}
+
+
+def _folded_detail(main, c, count_words) -> str:
+    """The one computation line of a folded stand-in: the draws, any gap
+    the stand-in's passes fell within, then the stand-in's counterexample
+    and the `[float]` row's, where they have one."""
+    parts = []
+    if c.n:
+        parts.append(count_words(c.n, (c.meta or {}).get("mathema.drawn")))
+    own = _own(main)
+    parts += [g for note, verdict in ((own["note"], own["verdict"]),
+                                      (c.note, _verdict(c)))
+              for g in (note or "").split("; ")
+              if _WITHIN.search(g) and verdict != "falsified"]
+    found = [cx for cx in (own["counterexample"], c.counterexample) if cx]
+    if found:
+        parts.append("counterexample " + "; and ".join(dict.fromkeys(found)))
+    return "; ".join(parts)
 
 
 def _extras(p) -> list:
@@ -453,6 +538,9 @@ def _detail(p, count_words) -> str:
         gaps = [c for c in (p.note or "").split("; ") if _WITHIN.search(c)]
         return "; ".join([count_words(p.n, (p.meta or {}).get("mathema.drawn")),
                           *gaps])
+    if verdict == "proven" and (p.route or "").endswith(":within_float64"):
+        from .records import within_float64_words
+        return within_float64_words(p.meta)
     if verdict == "falsified" and p.counterexample:
         return f"counterexample {p.counterexample}"
     if verdict in ("unknown", "skipped") and p.note:

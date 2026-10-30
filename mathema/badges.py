@@ -77,6 +77,9 @@ _EXTENT_BITS: dict[str, float] = {
 # so less residual entropy, than random sampling); a WITNESSED falsification
 # is knowledge (an uncorroborated disproof is already `unknown`, scoring 0)
 _PROVEN_STRENGTH = 1.0
+# every point of a finite region run in float64 with some point decided
+# there only: nothing untried, a difference below the stated delta unseen
+_WITHIN_FLOAT64_STRENGTH = 0.95
 _FALSIFIED_STRENGTH = 0.85
 _HOLDS_STRENGTH: dict[str, float] = {
     "examine": 0.90, "derive": 0.90, "probe:semi_analytical": 0.85,
@@ -135,6 +138,8 @@ def _strength(verdict: str, route: str, n: "int | None" = None) -> float:
     from .records import classify_verdict
     v = classify_verdict(verdict or "")
     if v == "proven":
+        if (route or "").endswith(":within_float64"):
+            return _WITHIN_FLOAT64_STRENGTH
         return _PROVEN_STRENGTH
     if v == "falsified":
         return _FALSIFIED_STRENGTH
@@ -861,8 +866,8 @@ def _reductions(verified_claims, pure: bool, profile: "_Profile | None" = None) 
             credits = soft if holding else []
         else:                                        # the shape / relation group
             credits = ["shape"]
-        if route == "derive:brute_force" and classify_verdict(verdict) == \
-                "proven":
+        if (route or "").startswith("derive:brute_force") \
+                and classify_verdict(verdict) == "proven":
             # a proof visiting every point of the function's own finite
             # domain settles what that parameter accepts
             credits = credits + finite_soft
@@ -983,18 +988,23 @@ def _population(targets, root: str) -> dict:
         defined under `targets`, or, rootwide (no targets), every
         function the declared/verified store knows. One population feeds
         all three scores and the centrality graph, so they line up.
+        The targets and keys are imported with `root` on `sys.path`, so a
+        worker process finds the same population as the parent.
     """
+    from .targets import _root_on_path
     if targets:
         from .audit import discover
-        return dict(discover(list(targets)))
+        with _root_on_path(root):
+            return dict(discover(list(targets)))
     from .conjecture import _resolve_func_ref
     from .spec import load_declared, load_verified
     keys = sorted(set(load_declared(root)) | set(load_verified(root)))
     out = {}
-    for key in keys:
-        fn = _resolve_func_ref(key)
-        if fn is not None:
-            out[key] = fn
+    with _root_on_path(root):
+        for key in keys:
+            fn = _resolve_func_ref(key)
+            if fn is not None:
+                out[key] = fn
     return out
 
 
@@ -1406,7 +1416,9 @@ def _repo_badges(targets, root: str, implementation: bool,
             covered, statements = result["covered"], result["statements"]
             covered_lines += covered
             statement_lines += statements
-            impl = round(100 * covered / statements) if statements else 100
+            # a function with no statement line to read (no source) has
+            # unknown coverage: no score, and no lines in the ratio
+            impl = round(100 * covered / statements) if statements else None
         if result["intent"] is not None:
             intent_pairs.append((w, result["intent"]))
         if result["clarity"] is not None:
@@ -1421,8 +1433,9 @@ def _repo_badges(targets, root: str, implementation: bool,
     clarity = _weighted_mean(behav_pairs)
     if implementation:
         impl_score = (round(100 * covered_lines / statement_lines)
-                      if statement_lines else 100)
-        overall = triangle_area(impl_score, intent, clarity)
+                      if statement_lines else None)
+        overall = (triangle_area(impl_score, intent, clarity)
+                   if impl_score is not None else None)
     else:
         impl_score = overall = None
     return BadgeScores(implementation=impl_score, intent=intent,
@@ -1473,8 +1486,14 @@ def render_triangle(a: int, b: int, c: int) -> str:
         with dots, so the filled area is the current state and the gap to
         the frame is the room to grow. The three scores label the corners
         and the overall area sits below. If any score is under 5 the shape
-        is degenerate and is not drawn, only the numbers are shown.
+        is degenerate and is not drawn, only the numbers are shown, and so
+        is a score that is unknown (None), shown as `unknown`.
     """
+    if None in (a, b, c):
+        def said(v):
+            return "unknown" if v is None else v
+        return (f"IMPL {said(a)}   INTENT {said(b)}   CLARITY {said(c)}   "
+                f"overall unknown\n(no triangle: a dimension is unknown)")
     overall = triangle_area(a, b, c)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
     if min(a, b, c) < 5:
@@ -1560,8 +1579,9 @@ def shields_payloads(scores: BadgeScores) -> dict:
     Tetrion Labs colours: an ink label and a deep green message."""
     out = {}
     for dim in ("implementation", "intent", "clarity"):
+        value = getattr(scores, dim)
         out[dim] = {"schemaVersion": 1, "label": _BADGE_LABEL[dim],
-                    "message": f"{getattr(scores, dim)}%",
+                    "message": "unknown" if value is None else f"{value}%",
                     "color": _ACCENT_STRONG,
                     "labelColor": _INK}
     return out
@@ -1569,8 +1589,9 @@ def shields_payloads(scores: BadgeScores) -> dict:
 
 def _svg_score_point(origin, corner, score):
     """A score's point on its spoke from `origin` (all-zero) out to its
-    frame `corner`, the SVG twin of the ASCII spoke placement."""
-    f = max(0.0, min(1.0, score / 100.0))
+    frame `corner`, the SVG twin of the ASCII spoke placement; an
+    unknown score (None) sits at the origin."""
+    f = 0.0 if score is None else max(0.0, min(1.0, score / 100.0))
     return (origin[0] + f * (corner[0] - origin[0]),
             origin[1] + f * (corner[1] - origin[1]))
 
@@ -1631,14 +1652,16 @@ def render_svg(scores: BadgeScores) -> str:
         parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" '
                      f'letter-spacing="1.2" text-anchor="{anchor}">'
                      f'<tspan fill="{_DMUTE}">{name}</tspan> '
-                     f'<tspan fill="{_PAPER}" font-weight="600">{sc}%</tspan>'
+                     f'<tspan fill="{_PAPER}" font-weight="600">'
+                     f'{"unknown" if sc is None else f"{sc}%"}</tspan>'
                      '</text>')
     # the overall (shaded-area) number, top right, clear of the shape at
     # every score
     parts.append(f'<text x="{w - 20}" y="37" fill="{_PAPER}" '
                  f'font-family="{_DISPLAY_FONT}" font-size="20" '
                  f'font-weight="600" text-anchor="end">'
-                 f'{scores.overall}%</text>')
+                 f'{"unknown" if scores.overall is None else f"{scores.overall}%"}'
+                 '</text>')
     parts.append(f'<text x="{w - 20}" y="51" fill="{_DMUTE}" font-size="10" '
                  'letter-spacing="1.2" text-anchor="end">overall</text>')
     parts.append("</svg>")

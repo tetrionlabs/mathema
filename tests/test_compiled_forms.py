@@ -62,18 +62,26 @@ def heat_index_like(t, h):
             + 0.012 * t * t * math.exp(h / 80) / (1 + 0.01 * t * h))
 
 
-def test_false_derivative_claim_falsifies_through_some_route():
+def test_false_derivative_claim_is_never_proven():
     # d(f,h) >= -10 is genuinely false in the box (the -0.146*t term
-    # dominates); sympy's sign engine stalls on the expression, so the
-    # lifted-numeric fallback supplies the counterexample, but any
-    # route agreeing it is false is a pass
+    # dominates); sympy's sign engine stalls on the expression. The
+    # lifted-numeric sampling of derive's reconstruction finds the miss,
+    # but on route derive that falsifies only where the code, run there,
+    # fails the relation, and the code cannot evaluate a derivative: the
+    # claim stays unknown with the reason, never proven
+    for route in ("derive", "best"):
+        (p,) = check_conjectures(heat_index_like, [claim(
+            "for t in [80,110], h in [40,100], d(f(t,h), h) >= -10",
+            route=route)])
+        assert p.verdict != "proven", (route, p.verdict)
+        if p.route == "probe:lifted_numeric":
+            assert "reconstruction" in p.note
+            assert p.counterexample
     (p,) = check_conjectures(heat_index_like, [claim(
         "for t in [80,110], h in [40,100], d(f(t,h), h) >= -10",
         route="derive")])
-    assert p.verdict == "falsified"
-    if p.route == "probe:lifted_numeric":
-        assert "reconstruction" in p.note
-        assert p.counterexample
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert "is no witness" in p.note
 
 
 def test_true_derivative_claim_gathers_lifted_numeric_evidence():
@@ -92,14 +100,20 @@ def test_true_derivative_claim_gathers_lifted_numeric_evidence():
 def test_unclosable_integral_gets_quad_backed_evidence():
     # sympy has no closed form for this integrand, so the intermediate
     # stays an Integral; the quad backend (sympy evalf -> mpmath
-    # quadrature, no new dependency) supplies executed evidence. The
-    # FALSE bound falsifies with a genuine numerically-integrated
-    # witness, which exercises the whole pipeline in one adjudication.
+    # quadrature, no new dependency) samples it. The bound is FALSE (the
+    # integrand is at most e, so the integral over [0, a], a <= 2, is at
+    # most 2e < 10), and the quadrature finds the miss on derive's
+    # reconstruction; on every route that miss falsifies only where the
+    # code, run at its point, fails the claim, and the code cannot
+    # evaluate an integral, so the point is no witness: unknown, the
+    # reconstruction's miss named in the note
     def carrier(a):
         return a
-    (p,) = check_conjectures(carrier, [claim(
-        "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10",
-        route="derive")])
-    assert p.verdict == "falsified"
-    assert p.route == "probe:lifted_numeric"
-    assert p.counterexample
+    for route in ("best", "derive"):
+        (p,) = check_conjectures(carrier, [claim(
+            "for a in [0.5, 2], integrate(exp(-x**2 + sin(x)), x, 0, a) >= 10",
+            route=route)])
+        assert (p.verdict, p.route) == ("unknown", "derive"), (route, p.verdict,
+                                                               p.route, p.note)
+        assert "derive's reconstruction misses the claim" in p.note
+        assert "is no witness" in p.note

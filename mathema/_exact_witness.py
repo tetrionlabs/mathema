@@ -363,8 +363,10 @@ def relation_fails(left, right, relation: str) -> bool:
 def interval_pieces(bound) -> list:
     """Intent:
         A real domain bound as `[(lo, hi, closed_lo, closed_hi), ...]`
-        with each finite end read exactly as written (a float end as
-        the shortest decimal that reads back as it), or `Undecided` for
+        with each finite end read exactly as written (the rational its
+        text writes where the interval keeps it, `1/3` as 1/3, else a
+        float end as the shortest decimal that reads back as it), or
+        `Undecided` for
         a bound that is not a union of intervals.
     """
     import math
@@ -375,9 +377,13 @@ def interval_pieces(bound) -> list:
         if not (isinstance(piece, (tuple, list)) and len(piece) == 2):
             raise Undecided("a domain that is not a union of intervals")
         ends = []
-        for end in piece:
+        written = (getattr(piece, "exact_lo", None),
+                   getattr(piece, "exact_hi", None))
+        for at, end in enumerate(piece):
             if isinstance(end, float) and math.isinf(end):
                 ends.append(end)
+            elif written[at] is not None:
+                ends.append(written[at])
             elif isinstance(end, (int, float, Fraction)):
                 ends.append(Fraction(repr(end)) if isinstance(end, float)
                             else Fraction(end))

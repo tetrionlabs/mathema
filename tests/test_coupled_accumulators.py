@@ -61,11 +61,12 @@ def test_fibonacci_pair_proves_binet(tmp_path):
 
 def test_nonlinear_coupling_stays_honestly_out(tmp_path):
     mod = _mod(tmp_path, _BODY, "coup_b")
-    # n is an int, so [0, 10] is eleven points the sweep may settle;
+    # n is an int, so [0, 10] is eleven points the sweep may settle
+    # (exactly, or within float64 where a point has no exact value);
     # what stays out is a closed form for the nonlinear coupling
     (p,) = check_conjectures(mod.nonlinear_pair, [claim(
         "for n in [0,10], f(n) >= 0", route="derive")])
-    assert p.verdict != "proven" or p.route == "derive:brute_force", (
+    assert p.verdict != "proven" or p.route.startswith("derive:brute_force"), (
         p.verdict, p.route, p.sketch)
 
 

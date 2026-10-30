@@ -13,10 +13,11 @@ import pytest
 from mathema.conjecture import InvalidConjecture, check_conjectures, claim
 from mathema.spec import (canonical_claim_text, declare, entry_claims,
                           fingerprint_text, render_claim_text)
+from tests._equivalence_rows import claim_row
 
 
 def _verdict(fn, cj):
-    (probe,) = check_conjectures(fn, [cj], extensive=False)
+    probe = claim_row(check_conjectures(fn, [cj], extensive=False))
     return probe.verdict
 
 

@@ -52,7 +52,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .analysis import Facts, SourceUnavailable, _parse_notes, effective_facts
+from .analysis import (Facts, SourceUnavailable, _intent_block_text,
+                       _parse_notes, effective_facts)
 from .analysis import analyze_source as analyze_source
 # aliased on import: the bare name `claims` is already the conjecture-module
 # alias below (`mathema.claims.check(...)`, load-bearing in README/tests), so
@@ -107,7 +108,7 @@ _register_dot_family()
 _register_fold_family()
 _register_sum_family()
 
-__version__ = "0.6.2.1"
+__version__ = "0.6.3"
 __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "status", "track_claims",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
@@ -130,6 +131,57 @@ def _pad(text: str) -> str:
     """`text` with each line after its first indented to sit under a
     record line's detail column."""
     return text.replace("\n", "\n           ")
+
+
+_VOLUNTEERED = ("suggested", "builtin")
+
+
+def _ranked_lines(probes: list, lines: list, starts: list) -> list:
+    """Intent:
+        The printed record with the function's stated claims first and
+        every row mathema volunteered (`records.row_source` `suggested`
+        or `builtin`, a missing-value policy row or a gate excepted)
+        folded into one line counting their verdicts, the verdict of a
+        claim with a falsified computation line counted as falsified.
+        `lines` is the record as printed in order, `starts` each probe
+        with the index of its first line there. The lines unchanged when
+        no stated claim or no volunteered row is among them.
+    """
+    from .records import row_source
+    from .verify import summary_counts
+    import warnings
+    ends = [i for _p, i in starts[1:]] + [len(lines)]
+    head = lines[:starts[0][1]] if starts else lines
+    stated, other, volunteered = [], [], []
+    broken = {(p.meta or {}).get("mathema.companion_of") for p in probes
+              if (p.meta or {}).get("mathema.companion_of")
+              and (p.verdict or "").startswith("falsified")}
+    for (p, start), end in zip(starts, ends):
+        meta = p.meta or {}
+        if meta.get("mathema.companion_of") and start == end:
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            source = row_source(meta, p.note or "")
+        unit = (p, lines[start:end])
+        if meta.get("mathema.policy") or meta.get("mathema.gate"):
+            other.append(unit)
+        elif source in _VOLUNTEERED:
+            volunteered.append(unit)
+        else:
+            stated.append(unit)
+    if not stated or not volunteered:
+        return lines
+    counts: dict = {}
+    for p, _shown in volunteered:
+        verdict = "falsified" if p.name in broken else \
+            (p.verdict or "unknown").split(":", 1)[0]
+        counts[verdict] = counts.get(verdict, 0) + 1
+    n = len(volunteered)
+    count = (f"  {n} built-in check{'s' if n != 1 else ''}: "
+             f"{summary_counts(counts)} (record.render(families=True) "
+             f"prints them)")
+    return [*head, *(ln for _p, shown in stated + other for ln in shown), count]
 
 
 @dataclass
@@ -171,6 +223,19 @@ class Record:
     key: str | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
+        return self.render()
+
+    def render(self, families: bool = False) -> str:
+        """Intent:
+            The record as it prints. Where the function states claims of
+            its own (a docstring `Claims:` block, a decorator, `declared=`,
+            `claims=`), those come first and the rows mathema volunteered
+            (the built-in families a bare `check(fn)` runs, row source
+            `suggested` or `builtin`) fold under one count line;
+            `families=True` prints every row in the order adjudicated,
+            the folded rows included. A record with no stated claim
+            prints every row.
+        """
         from .analysis import tier_word
         from ._layout import blocks
         from ._missing_words import count_words as _count_words
@@ -190,7 +255,9 @@ class Record:
         grouped = blocks(self.probes, list(self.facts.params),
                          dict(self.facts.param_kinds), self.key or self.facts.name,
                          _count_words)
+        starts: list = []
         for p in self.probes:
+            starts.append((p, len(lines)))
             if id(p) in grouped:
                 lines.extend(grouped[id(p)])
                 continue
@@ -239,6 +306,13 @@ class Record:
                 # the statement it qualifies, with what a missing value
                 # of each parameter means
                 line = f"  {mark} {p.name}: {p.statement}"
+                if (p.route or "").endswith(":within_float64"):
+                    # every point run in float64: the count and the
+                    # largest delta beside the statement
+                    from .records import within_float64_words
+                    said = within_float64_words(p.meta)
+                    if said:
+                        line += f"  ({said})"
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
@@ -279,6 +353,8 @@ class Record:
                 if parts:
                     line += f"\n           [{', '.join(parts)}]"
             lines.append(line)
+        if not families:
+            lines = _ranked_lines(self.probes, lines, starts)
         return "\n".join(lines)
 
     def to_spec(self) -> dict:
@@ -322,6 +398,7 @@ def _doc_only_facts(fn) -> Facts:
     import hashlib
     import inspect
 
+    from . import _exits
     from ._signatures import callable_signature
     from .intent import parse_doc
 
@@ -338,7 +415,7 @@ def _doc_only_facts(fn) -> Facts:
         params, sig_str = [], "(…)"
         for arity in (1, 2, 3):
             try:
-                fn(*[0.5] * arity)
+                _exits.call(fn, *[0.5] * arity)
             except TypeError:
                 continue
             except Exception:
@@ -381,7 +458,7 @@ def _doc_only_facts(fn) -> Facts:
         form="doc:" + hashlib.sha256((doc or name).encode()).hexdigest()[:8],
         sigh=hashlib.sha256(sig_str.encode()).hexdigest()[:12],
         tier=0, tree=None,
-        doc_intent=parsed.summary or None,
+        doc_intent=_intent_block_text(doc) or parsed.summary or None,
         doc_refs=parsed.refs,
         doc_hints=parsed.concept_hints,
         doc_notes=_parse_notes(doc),
@@ -825,9 +902,16 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                     pol.get("premise") or "") for pol in
                    ((p.meta or {}).get("mathema.policy") for p in probes)
                    if pol and pol.get("source") == "stated"}
-        probes = probes + _policy.default_rows(
-            fn, facts, parent_domain or {}, covered, _policy.row_name,
-            optional_only=not written)
+        # a record whose claims all report the mathematics line alone
+        # (derive:math_only) carries no policy row: what the computation
+        # does with a value that is not there is outside their remit
+        from .gates import MATH_ONLY_ROUTE
+        mathematics_only = bool(all_claims) and all(
+            getattr(c, "route", None) == MATH_ONLY_ROUTE for c in all_claims)
+        if not mathematics_only:
+            probes = probes + _policy.default_rows(
+                fn, facts, parent_domain or {}, covered, _policy.row_name,
+                optional_only=not written)
     if all_claims:
         # the split offer's own runs are not the record's claims: they
         # stay out of the calls the policy rows read
@@ -1021,7 +1105,8 @@ def status(root: str = ".") -> str:
             lines.append(f"  ∅ {key}: no verified record")
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
-        state = ("fresh" if stored and stored == current
+        from .identity import same_form
+        state = ("fresh" if stored and same_form(stored, current)
                  else "stale (code changed since spec)" if stored else "no hash")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")

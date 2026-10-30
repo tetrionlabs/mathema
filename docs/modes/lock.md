@@ -26,7 +26,9 @@ mathema unlock KEY [--root .]
 ## What a lock pins, exactly
 
 The **body**, nothing else. The form hash is computed over the
-function's alpha-normalised AST with the docstring stripped, so:
+function's alpha-normalised AST with the docstring stripped, and
+written `py:<sha>` for a Python function (a lock taken at a bare hash
+by a release before 0.6.3 still holds at the same body), so:
 
 - **Docstring edits never trip a lock.** Rewriting the prose, the
   `Intent:`, the `Notes:`, even the `Claims:` block leaves the form
@@ -82,7 +84,7 @@ mathema verify
 <!-- example: tripped session -->
 ```
 $ mathema lock funcs.settle --note "settled implementation"
-locked funcs.settle at form 3eb01e1d9919
+locked funcs.settle at form py:3eb01e1d9919
 the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock funcs.settle
 ```
 
@@ -103,9 +105,10 @@ def midpoint(a: float, b: float) -> float:
 <!-- example: tripped session -->
 ```
 $ mathema verify; echo $?
-FAIL funcs.settle: locked at form 3eb01e1d9919 but the code is now 1ce1c0e16be4; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
+FAIL funcs.settle: locked at form py:3eb01e1d9919 but the code is now py:1ce1c0e16be4; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
 1 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 1
 ```
 
@@ -157,7 +160,7 @@ pinned form hash for machines.
 funcs.settle:
   at: '2026-09-24'
   by: Alan Turing
-  form: 3eb01e1d9919
+  form: py:3eb01e1d9919
   note: settled implementation
 ```
 

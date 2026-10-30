@@ -43,7 +43,7 @@ has a block like these for every claim:
 
 <!-- example: ema output match=subset -->
 ```text
-mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
+mathema.Record(ema) · source, no side effects · form py:0f61bbd9aa20
   monotonic_increasing[alpha]  d(f(x, alpha), alpha) >= 0   falsified at alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
     falsified  computation  d(f(x, alpha), alpha) >= 0   counterexample alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
@@ -69,7 +69,7 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1); differs by 0.00131 at x = [1000000.0, 1000000.0, 1000000.0, 1000000.0, -1000000.0, 1000000.0, 1000000.0, 1000000.0], alpha = -9.99998, c = -1.4095238757810247, within the default tolerance (3.75e+03)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -161,7 +161,7 @@ the picture, not just the wording (an excerpt, from the bounds on):
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 0.7579544029403025
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1); differs by 2.09e-09 at x = [1000000.0, 1000000.0, -1000000.0, 1000000.0], alpha = 1e-06, c = 4.229996249451993, within the default tolerance (0.423)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 0.7579544029403025 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
@@ -189,7 +189,7 @@ print(mathema.check(ema, claims=["excluding"], domain={"alpha": (0, 1)}))
 
 <!-- example: ema output -->
 ```text
-mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
+mathema.Record(ema) · source, no side effects · form py:0f61bbd9aa20
   falsified excluded_outside_domain[alpha]: excluded_outside_domain(alpha)
            counterexample alpha = -0.5 is outside the declared domain but was accepted (returned 1.0125000000000001e+301); the exclusion is asserted, not enforced
 ```
@@ -221,7 +221,7 @@ print(mathema.check(ema, claims=collapses))
 
 <!-- example: ema output -->
 ```text
-mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
+mathema.Record(ema) · source, no side effects · form py:0f61bbd9aa20
   collapses_probed  assuming len(x) >= 1, f(x, 1.0) = x[-1]   holds
     holds      computation  assuming len(x) >= 1, f(x, 1.0) = x[-1]   628 entries across 132 draws, sizes (1, 1) to (8, 1)
     holds      policy       f(x=[..., nan, ...])   no missing policy stated; assumed propagates
@@ -269,7 +269,7 @@ keeps instead of trusting the code alone (trimmed):
 
 <!-- example: ema output match=subset -->
 ```yaml
-# machine record; binds to form 0f61bbd9aa20
+# machine record; binds to form py:0f61bbd9aa20
 ema:
   schema_version: "0.2.0"
   name: "ema"
@@ -278,14 +278,14 @@ ema:
   grammar: "mathema"
   tolerance: 1.0e-09
   identity:
-    form: "0f61bbd9aa20"
+    form: "py:0f61bbd9aa20"
     sig: "60eacde6c064"
     tier: 2
     source_available: true
     pure: true
     claims_fingerprint: "c1cd39184d20"
     pin: "none"
-    integrity: "v2:3313778d4cb4e4b1"
+    integrity: "v2:f2d5d7c316cb688b"
   math: null
   claims:
     - name: "collapses_derived"
@@ -340,7 +340,7 @@ ema:
       claim: "instantiates: summation, folded-sum"
       basis: "deterministic concept tagging"
   lineage:
-    generated_by: "mathema 0.6.2.1"
+    generated_by: "mathema 0.6.3"
     CDD_spec_version: "0.2.0"
 ```
 

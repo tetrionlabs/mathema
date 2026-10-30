@@ -38,5 +38,6 @@ def test_over_all_of_r_n_the_array_overflows_at_the_largest_doubles():
         "for a in R^n, f(a) ~= sum(a)", route="probe")])
     assert p.verdict == "falsified", (p.verdict, p.counterexample, p.note)
     assert p.counterexample == (
-        "a = [1.7976931348623157e+308, 1.7976931348623157e+308]: f returned "
+        "a = numpy.array([1.7976931348623157e+308, 1.7976931348623157e+308]): "
+        "f returned "
         "inf, and an infinity for a finite input is no value"), p.counterexample

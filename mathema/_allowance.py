@@ -22,7 +22,14 @@ the inputs' round-off. When the exact result is 0, or within the fixed
 absolute part of 0 (a trace of -1e-16 over entries near 1, which float
 rounds as it rounds 0), the absolute part alone decides what "near
 zero" means. A declared tolerance is the whole allowance, an absolute
-difference that replaces both parts.
+difference that replaces both parts. A declared tolerance kind (`a ~=
+b` with `{rel: x}`, `_tolerance.ToleranceKind`) is the whole allowance
+too, at each pair of values compared: computed in float64 between
+floats, decided exactly where either value is an exact rational.
+
+`a ~= b` is `abs(a - b) <= ε`, so with no declared tolerance its gap may
+reach ε (the 1e-9 default), or the allowance above where that is
+larger; a declared tolerance is ε and the whole allowance at once.
 """
 from __future__ import annotations
 
@@ -36,6 +43,10 @@ ABSOLUTE = 1e-9
 RELATIVE = 1e-7
 #: float64's unit roundoff, half the gap from 1 to the next float
 UNIT_ROUNDOFF = 2.0 ** -53
+#: the unit roundoffs float64's precision at a point allows, per unit of
+#: the values it is read against: what a correctly rounded chain of a
+#: handful of operations may lose
+PRECISION_FACTOR = 8
 #: the growth a backward-stable computation may show over its condition
 #: number times the unit roundoff before the loss is the code's
 STABILITY_FACTOR = 2 ** 10
@@ -70,7 +81,9 @@ def allowance(reference, declared=None, input_scaled: float = 0.0):
         float range, so the comparison never overflows.
     """
     if declared is not None:
-        return declared
+        from ._tolerance import bare
+        return bare(declared, "the computation allowance against one "
+                              "exact value")
     ref = _magnitude(reference)
     absolute = ABSOLUTE + float(input_scaled)
     if ref is None or ref <= ABSOLUTE:
@@ -197,8 +210,16 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
         u = Fraction(u)
     if isinstance(v, decimal.Decimal):
         v = Fraction(v)
+    from ._tolerance import ToleranceKind
+    if isinstance(declared, ToleranceKind):
+        return _within_kind(u, v, relation, declared)
     reference = _reference_of(u, v, side) if scale is None else scale
     tol = allowance(reference, declared, input_scaled)
+    if relation == "~=" and declared is None:
+        # `abs(a - b) <= ε`: the gap may reach ε, or the allowance
+        # where that is larger
+        from .conjecture import DEFAULT_TOLERANCE
+        tol = max(tol, DEFAULT_TOLERANCE)
     if isinstance(u, complex) or isinstance(v, complex):
         if relation not in ("==", "~=", "!="):
             return None
@@ -236,13 +257,45 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
     return None
 
 
+def _within_kind(u, v, relation: str, kind) -> "bool | None":
+    """Intent:
+        `u ~= v` under a tolerance kind, at one pair of numbers: the
+        same infinity agrees, an infinity against anything else does
+        not, a pair holding an exact rational is decided exactly
+        (`ToleranceKind.allows_exactly`), and two floats (or complex
+        values, by their magnitudes) in float64 (`allows`).
+
+    Raises:
+        ToleranceKindRefused: a relation other than `~=`, which reads
+            the tolerance as one number.
+    """
+    from .probing import holds_inf, same_infinity
+    from ._tolerance import ToleranceKindRefused
+    if relation != "~=":
+        raise ToleranceKindRefused(
+            f"a {relation} comparison reads the tolerance as one number, "
+            f"and {kind.text()} is a kind, not one number")
+    if same_infinity(u, v):
+        return True
+    if holds_inf(u) or holds_inf(v):
+        return False
+    if isinstance(u, complex) or isinstance(v, complex):
+        return abs(u - v) <= kind.bound(abs(u), abs(v))
+    if any(isinstance(x, Fraction) for x in (u, v)) or any(
+            isinstance(x, int) and _magnitude(x).__class__ is Fraction
+            for x in (u, v)):
+        return kind.allows_exactly(u, v)
+    return kind.allows(u, v)
+
+
 def relation_within(lv, rv, relation: str, declared=None,
                     input_scaled: float = 0.0, side: "int | None" = None,
                     exact_inequality: bool = True) -> "bool | None":
     """Intent:
         Whether `lv <relation> rv` holds on a computation line, the
         computed side allowed to miss the exact side (`side`, as
-        `reference_side` names it) by `allowance(...)` at every element.
+        `reference_side` names it) by `allowance(...)` at every element,
+        and `~=` with no declared tolerance by ε where that is larger.
         A NaN anywhere fails every relation. `==`, `~=` and `!=` over
         arrays are one fact about the whole value, so `!=` holds when
         some element differs and two values of different shapes are
@@ -296,6 +349,136 @@ def relation_within(lv, rv, relation: str, declared=None,
         # two values of different shapes are unequal outright
         return False
     return held
+
+
+def allowance_text(value: float) -> str:
+    """An allowance or gap as a record shows it: three significant
+    digits, or `past float64's range` for one too large for a float."""
+    import math
+    return f"{value:.3g}" if math.isfinite(value) else "past float64's range"
+
+
+def _float_or_inf(value) -> float:
+    """`value` as a float, or infinity when its magnitude is past
+    float64's range."""
+    try:
+        return float(value)
+    except OverflowError:
+        return float("inf")
+
+
+def float_miss(lv, rv, relation: str, declared=None,
+               input_scaled: float = 0.0, side: "int | None" = None
+               ) -> "tuple | None":
+    """Intent:
+        `(miss, allowance)`, both floats, for two computed sides: how
+        far they miss the relation as floats (`abs(lv - rv)` for `==`
+        and `~=`, the amount an ordering `<=`/`>=` is violated by, 0
+        where it holds outright) and the allowance applied there
+        (`allowance`, ε for `~=` where that is larger; 0 for `<`, `>`
+        and `!=`, which take none); over arrays the largest miss and
+        its allowance. None when a side is not a finite real number (a
+        string, None, a NaN, an infinity, a complex value) or the
+        declared tolerance is a tolerance kind.
+    """
+    from ._tolerance import ToleranceKind
+    from .probing import _is_matrix_value, holds_inf, holds_nan, plain_value
+    if isinstance(declared, ToleranceKind):
+        return None
+    lv, rv = plain_value(lv), plain_value(rv)
+    arrays = _is_matrix_value(lv) or _is_matrix_value(rv)
+    scale = _array_scale(lv, rv, side) if arrays else None
+    best: list = [None]
+
+    def leaf(u, v) -> bool:
+        if holds_nan(u) or holds_nan(v) or holds_inf(u) or holds_inf(v):
+            return False
+        if _magnitude(u) is None or _magnitude(v) is None \
+                or isinstance(u, complex) or isinstance(v, complex):
+            return False
+        if isinstance(u, decimal.Decimal):
+            u = Fraction(u)
+        if isinstance(v, decimal.Decimal):
+            v = Fraction(v)
+        if relation in ("<", ">", "!="):
+            gap, tol = Fraction(0), Fraction(0)
+        else:
+            reference = _reference_of(u, v, side) if scale is None else scale
+            tol = allowance(reference, declared, input_scaled)
+            if relation == "~=" and declared is None:
+                from .conjecture import DEFAULT_TOLERANCE
+                tol = max(tol, DEFAULT_TOLERANCE)
+            diff = Fraction(u) - Fraction(v)
+            gap = (abs(diff) if relation in ("==", "~=") else
+                   max(Fraction(0), diff) if relation == "<=" else
+                   max(Fraction(0), -diff))
+        measured = (_float_or_inf(gap), _float_or_inf(tol))
+        if best[0] is None or measured[0] > best[0][0]:
+            best[0] = measured
+        return True
+
+    def walk(x, y) -> bool:
+        xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if xs and ys:
+            return len(x) == len(y) and all(walk(a, b) for a, b in zip(x, y))
+        if xs:
+            return all(walk(a, y) for a in x)
+        if ys:
+            return all(walk(x, b) for b in y)
+        return leaf(x, y)
+
+    try:
+        complete = walk(lv, rv)
+    except (TypeError, ValueError):
+        return None
+    return best[0] if complete else None
+
+
+def precision_miss(lv, rv, relation: str, declared=None,
+                   side: "int | None" = None, kappa: "float | None" = None,
+                   returned: float = 0.0) -> "tuple | None":
+    """Intent:
+        `(miss, precision, magnitude)`, all floats, for two computed
+        sides at one point: how far they miss the relation itself, with
+        no allowance (`abs(lv - rv)` for `==`, the amount an ordering
+        `<=`/`>=` is violated by, for `~=` the amount the difference
+        passes ε, the bare `declared` tolerance else `DEFAULT_TOLERANCE`,
+        and 0 for a relation they satisfy outright); float64's own
+        precision at the point, `PRECISION_FACTOR` unit roundoffs of
+        `magnitude + kappa * returned`; and `magnitude`, that of the
+        value compared against (the reference side's, `side`, else the
+        larger side's; the largest entry over arrays). `kappa` is the
+        computation's relative condition number at the point and
+        `returned` the magnitude of the value it returned there: a
+        relative input error u moves the result by about `kappa * u`
+        relative to it, so the absolute spread is `kappa * u *
+        returned`. With no `kappa` it adds nothing. None when a side is
+        not a finite real number, or the tolerance is a tolerance kind.
+    """
+    from ._tolerance import ToleranceKind
+    from .probing import _is_matrix_value, plain_value
+    if isinstance(declared, ToleranceKind):
+        return None
+    measured = float_miss(lv, rv, relation, 0.0, 0.0, side)
+    if measured is None:
+        return None
+    miss = measured[0]
+    if relation == "~=":
+        from .conjecture import DEFAULT_TOLERANCE
+        eps = declared if declared is not None else DEFAULT_TOLERANCE
+        miss = max(0.0, miss - float(eps))
+    lv, rv = plain_value(lv), plain_value(rv)
+    if _is_matrix_value(lv) or _is_matrix_value(rv):
+        magnitude = _array_scale(lv, rv, side)
+    else:
+        magnitude = _magnitude(_reference_of(lv, rv, side)) or 0
+    try:
+        magnitude = float(magnitude)
+    except OverflowError:
+        magnitude = float("inf")
+    spread = kappa * float(returned) if kappa is not None else 0.0
+    return (miss, PRECISION_FACTOR * UNIT_ROUNDOFF * (magnitude + spread),
+            magnitude)
 
 
 def _exactly_equal(lv, rv) -> bool:

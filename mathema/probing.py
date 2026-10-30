@@ -294,8 +294,8 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     parameter is bound to a language."""
     wide_domain, float_extremes = 0, 0
     for p in facts.params:
-        bounds = domain.get(p)
-        if not isinstance(bounds, tuple):
+        bounds = _numeric_span(domain.get(p))
+        if bounds is None:
             continue
         lo, hi = bounds
         if math.isinf(lo) or math.isinf(hi) or (hi - lo) > policy.wide_span:
@@ -314,6 +314,32 @@ def _structural_risk(facts, domain: dict, policy: _RiskPolicy = _RISK) -> dict:
     if language is not None:
         risk["language"] = language
     return risk
+
+
+def _real_pair(pair) -> bool:
+    """Whether both ends of a two-ended bound are real numbers."""
+    return all(isinstance(b, (int, float)) and not isinstance(b, bool)
+               for b in pair)
+
+
+def _numeric_span(bounds) -> "tuple[float, float] | None":
+    """Intent:
+        The `(lo, hi)` a parameter's bound spans on the real line: the
+        bound itself for an interval, the hull of the interval pieces
+        for a real-valued `Domain` (`for x in R` reaches the float
+        range's ends), `None` for any other shape, a complex rectangle
+        included.
+    """
+    if isinstance(bounds, tuple) and len(bounds) == 2:
+        return bounds if _real_pair(bounds) else None
+    if isinstance(bounds, Domain) and bounds.base_type != "L":
+        spans = [b for b in bounds.pieces
+                 if isinstance(b, (tuple, list)) and len(b) == 2]
+        if any(not _real_pair(b) for b in spans):
+            return None
+        if spans:
+            return (min(lo for lo, _hi in spans), max(hi for _lo, hi in spans))
+    return None
 
 
 def _language_risk(params, domain: dict, policy: _RiskPolicy = _RISK) -> "int | None":
@@ -988,7 +1014,8 @@ def missing_class(value) -> "str | None":
     from .domain import absence_word, is_missing
     if absence_word(value) is not None:
         return "absent"
-    if isinstance(value, (list, tuple, dict, str)) or _is_matrix_value(value):
+    if isinstance(value, (list, tuple, set, frozenset, dict, str)) \
+            or _is_matrix_value(value):
         return None
     try:
         return "hole" if is_missing(value) else None
@@ -1009,7 +1036,7 @@ def inputs_missing(args) -> bool:
             return True
         if isinstance(v, dict):
             return any(holds(x) for x in v.values())
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, (list, tuple, set, frozenset)):
             return any(holds(x) for x in v)
         if _is_matrix_value(v) or type(v).__module__.split(".")[0] in ("pandas",
                                                                        "polars"):
@@ -1337,6 +1364,10 @@ class ComplexResult(ArithmeticError):
 
 
 def _complex_text(value) -> str:
+    """A complex value as a witness writes it: a number as `a+bj`, a
+    vector or matrix of them entry by entry."""
+    if hasattr(value, "tolist") and getattr(value, "ndim", 0):
+        return _fmt_value(value.tolist())
     try:
         return _fmt_value(complex(value))
     except (TypeError, ValueError):
@@ -1383,6 +1414,28 @@ def complex_is_a_raise(callee, cj_domain: dict | None) -> bool:
                    for a in annotations)
 
 
+def _exact_shortfall(np, lv, rv, relation: str) -> float:
+    """Intent:
+        `ordering_shortfall` over arrays holding a number too large for
+        a float: each difference taken exactly, the largest positive one
+        that a float holds, 0.0 when there is none.
+    """
+    try:
+        diffs = (np.asarray(lv, dtype=object)
+                 - np.asarray(rv, dtype=object)).ravel().tolist()
+    except (ValueError, TypeError):
+        return 0.0
+    out = 0.0
+    for d in diffs:
+        try:
+            gap = float(d if relation == "<=" else -d)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if math.isfinite(gap) and gap > out:
+            out = gap
+    return out
+
+
 def ordering_shortfall(lv, rv, relation: str) -> float:
     """Intent:
         By how much `lv <relation> rv` fails when compared exactly, for
@@ -1402,6 +1455,12 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
             return 0.0
         # the difference is taken exactly, so an integer too large for
         # a float never has to be converted unless it is the answer
+        if isinstance(lv, float) or isinstance(rv, float):
+            if any(isinstance(v, float) and not math.isfinite(v)
+                   for v in (lv, rv)):
+                return 0.0
+            from fractions import Fraction
+            lv, rv = Fraction(lv), Fraction(rv)
         exact = (lv - rv) if relation == "<=" else (rv - lv)
         if exact <= 0:
             return 0.0
@@ -1417,6 +1476,8 @@ def ordering_shortfall(lv, rv, relation: str) -> float:
     try:
         gaps = sign * (np.asarray(lv, dtype=float) - np.asarray(rv, dtype=float))
         finite = gaps[np.isfinite(gaps)]
+    except OverflowError:
+        return _exact_shortfall(np, lv, rv, relation)
     except (ValueError, TypeError):
         return 0.0
     if finite.size == 0:
@@ -1754,6 +1815,8 @@ def _classify_bound(bounds) -> str:
     claim's own richer domain bound reached it."""
     if isinstance(bounds, Domain):
         return "language" if bounds.base_type == "L" else "domain"
+    if isinstance(bounds, Instances):
+        return "instances"
     if isinstance(bounds, frozenset):
         return "frozenset"
     if bounds == "Z":
@@ -1773,17 +1836,19 @@ def _classify_bound(bounds) -> str:
 _SEQUENCE_CORNER_SHARE = 0.15
 
 
-def _element_range(bounds) -> "tuple[float, float] | None":
+def _element_range(bounds, reach=None) -> "tuple[float, float] | None":
     """Intent:
         The real interval a sequence's elements range over, `(lo, hi)`
-        with an unbounded end at the number representation's reach, or
-        None when the elements are not one real interval (an integer
-        lattice, a finite set, a union).
+        with an unbounded end at `reach` (`(lo, hi)`, the claim's
+        resolved pseudo-infinity) when given, else at the number
+        representation's reach, or None when the elements are not one
+        real interval (an integer lattice, a finite set, a union).
     """
     from ._sampling import _reach_ends, representation_reach
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     if bounds is None:
-        reach = representation_reach()
-        return -reach, reach
+        return lo_reach, hi_reach
     pieces = getattr(bounds, "pieces", None)
     if pieces is not None:
         def numeric(v) -> bool:
@@ -1793,23 +1858,28 @@ def _element_range(bounds) -> "tuple[float, float] | None":
         if getattr(bounds, "base_type", "R") != "R" or any(
                 numeric(v) for v in (getattr(bounds, "excluded", None) or ())):
             return None
+        from .domain import is_sentinel
         sets = [p for p in pieces if isinstance(p, frozenset)]
         if any(numeric(v) for p in sets for v in p):
             return None
+        if any(v is not None and not is_sentinel(v)
+               for p in sets for v in p):
+            # a finite set of strings or booleans is no real range
+            return None
         real = [p for p in pieces if not isinstance(p, frozenset)]
         if not real:
-            reach = representation_reach()
-            return -reach, reach
+            return lo_reach, hi_reach
         if len(real) != 1:
             return None
         bounds = real[0]
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
             and len(bounds) == 2:
         try:
-            lo, hi, _ul, _uh = _reach_ends(bounds)
+            lo, hi, unbounded_lo, unbounded_hi = _reach_ends(bounds)
         except (TypeError, ValueError):
             return None
-        return lo, hi
+        return (lo_reach if unbounded_lo else lo,
+                hi_reach if unbounded_hi else hi)
     return None
 
 
@@ -1835,21 +1905,27 @@ def _cancel_magnitudes(top: float) -> list:
     return out or [top]
 
 
-def sequence_corners(bounds, n: "int | None" = None) -> list:
+def sequence_corners(bounds, n: "int | None" = None, reach=None,
+                     distinct: bool = False) -> list:
     """Intent:
         The magnitude corners of a sequence whose elements range over
-        `bounds` (None the whole line, an unbounded end at the number
-        representation's reach), each a list: the pairs that cancel at
+        `bounds` (None the whole line, an unbounded end at `reach`, the
+        claim's resolved pseudo-infinity range, when given, else at the
+        number representation's reach), each a list: the pairs that cancel at
         a large magnitude, `[M, -M]` for M at 1e16, 1e300 and the
         range's own limit, the range's opposite ends `[lo, hi]`, and
         the same-sign pair `[e, e]` at each end `e` past half the
         representation's reach, where the sum of the pair overflows;
         every entry inside the range. With `n`, each pair is repeated
         to length `n`, and none is given below 2. Empty when the
-        elements are not one real interval.
+        elements are not one real interval. With `distinct`, for a
+        container holding each value once (a set), the same-sign pair
+        is `[e, e']`, `e'` the next double from `e` toward the range's
+        other end, so the set still holds two entries past half the
+        reach; a range holding one double gives no such pair.
     """
     from ._sampling import representation_reach
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None or (n is not None and n < 2):
         return []
     lo, hi = span
@@ -1861,29 +1937,39 @@ def sequence_corners(bounds, n: "int | None" = None) -> list:
     half = representation_reach() / 2
     for end in (hi, lo):
         if abs(end) > half and [end, end] not in pairs:
-            pairs.append([end, end])
+            if not distinct:
+                pairs.append([end, end])
+                continue
+            inner = math.nextafter(end, lo if end == hi else hi)
+            if lo <= inner <= hi and inner != end and abs(inner) > half:
+                pairs.append([end, inner])
     if n is None:
         return pairs
     return [[pair[i % 2] for i in range(n)] for pair in pairs]
 
 
-def _sequence_corner(rng: random.Random, n: int, bounds) -> "list | None":
+def _sequence_corner(rng: random.Random, n: int, bounds,
+                     reach=None) -> "list | None":
     """Intent:
         One sequence from the corners where float arithmetic breaks, or
         None when the elements' domain is not one real interval:
         entries that cancel at a large magnitude (`[M, -M, ...]`),
         entries at the range's stated ends, or a series one ulp from
-        constant. Every entry lies inside the element range.
+        constant. Every entry lies inside the element range, whose
+        unbounded ends are at `reach` (`(lo, hi)`, the claim's resolved
+        pseudo-infinity) when given, else at the number
+        representation's reach.
     """
-    span = _element_range(bounds)
+    span = _element_range(bounds, reach)
     if span is None:
         return None
     lo, hi = span
     from ._sampling import representation_reach
-    reach = representation_reach()
+    whole = representation_reach()
+    lo_reach, hi_reach = reach if reach is not None else (-whole, whole)
     # entries at the range's own ends only where the claim states them;
-    # an unbounded side's float limit is the reach draws' business
-    stated = not (lo == -reach and hi == reach)
+    # an unbounded side's limit is the reach draws' business
+    stated = not (lo == lo_reach and hi == hi_reach)
     shapes = ["near-constant"] + (["edges"] if stated else [])
     if n >= 2 and lo < 0 < hi:
         shapes.append("cancel")
@@ -1910,13 +1996,19 @@ def _synth(kind: str, rng: random.Random, bounds=None,
           extra: list[float] | None = None,
           extra_cycle: "_SpecialCycle | None" = None,
           length: "int | None" = None,
-          lap: "_SpecialCycle | None" = None):
+          lap: "_SpecialCycle | None" = None,
+          reach=None):
+    # `reach`, the claim's resolved pseudo-infinity range when one
+    # applies, bounds a sequence's corner draws along unbounded ends.
     # `kind == "sequence"` is checked first, unconditionally, before any
     # bounds-shape dispatch below, a Domain/frozenset/"Z"/"N" bound
     # means something different for a sequence (a per-element domain)
     # than it does for a scalar (the parameter's own domain), so a
     # sequence-typed parameter must never fall into the scalar
     # dispatch below and come back a bare number instead of a list.
+    if isinstance(bounds, Instances):
+        # a method's receiver: an instance of its class
+        return bounds.draw(rng, specials)
     if _classify_bound(bounds) == "language":
         # a language bound is the parameter's own domain whatever kind
         # the body suggested (a mapping read, an iteration): the author
@@ -1936,6 +2028,10 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         if value is not WAIT:
             return value
         waited = True
+    if kind == "complex" and bounds is None:
+        # a complex parameter no binding names ranges over the whole
+        # plane, drawn as `for z in C` draws it
+        return _sample_bare_named_set(rng, "C")
     if kind == "dict":
         # a mapping parameter with no key list to hand (the automatic
         # type-probes): a generic dict, enough not to crash a function
@@ -1948,7 +2044,7 @@ def _synth(kind: str, rng: random.Random, bounds=None,
         # construction rather than by rejection
         n = length if length is not None else rng.randint(1, 8)
         if rng.random() < _SEQUENCE_CORNER_SHARE:
-            corner = _sequence_corner(rng, n, bounds)
+            corner = _sequence_corner(rng, n, bounds, reach)
             if corner is not None:
                 return corner
         if bounds is not None:
@@ -2008,6 +2104,84 @@ def _synth(kind: str, rng: random.Random, bounds=None,
             return _synth_int_in(rng, bounds, "Z")
         return rng.choice([0, 1, 2]) if rng.random() < 0.3 else rng.randint(0, 10)
     return _synth_scalar(rng, bounds, specials=specials, extra=extra, extra_cycle=extra_cycle)
+
+
+@dataclass(frozen=True, eq=False)
+class Instances:
+    """Intent:
+        The instances of `cls` a method's receiver ranges over, built
+        as the class builds one (`_receivers.construct_receiver`): each
+        field of `fields`, `((name, kind), ...)`, or each argument of the
+        class's own constructor, drawn as its kind (`int` or `float`)
+        inside its bound in `bounds`, `((name, bound), ...)`, None for
+        the whole line.
+    """
+    cls: type
+    fields: tuple
+    bounds: tuple = ()
+
+    @property
+    def instances_of(self) -> type:
+        """The class whose instances these are."""
+        return self.cls
+
+    def draw(self, rng: random.Random, specials=None):
+        from .runtime_types._receivers import construct_receiver
+        return construct_receiver(
+            self.cls, self.fields, dict(self.bounds),
+            lambda kind, bound: _synth(kind, rng, bound, specials=specials))
+
+
+def bound_element_type(bound) -> "str | None":
+    """Intent:
+        The type a bound holds its members as, when it is not the
+        reals: `int` for the integers, the naturals, an integer-typed
+        domain or a finite set of ints, `bool` for a finite set of
+        bools; None otherwise.
+    """
+    from .domain import is_sentinel
+    if bound in ("Z", "N"):
+        return "int"
+    if isinstance(bound, Domain):
+        if bound.base_type in ("Z", "N"):
+            return "int"
+        if bound.base_type != "R" or not bound.pieces \
+                or not all(isinstance(p, frozenset) for p in bound.pieces):
+            return None
+        bound = frozenset(v for p in bound.pieces for v in p)
+    if isinstance(bound, frozenset):
+        members = [v for v in bound if not is_sentinel(v) and v is not None]
+        if members and all(isinstance(v, bool) for v in members):
+            return "bool"
+        if members and all(isinstance(v, int) and not isinstance(v, bool)
+                           for v in members):
+            return "int"
+    return None
+
+
+def typed_element_bound(fn, param: str, bound):
+    """Intent:
+        The bound a sequence parameter's elements are drawn from, held
+        to the element type its annotation states: with no bound, the
+        integers, the two bools or the type of strings for `int`,
+        `bool` or `str` elements; a real binding that states no type,
+        completed to the integers for `int` elements (`[0, 1]^n` on
+        `list[int]`); any other bound as it is.
+    """
+    from .runtime_types import annotated_element
+    element = annotated_element(fn, param)
+    if bound is None:
+        if element == "int":
+            return "Z"
+        if element == "bool":
+            return frozenset({False, True})
+        if element == "str":
+            return Domain(base_type="S", explicit_type=True, clause=True)
+        return None
+    if element == "int":
+        from ._annotation_text import int_completed
+        return int_completed(bound, "list[int]")
+    return bound
 
 
 def _annotation_text(param) -> str:
@@ -2115,6 +2289,10 @@ def _fmt_value(v) -> str:
 
 
 def _fmt_value_of(v) -> str:
+    from ._called_text import called_text, received
+    called = called_text(received(v))
+    if called is not None:
+        return called
     if isinstance(v, float):
         return f"{v:.6g}"
     if isinstance(v, complex):
@@ -2144,9 +2322,16 @@ def _fmt_coordinate(v) -> str:
         six-digit spelling when that reads back as the same float, and
         otherwise prints every digit it needs (`exact_float_text`), so
         a point read back from the record is the point that was
-        checked. Containers recurse; anything else is `_fmt_value`.
+        checked. Containers recurse; a pandas, polars or numpy argument
+    is written as the call received it (`_called_text`); anything else
+    is `_fmt_value`.
     """
+    from ._called_text import called_text, received
     from ._float_text import exact_float_text
+    called = called_text(received(v))
+    if called is not None:
+        # the argument as the call received it (`pandas.Series([0.0])`)
+        return called
     if isinstance(v, float):
         return exact_float_text(v, f"{v:.6g}")
     if isinstance(v, complex):
@@ -2177,8 +2362,10 @@ def _fmt(args: tuple, names: tuple[str, ...] | None = None,
             pairs = [(n, a) for n, a in pairs if n in shown]
         # a large vector or matrix prints its shape, a first row and a
         # count; the full value rides in the counterexample's arguments
+        from ._called_text import received_as
         return ", ".join(f"{n} = {capped}" if (capped := witness_text(a)) is not None
-                         else f"{n} = {_fmt_coordinate(a)}" for n, a in pairs)
+                         else f"{n} = {_fmt_coordinate(received_as(n, a))}"
+                         for n, a in pairs)
     return "(" + ", ".join(witness_text(a) or _fmt_coordinate(a) for a in args) + ")"
 
 
@@ -2519,8 +2706,34 @@ class SamplingSetup:
     affine: bool = False
     explicit_trials: bool = False
     scale: float = 1.0
-    # "probe" or "probe:semi_analytical", the route value the evidence
-    # honestly earns, per record-schema.md's open route field.
+    domain: dict = dataclasses.field(default_factory=dict)
+    # "probe:semi_analytical" when an analytically discovered critical
+    # point exists, else "probe"; the subroute is earned only once a
+    # draw lands on one of `analytical_hints` (`earned_route`)
+    analytical_hints: dict = dataclasses.field(default_factory=dict)
+
+    def earned_route(self, drew_critical: bool) -> str:
+        """Intent:
+            The route a sampling pass reports: `route`, except that
+            `probe:semi_analytical` falls back to plain `probe` when no
+            draw it evaluated was an analytically discovered critical
+            point.
+        """
+        if self.route == "probe:semi_analytical" and not drew_critical:
+            return "probe"
+        return self.route
+
+    def is_critical_draw(self, values: dict) -> bool:
+        """Intent:
+            Whether a draw (`{param: value}`) puts some parameter exactly
+            on one of its own analytically discovered critical points.
+        """
+        for p, hints in self.analytical_hints.items():
+            v = values.get(p)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and v in hints:
+                return True
+        return False
 
 
 def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
@@ -2563,6 +2776,7 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     # this function; hazard-channel values (the decade sweep, stub
     # boundaries) widen the sampling but never relabel its mechanism
     analytical = bool(critical_hints)
+    analytical_hints = {p: list(vs) for p, vs in critical_hints.items()}
     for param, values in _hazard_hint_values(fn, facts, domain).items():
         critical_hints.setdefault(param, []).extend(values)
     # kept per-parameter, not merged into the shared `specials` pool, so
@@ -2575,16 +2789,17 @@ def _prepare_sampling(fn, facts, domain: dict, trials: int | None,
     scale = min(1.0, trials_scale)
     budget = _scaled_budget(budget, scale)
     # record-schema.md's own `route` field: "probe:semi_analytical"
-    # states plainly that at least one parameter's own sampling was
-    # informed by an analytically discovered critical point this run,
-    # not blind trial-and-error.
+    # states plainly that at least one draw evaluated this run was an
+    # analytically discovered critical point, not blind trial-and-error;
+    # a pass reports it through `SamplingSetup.earned_route`.
     route_value = "probe:semi_analytical" if analytical else "probe"
     return SamplingSetup(rng=rng, specials=specials, risk=risk, budget=budget,
                          points=points, critical_hints=critical_hints,
                          truncated_hints=truncated_hints,
                          extra_cycles=extra_cycles, route=route_value,
                          affine=affine, explicit_trials=trials is not None,
-                         scale=scale)
+                         scale=scale, analytical_hints=analytical_hints,
+                         domain=dict(domain or {}))
 
 
 def _scaled_budget(budget: int, scale: float) -> int:
@@ -2598,18 +2813,27 @@ def _scaled_budget(budget: int, scale: float) -> int:
     return budget
 
 
-def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict) -> "tuple[dict, int]":
+def claim_sampling_budget(setup: "SamplingSetup", facts, cj_domain: dict,
+                          bound: "dict | None" = None) -> "tuple[dict, int]":
     """Intent:
         The risk and trial budget for one claim: the function's own
-        setup, with the `language` factor read off the claim's domain
-        (a written binding or an inferred one), and the budget set from
-        the complexity that factor adds. An explicit trial count is kept
-        as given.
+        setup, with the `wide_domain` and `float_extremes` factors read
+        off the claim's own written binding `bound` (which replaces the
+        setup's domain for each parameter it binds), the `language`
+        factor read off the claim's domain (a written binding or an
+        inferred one), and the budget set from the complexity those
+        factors give. An explicit trial count is kept as given.
     """
+    risk = dict(setup.risk)
+    if bound:
+        claimed = _structural_risk(facts, {**setup.domain, **bound})
+        risk["wide_domain"] = claimed["wide_domain"]
+        risk["float_extremes"] = claimed["float_extremes"]
     language = _language_risk(facts.params, cj_domain)
-    if language is None or language == setup.risk.get("language"):
+    if language is not None:
+        risk["language"] = language
+    if risk == setup.risk:
         return setup.risk, setup.budget
-    risk = {**setup.risk, "language": language}
     if setup.explicit_trials:
         return risk, setup.budget
     return risk, _scaled_budget(_starting_budget(risk, setup.affine), setup.scale)
@@ -2737,6 +2961,8 @@ def probe(fn, facts, domain: dict | None = None,
     except _dims.DimensionConflict:
         resolver = None
 
+    from .runtime_types import as_element_type
+
     def value_for(p, k, sizes):
         param = signature.get(p)
         if (param is not None and p not in domain
@@ -2764,14 +2990,19 @@ def probe(fn, facts, domain: dict | None = None,
         length = None
         if shape is not None and shape.ndim == 1 and shape.axes[0] is not None:
             length = sizes.get(resolver.key(p, 0))
-        drawn = _synth(k, rng, domain.get(p), specials=specials,
+        bound = (typed_element_bound(fn, p, domain.get(p))
+                 if k in SEQUENCE_KINDS else domain.get(p))
+        drawn = _synth(k, rng, bound, specials=specials,
                        extra=critical_hints.get(p),
                        extra_cycle=extra_cycles.get(p), length=length)
         if inputs_missing([drawn]):
             # the smoke call asks whether f can be called with a value;
             # a claim's own missing points are its own to execute
-            return _synth(k, rng, None, specials=specials, length=length)
-        return drawn
+            drawn = _synth(k, rng, typed_element_bound(fn, p, None)
+                           if k in SEQUENCE_KINDS else None,
+                           specials=specials, length=length)
+        return as_element_type(drawn, bound_element_type(bound)) \
+            if k in SEQUENCE_KINDS else drawn
 
     def args_for() -> "tuple[list, dict]":
         sizes = resolver.draw_sizes(rng) if resolver is not None else {}

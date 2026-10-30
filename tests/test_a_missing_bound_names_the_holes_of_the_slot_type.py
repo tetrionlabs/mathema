@@ -71,4 +71,5 @@ def test_the_witness_of_a_literal_empty_call_is_the_empty_input():
         return 1.0
     p = _verdict(mean_np_plain, "f([]) in {missing}")
     assert p.verdict == "falsified", (p.verdict, p.counterexample)
-    assert p.counterexample.startswith("xs = []"), p.counterexample
+    assert p.counterexample.startswith("xs = numpy.array([], dtype='float64')"), \
+        p.counterexample

@@ -550,6 +550,9 @@ def pending_decisions(root: str = ".") -> dict:
     (a re-authored verified claim needs `accept --as superseded`),
     `acceptance-stale` (an accepted claim's function changed),
     `intent-acceptance-stale` (signature/raises/intent moved on),
+    `intent-acceptance-new` (a stated intent, at the codebase,
+    package, module or function level, that no one has accepted yet;
+    the detail names the `mathema accept` command a human runs),
     `accepted-risk` (a standing risk ownership, reviewable), and
     `unknown-gating` (an unaccepted unknown that fails the gate), and
             `falsified-gating` (an unaccepted falsification awaiting a
@@ -608,6 +611,15 @@ def pending_decisions(root: str = ".") -> dict:
                 rows.append([key, c.get("name"), "falsified-gating",
                              "fix the code, or diagnose with "
                              "`accept --as discovery`"])
+    from mathema.acceptance import pending_intents
+    for item in pending_intents(root):
+        if item["status"] == "new":
+            rows.append([item["key"], None, "intent-acceptance-new",
+                         f"{item['level']} intent stated, never accepted; "
+                         f"a human runs `mathema accept {item['key']} "
+                         f"--intent`, or `mathema accept --intent` for "
+                         f"all"])
+    from mathema.identity import namespaced_form, same_form
     from mathema.locks import load_locks
     from mathema.targets import resolve_function
     for key, lk in sorted(load_locks(root).items()):
@@ -617,9 +629,9 @@ def pending_decisions(root: str = ".") -> dict:
             current = analyze(fn).form
         except Exception:
             current = None
-        if current is not None and current != lk.get("form"):
+        if current is not None and not same_form(current, lk.get("form")):
             rows.append([key, None, "locked-changed",
-                         f"locked at {lk.get('form')}, code is now "
+                         f"locked at {namespaced_form(lk.get('form'))}, code is now "
                          f"{current}; restore the body, or a human runs "
                          f"`mathema unlock {key}`"])
     return {"cols": ["key", "claim", "kind", "detail"], "rows": rows}

@@ -14,6 +14,7 @@ import pytest
 from mathema import families
 from mathema.analysis import analyze_source
 from mathema.claims import check_conjectures, claim
+from tests._equivalence_rows import claim_row
 
 REASON = "equivalence across runtimes needs the equivalence family"
 
@@ -82,7 +83,7 @@ def equivalence_family():
 
 
 def _check(f, g, law="for x in [-4, 4], f =:= g"):
-    (p,) = check_conjectures(f, [claim(law, funcs={"g": g})])
+    p = claim_row(check_conjectures(f, [claim(law, funcs={"g": g})]))
     return p
 
 

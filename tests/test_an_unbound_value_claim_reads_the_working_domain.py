@@ -70,7 +70,7 @@ def test_a_two_parameter_guard_leaves_a_working_domain_with_no_witness_in_it():
     (p,) = check_conjectures(ordered_gap, [claim("f(x, y) >= 0")])
     assert p.verdict in ("proven", "holds"), (p.verdict, p.counterexample,
                                               p.note)
-    assert "the domain left by f's guards (x > y)" in (p.note or ""), p.note
+    assert "f's own guard raises where x > y" in (p.note or ""), p.note
     (p,) = check_conjectures(ordered_gap, [claim(
         "for x in [0, 1], y in [0, 1], f(x, y) >= 0")])
     assert p.verdict == "falsified", (p.verdict, p.note)

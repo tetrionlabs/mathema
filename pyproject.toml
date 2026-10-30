@@ -77,7 +77,12 @@ test = ["pytest>=7", "pytest-xdist>=3", "pytest-cov>=7", "mathema[numpy,pandas,p
 # Local development and release tooling: the gates `.pre-commit-config
 # .yaml` runs, and the two commands the release workflow needs. Not a
 # runtime capability, so it stays out of `all`.
-dev = ["build>=1", "twine>=5", "pre-commit>=3", "ruff>=0.6", "mypy>=1.8"]
+# The dev extra (build, publish, pre-commit, lint, types) needs Python 3.11 or
+# later: its tools' current releases no longer support 3.10. mathema itself
+# still runs and is tested on 3.10.
+dev = ["build>=1; python_version >= '3.11'", "twine>=5; python_version >= '3.11'",
+       "pre-commit>=3; python_version >= '3.11'", "ruff>=0.6; python_version >= '3.11'",
+       "mypy>=1.8; python_version >= '3.11'", "filelock>=4.2.1; python_version >= '3.11'"]
 # The MCP interface (mathema mcp serve), the official MCP SDK, only
 # needed to actually serve; the tool functions themselves are SDK-free.
 # Upper bound deliberately: `mcp>=1.2` unbounded resolves to 2.x,

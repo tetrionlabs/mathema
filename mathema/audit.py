@@ -46,8 +46,12 @@ def _source_span(fn) -> str | None:
         The function's own line range in its source file, in the
         sed-address style the audit grid prints (`100:245p`), so a
         reader can jump straight to it. None when the source is
-        unavailable.
+        unavailable, or is a wrapper's, for a callable standing for a
+        function another frontend read (`analysis.foreign_body`).
     """
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        return None
     try:
         lines, start = inspect.getsourcelines(fn)
     except (OSError, TypeError):
@@ -799,9 +803,12 @@ def _coverage_outdated(fn, freshness) -> bool:
         report measured it (by content hash when the report is stamped,
         else by file time); the report's yes/no then describes code
         that no longer exists, so neither answer is trustworthy and the
-        cell says "outdated" instead of either.
+        cell says "outdated" instead of either. A callable standing for a
+        function another frontend read has no Python file whose change
+        would outdate it.
     """
-    if freshness is None:
+    from .analysis import foreign_body
+    if freshness is None or foreign_body(fn):
         return False
     import inspect as _inspect
     try:
@@ -1371,7 +1378,9 @@ def build_index(targets: list[str], root: str = ".") -> dict:
                 "concepts": module_concepts,
                 "functions": [],
             }
-        line = getattr(getattr(fn, "__code__", None), "co_firstlineno", None)
+        from .analysis import foreign_body
+        line = (None if foreign_body(fn) else
+                getattr(getattr(fn, "__code__", None), "co_firstlineno", None))
         # everything an agent needs to go straight to the code and the
         # record, no grepping and no joins: the root-relative file
         # repeated per function, the sed-address source span, and the

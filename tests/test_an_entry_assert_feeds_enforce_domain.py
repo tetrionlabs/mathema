@@ -36,6 +36,11 @@ def test_the_entry_assert_becomes_the_enforced_domain(tmp_path):
     assert mod.root(1.0) == 1.0
     with pytest.raises(DomainError, match="outside its declared domain"):
         mod.root(-1.0)
-    (p,) = check_conjectures(mod.root,
-                             [claim("for x in [-4, 4], is_defined(f)")])
+    (p,) = check_conjectures(mod.root, [claim("is_defined(f)")])
     assert p.verdict in ("proven", "holds"), (p.verdict, p.sketch, p.note)
+    # a domain the claim binds is the domain: the refusal at x < 0 has
+    # no value there
+    (q,) = check_conjectures(mod.root,
+                             [claim("for x in [-4, 4], is_defined(f)")])
+    assert q.verdict == "falsified", (q.verdict, q.sketch, q.note)
+    assert "DomainError" in q.counterexample, q.counterexample

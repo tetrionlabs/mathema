@@ -20,17 +20,19 @@ with `KoineDeclined`, carrying the engine's decline shape
 
 `hydrated(facts)` is the one place a `Facts` carrying `koine` and no
 `tree` gets its tree and structural fields; `rendered_scope(facts)` is
-what the rendered body's names resolve in.
+what the rendered body's names resolve in, and `sibling_scope(fn,
+siblings)` the same with the other functions of the program the body
+calls bound under the names the rendering calls them by.
 """
 from __future__ import annotations
 
 import ast
 import hashlib
 from dataclasses import dataclass, replace
-from typing import Iterator
+from typing import Callable, Iterator, Mapping
 
 from ..analysis import Facts, _call_groups, _loops, _max_depth
-from ._render import RenderError, namespace, render
+from ._render import RenderError, materialise, namespace, render
 from .canonical import koine_hash
 from .document import Document
 from .syntax import KoineSyntaxError, List, Name, Term
@@ -315,6 +317,118 @@ def rendered_scope(facts) -> dict:
     return scope
 
 
+def sibling_scope(fn: Callable[..., object] | Facts,
+                  siblings: Mapping[str, object]) -> dict:
+    """The names a lifted body reads, with the functions it calls bound.
+
+    `fn` is a callable whose injected facts (`__mathema_facts__`) carry
+    a KOINE document, or those facts themselves. `siblings` maps the
+    locator a body calls another function of its program by (the key
+    in its `call::function` term) to that function: its document, as a
+    document or as KOINE text, or a callable. A document is bound as
+    the engine's rendering of it, its own calls bound from the same
+    mapping (mutual calls included); a callable is bound as given, and
+    one carrying its own lifted body is read through that body.
+
+    The result is the scope `rendered_scope` gives (`math`, the
+    helpers, the exception classes the body raises) with each sibling
+    the body calls added under the name its rendering calls it by.
+    Set it as the callable's `__mathema_scope__` and every reading of
+    the body (derive among them) resolves the calls in it. A sibling
+    the body does not reach is left out; a call whose locator is not
+    in `siblings`, or whose document has no rendering, stays unbound,
+    and derive declines to read through it.
+
+    Returns an empty mapping when `fn` carries no document or the
+    document has no rendering.
+    """
+    facts = fn if isinstance(fn, Facts) else getattr(fn, "__mathema_facts__", None)
+    doc = getattr(facts, "koine", None)
+    if not isinstance(doc, Document):
+        return {}
+    try:
+        rendered = render(doc)
+    except (RenderError, IndexError, AttributeError, TypeError):
+        return {}
+    bound = _bound_siblings(rendered.externals, siblings)
+    return {**rendered_scope(facts), **bound}
+
+
+def materialised(doc: Document, siblings: "Mapping[str, object] | None" = None):
+    """Intent:
+        The engine's rendering of `doc` as a Python function in a
+        module of its own, its calls to other functions of the program
+        bound from `siblings` as `sibling_scope` binds them; a call
+        `siblings` does not resolve stays unbound.
+
+    Raises:
+        RenderError: the body has no rendering.
+    """
+    rendered = render(doc)
+    fn = materialise(rendered, key=doc.key,
+                     bindings={name: None for name in rendered.externals})
+    bound = _bound_siblings(rendered.externals, siblings or {})
+    for name in rendered.externals:
+        if name in bound:
+            fn.__globals__[name] = bound[name]
+        else:
+            fn.__globals__.pop(name, None)
+    return fn
+
+
+def sibling_documents(siblings: "Mapping[str, object] | None") -> dict:
+    """Intent:
+        `{locator: Document}` for each entry of `siblings` given as a
+        document or as KOINE text the engine takes; callables and
+        declined documents are left out.
+    """
+    out: dict = {}
+    for key, value in (siblings or {}).items():
+        if isinstance(value, (Document, str)):
+            try:
+                out[key] = _document(value)
+            except KoineDeclined:
+                continue
+    return out
+
+
+def _bound_siblings(externals: dict, siblings: Mapping[str, object]) -> dict:
+    """Intent:
+        `{name: function}` for each name in `externals` (rendered name
+        to locator) whose locator `siblings` resolves: a callable as
+        given, a document materialised from its rendering. Every
+        document reachable through the calls is materialised once, and
+        each one's own names are bound after all are made, so siblings
+        that call each other resolve.
+    """
+    made: dict = {}
+    pending = sorted(set(externals.values()))
+    while pending:
+        key = pending.pop()
+        if key in made or key not in siblings:
+            continue
+        value = siblings[key]
+        if callable(value) and not isinstance(value, (Document, str)):
+            made[key] = (value, {})
+            continue
+        try:
+            sibling = _document(value)
+            sibling_rendered = render(sibling)
+        except (KoineDeclined, TypeError, RenderError, IndexError, AttributeError):
+            continue
+        fn = materialise(sibling_rendered, key=key,
+                         bindings={name: None for name in sibling_rendered.externals})
+        made[key] = (fn, sibling_rendered.externals)
+        pending.extend(k for k in sibling_rendered.externals.values() if k not in made)
+    for fn, own in made.values():
+        for name, key in own.items():
+            if key in made:
+                fn.__globals__[name] = made[key][0]
+            else:
+                fn.__globals__.pop(name, None)
+    return {name: made[key][0] for name, key in externals.items() if key in made}
+
+
 def provenance(facts) -> dict | None:
     """Intent:
         Where the body `facts` are read by came from, as the record
@@ -338,6 +452,20 @@ def provenance(facts) -> dict | None:
     return out
 
 
+def _namespaced_hashes(provenance: dict) -> "dict | None":
+    """Intent:
+        `provenance`'s `body_hashes`, each hash read by
+        `identity.namespaced_form` (a bare Python form as `py:<sha>`);
+        None when it states none.
+    """
+    from ..identity import namespaced_form
+    hashes = provenance.get("body_hashes")
+    if not isinstance(hashes, dict):
+        return hashes
+    return {name: namespaced_form(h) if isinstance(h, str) else h
+            for name, h in hashes.items()}
+
+
 def provenance_change(now: dict | None, was: dict | None) -> str | None:
     """Intent:
         What moved between two body provenances (`provenance(facts)`
@@ -352,7 +480,7 @@ def provenance_change(now: dict | None, was: dict | None) -> str | None:
     if not now and not was:
         return None
     if now.get("koine_hash") != was.get("koine_hash") \
-            or now.get("body_hashes") != was.get("body_hashes"):
+            or _namespaced_hashes(now) != _namespaced_hashes(was):
         return "body"
     if now.get("frontend") != was.get("frontend"):
         return "frontend"

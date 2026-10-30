@@ -325,8 +325,11 @@ derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
 the exception, swept point by point and proven or falsified with the
-member. `is_language_defined(text)` keeps fuzzing a string
-parameter for accidental crashes as before.
+member. `is_language_defined(text)` over a language holds each member
+to an answer (a return or an exit status) and each non-member to a
+refusal; over a plain string it fuzzes the parameter, reads exits and
+deliberate or guarded raises as the function's refusals, which the
+note lists, and falsifies only on an accidental unguarded crash.
 
 Without the package installed, a claim over `L[unicode]` is not wrong,
 only unresolved: it is `unknown`, with a note saying it needs mathema-language,
@@ -360,9 +363,12 @@ results = mathema.claims.check_conjectures(
 
 Either way, a decided proof comes back `proven`, or `falsified` with
 a witness. A claim the derive route cannot decide falls back to
-probing rather than stopping at `unknown`, so it can still come back
-`holds`, and `Probe.route` then names `probe`, the mechanism that
-actually decided. The derive diagnosis stays on the record, and covers
+probing rather than stopping at `unknown`, so on the default route
+(`best`) it can still come back `holds`, and `Probe.route` then names
+`probe`, the mechanism that actually decided. On `route="derive"` the
+probe only falsifies: an executed counterexample comes back
+`falsified` on the probe's route, and a sampling that finds none
+leaves the claim `unknown`. The derive diagnosis stays on the record, and covers
 two different things: a genuinely unliftable function, or one the
 derive route lifted fine but the specific claim stayed undecided.
 `Probe.meta["mathema.derive_status"]` (`"unliftable"` or `"undecided"`)
@@ -670,6 +676,58 @@ acceptance retiring a claim), and a comment does not survive that; a
 `note:` is part of the claim and persists through every rewrite.
 `docsync` warns before it rewrites a file that has comments.
 
+A claim's `tolerance:` is how close counts as equal, as
+[How close counts as equal](grammar.md#how-close-counts-as-equal)
+describes: a bare number is an absolute allowance, and on `a ~= b` or
+`f =:= g` it may name its kind instead, `{abs: x}`, `{rel: x}` or
+`{ulp: n}`, each with an optional `floor: x` added to it. A rate spread
+over 365 days and gathered back again is the rate in exact arithmetic,
+and in float64 it is off by a rounding step, which a relative tolerance
+states at every magnitude the domain spans:
+
+<!-- example: tolerance-file file=rates.py -->
+```python
+def daily(rate: float) -> float:
+    """An annual rate spread over 365 days and gathered back."""
+    return rate / 365 * 365
+```
+
+<!-- example: tolerance-file file=claims/rates.claims.yaml -->
+```yaml
+rates.daily:
+  claims:
+    - name: round_trip
+      statement: "for rate in [1e-6, 50], f(rate) ~= rate"
+      tolerance: {rel: 1e-15, floor: 1e-18}
+```
+
+The record keeps the tolerance as written on both lines, and the
+claim's own row says how it read it:
+
+<!-- example: tolerance-file run -->
+```python
+import yaml
+
+import mathema
+import rates
+
+mathema.write_spec(rates.daily, root=".")
+with open(".mathema/verified/rates.daily.yaml") as fh:
+    entry = yaml.safe_load(fh)["rates.daily"]
+for row in entry["claims"]:
+    if row["name"].startswith("round_trip"):
+        print(row["name"], row["verdict"], row.get("tolerance"))
+        print(" ", row["note"])
+```
+
+<!-- example: tolerance-file output -->
+```text
+round_trip proven {'rel': 1e-15, 'floor': 1e-18}
+  read as abs(f(rate) - rate) <= 1e-15 * max(abs(f(rate)), abs(rate)) + 1e-18, the tolerance {rel: 1e-15, floor: 1e-18} (declared)
+round_trip[float] holds {'rel': 1e-15, 'floor': 1e-18}
+  the float64 computation of round_trip ran at 42 points: every corner and 40 interior points
+```
+
 ## Experiment before you declare
 
 Try a spelling before it reaches an authoring surface. Both of these
@@ -729,8 +787,17 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 
 <!-- example: write-spec repl -->
 ```
->>> mathema.write_spec(softmax, root='.')
-mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+>>> record = mathema.write_spec(softmax, root='.')
+>>> record
+mathema.Record(softmax) · source, no side effects · form py:b16dc9b223d3
+  holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
+  sums_to_one  sum(f(scores)) = 1   holds
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
+    holds      policy       f([])
+    holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
+  8 built-in checks: 3 proven, 3 holds, 2 falsified (record.render(families=True) prints them)
+>>> print(record.render(families=True))
+mathema.Record(softmax) · source, no side effects · form py:b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   is_deterministic  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)
@@ -756,13 +823,15 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     falsified  computation  is_sorted_output(f(scores))   counterexample scores = [-1.5826006057216802, 1.6115862431940702, -3.3095649205736706, 0.4922462179121361, 8.505771029004748, 8.22252025430242, -4.849453040633261]: output [2.368462735344695e-05, 0.0005776759386833547, 4.21168113708018e-06, 0.00018860842235591329, 0.5698895434078277, 0.42931537291677885, 9.03005863617381e-07] fails is_sorted_output
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   sums_to_one  sum(f(scores)) = 1   holds
-    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1)
+    holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
     holds      policy       f([])
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
 ```
 
 `result_dimensions` came from the `Annotated[list, Shape("n")]` hints,
-`sums_to_one` came from the docstring `Claims:` block, and the rest are
+`sums_to_one` came from the docstring `Claims:` block, and the record
+prints those first, folding the rest into one line that counts their
+verdicts; `render(families=True)` prints every row. The rest are
 mathema's built-in battery: every function gets the determinism and
 state probes, a function computing a number from numbers gets the
 stability probe too, and a list-in, list-out function also gets the

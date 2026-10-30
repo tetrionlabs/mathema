@@ -200,6 +200,13 @@ def active_batch() -> "Batch | None":
     return _BATCH.get()
 
 
+#: set while a claim whose remit is the mathematics alone
+#: (`derive:math_only`) is adjudicated: the calls it makes are filed
+#: nowhere
+OUTSIDE_REMIT: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_policy_outside_remit", default=False)
+
+
 @contextmanager
 def claim_scope(name: "str | None"):
     """Calls made inside are filed under the claim `name`."""
@@ -217,7 +224,7 @@ def record_call(point: dict, output=None, raised: "str | None" = None,
     """File one call at a missing input into the active batch, under
     `undecided` when `others` names the arguments its raise stayed with."""
     current = _BATCH.get()
-    if current is None:
+    if current is None or OUTSIDE_REMIT.get():
         return
     made = Call(dict(point), output, raised, _CLAIM.get(),
                 list(keys) if keys is not None else None, behaviour,
@@ -229,7 +236,7 @@ def record_call(point: dict, output=None, raised: "str | None" = None,
 def record_unrepeatable(point: dict, first: tuple, second: tuple) -> None:
     """File a call that answered otherwise when made again."""
     current = _BATCH.get()
-    if current is not None:
+    if current is not None and not OUTSIDE_REMIT.get():
         current.unrepeatable.append((dict(point), first, second))
 
 
@@ -252,7 +259,7 @@ def unrepeated_witness(current: "Batch | None") -> "str | None":
 def record_introduced(point: dict) -> None:
     """File one call where f gave None back from present inputs."""
     current = _BATCH.get()
-    if current is None:
+    if current is None or OUTSIDE_REMIT.get():
         return
     current.introduced.append(Call(dict(point), None, None, _CLAIM.get()))
 
@@ -1477,14 +1484,24 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of,
             calls = [c for c in _relevant(current.calls if current else [], p, kind,
                                           None, "") if open_case(c)]
             undecided = [c for c in _undecided_at(current, p, kind) if open_case(c)]
-            if not calls and kind == "absent" and sig.annotated and sig.absent \
-                    and not mine:
-                # what f does at None is judged for every Optional
-                # parameter: where no claim's draw reached it (a text
-                # parameter no claim samples), the row calls f there
-                # itself
+            if not calls and not mine and (
+                    (kind == "absent" and sig.annotated and sig.absent)
+                    or (not undecided and not optional_only
+                        and current is not None
+                        and (p, kind) in current.origins
+                        and facts.param_kinds.get(p) != "table")):
+                # what f does at a kind a parameter admits is judged
+                # whatever the claims' draws found: for every Optional
+                # parameter, and for every kind a claim's domain admits,
+                # where no claim's draw reached it (a text parameter no
+                # claim samples, a claim falsified at its first draw),
+                # the row calls f there itself; a table's holes are
+                # placed by the columns its claims bind, so a table is
+                # left to them
+                words = (["None"] if kind == "absent"
+                         else list(sig.members or NO_ANNOTATION.members))
                 calls, unread = _split_undecided(_run_floor(
-                    fn, facts, _floor_points(fn, facts, p, kind, ["None"], domain),
+                    fn, facts, _floor_points(fn, facts, p, kind, words, domain),
                     domain))
                 undecided += unread
             if not calls and undecided:
@@ -1582,47 +1599,16 @@ def _path_rows(fn, covered: set, current: "Batch | None", guards: dict, name_of)
 
 
 def _return_rows(fn, covered: set, current: "Batch | None", name_of) -> list:
-    """`absent(f) introduces`, where f gave None back from present
-    inputs: proven from the return type where it declares the absence
-    (`-> Optional[float]`), falsified where it does not, since the None
-    contradicts the type (an observed introduction, unaccounted for
-    until the annotation or the code changes)."""
+    """`absent(f) introduces`, proven from the return type where f gave
+    None back from present inputs and the type declares the absence
+    (`-> Optional[float]`). A None the type does not declare is no
+    value: the value claims fail there, and no row is made for it."""
     from .records import Probe
     from ._missing_words import declared_optional_return, point_shown
     calls = list(current.introduced) if current else []
     declared = declared_optional_return(fn)
-    if not calls or ("absent", None, None, "") in covered:
+    if not calls or not declared or ("absent", None, None, "") in covered:
         return []
-    if not declared:
-        import inspect
-
-        from ._annotation_text import annotation_text
-        try:
-            ann = inspect.signature(fn).return_annotation
-        except (TypeError, ValueError):
-            ann = inspect.Signature.empty
-        shown = ("no annotation" if ann is inspect.Signature.empty
-                 else annotation_text(ann))
-        optional = ("Optional[...]" if ann is inspect.Signature.empty
-                    else f"Optional[{shown}]")
-        policy = Policy(kind="absent", behaviour="introduces", source="observed")
-        where = point_shown(calls[0].point)
-        sentence = (f"f returned None at {where} from present inputs, and its "
-                    f"return type ({shown}) does not declare it")
-        nxt = options([f"if None is an answer f may give, declare it in the "
-                       f"return type: {optional}",
-                       "if not, make f return a value"])
-        meta = {"mathema.policy": {"kind": "absent", "parameter": None, "member": None,
-                                   "behaviour": "introduces", "exception": None,
-                                   "premise": "", "source": "observed",
-                                   "reason": sentence, "sentence": sentence,
-                                   "next": nxt,
-                                   "evidence": _confirmed(calls, current, False)},
-                "mathema.surface": "mathema"}
-        return [Probe(name_of(policy), policy_text(policy), "falsified",
-                      n=len(calls), route="probe",
-                      counterexample=f"{where}: f returned None",
-                      note=f"{sentence}. {nxt}", meta=meta)]
     policy = Policy(kind="absent", behaviour="introduces", source="annotation")
     reason = (f"from the return type {declared}: f returned None at "
               f"{point_shown(calls[0].point)} from present inputs; "

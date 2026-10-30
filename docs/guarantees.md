@@ -12,9 +12,9 @@ rather than checked.
 
 | Verdict | What it establishes | What it does not | What the record keeps |
 |---|---|---|---|
-| `proven` | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point. | That floating point reproduces what the reals prove. Where the function is undefined inside the domain as mathematics (a root of a negative, a division by zero), or its own source raises there, no proof is reached and the claim itself is falsified; where the computation fails on an input the mathematics admits (an overflow, a NaN, a precision collapse) the `[float]` companion claim, which runs the real function at the domain's corners and across its interior, is falsified while the proof stands, see [Mathematics and computation](#mathematics-and-computation) below and [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). | The route (`derive`, `derive:extensive`, `derive:brute_force`) and a sketch naming the mechanism behind the proof. A `proven` never rests on an unnamed step. |
+| `proven` | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point, each decided exactly; where a point has no exact value the sweep is `proven` on `derive:brute_force:within_float64`, every point run in float64, each such point's float64 result within float64's own precision of the relation there, and the largest delta stated; a larger miss is not counted (`unknown`), or `holds` under a declared tolerance. | That floating point reproduces what the reals prove. Where the function is undefined inside the domain as mathematics (a root of a negative, a division by zero), or its own source raises there, no proof is reached and the claim itself is falsified; where the computation fails on an input the mathematics admits (an overflow, a NaN, a precision collapse) the `[float]` companion claim, which runs the real function at the domain's corners and across its interior, is falsified while the proof stands, see [Mathematics and computation](#mathematics-and-computation) below and [the sigmoid case study](case-studies.md#the-sigmoid-calculus-as-a-specification). | The route (`derive`, `derive:extensive`, `derive:brute_force`, `derive:brute_force:within_float64`) and a sketch naming the mechanism behind the proof. A `proven` never rests on an unnamed step. |
 | `holds (n=...)` | The real function survived exactly `n` executed trials without a counterexample, on seeded inputs biased toward domain edges, corners, poles and special values. | A probability of failure. No statistical bound is computed or implied. The confidence stars beside a `holds` measure sampling density against the function's structure, and top out at four of five, since five is reserved for proof. | `n`, the sampling plan including its seed, and the confidence breakdown. |
-| `falsified` | The real function, called at an in-domain point, violates the claim. That point is the **witness**, and a `falsified` always has one. A missing input is not such a point: what the function does with one is judged by its policy row ([missing values](missing-values.md)), and a policy row the code contradicts is falsified like any claim. A raise at that point, a NaN computed from inputs that are not missing, or an infinity returned for a finite input (an overflow or a pole, where `math` would raise), is no value, so it falsifies every relation, `!=` included. The one agreement is two sides that overflow toward the same infinity (both `inf`, or both `-inf`): that is one extended-real point, so the point reads as two equal values; a NaN agrees with nothing, not even another NaN. Probing runs under one pinned floating-point regime, so the witness does not depend on the caller's `numpy.seterr` settings. | Anything about why. A falsification may mean the code is wrong or the claim is, and the loop exists to tell those apart, see [the CDD loop](tutorial.md). | The counterexample, kept permanently and replayed on every later run, so a bug cannot be fixed by accident and quietly unfixed. |
+| `falsified` | The real function, called at an in-domain point, violates the claim. That point is the **witness**, and a `falsified` always has one. A negated claim (`not is_defined(f)`) says the positive claim fails somewhere, which no single point can refute, so its witness is the proof of the positive claim over the whole domain. A missing input is not such a point: what the function does with one is judged by its policy row ([missing values](missing-values.md)), and a policy row the code contradicts is falsified like any claim. A raise at that point, a NaN computed from inputs that are not missing, or an infinity returned for a finite input (an overflow or a pole, where `math` would raise), is no value, so it falsifies every relation, `!=` included. The one agreement is two sides that overflow toward the same infinity (both `inf`, or both `-inf`): that is one extended-real point, so the point reads as two equal values; a NaN agrees with nothing, not even another NaN. Probing runs under one pinned floating-point regime, so the witness does not depend on the caller's `numpy.seterr` settings. | Anything about why. A falsification may mean the code is wrong or the claim is, and the loop exists to tell those apart, see [the CDD loop](tutorial.md). | The counterexample, kept permanently and replayed on every later run, so a bug cannot be fixed by accident and quietly unfixed. |
 | `invalidated` | The claim was `proven` or `holds` in the previous record and the current code no longer supports it. | That it may simply be re-adjudicated away. It stays `invalidated` until the claim is supported again, or a person accepts it as a discovery or as history. | The previous verdict, what it regressed to, and the last commit where it was supported. |
 | `unknown` | Nothing was decided, and the reason is kept. This includes a symbolic disproof that no executed point reproduces, which is flagged as a probable engine fault rather than reported as a bug in your code. | A pass. `verify` fails on an `unknown` unless a person accepts it as risk. | Why each route stopped (unliftable, undecided, timed out). |
 | `skipped` | The claim could not be adjudicated as stated: misspecified, or a form the chosen route cannot evaluate. | A pass. `verify` fails on a `skipped` in its default strict mode. | The reason, with a [reason code](reason-codes.md). |
@@ -37,7 +37,8 @@ reasoning, no largest double, no overflow threshold, no operational
 infinity. What does enter is the mathematics of definedness, namely the
 real domain of the primitives (a root of a negative, a logarithm at or
 below zero, a division by zero), a `raise` the function's own source
-states, and a library's `is_defined` row, since a function undefined at
+states, a nan or an infinity its source returns as the value
+(`math.nan`, `float("inf")`), and a library's `is_defined` row, since a function undefined at
 a point of its domain is not the function the claim describes. The
 computation is one implementation executed in one language, one runtime
 and one number representation, and the number representation follows the domain: float64 for a claim
@@ -51,7 +52,7 @@ are related mathematically.
 An executed value is read by one rule on every path that executes
 anything, the probe route, the `[float]` companion, the computation-safety
 families (`is_numerically_stable`, `is_representation_safe`,
-`is_missing_safe` and the rest) and the executed rung of `=:=` alike. A
+`is_missing_safe` and the rest) and the computation line of `=:=` alike. A
 raise, a NaN computed from inputs that are not missing, or an infinity
 returned for a finite input is no value, and no value fails every
 relation, `!=` included; two sides that overflow toward the same
@@ -127,9 +128,16 @@ domain (`is_pole_safe`, `is_numerically_stable`), or a raising guard on
 a missing value the domain admits (`is_missing_safe`), is checked by
 calling the function at the point the structure names. A raise there,
 or a non-finite result at a pole, is the witness; a call that behaves
-leaves the disproof uncorroborated. Where the difference is known to
-exist in exact arithmetic and the code, run where it is, rounds it away
-(an irrational pole, a gap below float resolution), the record adds
+leaves the disproof uncorroborated. Where the code, run where the
+difference is, rounds it away, the body is read exactly there (its
+literals as written, its divisions as ratios, a root as sympy holds
+it), and a difference that reading confirms is the witness. A pole no
+float lands on (`sqrt(2)` for `1 / (x*x - 2)`, where the nearest float
+returns a large finite number) is the witness itself when interval
+arithmetic certifies that the divisor is zero there, independently of
+the solver that found it, as `is_defined` certifies the same point.
+Where no exact reading confirms it (a gap below float resolution that
+comes from a float outside the body), the record adds
 `mathema.corroboration_reason: "exact arithmetic only"` and the note
 says so instead of naming an engine bug. A falsification is
 therefore equally strong whichever route found it, because it always
@@ -144,9 +152,15 @@ cannot decide falls through to probing, with the reason the proof
 stopped kept in the record. The result names the mechanism that settled
 it, and a claim's name never implies a route.
 
-- A claim pinned to `route: derive` makes the fast proof attempt only;
-  if that cannot decide, it still falls through to probing, with the
-  derive status recorded.
+- A claim pinned to `route: derive` makes the fast proof attempt only,
+  and derive gives its verdict. When the proof cannot settle it (a body
+  derive cannot read, a branch it cannot decide, the wall clock), the
+  probe still samples the claim, as a falsifier only: a counterexample
+  it executes falsifies the claim, on the probe's route with derive's
+  reason in the note, and draws that find none leave the claim
+  `unknown`, never `holds`, with the number of draws in the note. A
+  proof's `[float]` companion and a disproof's executed witness are as
+  on any route.
 - A claim pinned to `route: probe` never attempts a proof.
 - Calculus forms (`d`, `lim`, `integrate`, `Sum`, `Prod`) are decided by
   the derive route. When the proof cannot close, numeric evidence on
@@ -188,7 +202,7 @@ built. See [Claims transfer](claims-transfer.md).
   a 45 second failsafe over the whole extensive ladder. A proof that runs
   out of time falls through to probing and the record says so
   (`mathema.timeout`), so a slow machine can turn a `proven` into a
-  `holds`, and never the reverse.
+  `holds` (an `unknown` on `route: derive`), and never the reverse.
 - **What the derive route lifts.** Straight-line and branching scalar
   code, accumulating loops, linear self-recursion, and more, catalogued
   in [The derive route](derive-route.md). Beyond scalars and sequences,
@@ -224,7 +238,8 @@ mathematical expression. A function that lifts can be proven about; one
 that does not is still probed.
 
 **Witness.** The executed input at which the real function fails a
-claim. Every `falsified` has one.
+claim. Every `falsified` has one. For a negated claim the witness is the
+proof of the positive claim over the whole domain.
 
 **Corroboration.** Reproducing a symbolic disproof by running the real
 function, which is what turns an algebraic disproof into a `falsified`.

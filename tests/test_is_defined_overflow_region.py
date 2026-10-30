@@ -3,8 +3,9 @@
 """`is_defined` checked by execution samples inside the function's
 recorded `is_overflow_safe` region when one exists, a library row or the
 project's own claim alike, and otherwise runs to the number
-representation's reach, where an overflow is no value. Overflow outside
-the region is reported by `is_overflow_safe`, not `is_defined`.
+representation's reach. An overflow, inside the region or out, is the
+computation's fact, reported by `is_overflow_safe`, never a point where
+f has no value.
 
 The execution half runs when the derive half declines: a function with
 Python source has its totality settled by the mathematics (exp is
@@ -59,10 +60,13 @@ def test_a_project_overflow_row_keeps_is_defined_inside_it(tmp_path):
     assert "overflow-safe region" in (p.note or ""), p.note
 
 
-def test_without_the_row_is_defined_meets_the_overflow(tmp_path):
+def test_without_the_row_is_defined_reports_the_overflow_as_a_computation_finding(
+        tmp_path):
+    # exp has a value at every real x; its float run overflows past
+    # x = 709.78, which is_computation_safe judges, never is_defined
     ex = _load(tmp_path, _EX, "ov_ex_out").ex
     p = _defined(ex)
-    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.verdict == "holds", (p.verdict, p.note)
     assert "is_overflow_safe" in (p.note or "") + (p.counterexample or ""), \
         (p.note, p.counterexample)
 

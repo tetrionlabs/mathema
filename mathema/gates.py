@@ -17,6 +17,7 @@ runs, so the import graph stays acyclic."""
 from __future__ import annotations
 
 from . import _exits, _shapes
+from ._exact_side import F_CALL, f_slot
 from ._math_vocab import MATH_CONSTANTS
 from .records import Probe
 from .runtime_types import SEQUENCE_KINDS
@@ -35,6 +36,20 @@ _EXTREME = 1e10
 # companion
 FLOAT_SUFFIX = "[float]"
 FLOAT_FAMILY = "is_numerically_stable"
+
+
+def computation_line_of(meta: "dict | None") -> "str | None":
+    """The claim a row is the computation line of (`shift` for
+    `shift[float]`), read from its meta, or None for any other row. An
+    empty-input line is tagged with the claim it belongs to as well, but
+    it is a line of its own family (`is_empty_safe`), not the
+    computation."""
+    meta = meta or {}
+    parent = meta.get("mathema.companion_of")
+    if parent and meta.get("mathema.family") in (None, FLOAT_FAMILY):
+        return parent
+    return None
+
 
 # the authored route that states the mathematics alone: adjudicated as
 # a derive claim, spawning no float companion
@@ -76,7 +91,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         in-domain-and-assumption membership; `sample(name, rng)` draws
         a value respecting the parameter's declared bound; `exact`
         drops the default allowance, so a claim with no declared
-        tolerance is compared with none; `corners` are the domain's
+        tolerance is compared with none (`~=` within ε, which is what
+        it states); `corners` are the domain's
         corner points; `reach` is the magnitude an unbounded direction
         runs to; plus the free-variable `names`.
 
@@ -146,22 +162,42 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # a Sum/Prod index is bound over its summand: it is no
             # coordinate of the point, even when a parameter shares its
             # name
-            code_l, aux_l, bound_l = _indexed.compile_indexed(cj.lhs, aux_l)
+            code_l, aux_l, bound_l = _indexed.compile_indexed(
+                cj.lhs, aux_l, set(kinds))
             bound_r: set = set()
             if cj.rhs:
-                code_r, aux_r, bound_r = _indexed.compile_indexed(cj.rhs, aux_r)
+                code_r, aux_r, bound_r = _indexed.compile_indexed(
+                    cj.rhs, aux_r, set(kinds))
             bound_indices = bound_l | bound_r
     except (InvalidConjecture, ValueError):
         return None
     # the computation allowance (`_allowance`): a declared tolerance, an
     # exact comparison, or the default rule against the exact side
-    from ._allowance import (exact_side_at, largest_miss, reference_side,
-                             relation_within)
-    declared = (cj.tolerance if cj.tolerance is not None
-                else 0.0 if exact else None)
+    from ._allowance import (exact_side_at, float_miss, largest_miss,
+                             reference_side, relation_within)
+    from ._tolerance import bare as _bare
+    from .conjecture import _exact_slack
+    declared = _exact_slack(cj) if exact else cj.tolerance
     claim_side = reference_side(cj)
     # the gap and the result's magnitude at the last miss
     miss: list = [None]
+    # how far the float sides missed the relation at the last point
+    # compared, and the allowance applied there (`_allowance.float_miss`)
+    precision: list = [None]
+    # the largest gap a pass of `==`, `<=` or `>=` fell within, as
+    # `(gap, allowance, point)`
+    passed: list = [None]
+    # whether a Decimal operation rounded at the last point evaluated
+    # (`_decimal_rounding.watched`)
+    rounded: list = [None]
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
+    # whether a point's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods, and whether
+    # the last point evaluated is the first to show it does
+    touches_decimal = [may_touch_decimal(fn, *(bound_funcs or {}).values())]
+    learned: list = [False]
 
     def _within(lv, rv, input_scaled: float = 0.0, point=None):
         side = claim_side
@@ -174,6 +210,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                side, exact_inequality=cj.tolerance is None)
         if held is False:
             miss[0] = largest_miss(lv, rv, side)
+        precision[0] = float_miss(lv, rv, cj.relation, declared,
+                                  input_scaled, side)
+        if held is True and cj.relation in ("==", "<=", ">=") \
+                and precision[0] is not None and precision[0][0] > 0 \
+                and (passed[0] is None or precision[0][0] > passed[0][0]):
+            passed[0] = (*precision[0], dict(point or {}))
         return held
     # `ε`/`eps`/`epsilon` in a law is the claim's tolerance, a fixed
     # value, never a free variable to sample
@@ -270,6 +312,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
                    for p, v in point.items())
 
+    def _f_returned_none() -> bool:
+        # whether a call of the function under test at this point
+        # returned None
+        return any(kind == "returned" and out is None
+                   for kind, out, _a, _kw in point_calls)
+
     def _record_returned_none(point, lv, rv):
         # a None f returned from present inputs: filed for the absence
         # policy line, as declared by the return type or as introduced
@@ -307,20 +355,39 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # runtime type and its result is read back as an array
     as_arrays = bool(seq_names or table_names) and _numpy() is not None
     fn_call = calling(fn, facts)
+    original_bound = dict(bound_funcs or {})
     if as_arrays:
         fn_call = law_callable(fn_call)
         bound_funcs = {name: _bound_for_arrays(v)
                        for name, v in bound_funcs.items()}
+    # the function and the bound functions as the exact reading runs
+    # them: each body read exactly (`_exact_body.exact_callee`), a body
+    # the reading cannot follow faithfully refusing the point
+    exact_callees: list = [None]
+
+    def _exact_callees() -> dict:
+        if exact_callees[0] is None:
+            from ._exact_body import exact_callee
+            f_exact = calling(exact_callee(fn), facts)
+            if as_arrays:
+                f_exact = law_callable(f_exact)
+            bound = {}
+            for name, v in original_bound.items():
+                t = exact_callee(v)
+                bound[name] = _bound_for_arrays(t) if as_arrays else t
+            exact_callees[0] = {"f": f_exact, **bound}
+        return exact_callees[0]
     from .conjecture import _fill_value, _refill_caller
     executed.refill_at = _refill_caller(fn_call)
     executed.fills = {p: fill for p in kinds
                       if (fill := _fill_value(cj_domain.get(p))) is not None}
     from ._missing_policy import Presence
     executed.presence = Presence(dict(kinds), {p: cj_domain.get(p) for p in kinds})
-    base_env = {"f": _tag(fn_call, "f"), **_SAFE_FUNCS,
+    base_env = {"f": _tag(fn_call, "f"), F_CALL: _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
                 **{name: _tag(v, name) for name, v in bound_funcs.items()},
-                **{name: (cj.tolerance if cj.tolerance is not None else 1e-9)
+                **{name: (_bare(cj.tolerance, f"{name} in the claim")
+                          if cj.tolerance is not None else 1e-9)
                    for name in eps_names},
                 **(_indexed.indexed_env() if indexed else {})}
     from .records import pseudo_infinity_range
@@ -379,7 +446,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         try:
             for fill in (1.0, 2.0, 0.9):
                 env = {"__builtins__": {}, **base_env, **_typed(point),
-                       "f": lambda *a, _fill=fill, **k:
+                       f_slot(code_l, code_r): lambda *a, _fill=fill, **k:
                        _nan_filled(fn_call(*a, **k), _fill)}
                 try:
                     lf = eval(code_l, env)
@@ -416,10 +483,29 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return False
         return _within(lv, rv, point=point)
 
-    def evaluate(point):
-        _reset()
+    def _reads_exactly(point) -> bool:
+        # whether the claim's sides read exactly at the point, the calls
+        # the computation made there kept
+        from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+        made = (list(f_calls.calls), calls_raised[0], calls_nonfinite[0])
         try:
-            lv, rv = _values(point)
+            sides = _with_timeout(lambda: exact_as_written(point),
+                                  FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            sides = None
+        f_calls.calls = made[0]
+        calls_raised[0], calls_nonfinite[0] = made[1], made[2]
+        return sides is not None
+
+    def evaluate(point):
+        learned[0] = False
+        _reset()
+        precision[0] = None
+        rounded[0] = None
+        try:
+            with watched(touches_decimal[0] or holds_decimal(
+                    list(point.values()))) as watch:
+                lv, rv = _values(point)
         except Exception as e:
             # a raise FROM THE FUNCTION at an in-domain point is a
             # genuine failure of a value claim (the pedantic raise
@@ -435,6 +521,36 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                              or isinstance(e, (IndexError, ZeroDivisionError))) \
                 else None
         if _classify(point, False, (lv, rv)):
+            return None
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later point is read
+            touched_decimal(fn, *(bound_funcs or {}).values())
+            touches_decimal[0] = learned[0] = True
+        if watch.rounded:
+            # a Decimal operation rounded: the sides are neither the
+            # mathematics nor float64 values, and the point is undecided
+            # unless the relation fails by more than the rounding can
+            # account for
+            rounded[0] = watch.reason
+            if beyond_rounding(
+                    lv, rv, cj.relation, watch.precision,
+                    lambda a, b: relation_within(
+                        a, b, cj.relation, declared, 0.0, claim_side,
+                        exact_inequality=cj.tolerance is None)):
+                return False
+            return None
+        if (holds_decimal(lv) or holds_decimal(rv)) \
+                and not _reads_exactly(point):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read, and is
+            # read as a rounded one at the smallest precision watched
+            rounded[0] = UNSEEN
+            if beyond_rounding(
+                    lv, rv, cj.relation, watch.precision,
+                    lambda a, b: relation_within(
+                        a, b, cj.relation, declared, 0.0, claim_side,
+                        exact_inequality=cj.tolerance is None)):
+                return False
             return None
         if calls_nonfinite[0] is not None and calls_nonfinite[0].endswith("nan") \
                 and _nan_unread(point, lv, rv):
@@ -460,7 +576,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             from ._missing_words import absence_agrees
             _record_returned_none(point, lv, rv)
             if absence_agrees(lv, rv, cj.relation):
-                return True
+                # both sides absent agree, unless f's own None is one the
+                # return type does not declare, which is no value
+                return not (not declared_return and _f_returned_none())
             if declared_return and (lv is None or rv is None):
                 return None
             return False
@@ -492,16 +610,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         # input was compared by kind before this)
         if holds_nan(lv) or holds_nan(rv):
             return False
-        if cj.relation in ("==", "~="):
+        from ._exact_side import holds_number
+        if holds_number(lv) and holds_number(rv):
+            # a side the code returned as an exact number (a Fraction):
+            # the claim's own side is read exactly against it, its
+            # literals as written (`returned_exactly`)
+            sides = returned_exactly(point)
+            if sides is not None:
+                return _within(sides[0], sides[1], point=point)
+        if cj.relation in ("==", "~=", "!="):
             try:
-                return bool(lv == rv)
+                equal = bool(lv == rv)
             except Exception:
                 return None
-        if cj.relation == "!=":
-            try:
-                return not (lv == rv)
-            except Exception:
-                return None
+            from ._exact_side import holds_number
+            if holds_number(lv) and holds_number(rv):
+                # two numbers compared by their own equality (a Fraction
+                # or Decimal result): no allowance, no miss
+                precision[0] = (0.0, 0.0)
+            return equal if cj.relation != "!=" else not equal
         return None
 
     # the executed missing inputs both evaluators record, read by
@@ -589,8 +716,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return None
         if not inputs_missing(point.values()) \
                 and "absent" in (missing_class(lv), missing_class(rv)):
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             _record_returned_none(point, lv, rv)
+            if absence_agrees(lv, rv, cj.relation) and not declared_return \
+                    and _f_returned_none():
+                return undeclared_none_words(fn)
             if absence_agrees(lv, rv, cj.relation) or declared_return:
                 return None
             return (f"the computation returns None here "
@@ -825,6 +956,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             return True
         return isinstance(e, (int, float)) and domain_contains(e, bound)
 
+    def _within_cap(e, bound):
+        # under a pseudo-infinity an element runs along its unbounded
+        # directions to the cap and no further; a declared finite end
+        # stays the claim's own, and a hole is judged by its slot
+        if isinstance(e, bool) or not isinstance(e, (int, float)) or e != e:
+            return True
+        from .probing import _element_range
+        span = _element_range(bound, (cap_lo, cap_hi))
+        return span is None or span[0] <= e <= span[1]
+
     from .domain import path_bindings_hold as _paths_hold
     # the parameters the claim binds paths into (`o.lines[*].qty`): a
     # path binding is a filter on the member
@@ -862,6 +1003,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
             if bound is not None and not all(_element_ok(n, e, bound)
                                              for e in elements):
+                return False
+            if cap is not None and not all(_within_cap(e, bound)
+                                           for e in elements):
                 return False
         for n in names:
             bound = cj_domain.get(n)
@@ -1045,7 +1189,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         corners = [{n: _corner_value(n, edges[n][min(i, len(edges[n]) - 1)])
                     for n in names} for i in (0, 1)]
     # a sequence's magnitude corners (the cancelling pairs, the float
-    # limit pair), each at the first box corner of the other coordinates
+    # limit pair, both within a declared pseudo-infinity), each at the
+    # first box corner of the other coordinates
     from .probing import sequence_corners
 
     def _corner_sequence(name, pair):
@@ -1057,7 +1202,9 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         return [pair[i % 2] for i in range(3)]
     for seq in [n for n in names if n in seq_names
                 and n not in mat_names and n not in table_names]:
-        for pair in sequence_corners(cj_domain.get(seq)):
+        for pair in sequence_corners(cj_domain.get(seq),
+                                     reach=(cap_lo, cap_hi) if cap is not None
+                                     else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
     # this dict is the point-runtime kit; `interfaces.runtime` states
@@ -1065,18 +1212,78 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # whose callable stands in for fn) so the seam is testable
     def exact_at(point):
         # the claim's sides at a point of exact numbers, the function and
-        # the bound functions run on those numbers themselves
+        # the bound functions run on those numbers with their bodies read
+        # exactly (`_exact_callees`)
         from ._exact_side import exact_sides
         _reset()
         try:
             return exact_sides(code_l, code_r, {**base_env, **point},
-                               {"f": fn_call, **(bound_funcs or {})},
-                               exact_calls=True)
+                               _exact_callees(), exact_calls=True)
         finally:
             _reset()
 
+    def returned_exactly(point):
+        # the claim's sides on the exact values the code returned at the
+        # executed point (`_exact_side.returned_sides`), its literals as
+        # written; None where a call returns a value that is not exact,
+        # or where a coordinate as written is not the float the code ran
+        # on (the code's value is then the value at another point)
+        from ._exact_side import returned_sides, to_exact
+        typed = _typed(point)
+        written = {n: _written_exactly(v) for n, v in typed.items()}
+        if any(to_exact(typed[n]) != written[n] for n in typed):
+            return None
+        _reset()
+        try:
+            sides = returned_sides(code_l, code_r, {**base_env, **written},
+                                   {"f": fn_call, **(bound_funcs or {})},
+                                   computed_env={**base_env, **typed})
+        finally:
+            _reset()
+        if sides is not None and code_r is None:
+            return sides[0], 0
+        return sides
+
+    def exact_as_written(point):
+        # the claim's sides at a point of the domain read as written:
+        # each float coordinate the decimal it stands for (`repr`), an
+        # integer coordinate an int, the function and the bound
+        # functions run on those values with their bodies read exactly
+        # (`_exact_callees`; a result holding no number, a string, kept
+        # as it is); a claim with no right side compares against 0, as
+        # the float evaluation does
+        from ._exact_side import exact_sides
+        typed = _typed(point)
+        written = {n: _written_exactly(v) for n, v in typed.items()}
+        _reset()
+        try:
+            sides = exact_sides(code_l, code_r, {**base_env, **written},
+                                _exact_callees(),
+                                exact_calls=True, opaque_results=True,
+                                computed_env={**base_env, **typed})
+        finally:
+            _reset()
+        if sides is not None and code_r is None:
+            return sides[0], 0
+        return sides
+
     evaluate.exact_at = exact_at  # type: ignore[attr-defined]
+    evaluate.exact_as_written = exact_as_written  # type: ignore[attr-defined]
+    evaluate.returned_exactly = returned_exactly  # type: ignore[attr-defined]
     evaluate.last_miss = lambda: miss[0]  # type: ignore[attr-defined]
+    # `(miss, allowance)` of the float comparison at the last point
+    # evaluated, None where no numbers were compared
+    evaluate.last_precision = lambda: precision[0]  # type: ignore[attr-defined]
+    # the largest gap a pass fell within over every point evaluated,
+    # `(gap, allowance, point)`, None where every pass was exact
+    evaluate.largest_pass = lambda: passed[0]  # type: ignore[attr-defined]
+    # why the last point evaluated is not counted for its Decimal
+    # arithmetic (`_decimal_rounding.REASONS`), None when it is; such a
+    # point decided nothing unless it failed beyond the rounding
+    evaluate.decimal_rounded = lambda: rounded[0]  # type: ignore[attr-defined]
+    # whether the last point evaluated was the first to return a Decimal
+    # from a run not read, after which every point is read
+    evaluate.learned_decimal = lambda: learned[0]  # type: ignore[attr-defined]
 
     def last_args():
         # the arguments of f's last returning call at the point
@@ -1094,6 +1301,47 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
+
+
+def _written_exactly(value):
+    """Intent:
+        A coordinate of a declared finite domain as the number written:
+        a finite float the decimal it reads back as (`repr`, a Fraction),
+        an int one whose division stays exact (`_exact_side.ExactInt`),
+        the elements of a list, tuple, float array or table column the
+        same way; anything else (a bool, a string, a missing value, a
+        signed zero, an infinity) unchanged.
+    """
+    import math
+    from fractions import Fraction
+
+    from ._exact_side import ExactInt, _np
+    np = _np()
+    if isinstance(value, bool):
+        return value
+    if type(value) is int:
+        # an integer divides exactly: `n / 2` is the ratio
+        return ExactInt(value)
+    if isinstance(value, float):
+        if not math.isfinite(value) or (value == 0.0
+                                        and math.copysign(1.0, value) < 0):
+            return value
+        return Fraction(repr(value))
+    if np is not None and isinstance(value, np.floating):
+        return _written_exactly(float(value))
+    if np is not None and isinstance(value, np.ndarray) \
+            and value.dtype.kind == "f":
+        out = np.empty(value.shape, dtype=object)
+        for idx, v in np.ndenumerate(value):
+            out[idx] = _written_exactly(float(v))
+        return out
+    if isinstance(value, list):
+        return [_written_exactly(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_written_exactly(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _written_exactly(v) for k, v in value.items()}
+    return value
 
 
 def _fmt_point(point, names):
@@ -1116,6 +1364,12 @@ def _fmt_point(point, names):
             # a count; the full value rides in the counterexample's
             # arguments
             parts.append(f"{n} = {capped}")
+            continue
+        from ._called_text import called_text, received_as
+        called = called_text(received_as(n, v))
+        if called is not None:
+            # the argument as the call received it
+            parts.append(f"{n} = {called}")
             continue
         parts.append(f"{n} = {_fmt_coordinate(v)}" if isinstance(v, float)
                      else f"{n} = {v!r}")
@@ -1187,28 +1441,63 @@ def _sequence_witness(witness, seq_names):
     return out
 
 
-_DEFAULT_ORDERING_SLACK = 1e-9
+
+def _allowed_miss_words(deps, point) -> str:
+    """Intent:
+        How the executed code passes at `point` on the probe route, in
+        words: `the executed code misses the relation there by M, within
+        the allowance A the probe route gives the computation`, M and A
+        the float miss and allowance measured there
+        (`evaluate.last_precision`); without the measurement, the same
+        without the numbers.
+    """
+    measured = None
+    try:
+        if deps["evaluate"](point) is True:
+            measured = deps["evaluate"].last_precision()
+    except Exception:
+        measured = None
+    if measured is None:
+        return ("the executed code passes there within the allowance the "
+                "probe route gives the computation")
+    from ._allowance import allowance_text
+    miss, allowed = measured
+    return (f"the executed code misses the relation there by "
+            f"{allowance_text(miss)}, within the allowance "
+            f"({allowance_text(allowed)}) the probe route gives the "
+            f"computation")
 
 
 def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
-                             proof, seq_names):
+                             proof, seq_names, found: "list | None" = None,
+                             reading: str = "executed values",
+                             disagreed: "list | None" = None):
     """Intent:
         `(point, compared)`: `point` is the point derive named as its
-        witness when the real code executed there violates a closed
-        ordering (`<=`/`>=`) or an equality (`==`) compared exactly,
-        with none of the default allowance, else None; `compared` is
-        whether the code was executed and compared there at all. No
-        comparison happens when the claim is not such a relation,
-        declares its own tolerance (which is then part of the claim),
-        or names no in-domain witness.
+        witness when the claim there, decided exactly, is false, else
+        None; `compared` is whether the claim was decided there and
+        held. `reading` names how the claim is decided
+        (`_exact_reading`): `executed values`, the values the real code
+        returned compared with none of the default allowance, or
+        `mathematics`, the function run on the point's exact values.
+        Applies to a closed ordering (`<=`/`>=`), an equality (`==`) and
+        `~=`; no comparison happens when the claim is another relation
+        or derive's witness lies outside the domain. A declared bare
+        tolerance binds the computation line only, so the relation is
+        compared exactly whatever it declares. `found`, when
+        given, receives the record of a violation (the reading, the
+        point's exact and computed sides). `disagreed`, when given,
+        receives a sentence for each point where the float run and the
+        exact reading of the `mathematics` reading disagree.
 
     Notes:
         `~=` is `abs(lhs - rhs) <= ε`, compared exactly as that ordering
-        (ε the 1e-9 default). A coordinate
-        derive's witness leaves free (the difference does not depend on
-        it) is drawn from its declared bound with a fixed seed, a few
-        draws at most, and the first admissible completion is the point
-        compared.
+        (ε the 1e-9 default). A coordinate derive's witness leaves free
+        (the difference does not depend on it, and a witness naming
+        none leaves every coordinate free) is drawn from its declared
+        bound with a fixed seed, a few draws at most, until one shows
+        the violation; a witness that fixes every coordinate is decided
+        at that one point.
     """
     import random
     from . import corroboration as C
@@ -1216,7 +1505,7 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         from dataclasses import replace
         cj = replace(cj, lhs=f"abs(({cj.lhs}) - ({cj.rhs}))", relation="<=",
                      rhs="ε")
-    if cj.relation not in ("<=", ">=", "==") or cj.tolerance is not None:
+    if cj.relation not in ("<=", ">=", "=="):
         return None, False
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             sequences=True, exact=True)
@@ -1224,19 +1513,151 @@ def _exact_witness_violation(cj, fn, facts, cj_domain, bound_funcs, assum,
         return None, False
     seeds = C._seed_points(_sequence_witness(proof.witness, seq_names),
                            deps["names"])
-    if not seeds:
-        return None, False
-    named = seeds[0]
+    named = seeds[0] if seeds else {}
     missing = [n for n in deps["names"] if n not in named]
     rng = random.Random(0)
+    compared = False
     for _ in range(8 if missing else 1):
         point = {**named, **{n: deps["sample"](n, rng) for n in missing}}
-        if deps["admits"](point):
-            holds = deps["evaluate"](point)
-            if holds is False:
-                return point, True
-            return None, holds is True
-    return None, False
+        if not deps["admits"](point):
+            continue
+        held, record, disagreement = _exact_reading(cj, deps, cj_domain,
+                                                    point, reading)
+        if disagreement is not None and disagreed is not None:
+            disagreed.append(disagreement)
+        if held is False:
+            if found is not None:
+                found.append(record)
+            return point, True
+        if held is True:
+            compared = True
+            if not missing:
+                break
+    return None, compared
+
+
+def _exact_reading(cj, deps, cj_domain, point, reading: str) -> tuple:
+    """Intent:
+        `(holds, record, disagreement)`: the claim at `point` decided
+        exactly, by `reading`. `executed values`: the values the real
+        code returned, compared with none of the default allowance (the
+        evaluator was built with `exact`). `mathematics`: two
+        independent readings of the point, the code's float run
+        (`evaluate`, compared as for `executed values`) and the exact
+        reading, each coordinate read as written, the function run on
+        those exact values (`evaluate.exact_as_written`) under the fast
+        wall-clock cap, the sides compared by
+        `conjecture._exact_relation`. Both run at every point, the float
+        run first; the exact reading decides, and is None where a side
+        has no exact value or a coordinate as written lies outside its
+        bound. A float run with no value leaves the exact reading to
+        decide. `record` holds the reading and the two sides, as decided
+        (`exact`) and as the float computation gave them (`computed`).
+        `disagreement` is a sentence for the note where both readings
+        decide and differ, else None. `(None, None, None)` when the
+        reading does not decide.
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _exact_relation
+    evaluate = deps["evaluate"]
+    if reading == "executed values":
+        held = evaluate(point)
+        sides = computed = evaluate.sides()
+        if held is None:
+            return None, None, None
+        return held, {"reading": reading,
+                      "exact": _sides_text(sides, exact=False),
+                      "computed": _sides_text(computed, exact=False)}, None
+    float_held = evaluate(point)
+    computed = evaluate.sides()
+    held = sides = None
+    if _written_inside(cj_domain, point):
+        try:
+            sides = _with_timeout(
+                lambda: evaluate.exact_as_written(point),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            sides = None
+        if sides is not None:
+            try:
+                held = _exact_relation(cj, sides[0], sides[1])
+            except (TypeError, ValueError, ArithmeticError):
+                held = None
+    if held is None:
+        return None, None, None
+    record = {"reading": reading,
+              "exact": _sides_text(sides, exact=True),
+              "computed": _sides_text(computed, exact=False)}
+    disagreement = None
+    if float_held is not None and float_held != held:
+        float_word, exact_word = (("holds", "makes the claim false")
+                                  if float_held else
+                                  ("makes the claim false", "holds"))
+        disagreement = (
+            f"the two readings of derive's witness disagree: the code's "
+            f"float run {float_word} there compared exactly "
+            f"({record['computed']}), the exact reading {exact_word} "
+            f"({record['exact']})")
+    return held, record, disagreement
+
+
+def _sides_text(sides, exact: bool) -> str:
+    """Two claim sides as text, `a vs b`: exact values as integers or
+    ratios, float values with every digit they hold."""
+    from .probing import _fmt_coordinate, _fmt_value
+    if sides is None:
+        return ""
+
+    def shown(v):
+        if isinstance(v, (list, tuple)):
+            return "[" + ", ".join(shown(u) for u in v) + "]"
+        if exact and not isinstance(v, float):
+            return str(v)
+        return _fmt_coordinate(v) if isinstance(v, float) else _fmt_value(v)
+    return f"{shown(sides[0])} vs {shown(sides[1])}"
+
+
+def _written_inside(cj_domain, point) -> bool:
+    """Intent:
+        Whether every float coordinate of `point`, read as written (the
+        decimal it reads back as), lies in its declared bound, element
+        by element for a sequence. A bound that is not a union of
+        intervals is not checked here: the point's own admission
+        decided it.
+    """
+    import math
+    from fractions import Fraction
+
+    from ._exact_witness import Undecided, in_bound
+    for name, value in point.items():
+        bound = cj_domain.get(name)
+        if bound is None:
+            continue
+        values = (list(value) if isinstance(value, (list, tuple))
+                  else value.ravel().tolist() if hasattr(value, "ravel")
+                  else [value])
+        for v in values:
+            if not isinstance(v, float) or not math.isfinite(v):
+                continue
+            try:
+                if not in_bound(Fraction(repr(v)), bound):
+                    return False
+            except Undecided:
+                continue
+    return True
+
+
+def _returned_calls(calls, facts) -> list:
+    """`(value, {param: argument})` for each call of f that returned, from
+    `(kind, outcome, args, kwargs)` records."""
+    out = []
+    for kind, value, args, kwargs in calls or ():
+        if kind != "returned":
+            continue
+        point = dict(zip(list(facts.params), args))
+        point.update(kwargs or {})
+        out.append((value, point))
+    return out
 
 
 def _capped_exact(exact_at, point):
@@ -1293,6 +1714,40 @@ def _certified_point_witness(cj, deps, proof, cj_domain) -> "str | None":
         return None
 
 
+def _exact_witness_found(falsified, deps, fn, facts, point, record,
+                         named: bool = True) -> dict:
+    """Intent:
+        Mark `falsified` reproduced at `point`, a witness the claim is
+        false at exactly, and return its `mathema.exact_witness` record:
+        `record` (the reading and the sides) with the point as `at` (a
+        claim with no coordinate named by its own calls, written as
+        calls when `named` is False) and
+        `computation`, the float computation there judged within its
+        allowance as the probe route judges it (`holds within its
+        allowance`, `fails past its allowance`, or `undecided`). The
+        counterexample becomes the point.
+    """
+    pt = _fmt_point(point, deps["names"])
+    computation = deps["evaluate"](point)
+    if not pt and deps["evaluate"].calls():
+        # a claim with no coordinate is witnessed by its own calls
+        from ._brute_force import _ground_witness
+        pt = _ground_witness(fn, facts, deps["evaluate"].calls(),
+                             named=named)
+    record = {"at": pt, **record, "computation": (
+        "holds within its allowance" if computation is True else
+        "fails past its allowance" if computation is False else
+        "undecided")}
+    falsified.meta = {**(falsified.meta or {}),
+                      "mathema.corroboration": "reproduced",
+                      "mathema.exact_witness": record}
+    falsified.counterexample = pt or falsified.counterexample
+    if falsified.stratum is None:
+        falsified.stratum = {"mathematics": "unsound",
+                             "blame": "claim", "witness": pt}
+    return record
+
+
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                         bound_funcs, assum=()):
     """Intent:
@@ -1311,11 +1766,16 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
 
     Notes:
         The search compares with the claim's tolerance, or the 1e-9
-        default. For a closed ordering with no declared tolerance, a
-        search that reproduces nothing is followed by one exact
-        comparison at derive's own witness: a violation there, however
-        small, is `falsified` with that witness. An equality `==` gets
-        the same exact comparison; `~=` does not.
+        default. For a closed ordering, an equality `==` or `~=` with no
+        declared tolerance, a search that reproduces nothing is followed
+        by an exact comparison at derive's own witness, its free
+        coordinates drawn (`_exact_witness_violation`): first on the
+        values the code returned, then (after the certified witness) on
+        the mathematics, the function run on the point's exact values. A
+        violation there, however small, is `falsified` with that
+        witness, and `mathema.exact_witness` records the reading, both
+        sides exactly and as computed, and whether the float
+        computation holds there within its allowance.
     """
     from . import corroboration as C
     if proof.meta.get("mathema.witness_certified") and falsified.counterexample:
@@ -1364,8 +1824,15 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         falsified.meta = {**(falsified.meta or {}),
                           "mathema.corroboration": "reproduced"}
         pt = _fmt_point(result.point, deps["names"])
+        named = bool(pt)
+        if not named:
+            # a claim with no coordinate is witnessed by its own calls,
+            # which carry what failed there
+            from ._brute_force import call_witness
+            pt = call_witness(fn, facts, deps, result.point,
+                              named=not cj.domain) or ""
         falsified.counterexample = pt or falsified.counterexample
-        detail = deps["probe_finite"](result.point)
+        detail = deps["probe_finite"](result.point) if named else None
         if pt and isinstance(detail, str) and \
                 detail.startswith("the claim's own"):
             # the witness carries why the claim fails there: its own
@@ -1397,21 +1864,17 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             # evidence than was actually obtained.
             falsified.route = "probe:semi_analytical"
         return falsified
+    found: list = []
     exact_point, compared = _exact_witness_violation(
-        cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names)
+        cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names,
+        found=found)
     if exact_point is not None:
-        pt = _fmt_point(exact_point, deps["names"])
-        falsified.meta = {**(falsified.meta or {}),
-                          "mathema.corroboration": "reproduced"}
-        falsified.counterexample = pt or falsified.counterexample
-        if falsified.stratum is None:
-            falsified.stratum = {"mathematics": "unsound",
-                                 "blame": "claim", "witness": pt}
+        _exact_witness_found(falsified, deps, fn, facts, exact_point, found[0],
+                             named=not cj.domain)
         falsified.note = (
             f"{falsified.note}; reproduced exactly at derive's witness: "
-            f"the executed code violates the relation there by less than "
-            f"the default tolerance ({_DEFAULT_ORDERING_SLACK:g}) the probe "
-            f"route allows, and compared exactly it fails").lstrip("; ")
+            f"{_allowed_miss_words(deps, exact_point)}, and compared "
+            f"exactly it fails").lstrip("; ")
         return falsified
     certified = (_certified_point_witness(cj, deps, proof, cj_domain)
                  if not assum else None)
@@ -1428,6 +1891,28 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"there, while every float draw passes (the computation holds "
             f"within its tolerance)").lstrip("; ")
         return falsified
+    found = []
+    disagreed: list = []
+    exact_point, _held = _exact_witness_violation(
+        cj, fn, facts, cj_domain, bound_funcs, assum, proof, seq_names,
+        found=found, reading="mathematics", disagreed=disagreed)
+    disagreement_text = f"; {disagreed[-1]}" if disagreed else ""
+    if exact_point is not None:
+        record = _exact_witness_found(falsified, deps, fn, facts, exact_point,
+                                      found[0], named=not cj.domain)
+        pt = record["at"]
+        if pt:
+            falsified.counterexample = (
+                f"{pt}: {record['computed']}, false here in exact arithmetic "
+                f"({record['exact']})")
+        falsified.note = (
+            f"{falsified.note}; reproduced exactly at derive's witness: the "
+            f"code, run on the point's exact values, makes the claim false "
+            f"there ({record['exact']})"
+            + (", while the float computation agrees within its allowance"
+               if record["computation"] == "holds within its allowance"
+               else "") + disagreement_text).lstrip("; ")
+        return falsified
     falsified.verdict = "unknown"
     falsified.meta = {**(falsified.meta or {}),
                       "mathema.corroboration": "uncorroborated"}
@@ -1442,13 +1927,14 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
             f"{falsified.note}; derive found this claim false, but "
             f"{C.EXACT_ARITHMETIC_ONLY_NOTE} (run at derive's "
             f"counterexample, the two sides come out equal), so the "
-            f"verdict stays unknown").lstrip("; ")
+            f"verdict stays unknown{disagreement_text}").lstrip("; ")
         return falsified
     falsified.note = (
         f"{falsified.note}; derive found this claim false, but no run of "
         f"the code inside the domain reproduced it ({result.checked} points "
         f"checked); a disproof nothing reproduces is probably a mathema "
-        f"bug worth reporting, so the verdict stays unknown")
+        f"bug worth reporting, so the verdict stays unknown"
+        f"{disagreement_text}")
     return falsified
 
 
@@ -1736,7 +2222,8 @@ def _interval_discontinuities(cj, fn, facts, deps, cj_domain, corners):
 
 def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      assum=(), budget=None, missing=None,
-                     holes=None, excluded=None) -> "Probe | None":
+                     holes=None, excluded=None,
+                     witness: "dict | None" = None) -> "Probe | None":
     """Intent:
         The computation claim a derive proof spawns. `parent` is proven in
         exact arithmetic, which is all a derive `proven` says; the
@@ -1771,7 +2258,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         missing input is classified, never judged. `excluded`, when given,
         is a predicate over points that the claim's premises leave out
         beyond its relations (`assuming f is defined`): such a point is
-        never executed.
+        never executed. `witness`, when given, receives the executed
+        point a falsification names, under `"point"`.
     """
     from . import corroboration as C
     from ._sampling import representation_reach
@@ -1900,6 +2388,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                    if coverage is not None and coverage.at_discontinuities
                    else "probe")
     if sweep.fragile_point is not None:
+        if witness is not None:
+            witness["point"] = dict(sweep.fragile_point)
         pt = _fmt_point(sweep.fragile_point, deps["names"])
         remedy = ("narrow the domain, "
                   + ("" if not reach_text else
@@ -1923,6 +2413,17 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                        f"claim is false in exact arithmetic as well as in "
                        f"the computation ({sweep.detail})",
                 meta={"mathema.proof_contradicted": pt})
+        if sweep.detail.startswith("f returned None from present inputs"):
+            # a None the return type does not declare: no value, whatever
+            # the mathematics says; the witness carries the call and why
+            return Probe(
+                name, parent.statement, "falsified", route=float_route,
+                n=numbers, counterexample=f"{pt}: {sweep.detail}", note=what,
+                sketch=f"{parent.name} is proven, but its computation gives "
+                       f"no value at {pt}: {sweep.detail}",
+                stratum={"mathematics": "sound", "blame": "implementation",
+                         "cause": "implementation:absent", "witness": pt},
+                meta=tried_meta or None)
         relation_failed = sweep.detail.startswith("the relation fails")
         found = None
         if relation_failed:
@@ -1934,6 +2435,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             exact_at = getattr(deps["evaluate"], "exact_at", None)
             found = _conditioning.at_miss(
                 fn, facts, called, gap, reference, cj_domain,
+                calls=_returned_calls(deps["evaluate"].calls(), facts),
                 reduces=_conditioning.claim_reduces(cj),
                 exact_at=(lambda point: _capped_exact(exact_at, point))
                 if exact_at is not None else None)
@@ -1980,5 +2482,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(name, parent.statement, "skipped", route=float_route,
                      note=f"{what}; no in-domain point satisfied the "
                           f"claim's premises, so nothing was executed")
+    largest = deps["evaluate"].largest_pass()
+    if largest is not None:
+        from .conjecture import passed_within_words
+        gap, allowance, at = largest
+        what = f"{what}; " + passed_within_words(
+            cj.relation, gap, _fmt_point(at, deps["names"]) if at else None,
+            allowance, cj.tolerance)
     return Probe(name, parent.statement, "holds", route=float_route,
                  n=numbers, note=what, meta=tried_meta or None)

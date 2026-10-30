@@ -77,10 +77,16 @@ def test_a_mean_lies_between_the_extremes_whatever_the_runtime_type(fn):
         (proof.verdict, proof.note)
     p = _verdict(fn, _BETWEEN)
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    big = "[1.7976931348623157e+308, 1.7976931348623157e+308]"
+    received = {mean_of: f"numpy.array({big})",
+                series_mean: f"pandas.Series({big}, index=pandas.bdate_range("
+                             f"'2020-01-01', periods=2))",
+                polars_mean: f"polars.Series(values={big})",
+                marked_mean: f"pandas.Series({big}, index=pandas.bdate_range("
+                             f"'2020-01-01', periods=2))"}[fn]
     assert p.counterexample == (
-        "link 1: min(xs) <= f(xs): xs = [1.7976931348623157e+308, "
-        "1.7976931348623157e+308]: f returned inf, and an infinity for a "
-        "finite input is no value"), p.counterexample
+        f"link 1: min(xs) <= f(xs): xs = {received}: f returned inf, and an "
+        f"infinity for a finite input is no value"), p.counterexample
     bounded = _verdict(fn, "for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)")
     assert bounded.verdict == "holds", \
         (bounded.verdict, bounded.note, bounded.counterexample)
@@ -111,8 +117,10 @@ def test_the_list_sampling_note_states_the_nested_list_cap():
 
 
 def test_an_undeclared_vector_is_sampled_as_a_list_and_hinted():
-    hint = ("returns is used as a vector; this module imports pandas: "
-            "to sample it as one, annotate: returns: pd.Series")
+    hint = ("returns is used as a vector; this module imports pandas, "
+            "polars and numpy, whose types each support that use: to "
+            "sample it as one, annotate: returns: pd.Series, returns: "
+            "pl.Series or returns: np.ndarray")
     facts = mathema.analyze(unannotated_mean)
     assert facts.runtime_hints["returns"]["text"] == hint
     p = _verdict(unannotated_mean, "for returns in R^n, f(returns) == "
@@ -189,15 +197,30 @@ def test_a_claims_file_names_a_runtime_type_for_code_it_cannot_annotate():
 def test_the_cli_prints_the_hint_under_the_function(tmp_path, capsys):
     from mathema.cli import main
     (tmp_path / "quant_hint.py").write_text(
-        "import pandas as pd\n\n\n"
+        "import numpy as np\nimport pandas as pd\n\n\n"
         "def mean_return(returns):\n"
         "    return returns.mean()\n")
     main(["check", str(tmp_path / "quant_hint.py"), "--root", str(tmp_path),
           "--claim", "for returns in R^n, f(returns) <= max(returns)"])
     out = capsys.readouterr().out
     assert ("hint: returns is used as a vector; this module imports "
-            "pandas: to sample it as one, annotate: returns: pd.Series") \
-        in out, out
+            "pandas and numpy, whose types both support that use: to "
+            "sample it as one, annotate: returns: pd.Series or returns: "
+            "np.ndarray") in out, out
+
+
+def test_a_use_only_the_imported_library_supports_draws_its_type(
+        tmp_path, capsys):
+    from mathema.cli import main
+    (tmp_path / "quant_promoted.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def mean_return(returns):\n"
+        "    return returns.mean()\n")
+    main(["check", str(tmp_path / "quant_promoted.py"), "--root",
+          str(tmp_path), "--claim",
+          "for returns in [-1e6, 1e6]^n, f(returns) <= max(returns)"])
+    out = capsys.readouterr().out
+    assert "hint:" not in out and "misspecified" not in out, out
 
 
 @pytest.mark.parametrize("fn", [mean_of, series_mean, polars_mean])

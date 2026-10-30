@@ -42,6 +42,7 @@ import os
 import subprocess
 
 from .grammar import split_relation
+from .identity import namespaced_form, same_form
 from .routes import safety_predicates
 from .spec import classify_verdict, write_yaml
 
@@ -181,13 +182,29 @@ def invert_conjecture(statement: str, claim_name: str) -> "tuple[str | None, str
     return None, f"relation {cj.relation!r} has no mechanical inverse"
 
 
+def _asked_route(row: dict) -> "str | None":
+    """Intent:
+        The route a claim row was asked on: the route its author wrote
+        (`authored.route`), else the route its record names. A record's
+        `route` is the mechanism that decided the row (`derive` for a
+        claim asked on best and settled by derive), which is no request.
+    """
+    authored = row.get("authored")
+    asked = authored.get("route") if isinstance(authored, dict) else None
+    return asked or row.get("route")
+
+
 def _adjudicate_candidate(root: str, key: str, statement: str,
-                          route: "str | None"):
+                          route: "str | None", tolerance=None):
     """Intent:
         Dry-run one candidate corrected claim against the live
-        function: `(probe, None)` when it adjudicated, `(None,
-        reason)` when it could not run (function unresolvable,
-        statement rejected). Read-only; the plan stays a true preview.
+        function, under `tolerance` when one is given, every line of it
+        (the claim's row and its computation row, `NAME[float]`):
+        `(probe, None)` when it adjudicated, the probe being the first
+        line that falsifies, else the first that neither holds nor is
+        proven, else the claim's own row; `(None, reason)` when it
+        could not run (function unresolvable, statement rejected).
+        Read-only; the plan stays a true preview.
     """
     from .conjecture import _resolve_func_ref, check_conjectures
     from .conjecture import claim as _claim
@@ -201,14 +218,22 @@ def _adjudicate_candidate(root: str, key: str, statement: str,
     if base_route not in ("probe", "derive"):
         base_route = "best"
     try:
-        cj = _claim(statement, name="corrected_candidate", route=base_route)
-        probes = check_conjectures(fn, [cj])
+        cj = _claim(statement, name="corrected_candidate", route=base_route,
+                    tolerance=tolerance)
+        probes = check_conjectures(fn, [cj], float_companions=True)
     except TimeoutError:
         raise
     except Exception as e:
         return None, f"the candidate could not be checked ({e})"
     if not probes:
         return None, "the candidate could not be checked"
+    bases = [classify_verdict(p.verdict) for p in probes]
+    for probe, base in zip(probes, bases):
+        if base == "falsified":
+            return probe, None
+    for probe, base in zip(probes, bases):
+        if base not in ("proven", "holds"):
+            return probe, None
     return probes[0], None
 
 
@@ -430,6 +455,40 @@ def _another_claim_holds(claims: list, target: dict) -> bool:
     return False
 
 
+def computation_line_refusal(key: str, row: str, parent: str,
+                             found: "dict | None",
+                             whole: bool = False) -> str:
+    """Intent:
+        Why a falsified computation line `row` (the computation of the
+        claim `parent`) is not accepted alone, and the ways out. It is
+        accepted alone only where its recorded conditioning says the
+        loss is inherent; `found` is that record, None where none was
+        read at the witness (a raise, a NaN or an inf, not a miss of
+        the relation). A loss the conditioning does not explain is the
+        code's; one not known to be inherent counts as the code's.
+        `whole` is whether `parent` is proven, so that it can be
+        accepted whole as a discovery with this line.
+    """
+    from ._conditioning import command_word
+    cause = (found or {}).get("words") or (
+        "no conditioning was read at its witness, so whether the loss is "
+        "inherent is not decided")
+    whose = ("the code's" if (found or {}).get("inherent") is False
+             else "not known to be inherent, which counts as the code's")
+    accept_whole = (f"accept the whole claim as a discovery, keeping both "
+                    f"lines, run: mathema accept {key} "
+                    f"{command_word(parent)} --as discovery; "
+                    if whole else "")
+    return (f"{row} is the computation of {parent}, falsified: {cause}. A "
+            f"computation line is accepted alone only where its loss is "
+            f"inherent (no float64 computation could do better there); "
+            f"this loss is {whose}. The ways out: fix the code, and the "
+            f"recorded counterexample replays until the line holds; "
+            f"{accept_whole}or "
+            f"narrow the claim's domain knowingly: edit {parent}, then run: "
+            f"mathema accept {key} {command_word(parent)} --as superseded")
+
+
 def plan_acceptances(root: str, key: str, requests: list,
                      by: str | None = None, note: str | None = None,
                      corrected: str | None = None) -> list:
@@ -563,13 +622,13 @@ def plan_rename(root: str, new_key: str, old_key: str,
     entry = doc[old_key]
     recorded = (entry.get("identity") or {}).get("form")
     live = analyze(fn).form
-    matches = recorded == live
+    matches = same_form(recorded, live)
     actions = [f"rename the record {old_key} to {new_key}, carrying its "
                f"claims, acceptance history, lineage and sign-offs",
                f"remove {os.path.relpath(old_path, root)}",
                "re-stamp the integrity and re-anchor it to HEAD"]
     if not matches:
-        actions.insert(0, f"the record's form hash {recorded} differs from "
+        actions.insert(0, f"the record's form hash {namespaced_form(recorded)} differs from "
                           f"{new_key}'s {live}: it may not be the same "
                           f"function, and the next verify checks it again")
     if old_key in load_locks(root):
@@ -640,6 +699,160 @@ def _apply_rename(plan: dict, attestation: "dict | None") -> str:
     return f"reconciled: {old_key} renamed to {new_key} (by {who})"
 
 
+def _is_equivalence(row: "dict | None") -> bool:
+    """Whether a record row states a function equivalence `f =:= g`."""
+    if not row:
+        return False
+    try:
+        _lhs, relation, _rhs = split_relation(row.get("statement") or "")
+    except ValueError:
+        # a predicate row (`absent(f, x)`) has no relation of its own
+        return False
+    return relation == "=:="
+
+
+#: the `=:=` computation row's default (`equivalence._values_agree`,
+#: twice `_allowance.allowance`) as the kind a `~=` correction states:
+#: `2e-7 * m + 2e-9` for values of magnitude m of at least 1e-2, the
+#: default exactly there; below 1e-2 the default's absolute part
+#: shrinks with m (`4e-7 * m`, and 2e-9 at or below 1e-9) while this
+#: kind keeps its floor
+DEFAULT_CORRECTION_TOLERANCE = {"rel": 2e-7, "floor": 2e-9}
+
+
+def _approximate_correction(root: str, key: str, row: dict) -> tuple:
+    """Intent:
+        The correction a falsified mathematics line of `f =:= g` offers,
+        as `(statement, tolerance, None)`: the same claim with `f(x) ~=
+        g(x)` in place of `f =:= g`, over f's parameters, at the
+        tolerance its computation compared under, as a claim writes it:
+        a declared number or kind as written, or, with none declared,
+        `DEFAULT_CORRECTION_TOLERANCE`. `(None, None, reason)` when
+        none can be stated: a function or statement mathema cannot
+        read.
+    """
+    from ._tolerance import read_tolerance, written_tolerance
+    from .conjecture import _effective_facts, _resolve_func_ref
+    try:
+        declared = read_tolerance(row.get("tolerance"))
+    except ValueError as e:
+        return None, None, f"its tolerance does not read ({e})"
+    if declared is None:
+        tolerance = dict(DEFAULT_CORRECTION_TOLERANCE)
+    elif isinstance(declared, (int, float)) \
+            and not isinstance(declared, bool):
+        tolerance = float(declared)
+    else:
+        tolerance = written_tolerance(declared)
+        if not isinstance(tolerance, dict):
+            return None, None, f"its tolerance {declared!r} is not a number"
+    if not _is_equivalence(row):
+        return None, None, "the statement does not read as `f =:= g`"
+    lhs, relation, rhs = split_relation(row.get("statement") or "")
+    if not lhs.rstrip().endswith("f") \
+            or not rhs.strip().isidentifier():
+        return None, None, "the statement does not read as `f =:= g`"
+    try:
+        params = list(_effective_facts(_resolve_func_ref(key, root=root)).params)
+    except Exception as e:
+        return None, None, f"cannot read {key}'s parameters ({e})"
+    args = ", ".join(params)
+    prefix = lhs.rstrip()[:-1]
+    return (f"{prefix}f({args}) ~= {rhs.strip()}({args})", tolerance, None)
+
+
+def tolerance_words(tolerance) -> str:
+    """A tolerance for a line a person reads: a number as `:g` writes
+    it (`0.01`), a kind as a claims file writes it (`{rel: 2e-7,
+    floor: 2e-9}`)."""
+    from ._tolerance import read_tolerance
+    if isinstance(tolerance, dict):
+        return read_tolerance(tolerance).text()
+    return f"{tolerance:g}"
+
+
+def _whole_claim_discovery(root: str, key: str, claims: list, target: dict,
+                           as_: str) -> "dict | None":
+    """Intent:
+        What a discovery that retires a claim with its computation line
+        changes in its plan, or None when `target` is no such claim or
+        `as_` is not `discovery`. Two claims retire whole. An `f =:= g`
+        claim is a discovery when either of its lines is falsified, and
+        its computation row `NAME[float]` alone is never accepted. A
+        value claim whose own row is proven is a discovery when its
+        computation line is falsified. Either retires with both rows:
+        `{"base": "falsified", "witness": the falsified line's witness,
+        "moves_with": [its computation row], "correction": (statement,
+        tolerance, reason) or None, "equivalence": whether it states
+        `f =:= g`}`. The correction is offered where the mathematics
+        line of `f =:= g` is falsified and the computation holds
+        (`_approximate_correction`); a falsified computation offers
+        none, the replacement being the author's to state.
+
+    Raises:
+        AcceptanceError: a discovery on the computation row of an
+        `f =:= g` claim alone.
+    """
+    if as_ != "discovery":
+        return None
+    parent_name = (target.get("meta") or {}).get("mathema.companion_of")
+    if parent_name is not None:
+        parent = next((c for c in claims if c.get("name") == parent_name),
+                      None)
+        if _is_equivalence(parent):
+            raise AcceptanceError(
+                f"{target.get('name')} is the computation of {parent_name}, "
+                f"an equivalence, and the computation is what runs, so "
+                f"{parent_name} cannot stand where it fails: accept the "
+                f"whole claim as a discovery (mathema accept {key} "
+                f"{parent_name} --as discovery, keeping both lines), or "
+                f"replace it with a claim true of the running code "
+                f"(--corrected \"<law>\")")
+        return None
+    name = target.get("name")
+    computation = _computation_row(claims, name)
+    main = classify_verdict(target.get("verdict") or "")
+    computed = classify_verdict((computation or {}).get("verdict") or "")
+    if not _is_equivalence(target):
+        # a value claim retires whole where its mathematics is proven
+        # and its computation line falsified
+        if _proven_row(target) and computed == "falsified":
+            return {"base": "falsified",
+                    "witness": computation.get("counterexample"),
+                    "moves_with": [computation], "correction": None,
+                    "equivalence": False}
+        return None
+    if main in ("falsified", "invalidated"):
+        witness = target.get("counterexample")
+    elif computed == "falsified":
+        witness = computation.get("counterexample")
+    else:
+        return None
+    correction = None
+    if main == "falsified" and str(target.get("route") or "").startswith(
+            "derive") and computed in ("holds", "proven"):
+        correction = _approximate_correction(root, key, target)
+    return {"base": "falsified", "witness": witness,
+            "moves_with": [computation] if computation else [],
+            "correction": correction, "equivalence": True}
+
+
+def _proven_row(row: "dict | None") -> bool:
+    """Whether a record row's own verdict is a proof."""
+    return classify_verdict((row or {}).get("verdict") or "") in (
+        "proven", "derived")
+
+
+def _computation_row(claims: list, name: "str | None") -> "dict | None":
+    """The computation line of the claim `name` among a record's claim
+    rows (`name[float]`, or the line a probe keeps), None when it has
+    none."""
+    from .gates import computation_line_of
+    return next((c for c in claims
+                 if name is not None
+                 and computation_line_of(c.get("meta")) == name), None)
+
+
 def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                     by: str | None = None, note: str | None = None,
                     corrected: str | None = None,
@@ -690,6 +903,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             "witness": target.get("counterexample"),
             "others_hold": _another_claim_holds(claims, target),
             "actions": []}
+    whole = _whole_claim_discovery(root, key, claims, target, as_)
+    if whole is not None:
+        base = whole["base"]
+        plan["witness"] = whole["witness"]
+        plan["moves_with"] = whole["moves_with"]
     if as_ == "trusted":
         # external testimony (a compendium row) accepted at the
         # level the row claims: the row's verdict becomes that
@@ -707,19 +925,29 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                   "skipped); anything else is either already evidence "
                   "or needs the ordinary flow")
         claimed = meta.get("mathema.compendium_claimed", "holds")
+        # a row claimed proven within float64 is adopted at that
+        # strength: its route caps whatever rests on it
+        capped = str(meta.get("mathema.compendium_route") or "")
+        capped = capped if capped.endswith(":within_float64") else ""
         written, versions = written_row(root, key, claim_name)
         plan["accepted"] = {"as": "trusted",
                             "at": datetime.date.today().isoformat(),
                             "level": claimed,
                             "source": meta.get("mathema.compendium", ""),
                             "statement": written, "versions": versions}
+        if capped:
+            plan["accepted"]["route"] = capped
+            plan["new_route"] = capped
         if by:
             plan["accepted"]["by"] = by
         if note:
             plan["accepted"]["note"] = note
         plan["new_verdict"] = claimed
         plan["actions"].append(
-            f"trust {claim_name} at its claimed level ({claimed}), on "
+            f"trust {claim_name} at its claimed level ({claimed}"
+            + (f", capped at within_float64 by its route {capped}"
+               if capped else "")
+            + "), on "
             f"the word of {meta.get('mathema.compendium') or 'its compendium entry'}; "
             f"when `mathema verify` checks this key again, a local "
             f"verdict replaces the testimony")
@@ -829,6 +1057,16 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                 "was wrong about the world, accept it as a discovery "
                 "(--as discovery), optionally stating what is true with "
                 "--corrected")
+        parent = (target.get("meta") or {}).get("mathema.companion_of")
+        from .gates import computation_line_of
+        if computation_line_of(target.get("meta")):
+            found = (target.get("meta") or {}).get("mathema.conditioning")
+            if not (found and found.get("inherent") is True):
+                owner = next((c for c in claims if c.get("name") == parent),
+                             None)
+                raise AcceptanceError(computation_line_refusal(
+                    key, claim_name, parent, found,
+                    whole=_proven_row(owner)))
         accepted = {"as": "discovery", "at": datetime.date.today().isoformat(),
                     "form": form}
         if by:
@@ -836,7 +1074,6 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         if note:
             accepted["note"] = note
         plan["accepted"] = accepted
-        parent = (target.get("meta") or {}).get("mathema.companion_of")
         plan["companion_of"] = parent
         if parent:
             # a float companion is no authored law: nothing declares it
@@ -853,8 +1090,22 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         # VERIFIED here and now: the author's --corrected statement, or
         # a mechanically sound inverse, each adjudicated against the
         # live function before anything may be written
+        c_tolerance = None
+        offered = "its mechanical inverse"
         if corrected is not None:
             candidate, why_not, stated = corrected, None, True
+        elif whole is not None and not whole["equivalence"]:
+            candidate, why_not, stated = None, (
+                f"{claim_name} is proven, so no inverse of it can hold; "
+                f"what the running code does is the author's to state"), False
+        elif whole is not None:
+            candidate, c_tolerance, why_not = (
+                whole["correction"] or (None, None, (
+                    "an equivalence has no mechanical inverse, and its "
+                    "computation does not hold, so no `~=` correction "
+                    "at its tolerance can")))
+            stated = False
+            offered = "its `~=` correction"
         else:
             candidate, why_not = invert_conjecture(
                 target.get("statement") or "", claim_name)
@@ -862,7 +1113,8 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         c_verdict = c_n = None
         if candidate:
             probe, err = _adjudicate_candidate(root, key, candidate,
-                                               target.get("route"))
+                                               _asked_route(target),
+                                               tolerance=c_tolerance)
             if probe is None:
                 if stated:
                     raise AcceptanceError(
@@ -871,19 +1123,22 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                 candidate, why_not = None, err
             else:
                 base_c = classify_verdict(probe.verdict)
+                line = (f" on its computation line {probe.name}"
+                        if "[" in (probe.name or "") else "")
                 if base_c == "falsified":
                     if stated:
                         raise AcceptanceError(
-                            f"--corrected {candidate!r} itself falsifies "
-                            f"(counterexample: {probe.counterexample}); a "
-                            "correction that is wrong too is never written")
+                            f"--corrected {candidate!r} itself falsifies"
+                            f"{line} (counterexample: "
+                            f"{probe.counterexample}); a correction that "
+                            "is wrong too is never written")
                     candidate, why_not = None, (
-                        "its mechanical inverse falsifies too "
+                        f"{offered} falsifies too{line} "
                         f"(counterexample: {probe.counterexample})")
                 elif not stated and base_c not in ("proven", "holds"):
                     candidate, why_not = None, (
-                        f"its mechanical inverse comes out "
-                        f"{probe.verdict!r}, not a holding verdict")
+                        f"{offered} comes out "
+                        f"{probe.verdict!r}{line}, not a holding verdict")
                 else:
                     c_verdict = probe.verdict
                     c_n = getattr(probe, "n", None)
@@ -892,16 +1147,26 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             + (f" (superseded_by: {claim_name}_corrected)" if candidate
                else "")
             + ", keeping its counterexample as the witness")
+        for row in plan.get("moves_with") or ():
+            plan["actions"].append(
+                f"move its computation line {row.get('name')!r} "
+                f"({row.get('verdict')}) to the discoveries section with it")
         if candidate:
             plan["corrected_statement"] = candidate
             plan["corrected_name"] = f"{claim_name}_corrected"
             plan["corrected_verdict"] = c_verdict
+            if c_tolerance is not None:
+                plan["corrected_tolerance"] = c_tolerance
             if c_n:
                 plan["corrected_n"] = c_n
+            kind = ("stated" if stated else "approximate"
+                    if whole is not None else "inverted")
             plan["actions"].append(
-                f"declare the {'stated' if stated else 'inverted'} corrected "
-                f"claim {plan['corrected_name']!r}: {candidate!r}, "
-                f"checked now: {c_verdict}"
+                f"declare the {kind} corrected "
+                f"claim {plan['corrected_name']!r}: {candidate!r}"
+                + (f" with tolerance {tolerance_words(c_tolerance)}"
+                   if c_tolerance is not None else "")
+                + f", checked now: {c_verdict}"
                 + (f" over {c_n} trials" if c_n else ""))
         else:
             plan["actions"].append(
@@ -1026,12 +1291,22 @@ def _apply_attested(plan: dict, attestation) -> str:
         meta["mathema.previous_verdict"] = target.get("verdict")
         target["meta"] = meta
         target["verdict"] = plan["new_verdict"]
+    if plan.get("new_route"):
+        target["route"] = plan["new_route"]
     if (plan.get("accepted") or {}).get("as") == "discovery":
         claims = entry.get("claims") or []
         claims.remove(target)
         if plan.get("corrected_name"):
             target["superseded_by"] = plan["corrected_name"]
         entry.setdefault("discoveries", []).append(target)
+        for row in plan.get("moves_with") or ():
+            # a line of the claim retires with it, under the same
+            # acceptance
+            if row in claims:
+                claims.remove(row)
+                row.setdefault("acceptance_history", []).append(dict(event))
+                row["accepted"] = dict(plan["accepted"])
+                entry["discoveries"].append(row)
         if plan.get("corrected_statement"):
             meta = {"mathema.surface": "declared",
                     "mathema.discovered_from": target["name"],
@@ -1057,6 +1332,8 @@ def _apply_attested(plan: dict, attestation) -> str:
             }
             if plan.get("corrected_n"):
                 new_claim["n"] = plan["corrected_n"]
+            if plan.get("corrected_tolerance") is not None:
+                new_claim["tolerance"] = plan["corrected_tolerance"]
             claims.append(new_claim)
         entry["claims"] = claims
     if plan.get("declared_edits"):
@@ -1080,9 +1357,17 @@ _KIND_PHRASE = {"evidence": "evidence", "risk": "a risk",
 
 def _verdict_line(plan: dict) -> "str | None":
     """The verdict being accepted, with its witness when it was
-    falsified and its trial count when it holds."""
+    falsified, or its computation line's when a proven claim retires
+    with that falsified line, and its trial count when it holds."""
     verdict = plan.get("verdict") or ""
     base = classify_verdict(verdict)
+    falsified_line = next(
+        (r for r in plan.get("moves_with") or ()
+         if classify_verdict(r.get("verdict") or "") == "falsified"), None)
+    if base in ("proven", "derived") and falsified_line is not None \
+            and plan.get("witness"):
+        return (f"{base}; its computation line {falsified_line.get('name')} "
+                f"falsified at {plan['witness']}")
     if base in ("falsified", "invalidated") and plan.get("witness"):
         return f"{base} at {plan['witness']}"
     if base == "holds" and plan.get("n"):
@@ -1099,6 +1384,8 @@ def _discovery_lines(plan: dict) -> list:
     if parent:
         return [f"{moved}; as the float companion of {parent}, it stays "
                 f"retired while {parent} stands"]
+    for row in plan.get("moves_with") or ():
+        moved += f", with its computation line {row.get('name')}"
     edits = plan.get("declared_edits") or []
     if edits:
         moved += ", out of " + " and ".join(edits)
@@ -1111,9 +1398,12 @@ def _discovery_lines(plan: dict) -> list:
         if plan.get("corrected_n"):
             checked += f" over {plan['corrected_n']} trials"
         stub = corrected_stub(plan) or {}
+        tolerance = (f" with tolerance {tolerance_words(stub['tolerance'])}"
+                     if stub.get("tolerance") is not None else "")
         lines.append(f"the corrected claim takes its place: "
                      f"{stub.get('name')} [{stub.get('route')}]: "
-                     f"{stub.get('statement')}, checked now: {checked}")
+                     f"{stub.get('statement')}{tolerance}, checked now: "
+                     f"{checked}")
     elif not plan.get("others_hold"):
         lines.append('no corrected claim; pass --corrected "<law>" to state '
                      "what is true")
@@ -1174,15 +1464,19 @@ def corrected_stub(plan: dict) -> dict | None:
     """Intent:
         The declared-layer stanza for a discovery's corrected claim:
         its name, statement and route, the route reduced to the base
-        spelling a claims file takes (`probe`, `derive` or `best`).
+        spelling a claims file takes (`probe`, `derive` or `best`), and
+        its tolerance when the correction states one.
         None when the plan corrects no claim.
     """
     if not plan.get("corrected_statement"):
         return None
     route = (plan["claim"].get("route") or "best").split(":", 1)[0]
-    return {"name": plan["corrected_name"],
+    stub = {"name": plan["corrected_name"],
             "statement": plan["corrected_statement"],
             "route": route if route in ("probe", "derive") else "best"}
+    if plan.get("corrected_tolerance") is not None:
+        stub["tolerance"] = plan["corrected_tolerance"]
+    return stub
 
 
 def _carry_trust(c: dict, accepted: dict, history: list) -> None:
@@ -1396,7 +1690,8 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
                 continue
             _carry_trust(c, accepted, history)
             continue
-        if accepted.get("form") != fresh_form and not accepted.get("stale"):
+        if not same_form(accepted.get("form"), fresh_form) \
+                and not accepted.get("stale"):
             accepted["stale"] = True
             history.append({"at": datetime.date.today().isoformat(),
                             "event": "stale",
@@ -1657,3 +1952,294 @@ def scope_intent_status(root: str, key: str,
     now = hashlib.sha256(current_text.strip().encode()).hexdigest()[:12]
     return "documented" if now == (entry.get("accepted") or {}).get(
         "text_hash") else "stale"
+
+
+_CHANGED_WORDS = {"sig": "signature", "raises": "raised exceptions",
+                  "intent_hash": "intent text"}
+_LEVEL_ORDER = {"codebase": 0, "package": 1, "module": 2, "function": 3}
+
+
+def _in_project(root_abs: str, path: "str | None") -> bool:
+    """Intent:
+        Whether a source file belongs to the project at `root_abs`:
+        inside the root, and not inside an installed environment's
+        site-packages.
+    """
+    import os
+    if not path:
+        return False
+    path = os.path.abspath(path)
+    inside = os.path.commonpath([root_abs, path]) == root_abs
+    return inside and "site-packages" not in path.split(os.sep)
+
+
+def _marker_line(lines: list, start: int = 0,
+                 end: "int | None" = None) -> "int | None":
+    """Intent:
+        The 1-based number of the first line in `lines[start:end]`
+        that opens an intent: an `Intent:` line or an `# Intent`
+        style markdown heading. None when no line does.
+    """
+    import re
+    heading = re.compile(r"^#{1,4}\s*Intent\s*$", re.IGNORECASE)
+    for i in range(start, len(lines) if end is None else end):
+        text = lines[i].strip()
+        if text.lower() == "intent:" or heading.match(text):
+            return i + 1
+    return None
+
+
+def _file_lines(path: str) -> list:
+    """Intent:
+        The lines of a text file, empty when it cannot be read.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().splitlines()
+    except OSError:
+        return []
+
+
+def _scope_source(root: str, key: str) -> tuple:
+    """Intent:
+        Where a scope's stated intent is written, as `(path, line)`:
+        the top README for `__project__`; otherwise the module's own
+        source when its docstring states the intent, else the README.md
+        beside it. `(None, None)` when the scope does not resolve.
+    """
+    import importlib
+    import os
+
+    from .docstring import _read_module_intent
+    if key == "__project__":
+        path = os.path.join(root, "README.md")
+    else:
+        try:
+            module = importlib.import_module(key)
+        except Exception:
+            return None, None
+        src = getattr(module, "__file__", None)
+        if not src:
+            return None, None
+        path = src
+        if _read_module_intent(module) is None:
+            path = os.path.join(os.path.dirname(src), "README.md")
+    return path, _marker_line(_file_lines(path)) or 1
+
+
+def _scope_item(root: str, key: str, level: str) -> "dict | None":
+    """Intent:
+        A module, package or codebase intent that waits on a person:
+        stated and never accepted (`new`), or accepted and since
+        reworded (`stale`). None when nothing is stated or the
+        acceptance is current.
+    """
+    text = _current_scope_intent(root, key)
+    if not text:
+        return None
+    status = scope_intent_status(root, key, text)
+    if status == "documented":
+        return None
+    path, line = _scope_source(root, key)
+    item = {"key": key, "level": level,
+            "status": "stale" if status == "stale" else "new",
+            "text": text, "file": path, "line": line}
+    if status == "stale":
+        item["changed"] = [_CHANGED_WORDS["intent_hash"]]
+        accepted = (_scope_acceptances(root).get(key) or {}).get(
+            "accepted") or {}
+        item["accepted_at"] = accepted.get("at")
+    return item
+
+
+def _function_item(key: str, entry: dict, fn) -> "dict | None":
+    """Intent:
+        A function intent that waits on a person, read from its
+        record: a recorded intent with no acceptance (`new`), or an
+        acceptance whose signature, raised exceptions or text moved on
+        (`stale`, with what changed). None when there is no recorded
+        intent or the acceptance is current.
+    """
+    import inspect
+    text = (entry.get("intent") or "").strip()
+    if not text:
+        return None
+    accepted = entry.get("intent_accepted") or {}
+    changed: list = []
+    if accepted:
+        fresh = _intent_binding(entry)
+        changed = [_CHANGED_WORDS[what]
+                   for what in ("sig", "raises", "intent_hash")
+                   if accepted.get(what) != fresh[what]]
+        if not changed and not accepted.get("stale"):
+            return None
+    path = line = None
+    from .analysis import foreign_body
+    if fn is not None and not foreign_body(fn):
+        try:
+            path = inspect.getsourcefile(fn)
+            body, first = inspect.getsourcelines(fn)
+        except (OSError, TypeError):
+            path = None
+        if path:
+            lines = _file_lines(path)
+            line = (_marker_line(lines, first - 1, first - 1 + len(body))
+                    or first)
+    item = {"key": key, "level": "function",
+            "status": "stale" if accepted else "new", "text": text,
+            "signature": entry.get("signature"),
+            "raises": sorted(entry.get("raises") or []),
+            "file": path, "line": line}
+    if accepted:
+        item["changed"] = changed
+        item["accepted_at"] = accepted.get("at")
+        item["accepted_raises"] = sorted(accepted.get("raises") or [])
+        if accepted.get("stale_reason"):
+            item["reason"] = accepted["stale_reason"]
+    return item
+
+
+def _scope_acceptances(root: str) -> dict:
+    """Intent:
+        The scope-level acceptances on file, keyed by scope; empty
+        when none are recorded or the file cannot be read.
+    """
+    import os
+
+    import yaml
+    path = _scope_intent_path(root)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def pending_intents(root: str = ".") -> list:
+    """Intent:
+        Every stated intent in the project that waits on a person's
+        acceptance, top down: the codebase README (`__project__`), then
+        each package, then each module, then each function with a
+        record whose source is in the project (a library function's
+        record is not the project's to document). The packages and
+        modules are the ones that hold such a function, and any
+        already accepted. Each item
+        says its key, level, status (`new` or `stale`), text and where
+        the text is written; a function also gives its signature and
+        raised exceptions, and a stale item says what changed. Reading
+        only: nothing is written.
+    """
+    import importlib
+    import inspect
+    import os
+
+    from .conjecture import _resolve_func_ref
+    from .docstring import _read_module_intent
+    from .spec import load_verified
+
+    root_abs = os.path.abspath(root)
+    items: list = []
+    scopes: set = set()
+    for key, wrap in sorted(load_verified(root).items()):
+        entry = (wrap or {}).get("entry") or {}
+        fn = None if ":" in key else _resolve_func_ref(key, root=root)
+        if ":" not in key:
+            # a dotted key counts when it names a function whose source
+            # is in the project: a library function (a compendium
+            # record, a builtin) is not the project's to document, and
+            # a key that no longer resolves is a moved record; a
+            # function another frontend read, whose record the project
+            # keeps, counts, its Python file being a wrapper's
+            from .analysis import foreign_body
+            foreign = fn is not None and foreign_body(fn)
+            try:
+                src = (inspect.getsourcefile(fn)
+                       if fn is not None and not foreign else None)
+            except TypeError:
+                src = None
+            if not foreign and not _in_project(root_abs, src):
+                continue
+            parts = (getattr(fn, "__module__", "") or "").split(".")
+            scopes.update(".".join(parts[:i])
+                          for i in range(1, len(parts) + 1) if parts[0])
+        item = _function_item(key, entry, fn)
+        if item is not None:
+            items.append(item)
+    on_file = _scope_acceptances(root)
+    scopes.update(k for k in on_file if k != "__project__")
+    for key in sorted(scopes):
+        try:
+            module = importlib.import_module(key)
+        except Exception:
+            continue
+        if not _in_project(root_abs, getattr(module, "__file__", None)):
+            continue
+        is_package = hasattr(module, "__path__")
+        if (not is_package and key not in on_file
+                and _read_module_intent(module) is None):
+            # a module with no docstring of its own reads its intent
+            # from the README beside it, which is its package's
+            continue
+        item = _scope_item(root, key, "package" if is_package else "module")
+        if item is not None:
+            items.append(item)
+    project = _scope_item(root, "__project__", "codebase")
+    if project is not None:
+        items.append(project)
+    items.sort(key=lambda i: (_LEVEL_ORDER[i["level"]],
+                              i["key"].count(".") if i["level"] == "package"
+                              else 0, i["key"]))
+    return items
+
+
+def reread_intent(root: str, item: dict) -> "dict | None":
+    """Intent:
+        The same intent read again after its source was edited: the
+        module (or the function's module) is reloaded from source and
+        the item rebuilt. For a function, whose acceptance binds to its
+        record, the item carries `live_text` when the docstring now
+        says something the record does not yet hold. None when the
+        intent is no longer stated, or is now accepted and current.
+    """
+    import importlib
+    import importlib.util
+    import os
+    import sys
+
+    from .conjecture import _resolve_func_ref
+    from .spec import load_verified
+
+    def reload(name: str) -> None:
+        module = sys.modules.get(name)
+        src = getattr(module, "__file__", None)
+        if module is None or not src:
+            return
+        try:
+            os.remove(importlib.util.cache_from_source(src))
+        except (OSError, ValueError, NotImplementedError):
+            pass
+        importlib.invalidate_caches()
+        importlib.reload(module)
+
+    if item["level"] != "function":
+        if item["key"] != "__project__":
+            reload(item["key"])
+        return _scope_item(root, item["key"], item["level"])
+    fn = _resolve_func_ref(item["key"], root=root)
+    if fn is not None:
+        reload(fn.__module__)
+        fn = _resolve_func_ref(item["key"], root=root)
+    wrap = load_verified(root).get(item["key"]) or {}
+    fresh = _function_item(item["key"], wrap.get("entry") or {}, fn)
+    if fresh is None or fn is None:
+        return fresh
+    from .analysis import _intent_block_text
+    from .analysis import docstring_of
+    from .intent import parse_doc
+    doc = docstring_of(fn)
+    live = (_intent_block_text(doc) or parse_doc(doc).summary or "").strip()
+    if live and live != fresh["text"]:
+        fresh["live_text"] = live
+    return fresh

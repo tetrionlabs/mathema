@@ -38,10 +38,11 @@ import warnings
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 
-from ._abstract import (AbstractMat, AbstractTable, AbstractVec, NotMine,
-                        abstract_of, plain)
-from ._adapters import (BUILTIN_ADAPTERS, KINDS, Detection, ListAdapter,
-                        RuntimeTypeAdapter)
+from ._abstract import (ELEMENT_TYPES, AbstractMat, AbstractTable,
+                        AbstractVec, Labelled, NotMine, abstract_of,
+                        element_type, plain)
+from ._adapters import (BUILTIN_ADAPTERS, KINDS, BodyUses, Detection,
+                        ListAdapter, RuntimeTypeAdapter)
 from ._missing import (Definition, absence_defined, definitions, members,
                        resolve_absence, resolve_missing, set_definitions,
                        spellings)
@@ -433,7 +434,34 @@ def undrawable_parameters(fn, detected: dict) -> dict:
         if isinstance(cls, type) and typing.get_origin(cls) is None \
                 and not _drawable_class(cls) and not _adapts_to_language(cls):
             out[p] = cls.__name__
+    receiver = _undrawable_receiver(fn)
+    if receiver is not None and receiver[0] not in detected:
+        out[receiver[0]] = receiver[1]
     return out
+
+
+def _undrawable_receiver(fn) -> "tuple[str, str] | None":
+    """Intent:
+        `(name, class name)` when `fn` is an unbound method whose
+        receiver mathema knows no way to draw as an instance of its
+        class (`_receivers.receiver_fields` is None), else None.
+    """
+    from ._receivers import method_receiver, receiver_fields
+    receiver = method_receiver(fn)
+    if receiver is None:
+        return None
+    name, cls = receiver
+    try:
+        from ..analysis import SourceUnavailable, get_tree
+        try:
+            tree = get_tree(fn)[1]
+        except SourceUnavailable:
+            tree = None
+    except Exception:
+        return None
+    if receiver_fields(cls, tree, name) is not None:
+        return None
+    return name, cls.__name__
 
 
 def realised_parameters(facts) -> dict:
@@ -476,12 +504,17 @@ def descriptor_names(facts) -> list:
 
 # --- realise and observe ---------------------------------------------
 
-def realise(value, detection: Detection, options: "dict | None" = None):
+def realise(value, detection: Detection, options: "dict | None" = None,
+            declared: "dict | None" = None):
     """Intent:
         `value` (a drawn plain value) as the object the detection's
         runtime type carries, or `value` unchanged when it is not a
         vector, matrix or table the adapter carries (a scalar, a value
-        already of the runtime type).
+        already of the runtime type). `declared` states the element
+        type the claim binds where the values may not show it:
+        `{"element": "str"}` for a vector, `{"columns": {"k": "str"}}`
+        for a table's columns; a vector or column whose own values
+        state no type (holes only, or no rows) takes it.
     """
     found = adapter(detection.adapter)
     if found is None:
@@ -489,11 +522,29 @@ def realise(value, detection: Detection, options: "dict | None" = None):
     abstract = abstract_of(value)
     if abstract is None:
         return value
+    abstract = _with_declared(abstract, declared or {})
     kind = ("mat" if isinstance(abstract, AbstractMat) else
             "table" if isinstance(abstract, AbstractTable) else "vec")
     if kind not in found.kinds:
         return value
     return found.realise(abstract, dict(options or {}))
+
+
+def _with_declared(abstract, declared: dict):
+    """`abstract` with the element types `declared` states set on each
+    vector whose `element` is not stated."""
+    from dataclasses import replace
+
+    def typed(vec, element):
+        if element is None or not isinstance(vec, AbstractVec) \
+                or vec.element is not None:
+            return vec
+        return replace(vec, element=element)
+    if isinstance(abstract, AbstractTable):
+        columns = declared.get("columns") or {}
+        return AbstractTable({name: typed(col, columns.get(name))
+                              for name, col in abstract.columns.items()})
+    return typed(abstract, declared.get("element"))
 
 
 def observe(obj):
@@ -519,7 +570,61 @@ def observe(obj):
 
 
 def _root_module_of(obj) -> str:
-    return (type(obj).__module__ or "").split(".", 1)[0]
+    """The library `obj`'s type comes from: the first class in its
+    method resolution order that mathema does not define, so mathema's
+    own subclass of a numpy array reads as numpy's."""
+    for cls in type(obj).__mro__:
+        root = (cls.__module__ or "").split(".", 1)[0]
+        if root != "mathema":
+            return root
+    return "mathema"
+
+
+# --- tables, read the same whatever their runtime type ---------------
+
+def as_table(obj) -> AbstractTable:
+    """Intent:
+        `obj` as an `AbstractTable`: itself when it is one, a dict of
+        columns read as drawn values, any other object as the
+        installed adapter that recognises it observes it (a pandas or
+        polars DataFrame, or a table a registered adapter carries).
+
+    Raises:
+        TypeError: `obj` is no table.
+    """
+    if isinstance(obj, AbstractTable):
+        return obj
+    found = abstract_of(obj) if isinstance(obj, dict) else observe(obj)
+    if not isinstance(found, AbstractTable):
+        raise TypeError(f"{type(obj).__name__} is not a table")
+    return found
+
+
+def column_names(table) -> tuple:
+    """The column names of a table (`as_table`), in order."""
+    return as_table(table).column_names()
+
+
+def column_types(table) -> dict:
+    """`{name: type}` for each column of a table (`as_table`), the
+    type one of `ELEMENT_TYPES`."""
+    return as_table(table).column_types()
+
+
+def column(table, name: str) -> AbstractVec:
+    """Intent:
+        The column `name` of a table (`as_table`), as an `AbstractVec`.
+
+    Raises:
+        KeyError: the table has no such column; the message names the
+            columns it has.
+    """
+    return as_table(table).column(name)
+
+
+def row_count(table) -> int:
+    """The number of rows of a table (`as_table`)."""
+    return as_table(table).row_count()
 
 
 def observed_plain(obj):
@@ -537,12 +642,22 @@ class _Realising:
     result as a plain value. Every attribute it does not define is the
     function's own (`__globals__`, `__code__`, `__defaults__`), and
     `__wrapped__` is the function, so signature and source readers see
-    the function itself."""
+    the function itself. A parameter annotated as a set, a frozenset or
+    a tuple is passed as one (`as_annotated`), and a sequence annotated
+    with int or bool elements receives a whole float element as the int
+    or bool it equals (`as_element_type`); a function whose only such
+    parameters are those has its result returned as it is."""
 
-    def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None):
+    def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None,
+                 containers: "dict | None" = None,
+                 declared: "dict | None" = None,
+                 elements: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
         self._enums = enums or {}
+        self._containers = containers or {}
+        self._declared = declared or {}
+        self._elements = elements or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -553,27 +668,161 @@ class _Realising:
             bound = self._sig.bind(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
+        for name, element in self._elements.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_element_type(bound.arguments[name],
+                                                        element)
+        from .._called_text import file_realised
         for name, detection in self._bindings.items():
             if name in bound.arguments:
-                bound.arguments[name] = realise(bound.arguments[name],
-                                                detection)
+                drawn = bound.arguments[name]
+                bound.arguments[name] = realise(drawn, detection,
+                                                declared=self._declared.get(name))
+                file_realised(drawn, bound.arguments[name], name)
         for name, cls in self._enums.items():
             if name in bound.arguments:
                 bound.arguments[name] = as_enum_member(bound.arguments[name], cls)
+        for name, container in self._containers.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_annotated(bound.arguments[name],
+                                                     container)
+        if not self._bindings and not self._enums:
+            return fn(*bound.args, **bound.kwargs)
         return observed_plain(fn(*bound.args, **bound.kwargs))
 
     def __repr__(self) -> str:
         return f"<realising {self._fn!r}>"
 
 
-def calling(fn, facts):
+#: the Python container a sequence annotation names, by the last dotted
+#: part of its constructor, lowercased; any other sequence is a list
+_ANNOTATED_CONTAINERS = {"set": set, "mutableset": set, "abstractset": set,
+                         "frozenset": frozenset, "tuple": tuple}
+
+
+def annotated_container(fn, param: str) -> "type | None":
+    """Intent:
+        The container type `param`'s annotation names when it is a set,
+        a frozenset or a tuple (`set`, `typing.Set[float]`,
+        `Optional[frozenset]`), so a sequence drawn as a list is passed
+        as a member of that type; None for any other annotation or none.
+    """
+    from .._signatures import callable_signature
+    from ..probing import _annotation_text
+    try:
+        spec = callable_signature(fn).parameters.get(param)
+    except (TypeError, ValueError):
+        return None
+    if spec is None:
+        return None
+    text = _annotation_text(spec).replace(" ", "").lower()
+    for wrapper in ("optional[", "typing.optional["):
+        if text.startswith(wrapper) and text.endswith("]"):
+            text = text[len(wrapper):-1]
+    parts = [t for t in text.split("|") if t not in ("none", "nonetype")]
+    if len(parts) != 1:
+        return None
+    head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
+    return _ANNOTATED_CONTAINERS.get(head)
+
+
+def annotated_element(fn, param: str) -> "str | None":
+    """Intent:
+        The scalar type the elements of `param` have, as its annotation
+        states it: `int` for `list[int]`, `tuple[int, ...]`,
+        `Sequence[Optional[int]]` or `NDArray[np.int64]`, likewise
+        `float`, `bool`, `str` and `complex`; None when the annotation
+        is no container of one scalar type, or there is none.
+    """
+    import collections.abc as abc
+
+    from ..types import _numpy_dtype_scalar, _optional_parts, _scalar_slot_type
+    try:
+        hint = typing.get_type_hints(inspect.unwrap(fn)).get(param)
+    except Exception:
+        return None
+    if hint is None:
+        return None
+    _optional, inner = _optional_parts(hint)
+    origin = typing.get_origin(inner)
+    if origin is None:
+        return None
+    module = getattr(origin, "__module__", "") or ""
+    if module.split(".")[0] == "numpy":
+        return _numpy_dtype_scalar(inner)
+    if origin not in (list, tuple, set, frozenset, abc.Sequence,
+                      abc.MutableSequence, abc.Set, abc.MutableSet,
+                      abc.Collection, abc.Iterable):
+        return None
+    scalars = {_scalar_slot_type(_optional_parts(a)[1])
+               for a in typing.get_args(inner) if a is not Ellipsis}
+    if len(scalars) != 1:
+        return None
+    return scalars.pop()
+
+
+def as_element_type(value, element: "str | None"):
+    """Intent:
+        `value`, a drawn list, tuple, set or frozenset, with each float
+        element held as the member of `element` it equals: a whole
+        number as that int when `element` is `int`, 0.0 and 1.0 as
+        False and True when it is `bool`; `value` unchanged for any
+        other element type or value.
+    """
+    if element not in ("int", "bool") \
+            or not isinstance(value, (list, tuple, set, frozenset)):
+        return value
+
+    def typed(v):
+        if not isinstance(v, float):
+            return v
+        if element == "int" and v.is_integer():
+            return int(v)
+        if element == "bool" and v in (0.0, 1.0):
+            return v == 1.0
+        return v
+    return type(value)(typed(v) for v in value)
+
+
+def annotated_containers(fn, facts) -> dict:
+    """`{param: container}` for each sequence parameter of `fn` whose
+    annotation names a set, a frozenset or a tuple
+    (`annotated_container`)."""
+    kinds = getattr(facts, "param_kinds", None) or {}
+    return {p: made for p, k in kinds.items()
+            if k in SEQUENCE_KINDS
+            and (made := annotated_container(fn, p)) is not None}
+
+
+def as_annotated(value, container: "type | None"):
+    """Intent:
+        `value`, a drawn list or tuple, as a member of `container` (a
+        set, a frozenset or a tuple, from `annotated_container`), so
+        the function is called inside its parameter's type; `value`
+        unchanged when `container` is None, when it is no list or tuple
+        (an absence, a value already of the type), or when its elements
+        cannot be held in a set.
+    """
+    if container is None or not isinstance(value, (list, tuple)) \
+            or type(value) is container:
+        return value
+    try:
+        return container(value)
+    except TypeError:
+        return value
+
+
+def calling(fn, facts, declared: "dict | None" = None):
     """Intent:
         A callable with `fn`'s signature and attributes that calls
         `fn`, with a `SystemExit` it raises arriving as the raise
         `_exits.ExitRaised`. When a parameter has a runtime type other
         than a list, the call first realises each such parameter's
         drawn value through its adapter, and observes the result into
-        a plain value.
+        a plain value. A parameter annotated as a set, a frozenset or a
+        tuple is passed as one. `declared`, `{param: declared}` as
+        `realise` reads it, states the element types the claim binds
+        for a vector or a table's columns.
 
     Notes:
         A call the signature does not bind is passed to `fn` unchanged,
@@ -585,12 +834,17 @@ def calling(fn, facts):
         return exiting_as_raise(fn)
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
-    if not bindings and not enums:
+    containers = annotated_containers(fn, facts)
+    kinds = getattr(facts, "param_kinds", None) or {}
+    elements = {p: made for p, k in kinds.items() if k in SEQUENCE_KINDS
+                and (made := annotated_element(fn, p)) in ("int", "bool")}
+    if not bindings and not enums and not containers and not elements:
         return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
         return exiting_as_raise(fn)
-    return exiting_as_raise(_Realising(fn, bindings, sig, enums))
+    return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers,
+                                       declared, elements))
 
 
 def enum_parameters(fn) -> dict:
@@ -797,6 +1051,218 @@ def usage_hints(fn, fdef, params: list, param_kinds: dict,
     return out
 
 
+def _body_uses(fdef, params: list) -> dict:
+    """Intent:
+        Each parameter's uses in the body as `(form, name)` pairs, the
+        vocabulary `BodyUses.supports` reads: `("attr", name)` for an
+        attribute read off it, `("call", name)` for a method called on
+        it, `("keyed", name)` for one called with a string first
+        argument, `("@", "")` for an operand of `@`.
+    """
+    pset = set(params)
+    found: dict = {}
+    called = {id(n.func) for n in ast.walk(fdef) if isinstance(n, ast.Call)}
+
+    def note(p, use):
+        if p in pset and use not in found.setdefault(p, []):
+            found[p].append(use)
+
+    for node in ast.walk(fdef):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name):
+            first = node.args[0] if node.args else None
+            keyed = isinstance(first, ast.Constant) \
+                and isinstance(first.value, str)
+            note(node.func.value.id,
+                 ("keyed" if keyed else "call", node.func.attr))
+        elif isinstance(node, ast.Attribute) and isinstance(node.value,
+                                                            ast.Name) \
+                and id(node) not in called:
+            note(node.value.id, ("attr", node.attr))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                        ast.MatMult):
+            for side in (node.left, node.right):
+                if isinstance(side, ast.Name):
+                    note(side.id, ("@", ""))
+    return found
+
+
+def _typed_use(use: tuple, declared: list) -> bool:
+    """Intent:
+        Whether a body use says anything about a runtime type: one a
+        list does not support (`.T`, `@`, a vector method or attribute)
+        or one some adapter's `USES` declares.
+    """
+    form, name = use
+    if form == "@" or name == "T" or name in _VECTOR_METHODS \
+            or name in _VECTOR_ATTRS:
+        return True
+    return any(uses.supports(use) for uses in declared)
+
+
+def _universal(use: tuple) -> bool:
+    """Intent:
+        Whether every Python object supports the use: an attribute or
+        method `object` itself has (`x.__class__`, `x.__eq__(y)`).
+    """
+    form, name = use
+    return form != "@" and hasattr(object, name)
+
+
+def _use_text(p: str, use: tuple) -> str:
+    """`x.weight` for an attribute read, `x.fit()` for a method call,
+    `x @` for an operand of `@`."""
+    form, name = use
+    if form == "@":
+        return f"{p} @"
+    return f"{p}.{name}()" if form in ("call", "keyed") else f"{p}.{name}"
+
+
+def with_unsupported(hint: dict, p: str, unsupported: list) -> dict:
+    """Intent:
+        `hint` for a parameter whose uses include `unsupported` (use
+        texts, `x.weight`), uses the runtime type the hint names does
+        not support: the same keys plus `unsupported`, and a text
+        naming those uses in place of the advice to annotate that type.
+    """
+    lib = hint["type"].split(".", 1)[0]
+    return {**hint, "unsupported": list(unsupported),
+            "text": f"{p} is used as a {hint['usage']}; this module imports "
+                    f"{lib}, but {hint['type']} does not support "
+                    f"{_listed(list(unsupported), 'and')}: annotate {p} "
+                    f"with the type it has"}
+
+
+#: the kinds a body usage asks for, in order of preference
+_USAGE_KINDS = {"vector": ("vec",), "table": ("table",),
+                "matrix": ("mat", "table")}
+#: the usage a hint states for a promoted kind
+_KIND_USAGE = {"vec": "vector", "mat": "matrix", "table": "table"}
+
+
+def _library_choice(candidates: list, usage: "str | None"):
+    """Intent:
+        The one adapter of a library a body's uses select: the only
+        candidate, else the only one carrying the first kind the usage
+        asks for that any candidate carries; None when the library's
+        candidates stay tied.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    for kind in _USAGE_KINDS.get(usage or "", ()):
+        carrying = [a for a in candidates if kind in a.kinds]
+        if len(carrying) == 1:
+            return carrying[0]
+        if carrying:
+            return None
+    return None
+
+
+def _promoted_kind(found, usage: "str | None") -> str:
+    """Intent:
+        The kind a promoted parameter is drawn with: the adapter's only
+        kind, else the first kind the body's usage asks for that the
+        adapter carries, else `vec`.
+    """
+    if len(found.kinds) == 1:
+        return next(iter(found.kinds))
+    for kind in _USAGE_KINDS.get(usage or "", ()):
+        if kind in found.kinds:
+            return kind
+    return "vec"
+
+
+def promotions(fn, fdef, params: list, param_kinds: dict,
+               detected: dict) -> tuple:
+    """Intent:
+        The parameters the body's uses draw as a runtime type, the ones
+        whose uses leave the type open, and the uses each imported
+        runtime type does not support, `(promoted, ambiguous,
+        unsupported)`.
+        A parameter qualifies as `usage_hints` reads one: no runtime
+        type named, no annotation naming a type, not an `int`, `bool`,
+        `string` or `complex` kind, in a module importing a library
+        with a runtime type adapter, and at least one of its uses typed
+        (`_typed_use`). Every use the body makes of it, apart from one
+        every object supports (`_universal`), is matched against each
+        adapter's `USES` whose library the module imports; an adapter
+        matches when it supports every one of them, so an attribute it
+        does not declare (`x.weight`) rules it out.
+        A library whose adapters match selects one (`_library_choice`).
+        `promoted` is `{param: Detection}` when exactly one library
+        selects an adapter, its evidence `the body uses it as <the
+        adapter's described type>`. `ambiguous` is `{param: hint}`
+        when two or more do, the hint (`usage_hints`'s keys, plus
+        `types`, the runtime types in detection order) naming each.
+        `unsupported` is `{param: {runtime type: [use texts]}}` for a
+        qualifying parameter in neither, each imported adapter with
+        `USES` mapped to the uses it does not support (`_use_text`).
+    """
+    scope = module_scope(fn)
+    imported = module_imports(scope)
+    if not imported or fdef is None:
+        return {}, {}, {}
+    declared = [(a, a.USES) for a in adapters().values()
+                if isinstance(getattr(a, "USES", None), BodyUses)]
+    numpy_aliases = {alias for lib, alias in imported.items()
+                     if lib == "numpy"} | {
+        n for n, v in scope.items()
+        if inspect.ismodule(v) and v.__name__ == "numpy"}
+    usages = _usages(fdef, params, numpy_aliases)
+    annotated = _annotated(fdef)
+    promoted: dict = {}
+    ambiguous: dict = {}
+    unsupported: dict = {}
+    for p, uses in _body_uses(fdef, params).items():
+        if p in detected or p in annotated \
+                or param_kinds.get(p) in ("int", "bool", "string", "complex"):
+            continue
+        typed = [u for u in uses if not _universal(u)]
+        if not any(_typed_use(u, [d for _a, d in declared]) for u in typed):
+            continue
+        usage = (usages.get(p) or (None,))[0]
+        by_library: dict = {}
+        for found, body_uses in declared:
+            lib = found.name.split(".", 1)[0]
+            if lib in imported and all(body_uses.supports(u) for u in typed):
+                by_library.setdefault(lib, []).append(found)
+        chosen = [c for c in (_library_choice(cands, usage)
+                              for cands in by_library.values())
+                  if c is not None]
+        if len(chosen) == 1:
+            found = chosen[0]
+            described = found.USES.described or f"a {found.name}"
+            promoted[p] = Detection(found.name, _promoted_kind(found, usage),
+                                    f"the body uses it as {described}")
+        elif len(chosen) > 1:
+            libs = [c.name.split(".", 1)[0] for c in chosen]
+            spelled = [f"{p}: {imported[lib]}.{c.name.split('.', 1)[1]}"
+                       for lib, c in zip(libs, chosen)]
+            stated = usage or _KIND_USAGE[_promoted_kind(chosen[0], usage)]
+            both = "both" if len(chosen) == 2 else "each"
+            ambiguous[p] = {
+                "usage": stated, "strong": True,
+                "type": chosen[0].name, "types": [c.name for c in chosen],
+                "text": f"{p} is used as a {stated}; this module imports "
+                        f"{_listed(libs, 'and')}, whose types {both} "
+                        f"support that use: to sample it as one, annotate: "
+                        f"{_listed(spelled, 'or')}"}
+        else:
+            unsupported[p] = {
+                found.name: [_use_text(p, u) for u in typed
+                             if not body_uses.supports(u)]
+                for found, body_uses in declared
+                if found.name.split(".", 1)[0] in imported}
+    return promoted, ambiguous, unsupported
+
+
+def _listed(items: list, word: str) -> str:
+    """`a`, `a and b`, `a, b and c` (with `word` in place of `and`)."""
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} {word} {items[-1]}"
+
+
 def strong_hints(facts) -> list:
     """The hint texts a record's notes carry, one per parameter whose
     body use a list does not support."""
@@ -806,12 +1272,16 @@ def strong_hints(facts) -> list:
 
 __all__ = [
     "AbstractMat", "AbstractTable", "AbstractVec", "Definition", "Detection",
+    "ELEMENT_TYPES", "Labelled", "as_table", "column", "column_names",
+    "column_types", "element_type", "row_count",
     "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
     "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
-    "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
+    "abstract_of", "adapter", "adapters", "annotated_element",
+    "as_element_type", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",
     "installed", "library_version", "module_imports", "observe",
-    "observed_plain", "plain", "realise", "realised_parameters",
-    "strong_hints", "usage_hints",
+    "observed_plain", "plain", "promotions", "realise",
+    "realised_parameters", "strong_hints", "usage_hints", "BodyUses",
+    "with_unsupported",
 ]

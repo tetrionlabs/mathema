@@ -103,6 +103,7 @@ def find_moved(root: str, verified: dict, declared: dict,
         none pays one resolve per key and nothing else.
     """
     from .compendium import is_library_record
+    from .identity import namespaced_form
     orphans: dict = {}
     for key, info in verified.items():
         entry = (info or {}).get("entry") or {}
@@ -110,7 +111,7 @@ def find_moved(root: str, verified: dict, declared: dict,
         if not form or is_library_record(entry):
             continue
         if resolve(key) is None:
-            orphans[key] = form
+            orphans[key] = namespaced_form(form)
     if not orphans:
         return {}
     by_form = {form: [k for k in keys if k not in verified]

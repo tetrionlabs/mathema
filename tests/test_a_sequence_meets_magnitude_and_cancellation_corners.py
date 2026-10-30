@@ -111,9 +111,12 @@ def test_the_corners_are_the_pairs_of_the_element_range():
     assert sequence_corners(None) == [[1e16, -1e16], [1e300, -1e300],
                                       [reach, -reach], [reach, reach],
                                       [-reach, -reach]]
+    # the float nearest 1e308 lies past 10**308 as written, so the
+    # range's ends are the floats just inside it
+    end = math.nextafter(1e308, 0)
     assert sequence_corners((-1e308, 1e308), 3) == [
-        [1e16, -1e16, 1e16], [1e300, -1e300, 1e300], [1e308, -1e308, 1e308],
-        [1e308, 1e308, 1e308], [-1e308, -1e308, -1e308]]
+        [1e16, -1e16, 1e16], [1e300, -1e300, 1e300], [end, -end, end],
+        [end, end, end], [-end, -end, -end]]
     assert sequence_corners((0.5, 1)) == [[0.5, 1]]
     assert sequence_corners((1e307, 1.7e308), 1) == []
 

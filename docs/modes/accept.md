@@ -49,7 +49,24 @@ and `--concepts` accept the function's stated intent and concept tags.
   interesting fact. Accepting it retires the claim into the record's
   discoveries section, permanently, with the counterexample kept as
   the witness; every falsified claim can be accepted this way,
-  whatever its shape. A corrected claim is declared alongside only
+  whatever its shape, with one exception. A proof's computation line
+  (`<name>[float]`) is accepted alone only where its loss is inherent
+  in the inputs, so that no float64 computation could do better at the
+  witness: the computed value is the exact result correctly rounded, or
+  the condition number its note gives is above 10 (the problem itself
+  amplifies rounding) and the loss is within what it explains. Where
+  the code loses more than that, where a well-conditioned result is not
+  the correctly rounded one (a different arrangement of the formula may
+  lose less), or where the conditioning could not be
+  read, the
+  acceptance is refused with the cause and the ways out: fix the code,
+  accept the whole claim as a discovery, or narrow the claim's domain
+  knowingly, edit it and accept it `--as superseded`. Accepting the
+  whole claim, `mathema accept KEY NAME --as discovery` on the proven
+  claim itself, moves its row and its computation line to discoveries
+  under one acceptance, with the computation's witness kept, and the
+  claim no longer counts as proven (an `f =:= g` claim retires the same
+  way); a proven claim whose computation holds has nothing to accept. A corrected claim is declared alongside only
   when it is verified first. State it yourself with
   `--corrected "<law>"` and mathema adjudicates it against the live
   function before anything is written (a correction that itself
@@ -159,8 +176,10 @@ balances.running_total:
 `shifts_with_start` is proven; its `shifts_with_start[float]`
 companion is falsified at a cancelling pair of magnitude 1e300, where
 the float sum drops `y0` (the note gives the condition number at the
-witness and the ways out: a narrower domain, or accepting the
-discovery). `nonneg_for_nonneg_steps` only holds: the probe agrees, but
+witness and the ways out: a `let |inf|` binding, which bounds only the
+computation and never the proof, so the proof stays over the full
+domain, or accepting the computation line as a discovery, which is open
+to it because the loss is inherent in the inputs). `nonneg_for_nonneg_steps` only holds: the probe agrees, but
 derive cannot settle the sign of the lifted sum.
 `never_overshoots_much` rests on it being proven, so it comes back
 `unknown` with the note `prerequisite nonneg_for_nonneg_steps is holds,
@@ -171,8 +190,8 @@ not proven, nothing to rest this claim on`, and `verify` fails on it
 ```
 $ mathema verify --root .
 note balances.running_total: shifts_with_start[float] initially falsified: ill-conditioned here (κ ≈ 5e287): no float64 computation can deliver this result at inputs of magnitude 1e300:
-  (i) if inputs this large are out of scope, narrow the domain: for xs in [-1e21, 1e21]^n
-  (ii) if the loss is accepted, run: mathema accept balances.running_total shifts_with_start --as discovery
+  (i) if inputs this large are out of scope, bound the computation alone (the claim keeps its domain): let |inf| be 1e+21
+  (ii) if the loss is accepted, run: mathema accept balances.running_total "shifts_with_start[float]" --as discovery
 FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 unknown  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
        (i) change f
        (ii) write: missing(f, xs, null) raises(TypeError)
@@ -181,6 +200,7 @@ FAIL balances.running_total: no baseline record; 2 proven (1 claim, 1 built-in),
        never_overshoots_much unknown: prerequisite nonneg_for_nonneg_steps is holds, not proven, nothing to rest this claim on
 0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
 grammars detected: mathema; verified by this run: mathema
+1 intent to accept (1 function): mathema accept --intent
 ```
 
 Owning that gap is a decision. At a terminal, mathema prints the exact
@@ -369,6 +389,9 @@ The key can also be a module (`mypkg.mod`) or the literal
 sections) accept the same way, bound to the intent text alone, and
 land in `.mathema/meta/intent.yaml`; the index reports each scope's
 rung and flags a stale acceptance when the text has moved on.
+With no key, `mathema accept --intent` walks every intent waiting to
+be accepted, top down, one prompt each (see
+[Intent at every level](../mathema-docstring.md#intent-at-every-level)).
 `--concepts a,b` accepts tags as documented; `--dismiss-concepts c`
 records a dismissal in `.mathema/meta/concepts.yaml` so the
 suggestion never repeats. All prompted, all CLI-only, like every

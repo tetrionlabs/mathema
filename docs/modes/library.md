@@ -104,7 +104,7 @@ def ema(x: list[float], alpha: float) -> float:
 <!-- example: ema repl -->
 ```python
 >>> mathema.check(ema, domain={"x": (-1e6, 1e6), "alpha": (-10, 10)})
-mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
+mathema.Record(ema) · source, no side effects · form py:0f61bbd9aa20
   monotonic_increasing[alpha]  d(f(x, alpha), alpha) >= 0   falsified at alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
     falsified  computation  d(f(x, alpha), alpha) >= 0   counterexample alpha = 8.459992498903986 -> -4.930559650170467e+304, alpha = 8.70201321389522 -> -5.772547268351122e+304 at x = [1e+300, -1e+300, -2.7255878198803085, 1.4703849054783387, 4.922577492583454, -8.999703650149867] (not increasing)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
@@ -161,14 +161,14 @@ mathema.Record(ema) · source, no side effects · form 0f61bbd9aa20
                               (ii) guard the empty input at entry
   scale_equivariant  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.scale_seq, let c be [-5.0, 5.0], c*f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1); differs by 0.00131 at x = [1000000.0, 1000000.0, 1000000.0, 1000000.0, -1000000.0, 1000000.0, 1000000.0, 1000000.0], alpha = -9.99998, c = -1.4095238757810247, within the default tolerance (3.75e+03)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)
                               (ii) guard the empty input at entry
   translation_equivariant  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   falsified at x = [], alpha = 5.159088058806049
     proven     mathematics  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)
-    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1)
+    holds      computation  let g = mathema.f.shift_seq, let c be [-5.0, 5.0], c + f(x, alpha) = f(g(x, c), alpha)   288 entries across 68 draws, sizes (1, 1) to (8, 1); differs by 0.00292 at x = [906106.1434297902, -154913.5463164954, 814855.4958683907, -224511.23675302154, -399682.6736009131, -354945.7160463119, 999998.0, 105862.45522526401], alpha = -9.99998, c = 1.7939528529796345, within the default tolerance (1.91e+06)
     falsified  policy       f(x=[])   f(x, alpha) raises IndexError at x = [], alpha = 5.159088058806049 with no emptiness guard in the body: the empty input is stumbled into, not handled
                             possible fixes:
                               (i) if the IndexError is the intended refusal, state: raises(ema([], alpha), IndexError)

@@ -67,10 +67,14 @@ def test_a_value_miss_at_the_literal_call_is_the_witness(route):
 
 
 @pytest.mark.parametrize("route", ("derive", "best"))
-@pytest.mark.parametrize("fn", [total, series_total])
-def test_a_fixed_input_that_holds_is_proven(fn, route):
+@pytest.mark.parametrize("fn,suffix", [(total, ""),
+                                       (series_total, ":within_float64")])
+def test_a_fixed_input_that_holds_is_proven(fn, suffix, route):
+    # float(xs.sum()) is a float pandas computed, with no exact reading:
+    # its call is proven within float64, the record saying so
     p = _one(fn, "f([]) == 0", route)
     assert p.verdict == "proven", (p.verdict, p.note)
+    assert p.route == "derive:brute_force" + suffix, p.route
     assert "mathema.sampling" not in (p.meta or {}), p.meta
 
 
@@ -82,11 +86,12 @@ def test_the_probe_route_runs_the_call_once(fn):
 
 
 @pytest.mark.parametrize("route", ROUTES)
-@pytest.mark.parametrize("fn,got", [(total, "0"), (series_total, "0.0")])
-def test_a_fixed_input_that_fails_names_only_its_call(fn, got, route):
+@pytest.mark.parametrize("fn,shown,got", [
+    (total, "[]", "0"), (series_total, "pandas.Series([], dtype='float64')", "0.0")])
+def test_a_fixed_input_that_fails_names_only_its_call(fn, shown, got, route):
     p = _one(fn, "f([]) == 1", route)
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert p.counterexample == f"xs = []: {got} vs 1", p.counterexample
+    assert p.counterexample == f"xs = {shown}: {got} vs 1", p.counterexample
 
 
 @pytest.mark.parametrize("route", ROUTES)

@@ -45,11 +45,13 @@ def cut_both_sides(x: float) -> float:
     return x
 
 
-def test_a_binding_outside_the_enforced_domain_has_no_valid_domain():
+def test_a_binding_outside_the_enforced_domain_is_falsified_where_refused():
+    # the domain the claim binds is the domain; @enforce_domain refuses
+    # every point of [2, 3], so f has no value there
     (p,) = check_conjectures(unit_only,
                              [claim("for x in [2, 3], is_defined(f)")])
-    assert p.verdict == "unknown", (p.verdict, p.note)
-    assert "no valid domain" in (p.note or ""), p.note
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "DomainError" in p.counterexample, p.counterexample
 
 
 def test_guards_that_cut_the_whole_line_leave_no_valid_domain():

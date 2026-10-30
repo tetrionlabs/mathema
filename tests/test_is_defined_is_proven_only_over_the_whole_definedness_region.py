@@ -40,11 +40,11 @@ def ratio(returns: pd.Series) -> float:
 
 
 @pytest.mark.needs_full_proof_budget
-def test_a_restriction_naming_part_of_the_region_is_not_proven():
+def test_a_restriction_naming_part_of_the_region_is_falsified():
     # log(x + 3) needs x > -3, gamma(x) has no value at 0, -1 and -2
     (p,) = check_conjectures(log_and_gamma, [
         claim("x + 3 > 0", name="is_defined", route="derive")])
-    assert p.verdict != "proven", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
 
 
 @pytest.mark.needs_full_proof_budget
@@ -60,7 +60,7 @@ def test_a_restriction_is_falsified_where_the_region_it_misses_is_executed():
 def test_bare_is_defined_over_a_call_of_unknown_definedness(fn):
     (p,) = check_conjectures(fn, [
         claim("for x in [-2, 2], is_defined(f)", route="derive")])
-    assert p.verdict != "proven", (fn.__name__, p.verdict, p.sketch)
+    assert p.verdict == "falsified", (fn.__name__, p.verdict, p.sketch)
     (p,) = check_conjectures(fn, [
         claim("for x in [-2, 2], is_defined(f)", route="best")])
     assert p.verdict == "falsified", (fn.__name__, p.verdict, p.sketch)
@@ -74,10 +74,10 @@ def test_a_ratio_over_a_spread_is_not_defined_on_a_constant_series():
     (p,) = check_conjectures(ratio, [
         claim("for returns in [-0.1, 0.1]^n, is_defined(f)",
               route="derive")])
-    assert p.verdict != "proven", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
     (p,) = check_conjectures(ratio, [
         claim("for returns in [-0.1, 0.1]^n, is_defined(f)")])
-    assert p.verdict != "proven", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
 
 
 def test_a_total_body_is_still_proven_defined():

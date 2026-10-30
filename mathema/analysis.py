@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from ._signatures import module_scope
 import ast
+import cmath
 import inspect
 import re
 import textwrap
@@ -233,6 +234,13 @@ def get_tree(fn) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]:
             "exec/stdin do not."
         ) from e
     mod = ast.parse(src)
+    for node in ast.walk(mod):
+        # a decimal literal past the float range (`1e309`) parses to an
+        # infinity; the number it denotes is kept as written
+        if isinstance(node, ast.Constant) \
+                and isinstance(node.value, (float, complex)) \
+                and not cmath.isfinite(node.value):
+            node.mathema_written = ast.get_source_segment(src, node)
     fdef = next((n for n in mod.body
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
                 None)
@@ -302,6 +310,17 @@ def _read_block(doc: str, header: str) -> list[str] | None:
             break   # dedented past the block's own body: the block is over
         out.append(line)
     return out
+
+
+def _intent_block_text(doc: str) -> str | None:
+    """Intent:
+        The `Intent:` block's prose joined into one string, or `None`
+        when the docstring has no such block or the block is empty.
+    """
+    lines = _read_block(doc, "intent:")
+    if not lines:
+        return None
+    return " ".join(line.strip() for line in lines).strip() or None
 
 
 def _parse_concepts_marker(doc: str) -> list:
@@ -396,6 +415,10 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
             iterated.add(node.iter.id)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id in {"len", "sum", "min", "max", "sorted", "enumerate", "reversed"}:
+            # `max(a, b)` and `min(a, b)` compare their arguments as
+            # values; only the one-argument form iterates its argument
+            if node.func.id in {"min", "max"} and len(node.args) != 1:
+                continue
             for call_arg in node.args:
                 if isinstance(call_arg, ast.Name):
                     iterated.add(call_arg.id)
@@ -1219,8 +1242,9 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
             continue
         seen.add(key)
         doc_notes = f"{doc_notes} {text}" if doc_notes else text
-    from .runtime_types import (detect_parameters, undrawable_parameters,
-                                usage_hints)
+    from .runtime_types import (detect_parameters, promotions,
+                                undrawable_parameters, usage_hints,
+                                with_unsupported)
     param_kinds = _param_kinds(fdef, params)
     detected = detect_parameters(fn)
     undrawable = undrawable_parameters(fn, detected)
@@ -1232,18 +1256,33 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
     hints = {p: h for p, h in usage_hints(fn, fdef, params, param_kinds,
                                           detected).items()
              if p not in undrawable}
-    # a parameter the body uses as a numpy array, which a list does not
-    # support, is drawn as one: the hint becomes the runtime type
-    from .runtime_types import Detection
+    # a parameter the body uses in a way only one imported library's
+    # runtime type supports is drawn as that type, and the record says
+    # why; uses two imported libraries both support leave it undrawn as
+    # either, with a hint naming each
+    promoted, ambiguous, unsupported = promotions(fn, fdef, params,
+                                                  param_kinds, detected)
+    for p, detection in promoted.items():
+        if p not in undrawable:
+            detected[p] = (detection,)
+            hints.pop(p, None)
+    for p, hint in ambiguous.items():
+        if p not in undrawable:
+            hints[p] = hint
+    # a hint naming a type that lacks one of the body's uses names
+    # those uses instead of advising that type
     for p, hint in list(hints.items()):
-        if hint.get("strong") and hint.get("type") == "numpy.ndarray" \
-                and p not in detected:
-            kind = "mat" if hint.get("usage") == "matrix" else "vec"
-            detected[p] = (Detection("numpy.ndarray", kind,
-                                     "the body uses it as a numpy array"),)
-            hints.pop(p)
+        lacking = (unsupported.get(p) or {}).get(hint.get("type"))
+        if lacking:
+            hints[p] = with_unsupported(hint, p, lacking)
     apply_runtime_kinds(param_kinds, detected)
     form = identity.form_hash(fdef)
+    # every reader past this point (the guards below and each lifter
+    # reading `tree`) sees a statement `sys.exit(c)` as the
+    # `raise SystemExit(c)` it is; the form hash above and `source`
+    # stay those of the code as written
+    from ._exits import exits_as_raises
+    fdef = exits_as_raises(fdef, fn)
     return Facts(
         name=fdef.name,
         signature=identity.signature_string(fn),
@@ -1271,7 +1310,8 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
         sigh=identity.sig_hash(fn),
         tree=fdef,
         guards=_guards(fdef, params),
-        doc_intent=doc.summary or None,
+        doc_intent=(_intent_block_text(docstring_text or "") or doc.summary
+                    or None),
         doc_intent_source=("documented" if _read_block(docstring_text or "", "intent:") is not None
                            else "declared" if doc.summary else None),
         doc_refs=doc.refs,
@@ -1329,6 +1369,71 @@ def has_injected_facts(fn) -> bool:
         facts describe.
     """
     return isinstance(getattr(fn, "__mathema_facts__", None), Facts)
+
+
+#: form-hash namespaces the Python frontend and the documentation-only
+#: fallback write; a bare hash is the Python frontend's own form
+PYTHON_FORM_NAMESPACES = frozenset({"py", "doc"})
+
+
+def written_elsewhere(facts) -> bool:
+    """Intent:
+        Whether `facts` were read by a frontend other than the Python
+        one: their `provenance` names another frontend (by `name` in a
+        mapping, or as a string), or, with no frontend named, their form
+        hash is namespaced (`"<frontend>:<sha>"`) outside `py` and `doc`.
+    """
+    stated = getattr(facts, "provenance", None) or {}
+    frontend = stated.get("frontend") if isinstance(stated, dict) else None
+    if isinstance(frontend, dict):
+        frontend = frontend.get("name")
+    from .koine.frontends import PYTHON
+    if frontend:
+        return frontend != PYTHON
+    form = getattr(facts, "form", None) or ""
+    if ":" not in form:
+        return False
+    return form.split(":", 1)[0] not in PYTHON_FORM_NAMESPACES
+
+
+def foreign_body(fn) -> bool:
+    """Intent:
+        Whether `fn` stands for a function a frontend other than Python
+        read: it, or the function it wraps, carries injected facts
+        (`__mathema_facts__`) `written_elsewhere`. Its Python source, when
+        it has one, is a wrapper's, and nothing read from that source (a
+        line, a span, a raise, an assert, an effect, coverage) describes
+        the function.
+    """
+    seen = 0
+    while fn is not None and seen < 16:
+        injected = getattr(fn, "__mathema_facts__", None)
+        if isinstance(injected, Facts):
+            return written_elsewhere(injected)
+        fn = getattr(fn, "__wrapped__", None)
+        seen += 1
+    return False
+
+
+def docstring_of(fn) -> str:
+    """Intent:
+        The docstring `fn`'s claims, intent and documentation are read
+        from: the injected facts' own for a callable standing for a
+        function another frontend read (`foreign_body`), whose Python
+        `__doc__` is a wrapper's, else `inspect.getdoc(fn)`; "" when
+        there is none.
+    """
+    import inspect
+    if foreign_body(fn):
+        seen = 0
+        while fn is not None and seen < 16:
+            injected = getattr(fn, "__mathema_facts__", None)
+            if isinstance(injected, Facts):
+                return inspect.cleandoc(injected.docstring or "")
+            fn = getattr(fn, "__wrapped__", None)
+            seen += 1
+        return ""
+    return inspect.getdoc(fn) or ""
 
 
 def apply_runtime_kinds(param_kinds: dict, detected: dict) -> None:

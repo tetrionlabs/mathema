@@ -27,7 +27,8 @@ from dataclasses import dataclass, field
 import sympy
 
 from ._base import (
-    NotSymbolic, _LiftCtx, _bind_params, _expr_to_sympy, _simplify_maybe_array,
+    NotSymbolic, _LiftCtx, _bind_params, _complex_typed, _expr_to_sympy,
+    _simplify_maybe_array,
     strip_docstring, _unmodified_params, _walk_lift_body,
 )
 from ..domain import bound_to_sympy_set
@@ -196,6 +197,19 @@ def _inline_expr_env(unmodified: set, affine_locals: dict, params: dict) -> dict
     return env
 
 
+def _field_key(node: ast.AST, unmodified: set) -> "str | None":
+    """Intent:
+        The domain key of a field read off an unmodified parameter
+        (`o.kind`, `o["kind"]`, `o.address.zip` as `o.address.zip`),
+        or None for anything else.
+    """
+    from ._base import _chain
+    found = _chain(node)
+    if found is None or found[0] not in unmodified:
+        return None
+    return f"{found[0]}.{found[1]}"
+
+
 def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
                    affine_locals: dict | None = None,
                    params: dict | None = None) -> bool | None:
@@ -261,6 +275,11 @@ def _compare_truth(test: ast.AST, domain: dict, unmodified: set,
             if result is not None:
                 return result
             break   # a recognized param name commits this case, either way
+        field = _field_key(subject, unmodified)
+        if field is not None and isinstance(domain.get(field), frozenset):
+            # a field of an unmodified parameter bound to a finite set
+            # (`o.kind in {"a", "b"}`) is decided over its members
+            return _compare_truth_literal(field, op, other, domain, flipped)
 
     for subject, other, flipped in sides:
         if isinstance(subject, ast.Name) and subject.id in affine_locals \
@@ -355,15 +374,16 @@ def _compare_truth_literal(param: str, op: ast.AST, lit_node: ast.AST,
         return truth if isinstance(op, ast.In) else not truth
 
     if isinstance(op, (ast.Is, ast.IsNot)):
-        # identity is decidable EXACTLY over a discrete domain: evaluate
-        # `v is lit` for every stated value (True/False/None are
-        # singletons, so identity on real domain values is real Python
-        # semantics, not an equality approximation; `1 is True` and
-        # `True is True` genuinely differ, and a bool parameter's
-        # stated set carries the real False/True objects). An interval
-        # domain is left undecided: identity over synthesized numerics
-        # is not a fact about the code.
-        if not isinstance(dom, frozenset):
+        # identity is decidable EXACTLY over a discrete domain only
+        # against a singleton (None, True, False, Ellipsis): evaluate
+        # `v is lit` for every stated value (`1 is True` and `True is
+        # True` genuinely differ, and a bool parameter's stated set
+        # carries the real False/True objects). Against any other
+        # object (a string, a number) identity depends on how the
+        # runtime interns it, which no reading of the code settles, so
+        # it is left undecided, and so is an interval domain.
+        if not isinstance(dom, frozenset) \
+                or not any(lit is single for single in (None, True, False, ...)):
             return None
         results = {v is lit for v in dom}
         if len(results) != 1:
@@ -674,6 +694,17 @@ def _explain_branch(test: ast.AST, unmodified: set, affine_locals: dict | None =
                "(or a reassigned parameter), not an unmodified signature "
                "parameter, a bare name's truthiness isn't traced through "
                "affine locals, only a comparison is (see below)"}
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
+            and isinstance(test.ops[0], (ast.Is, ast.IsNot)) \
+            and not any(_literal_value(side)[0]
+                        and _literal_value(side)[1] is single
+                        for side in (test.left, test.comparators[0])
+                        for single in (None, True, False, ...)):
+        return {"kind": "blocked", "code": "unrecognized-shape",
+                "reason": "identity (is / is not) against an object that "
+                "is not None, True, False or Ellipsis depends on how the "
+                "runtime interns that object, so no domain decides it; "
+                "compare with == or != instead"}
     if isinstance(test, ast.Compare) and len(test.ops) == 1:
         left, right = test.left, test.comparators[0]
         left_name = left.id if isinstance(left, ast.Name) else None
@@ -865,9 +896,60 @@ def _condition_to_sympy(test: ast.AST, env: dict):
             builder = _PIECEWISE_COMPARE_OPS.get(type(op))
             if builder is None or isinstance(a, tuple) or isinstance(b, tuple):
                 return None
+            if not isinstance(op, (ast.Eq, ast.NotEq)) and (
+                    _complex_typed(a) or _complex_typed(b)):
+                # complex numbers have no order: `<` raises TypeError
+                return None
             clauses.append(builder(a, b))
         return sympy.And(*clauses) if len(clauses) > 1 else clauses[0]
     return None
+
+
+def _exact_raise_guard(cond):
+    """Intent:
+        A raise path's condition rewritten so it holds on exactly the
+        same points: over one real parameter, its solution set stated
+        as interval relations, each end closed exactly where the set
+        contains it; otherwise the condition as built.
+
+    Notes:
+        A solution set sympy cannot state as intervals (a
+        `ConditionSet`), a timeout, or any failure leaves the condition
+        as built, which is exact by construction.
+    """
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    free = getattr(cond, "free_symbols", set())
+    if len(free) != 1:
+        return cond
+    (sym,) = free
+    if not sym.is_real:
+        return cond
+    try:
+        exact = _with_timeout(
+            lambda: cond.as_set().as_relational(sym), FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return cond
+    if exact.has(sympy.ConditionSet) or exact.free_symbols - {sym}:
+        return cond
+    return _parameter_first(exact, sym)
+
+
+def _parameter_first(expr, sym):
+    """Intent:
+        `expr` with each relation written with `sym` on its left (`1 <
+        w` as `w > 1`), the same set of points.
+    """
+    def flip(rel):
+        if sym not in rel.lhs.free_symbols and sym in rel.rhs.free_symbols:
+            return rel.reversed
+        return rel
+    if isinstance(expr, sympy.core.relational.Relational):
+        return flip(expr)
+    try:
+        return expr.replace(
+            lambda e: isinstance(e, sympy.core.relational.Relational), flip)
+    except Exception:
+        return expr
 
 
 def lift_piecewise(fn, facts) -> "ConditionedLift | None":
@@ -1004,14 +1086,7 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
             expr = sympy.piecewise_fold(expr)
         except Exception:
             pass
-    guards = []
-    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    for cond, name in raise_guards:
-        try:
-            guards.append((_with_timeout(lambda c=cond: sympy.simplify(c),
-                                         FAST_TIMEOUT_SECONDS), name))
-        except Exception:
-            guards.append((cond, name))
+    guards = [(_exact_raise_guard(cond), name) for cond, name in raise_guards]
     return ConditionedLift(kind="value", expr=expr, params=params,
                            sig_params=list(facts.params), aggregate=aggregate,
                            opaque=OpaqueRegistry(), raise_guards=guards)

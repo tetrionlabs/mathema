@@ -242,10 +242,10 @@ class DocstringSync:
     # convention's whole value at this level.
     intent_context: dict = field(default_factory=dict)
     # informational only, never scored: the intent hierarchy around
-    # this function ({"function", "module", "readme"} -> str | None,
-    # see intent_context()); context is reported, never inherited,
-    # so a function missing its own Intent: still shows as a gap even
-    # when its module or README states one.
+    # this function ({"function", "module", "package", "readme"} ->
+    # dict | None, see intent_context()); context is reported, never
+    # inherited, so a function missing its own Intent: still shows as a
+    # gap even when its module, package or README states one.
     # 0-100: how much of what the function actually does is surfaced
     # as context a developer can read (intent at every level, domains,
     # raise conditions, types, the immediate call surface);
@@ -489,7 +489,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         live_form = getattr(facts, "form", None) if facts is not None \
             else None
         if recorded_form and live_form:
-            record_stale = recorded_form != live_form
+            from .identity import same_form
+            record_stale = not same_form(recorded_form, live_form)
 
     # --- the claim triplet: informational only, never scored --------------
     if claims_floor is None:
@@ -628,9 +629,11 @@ def docstring_sync_checklist(sync: DocstringSync) -> list[str]:
                      "was written); its contribution here is dated "
                      "(not scored)")
     ctx = sync.intent_context or {}
-    if ctx.get("module") or ctx.get("readme"):
+    if ctx.get("module") or ctx.get("package") or ctx.get("readme"):
+        levels = (("function", "module", "package", "readme")
+                  if ctx.get("package") else ("function", "module", "readme"))
         parts = []
-        for level in ("function", "module", "readme"):
+        for level in levels:
             entry = ctx.get(level)
             parts.append(f"{level} ✓ {entry['evidence']}" if entry else f"{level} ✗")
         lines.append("· intent context: " + ", ".join(parts) + " (not scored)")
@@ -739,7 +742,8 @@ def render_docstring(fn, root: str = ".") -> str:
     entry = rec["entry"]
     claims = entry.get("claims") or []
 
-    doc = inspect.getdoc(fn) or ""
+    from .analysis import docstring_of
+    doc = docstring_of(fn)
     text = _strip_block(doc, "Claims:")
 
     claim_lines = [f"    {c['name']}{_route_tag(c)}: {c['statement']}"
@@ -777,7 +781,8 @@ def generate_docstring(fn, key: str | None = None, root: str = ".") -> str | Non
     from .authoring import _fn_key, resolve_declared
     from .spec import load_verified
 
-    if (inspect.getdoc(fn) or "").strip():
+    from .analysis import docstring_of
+    if docstring_of(fn).strip():
         return None
     key = key or _fn_key(fn)
     declared = resolve_declared(fn, key=key, root=root)
@@ -819,7 +824,17 @@ def write_docstring(fn, text: str) -> str:
     The insertion is positional, not a reformat: the triple-quoted
     string goes on its own lines immediately before the function's
     first statement, at that statement's own indentation, and nothing
-    else in the file is touched."""
+    else in the file is touched. Refused with `ValueError` for a callable
+    standing for a function another frontend read
+    (`analysis.foreign_body`): its source file is a wrapper's, not where
+    that function is written."""
+    from .analysis import foreign_body
+    if foreign_body(fn):
+        raise ValueError(
+            f"cannot write a docstring for {getattr(fn, '__qualname__', fn)!r}: "
+            f"it stands for a function written in another language, so its "
+            f"Python source is a wrapper's; add the docstring to that "
+            f"function's own source")
     path = inspect.getsourcefile(fn)
     if path is None:
         raise ValueError(f"no source file for {fn!r}")
@@ -891,18 +906,51 @@ def _read_readme_intent(readme: str) -> dict | None:
     return {"text": text, "evidence": "explicit"} if text else None
 
 
+def _read_package_intent(package) -> dict | None:
+    """Intent:
+        A package's own intent: its `__init__.py` docstring, read the
+        way a module's is, else the Intent section of the README.md in
+        the package's directory. None when neither states one.
+    """
+    got = _read_module_intent(package)
+    if got is not None:
+        return got
+    src = getattr(package, "__file__", None)
+    if not src:
+        return None
+    readme = os.path.join(os.path.dirname(src), "README.md")
+    if not os.path.exists(readme):
+        return None
+    with open(readme) as fh:
+        return _read_readme_intent(fh.read())
+
+
+def _enclosing_package(module):
+    """Intent:
+        The package that holds `module`: for `a.b.c` the package
+        `a.b`, for the package `a.b` itself its parent `a`. None for a
+        top-level module or one whose package is not imported.
+    """
+    import sys
+    parent = (getattr(module, "__name__", "") or "").rpartition(".")[0]
+    return sys.modules.get(parent) if parent else None
+
+
 def intent_context(fn, root: str = ".") -> dict:
     """The intent hierarchy around one function: its own docstring's
     intent (`Intent:` block, falling back to the summary line the same
     way `analyze_source()` reads it), its module docstring's (an
     `Intent:` block there, else the module docstring's own first
-    non-empty line), and the codebase's (`<root>/README.md`: an
-    `Intent:` Google-style block, or the first paragraph under an
-    `# Intent`-style heading). Returns
-    `{"function": ..., "module": ..., "readme": ...}`, `None` per level
-    where nothing is stated; context is reported, never inherited
-    downward: a function with no intent of its own stays a gap for the
-    sync checklist to show, whatever its module or README says."""
+    non-empty line), its package's (the package's `__init__.py`
+    docstring read the same way, else an Intent section in the
+    package directory's README.md), and the codebase's
+    (`<root>/README.md`: an `Intent:` Google-style block, or the first
+    paragraph under an `# Intent`-style heading). Returns
+    `{"function": ..., "module": ..., "package": ..., "readme": ...}`,
+    `None` per level where nothing is stated; context is reported,
+    never inherited downward: a function with no intent of its own
+    stays a gap for the sync checklist to show, whatever its module,
+    package or README says."""
     from .analysis import quiet_facts
 
     # the explicit Intent: block is the function-level marker and earns
@@ -926,6 +974,8 @@ def intent_context(fn, root: str = ".") -> dict:
 
     module = inspect.getmodule(fn)
     module_intent = _read_module_intent(module) if module else None
+    package = _enclosing_package(module) if module else None
+    package_intent = _read_package_intent(package) if package else None
 
     readme_intent = None
     readme_path = os.path.join(root, "README.md")
@@ -934,4 +984,4 @@ def intent_context(fn, root: str = ".") -> dict:
             readme_intent = _read_readme_intent(fh.read())
 
     return {"function": function_intent, "module": module_intent,
-            "readme": readme_intent}
+            "package": package_intent, "readme": readme_intent}

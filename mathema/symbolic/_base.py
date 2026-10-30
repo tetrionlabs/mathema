@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .._signatures import module_scope
 import ast
+import cmath
 import contextlib
 import contextvars
 import inspect
@@ -64,6 +65,89 @@ _SYMPY_RELOPS = {
     ast.Lt: sympy.Lt, ast.LtE: sympy.Le,
     ast.Gt: sympy.Gt, ast.GtE: sympy.Ge,
 }
+
+
+#: elementary functions whose cmath and numpy forms compute on a complex
+#: argument along the principal branch sympy reads them with
+_PLANE_FUNCTIONS = frozenset({"sqrt", "exp", "log", "log10", "log2", "sin",
+                              "cos", "tan", "sinh", "cosh", "tanh"})
+
+
+def _complex_typed(value) -> bool:
+    """Intent:
+        Whether a lifted value stands for a Python complex number: it
+        reads a parameter bound as a complex symbol, or the imaginary
+        unit, anywhere outside an `Abs` (whose result is a real number).
+        Python arithmetic with a complex operand always returns a
+        complex, so a value built from one keeps the type.
+    """
+    if isinstance(value, tuple):
+        return any(_complex_typed(v) for v in value)
+    if isinstance(value, _SymbolicArray):
+        return _complex_typed(value.expr)
+    if not isinstance(value, sympy.Basic):
+        return False
+    if isinstance(value, sympy.Abs):
+        return False
+    if value is sympy.I:
+        return True
+    if isinstance(value, sympy.Symbol):
+        return bool(value.is_complex) and value.is_extended_real is not True
+    return any(_complex_typed(a) for a in value.args)
+
+
+def _callee_object(node: ast.Call, ctx: "_LiftCtx | None"):
+    """The object a call's function expression names in the module the
+    body is read in (`math.exp`, a name imported from cmath), or None
+    when it does not resolve there."""
+    import builtins
+    f = node.func
+    scope = ctx.globals_ns if ctx is not None else {}
+    if isinstance(f, ast.Name):
+        if f.id in scope:
+            return scope[f.id]
+        return getattr(builtins, f.id, None)
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+        module = scope.get(f.value.id)
+        return getattr(module, f.attr, None) if module is not None else None
+    return None
+
+
+def _accepts_complex(node: ast.Call, name: str, ctx: "_LiftCtx | None") -> bool:
+    """Intent:
+        Whether the function a call names computes on a Python complex
+        argument, as the lifted sympy function does: the builtin `abs`,
+        `numpy.abs` and `numpy.conjugate`, and the cmath and numpy forms
+        of the elementary functions in `_PLANE_FUNCTIONS`. Every other
+        function (`float`, `min`, `max`, `round`, anything in the math
+        module, a floor or a two-argument arctangent) raises TypeError
+        on a complex argument or orders it in a way sympy does not, so
+        it does not.
+
+    Notes:
+        A callee that does not resolve in the module's namespace does
+        not accept complex.
+    """
+    import builtins
+    obj = _callee_object(node, ctx)
+    if obj is None:
+        return False
+    if obj is builtins.abs:
+        return True
+    module = getattr(obj, "__module__", None) or ""
+    root = module.split(".")[0]
+    if root == "cmath":
+        return name in _PLANE_FUNCTIONS
+    if root == "numpy":
+        return name in _PLANE_FUNCTIONS or name in ("abs", "conjugate")
+    return False
+
+
+def _refuse_real_only(node: ast.AST, category: str) -> "NotSymbolic":
+    """The refusal for a real-only operation applied to a complex value,
+    which raises TypeError in Python."""
+    return NotSymbolic(f"a real-only operation on a complex value raises "
+                       f"TypeError: {ast.unparse(node)!r}", category=category)
 
 
 def _unsupported_call_message(node: ast.Call) -> str:
@@ -231,6 +315,39 @@ def _method_ctx_fields(fn, facts) -> tuple:
     return None, None
 
 
+def _module_function(func: ast.Attribute, globals_ns: dict):
+    """Intent:
+        The function a call names through modules alone
+        (`helpers.g`, `h.g` for an aliased import, `pkg.sub.g`): the
+        name the chain starts from resolves in `globals_ns` to a
+        module, each step after it but the last is a module, and the
+        last is a plain Python function whose source lies outside the
+        installed library paths. None for anything else (a method of
+        an object a module holds, a class, a library function).
+    """
+    steps: list = []
+    node: ast.AST = func
+    while isinstance(node, ast.Attribute):
+        steps.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    holder = globals_ns.get(node.id)
+    for attr in reversed(steps):
+        if not inspect.ismodule(holder):
+            return None
+        holder = getattr(holder, attr, None)
+    if not inspect.isfunction(holder):
+        return None
+    import os
+
+    from .._examine import _INSTALLED
+    path = os.path.abspath(holder.__code__.co_filename)
+    if any(path.startswith(p + os.sep) for p in _INSTALLED):
+        return None
+    return holder
+
+
 def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
                        opaque: "OpaqueRegistry | None" = None):
     """Attempt to inline a call to a plain, bare-name function this one
@@ -249,8 +366,9 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
     the caller's registry rather than getting a fresh one. Declines
     (returns None, never raises, the caller falls back to its own
     ordinary unsupported-call error) whenever the attempt wouldn't be
-    honest: a module-qualified or method call (`obj.method(...)`, only a
-    bare `name(...)` is attempted), keyword arguments, the depth budget
+    honest: a method call (`obj.method(...)`; a bare `name(...)`, a
+    call through modules to a project function (`_module_function`)
+    and a sibling method through self are attempted), keyword arguments, the depth budget
     exhausted or the callee already on this path (seen), the name not
     resolving to a real Python function, the callee itself failing to
     lift (unconditionally, or under a derived domain), a callee whose
@@ -278,6 +396,8 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
             callee, self_call = member.__func__, "static"
         else:
             callee, self_call = member, "instance"
+    elif isinstance(node.func, ast.Attribute):
+        callee = _module_function(node.func, ctx.globals_ns)
     else:
         return None
     if callee is None or not inspect.isfunction(callee) or id(callee) in ctx.seen:
@@ -327,6 +447,11 @@ def _try_inline_callee(node: ast.Call, env: dict, ctx: "_LiftCtx",
 
     args = [_expr_to_sympy(a, env, ctx, opaque) for a in node.args]
     if any(isinstance(a, (tuple, _SymbolicArray)) for a in args):
+        return None
+    if any(_complex_typed(a) and not _complex_typed(lifted.params[p])
+           for p, a in zip(sig_params, args)):
+        # the callee was read over a real parameter; a complex argument
+        # may meet a real-only operation in its body
         return None
     subs = {lifted.params[p]: a for p, a in zip(sig_params, args)}
     return lifted.expr.subs(subs, simultaneous=True)
@@ -734,7 +859,9 @@ def _literal_int_index(node: ast.AST) -> int | None:
     return None
 
 
-def _exact_numeric_literal(value: int | float) -> "sympy.Integer | sympy.Rational":
+def _exact_numeric_literal(value: int | float,
+                           written: "str | None" = None
+                           ) -> "sympy.Integer | sympy.Rational":
     """An int/float literal from claim text, converted without the
     binary floating-point rounding `sympy.Float`/plain `sympy.sympify`
     would introduce for a float. Python's own `str()` of a float is
@@ -745,7 +872,21 @@ def _exact_numeric_literal(value: int | float) -> "sympy.Integer | sympy.Rationa
     differ at the ~1e-17 relative level, invisible for a single
     comparison but capable of leaving a real identity's difference
     non-zero (`falsified`, not just imprecise) once raised to a
-    symbolic power elsewhere in the same expression."""
+    symbolic power elsewhere in the same expression. A real literal
+    past the float range (`1e309`, which Python reads as an infinity)
+    is the number `written` spells, 10**309; with no written text it
+    does not lift."""
+    if isinstance(value, (float, complex)) and not cmath.isfinite(value):
+        exact = None
+        if isinstance(value, float) and written:
+            try:
+                exact = sympy.Rational(written.replace("_", ""))
+            except (TypeError, ValueError):
+                exact = None
+        if exact is None:
+            raise NotSymbolic(f"a literal with no finite value: {value!r}",
+                              category="non-numeric-constant")
+        return exact
     if isinstance(value, complex):
         real = sympy.Rational(str(value.real)) if value.real else sympy.Integer(0)
         return real + sympy.I * sympy.Rational(str(value.imag))
@@ -798,6 +939,10 @@ def _cond_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
                 raise NotSymbolic(f"cannot use a tuple or array value in a "
                                   f"condition: {ast.unparse(node)!r}",
                                   category="tuple-in-expression")
+            if relop not in (sympy.Eq, sympy.Ne) and (
+                    _complex_typed(left) or _complex_typed(right)):
+                # complex numbers have no order: `<` raises TypeError
+                raise _refuse_real_only(node, "ternary")
             parts.append(relop(left, right))
         return sympy.And(*parts) if len(parts) > 1 else parts[0]
     raise NotSymbolic(f"unsupported ternary condition {ast.unparse(node)!r}",
@@ -965,8 +1110,14 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
     means for any all-constant tuple. See the derive-route docs for
     this boundary."""
     if isinstance(node, ast.Constant):
+        if isinstance(node.value, complex) and node.value.imag == 0:
+            # a complex literal on the real axis is still a Python
+            # complex, which the exact number it denotes does not show
+            raise NotSymbolic(f"a complex literal with no imaginary part "
+                              f"lifts to a real number: {ast.unparse(node)!r}")
         if not isinstance(node.value, bool) and isinstance(node.value, (int, float, complex)):
-            return _exact_numeric_literal(node.value)
+            return _exact_numeric_literal(
+                node.value, getattr(node, "mathema_written", None))
         if opaque is not None and is_opaque_eligible(node.value):
             return opaque.register(node.value)
         raise NotSymbolic(f"non-numeric constant {node.value!r}",
@@ -1093,9 +1244,17 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if isinstance(left, tuple) or isinstance(right, tuple):
             raise NotSymbolic(f"cannot use a tuple value in an arithmetic "
                               f"operation: {ast.unparse(node)!r}", category="tuple-in-expression")
+        typed = _complex_typed(left) or _complex_typed(right)
+        if typed and isinstance(node.op, (ast.Mod, ast.FloorDiv)):
+            raise _refuse_real_only(node, "unsupported-syntax")
         if isinstance(left, _SymbolicArray) or isinstance(right, _SymbolicArray):
-            return _array_elementwise_binop(op, left, right)
-        return op(left, right)
+            result = _array_elementwise_binop(op, left, right)
+        else:
+            result = op(left, right)
+        if typed and not _complex_typed(result):
+            # `z - z` is the number 0 but the Python value 0j
+            raise _refuse_real_only(node, "unsupported-syntax")
+        return result
     if isinstance(node, ast.Call):
         if (isinstance(node.func, ast.Name) and node.func.id == "len"
                 and len(node.args) == 1 and not node.keywords
@@ -1131,9 +1290,18 @@ def _expr_to_sympy(node: ast.AST, env: dict, ctx: "_LiftCtx | None" = None,
         if any(isinstance(a, tuple) for a in args):
             raise NotSymbolic(f"cannot pass a tuple value to a function call: "
                               f"{ast.unparse(node)!r}", category="tuple-in-expression")
+        typed = any(_complex_typed(a) for a in args)
+        if typed and not _accepts_complex(node, name, ctx):
+            raise _refuse_real_only(node, "unsupported-call")
         if any(isinstance(a, _SymbolicArray) for a in args):
-            return _apply_elementwise(_SYMPY_FUNCS[name], args)
-        return _SYMPY_FUNCS[name](*args)
+            result = _apply_elementwise(_SYMPY_FUNCS[name], args)
+        else:
+            result = _SYMPY_FUNCS[name](*args)
+        if typed and name not in ("abs", "Abs") and not _complex_typed(result):
+            # `cmath.exp(1j * math.pi)` is the number -1 but the Python
+            # value (-1+1.2e-16j)
+            raise _refuse_real_only(node, "unsupported-call")
+        return result
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                          ast.GeneratorExp)):
         raise NotSymbolic(

@@ -81,6 +81,20 @@ narrows a domain away from `nan`/`inf`, fast via numpy. On an expression
 every other claim, and a raise from `f` at a point inside it falsifies
 the claim, naming the exception.
 
+Both `is_finite` and `is_real` also read a result that is a single
+number, and they read every value the same way with or without numpy
+installed. A number is an int, a bool, a float, a complex, a Fraction
+or a Decimal. It is finite when it is neither an infinity nor a NaN (a
+complex number when both its parts are), and a bool or a Fraction is
+always finite. `is_real` reads the value, not its type: a complex
+number with a zero imaginary part, such as `1 + 0j`, is real, and a
+vector or matrix is real when every entry is. An empty vector or
+matrix is finite and real, since no entry is otherwise. A result that
+is not a number, nor a vector or matrix of numbers (None, a string, a
+ragged list, a list holding None), leaves the claim unknown with "the
+result is not a number" and the point that returned it, unless another
+point falsifies the claim.
+
 ## Narrowing the domain
 
 A structure marker, or an `assuming` premise, narrows the matrices a
@@ -229,6 +243,18 @@ positive semidefiniteness has none either, so it narrows sampling only.
 Matrices and vectors are real in this release: a claim over `C^n` or
 `C^(m,n)` is refused as misspecified, with the reason "matrices and
 vectors are real-only in this release". Complex scalars are unaffected.
+
+A function may still return a vector or matrix of complex numbers, and
+that result is a value, read as a complex array with or without numpy.
+`is_finite` and `is_real` decide it by value, entry by entry, as they
+do a complex scalar. The structural properties (symmetric, triangular,
+diagonal, orthogonal, positive definite and the rest) are read over
+real matrices only, so on a complex result they leave the claim
+unknown with the reason "the result is a complex matrix, and
+is_symmetric is read over real matrices only in this release". With
+numpy installed, a real claim over `R^n` or `R^(m,n)` whose function
+returns a complex vector or matrix reads it as it reads a complex
+scalar: no real value there.
 
 ### Sugar
 
@@ -415,8 +441,10 @@ A function that calls numpy is read through numpy's
 `f(a, b) ~= solve(a, b)` where `det(a) != 0`, is stated over a matrix
 and a vector together, which a proof through definition rows does not
 read, so a claim about a function calling it is decided by sampling.
-The same identity in the grammar's own words, `A @ solve(A, b) ~= b`,
-is proven (see the vocabulary above).
+There `A @ f(A, b) == b` is `unknown`: each sampled solution meets `b`
+only within the computation's allowance, and numpy's result has no exact
+reading, so no draw is counted. The same identity in the grammar's own
+words, `A @ solve(A, b) ~= b`, is proven (see the vocabulary above).
 
 <!-- example: numpy-functions run requires=numpy -->
 ```python
@@ -437,7 +465,7 @@ for A in R^(n,n), f(A) == A   # falsified
 
 <!-- example: numpy-functions verdicts fn=solve_for -->
 ```
-for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
+for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # unknown
 for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, f(A, b) == b   # falsified
 ```
 

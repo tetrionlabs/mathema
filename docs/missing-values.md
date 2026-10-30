@@ -264,7 +264,7 @@ print(mathema.check(clamp_discount, claims=[mathema.claim(
 
 <!-- example: core output -->
 ```text
-mathema.Record(clamp_discount) · source, no side effects · form bc9fa73b5bd1
+mathema.Record(clamp_discount) · source, no side effects · form py:bc9fa73b5bd1
   in_unit  for rate in R|missing, 0 <= clamp_discount(rate) <= 1   falsified at f(nan)
     proven     mathematics  for rate in R, 0 <= clamp_discount(rate) <= 1
     holds      computation  for rate in R, 0 <= clamp_discount(rate) <= 1   43 draws
@@ -302,7 +302,7 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 
 <!-- example: core output -->
 ```text
-mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
+mathema.Record(risk_label) · source, no side effects · form py:ba84c5dc4cc6
   labels  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at f(nan)
     holds      computation  for score in [0.0, 1.0] : float, risk_label(score) in {"high", "low"}   34 draws
     falsified  policy       f(nan)   f(nan) returns "low"
@@ -346,19 +346,19 @@ print(mathema.check(in_base_currency, claims=[mathema.claim(
 
 <!-- example: core output -->
 ```text
-mathema.Record(volatility) · source, no side effects · form fafd8ee932cd
+mathema.Record(volatility) · source, no side effects · form py:fafd8ee932cd
   nonneg  for variance in [0.0, 1.0] : float|missing, volatility(variance) >= 0   holds
     proven     mathematics  for variance in [0.0, 1.0] ⊂ ℝ, volatility(variance) >= 0
     holds      computation  for variance in [0.0, 1.0] : float, volatility(variance) >= 0   43 draws
     proven     policy       f(nan)   propagates, from math.sqrt's own policy row, which f calls
-mathema.Record(log_return) · source, no side effects · form cdfe6bbcc84d
+mathema.Record(log_return) · source, no side effects · form py:cdfe6bbcc84d
   bounded  for ratio in [0.5, 2.0] : float|missing, log_return(ratio) <= 1   holds
     proven     mathematics  for ratio in [0.5, 2.0] ⊂ ℝ, log_return(ratio) <= 1
     holds      computation  for ratio in [0.5, 2.0] : float, log_return(ratio) <= 1   42 draws
     proven     policy       f(nan)   raises(ValueError), from the guard on line 3
-mathema.Record(in_base_currency) · source, no side effects · form c0f6dfdbe44d
+mathema.Record(in_base_currency) · source, no side effects · form py:c0f6dfdbe44d
   scales  for amount in [0.0, 100.0] : float|missing, fx_rate in [0.5, 2.0] : float|absent|missing, in_base_currency(amount, fx_rate) = amount*fx_rate   holds
-    holds      computation  for amount in [0.0, 100.0] : float, fx_rate in [0.5, 2.0] : float, in_base_currency(amount, fx_rate) = amount*fx_rate   161 draws
+    holds      computation  for amount in [0.0, 100.0] : float, fx_rate in [0.5, 2.0] : float, in_base_currency(amount, fx_rate) = amount*fx_rate   161 draws; differs by 1.34e-14 at amount = 89.64787909445818, fx_rate = 1.5085973865860938, within the default tolerance (1.35e-05)
     holds      policy       f(amount=nan)   no missing policy stated; assumed propagates
     holds      policy       f(fx_rate=nan)   no missing policy stated; assumed propagates
     proven     policy       f(fx_rate=None)   drops, from the guard on line 3
@@ -382,7 +382,7 @@ print(mathema.check(fee_rate, claims=[mathema.claim(
 
 <!-- example: core output -->
 ```text
-mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
+mathema.Record(fee_rate) · source, no side effects · form py:c1cba0e35dda
   below_one  for tier in [0, 3] : int, fee_rate(tier) < 1   proven
     proven     mathematics  for tier in [0, 3] ⊂ ℤ, fee_rate(tier) < 1
     proven     policy       absent(f) introduces   from the return type Optional[float]: f returned None at tier = 0 from present inputs; confirmed on the draws of below_one
@@ -390,9 +390,11 @@ mathema.Record(fee_rate) · source, no side effects · form c1cba0e35dda
 
 `-> Optional[float]` declares that the result may be absent, so the
 `None` at `tier = 0` is recorded and not judged, and `absent(f)
-introduces` comes from the return type. The same body annotated `->
-float` fails the claim at that point: a `None` from inputs that were all
-there is no value.
+introduces` comes from the return type. `float | None` declares it the
+same way, and so do the types that admit `None` themselves (`-> None`,
+`-> Any`, `-> object`). The same body annotated `-> float`, or with no
+return annotation at all, fails the claim at that point: a `None` from
+inputs that were all there is no value.
 
 ## Containers: lists, arrays and series
 
@@ -431,7 +433,7 @@ print(mathema.check(average_return, claims=[mathema.claim(
 
 <!-- example: containers output -->
 ```text
-mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
+mathema.Record(total_exposure) · source, no side effects · form py:dacf931fef1e
   nonneg  for positions in ([0.0, 1.0] | {missing})^n : float, total_exposure(positions) >= 0   falsified at f([null])
     proven     mathematics  for positions in ([0.0, 1.0])^n ⊂ ℝ, total_exposure(positions) >= 0
     holds      computation  for positions in ([0.0, 1.0])^n : float, total_exposure(positions) >= 0   208 entries across 44 draws, sizes (1, 1) to (8, 1)
@@ -442,7 +444,7 @@ mathema.Record(total_exposure) · source, no side effects · form dacf931fef1e
                               (ii) exclude null
                               (iii) handle null at entry
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
-mathema.Record(average_return) · source, no side effects · form ce47d44bdab7
+mathema.Record(average_return) · source, no side effects · form py:ce47d44bdab7
   unit  for returns in ([0.0, 1.0] | {missing})^n : float, 0 <= average_return(returns) <= 1   holds
     holds      computation  for returns in ([0.0, 1.0])^n : float, 0 <= average_return(returns) <= 1   418 entries across 102 draws, sizes (1, 1) to (8, 1)
     proven     policy       f([..., nan, ...])   propagates, from numpy.mean's own policy row, which f calls
@@ -483,7 +485,7 @@ print(mathema.check(greeting, claims=[mathema.claim(
 
 <!-- example: strings output match=subset -->
 ```text
-mathema.Record(greeting) · source, no side effects · form 4ddaf64c7461
+mathema.Record(greeting) · source, no side effects · form py:4ddaf64c7461
   long_enough  for nickname in L[unicode]|absent, len(greeting(nickname)) >= 3   falsified at f(None)
     holds      computation  for nickname in L[unicode], len(greeting(nickname)) >= 3   223 draws
     falsified  policy       f(None)   f(None) raises AttributeError; f("a😀😀😀😀😀😀") returns "Hi a😀😀😀😀😀😀"
@@ -528,7 +530,7 @@ print(mathema.check(delivery_note, claims=[mathema.claim(
 
 <!-- example: slip output -->
 ```text
-mathema.Record(delivery_note) · source, no side effects · form 723add5de9a8
+mathema.Record(delivery_note) · source, no side effects · form py:723add5de9a8
   has_text  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   falsified at f(order) with order.note unset
     holds      computation  for order.note in {"leave at the door", "ring twice", absent} \ {null}, len(delivery_note(order)) >= 1   87 draws
     falsified  policy       f(order) at order.note unset   f(order) with order.note unset raises KeyError
@@ -706,7 +708,7 @@ print(mathema.check(risk_label, claims=[mathema.claim(
 
 <!-- example: core output -->
 ```text
-mathema.Record(risk_label) · source, no side effects · form ba84c5dc4cc6
+mathema.Record(risk_label) · source, no side effects · form py:ba84c5dc4cc6
   risk_label_score_in_high_low  for score in [0.0, 1.0] : float|absent|missing, risk_label(score) in {"high", "low"}   falsified at f(nan)
     holds      computation  for score in [0.0, 1.0] : float, risk_label(score) in {"high", "low"}   34 draws
     falsified  policy       f(nan)   f(nan) returns "low"

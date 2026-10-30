@@ -80,3 +80,106 @@ def test_no_record_under_this_repository_holds_a_non_string_key():
         return True
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assert keys_ok(load_verified(root))
+
+
+# --- every key the writer emits reads back, or the writer refuses it ---
+
+INDICATORS = list(">|&*!%@`,[]{}#?-:'\"") + [" "]
+
+INDICATOR_KEYS = sorted({k for c in INDICATORS
+                         for k in (c, c + " 256 ulp", c + c, "a " + c,
+                                   "a" + c + "b", "a " + c + " b")})
+
+# line breaks, control characters and characters YAML does not carry
+# literally: each needs an escape inside a quoted scalar
+ESCAPED_KEYS = ["\n", "a\nb", "\r", "a\r\nb", "\t", "a\tb", "\x00", "\x07",
+                "\x1b", "\x7f", "\x85", "a\x85b", "\x9f", " ", " ",
+                "﻿", "￾", "￿", "\xa0", "\xa0x", "x\xa0",
+                "\\", "a\\nb", "é", "\U0001F600"]
+
+
+def _loaders():
+    out = [yaml.SafeLoader]
+    if hasattr(yaml, "CSafeLoader"):
+        out.append(yaml.CSafeLoader)
+    return out
+
+
+def _shapes(key):
+    """The places a key can sit in a record: a nested mapping, the
+    first and a later key of a mapping inside a list, and a top-level
+    key whose value is a mapping."""
+    return [{"m": {key: 1, "other": 2}},
+            {"m": [{key: 1, "z": 2}]},
+            {"m": [{"z": 1, key: 2}]},
+            {key: {"a": 1}}]
+
+
+@pytest.mark.parametrize("key", INDICATOR_KEYS + ESCAPED_KEYS)
+def test_a_key_reads_back_wherever_it_sits(key):
+    for data in _shapes(key):
+        text = dump_yaml(data)
+        for loader in _loaders():
+            assert yaml.load(text, Loader=loader) == data, (loader, text)
+
+
+@pytest.mark.parametrize("value", ESCAPED_KEYS + INDICATOR_KEYS)
+def test_a_string_value_reads_back_as_itself(value):
+    data = {"m": {"v": value}, "l": [value]}
+    text = dump_yaml(data)
+    for loader in _loaders():
+        assert yaml.load(text, Loader=loader) == data, (loader, text)
+
+
+def _entry(meta):
+    return {"identity": {"form": "abc"}, "meta": meta, "claims": []}
+
+
+def test_no_record_the_writer_emits_is_dropped_by_the_reader(tmp_path):
+    from mathema.spec import save_verified_entry, unreadable_verified
+    keys = INDICATOR_KEYS + ESCAPED_KEYS
+    for i, key in enumerate(keys):
+        save_verified_entry(f"pkg.mod.f{i}", _entry({"bands": {key: i},
+                                                     "rows": [{key: i}],
+                                                     "said": key}),
+                            str(tmp_path))
+    store = load_verified(str(tmp_path))
+    assert unreadable_verified(str(tmp_path)) == {}
+    for i, key in enumerate(keys):
+        meta = store[f"pkg.mod.f{i}"]["entry"]["meta"]
+        assert meta == {"bands": {key: i}, "rows": [{key: i}], "said": key}, key
+
+
+def test_the_extension_band_key_survives_the_store(tmp_path):
+    from mathema.spec import save_verified_entry
+    save_verified_entry("pkg.mod.f", _entry({"ext.bands": {"> 256 ulp": 3}}),
+                        str(tmp_path))
+    meta = load_verified(str(tmp_path))["pkg.mod.f"]["entry"]["meta"]
+    assert meta == {"ext.bands": {"> 256 ulp": 3}}
+
+
+def test_a_key_at_the_length_yaml_reads_is_written():
+    key = "k" * 1022
+    assert yaml.safe_load(dump_yaml({"m": {key: 1}})) == {"m": {key: 1}}
+
+
+@pytest.mark.parametrize("key, says", [
+    ("k" * 1100, "1024"),
+    ("a\ud800b", "surrogate"),
+    (("a", 1), "tuple"),
+    (b"bytes", "bytes"),
+])
+def test_a_key_yaml_cannot_carry_is_refused_by_name(key, says, tmp_path):
+    from mathema.spec import save_verified_entry
+    with pytest.raises(ValueError) as err:
+        save_verified_entry("pkg.mod.f", _entry({"bands": {key: 1}}),
+                            str(tmp_path))
+    text = str(err.value)
+    assert says in text, text
+    assert repr(key)[:20] in text, text
+    assert "pkg.mod.f" not in load_verified(str(tmp_path))
+
+
+def test_a_value_with_a_lone_surrogate_is_refused():
+    with pytest.raises(ValueError, match="surrogate"):
+        dump_yaml({"m": {"v": "a\udc80"}})

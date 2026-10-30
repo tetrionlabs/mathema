@@ -362,7 +362,7 @@ _REPRESENTATION_LADDER = (sys.float_info.max, 1e154, 710.0, 1e-308,
                           5e-324)
 
 
-def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
+def _extreme_candidates(bounds, pseudo_infinity=None, profile=None) -> list[float]:
     """Intent:
         Representation-extreme input candidates a declared bound
         admits: the finite declared endpoints themselves, and (for an
@@ -380,6 +380,16 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
         Candidates are filtered by domain membership, so an excluded
         endpoint or a bound shape domain_contains rejects contributes
         nothing.
+
+        `profile` is the `representations.Representation` the parameter
+        is computed in, or None for the float64 ladder. Under a profile
+        the ladder is the profile's: its non-negative rungs for an
+        unbounded upper side, its non-positive rungs for an unbounded
+        lower side. A declared end past the profile's range counts as
+        unbounded, and every candidate lies within the range. Under an
+        integral profile a declared end contributes the first integer
+        the domain admits at or inside it (`(0.5, 10)` gives 1, `(0, 10)`
+        open gives 1 and 9), as an exact integer.
     """
     from .grammar import domain_contains
 
@@ -389,55 +399,94 @@ def _extreme_candidates(bounds, pseudo_infinity=None) -> list[float]:
         except Exception:
             return False
 
+    def end(value) -> float:
+        if profile is not None and profile.integral and isinstance(value, int) \
+                and not isinstance(value, bool):
+            return value
+        return float(value)
+
+    def inward(value, step: int):
+        if profile is None or not profile.integral:
+            return value
+        whole = math.ceil(value) if step > 0 else math.floor(value)
+        return whole if admitted(whole) else whole + step
+
+    if profile is None:
+        rungs_hi = list(_REPRESENTATION_LADDER)
+        rungs_lo = [-v for v in _REPRESENTATION_LADDER]
+        floor = ceiling = None
+    else:
+        rungs_hi = [v for v in profile.ladder if v >= 0]
+        rungs_lo = [v for v in profile.ladder if v <= 0]
+        floor, ceiling = profile.min_value, profile.max_value
+
     raw: list[float] = []
     lo = hi = None
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset) \
             and len(bounds) == 2:
         try:
-            lo, hi = float(bounds[0]), float(bounds[1])
+            lo, hi = end(bounds[0]), end(bounds[1])
         except (TypeError, ValueError):
             lo = hi = None
     reach_lo = bool(getattr(bounds, "reach_lo", False))
     reach_hi = bool(getattr(bounds, "reach_hi", False))
+    past_lo = floor is not None and lo is not None and lo < floor
+    past_hi = ceiling is not None and hi is not None and hi > ceiling
     if reach_lo and pseudo_infinity is None and lo is not None:
         pseudo_infinity = (lo, abs(lo))
     if reach_hi and pseudo_infinity is None and hi is not None:
         pseudo_infinity = (-abs(hi), hi)
-    if lo is not None and abs(lo) != float("inf") and not reach_lo:
-        raw.append(lo)
-    if hi is not None and abs(hi) != float("inf") and not reach_hi:
-        raw.append(hi)
-    unbounded_hi = hi is None or hi == float("inf") or reach_hi
-    unbounded_lo = lo is None or lo == -float("inf") or reach_lo
+    if lo is not None and abs(lo) != float("inf") and not reach_lo and not past_lo:
+        raw.append(inward(lo, 1))
+    if hi is not None and abs(hi) != float("inf") and not reach_hi and not past_hi:
+        raw.append(inward(hi, -1))
+    unbounded_hi = hi is None or hi == float("inf") or reach_hi or past_hi
+    unbounded_lo = lo is None or lo == -float("inf") or reach_lo or past_lo
     if unbounded_hi:
-        raw.extend(list(_REPRESENTATION_LADDER) if pseudo_infinity is None
-                   else [v for v in _REPRESENTATION_LADDER
-                         if v <= pseudo_infinity[1]]
+        raw.extend(rungs_hi if pseudo_infinity is None
+                   else [v for v in rungs_hi if v <= pseudo_infinity[1]]
                    + [pseudo_infinity[1]])
     if unbounded_lo:
-        raw.extend([-v for v in _REPRESENTATION_LADDER]
-                   if pseudo_infinity is None
-                   else [-v for v in _REPRESENTATION_LADDER
-                         if -v >= pseudo_infinity[0]]
+        raw.extend(rungs_lo if pseudo_infinity is None
+                   else [v for v in rungs_lo if v >= pseudo_infinity[0]]
                    + [pseudo_infinity[0]])
     out: list[float] = []
     for cand in raw:
+        if (floor is not None and cand < floor) or (ceiling is not None and cand > ceiling):
+            continue
         if admitted(cand) and cand not in out:
             out.append(cand)
     return out
+
+
+def _parameter_profile(facts, param: str):
+    """The profile of the representation `param`'s KOINE parameter line
+    names (`representations.parameter_profile`), or None when `facts`
+    carries no document (every Python function)."""
+    doc = getattr(facts, "koine", None)
+    if doc is None:
+        return None
+    from .representations import parameter_profile
+    return parameter_profile(doc, param)
 
 
 def _extreme_hazard_points(fn, facts, domain: dict) -> list[HazardPoint]:
     """Representation-extreme candidates per scalar parameter, from
     the declared bounds alone (a claim-level pseudo-infinity range is
     applied by the consumer, not here; the registry sees only the
-    function and domain)."""
+    function and domain). The ladder is the profile of the
+    representation the parameter's KOINE line names, an integer
+    parameter included, else the float64 ladder; an integer point
+    reads as the exact integer."""
     out: list[HazardPoint] = []
     for p in facts.params:
-        if facts.param_kinds.get(p) not in ("scalar", "unknown"):
+        profile = _parameter_profile(facts, p)
+        kinds = ("scalar", "unknown", "int") if profile is not None else ("scalar", "unknown")
+        if facts.param_kinds.get(p) not in kinds:
             continue
-        for value in _extreme_candidates(domain.get(p)):
-            out.append(HazardPoint("extreme", p, f"{value:g}", value,
+        for value in _extreme_candidates(domain.get(p), profile=profile):
+            at = str(value) if isinstance(value, int) else f"{value:g}"
+            out.append(HazardPoint("extreme", p, at, value,
                                    source="representation ladder"))
     return out
 

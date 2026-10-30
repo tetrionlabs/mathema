@@ -4,14 +4,26 @@
 code, executed at the point derive names, fails there. A pole inside
 the declared domain (is_pole_safe, is_numerically_stable) or a raising
 missing-value guard the domain contradicts (is_missing_safe) is a
-structural finding; the executed call is the witness. When the call
-at that point behaves, the disproof is uncorroborated: the verdict is
-not `falsified`, and the record carries the engine-bug flag."""
+structural finding; the executed call is the witness. A pole no float
+lands on is witnessed by its exact point, certified by interval
+arithmetic on the body's own divisor. When the call at that point
+behaves and nothing certifies it, the disproof is uncorroborated: the
+verdict is not `falsified`, and the record carries the flag."""
 from mathema import check_conjectures, claim
 
 
 def reciprocal_shift(x: float) -> float:
     return 1 / (x - 5)
+
+
+def _irrational_denominator(x):
+    return x * x - 2
+
+
+def reciprocal_through_a_helper(x: float) -> float:
+    # the divisor is the helper's result, which the raise-region reading
+    # does not state, so nothing certifies the pole sqrt(2) the lift finds
+    return 1 / _irrational_denominator(x)
 
 
 def reciprocal_irrational_pole(x: float) -> float:
@@ -60,10 +72,19 @@ def test_the_finiteness_statement_is_falsified_as_written():
 def test_pole_safe_disproof_the_code_does_not_reproduce_is_not_falsified():
     cj = claim("for x in [0, 10], is_pole_safe(x)", name="is_pole_safe[x]",
                route="derive")
-    (p,) = check_conjectures(reciprocal_irrational_pole, [cj])
+    (p,) = check_conjectures(reciprocal_through_a_helper, [cj])
     assert p.verdict != "falsified", (p.verdict, p.counterexample)
     assert p.meta.get("mathema.corroboration") == "uncorroborated"
     assert "derive found a disproof" in p.note
+
+
+def test_an_irrational_pole_the_divisor_certifies_is_falsified():
+    cj = claim("for x in [0, 10], is_pole_safe(x)", name="is_pole_safe[x]",
+               route="derive")
+    (p,) = check_conjectures(reciprocal_irrational_pole, [cj])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert p.counterexample == "x = sqrt(2)", p.counterexample
+    assert "certified by interval arithmetic" in p.sketch, p.sketch
 
 
 def test_the_finiteness_statement_holds_where_float_steps_over_the_pole():
@@ -97,7 +118,7 @@ def test_missing_safe_guard_that_does_not_raise_on_missing_is_not_falsified():
 def test_a_pole_floating_point_steps_over_is_labelled_exact_arithmetic_only():
     cj = claim("for x in [0, 10], is_pole_safe(x)", name="is_pole_safe[x]",
                route="derive")
-    for p in check_conjectures(reciprocal_irrational_pole, [cj]):
+    for p in check_conjectures(reciprocal_through_a_helper, [cj]):
         assert p.meta.get("mathema.corroboration") == "uncorroborated"
         assert p.meta.get("mathema.corroboration_reason") == \
             "exact arithmetic only", (p.name, p.meta)

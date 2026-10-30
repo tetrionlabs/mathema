@@ -71,9 +71,12 @@ def _identity(statement: str, domain: "dict | None" = None,
         to silently skip; the old fingerprint returned None here, and
         a conflict on an unparseable claim simply vanished.
     """
+    from ._annotation_text import complex_parameters
+    from .grammar import complex_in_view
     from .spec import _declared_conjecture, fingerprint_text
-    return (fingerprint_text(_completed(_declared_conjecture(
-        {"statement": statement, "domain": domain}), fn)),)
+    with complex_in_view(complex_parameters(fn) if fn is not None else ()):
+        return (fingerprint_text(_completed(_declared_conjecture(
+            {"statement": statement, "domain": domain}), fn)),)
 
 
 def _claim_identity(c: dict, fn=None) -> "tuple | None":
@@ -274,11 +277,12 @@ def claim_conflicts(fn, file_entry: dict,
           grammar's claim holds no verdict, so it is never in
           conflict: the authored claim is adjudicated as written.
     """
-    import inspect
 
-    from .authoring import parse_docstring_claims
+    from .analysis import docstring_of
+    from .authoring import _fn_key, parse_docstring_claims
     doc_claims = {c.get("name"): c
-                  for c in parse_docstring_claims(inspect.getdoc(fn) or "")}
+                  for c in parse_docstring_claims(docstring_of(fn),
+                                                  owner=_fn_key(fn))}
     verified_rows = {}
     for row in (verified_entry or {}).get("claims") or []:
         meta = row.get("meta") or {}
@@ -467,14 +471,15 @@ def docstring_drift(fn, entry: dict, verified_entry: dict | None) -> list:
         --write-docstrings). Only reported when the docstring carries
         a Claims: marker at all.
     """
-    import inspect
     import re
 
-    from .authoring import parse_docstring_claims
-    doc = inspect.getdoc(fn) or ""
+    from .analysis import docstring_of
+    from .authoring import _fn_key, parse_docstring_claims
+    doc = docstring_of(fn)
     if not re.search(r"^\s*claims:\s*$", doc, re.I | re.M):
         return []
-    doc_names = {c.get("name") for c in parse_docstring_claims(doc)}
+    doc_names = {c.get("name") for c in parse_docstring_claims(
+        doc, owner=_fn_key(fn))}
     declared_names = {c.get("name") for c in entry.get("claims") or []}
     verified_names = {c.get("name")
                       for c in (verified_entry or {}).get("claims") or []

@@ -10,12 +10,16 @@ a claims file in the compendium shape (`compendium: <library>`,
 downstream project drops into its own claims directory. Each row
 carries the verdict it reached here as its claimed level
 (`meta: {mathema.compendium_claimed: holds}`) and the `note:` its
-claims file states; a consumer still verifies or accepts it, since a
-compendium row is testimony until then.
+claims file states; a row proven within float64 also carries the
+route that proved it (`mathema.compendium_route:
+derive:brute_force:within_float64`), the strength it is claimed at. A
+consumer still verifies or accepts it, since a compendium row is
+testimony until then.
 """
 from __future__ import annotations
 
 import os
+from typing import NamedTuple
 
 _SUPPORTED = ("proven", "holds")
 
@@ -29,20 +33,35 @@ def _installed(library: str) -> "str | None":
     return _installed_version(library)
 
 
+class Origin(NamedTuple):
+    """Where a stated row comes from: `kind` is `bundled`, `package` or
+    `project`, `package` the distribution and version for a package's
+    row, and `shipped` whether that package's file applies to the
+    installed library, so the package already ships the row here."""
+    kind: str
+    package: "str | None" = None
+    shipped: bool = False
+
+    @property
+    def bundled(self) -> bool:
+        return self.kind == "bundled"
+
+
+_PROJECT = Origin("project")
+
+
 def _compendium_file_entries(library: str, root: str) -> list:
     """Intent:
-        `(key, entry, bundled)` for every entry of every compendium file
-        about `library`, bundled first, then the project's, whatever
-        version range each file states: the rows as their files write
-        them, and whether the file ships with mathema.
+        `(key, entry, origin)` for every entry of every compendium file
+        about `library`, in load order (bundled, each installed
+        package's, the project's), whatever version range each file
+        states: the rows as their files write them, and where the file
+        comes from, `Origin`.
     """
-    from . import _bundled_dir, pop_library_fields
-    from ..spec import claims_file_paths, read_claims_file
-    bundled = _bundled_dir()
-    paths = claims_file_paths(bundled)
-    paths += claims_file_paths(root, exclude=(bundled,))
+    from . import applicable_tag, claims_sources, pop_library_fields
+    from ..spec import read_claims_file
     out: list = []
-    for path in paths:
+    for path, kind, package in claims_sources(root):
         try:
             data = read_claims_file(path, os.path.relpath(path, root)) or {}
         except Exception:
@@ -54,30 +73,35 @@ def _compendium_file_entries(library: str, root: str) -> list:
         fields = pop_library_fields(data)
         if fields.library != library:
             continue
-        out.extend((k, e, path.startswith(bundled + os.sep))
+        origin = Origin(
+            kind, package.label if package else None,
+            package is not None and applicable_tag(
+                library, fields.versions, fields.aliases) is not None)
+        out.extend((k, e, origin)
                    for k, e in data.items() if isinstance(e, dict))
     return out
 
 
 def _stated_rows(library: str, root: str) -> dict:
     """Intent:
-        `{(key, claim name): (row, bundled)}` for every `<library>.*`
+        `{(key, claim name): (row, origin)}` for every `<library>.*`
         row a claims file states: the compendium files about the library
-        (bundled, then the project's, in or out of their version range),
-        then the project's own claims files, a later file's row
-        replacing an earlier one of the same name; `bundled` says
-        whether the stating file ships with mathema.
+        (bundled, then each installed package's, then the project's, in
+        or out of their version range), then the project's own claims
+        files, a later file's row replacing an earlier one of the same
+        name; `origin` says where the stating file comes from
+        (`Origin`).
     """
     from ..spec import load_declared
 
     entries = _compendium_file_entries(library, root)
     out: dict = {}
-    for key, entry, bundled in entries:
+    for key, entry, origin in entries:
         if key.split(".")[0] != library:
             continue
         for c in (entry or {}).get("claims") or []:
             if isinstance(c, dict) and c.get("name"):
-                out[(key, c["name"])] = (c, bundled)
+                out[(key, c["name"])] = (c, origin)
     for key, info in load_declared(root).items():
         if key.split(".")[0] != library or not isinstance(info, dict):
             continue
@@ -87,7 +111,7 @@ def _stated_rows(library: str, root: str) -> dict:
             prior = out.get((key, c["name"]))
             if prior is not None and _same_row(prior[0], c):
                 continue
-            out[(key, c["name"])] = (c, False)
+            out[(key, c["name"])] = (c, _PROJECT)
     return out
 
 
@@ -104,7 +128,7 @@ def _stated_notes(library: str, root: str) -> dict:
         file states a `note:` on (`_stated_rows`).
     """
     return {k: str(c["note"])
-            for k, (c, _b) in _stated_rows(library, root).items()
+            for k, (c, _o) in _stated_rows(library, root).items()
             if c.get("note")}
 
 
@@ -134,14 +158,17 @@ def export_compendium(library: str, root: str = ".",
         `spec.write_yaml` writes: `compendium`, `versions`, then one
         entry per verified `<library>.*` key holding its proven and
         held rows, each stamped with the verdict it reached as
-        `mathema.compendium_claimed`, and the `note:` the claims file
-        that states the row gives it.
+        `mathema.compendium_claimed`, a row proven within float64 also
+        with the route that proved it as `mathema.compendium_route`, and
+        the `note:` the claims file that states the row gives it.
 
     Notes:
         `versions` is `export_range`. At or above the library's supported
         floor (`compendium.SUPPORTED_FLOORS`) the rows a bundled file
         states are left out, since mathema already ships them for that
-        version, and one line saying so is appended to `notes`. The built-in battery rows and pseudo-claims (a row
+        version, and one line saying so is appended to `notes`; so are
+        the rows an installed package's file states when that file
+        applies to the installed library, one line per package. The built-in battery rows and pseudo-claims (a row
         whose statement is its own name, `dependencies_current`) are
         left out: they are regenerated for every function, never
         claimed about it. A key with no row to transfer is left out.
@@ -163,6 +190,7 @@ def export_compendium(library: str, root: str = ".",
     covered = (library in SUPPORTED_FLOORS and bool(installed)
                and not below_floor(library, installed))
     left_out = 0
+    shipped: dict = {}
     for key, info in sorted(load_verified(root).items()):
         if key.split(".")[0] != library:
             continue
@@ -177,10 +205,13 @@ def export_compendium(library: str, root: str = ".",
             meta = c.get("meta") or {}
             if meta.get("mathema.surface") in _GENERATED_SURFACES:
                 continue
-            stated, bundled = stated_rows.get((key, c.get("name")),
-                                              ({}, False))
-            if bundled and covered:
+            stated, origin = stated_rows.get((key, c.get("name")),
+                                             ({}, _PROJECT))
+            if origin.bundled and covered:
                 left_out += 1
+                continue
+            if origin.package and origin.shipped:
+                shipped[origin.package] = shipped.get(origin.package, 0) + 1
                 continue
             stated_text = stated.get("statement") or stated.get("law")
             row = {"name": c.get("name"),
@@ -193,6 +224,9 @@ def export_compendium(library: str, root: str = ".",
             if stated.get("note"):
                 row["note"] = str(stated["note"])
             row["meta"] = {"mathema.compendium_claimed": c["verdict"]}
+            decided_by = str(c.get("route") or "")
+            if decided_by.endswith(":within_float64"):
+                row["meta"]["mathema.compendium_route"] = decided_by
             rows.append(row)
         if rows:
             body: dict = {}
@@ -209,6 +243,12 @@ def export_compendium(library: str, root: str = ".",
                      f"bundled file states left out of the export "
                      f"(mathema ships them for {library} >= "
                      f"{SUPPORTED_FLOORS[library]})")
+    for package, n in sorted(shipped.items()):
+        if notes is not None:
+            notes.append(f"{package} ships {n} row{'s' if n != 1 else ''} "
+                         f"about {library} for the installed version, left "
+                         f"out of the export (a project installing "
+                         f"{package.split(' ')[0]} reads them from it)")
     return out
 
 

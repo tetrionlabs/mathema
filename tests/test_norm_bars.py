@@ -583,7 +583,8 @@ def test_the_root_mean_square_error_of_the_empty_vector_is_left_to_the_probe(law
 def test_the_empty_vector_falsifies_the_largest_magnitude_with_a_witness():
     p = _adjudicate(largest_magnitude, "for x in R^0, f(x) ~= ||x||_inf")
     assert (p.verdict, p.route) == ("falsified", "probe"), (p.verdict, p.note)
-    assert "x = []" in str(p.counterexample), p.counterexample
+    assert "x = numpy.array([], dtype='float64')" in str(p.counterexample), \
+        p.counterexample
 
 
 @pytest.mark.parametrize("fn, law", [

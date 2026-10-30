@@ -134,16 +134,21 @@ def test_clamp01_monotonic_claims_resolve_via_probe_algorithmic_end_to_end():
     assert by_name["monotonic_decreasing[x]"].route == "probe:algorithmic"
 
 
-def test_a_derive_route_claim_falls_back_to_the_family_with_the_route_named():
-    # a route="derive" claim whose proof attempt can't decide is now
+def test_a_derive_route_claim_stays_on_derive_and_best_falls_back_to_the_family():
+    # a route="derive" claim whose proof attempt can't decide is unknown
+    # on the derive route; on the default route the same claim is
     # adjudicated by the family's probe:algorithmic technique, an
-    # unknown is superseded by empirical evidence, with the route
-    # field naming the mechanism that actually decided, never a
-    # silently relabeled "derive".
+    # unknown superseded by empirical evidence, with the route field
+    # naming the mechanism that actually decided, never a silently
+    # relabeled "derive".
     facts = analyze_source(clamp01)
     results = check_conjectures(
         clamp01, [claim("d(f(x), x) >= 0", name="monotonic_increasing[x]",
                        route="derive")],
+        facts=facts)
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(
+        clamp01, [claim("d(f(x), x) >= 0", name="monotonic_increasing[x]")],
         facts=facts)
     assert results[0].verdict == "holds"
     assert results[0].route == "probe:algorithmic"

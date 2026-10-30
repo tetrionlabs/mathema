@@ -31,7 +31,7 @@ intent, concepts) and every unlock asks for it before writing.
 $ mathema accept funcs.settle nonneg --as evidence
 accept funcs.settle :: nonneg as evidence, by Alonzo Church
   holds over 130 trials
-  the claim is accepted as evidence at n=130, bound to form 3eb01e1d9919
+  the claim is accepted as evidence at n=130, bound to form py:3eb01e1d9919
 write this acceptance? [y/N] y
 PIN:
 written.
@@ -44,7 +44,7 @@ and in the record (trimmed):
         as: "evidence"
         at: "2026-09-24"
         n: 130
-        form: "3eb01e1d9919"
+        form: "py:3eb01e1d9919"
         by: "Alonzo Church"
         verified_by:
           method: "pin"

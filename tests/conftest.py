@@ -19,7 +19,14 @@ mathema's reading of it) rather than mathema, so it is skipped by
 default too:
 
     python -m pytest -n 4 -q -m third_party_compendiums \
-        --third-party-compendiums"""
+        --third-party-compendiums
+
+`--proof-budget-scale FACTOR` multiplies every wall-clock budget of a
+test not marked `needs_full_proof_budget` by FACTOR, so a run with 0.25
+shows which tests assert a proof that only finishes on a fast, idle
+machine:
+
+    python -m pytest -n 2 -q --proof-budget-scale 0.25 tests/test_x.py"""
 import pytest
 
 
@@ -159,6 +166,12 @@ def _library_claims_isolated():
 def pytest_addoption(parser):
     parser.addoption("--extensive", action="store_true", default=False,
                      help="run the extensive-ladder proof corpus (slower, opt-in)")
+    parser.addoption("--proof-budget-scale", type=float, default=None,
+                     metavar="FACTOR",
+                     help="multiply every wall-clock budget by FACTOR for each "
+                          "test not marked needs_full_proof_budget (0.25 is a "
+                          "machine four times slower): a test that fails only "
+                          "under it asserts a proof finishing in time")
     parser.addoption("--third-party-compendiums", action="store_true",
                      default=False,
                      help="adjudicate the bundled compendium rows against the "
@@ -246,8 +259,19 @@ def full_proof_budget(request, monkeypatch):
     """A wall-clock budget large enough that a verdict reflects the
     mathematics rather than the machine, for any test marked
     `needs_full_proof_budget`. Every other test is left alone, so the
-    caps keep being exercised at their real values."""
+    caps keep being exercised at their real values, unless
+    `--proof-budget-scale FACTOR` is given: then every budget of an
+    unmarked test is multiplied by FACTOR, which shows the tests whose
+    verdict depends on a proof finishing in time on this machine."""
     if request.node.get_closest_marker("needs_full_proof_budget") is None:
+        factor = request.config.getoption("--proof-budget-scale")
+        if factor is not None:
+            from tests._proof_budget import scale_budget
+            scaled = scale_budget(
+                lambda mod, attr, value: monkeypatch.setattr(mod, attr, value),
+                factor)
+            for name, value in scaled.items():
+                monkeypatch.setenv(name, value)
         return
     from tests._proof_budget import ENVIRONMENT, raise_budget
     raise_budget(lambda mod, attr, value: monkeypatch.setattr(mod, attr, value))

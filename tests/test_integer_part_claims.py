@@ -81,9 +81,9 @@ def mod(tmp_path_factory):
         sys.path.remove(str(path.parent))
 
 
-def _verdict(fn, law):
+def _verdict(fn, law, route="derive"):
     (p,) = mathema.claims.check_conjectures(
-        fn, [mathema.claim(law, route="derive")])
+        fn, [mathema.claim(law, route=route)])
     return p
 
 
@@ -160,6 +160,9 @@ def test_a_relaxation_never_disproves_a_true_claim(mod):
     that can be negative says nothing about the real one: the two
     floors here move together, the auxiliaries do not."""
     p = _verdict(mod.floor_doubling, "for x in [-5,5], f(x) >= 0")
+    assert p.verdict in ("proven", "unknown"), (p.verdict, p.note)
+    assert (p.meta or {}).get("mathema.corroboration") != "uncorroborated"
+    p = _verdict(mod.floor_doubling, "for x in [-5,5], f(x) >= 0", route="best")
     assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
     assert (p.meta or {}).get("mathema.corroboration") != "uncorroborated"
 

@@ -206,9 +206,25 @@ def a_hair_over_one(x: float) -> float:
     return min(1.0, x) + 1e-12
 
 
-def test_a_line_that_passed_within_the_tolerance_prints_the_gap():
+def test_a_line_passing_within_the_floor_but_false_exactly_is_falsified():
+    # f(2) is 1.000000000001 in float64, within the tolerance of 1, and
+    # exactly 1 + 1/10**12 > 1
     rec = mathema.check(a_hair_over_one, claims=[mathema.claim(
         "for x in [0.5, 2], 0 <= f(x) <= 1", name="unit", route="probe")])
     line = next(ln for ln in _lines(rec)
+                if ln.split()[:2] == ["falsified", "computation"])
+    assert "false here in exact arithmetic" in line, line
+
+
+def one_by_rounding(x: float) -> float:
+    # (0.1 + 0.2) / 0.3 is 1.0000000000000002 in float64 and exactly 1
+    return min(1.0, x) * (0.1 + 0.2) / 0.3
+
+
+def test_a_line_that_passed_within_the_tolerance_prints_the_gap():
+    rec = mathema.check(one_by_rounding, claims=[mathema.claim(
+        "for x in [0.5, 2], 0 <= f(x) <= 1", name="unit", route="probe")])
+    line = next(ln for ln in _lines(rec)
                 if ln.split()[:2] == ["holds", "computation"])
-    assert "fails by 1e-12 at x = 2, within the default tolerance (1e-09)" in line, line
+    assert "fails by 2.22e-16 at x = " in line, line
+    assert "within the default tolerance (1.01e-07)" in line, line

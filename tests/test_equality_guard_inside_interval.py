@@ -31,7 +31,7 @@ def spike_int(n: int) -> int:
 def test_a_point_guard_inside_the_interval_is_not_pruned(fn):
     (p,) = check_conjectures(fn, [claim("for x in [0, 3], f(x) == x",
                                         route="derive")])
-    assert p.verdict != "proven", (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)
 
 
 @pytest.mark.parametrize("fn", [spike, spike_ne])
@@ -44,4 +44,4 @@ def test_a_point_guard_outside_the_interval_is_still_decided(fn):
 def test_an_integer_point_guard_is_not_pruned():
     (p,) = check_conjectures(spike_int, [claim("for n in [0, 10] ⊂ Z, f(n) >= 0",
                                                route="derive")])
-    assert p.verdict != "proven", (p.verdict, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.note)

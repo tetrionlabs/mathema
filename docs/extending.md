@@ -10,7 +10,7 @@ reference: [that page](api.md) covers what you use to write and check
 claims. The surface here is narrower in audience and wider in what it
 exposes.
 
-## The five entry-point groups
+## The entry-point groups
 
 | Group | What it registers | Discovered by |
 |---|---|---|
@@ -23,6 +23,7 @@ exposes.
 | `mathema.language_adaptors` | an adaptor turning an imported object (a schema class, a type) into a language, or `None` for an object it does not handle | `mathema.languages` |
 | `mathema.language_refinements` | a refinement key inside `L[...]` (`len`, `depth`), the entry point's name being the key | `mathema.languages` |
 | `mathema.lexicon` | worked claims (rows, sections, tags, example functions) that join mathema's lexicon | `mathema.lexicon` |
+| `mathema.compendium` | directories of compendium files: claims about a library's functions, read beside the ones mathema bundles | `mathema.compendium` |
 
 A claim family answers "can this be proven." A capability answers "how
 should this be shown." They are separate mechanisms with separate
@@ -31,6 +32,103 @@ groups on purpose, and nothing is discoverable through both.
 Discovery is fail-soft everywhere. A provider that raises on import is
 skipped with a warning, and mathema falls back to its own behaviour.
 Your extension being broken or absent never crashes someone's run.
+
+## Runtime type adapters
+
+An adapter registered under `mathema.runtime_types` follows the
+`mathema.runtime_types.RuntimeTypeAdapter` protocol, described with
+its `name`, `kinds`, `requires`, `detect`, `realise` and `observe` in
+[runtime types](runtime-types.md#adding-a-runtime-type). Besides
+`ALIASES`, it may state `USES`, a `BodyUses` naming the uses of a
+parameter its type supports and a list does not:
+
+```python
+from mathema.runtime_types import BodyUses
+
+
+class TorchTensorAdapter:
+    name = "torch.Tensor"
+    kinds = frozenset({"vec", "mat"})
+    requires = ("torch",)
+    ALIASES = {"th": "torch"}
+    USES = BodyUses(
+        attributes=frozenset({"T", "shape", "device"}),
+        methods=frozenset({"mean", "sum", "numel", "detach"}),
+        matmul=True,
+        described="a torch tensor")
+    ...
+```
+
+`attributes` are names read off the parameter (`x.shape`), `methods`
+names called on it (`x.mean()`), `keyed` methods called with a column
+name as the first argument (`df.groupby("k")`), and `matmul` says the
+type can be an operand of `@`. `described` is how the record names the
+type: `the body uses it as a torch tensor`.
+
+An unannotated parameter is drawn as the adapter's type when every use
+the body makes of it (apart from what every Python object has, such as
+`.__class__`) is one the adapter declares, the function's module
+imports the adapter's library, and no other imported library's adapter
+supports the same uses. An attribute or method the adapter does not
+declare rules it out, and the hint names that use; with two matching
+libraries the parameter is drawn as a list and the hint names both. Declare only names your type has and a list lacks: a name a list
+also has (`index`, `copy`, `sort`) would draw a list-using function as
+your type. An adapter without `USES` is never chosen this way.
+
+An adapter whose `kinds` include `table` realises mathema's typed
+table: a Spark, Arrow or database frame in a package needs nothing in
+core beyond the adapter. `realise` receives an `AbstractTable`, named
+columns of one length in order (`column_names()`, `row_count()`), each
+an `AbstractVec` whose `values` hold the column's cells,
+`missing` the positions holding a hole, and `element_type(column)` its
+type, one of `float`, `int`, `bool` and `str` (`column_types()` gives
+them all). It builds the frame with each column in the library's type
+for that element type, and a hole as the library holds one (a hole the
+library cannot hold as drawn, NaN in a string column, say, as its
+null). `observe` turns a returned frame back into an `AbstractTable`,
+stating each column's `element` from the library's type, so a column
+of holes only keeps its type; a one-dimensional result indexed by
+column names (what a reduction of a table returns) is an `AbstractVec`
+with those names as its `labels`, which a claim reads by name:
+
+```python
+from mathema.runtime_types import (AbstractTable, AbstractVec, NotMine,
+                                   element_type)
+
+_TYPES = {"float": "double", "int": "bigint", "bool": "boolean",
+          "str": "string"}
+
+
+class SparkFrameAdapter:
+    name = "pyspark.sql.DataFrame"
+    kinds = frozenset({"table"})
+    requires = ("pyspark",)
+
+    def detect(self, annotation):
+        ...
+
+    def realise(self, table, options):
+        schema = ", ".join(f"{name} {_TYPES[element_type(col)]}"
+                           for name, col in table.columns.items())
+        rows = [tuple(None if k in col.missing else col.values[k]
+                      for col in table.columns.values())
+                for k in range(table.row_count())]
+        return self.spark.createDataFrame(rows, schema)
+
+    def observe(self, obj):
+        if type(obj).__name__ != "DataFrame":
+            return NotMine
+        ...
+        return AbstractTable({name: AbstractVec(values, missing,
+                                                element=element)
+                              for name, (values, missing, element)
+                              in columns.items()})
+```
+
+Code inside mathema reads a table through `mathema.runtime_types`
+(`column_names`, `column_types`, `column`, `row_count`, `as_table`),
+which goes through `observe`, so a registered adapter's frames read
+exactly as pandas and polars ones do.
 
 ## Target resolvers
 
@@ -98,7 +196,8 @@ outside it and what counts as answering a member, as two optional
 attributes: `refusal`, a `Refusal`, and `defined_answer`, a
 `DefinedAnswer`. `excluded_outside_domain` then holds an outside draw
 to the declared refusal instead of any raise, and `is_language_defined`
-holds a member to the declared answer instead of no unguarded crash.
+holds a member to the declared answer instead of any return or exit
+status, and a non-member to the declared refusal instead of any raise.
 Each names the exception classes that count (optionally narrowed by a
 `when` test on the exception) and a `returns` test on a returned value,
 and its `text` is how a witness names it. `Refusal.exit(2)` and
@@ -190,6 +289,121 @@ example function is rendered and round-tripped as that function
 completes it, so `for n in N` against `n: int` stays `N`, the form its
 record states; a row without one renders the unannotated default.
 
+## Registered compendium files
+
+A [compendium file](claims-transfer.md#in-the-compendium) states claims
+about a library's functions. mathema bundles some and a project writes
+its own; a package ships them through the `mathema.compendium` group, so
+the claims about a library travel with a package rather than by copying
+files into each project. An entry is a callable that takes no arguments
+and returns a directory of compendium files, or a list of directories;
+it is called when mathema first reads the compendium, so the package
+decides then what it offers.
+
+A package `acme_rows` ships claims about its own `scale` function in
+`acme_rows/claims/acme.claims.yaml`, beside a function returning that
+directory:
+
+<!-- example: package-rows file=site-packages/acme_rows/__init__.py -->
+```python
+from pathlib import Path
+
+
+def scale(x: float) -> float:
+    """Twice x."""
+    return 2 * x
+
+
+def compendium_dirs():
+    """The directories of compendium files this package ships."""
+    return [Path(__file__).parent / "claims"]
+```
+
+<!-- example: package-rows file=site-packages/acme_rows/claims/acme.claims.yaml -->
+```yaml
+compendium: acme_rows
+versions: ">=1.0,<2"
+
+acme_rows.scale:
+  claims:
+    - name: doubles
+      statement: "for x in [-100, 100], f(x) == 2 * x"
+```
+
+and declares the entry point in its `pyproject.toml`:
+
+```toml
+[project]
+name = "acme_rows"
+version = "1.0"
+
+[project.entry-points."mathema.compendium"]
+acme_rows = "acme_rows:compendium_dirs"
+```
+
+Installing the package writes the declaration into the distribution's
+metadata, which is where mathema reads it:
+
+<!-- example: package-rows file=site-packages/acme_rows-1.0.dist-info/entry_points.txt -->
+```ini
+[mathema.compendium]
+acme_rows = acme_rows:compendium_dirs
+```
+
+<!-- example: package-rows file=site-packages/acme_rows-1.0.dist-info/METADATA -->
+```text
+Metadata-Version: 2.1
+Name: acme_rows
+Version: 1.0
+```
+
+In a project with the package installed, the row loads with the
+bundled ones, and its provenance names the distribution and the file:
+
+<!-- example: package-rows run -->
+```python
+import sys
+sys.path.insert(0, "site-packages")  # where the package is installed
+
+from mathema.compendium import load_library_claims
+
+info = load_library_claims(".")["acme_rows.scale"]
+for row in info["entry"]["claims"]:
+    meta = row["meta"]
+    print(row["name"], "from", meta["mathema.compendium_source"])
+    print("  tag:", meta["mathema.compendium"])
+    print("  package:", meta["mathema.compendium_package"])
+```
+
+<!-- example: package-rows output -->
+```text
+doubles from acme_rows/claims/acme.claims.yaml (from acme_rows 1.0)
+  tag: compendium:acme_rows-1.0 (from acme_rows 1.0)
+  package: acme_rows 1.0
+```
+
+The files load in order: the bundled ones, then each package's, sorted
+by distribution name, then the project's. A file applies only when its
+library is installed at a version inside its `versions:` range, as a
+bundled file does. A package's row adds to a function's rows by name. A
+row with the name of an earlier row (a bundled one, or another
+package's) and the same statement adds nothing; one with a different
+statement is a conflict, and neither row is used: both stay out of the
+function's rows, so out of every premise, guard and definition, and
+`mathema compendium status` lists the conflict with both statements and
+the file each comes from. A project's own row of that name replaces
+both, as a project row replaces its bundled namesake.
+
+A package's row is testimony, like a project's: `mathema verify`
+adjudicates it against the installed library when the project calls
+the function, and it gates the run like any other row. A `definition`
+row from a package is evidence, not an axiom, until it is verified or
+accepted (`mathema accept KEY ROW --as trusted`), and a package file's
+`defines:` entries are not applied. `mathema compendium export` leaves
+out the rows a package ships for the installed version, with a note
+naming the package. An entry that fails to import, raises, or names
+something that is not a directory is skipped with a warning.
+
 ## Injected facts
 
 A resolver-built proxy may carry a `__mathema_facts__` attribute
@@ -198,7 +412,9 @@ could honestly state, with `tree=None` and a namespaced form hash
 (`"<frontend>:<sha>"`). `mathema.analyze` returns it outright when present,
 which is richer than the documentation-only fallback a source-less
 callable would otherwise get. Form hashes are compared only within a
-namespace, never across.
+namespace, never across. The Python frontend writes `py:<sha>`; a
+bare hash, which records from releases before 0.6.3 hold, is read as
+Python's.
 
 Every part of mathema that reads a callable's facts reads the injected
 ones when they are present: checking and proving its claims, a
@@ -209,6 +425,70 @@ that needs a body to lift finds `tree=None` and declines, saying so.
 `docsync --write-docstrings` refuses such a callable with an error,
 since the proxy's source file is not where the function it stands for
 is written.
+
+## Lifted bodies
+
+A resolver that lifts a foreign function's body hands the engine a
+document, carried in the `koine` field of the `Facts` it injects, as a
+document or as its text. Two calls on the surface take such documents
+as they stand.
+
+`sibling_scope(fn, siblings)` binds the other functions of the program
+a lifted body calls. `fn` is the proxy (or its `Facts`); `siblings`
+maps the locator the body calls each one by to that function, as its
+document or as a callable. The result is the scope the body is read
+in, with each called function under the name the engine's rendering
+gives it; set it on the proxy and derive reads through the calls:
+
+```python
+from mathema.interfaces.extension import sibling_scope
+
+proxy.__mathema_scope__ = sibling_scope(proxy, {"src/shapes#scaled": scaled_doc})
+```
+
+A document is bound as the engine's rendering of it, with its own calls
+bound from the same mapping; a callable is bound as given. A call whose
+locator is not in the mapping stays unbound, and derive declines to read
+through it rather than guessing.
+
+`prove_bodies_equal(left, right, domain)` asks whether two lifted
+bodies compute the same function on a domain, which is how an
+equivalence family can record `proven` for a pair whose sides were
+lifted by different frontends. `domain` maps the left body's parameter
+names to bounds (a claim's bound, its text such as `"(0, inf)"`, or a
+list `[lo, hi]` for a closed interval); the right body's parameters
+align by position, and `siblings=` binds the functions either body
+calls, as `sibling_scope` takes them. It answers for the mathematics
+line of `f =:= g` alone, which is exact and takes no tolerance: a
+falsification stands where the two bodies, executed at derive's witness
+and compared exactly, disagree, however small the gap, and since it
+samples nothing there is no computation line to report. The answer is a `BodyEquivalence`:
+
+| Field | What it holds |
+|---|---|
+| `verdict` | `proven`, `falsified` or `unknown` |
+| `rung` | the rung that reached it: `form`, `symbolic`, `closed-forms`, or `None` |
+| `sketch` | the derivation, or why it stopped |
+| `witness`, `point` | for `falsified`: what each body did at the executed point, and the point by parameter name |
+| `meta` | `mathema.domain` (each bound as read), `mathema.corroboration`, and `mathema.timeout` when the cap fired |
+
+```python
+from mathema.interfaces.extension import prove_bodies_equal
+
+answer = prove_bodies_equal(left_doc, right_doc, {"x": [-4, 4]})
+if answer.verdict == "proven":
+    ...  # record proven, naming answer.rung
+```
+
+Only the derive rungs run, under the extensive wall-clock cap; nothing
+is sampled, which stays the family's own work. A falsification stands
+only at a point both bodies were executed at; a disproof that no
+executed point reproduces is `unknown`, flagged as a likely engine bug.
+Two bodies that both raise at a point agree there when they raise the
+same exception. When the documents name different languages the bodies
+run in different runtimes, so their exception names are not compared:
+a raise on one side matches any raise on the other, and the regions
+where each side raises must still coincide.
 
 ## The extension surface
 
@@ -234,6 +514,8 @@ Everything a provider may import lives in
 | `lexicon` | `LEXICON_GROUP`, `LexiconSource`, `lexicon_source`, `lexicon_problems`, `write_lexicon_golden` |
 | `families` | `SafetyFamily`, `OutputPredicateFamily`, `ProofResult`, `probe_trials`, `call_with_target`, `synth_other_params`, `format_point`, `pinned_float_env` |
 | `sampling` | `sample_bound`, `shrink` |
+| `body_scope` | `sibling_scope` |
+| `body_equivalence` | `prove_bodies_equal`, `BodyEquivalence` |
 
 `evidence_rank` ranks a route or an intent class, strongest lowest. A
 compendium definition row's route, `axiom`, ranks with trusted testimony,

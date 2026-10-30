@@ -113,6 +113,7 @@ import sympy
 from sympy.printing.str import StrPrinter
 
 from ._float_text import exact_float_text
+from ._representation_words import NUMBER_REPRESENTATIONS
 from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _call_name
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
@@ -928,11 +929,7 @@ def _parse_pseudo_infinity(form: str, rhs: str) -> float:
 # either as an ordinary free-variable binding, so the future meaning stays
 # free.
 _BASE_SET_NAMES = frozenset({"R", "Z", "N", "C"})
-_RESERVED_REPRESENTATIONS = frozenset({
-    "i8", "i16", "i32", "i64", "i128",
-    "u8", "u16", "u32", "u64", "u128",
-    "f16", "f32", "f64", "bigint", "f64int",
-})
+_RESERVED_REPRESENTATIONS = frozenset(NUMBER_REPRESENTATIONS)
 
 
 _SECTION_KEYWORDS = frozenset({"let", "for", "be", "in", "assuming"})
@@ -2115,6 +2112,32 @@ def bars_over_matrices(names):
 _ORDERED_MATRICES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
     "ordered_matrices", default=frozenset())
 
+#: the names read as complex numbers while a claim is rendered (a
+#: parameter annotated `complex` or bound to C): each is a complex
+#: symbol, so `abs(z) ** 2` keeps its bars rather than folding to `z ** 2`
+_COMPLEX_NAMES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
+    "complex_names", default=frozenset())
+
+
+@contextlib.contextmanager
+def complex_in_view(names):
+    """Within the block, the claim grammar reads `names` as complex
+    numbers as well as the names already in view."""
+    token = _COMPLEX_NAMES.set(_COMPLEX_NAMES.get() | frozenset(names))
+    try:
+        yield
+    finally:
+        _COMPLEX_NAMES.reset(token)
+
+
+def _name_symbol(name: str):
+    """A claim name as a sympy symbol: complex when it is in view as a
+    complex number, real otherwise."""
+    if name in _COMPLEX_NAMES.get():
+        return sympy.Symbol(name, complex=True)
+    return sympy.Symbol(name, real=True)
+
+
 #: math-constant names (`pi`, `oo`, `inf`, `infinity`) that a real
 #: parameter shadows while a claim is rendered: each stays a symbol
 _SHADOWED_CONSTANTS: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar(
@@ -2859,7 +2882,7 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
         if node.id in _ORDERED_MATRICES.get():
             # a matrix: its products keep their written order
             return sympy.Symbol(node.id, commutative=False)
-        return sympy.Symbol(node.id, real=True)
+        return _name_symbol(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v

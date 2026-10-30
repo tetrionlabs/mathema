@@ -160,10 +160,10 @@ print(mathema.check(midpoint, claims=[
 
 <!-- example: midpoint output -->
 ```text
-mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
+mathema.Record(midpoint) · source, no side effects · form py:cc66f89ce3e7
   proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
-  between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified at link 1
+  between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified: min(a, b) <= f(a, b) fails at a = 99.9999, b = 100
     falsified  computation  for a in [0.0, 100.0] : float, b in [0.0, 100.0] : float, min(a, b) <= f(a, b) <= max(a, b)   counterexample link 1: min(a, b) <= f(a, b): a = 99.9999, b = 100: 99.9999 vs 99.0
     holds      policy       f(a=nan)   no missing policy stated; assumed propagates
     holds      policy       f(b=nan)   no missing policy stated; assumed propagates
@@ -277,7 +277,7 @@ mathema lock pricing.discounted
 
 <!-- example: lock output -->
 ```text
-locked pricing.discounted at form d2ab6eef1b84
+locked pricing.discounted at form py:d2ab6eef1b84
 the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock pricing.discounted
 ```
 
@@ -295,7 +295,7 @@ the next sweep stops on it (an excerpt):
 <!-- example: lock session match=subset -->
 ```console
 $ mathema verify
-FAIL pricing.discounted: locked at form d2ab6eef1b84 but the code is now 53f9c55de50b; there is no record to compare. Restore the function, or a human runs: mathema unlock pricing.discounted
+FAIL pricing.discounted: locked at form py:d2ab6eef1b84 but the code is now py:53f9c55de50b; there is no record to compare. Restore the function, or a human runs: mathema unlock pricing.discounted
 ```
 
 With a record in place the line says `the record is unchanged` instead,

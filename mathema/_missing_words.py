@@ -331,9 +331,16 @@ def remedy_statements(text: str) -> list:
     return out
 
 
+#: return annotations, written as text, whose type admits None itself
+_ADMITS_NONE = {"none", "nonetype", "types.nonetype", "any", "typing.any",
+                "object", "builtins.object"}
+
+
 def declared_optional_return(fn) -> "str | None":
     """The return annotation's text when it declares that the output may
-    be absent (`Optional[float]`, `float | None`), else None."""
+    be absent: `Optional[float]`, `float | None`, and a type that admits
+    None itself (`None`, `NoneType`, `Any`, `object`); None for any other
+    annotation and for a return with no annotation."""
     import inspect
     import typing
     try:
@@ -346,14 +353,44 @@ def declared_optional_return(fn) -> "str | None":
         text = ann.strip().strip("'\"")
         low = text.replace(" ", "").lower()
         if low.startswith(("optional[", "typing.optional[")) or "|none" in low \
-                or low.startswith("none|"):
-            return text.replace("typing.", "")
+                or low.startswith("none|") or low in _ADMITS_NONE:
+            return (text.replace("typing.", "").replace("builtins.", "")
+                    .replace("types.", ""))
         return None
+    if ann is None or ann is type(None):
+        return "None"
+    if ann is typing.Any:
+        return "Any"
+    if ann is object:
+        return "object"
     args = typing.get_args(ann)
     if type(None) in args:
         from ._annotation_text import annotation_text
         return annotation_text(ann)
     return None
+
+
+def undeclared_none_words(fn) -> str:
+    """Why a None f returned from present inputs is no value: its return
+    type does not declare the absence, with the two ways to settle it
+    (`f returned None from present inputs, and its return type (float)
+    does not declare it; declare Optional[float] if None is an answer f
+    gives, or make f return a value`)."""
+    import inspect
+
+    from ._annotation_text import annotation_text
+    try:
+        ann = inspect.signature(fn).return_annotation
+    except (TypeError, ValueError):
+        ann = inspect.Signature.empty
+    if ann is inspect.Signature.empty:
+        shown, optional = "no annotation", "Optional[...]"
+    else:
+        shown = annotation_text(ann)
+        optional = f"Optional[{shown}]"
+    return (f"f returned None from present inputs, and its return type "
+            f"({shown}) does not declare it; declare {optional} if None is "
+            f"an answer f gives, or make f return a value")
 
 
 class DrawTally:

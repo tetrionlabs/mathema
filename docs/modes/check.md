@@ -49,7 +49,9 @@ call, before any law runs, from the target function's own structure:
 
 - **Higher**, from a base of 128 up to a max of 256, for a
   structurally riskier function, more branches, more loops, a wider
-  or unbounded declared domain, or a language domain, which adds 32
+  or unbounded domain (the claim's own binding, which replaces a
+  `domain=` passed to `check` for the parameter it binds, or that
+  `domain=` itself), or a language domain, which adds 32
   for every 32 hazards its language brings (up to three steps),
   whether the language is written in the claim or inferred from an
   annotation. A language whose hazards still outnumber the budget
@@ -57,7 +59,7 @@ call, before any law runs, from the target function's own structure:
   record's sampling line says it did.
 - **Lower**, down to 32, only when the derive route can *prove* the
   function is affine (a constant slope in every parameter) *and* the
-  declared domain doesn't itself need the extra density, a wide or
+  domain doesn't itself need the extra density, a wide or
   float-precision-risky domain, or a language, skips the reduction even
   for a provably affine function.
 
@@ -178,7 +180,7 @@ counterexample is kept as knowledge, *and* the run fails):
 <!-- example: softmax session -->
 ```
 $ mathema check functions.py:softmax --claim "sum(f(scores)) == 1"; echo $?
-FAIL functions.softmax: source, no side effects; claims 5/5 checked (0 proven, 3 holds, 2 falsified)  <- 2 falsified claim(s)
+FAIL functions.softmax: source, no side effects; claims 6/6 checked (0 proven, 4 holds, 2 falsified)  <- 2 falsified claim(s)
 1
 ```
 

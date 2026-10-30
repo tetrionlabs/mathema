@@ -55,7 +55,7 @@ print(mathema.check(discounted, claims=[
 
 <!-- example: quick output match=subset wrap=88 -->
 ```text
-mathema.Record(discounted) · source, no side effects · form d2ab6eef1b84
+mathema.Record(discounted) · source, no side effects · form py:d2ab6eef1b84
   at_most_price  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
       falsified at price = -1, rate = 1
     falsified  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(price, rate) <= price
@@ -124,7 +124,7 @@ print(mathema.check(discount_factor))
 
 <!-- example: pole output match=subset -->
 ```text
-mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
+mathema.Record(discount_factor) · source, no side effects · form py:ebb4c9b87847
   proven    is_defined: 1 - x != 0
   falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
@@ -150,18 +150,20 @@ print(mathema.check(step, claims=[
 
 <!-- example: step output -->
 ```text
-mathema.Record(step) · source, no side effects · form 8ca9c721c4cf
+mathema.Record(step) · source, no side effects · form py:8ca9c721c4cf
   unit_step  for x in [0.0, 1e+16] : float|missing, f(x) = 1   falsified at x = 1e+16
     proven     mathematics  for x in [0.0, 1e+16] ⊂ ℝ, f(x) = 1
     falsified  computation  for x in [0.0, 1e+16] : float, f(x) = 1   counterexample x = 1e+16
                             [mathematics sound, implementation:numerical-instability]
                             f loses more than the conditioning explains (κ ≈ 0, error 1)
                             possible fixes:
-                              if the loss is accepted, run: mathema accept step unit_step --as discovery
+                              (i) fix the code
+                              (ii) to accept the whole claim as a discovery, keeping both lines, run: mathema accept step unit_step --as discovery
+                              (iii) to narrow the domain knowingly, edit unit_step, then run: mathema accept step unit_step --as superseded
     holds      policy       f(nan)   no missing policy stated; assumed propagates
 ```
 
-At `1e16` the spacing between doubles is 2, so `x + 1.0` rounds back to `x` and the function returns 0.0. A condition number near zero says the exact problem is well conditioned, so the precision was lost by the code and not by the inputs, and the record offers the command that accepts the loss if it is in scope. [Guarantees](https://mathema.tetrionlabs.com/guarantees/#mathematics-and-computation) sets out what each line establishes.
+At `1e16` the spacing between doubles is 2, so `x + 1.0` rounds back to `x` and the function returns 0.0. A condition number near zero says the exact problem is well conditioned, so the precision was lost by the code and not by the inputs. That is why the record does not offer to accept the computation line on its own: the fixes it gives are to change the arithmetic, to accept the whole claim as a discovery (the proven mathematics and the failing computation retire together, with the witness), or to narrow the claim's domain knowingly and supersede it. [Guarantees](https://mathema.tetrionlabs.com/guarantees/#mathematics-and-computation) sets out what each line establishes.
 
 ### Library code
 
@@ -244,6 +246,7 @@ FAIL pricing.discounted: dependency changed; 1 proven, 1 holds, 0 falsified, 1 i
 ok   rates.rate_for: form changed; 1 proven, 0 holds, 0 falsified
 0 unchanged since the last run (not run again), 2 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
+2 intents to accept (2 functions): mathema accept --intent
 exit 1
 ```
 

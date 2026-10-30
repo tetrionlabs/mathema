@@ -24,9 +24,10 @@ and it never lets a weaker result be reported as a stronger one.
 
 | Rung | Verdict | What established it |
 |---|---|---|
-| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and no float companion was asked for (`math_only`). |
+| `derive`, `derive:brute_force`, `derive:math_only` | `proven` | A proof. The body was lifted to a symbolic expression and the claim settled over the whole declared domain (`derive`); every point of a finite domain was checked (`brute_force`); or the mathematics was proven and the record reports that line alone, with the computation and what it does with a missing input outside its remit (`math_only`). |
 | `examine` | `proven` | A proof from the function's structure, with nothing lifted: a guard that rejects before the body runs, or a body that writes nothing outside itself. |
 | `derive:extensive` | `proven` | The same, reached only by the deeper search you opt into with `extensive=True`. |
+| `derive:brute_force:within_float64` | `proven` | Every point of a finite domain was run and the claim held at each to within float64's precision: at a point with no exact value the float64 result misses the relation by at most 8 unit roundoffs of the value compared against, plus the function's relative condition number times the magnitude of the value it returned there, where both can be read, and a larger miss is not this rung: not counted, so `unknown`, or a `holds` on `derive:brute_force` under a declared tolerance; the record states the largest delta. A point lands here when it has no exact value, including when a decision the body takes on a float (a comparison, a branch, a rounding, a dict key) goes one way in the exact reading and the other in the function's own float run; where every decision goes the same way, the point stays exact. Nothing was left untried, which puts it above sampling; a difference smaller than the stated delta would not show, which puts it below an exact proof. |
 | `probe:semi_analytical`, `probe:algorithmic`, `probe:minimal_example`, `probe:counterfactual` | `holds (n=...)` | The real function survived `n` trials whose inputs were chosen by analysis, such as the points where a denominator vanishes, by a technique specific to the claim, by fuzzing that shrinks what it finds, or by refilling a missing value to see what the function would have done. |
 | `probe`, `probe:lifted_numeric` | `holds (n=...)` | The real function survived `n` seeded random trials; or, where the claim takes a derivative, integral, sum or limit that running the code cannot give, mathema's own symbolic reconstruction of the function survived `n` trials (`probe:lifted_numeric`, and the note says so). |
 | `axiom` | `trusted` | A definition row in a compendium, trusted rather than adjudicated: it counts as much as a plain `holds`, never more. |
@@ -104,12 +105,37 @@ the unbounded claim is falsified, and its row names the stratum:
 mathematics sound, its computation numerically unstable
 (`implementation:numerical-instability`). Two claims, two
 verdicts, and the companion gates `mathema verify` like any other claim.
-The remedies are the ordinary ones: narrow the domain, declare the
-`|inf|` the code has to reach, fix the code, accept the companion as a
-discovery with `mathema accept`, or state the claim with
-`route="derive:math_only"` (`[derive:math_only]` in a docstring), which
-proves the mathematics alone, spawns no companion, and records the
-opt-out on the proof's row.
+Which remedies apply depends on what the condition number at the
+witness says. Here it says the loss is the code's: `(x + 1) - x` is a
+well-conditioned way to write `1`, and the precision goes in the
+arithmetic rather than in the inputs, so the companion is not accepted
+on its own. The ways out are to fix the code, to accept the whole claim
+as a discovery (the proven row and its companion retire together under
+one acceptance, the witness kept, and the claim no longer counts as
+proven), to narrow the claim's domain knowingly (edit it, then accept
+it `--as superseded`), or to
+state the claim with `route="derive:math_only"` (`[derive:math_only]` in
+a docstring), which reports the mathematics line only, leaves the
+computation and its policies (what f does with a missing input) outside
+its remit, and records the opt-out on the proof's row, which is why the
+last block above has a single row. Where the loss is inherent
+in the inputs instead (no float64 computation could do better at the
+witness), the companion may be accepted alone as a discovery with
+`mathema accept`.
+
+Whenever the companion fails along an unbounded direction, as the one
+above does at `-1.8e308`, the note also offers `let |inf| be B`,
+whatever the conditioning says and whether the witness was a lost
+digit, an overflow, a `NaN` or a raise. The binding bounds only the
+computation and never the proof, which stays over the full domain.
+mathema runs the claim under the binding before offering it and offers
+it only where the computation line then holds: B is the condition
+number's own bound where it gives one and it holds, and otherwise the
+largest power of ten below the witness's magnitude at which the run
+holds, found by bisection on the exponent in at most ten runs, which
+are filed apart from the claim's own evidence. For `(x + 1) - x` over
+the reals that is `let |inf| be 1e+15`, since `x + 1.0` is exact below
+`2^53`; where no power of ten holds, nothing is offered.
 
 The companion is written to the verified record beside its parent, with
 `meta.mathema.companion_of` naming it. It is never part of the declared

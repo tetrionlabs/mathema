@@ -215,11 +215,16 @@ def test_d_rejects_non_parameter_variable():
     assert results[0].verdict == "unknown"
 
 
-def test_d_is_derive_route_only_probe_skips_cleanly():
-    # "d" isn't in the probe route's safe-call whitelist; a probe claim
-    # using it must skip cleanly, never crash the adjudication loop.
-    results = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="probe")])
-    assert results[0].verdict == "skipped"
+def test_d_on_the_probe_is_decided_only_in_a_shape_claim_spelling():
+    # the probe decides d(f(x), x) >= 0 with the monotonic_increasing
+    # check; any other d spelling skips cleanly with the reason, never
+    # crashing the adjudication loop
+    (p,) = check_conjectures(cube, [claim("d(f(x), x) >= 0", route="probe")])
+    assert (p.verdict, p.route) == ("holds", "probe:algorithmic")
+    assert "as monotonic_increasing[x] does" in p.note
+    (q,) = check_conjectures(cube, [claim("d(f(x), x) >= 1", route="probe")])
+    assert q.verdict == "skipped"
+    assert "is not one of them" in q.sketch
 
 
 def test_pde_renders_to_latex():
@@ -577,8 +582,12 @@ def test_callee_branch_declines_for_a_computed_call_site_argument():
     # guess at the image of [1, 5] under x + 1.0.
     results = check_conjectures(
         caller_computed, [claim("for x in [1, 5], f(x) == x + 2", route="derive")])
-    # declines to guess symbolically; the true claim then holds
-    # empirically via the probe fallback
+    # declines to guess symbolically
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    # on the default route the true claim then holds empirically via the
+    # probe fallback
+    results = check_conjectures(
+        caller_computed, [claim("for x in [1, 5], f(x) == x + 2")])
     assert results[0].verdict == "holds"
 
 
@@ -1296,6 +1305,9 @@ def test_fold_claim_non_bare_first_argument_is_skipped():
     # the last element, so the claim holds empirically
     results = check_conjectures(ema, [claim(
         "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    results = check_conjectures(ema, [claim(
+        "assuming len(x) >= 2, f(x[1:], 1.0) == x[-1]")])
     assert results[0].verdict == "holds"
 
 
@@ -1392,8 +1404,12 @@ def test_fold_claim_on_unrecognized_loop_stays_unliftable():
 
     results = check_conjectures(
         looped, [claim("f(xs) * 2 == f(xs) * 2", route="derive")])
-    # the loop shape stays unliftable; the tautology then holds
-    # empirically, with the derive diagnosis kept in the note
+    # the loop shape stays unliftable, the derive diagnosis in the note
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "not derivable" in results[0].note
+    # on the default route the tautology then holds empirically, with
+    # the derive diagnosis kept in the note
+    results = check_conjectures(looped, [claim("f(xs) * 2 == f(xs) * 2")])
     assert results[0].verdict == "holds"
     assert "not derivable" in results[0].note
 
@@ -1864,9 +1880,14 @@ def voltage_divider_named(vin: float, r1: float, r2: float) -> float:
 def test_raises_with_no_explicit_raise_gets_a_specific_message():
     results = check_conjectures(
         implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)", route="derive")])
-    # derive can't prove an implicit arithmetic raise; the pinned point
-    # then genuinely divides by zero, so the raises claim holds
-    # empirically, with the structural diagnosis kept in the note
+    # derive can't prove an implicit arithmetic raise, and says why
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert "no explicit raise" in results[0].note
+    # on the default route the pinned point then genuinely divides by
+    # zero, so the raises claim holds empirically, with the structural
+    # diagnosis kept in the note
+    results = check_conjectures(
+        implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)")])
     assert results[0].verdict == "holds"
     assert "no explicit raise" in results[0].note
 
@@ -2059,10 +2080,15 @@ def test_integrate_bounds_via_evaluation_bar_proves_gaussian_normalizes():
 # --- derive_status meta tag: undecided vs. unliftable, structured -----------
 
 def test_skipped_derive_claim_tags_unliftable_status_in_meta():
-    # the structured why-derive-couldn't tag survives onto the record
-    # even though probing then adjudicated the claim
+    # the structured why-derive-couldn't tag is on the derive route's
+    # record, and survives onto the record when probing then adjudicates
+    # the claim on the default route
     results = check_conjectures(
         implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)", route="derive")])
+    assert (results[0].verdict, results[0].route) == ("unknown", "derive")
+    assert results[0].meta["mathema.derive_status"] == "unliftable"
+    results = check_conjectures(
+        implicit_div, [claim("for r in [-1, -1], raises(f(r), ZeroDivisionError)")])
     assert results[0].verdict == "holds"
     assert results[0].meta["mathema.derive_status"] == "unliftable"
 

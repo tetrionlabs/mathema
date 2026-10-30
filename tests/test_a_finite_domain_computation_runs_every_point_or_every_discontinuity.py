@@ -53,6 +53,7 @@ def test_the_float_line_falls_at_a_discontinuity_while_the_mathematics_is_proven
     assert _point(float_row.counterexample) in failing, float_row.counterexample
 
 
+@pytest.mark.needs_full_proof_budget
 def test_a_small_finite_domain_runs_every_point():
     law = ("for periods in [1, 30] subset Z, active in [0, 30] subset Z, "
            "assuming active <= periods, "
@@ -66,11 +67,20 @@ def test_a_small_finite_domain_runs_every_point():
 
 
 @pytest.mark.needs_full_proof_budget
-def test_an_exact_computation_stays_proven():
-    rows = _rows(exposure_exact)
+def test_an_exact_computation_with_an_explicit_fraction_is_read_exactly():
+    # `Fraction(active, periods)` of two ints is exact by construction,
+    # so the body is read exactly: ceil(100 * a/p) / 100 is the claim's
+    # own side at every point, proven exactly where every point runs
+    law = ("for periods in [1, 30] subset Z, active in [0, 30] subset Z, "
+           "assuming active <= periods, "
+           "f(active, periods) == ceil(100*active/periods)/100")
+    rows = {p.name: p for p in mathema.check(exposure_exact,
+                                              claims=[law]).probes}
     main = [p for n, p in rows.items() if n.startswith("f_active")
             and not n.endswith("[float]")]
     assert [p.verdict for p in main] == ["proven"], [(p.name, p.verdict) for p in main]
+    assert main[0].route == "derive:brute_force", main[0].route
+    assert "mathema.sweep_inexact" not in main[0].meta, main[0].meta
 
 
 @pytest.mark.needs_full_proof_budget

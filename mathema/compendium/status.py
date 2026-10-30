@@ -6,7 +6,7 @@
 declared and verified stores know), resolves each call they make
 through its import aliases, and reports, for every third-party library
 called: its installed version, the claims files about it (bundled with
-mathema or in the project, each with its `versions` range and whether
+mathema, shipped by an installed package or in the project, each with its `versions` range and whether
 the installed version is inside it), the called functions no claims
 file states anything about, and for each called function that has rows
 how many of them are verified locally, trusted, falsified or unsettled.
@@ -51,19 +51,19 @@ def _in_project(head: str, root: str) -> bool:
 def _library_files(root: str) -> dict:
     """Intent:
         `{library: [{"source", "origin", "versions", "aliases",
-        "in_range"}]}` for every claims file declaring `compendium:`,
-        bundled ones first, whether or not its range admits the
-        installed version.
+        "in_range"}]}` for every claims file declaring
+        `compendium:`, in load order (bundled, each installed package's,
+        the project's), whether or not its range admits the installed
+        version. `origin` is `bundled`, `package <distribution>
+        <version>` or `project`; a package's file also gives `path`, its
+        absolute path.
     """
-    from . import _bundled_dir, _display_path, applicable_tag
-    from ..spec import claims_file_paths, read_claims_file
-    bundled = _bundled_dir()
+    from . import applicable_tag, claims_sources, source_display
+    from ..spec import read_claims_file
     out: dict = {}
-    paths = [(p, "bundled") for p in claims_file_paths(bundled)]
-    paths += [(p, "project")
-              for p in claims_file_paths(root, exclude=(bundled,))]
-    for path, origin in paths:
-        where = _display_path(path, root)
+    for path, kind, package in claims_sources(root):
+        where = source_display(path, root, package)
+        origin = kind if package is None else f"package {package.label}"
         try:
             data = read_claims_file(path, where) or {}
         except Exception:
@@ -77,7 +77,8 @@ def _library_files(root: str) -> dict:
             "source": where, "origin": origin, "versions": versions,
             "aliases": list(aliases),
             "in_range": applicable_tag(library, versions,
-                                       aliases) is not None})
+                                       aliases) is not None,
+            **({"path": os.path.abspath(path)} if package else {})})
     return out
 
 
@@ -199,10 +200,17 @@ def compendium_status(root: str = ".",
         unknown or skipped), and `unregistered`, each row whose region
         cannot be built mapped to the reason (`_unregistered_rows`).
 
+        When rows of one name on a library key are stated differently
+        by an installed package and an earlier file, `conflicts` lists
+        each as `{"key", "name", "rows": [{"statement", "source",
+        "package"}, ...]}` (only `library`'s keys when it is given); the
+        key is absent when there is none.
+
     Notes:
         A call is counted once per project function that makes it.
         Standard-library calls are left out
-        (`standard_library: "left out"`).
+        (`standard_library: "left out"`); a conflict is listed whether
+        or not the project calls its function.
     """
     from . import load_library_claims
     from ..spec import load_verified
@@ -249,8 +257,15 @@ def compendium_status(root: str = ".",
         entry["uncovered"] = [u for u in uncovered
                               if u["key"].split(".")[0] == entry["library"]]
     libraries.sort(key=lambda e: (-e["calls"], e["library"]))
-    return {"root": root, "standard_library": "left out",
-            "libraries": libraries}
+    out: dict = {"root": root, "standard_library": "left out",
+                 "libraries": libraries}
+    conflicts = [{"key": key, **conflict}
+                 for key, info in sorted(claims.items())
+                 for conflict in info.get("conflicts") or []
+                 if library is None or key.split(".")[0] == library]
+    if conflicts:
+        out["conflicts"] = conflicts
+    return out
 
 
 def _uncovered_calls(root: str, claims: dict) -> list:
@@ -289,6 +304,15 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+def _file_name(f: dict) -> str:
+    """A claims file as a status line shows it: its source, without the
+    `(from <distribution> <version>)` its origin already says."""
+    suffix = f" (from {f['origin'][len('package '):]})"
+    if f["origin"].startswith("package ") and f["source"].endswith(suffix):
+        return f["source"][:-len(suffix)]
+    return f["source"]
+
+
 def render_status(data: dict) -> str:
     """The text form of `compendium_status`: one block per library, most
     called first."""
@@ -303,7 +327,7 @@ def render_status(data: dict) -> str:
         if lib["files"]:
             lines.append("  claims files:")
             lines.extend(
-                f"    {f['source']} ({f['origin']}, {f['versions']}, "
+                f"    {_file_name(f)} ({f['origin']}, {f['versions']}, "
                 f"{'in range' if f['in_range'] else 'out of range'})"
                 for f in lib["files"])
         else:
@@ -334,5 +358,11 @@ def render_status(data: dict) -> str:
     if not blocks:
         blocks.append("no third-party library is called by a function in "
                       "the project")
+    for c in data.get("conflicts") or []:
+        lines = [f"{c['key']} {c['name']}: conflicting rows, neither used "
+                 f"as a fact or a premise"]
+        lines.extend(f"  {r['statement']} ({r['source']})"
+                     for r in c["rows"])
+        blocks.append("\n".join(lines))
     blocks.append("(standard library calls are left out)")
     return "\n\n".join(blocks)
