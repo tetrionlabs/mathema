@@ -21,7 +21,7 @@ For your first pull request, please confirm in a comment that you have read and 
    test modules import from a sibling as `from tests.test_x import y`,
    which only resolves when the repository root is on `sys.path`, and
    the `-m` form puts it there. For a faster loop, `python -m pytest
-   -n 4` runs the suite in parallel.
+   -n 4` runs the suite in parallel. The `dev` extra (build, twine, pre-commit, ruff, mypy) needs Python 3.11 or later; mathema itself supports and is tested on 3.10.
 
    One thing worth knowing before you trust a red result: proof
    attempts are capped on the wall clock, so anything that slows the
