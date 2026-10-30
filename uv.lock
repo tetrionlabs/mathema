@@ -163,10 +163,8 @@ version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "os_name == 'nt'" },
-    { name = "importlib-metadata", marker = "python_full_version < '3.10.2'" },
     { name = "packaging" },
     { name = "pyproject-hooks" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/bd/67/4898a44ea4f3f8e213b0954ec0aa0a16971d62a6212d6ea3931e97115b99/build-1.6.1.tar.gz", hash = "sha256:51cc11666391ab6f092070437ac747002ff46f3e4113a3622177ee6b488bfc53", size = 113427, upload-time = "2026-09-10T07:56:00.417Z" }
 wheels = [
@@ -713,34 +711,8 @@ wheels = [
 
 [[package]]
 name = "filelock"
-version = "3.32.7"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11'",
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0f/59/e19834834cb01a32febfbb0f8a23a9088088f5d45991824ff2bc3b5e8acb/filelock-3.32.7.tar.gz", hash = "sha256:37b8a3d9811b0f9aef7e5ec5c71bb320de52df51e6ca9bcd6f5ad81187660da7", size = 225154, upload-time = "2026-09-16T00:24:20.907Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/df/31098c5aeb4d966b553641472bd55fcf5fdfac953549894b8a765ba44e91/filelock-3.32.7-py3-none-any.whl", hash = "sha256:65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52", size = 100157, upload-time = "2026-09-16T00:24:19.543Z" },
-]
-
-[[package]]
-name = "filelock"
 version = "4.2.4"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-]
 sdist = { url = "https://files.pythonhosted.org/packages/d8/28/3893324bcadf8f89b1616637468d766af3f625008c0735bf704fdfa86617/filelock-4.2.4.tar.gz", hash = "sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d", size = 652444, upload-time = "2026-10-19T01:57:51.001Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/1b/5e74289a1878e666bb4b65fe5805a04cafcac2aa5f519ef1ead67ef91c56/filelock-4.2.4-py3-none-any.whl", hash = "sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e", size = 162475, upload-time = "2026-10-19T01:57:49.419Z" },
@@ -1240,12 +1212,12 @@ coverage = [
     { name = "coverage" },
 ]
 dev = [
-    { name = "build" },
-    { name = "filelock", version = "4.2.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "ruff" },
-    { name = "twine" },
+    { name = "build", marker = "python_full_version >= '3.11'" },
+    { name = "filelock", marker = "python_full_version >= '3.11'" },
+    { name = "mypy", marker = "python_full_version >= '3.11'" },
+    { name = "pre-commit", marker = "python_full_version >= '3.11'" },
+    { name = "ruff", marker = "python_full_version >= '3.11'" },
+    { name = "twine", marker = "python_full_version >= '3.11'" },
 ]
 docs = [
     { name = "mkdocs" },
@@ -1294,7 +1266,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "build", marker = "extra == 'dev'", specifier = ">=1" },
+    { name = "build", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=1" },
     { name = "coverage", marker = "extra == 'coverage'", specifier = ">=7" },
     { name = "filelock", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=4.2.1" },
     { name = "mathema", extras = ["coverage", "language", "mcp", "numpy", "smt"], marker = "extra == 'all'" },
@@ -1306,19 +1278,19 @@ requires-dist = [
     { name = "mkdocs-llmstxt", marker = "extra == 'docs'", specifier = ">=0.2" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.25" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
+    { name = "mypy", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=1.8" },
     { name = "numpy", marker = "extra == 'numpy'", specifier = ">=2.0" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.2" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3" },
+    { name = "pre-commit", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=7" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "ruff", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=0.6" },
     { name = "sympy", specifier = ">=1.12,<2" },
     { name = "tomli", marker = "python_full_version < '3.11' and extra == 'test'", specifier = ">=2" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=5" },
+    { name = "twine", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=5" },
     { name = "z3-solver", marker = "extra == 'smt'", specifier = ">=4.12" },
 ]
 provides-extras = ["docs", "numpy", "pandas", "polars", "test", "dev", "mcp", "smt", "coverage", "symbology", "language", "all"]
@@ -1591,7 +1563,6 @@ dependencies = [
     { name = "librt", marker = "platform_python_implementation != 'PyPy'" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/82/6a/878cc1097d4035f82bd516658d0c528d2a9955bc7b363afcbd0b07fea11b/mypy-2.3.1.tar.gz", hash = "sha256:47c1b1207258513a9d93495f69c8be9de73916186f0e52703e8c461b7a623419", size = 3992554, upload-time = "2026-08-15T03:03:38.549Z" }
@@ -2177,8 +2148,7 @@ dependencies = [
     { name = "identify" },
     { name = "nodeenv" },
     { name = "pyyaml" },
-    { name = "virtualenv", version = "21.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "virtualenv", version = "21.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "virtualenv" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/74/89/1f3e8e1fc3e97de0fa963495832f581f025f29471602a309e48808244292/pre_commit-4.6.2.tar.gz", hash = "sha256:8f5d7bfb021ecdbcd9d49d89847082dd24172ccde534390081a679ad046e2441", size = 198670, upload-time = "2026-08-10T22:07:18.421Z" }
 wheels = [
@@ -2435,8 +2405,7 @@ name = "python-discovery"
 version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock", version = "3.32.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "filelock", version = "4.2.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "filelock" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0c/57/250bd238b966cece44328235eb85290045d059265fdaf7527a3a958123db/python_discovery-1.6.1.tar.gz", hash = "sha256:cf87d3627dfb4412437fdd5b13eae402607722998d21567993aedbc59b23c15e", size = 84338, upload-time = "2026-09-18T01:31:53.971Z" }
 wheels = [
@@ -3143,44 +3112,11 @@ wheels = [
 
 [[package]]
 name = "virtualenv"
-version = "21.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11'",
-]
-dependencies = [
-    { name = "distlib" },
-    { name = "filelock", version = "3.32.7", source = { registry = "https://pypi.org/simple" } },
-    { name = "platformdirs" },
-    { name = "python-discovery" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/5d/42254e91a9203a13d95ab4f5211f4cdda52b82fc3546340f7fb33a642173/virtualenv-21.9.0.tar.gz", hash = "sha256:fa0f2a26fcb6f32b376fc8b2c705b6057366763d5b9e5242d1ab10ecc3279fd3", size = 5372770, upload-time = "2026-09-20T00:29:19.843Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/e5/9446b7a2a3d73de5f9fcf8f825efe78b071b111729e89f4ac07649b9448b/virtualenv-21.9.0-py3-none-any.whl", hash = "sha256:8c7cde05f630fbedf61758258014a92e6d6d5b4b9c6e6be7279d233f89e09aac", size = 5477625, upload-time = "2026-09-20T00:29:18.065Z" },
-]
-
-[[package]]
-name = "virtualenv"
 version = "21.15.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-]
 dependencies = [
     { name = "distlib" },
-    { name = "filelock", version = "4.2.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "filelock" },
     { name = "packaging" },
     { name = "platformdirs" },
     { name = "python-discovery" },
