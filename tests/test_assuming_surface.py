@@ -13,8 +13,8 @@ def prod2(x, y):
     return x * y
 
 
-def _v(law, extensive=False):
-    return check_conjectures(prod2, [claim(law, route="derive")],
+def _v(law, extensive=False, route="derive"):
+    return check_conjectures(prod2, [claim(law, route=route)],
                              extensive=extensive)[0]
 
 
@@ -45,7 +45,7 @@ def test_awkward_surface_still_gets_real_samples():
     # clause"
     law = ("assuming x + y == 2.7182, for x in [0,3], y in [0,3], "
            "f(x,y) <= 1.9")
-    p = _v(law)
+    p = _v(law, route="probe")
     assert p.verdict == "holds"
     assert p.n and p.n > 10
 
@@ -57,19 +57,20 @@ def test_inequality_assuming_still_adjudicates():
     assert p.verdict in ("proven", "holds")
 
 
-def test_tolerance_governs_the_symbolic_disproof_backstop():
-    # a residual inside the claim's own declared tolerance must not
-    # corroborate a disproof (the backstop threshold was hardcoded
-    # 1e-9 and ignored tolerance=)
+def test_a_declared_tolerance_does_not_absorb_an_exact_equality_gap():
+    # a tolerance declared on `==` binds the computation line only:
+    # exactly f(x) - x = 1/10**6, nonzero at every x, so the mathematics
+    # line falsifies with or without the declared 1e-3
     def close_fn(x):
         return x + 1e-6
     (strict_p,) = check_conjectures(
         close_fn, [claim("for x in [0,10], f(x) == x", route="derive")])
     assert strict_p.verdict == "falsified"
-    (loose_p,) = check_conjectures(
+    (declared_p,) = check_conjectures(
         close_fn, [claim("for x in [0,10], f(x) == x", route="derive",
                          tolerance=1e-3)])
-    assert loose_p.verdict in ("proven", "holds")
+    assert declared_p.verdict == "falsified", (declared_p.verdict,
+                                               declared_p.note)
 
 
 def test_abs_under_negated_argument_proves_on_a_positive_domain():

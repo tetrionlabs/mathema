@@ -244,6 +244,18 @@ Matrices and vectors are real in this release: a claim over `C^n` or
 `C^(m,n)` is refused as misspecified, with the reason "matrices and
 vectors are real-only in this release". Complex scalars are unaffected.
 
+A function may still return a vector or matrix of complex numbers, and
+that result is a value, read as a complex array with or without numpy.
+`is_finite` and `is_real` decide it by value, entry by entry, as they
+do a complex scalar. The structural properties (symmetric, triangular,
+diagonal, orthogonal, positive definite and the rest) are read over
+real matrices only, so on a complex result they leave the claim
+unknown with the reason "the result is a complex matrix, and
+is_symmetric is read over real matrices only in this release". With
+numpy installed, a real claim over `R^n` or `R^(m,n)` whose function
+returns a complex vector or matrix reads it as it reads a complex
+scalar: no real value there.
+
 ### Sugar
 
 Three math-paper spellings are accepted as sugar. Each is **ambiguous**
@@ -429,8 +441,10 @@ A function that calls numpy is read through numpy's
 `f(a, b) ~= solve(a, b)` where `det(a) != 0`, is stated over a matrix
 and a vector together, which a proof through definition rows does not
 read, so a claim about a function calling it is decided by sampling.
-The same identity in the grammar's own words, `A @ solve(A, b) ~= b`,
-is proven (see the vocabulary above).
+There `A @ f(A, b) == b` is `unknown`: each sampled solution meets `b`
+only within the computation's allowance, and numpy's result has no exact
+reading, so no draw is counted. The same identity in the grammar's own
+words, `A @ solve(A, b) ~= b`, is proven (see the vocabulary above).
 
 <!-- example: numpy-functions run requires=numpy -->
 ```python
@@ -451,7 +465,7 @@ for A in R^(n,n), f(A) == A   # falsified
 
 <!-- example: numpy-functions verdicts fn=solve_for -->
 ```
-for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # holds
+for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, A @ f(A, b) == b   # unknown
 for A in R^(n,n), b in [-1e6, 1e6]^n, assuming det(A) != 0, f(A, b) == b   # falsified
 ```
 

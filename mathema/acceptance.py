@@ -42,6 +42,7 @@ import os
 import subprocess
 
 from .grammar import split_relation
+from .identity import namespaced_form, same_form
 from .routes import safety_predicates
 from .spec import classify_verdict, write_yaml
 
@@ -179,6 +180,18 @@ def invert_conjecture(statement: str, claim_name: str) -> "tuple[str | None, str
         return None, (f"cannot place the grammar's `not` form on the "
                       f"recorded spelling {text!r}; restate by hand")
     return None, f"relation {cj.relation!r} has no mechanical inverse"
+
+
+def _asked_route(row: dict) -> "str | None":
+    """Intent:
+        The route a claim row was asked on: the route its author wrote
+        (`authored.route`), else the route its record names. A record's
+        `route` is the mechanism that decided the row (`derive` for a
+        claim asked on best and settled by derive), which is no request.
+    """
+    authored = row.get("authored")
+    asked = authored.get("route") if isinstance(authored, dict) else None
+    return asked or row.get("route")
 
 
 def _adjudicate_candidate(root: str, key: str, statement: str,
@@ -609,13 +622,13 @@ def plan_rename(root: str, new_key: str, old_key: str,
     entry = doc[old_key]
     recorded = (entry.get("identity") or {}).get("form")
     live = analyze(fn).form
-    matches = recorded == live
+    matches = same_form(recorded, live)
     actions = [f"rename the record {old_key} to {new_key}, carrying its "
                f"claims, acceptance history, lineage and sign-offs",
                f"remove {os.path.relpath(old_path, root)}",
                "re-stamp the integrity and re-anchor it to HEAD"]
     if not matches:
-        actions.insert(0, f"the record's form hash {recorded} differs from "
+        actions.insert(0, f"the record's form hash {namespaced_form(recorded)} differs from "
                           f"{new_key}'s {live}: it may not be the same "
                           f"function, and the next verify checks it again")
     if old_key in load_locks(root):
@@ -1100,7 +1113,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
         c_verdict = c_n = None
         if candidate:
             probe, err = _adjudicate_candidate(root, key, candidate,
-                                               target.get("route"),
+                                               _asked_route(target),
                                                tolerance=c_tolerance)
             if probe is None:
                 if stated:
@@ -1677,7 +1690,8 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
                 continue
             _carry_trust(c, accepted, history)
             continue
-        if accepted.get("form") != fresh_form and not accepted.get("stale"):
+        if not same_form(accepted.get("form"), fresh_form) \
+                and not accepted.get("stale"):
             accepted["stale"] = True
             history.append({"at": datetime.date.today().isoformat(),
                             "event": "stale",

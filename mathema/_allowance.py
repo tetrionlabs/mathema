@@ -43,6 +43,10 @@ ABSOLUTE = 1e-9
 RELATIVE = 1e-7
 #: float64's unit roundoff, half the gap from 1 to the next float
 UNIT_ROUNDOFF = 2.0 ** -53
+#: the unit roundoffs float64's precision at a point allows, per unit of
+#: the values it is read against: what a correctly rounded chain of a
+#: handful of operations may lose
+PRECISION_FACTOR = 8
 #: the growth a backward-stable computation may show over its condition
 #: number times the unit roundoff before the loss is the code's
 STABILITY_FACTOR = 2 ** 10
@@ -347,6 +351,22 @@ def relation_within(lv, rv, relation: str, declared=None,
     return held
 
 
+def allowance_text(value: float) -> str:
+    """An allowance or gap as a record shows it: three significant
+    digits, or `past float64's range` for one too large for a float."""
+    import math
+    return f"{value:.3g}" if math.isfinite(value) else "past float64's range"
+
+
+def _float_or_inf(value) -> float:
+    """`value` as a float, or infinity when its magnitude is past
+    float64's range."""
+    try:
+        return float(value)
+    except OverflowError:
+        return float("inf")
+
+
 def float_miss(lv, rv, relation: str, declared=None,
                input_scaled: float = 0.0, side: "int | None" = None
                ) -> "tuple | None":
@@ -392,10 +412,7 @@ def float_miss(lv, rv, relation: str, declared=None,
             gap = (abs(diff) if relation in ("==", "~=") else
                    max(Fraction(0), diff) if relation == "<=" else
                    max(Fraction(0), -diff))
-        try:
-            measured = (float(gap), float(tol))
-        except OverflowError:
-            measured = (float("inf"), float("inf"))
+        measured = (_float_or_inf(gap), _float_or_inf(tol))
         if best[0] is None or measured[0] > best[0][0]:
             best[0] = measured
         return True
@@ -415,6 +432,53 @@ def float_miss(lv, rv, relation: str, declared=None,
     except (TypeError, ValueError):
         return None
     return best[0] if complete else None
+
+
+def precision_miss(lv, rv, relation: str, declared=None,
+                   side: "int | None" = None, kappa: "float | None" = None,
+                   returned: float = 0.0) -> "tuple | None":
+    """Intent:
+        `(miss, precision, magnitude)`, all floats, for two computed
+        sides at one point: how far they miss the relation itself, with
+        no allowance (`abs(lv - rv)` for `==`, the amount an ordering
+        `<=`/`>=` is violated by, for `~=` the amount the difference
+        passes ε, the bare `declared` tolerance else `DEFAULT_TOLERANCE`,
+        and 0 for a relation they satisfy outright); float64's own
+        precision at the point, `PRECISION_FACTOR` unit roundoffs of
+        `magnitude + kappa * returned`; and `magnitude`, that of the
+        value compared against (the reference side's, `side`, else the
+        larger side's; the largest entry over arrays). `kappa` is the
+        computation's relative condition number at the point and
+        `returned` the magnitude of the value it returned there: a
+        relative input error u moves the result by about `kappa * u`
+        relative to it, so the absolute spread is `kappa * u *
+        returned`. With no `kappa` it adds nothing. None when a side is
+        not a finite real number, or the tolerance is a tolerance kind.
+    """
+    from ._tolerance import ToleranceKind
+    from .probing import _is_matrix_value, plain_value
+    if isinstance(declared, ToleranceKind):
+        return None
+    measured = float_miss(lv, rv, relation, 0.0, 0.0, side)
+    if measured is None:
+        return None
+    miss = measured[0]
+    if relation == "~=":
+        from .conjecture import DEFAULT_TOLERANCE
+        eps = declared if declared is not None else DEFAULT_TOLERANCE
+        miss = max(0.0, miss - float(eps))
+    lv, rv = plain_value(lv), plain_value(rv)
+    if _is_matrix_value(lv) or _is_matrix_value(rv):
+        magnitude = _array_scale(lv, rv, side)
+    else:
+        magnitude = _magnitude(_reference_of(lv, rv, side)) or 0
+    try:
+        magnitude = float(magnitude)
+    except OverflowError:
+        magnitude = float("inf")
+    spread = kappa * float(returned) if kappa is not None else 0.0
+    return (miss, PRECISION_FACTOR * UNIT_ROUNDOFF * (magnitude + spread),
+            magnitude)
 
 
 def _exactly_equal(lv, rv) -> bool:

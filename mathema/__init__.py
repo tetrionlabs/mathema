@@ -902,9 +902,16 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                     pol.get("premise") or "") for pol in
                    ((p.meta or {}).get("mathema.policy") for p in probes)
                    if pol and pol.get("source") == "stated"}
-        probes = probes + _policy.default_rows(
-            fn, facts, parent_domain or {}, covered, _policy.row_name,
-            optional_only=not written)
+        # a record whose claims all report the mathematics line alone
+        # (derive:math_only) carries no policy row: what the computation
+        # does with a value that is not there is outside their remit
+        from .gates import MATH_ONLY_ROUTE
+        mathematics_only = bool(all_claims) and all(
+            getattr(c, "route", None) == MATH_ONLY_ROUTE for c in all_claims)
+        if not mathematics_only:
+            probes = probes + _policy.default_rows(
+                fn, facts, parent_domain or {}, covered, _policy.row_name,
+                optional_only=not written)
     if all_claims:
         # the split offer's own runs are not the record's claims: they
         # stay out of the calls the policy rows read
@@ -1098,7 +1105,8 @@ def status(root: str = ".") -> str:
             lines.append(f"  ∅ {key}: no verified record")
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
-        state = ("fresh" if stored and stored == current
+        from .identity import same_form
+        state = ("fresh" if stored and same_form(stored, current)
                  else "stale (code changed since spec)" if stored else "no hash")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")

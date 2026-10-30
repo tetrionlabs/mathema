@@ -199,8 +199,9 @@ REFUSED = [via_str, via_repr, via_format, via_fstring, via_percent,
 ANSWERED = [typed, by_class, is_not_type, guarded]
 
 #: the refused bodies a finite sweep runs: `id(x)` is a hidden read to
-#: the strict examination, which declines the sweep before any reading
-SWEPT = [fn for fn in REFUSED if fn is not via_id]
+#: the strict examination, which declines the sweep before any reading,
+#: and `Decimal(x)` of the point's coordinate is read exactly
+SWEPT = [fn for fn in REFUSED if fn not in (via_id, via_decimal)]
 
 #: points the computation takes the float branch at (an integer-valued
 #: set reaches a function as ints, and `typed(1)` is 100.0 in Python)
@@ -250,11 +251,39 @@ def test_a_hidden_read_declines_the_sweep_before_any_reading():
     assert p.route == "probe", p.route
 
 
-@pytest.mark.parametrize("fn", REFUSED, ids=lambda f: f.__name__)
+#: bodies building an exact number from a float (`Fraction(x)`,
+#: `Decimal(x)`): the construction is read, and declined when it runs on
+#: a float the reading holds, which has no exact reading beyond its own
+#: value
+BUILT_FROM_A_FLOAT = [via_decimal, via_local_fraction]
+
+
+def test_a_decimal_of_the_coordinate_is_proven_exactly():
+    # Decimal(x) of 0.5, 1.5 or 2.5 is the coordinate itself, a dyadic
+    # rational every Decimal holds exactly; halved and read back it is
+    # x / 2 at each point
+    p = _check(via_decimal, _FLOATS)
+    assert (p.verdict, p.route) == ("proven", "derive:brute_force"), \
+        (p.verdict, p.route, p.sketch)
+    assert "mathema.sweep_inexact" not in p.meta, p.meta
+
+
+@pytest.mark.parametrize("fn", [fn for fn in REFUSED
+                                if fn not in BUILT_FROM_A_FLOAT],
+                         ids=lambda f: f.__name__)
 def test_the_refusal_is_found_on_the_syntax_tree(fn):
     found = unfaithful(fn)
     assert found, fn.__name__
     assert exact_twin(fn) is None, fn.__name__
+    with pytest.raises(Exception) as caught:
+        exact_callee(fn)(1.0)
+    assert type(caught.value).__name__ == "NotExact", caught.value
+
+
+@pytest.mark.parametrize("fn", BUILT_FROM_A_FLOAT, ids=lambda f: f.__name__)
+def test_a_construction_from_a_float_is_declined_when_it_runs(fn):
+    assert unfaithful(fn) == [], fn.__name__
+    assert exact_twin(fn) is not None, fn.__name__
     with pytest.raises(Exception) as caught:
         exact_callee(fn)(1.0)
     assert type(caught.value).__name__ == "NotExact", caught.value

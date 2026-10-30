@@ -46,7 +46,7 @@ mathema check pricing.py:discounted --claim "for rate in [0, 1], f(price, rate) 
 
 <!-- example: falsify output -->
 ```text
-FAIL pricing.discounted: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL pricing.discounted: source, no side effects; claims 3/3 checked (0 proven, 2 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 Falsified, on the first try. That is not a bad start, it is the point.
@@ -164,10 +164,10 @@ binds to (an excerpt):
 
 <!-- example: docstring output match=subset -->
 ```yaml
-# machine record; binds to form d2ab6eef1b84
+# machine record; binds to form py:d2ab6eef1b84
 pricing.discounted:
   identity:
-    form: "d2ab6eef1b84"
+    form: "py:d2ab6eef1b84"
   claims:
     - name: "missing[price]"
       statement: "missing(f, price) propagates"

@@ -74,7 +74,12 @@ def test_a_value_the_claim_excludes_is_labelled_outside(tmp_path):
         pr = _one(mod.first_char, 'for s in L[letters] \\ {""}, is_language_defined(s)')
         assert pr.verdict == "falsified"
         assert '(outside L[letters] \\ {""})' in pr.counterexample, pr.counterexample
-        assert "''" in pr.counterexample and "(inside" not in pr.counterexample
+        # the language is the domain: a non-member is refused, and
+        # first_char returns ' ' for ' ', which is not a letter; the
+        # IndexError on '' is a raise, a refusal
+        assert "' ' (outside" in pr.counterexample and "returned" in pr.counterexample, \
+            pr.counterexample
+        assert "(inside" not in pr.counterexample
     finally:
         unregister_language("letters")
 
@@ -125,6 +130,32 @@ def test_a_guarded_rejection_holds(tmp_path):
     pr = _one(mod.guarded)
     assert pr.verdict == "holds"
     assert pr.route == "probe:minimal_example"
+
+
+@pytest.mark.parametrize("future", [False, True])
+@pytest.mark.parametrize("annotation", [
+    "Optional[str]", "str | None", "None | str", "Union[str, None]",
+    "typing.Optional[str]",
+])
+def test_a_string_or_none_parameter_binds_no_language(tmp_path, annotation,
+                                                      future):
+    # str with None admitted is plain str for the language: the guarded
+    # rejection reads as it does on `s: str`, with the language extra
+    # installed or not
+    mod = _load(tmp_path, ("from __future__ import annotations\n"
+                           if future else "") + f'''
+import typing
+from typing import Optional, Union
+
+def guarded(s: {annotation}) -> str:
+    """Rejects empty input deliberately."""
+    if not s:
+        raise ValueError("empty")
+    return s[0]
+''')
+    pr = _one(mod.guarded)
+    assert (pr.verdict, pr.route) == ("holds", "probe:minimal_example"), \
+        (pr.verdict, pr.route, pr.note)
 
 
 def test_a_total_function_holds(tmp_path):

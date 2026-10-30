@@ -5,6 +5,8 @@ adjudication, `invalidated` as the record layer's regression error
 state (with `mathema.previous_verdict`/`mathema.regressed_to`
 history), strict mode counting both unestablished families, and a
 declared-spec `intent:` earning the `documented` rung."""
+import math
+
 import yaml
 
 import mathema
@@ -27,6 +29,13 @@ def test_underivable_derive_claim_superseded_by_evidence_keeps_its_status_tag():
     # record, pinned exactly, the piecewise lift succeeds here but
     # the sign question stays undecided.
     (p,) = check_conjectures(branchy, [claim("f(x) >= 0", route="derive")])
+    assert (p.verdict, p.route) == ("unknown", "derive")
+    assert p.meta.get("mathema.derive_status") == "undecided"
+    # on the default route a claim no rung of the extensive ladder
+    # settles is superseded by the probe's evidence, the tag kept
+    def xsin(x):
+        return x * math.sin(x)
+    (p,) = check_conjectures(xsin, [claim("f(x) >= -x^2")])
     assert p.verdict == "holds"
     assert p.meta.get("mathema.derive_status") == "undecided"
 

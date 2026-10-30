@@ -2586,9 +2586,147 @@ def _calculus_vars(src: str) -> set:
     return names
 
 
+def _piece_outside_premise(fn, facts, sub_domain: dict,
+                           claim_terms: dict) -> "str | None":
+    """Intent:
+        Why no point of a piece of a split domain satisfies the claim's
+        premise, or None when some point may: a premise bounding one
+        parameter by a constant that empties the piece (`assuming x >=
+        5` over [-10, 0)), or `assuming is_defined(f)` over a piece
+        where one of f's own raise branches holds at every point.
+    """
+    emptied = premise_empties_domain(sub_domain, set(facts.params),
+                                     claim_terms.get("assumption"))
+    if emptied is not None:
+        return f"no {emptied} there satisfies the premise"
+    for lhs_src, rel, rhs_src in claim_terms.get("assumption") or ():
+        premise = _premise_relation(lhs_src, rel, rhs_src, facts.params)
+        free = list(getattr(premise, "free_symbols", ()))
+        if premise is None or len(free) != 1 \
+                or sub_domain.get(str(free[0])) is None:
+            continue
+        if _holds_throughout(sympy.Not(premise), sub_domain):
+            return (f"no {free[0]} there satisfies "
+                    f"{lhs_src} {rel} {rhs_src}")
+    if not claim_terms.get("assume_defined"):
+        return None
+    try:
+        pw = lift_piecewise(fn, facts)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    for cond, exc in (getattr(pw, "raise_guards", None) or []):
+        if _holds_throughout(cond, sub_domain):
+            return f"f raises {exc} at every point there"
+    return None
+
+
+def _premise_relation(lhs_src, rel, rhs_src, params):
+    """One premise `lhs rel rhs` as a sympy relation over real symbols
+    for `params`, or None when it does not read as one."""
+    ops = {">=": sympy.Ge, ">": sympy.Gt, "<=": sympy.Le, "<": sympy.Lt,
+           "==": sympy.Eq, "!=": sympy.Ne}
+    if rel not in ops:
+        return None
+    names = {p: sympy.Symbol(p, real=True) for p in params}
+    try:
+        lhs = sympy.sympify(str(lhs_src), locals=names)
+        rhs = sympy.sympify(str(rhs_src), locals=names)
+        relation = ops[rel](lhs, rhs)
+    except Exception:
+        return None
+    if not isinstance(relation, (sympy.core.relational.Relational,
+                                 sympy.logic.boolalg.BooleanAtom)) \
+            or not relation.free_symbols <= set(names.values()):
+        return None
+    return relation
+
+
+def _named_point(text, params) -> dict:
+    """The coordinates a counterexample text names (`x = 21/8, y = 1`)
+    for `params`, as floats; those that do not read as a number are
+    left out."""
+    import re
+    out: dict = {}
+    for name, value in re.findall(r"\b(\w+)\s*=\s*([^,:;]+)", text or ""):
+        if name not in params or name in out:
+            continue
+        try:
+            out[name] = float(sympy.sympify(value.strip()))
+        except Exception:
+            continue
+    return out
+
+
+def _premise_refuses(fn, facts, point: dict, claim_terms: dict) -> bool:
+    """Intent:
+        Whether a counterexample point lies outside the claim's premise:
+        a premise relation false there, or, under `assuming
+        is_defined(f)`, one of f's own raise branches holding there.
+        A premise that cannot be evaluated at the point refuses nothing.
+    """
+    names = {p: sympy.Symbol(p, real=True) for p in facts.params}
+    at = {names[p]: sympy.Integer(int(v)) if isinstance(v, bool)
+          else sympy.nsimplify(v) for p, v in point.items()
+          if p in names and isinstance(v, (int, float))}
+
+    def false_at(relation) -> bool:
+        if relation is None or not relation.free_symbols <= set(at):
+            return False
+        try:
+            return relation.subs(at) is sympy.false
+        except Exception:
+            return False
+    for lhs_src, rel, rhs_src in claim_terms.get("assumption") or ():
+        if false_at(_premise_relation(lhs_src, rel, rhs_src, facts.params)):
+            return True
+    if claim_terms.get("assume_defined"):
+        try:
+            pw = lift_piecewise(fn, facts)
+        except TimeoutError:
+            raise
+        except Exception:
+            return False
+        for cond, _exc in (getattr(pw, "raise_guards", None) or []):
+            cond = cond.subs({s: names[str(s)] for s in cond.free_symbols
+                              if str(s) in names})
+            if cond.free_symbols <= set(at) and false_at(sympy.Not(cond)):
+                return True
+    return False
+
+
+def _holds_throughout(cond, domain: dict) -> bool:
+    """Intent:
+        Whether a condition over one parameter holds at every point of
+        that parameter's declared domain: the domain, as a set of reals,
+        lies inside the condition's solution set. False when it cannot
+        be shown (several parameters, a bound with no set reading, a
+        solve that does not finish).
+    """
+    from ..domain import bound_to_sympy_set
+    from .._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    if cond is sympy.true:
+        return True
+    free = list(getattr(cond, "free_symbols", ()))
+    if len(free) != 1 or domain.get(str(free[0])) is None:
+        return False
+    try:
+        region = bound_to_sympy_set(domain[str(free[0])])
+        solved = _with_timeout(
+            lambda: sympy.solveset(cond, free[0], sympy.S.Reals),
+            FAST_TIMEOUT_SECONDS)
+        return bool(region.is_subset(solved))
+    except TimeoutError:
+        raise
+    except Exception:
+        return False
+
+
 def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                       domain: dict, tolerance, max_callee_depth: int,
-                      extensive: bool, depth: int) -> ProofResult | None:
+                      extensive: bool, depth: int,
+                      **claim_terms) -> ProofResult | None:
     """Intent:
         Marginalize a relation claim over a branch guard the declared
         domain doesn't settle: split one guarded parameter's domain at
@@ -2605,7 +2743,10 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         split levels so the number of sub-proofs stays small (each
         level is at most seven pieces). `None` when no guard yields a
         usable split or some piece stays undecided, the caller falls
-        back to its ordinary unliftable report.
+        back to its ordinary unliftable report. `claim_terms` (the bound
+        functions, the premise, `assume_defined`, `exclude_own_guards`)
+        reach every piece's proof, so each piece is the claim itself
+        over a smaller domain.
     """
     if depth >= 2 or not domain:
         return None
@@ -2633,36 +2774,54 @@ def _try_domain_split(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             if pieces is None:
                 continue
         results = []
+        left_out = []
         for piece in pieces:
             sub_domain = dict(domain)
             sub_domain[p] = piece
+            why = _piece_outside_premise(fn, facts, sub_domain, claim_terms)
+            if why is not None:
+                left_out.append(f"{render_domain_bound(piece)} ({why})")
+                continue
             result = try_prove(fn, facts, lhs_src, rhs_src, relation,
                                domain=sub_domain, tolerance=tolerance,
                                max_callee_depth=max_callee_depth,
-                               extensive=extensive, _split_depth=depth + 1)
+                               extensive=extensive, _split_depth=depth + 1,
+                               **claim_terms)
             if result.status == "disproven":
                 piece_text = render_domain_bound(piece)
                 witness = dict(result.witness or {})
+                # the sub-proof's witness may not name every parameter:
+                # the point its counterexample names, else for the split
+                # parameter a point of the piece
+                named = _named_point(result.counterexample, facts.params)
+                for q, v in named.items():
+                    witness.setdefault(q, v)
                 if p not in witness:
-                    # the piece fixed or narrowed p, so the sub-proof's
-                    # witness may not name it; a point of the piece does
                     point = _piece_point(piece)
                     if point is not None:
                         witness[p] = point
+                if _premise_refuses(fn, facts, witness, claim_terms):
+                    # a point outside the claim's premise disproves
+                    # nothing
+                    return None
                 return replace(result, sketch=f"on the sub-domain {p} in "
                                f"{piece_text}: {result.sketch}",
                                witness=witness or result.witness)
             if result.status != "proven":
                 return None
             results.append((piece, result))
+        if not results:
+            return None
         piece_list = ", ".join(render_domain_bound(piece) for piece, _ in results)
         how = ("into its stated values" if isinstance(domain.get(p), frozenset)
                else "at its guard boundaries into")
+        outside = (f"; left out, as the claim's premise rules out every "
+                   f"point of it: {', '.join(left_out)}" if left_out else "")
         return ProofResult(
             "proven",
             sketch=f"proven piecewise: {p}'s domain split {how} "
                    f"{piece_list}, each piece proven "
-                   f"separately",
+                   f"separately{outside}",
             quantifier=_quantifier_clause(set(facts.params),
                                           list(facts.params), domain),
             meta={"mathema.derive_route": "domain_split"})
@@ -3132,14 +3291,6 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
                         tolerance, max_callee_depth, extensive, _split_depth,
                         funcs, assumption, assume_defined, _walk_notes=notes,
                         exclude_own_guards=exclude_own_guards)
-    if (result.status == "disproven" and tolerance is not None
-            and result.meta.get("mathema.exact_disproof")):
-        # a declared tolerance is part of the claim: a difference below
-        # it disproves nothing
-        return ProofResult(
-            "undecided",
-            sketch=(f"{result.sketch}; within the declared tolerance "
-                    f"({tolerance:g}), so not a disproof of this claim"))
     if result.status == "proven" and notes.get("claim_side"):
         return ProofResult(
             "undecided",
@@ -3261,9 +3412,9 @@ def length_admitted(name: str, k: int, domain, assumption,
     Notes:
         A value claim is over non-empty sequences: an unbound sequence
         and one over a dimension name (`x in R^n`, `Shape("n")`) admit
-        every length from one, and the empty list only where a premise
-        reads the sequence's length and holds at zero (`assuming
-        len(x) == 0`); what f does with an empty list the claim does not
+        every length from one; an unbound one admits the empty list only
+        where a premise reads the sequence's length and holds at zero
+        (`assuming len(x) == 0`), a space never (`R^n` means n >= 1); what f does with an empty list the claim does not
         name is the empty-input line's question (`empty_input_line`). A
         fixed length (`R^3`) admits only itself, and a dimension name
         the claim binds to whole numbers (`n in [2, 5] subset Z`) admits
@@ -3276,6 +3427,9 @@ def length_admitted(name: str, k: int, domain, assumption,
     from ..domain import domain_contains
     domain = domain or {}
     dims = dims_of(domain.get(name)) or dims_of((shapes or {}).get(name))
+    if dims and k == 0:
+        # a space (`R^n`, `Shape("n")`) has at least one entry on each axis
+        return False
     if dims:
         size = fixed_size(dims[0])
         if size is not None and size != k:
@@ -3988,7 +4142,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # boundaries and prove each piece separately.
             split = _try_domain_split(fn, facts, lhs_src, rhs_src, relation,
                                       domain or {}, tolerance,
-                                      max_callee_depth, extensive, _split_depth)
+                                      max_callee_depth, extensive, _split_depth,
+                                      funcs=funcs, assumption=assumption,
+                                      assume_defined=assume_defined,
+                                      exclude_own_guards=exclude_own_guards)
             if split is not None:
                 return split
             # the last lifting resort: the full piecewise form, every
@@ -4483,7 +4640,10 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
             # case per member of the parameter's finite set
             split = _try_domain_split(fn, facts, lhs_src, rhs_src, relation,
                                       domain or {}, tolerance, max_callee_depth,
-                                      extensive, _split_depth)
+                                      extensive, _split_depth, funcs=funcs,
+                                      assumption=assumption,
+                                      assume_defined=assume_defined,
+                                      exclude_own_guards=exclude_own_guards)
             if split is not None:
                 result = split
         if result.status == "undecided" and piecewise_hint:

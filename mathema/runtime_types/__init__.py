@@ -434,7 +434,34 @@ def undrawable_parameters(fn, detected: dict) -> dict:
         if isinstance(cls, type) and typing.get_origin(cls) is None \
                 and not _drawable_class(cls) and not _adapts_to_language(cls):
             out[p] = cls.__name__
+    receiver = _undrawable_receiver(fn)
+    if receiver is not None and receiver[0] not in detected:
+        out[receiver[0]] = receiver[1]
     return out
+
+
+def _undrawable_receiver(fn) -> "tuple[str, str] | None":
+    """Intent:
+        `(name, class name)` when `fn` is an unbound method whose
+        receiver mathema knows no way to draw as an instance of its
+        class (`_receivers.receiver_fields` is None), else None.
+    """
+    from ._receivers import method_receiver, receiver_fields
+    receiver = method_receiver(fn)
+    if receiver is None:
+        return None
+    name, cls = receiver
+    try:
+        from ..analysis import SourceUnavailable, get_tree
+        try:
+            tree = get_tree(fn)[1]
+        except SourceUnavailable:
+            tree = None
+    except Exception:
+        return None
+    if receiver_fields(cls, tree, name) is not None:
+        return None
+    return name, cls.__name__
 
 
 def realised_parameters(facts) -> dict:
@@ -543,7 +570,14 @@ def observe(obj):
 
 
 def _root_module_of(obj) -> str:
-    return (type(obj).__module__ or "").split(".", 1)[0]
+    """The library `obj`'s type comes from: the first class in its
+    method resolution order that mathema does not define, so mathema's
+    own subclass of a numpy array reads as numpy's."""
+    for cls in type(obj).__mro__:
+        root = (cls.__module__ or "").split(".", 1)[0]
+        if root != "mathema":
+            return root
+    return "mathema"
 
 
 # --- tables, read the same whatever their runtime type ---------------
@@ -609,17 +643,21 @@ class _Realising:
     function's own (`__globals__`, `__code__`, `__defaults__`), and
     `__wrapped__` is the function, so signature and source readers see
     the function itself. A parameter annotated as a set, a frozenset or
-    a tuple is passed as one (`as_annotated`); a function whose only
-    such parameters are those has its result returned as it is."""
+    a tuple is passed as one (`as_annotated`), and a sequence annotated
+    with int or bool elements receives a whole float element as the int
+    or bool it equals (`as_element_type`); a function whose only such
+    parameters are those has its result returned as it is."""
 
     def __init__(self, fn, bindings: dict, sig, enums: "dict | None" = None,
                  containers: "dict | None" = None,
-                 declared: "dict | None" = None):
+                 declared: "dict | None" = None,
+                 elements: "dict | None" = None):
         functools.update_wrapper(self, fn)
         self._fn, self._bindings, self._sig = fn, bindings, sig
         self._enums = enums or {}
         self._containers = containers or {}
         self._declared = declared or {}
+        self._elements = elements or {}
 
     def __getattr__(self, name):
         return getattr(self.__dict__["_fn"], name)
@@ -630,11 +668,17 @@ class _Realising:
             bound = self._sig.bind(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
+        for name, element in self._elements.items():
+            if name in bound.arguments:
+                bound.arguments[name] = as_element_type(bound.arguments[name],
+                                                        element)
+        from .._called_text import file_realised
         for name, detection in self._bindings.items():
             if name in bound.arguments:
-                bound.arguments[name] = realise(bound.arguments[name],
-                                                detection,
+                drawn = bound.arguments[name]
+                bound.arguments[name] = realise(drawn, detection,
                                                 declared=self._declared.get(name))
+                file_realised(drawn, bound.arguments[name], name)
         for name, cls in self._enums.items():
             if name in bound.arguments:
                 bound.arguments[name] = as_enum_member(bound.arguments[name], cls)
@@ -680,6 +724,64 @@ def annotated_container(fn, param: str) -> "type | None":
         return None
     head = parts[0].split("[", 1)[0].rsplit(".", 1)[-1]
     return _ANNOTATED_CONTAINERS.get(head)
+
+
+def annotated_element(fn, param: str) -> "str | None":
+    """Intent:
+        The scalar type the elements of `param` have, as its annotation
+        states it: `int` for `list[int]`, `tuple[int, ...]`,
+        `Sequence[Optional[int]]` or `NDArray[np.int64]`, likewise
+        `float`, `bool`, `str` and `complex`; None when the annotation
+        is no container of one scalar type, or there is none.
+    """
+    import collections.abc as abc
+
+    from ..types import _numpy_dtype_scalar, _optional_parts, _scalar_slot_type
+    try:
+        hint = typing.get_type_hints(inspect.unwrap(fn)).get(param)
+    except Exception:
+        return None
+    if hint is None:
+        return None
+    _optional, inner = _optional_parts(hint)
+    origin = typing.get_origin(inner)
+    if origin is None:
+        return None
+    module = getattr(origin, "__module__", "") or ""
+    if module.split(".")[0] == "numpy":
+        return _numpy_dtype_scalar(inner)
+    if origin not in (list, tuple, set, frozenset, abc.Sequence,
+                      abc.MutableSequence, abc.Set, abc.MutableSet,
+                      abc.Collection, abc.Iterable):
+        return None
+    scalars = {_scalar_slot_type(_optional_parts(a)[1])
+               for a in typing.get_args(inner) if a is not Ellipsis}
+    if len(scalars) != 1:
+        return None
+    return scalars.pop()
+
+
+def as_element_type(value, element: "str | None"):
+    """Intent:
+        `value`, a drawn list, tuple, set or frozenset, with each float
+        element held as the member of `element` it equals: a whole
+        number as that int when `element` is `int`, 0.0 and 1.0 as
+        False and True when it is `bool`; `value` unchanged for any
+        other element type or value.
+    """
+    if element not in ("int", "bool") \
+            or not isinstance(value, (list, tuple, set, frozenset)):
+        return value
+
+    def typed(v):
+        if not isinstance(v, float):
+            return v
+        if element == "int" and v.is_integer():
+            return int(v)
+        if element == "bool" and v in (0.0, 1.0):
+            return v == 1.0
+        return v
+    return type(value)(typed(v) for v in value)
 
 
 def annotated_containers(fn, facts) -> dict:
@@ -733,13 +835,16 @@ def calling(fn, facts, declared: "dict | None" = None):
     bindings = realised_parameters(facts)
     enums = enum_parameters(fn)
     containers = annotated_containers(fn, facts)
-    if not bindings and not enums and not containers:
+    kinds = getattr(facts, "param_kinds", None) or {}
+    elements = {p: made for p, k in kinds.items() if k in SEQUENCE_KINDS
+                and (made := annotated_element(fn, p)) in ("int", "bool")}
+    if not bindings and not enums and not containers and not elements:
         return exiting_as_raise(fn)
     sig = _signature(fn)
     if sig is None:
         return exiting_as_raise(fn)
     return exiting_as_raise(_Realising(fn, bindings, sig, enums, containers,
-                                       declared))
+                                       declared, elements))
 
 
 def enum_parameters(fn) -> dict:
@@ -1172,7 +1277,8 @@ __all__ = [
     "ListAdapter", "NotMine", "absence_defined", "definitions", "members",
     "resolve_absence", "resolve_missing", "set_definitions", "spellings",
     "RUNTIME_TYPES_GROUP", "RuntimeType", "SEQUENCE_KINDS", "RuntimeTypeAdapter",
-    "abstract_of", "adapter", "adapters", "calling", "descriptor_names",
+    "abstract_of", "adapter", "adapters", "annotated_element",
+    "as_element_type", "calling", "descriptor_names",
     "detect_annotation", "detect_parameters", "identity_entries",
     "installed", "library_version", "module_imports", "observe",
     "observed_plain", "plain", "promotions", "realise",

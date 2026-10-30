@@ -14,9 +14,10 @@ allowance absorbs never reaches a proof.
 - A point the function cannot be evaluated at exactly (a float it
   reads from outside its body, a module global, has no exact reading)
   caps the proof at float64: every point ran and agreed in the
-  computation, so the claim is proven on
-  `derive:brute_force:within_float64`, the record stating the largest
-  delta, never an exact proof.
+  computation within float64's own precision, so the claim is proven
+  on `derive:brute_force:within_float64`, the record stating the
+  largest delta, never an exact proof. A float64 miss beyond that
+  precision, which the allowance admits, is `holds`.
 - A function that satisfies the claim exactly at every point is still
   proven.
 
@@ -143,14 +144,44 @@ def _check(fn, law):
 @pytest.mark.parametrize("fn,law", [
     (drift_global, "for x in {1, 2}, f(x) == x"),
     (drift_global, "for x in {1, 2}, f(x) ~= x"),
+])
+def test_a_pass_only_through_the_relative_allowance_with_no_exact_value_is_unknown(
+        fn, law):
+    # f(1) is 1.000000002 in float64: the gap 2e-9 is past the absolute
+    # 1e-9 (for ~=, past ε) and inside only the relative part of the
+    # allowance, and the body has no exact reading, so no point is
+    # counted and nothing is decided
+    p = _check(fn, law)
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+    assert "could not be evaluated in exact arithmetic" in (p.note or ""), \
+        p.note
+
+
+@pytest.mark.parametrize("fn,law", [
     (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
     (offset_global, "for n in [0, 3] subset Z, f(n) == n"),
     (constant_global, "f([]) == 0"),
 ])
-def test_a_body_with_no_exact_value_is_proven_within_float64(fn, law):
+def test_a_body_with_no_exact_value_missing_beyond_float64_is_not_counted(
+        fn, law):
+    # each float64 result misses the relation by 5e-10 (against 0, or
+    # against 1 at n = 1), beyond float64's precision there and inside
+    # only the default allowance, with no exact reading: no evidence
+    # either way, so nothing is decided
     p = _check(fn, law)
-    assert p.verdict == "proven", (p.verdict, p.route, p.sketch, p.note)
-    assert p.route == "derive:brute_force:within_float64", p.route
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("fn,law", [
+    (offset_global, "for n in {0, 1, 2, 3}, f(n) == n"),
+    (constant_global, "f([]) == 0"),
+])
+def test_a_miss_beyond_float64_inside_a_declared_tolerance_holds(fn, law):
+    # the declared 1e-9 is the computation's allowance the claim asks
+    # for: the 5e-10 miss counts, as evidence, not a proof
+    (p,) = check_conjectures(fn, [claim(law, tolerance=1e-9)])
+    assert p.verdict == "holds", (p.verdict, p.route, p.sketch, p.note)
+    assert p.route == "derive:brute_force", p.route
     assert "mathema.sweep_precision" in p.meta, p.meta
 
 
@@ -173,10 +204,11 @@ def test_a_literal_gap_inside_the_allowance_is_an_exact_miss(fn, law):
 
 
 def test_the_record_names_the_point_with_no_exact_value():
-    p = _check(drift_global, "for x in {1, 2}, f(x) == x")
+    (p,) = check_conjectures(offset_global, [claim(
+        "for n in {0, 1, 2, 3}, f(n) == n", tolerance=1e-9)])
     inexact = p.meta["mathema.sweep_inexact"]
-    assert inexact["points"] == 2, inexact
-    assert inexact["first"] == "x = 1", inexact
+    assert inexact["points"] == 4, inexact
+    assert inexact["first"] == "n = 0", inexact
     assert "exactly" in p.sketch, p.sketch
 
 

@@ -1142,8 +1142,10 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
             plan, numbers_judged_elsewhere=frozenset(
                 covered & set(plan.elements)))
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def entry(args, kwargs):
+            # the dimensions of the arguments: raises where they disagree
+            # with the markers or a declared premise, else the names the
+            # call bound
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             av = bound.arguments
@@ -1169,11 +1171,21 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
                         f"{fn.__name__}: dim({left[0]}, {left[1]})={lval} "
                         f"violates the declared premise "
                         f"dim({left[0]}, {left[1]}) {rel} {rdesc}")
-            result = fn(*args, **kwargs)
+            return bound_names
+
+        def leave(bound_names, result):
+            # the dimensions of the result: raises where they disagree
+            # with the return marker
             problem = _shapes.exit_problem(plan, bound_names, result,
                                            fn.__name__)
             if problem is not None:
                 raise DimensionError(problem, at_exit=True)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound_names = entry(args, kwargs)
+            result = fn(*args, **kwargs)
+            leave(bound_names, result)
             return result
 
         # what the guard checks, read back by every sampler as the
@@ -1181,6 +1193,8 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
         # never the draws the guard rejects
         wrapper.__mathema_enforced_dimensions__ = {
             p: dims for p, (dims, _source) in plan.params.items()}
+        # the checks the wrapper makes before and after calling `fn`
+        wrapper.__mathema_dimension_check__ = (entry, leave)
         _declare_exclusions(wrapper, fn, sorted(plan.params),
                             "enforce_dimensions")
         return wrapper

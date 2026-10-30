@@ -35,6 +35,7 @@ does, rather than a second, subtly different reading of the claim.
 from __future__ import annotations
 
 import itertools
+import math
 
 from ._exact_side import holds_number
 from ._exits import call, exception_name
@@ -280,6 +281,15 @@ class _Precision:
         self.miss = None
         self.allowance = None
         self.at = None
+        # at the points with no exact value: `(miss, precision, where,
+        # words)`
+        # of the largest miss within float64's precision, and of the
+        # first miss beyond it (`_allowance.precision_miss`)
+        self.within = None
+        self.beyond = None
+        # the points with no exact value whose float64 pass rests on
+        # the default allowance alone (`_uncounted_at`), each by its text
+        self.uncounted: list = []
 
     def add(self, measured, where) -> None:
         """Count a point's `(miss, allowance)`, `where` its text or a
@@ -292,22 +302,65 @@ class _Precision:
             self.miss, self.allowance = gap, allowance
             self.at = where() if callable(where) else where
 
-    def meta(self) -> dict:
+    def inexact(self, measured, where) -> None:
+        """Count a point with no exact value at its `(miss, precision,
+        words, detail)` (`_float64_at`), `where` its text or a callable
+        giving it; None (no numbers compared) counts nothing."""
+        if measured is None:
+            return
+        miss, bound, words, detail = measured
+        if miss > bound:
+            if self.beyond is None:
+                self.beyond = (miss, bound,
+                               where() if callable(where) else where, words)
+        elif self.within is None or miss > self.within[0]:
+            self.within = (miss, bound, where() if callable(where) else where,
+                           words, detail)
+
+    def beyond_words(self, ran: str, call: str) -> str:
+        """Intent:
+            The sketch of a sweep whose float64 computation misses the
+            relation beyond float64's precision at a point with no exact
+            value: the swept points (`ran`) ran in float64 and passed
+            within the computation's allowance, the point, its miss and
+            float64's precision there, and the call (`call`) that could
+            not be computed exactly.
+        """
+        from .records import delta_text
+        miss, bound, where, words = self.beyond
+        return (f"{ran} in float64 and the claim held at each within the "
+                f"computation's allowance; at {where} the float64 "
+                f"computation misses the relation by {delta_text(miss)}, "
+                f"beyond float64's precision there ({delta_text(bound)}, "
+                f"{words}), "
+                f"and the value could not be computed exactly ({call}), so "
+                f"the sweep is evidence, not a proof")
+
+    def meta(self, proven: bool = False) -> dict:
+        """The `mathema.sweep_precision` record; for a sweep `proven`
+        within float64 it also carries `precision`, float64's precision
+        at the point with no exact value whose miss was largest
+        (`_float64_at`'s detail: `bound`, `factor`, `magnitude`,
+        `kappa`, `returned`)."""
         if self.points == 0:
             return {}
-        return {"mathema.sweep_precision": {
-            "points": self.points, "largest_delta": self.miss,
-            "allowance": self.allowance, "at": self.at,
-            "representation": "float64"}}
+        found = {"points": self.points, "largest_delta": self.miss,
+                 "allowance": self.allowance, "at": self.at,
+                 "representation": "float64"}
+        if proven and self.within is not None:
+            found["precision"] = dict(self.within[4])
+        return {"mathema.sweep_precision": found}
 
     def capped_words(self, ran: str, point: str, call: str) -> str:
         """Intent:
             The sketch of a sweep proven within float64, stating the cap
             for a reader downstream: the swept points (`ran`, `all 3
             points were run`, `_Scope.ran`) ran in float64 and the claim
-            held at each, the largest delta against its allowance, and
-            the `point` (its `call`) that could not be computed exactly,
-            below which delta a difference would not show.
+            held at each, the largest delta against its allowance, the
+            largest miss at a point with no exact value against
+            float64's precision there, and the `point` (its `call`) that
+            could not be computed exactly, below which delta a
+            difference would not show.
         """
         from .records import delta_text
         delta = delta_text(self.miss)
@@ -315,12 +368,207 @@ class _Precision:
         # float64's own resolution at these values
         below = (f"below {delta}" if self.miss else
                  "below float64's resolution at these values")
+        within = ""
+        if self.within is not None:
+            miss, bound, where, words, _detail = self.within
+            within = (f", and within float64's precision at every point "
+                      f"with no exact value (a miss of {delta_text(miss)} "
+                      f"against {delta_text(bound)}, {words}, at {where})")
         return (f"{ran} in float64 "
                 f"and the claim held at each; the largest delta was {delta} "
-                f"against an allowance of {delta_text(self.allowance)}. The "
+                f"against an allowance of {delta_text(self.allowance)}"
+                f"{within}. The "
                 f"value at {point} could not be computed exactly ({call}), "
                 f"so this proof is capped at within_float64: a difference "
                 f"{below} would not show")
+
+
+class _Kappa:
+    """The condition number of a function at the points of one sweep
+    (`_conditioning.condition_at`), with the magnitude of the value the
+    function returns there, read only where a miss needs them; once the
+    condition number cannot be read at one point it is not tried again
+    in the sweep."""
+
+    def __init__(self, cj, fn, facts):
+        self.cj, self.fn, self.facts = cj, fn, facts
+        self.unreadable = False
+
+    def params(self) -> list:
+        """The function's parameters, in order."""
+        return list(getattr(self.facts, "params", None) or [])
+
+    def at(self, point: dict, reference: float) -> "tuple | None":
+        """`(kappa, |f(point)|)` at the arguments `point` gives each
+        parameter, or None when either cannot be read: the condition
+        number is unknown, or the function's value there is not a finite
+        real number."""
+        from ._conditioning import claim_reduces, condition_at
+        if self.unreadable or self.fn is None or self.facts is None:
+            return None
+        params = self.params()
+        if not params or any(p not in point for p in params):
+            return None
+        try:
+            kappa, _how = condition_at(self.fn, self.facts, point, reference,
+                                       reduces=claim_reduces(self.cj))
+        except Exception:
+            kappa = None
+        if kappa is None or not math.isfinite(kappa):
+            self.unreadable = True
+            return None
+        try:
+            value = call(self.fn, *[point[p] for p in params])
+        except Exception:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            returned = abs(float(value))
+        except OverflowError:
+            return None
+        if not math.isfinite(returned):
+            return None
+        return kappa, returned
+
+
+def _f_arguments(cj, params) -> "list | None":
+    """Intent:
+        The point's coordinates f is called on where a side of the claim
+        is a bare call of f on them (`f(x)`, `f(a, b)`, one name per
+        parameter of `params`, in order), whose value is f's own: the
+        condition number times the magnitude f returned, both read at
+        those coordinates, then measures that side in its own units.
+        None when no side is such a call, when two such sides call f on
+        different coordinates, or when a side scales or combines f's
+        value (`f(x) / 1e10`, other units) or calls f on anything but
+        the coordinates themselves (`f(x / 1e10)`, another point).
+    """
+    import ast
+    found = None
+    for text in (getattr(cj, "lhs", None), getattr(cj, "rhs", None)):
+        if not text:
+            continue
+        try:
+            node = ast.parse(str(text), mode="eval").body
+        except SyntaxError:
+            continue
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if node.keywords or len(node.args) != len(params) \
+                or not all(isinstance(a, ast.Name) for a in node.args):
+            return None
+        names = [a.id for a in node.args]
+        if found is not None and found != names:
+            return None
+        found = names
+    return found
+
+
+def _float64_at(cj, computed, point: dict,
+                kappa: "_Kappa | None" = None,
+                returned=None) -> "tuple | None":
+    """Intent:
+        `(miss, precision, words, detail)` of the float64 sides `computed` at
+        `point` (`_allowance.precision_miss`): how far they miss the
+        claim's relation itself; float64's precision there,
+        `PRECISION_FACTOR` unit roundoffs of the value compared against
+        (the claim's own side where exactly one side runs no code), plus
+        the function's relative condition number times the magnitude of
+        the value it returned there, where the miss needs it, a side is
+        f's own value (`_f_arguments`) and `kappa` reads both; that
+        precision's reading in words; and `detail`,
+        the record of it (`bound`, `factor`, `magnitude`, `kappa` and
+        `returned`, the last two None where not read). With
+        `returned`, the claim's sides on exact values the code returned
+        (`evaluate.returned_exactly`), the miss is theirs, exactly, and
+        the precision 0: an exact value has no rounding to explain a
+        miss. None when there are no sides or no numbers to compare.
+    """
+    from ._allowance import PRECISION_FACTOR, precision_miss, reference_side
+    from ._conditioning import short
+    if computed is None:
+        return None
+    side = reference_side(cj)
+    if returned is not None:
+        found = precision_miss(returned[0], returned[1], cj.relation,
+                               cj.tolerance, side)
+        if found is not None:
+            return (found[0], 0.0, "0, the code returned an exact value",
+                    {"bound": 0.0, "factor": PRECISION_FACTOR,
+                     "magnitude": found[2], "kappa": None,
+                     "returned": None})
+    found = precision_miss(computed[0], computed[1], cj.relation,
+                           cj.tolerance, side)
+    if found is None:
+        return None
+    miss, bound, magnitude = found
+    words = f"{PRECISION_FACTOR} unit roundoffs of {short(magnitude)}"
+    detail = {"bound": bound, "factor": PRECISION_FACTOR,
+              "magnitude": magnitude, "kappa": None, "returned": None}
+    called = (_f_arguments(cj, kappa.params()) if kappa is not None
+              else None)
+    if miss > bound and kappa is not None and called is not None \
+            and all(n in point for n in called):
+        read = kappa.at({p: point[n] for p, n in
+                         zip(kappa.params(), called)}, magnitude)
+        if read is not None:
+            k, returned = read
+            again = precision_miss(computed[0], computed[1], cj.relation,
+                                   cj.tolerance, side, kappa=k,
+                                   returned=returned)
+            if again is not None:
+                miss, bound, magnitude = again
+                words = (f"{PRECISION_FACTOR} unit roundoffs of "
+                         f"{short(magnitude)} plus κ ≈ {short(k)} times "
+                         f"the value f returned, {short(returned)}")
+                detail = {"bound": bound, "factor": PRECISION_FACTOR,
+                          "magnitude": magnitude, "kappa": k,
+                          "returned": returned}
+    return miss, bound, words, detail
+
+
+def _returned_at(evaluate, point: dict):
+    """The claim's sides on exact values the code returned at `point`
+    (`evaluate.returned_exactly`) under the fast wall-clock cap, or None
+    where a call returns a value that is not exact."""
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    returned = getattr(evaluate, "returned_exactly", None)
+    if returned is None:
+        return None
+    try:
+        return _with_timeout(lambda: returned(point), FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+
+
+def _rounded_miss_words(sides, reason=None) -> str:
+    """Intent:
+        The clause a witness at a point where a Decimal operation
+        rounded, or may have rounded unseen (`reason` the
+        `_decimal_rounding.UNSEEN` text), carries: the executed sides,
+        and that they miss by more than the rounding can account for.
+    """
+    from ._decimal_rounding import UNSEEN
+    shown = (f" ({sides[0]!r} vs {sides[1]!r})"
+             if isinstance(sides, tuple) and len(sides) == 2 else "")
+    did = "may have rounded" if reason == UNSEEN else "rounded"
+    return (f", where a Decimal operation {did}{shown}, by more than "
+            f"rounding of the final values to the context's precision can account for")
+
+
+def _uncounted_at(cj, measured) -> bool:
+    """Intent:
+        Whether a point with no exact value, at its `(miss, precision,
+        words, detail)` (`_float64_at`), is not counted: its float64 sides miss
+        the relation beyond float64's precision there and the claim
+        declares no tolerance, so the pass rests on the default
+        allowance alone and is no evidence either way, as on the probe
+        route.
+    """
+    return cj.tolerance is None and measured is not None \
+        and measured[0] > measured[1]
 
 
 def _call_words(fn, facts, point: dict) -> str:
@@ -731,9 +979,13 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         arithmetic while the float computation agrees there within its
         allowance (`mathema.exact_witness` records it). `undecided` with
         `mathema.sweep_holds` and `mathema.sweep_inexact` when every
-        point agrees in floats but some point has no exact value, a
-        float the function computed for one: the computation holds,
-        and nothing proves the mathematics.
+        point agrees in floats but some point has no exact value and
+        its float64 computation misses the relation beyond float64's
+        own precision there (`_allowance.precision_miss`): the
+        computation holds, and nothing proves the mathematics. Every
+        point agreeing, with each point that has no exact value within
+        float64's precision, is `proven` on
+        `brute_force:within_float64`.
 
     Raises:
         Nothing. A claim this route cannot decide comes back `None` and
@@ -810,8 +1062,12 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # agrees within its allowance
     inexact: list = []
     exact_miss = None
+    # the points not counted for their Decimal arithmetic, with why
+    # (`_decimal_rounding.ROUNDED`)
+    rounded: list = []
     # how far the floats missed over the points compared
     precision = _Precision()
+    kappa = _Kappa(cj, fn, facts)
     for point in (plan.points if plan is not None else
                   (dict(zip(names, combo))
                    for combo in itertools.product(*(grid[n] for n in names)))):
@@ -821,10 +1077,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             continue
         total += 1
         verdict = evaluate(point)
+        if verdict is None and evaluate.learned_decimal():
+            # its Decimal came from a run not read, and every run from
+            # here on is: the point is run again, read
+            verdict = evaluate(point)
         executed = executed_missing(deps)
         if verdict is None and executed is not None and executed.last_classified:
             # a raise or a missing output at a missing input: classified
             # into the executed, not judged
+            continue
+        if verdict is None and evaluate.decimal_rounded():
+            # neither read exactly nor a float64 value: not counted
+            rounded.append((point, evaluate.decimal_rounded()))
             continue
         if verdict is None:
             return None
@@ -838,6 +1102,9 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
+                       + (_rounded_miss_words(evaluate.sides(),
+                                              evaluate.decimal_rounded())
+                          if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else
                           f", found among the points run "
@@ -861,12 +1128,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         judged.append(point)
         precision.add(evaluate.last_precision(),
                       lambda: _fmt_point(point, names))
+        computed = evaluate.sides()
         # sides with no number in them (a string, a bool, a missing
         # value) are decided exactly too: the body read exactly may have
         # reached them through a decision it does not take
         said, sides = _exactly_at(cj, evaluate, point)
         if said is None:
             inexact.append(point)
+            measured = _float64_at(cj, computed, point, kappa,
+                                   _returned_at(evaluate, point))
+            precision.inexact(measured, lambda: _fmt_point(point, names))
+            if _uncounted_at(cj, measured):
+                precision.uncounted.append(_fmt_point(point, names))
         elif said is False and exact_miss is None:
             exact_miss = (point, sides, _exact_witness_words(
                 _fmt_point(point, names), sides, evaluate.sides()))
@@ -892,6 +1165,18 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                  "mathema.exact_witness": {
                      **witness, "computation": "holds within its allowance"}},
                 executed_missing(deps)))
+    if rounded:
+        n = len(rounded)
+        first, reason = rounded[0]
+        return ProofResult(
+            "undecided",
+            sketch=(f"{reason} at {n} point{'s' if n != 1 else ''}, first "
+                    f"at {_fmt_point(first, names)}, so "
+                    f"{'they are' if n != 1 else 'it is'} not counted and "
+                    f"the sweep decides nothing"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid), **counted},
+                               executed_missing(deps)))
     if checked == 0:
         # every point was excluded: nothing was actually verified, and a
         # clean pass over no points proves nothing while looking like a
@@ -912,14 +1197,44 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             "undecided",
             sketch=(f"{_holds_at(total, judged, _Scope(cj, names))}{outside}; every point "
                     f"executed; proven needs the function to be shown "
-                    f"pure: {unexamined}"),
+                    f"pure: {unexamined}; a body whose every call the "
+                    f"examination reads, or a purity entry for that call, "
+                    f"would make the sweep a proof"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.sweep_holds": True, **_tried(grid),
+                                **counted, **no_exact},
+                               executed_missing(deps)))
+    if precision.uncounted:
+        # a point with no exact value that passed only within the
+        # default allowance is not counted, as on the probe route: the
+        # sweep decides nothing
+        n = len(precision.uncounted)
+        return ProofResult(
+            "undecided",
+            sketch=(f"{n} point{'s' if n != 1 else ''} passed only within "
+                    f"the tolerance and could not be evaluated in exact "
+                    f"arithmetic, first at {precision.uncounted[0]}, so "
+                    f"{'they are' if n != 1 else 'it is'} not counted and "
+                    f"the sweep decides nothing"),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                **_tried(grid), **counted, **no_exact},
+                               executed_missing(deps)))
+    if inexact and precision.beyond is not None:
+        # a point with no exact value whose float64 computation misses
+        # the relation beyond float64's precision there: evidence only
+        return ProofResult(
+            "undecided",
+            sketch=precision.beyond_words(
+                _Scope(cj, names).ran(total),
+                _call_words(fn, facts, inexact[0])) + outside,
             meta=with_executed({"mathema.derive_route": "brute_force",
                                 "mathema.sweep_holds": True, **_tried(grid),
                                 **counted, **no_exact},
                                executed_missing(deps)))
     if inexact:
-        # every point ran and the claim held at each in float64; a point
-        # with no exact value caps the proof at float64
+        # every point ran and the claim held at each in float64, within
+        # float64's precision wherever there is no exact value; such a
+        # point caps the proof at float64
         scope = _Scope(cj, names)
         return ProofResult(
             "proven",
@@ -929,7 +1244,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             quantifier=scope.quantifier(names, total),
             meta=with_executed({"mathema.derive_route":
                                     "brute_force:within_float64",
-                                **_tried(grid), **counted, **no_exact},
+                                **_tried(grid), **counted, **no_exact,
+                                **precision.meta(proven=True)},
                                executed_missing(deps)))
     return ProofResult(
         "proven",
@@ -984,11 +1300,14 @@ def _written_call(args: tuple, kwargs: dict) -> str:
     return f"f({', '.join(parts)})"
 
 
-def _ground_witness(fn, facts, calls: list) -> str:
+def _ground_witness(fn, facts, calls: list, named: bool = True) -> str:
     """Intent:
         The calls a ground claim's evaluation made, as its witness: the
         raising call when one raised, else the one call made (`xs =
-        []`), else every distinct call as written (`f(1), f(2)`).
+        []`), else every distinct call as written (`f(1), f(2)`). With
+        `named` False every call is written as a call, never as a point
+        of f's parameters: the form for a claim that binds a variable of
+        the same name its calls never read.
     """
     raised = [c for c in calls if c[0] == "raised"]
     shown = raised[-1:] if raised else calls
@@ -997,11 +1316,50 @@ def _ground_witness(fn, facts, calls: list) -> str:
         key = (repr(args), repr(sorted(kwargs.items())))
         if key not in [k for k, _a, _kw in distinct]:
             distinct.append((key, args, kwargs))
-    if len(distinct) == 1:
+    if len(distinct) == 1 and named:
         _key, args, kwargs = distinct[0]
         return _call_text(fn, facts, args, kwargs)
     return ", ".join(_written_call(args, kwargs)
                      for _key, args, kwargs in distinct)
+
+
+def _ground_failure(deps, point: dict) -> str:
+    """Intent:
+        What the evaluation at `point` just run by `deps["evaluate"]`
+        saw fail: the raise of its last raising call, else the two sides
+        it compared (`3 vs -3`, noting a nan), else what the point's
+        finite check reports.
+    """
+    evaluate = deps["evaluate"]
+    raised = [c for c in evaluate.calls() if c[0] == "raised"]
+    sides = evaluate.sides()
+    if raised:
+        return f"raised {raised[-1][1]}"
+    if sides is not None:
+        from .probing import holds_nan
+        return f"{sides[0]!r} vs {sides[1]!r}" + (
+            ", and a nan is no value" if any(holds_nan(v) for v in sides)
+            else "")
+    found = deps["probe_finite"](point)
+    return found if isinstance(found, str) else "the claim fails"
+
+
+def call_witness(fn, facts, deps, point: dict,
+                 named: bool = True) -> "str | None":
+    """Intent:
+        The witness of a failing point that names no coordinate of the
+        claim: the evaluation re-run at `point`, its calls with what
+        failed (`x = -3: 3 vs -3`, or with `named` False the calls as
+        written, `f(-3): 3 vs -3`). None when the evaluation makes no
+        call or does not fail there.
+    """
+    if deps["evaluate"](point) is not False:
+        return None
+    calls = deps["evaluate"].calls()
+    if not calls:
+        return None
+    witness = _ground_witness(fn, facts, calls, named=named)
+    return f"{witness}: {_ground_failure(deps, point)}"
 
 
 def ground_proof(cj, fn, facts, bound_funcs):
@@ -1057,18 +1415,7 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
         return None
     witness = _ground_witness(fn, facts, calls)
     if verdict is False:
-        raised = [c for c in calls if c[0] == "raised"]
-        sides = evaluate.sides()
-        if raised:
-            detail = f"raised {raised[-1][1]}"
-        elif sides is not None:
-            from .probing import holds_nan
-            detail = f"{sides[0]!r} vs {sides[1]!r}" + (
-                ", and a nan is no value" if any(holds_nan(v) for v in sides)
-                else "")
-        else:
-            found = deps["probe_finite"]({})
-            detail = found if isinstance(found, str) else "the claim fails"
+        detail = _ground_failure(deps, {})
         return ProofResult(
             "disproven",
             sketch=f"the claim fails at its own call, {witness}",
@@ -1101,6 +1448,14 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     precision = _Precision()
     if inexact:
         precision.add(evaluate.last_precision(), witness)
+        measured = _float64_at(cj, computed, {}, _Kappa(cj, fn, facts),
+                               _returned_at(evaluate, {}))
+        precision.inexact(measured, witness)
+        if _uncounted_at(cj, measured):
+            # the call passed only within the allowance, beyond float64's
+            # precision, and has no exact value: not counted, nothing
+            # decided
+            return None
     if facts.is_pure is not True or _examination_obstacle(fn) is not None:
         return ProofResult(
             "undecided",
@@ -1112,9 +1467,24 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
                                         "points": 1, "first": witness},
                                     **precision.meta()} if inexact else {})},
                                executed_missing(deps)))
+    if inexact and precision.beyond is not None:
+        # the call's float64 computation misses the relation beyond
+        # float64's precision, and its value has no exact reading
+        return ProofResult(
+            "undecided",
+            sketch=precision.beyond_words(
+                f"every point of the claim's own call ({_points(1)}) was run",
+                witness),
+            meta=with_executed({"mathema.derive_route": "brute_force",
+                                "mathema.sweep_holds": True,
+                                "mathema.sweep_inexact": {
+                                    "points": 1, "first": witness},
+                                **precision.meta()},
+                               executed_missing(deps)))
     if inexact:
-        # the call ran and the claim held in float64; its value has no
-        # exact reading, so the proof is capped at float64
+        # the call ran and the claim held in float64, within float64's
+        # precision; its value has no exact reading, so the proof is
+        # capped at float64
         return ProofResult(
             "proven",
             sketch=precision.capped_words(
@@ -1124,7 +1494,7 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
                                     "brute_force:within_float64",
                                 "mathema.sweep_inexact": {
                                     "points": 1, "first": witness},
-                                **precision.meta()},
+                                **precision.meta(proven=True)},
                                executed_missing(deps)))
     return ProofResult(
         "proven", sketch=sketch,

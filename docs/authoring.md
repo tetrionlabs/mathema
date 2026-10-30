@@ -325,8 +325,11 @@ derive route has no reading of a string, so it declines with the
 reason rather than proving real-only facts about a symbol standing in
 for one; a finite language (an enumeration a package registers) is
 the exception, swept point by point and proven or falsified with the
-member. `is_language_defined(text)` keeps fuzzing a string
-parameter for accidental crashes as before.
+member. `is_language_defined(text)` over a language holds each member
+to an answer (a return or an exit status) and each non-member to a
+refusal; over a plain string it fuzzes the parameter, reads exits and
+deliberate or guarded raises as the function's refusals, which the
+note lists, and falsifies only on an accidental unguarded crash.
 
 Without the package installed, a claim over `L[unicode]` is not wrong,
 only unresolved: it is `unknown`, with a note saying it needs mathema-language,
@@ -360,9 +363,12 @@ results = mathema.claims.check_conjectures(
 
 Either way, a decided proof comes back `proven`, or `falsified` with
 a witness. A claim the derive route cannot decide falls back to
-probing rather than stopping at `unknown`, so it can still come back
-`holds`, and `Probe.route` then names `probe`, the mechanism that
-actually decided. The derive diagnosis stays on the record, and covers
+probing rather than stopping at `unknown`, so on the default route
+(`best`) it can still come back `holds`, and `Probe.route` then names
+`probe`, the mechanism that actually decided. On `route="derive"` the
+probe only falsifies: an executed counterexample comes back
+`falsified` on the probe's route, and a sampling that finds none
+leaves the claim `unknown`. The derive diagnosis stays on the record, and covers
 two different things: a genuinely unliftable function, or one the
 derive route lifted fine but the specific claim stayed undecided.
 `Probe.meta["mathema.derive_status"]` (`"unliftable"` or `"undecided"`)
@@ -783,7 +789,7 @@ def softmax(scores: Annotated[list[float], Shape("n")]) -> Annotated[list, Shape
 ```
 >>> record = mathema.write_spec(softmax, root='.')
 >>> record
-mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+mathema.Record(softmax) · source, no side effects · form py:b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   sums_to_one  sum(f(scores)) = 1   holds
     holds      computation  sum(f(scores)) = 1   857 entries across 190 draws, sizes (1, 1) to (8, 1); differs by 1.56e-16 at scores = [-6.302472719152528, 0], within the default tolerance (1.01e-07)
@@ -791,7 +797,7 @@ mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
     holds      policy       f([..., nan, ...])   no missing policy stated; assumed propagates
   8 built-in checks: 3 proven, 3 holds, 2 falsified (record.render(families=True) prints them)
 >>> print(record.render(families=True))
-mathema.Record(softmax) · source, no side effects · form b16dc9b223d3
+mathema.Record(softmax) · source, no side effects · form py:b16dc9b223d3
   holds     result_dimensions: softmax(scores) has length n for scores of length n (32 draws)
   is_deterministic  f(scores) = f(scores)   holds
     proven     mathematics  f(scores) = f(scores)

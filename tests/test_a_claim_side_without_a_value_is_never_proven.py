@@ -53,9 +53,10 @@ def shifted_reciprocal_square(x: float) -> float:
     (square, "for x in [-1, 1], f(x) + 1/x**2 >= 0"),
     (less_one, "for x in [0, 2], f(x) / f(x) == 1"),
 ])
-def test_a_claim_side_with_no_value_in_the_domain_is_not_proven(fn, text):
+def test_a_claim_side_with_no_value_in_the_domain_falsifies_the_claim(fn, text):
     (p,) = check_conjectures(fn, [claim(text, route="derive")])
-    assert p.verdict != "proven", (text, p.verdict, p.sketch)
+    assert p.verdict == "falsified", (text, p.verdict, p.sketch)
+    assert p.counterexample, (text, p.note)
 
 
 @pytest.mark.needs_full_proof_budget

@@ -62,8 +62,9 @@ names.
   cannot close, the claim falls through to the probe route with the
   reason the derive attempt stopped kept in the record; a matrix
   identity is sampled over matrices of its declared shape, and stays
-  `unknown` only where it cannot be sampled or was declared
-  `route: derive`. Only available
+  `unknown` only where it cannot be sampled. A claim declared
+  `route: derive` takes only a falsification from that sampling: draws
+  that find no counterexample leave it `unknown`, never `holds`. Only available
   for a real subset of functions; see
   [The derive route](derive-route.md).
 

@@ -59,4 +59,4 @@ def test_false_scaled_gap_claim_still_falsifies():
         return (a - b) / 2
     p = _v(neg_radius,
            "assuming a <= b, for a in [0,10], b in [0,10], f(a,b) >= 0")
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)

@@ -48,11 +48,18 @@ def _is_nonfinite(out) -> bool:
     """True when a value is a silent non-finite number (nan/inf), a
     Python or numpy scalar (a complex one with a non-finite component)
     or a numpy array; False for a genuinely
-    non-numeric value, which is not this predicate's concern."""
+    non-numeric value, which is not this predicate's concern. An int,
+    a Fraction and a finite Decimal are exact and finite whatever their
+    size, a list or array of them too."""
     import math
-    if isinstance(out, bool):
+    from decimal import Decimal
+    from fractions import Fraction
+    if isinstance(out, (bool, int, Fraction)):
+        # an int or a Fraction is exact and finite at any size
         return False
-    if isinstance(out, (int, float)):
+    if isinstance(out, Decimal):
+        return not out.is_finite()
+    if isinstance(out, float):
         return math.isnan(out) or math.isinf(out)
     if isinstance(out, complex):
         # a NaN or an infinity in either component
@@ -66,6 +73,13 @@ def _is_nonfinite(out) -> bool:
         arr = np.asarray(out)
         if arr.dtype.kind != "c":
             arr = arr.astype(float)
+    except OverflowError:
+        # a number too large for a float among the entries: each entry
+        # read by itself
+        held = np.asarray(out, dtype=object)
+        if held.ndim == 0:
+            return False
+        return any(_is_nonfinite(v) for v in held.flat)
     except (TypeError, ValueError):
         return False
     return not bool(np.isfinite(arr).all())

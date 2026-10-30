@@ -25,6 +25,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .._representation_words import PYTHON_CARRIED
 from .document import Document
 from .functions import IMPLEMENTATIONS
 from .syntax import Bool, Int, Name, Real, Str, Term
@@ -56,8 +57,7 @@ SINGULAR = "nonvalue::mathematical::singular"
 DOMAIN = "nonvalue::mathematical::domain"
 OVERFLOW = "nonvalue::machine::overflow"
 
-RUNNABLE_REPRS = frozenset(f"representation::{r}" for r in
-                           ("f64", "f64int", "bigint", "c128", "bool", "str"))
+RUNNABLE_REPRS = frozenset(f"representation::{r}" for r in PYTHON_CARRIED)
 
 
 def interpret(doc: Document, point, calls: dict[str, Callable] | None = None):

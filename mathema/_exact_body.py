@@ -132,8 +132,8 @@ twin cannot tell the real `float` from its exact one), `str`/`repr`/
 `format`/`ascii`/`bin`/`hex`/`oct`/`id` calls, f-strings, `%`
 formatting with a string, `.format(...)`,
 `__str__`/`__repr__`/`__format__`, `.hex()`, `float.fromhex`,
-`.as_integer_ratio()`, explicit `Fraction(...)` and `Decimal(...)`,
-`isinstance`/`issubclass` against `Fraction`, `Decimal`,
+`.as_integer_ratio()`, `isinstance`/`issubclass` against `Fraction`,
+`Decimal`,
 `numbers.Rational` or a sympy class, `math.isclose`, `math.frexp`,
 `math.ldexp`, `math.ulp`, `math.nextafter`, and any use of the
 `struct` or `ctypes` modules, under any alias and whether imported at
@@ -142,7 +142,18 @@ module level or inside the body. Text turned back into a number
 with the text. An `import math` inside the body reaches the exact
 `math` too. A body with no source to scan (built in, a lambda,
 defined by `exec`) or a decorated function is refused the same way:
-nothing vouches for it.
+nothing vouches for it. `Fraction(...)` and `Decimal(...)` built from
+exact arguments (an int, a string, a `Decimal`) are exact by
+construction and read as the computation builds them, and a `Decimal`
+stays exact through the operations that do not round (addition,
+subtraction, multiplication, comparison); one that rounds to the
+decimal context's precision (a division, a square root) leaves the
+point undecided (`_without_decimal_rounding`); built from a
+float, or from a `Fraction` (which may stand for one), the point is
+undecided when the call runs (`_exact_constructor`). A decimal context
+the body installs or computes in (`localcontext`, `setcontext`, a
+`Context` it builds, one of the module's contexts) rounds where that
+trap does not reach, and is refused.
 
 Text whose only reach is an exception's message is not refused: an
 f-string, `"..." % x`, `"...".format(...)`, `str(...)` or `repr(...)`
@@ -166,6 +177,7 @@ import copy
 import functools
 import inspect
 import math
+import operator
 import sys
 import textwrap
 import threading
@@ -198,6 +210,13 @@ _MOD, _GUARD = "__mathema_mod__", "__mathema_guard__"
 #: globals
 _COMPARE, _DECIDED = "__mathema_compare__", "__mathema_decided__"
 _SUB, _DICT = "__mathema_sub__", "__mathema_dict__"
+#: the names the rewritten body calls for a product and an in-place
+#: product
+_MUL, _IMUL = "__mathema_mul__", "__mathema_imul__"
+#: the most bits an exact rational the reading builds by a product or a
+#: power may hold (numerator and denominator together); past it the
+#: reading declines
+_EXACT_BITS = 2 ** 20
 _SHADOW_MARK = "__mathema_shadow__"
 
 #: the most calls of other functions' twins nested inside one another
@@ -232,7 +251,9 @@ class _State(threading.local):
     shadow run (`log` gathering its decisions), `"exact"` for a twin
     run checked against a shadow run's decisions (`reference`);
     `session`, the claim evaluation pairing the calls of the
-    computation with those of the exact reading (`paired`)."""
+    computation with those of the exact reading (`paired`); `memo`, the
+    calls of pure functions the current run has made (`_memoised`), None
+    outside a run."""
     depth = 0
     guard = 0
     taint: "str | None" = None
@@ -240,6 +261,7 @@ class _State(threading.local):
     log: "list | None" = None
     reference: "_Reference | None" = None
     session: "_Session | None" = None
+    memo: "dict | None" = None
 
 
 _STATE = _State()
@@ -389,24 +411,33 @@ def _computed(fn, args: tuple, kwargs: dict) -> _Computed:
         The shadow run of `fn` (`_shadow_of`) on `args` and `kwargs`,
         the floats the computation held, gathering its decisions. A
         function with no shadow runs as written and its decisions are
-        unknown (`log` None).
+        unknown (`log` None). A `SystemExit` it raises is kept as the
+        raise it is (`_exits.as_raise`).
     """
+    from ._exits import as_raise
     shadow = _shadow_of(fn)
     if shadow is None:
         try:
             return _Computed(None, value=fn(*args, **kwargs))
+        except SystemExit as e:
+            return _Computed(None, error=as_raise(e))
         except Exception as e:
             return _Computed(None, error=e)
-    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard)
-    _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = (
-        "float", [], None, 0)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard,
+             _STATE.memo)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard, _STATE.memo = (
+        "float", [], None, 0, {})
     log = _STATE.log
     try:
         return _Computed(log, value=shadow(*args, **kwargs))
+    except SystemExit as e:
+        error = as_raise(e)
+        return _Computed(log, error=error, where=_where(error))
     except Exception as e:
         return _Computed(log, error=e, where=_where(e))
     finally:
-        _STATE.mode, _STATE.log, _STATE.reference, _STATE.guard = saved
+        (_STATE.mode, _STATE.log, _STATE.reference, _STATE.guard,
+         _STATE.memo) = saved
 
 
 def _raised_words(error, where) -> str:
@@ -414,12 +445,31 @@ def _raised_words(error, where) -> str:
     return f"raised {type(error).__name__}{at}"
 
 
+def _without_decimal_rounding(twin, args: tuple, kwargs: dict):
+    """Intent:
+        `twin(*args, **kwargs)` with the decimal context trapping every
+        rounding: a `Decimal` operation that would round to the
+        context's precision (a division, a square root, a result with
+        more digits than the context keeps) raises `decimal.Inexact` or
+        `decimal.Rounded` instead of returning a number the mathematics
+        does not have. The computation's own run rounds as ever, so the
+        two runs then differ and the point is not read exactly.
+    """
+    import decimal
+    with decimal.localcontext() as context:
+        context.traps[decimal.Inexact] = True
+        context.traps[decimal.Rounded] = True
+        return twin(*args, **kwargs)
+
+
 def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     """Intent:
         The twin's run on the exact `args` and `kwargs`, each decision
         it takes checked against `computation`'s (`_event`): the twin's
         value, or the exception both runs raised alike (the same class
-        at the same line of the body).
+        at the same line of the body). A `SystemExit` either run raises
+        is compared, and raised, as the raise it is
+        (`_exits.as_raise`).
 
     Raises:
         NotExact: the computation's decisions are unknown, a step of the
@@ -430,20 +480,22 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
     if computation.log is None:
         _not_exact("the function's float run cannot be followed decision "
                    "by decision")
-    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint,
+             _STATE.memo)
     reference = _Reference(computation.log)
-    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint = (
-        "exact", None, reference, None)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint, _STATE.memo = (
+        "exact", None, reference, None, {})
+    from ._exits import as_raise
     raised = None
     try:
         try:
-            out = twin(*args, **kwargs)
+            out = _without_decimal_rounding(twin, args, kwargs)
         except NotExact:
             raise
-        except Exception as e:
+        except (Exception, SystemExit) as e:
             if _STATE.taint is not None:
                 raise NotExact(_STATE.taint) from None
-            raised = e
+            raised = as_raise(e) if isinstance(e, SystemExit) else e
         if _STATE.taint is not None:
             raise NotExact(_STATE.taint)
         if reference.at < len(reference.log):
@@ -469,6 +521,7 @@ def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
         taint = _STATE.taint
         _STATE.mode, _STATE.log, _STATE.reference = saved[:3]
         _STATE.taint = saved[3] if saved[3] is not None else taint
+        _STATE.memo = saved[4]
 
 
 class _Session:
@@ -751,43 +804,69 @@ def _shadow_of(fn):
 
 def _domain_guarded(fn) -> "tuple | None":
     """`(check, inner)` for a function `enforce_domain` wraps with no
-    policy on its result: `check(args, kwargs)` raises where the
-    wrapper raises before calling `inner`, the function it wraps; None
-    for any other function."""
-    check = getattr(fn, "__mathema_domain_check__", None)
+    policy on its result, or `enforce_dimensions` wraps: `check(args,
+    kwargs)` raises where the wrapper raises before calling `inner`, the
+    function it wraps, and returns how the wrapper checks the result
+    (`leave(result)`, raising where the wrapper raises after the call),
+    or None when it does not; None for any other function."""
     inner = getattr(fn, "__wrapped__", None)
-    if check is None or not isinstance(inner, types.FunctionType):
+    if not isinstance(inner, types.FunctionType):
         return None
-    return check, inner
+    check = getattr(fn, "__mathema_domain_check__", None)
+    if check is not None:
+        return (lambda args, kwargs: (check(args, kwargs), None)[1]), inner
+    dimensions = getattr(fn, "__mathema_dimension_check__", None)
+    if dimensions is not None:
+        entry, leave = dimensions
+
+        def checked(args, kwargs):
+            bound_names = entry(args, kwargs)
+            return lambda result: leave(bound_names, result)
+        # a dimension check reads the arguments' shapes, never their
+        # numbers
+        checked.reads_numbers = False  # type: ignore[attr-defined]
+        return checked, inner
+    return None
 
 
 def _checked_first(fn, check, body):
     """Intent:
-        `fn`, a function `enforce_domain` wraps, as a reading runs it:
-        the domain check on the arguments, a decision (`_decide`) whose
-        outcome is that it passes or the exception it raises, then
-        `body`, the reading of the function it wraps.
+        `fn`, a function `enforce_domain` or `enforce_dimensions` wraps,
+        as a reading runs it: the wrapper's check on the arguments, a
+        decision (`_decide`) whose outcome is that it passes or the
+        exception it raises, then `body`, the reading of the function it
+        wraps, then the wrapper's check of the result when it makes one.
 
     Raises:
         NotExact: in a twin run on its own, an argument holds a number
-            standing for a float, whose membership is a decision.
+            standing for a float, whose membership is a decision (a
+            dimension check, which reads shapes alone, excepted).
     """
     site = (fn.__code__.co_filename, 0, 0, 0, 0, f"domain {fn.__qualname__}")
 
     @functools.wraps(body)
     def checked(*args, **kwargs):
-        if _STATE.mode is None and (_holds_stand_in(args)
-                                    or _holds_stand_in(kwargs)):
+        if getattr(check, "reads_numbers", True) and _STATE.mode is None \
+                and (_holds_stand_in(args) or _holds_stand_in(kwargs)):
             _not_exact(f"the domain check of {fn.__qualname__} on a number "
                        f"standing for a float is not taken exactly")
-        _decide(site, lambda: check(args, kwargs) and None)
-        return body(*args, **kwargs)
+        leave = []
+        _decide(site, lambda: leave.append(check(args, kwargs)))
+        out = body(*args, **kwargs)
+        if leave and leave[0] is not None:
+            leave[0](out)
+        return out
     return checked
 
 
 def _parse(fn):
     """`(src, FunctionDef, first line)` of `fn`'s source, dedented, or
-    None when there is no source or it is not one plain `def`."""
+    None when there is no source or it is not one plain `def`. A
+    statement that only calls `sys.exit` (or the interpreter's `exit`
+    or `quit`) reads as the `raise SystemExit(...)` it is
+    (`_exits.exits_as_raises`), as it does for every other reader of
+    the body."""
+    from ._exits import exits_as_raises
     try:
         lines, first = inspect.getsourcelines(fn)
     except (OSError, TypeError):
@@ -799,7 +878,7 @@ def _parse(fn):
         return None
     if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
         return None
-    return src, tree.body[0], first
+    return src, exits_as_raises(tree.body[0], fn), first
 
 
 def _plain(fn):
@@ -870,6 +949,7 @@ def _build(fn, exact: bool, decorated: bool = False) -> tuple:
             del env[fn.__name__]
     twin.__qualname__ = fn.__qualname__
     twin.__module__ = fn.__module__
+    twin.__mathema_read_from__ = fn  # type: ignore[attr-defined]
     twin.__doc__ = fn.__doc__
     twin.__annotations__ = dict(getattr(fn, "__annotations__", {}) or {})
     return twin, None
@@ -891,17 +971,86 @@ _CATCHING: tuple = (ast.Try, getattr(ast, "TryStar", ast.Try), ast.With,
 
 
 def _refused_callables() -> frozenset:
-    """The ids of the callables (and classes) whose value depends on the
-    float representation, or that build an exact number the computation
-    never had."""
-    import decimal
+    """The ids of the callables whose value depends on the float
+    representation. `Fraction` and `Decimal` are not among them: called
+    on exact arguments they build an exact number, and called on
+    anything else the reading declines at run time
+    (`_exact_constructor`)."""
     import numbers
-    values = [Fraction, decimal.Decimal, numbers.Rational, math.isclose,
+    values = [numbers.Rational, math.isclose,
               math.frexp, math.ldexp, math.nextafter, float.fromhex,
               float.hex, float.as_integer_ratio]
     if hasattr(math, "ulp"):
         values.append(math.ulp)
+    import decimal
+    values += [decimal.localcontext, decimal.setcontext, decimal.Context]
     return frozenset(id(v) for v in values)
+
+
+def _refused_classes() -> frozenset:
+    """The ids of the classes a type check of a number cannot ask in the
+    reading: an exact number standing for a float is a `Fraction`, so
+    `isinstance(x, Fraction)` would be answered otherwise than the
+    computation answers it."""
+    import decimal
+    return _refused_callables() | frozenset(
+        id(v) for v in (Fraction, decimal.Decimal))
+
+
+def _exact_constructor(func):
+    """Intent:
+        `Fraction` or `Decimal` as the reading calls it: built as the
+        computation builds it when every argument is exact by
+        construction (an int, a string, a `Decimal`), in the twin's run
+        and in its shadow alike. In the twin's run `Decimal(v)` of an
+        exact rational `v` the twin holds (the point's coordinate, a
+        float the computation holds standing for the dyadic rational it
+        is) is the `Decimal` of that rational, which converts exactly
+        when its denominator divides a power of ten (`_decimal_of`), as
+        the computation's `Decimal(float)` converts exactly.
+
+    Raises:
+        NotExact: in a run of the twin, an argument is anything else: a
+            float, which has no exact reading beyond its own value, a
+            `Fraction` passed to `Fraction` (it may stand for a float),
+            or a rational with no finite decimal expansion.
+    """
+    import decimal
+
+    def call(*args, **kwargs):
+        if _STATE.mode != "float":
+            if func is decimal.Decimal and len(args) == 1 and not kwargs \
+                    and isinstance(args[0], Fraction) \
+                    and not isinstance(args[0], bool):
+                return _decimal_of(args[0])
+            for arg in (*args, *kwargs.values()):
+                if isinstance(arg, (int, str, decimal.Decimal)):
+                    continue
+                _not_exact(f"{_named(func)} is called on a number it does "
+                           f"not read exactly")
+        return func(*args, **kwargs)
+    return call
+
+
+def _decimal_of(value: Fraction):
+    """Intent:
+        The `Decimal` equal to the rational `value`, built from its
+        digits without rounding: n/d with d dividing 10^k is
+        n * (10^k / d) * 10^-k.
+
+    Raises:
+        NotExact: d has a prime factor other than 2 and 5, so no
+            `Decimal` equals `value`.
+    """
+    import decimal
+    d, k = value.denominator, 0
+    while 10 ** k % d:
+        if k > 4 * d.bit_length() + 4:
+            _not_exact(f"{value} has no finite decimal expansion")
+        k += 1
+    scaled = value.numerator * (10 ** k // d)
+    digits = tuple(int(c) for c in str(abs(scaled)))
+    return decimal.Decimal((1 if scaled < 0 else 0, digits, -k))
 
 
 def _refused_modules() -> frozenset:
@@ -924,6 +1073,7 @@ class _Scan(ast.NodeVisitor):
         self.imported: dict = {}
         self.found: list = []
         self.callables = _refused_callables()
+        self.classes = _refused_classes()
         self.modules = _refused_modules()
         # the ids of the text constructs whose only reach is an
         # exception's message (`_message_text`)
@@ -1005,7 +1155,7 @@ class _Scan(ast.NodeVisitor):
         value = self._resolve(node)
         if value is _MISSING or not isinstance(value, type):
             return False
-        if id(value) in self.callables:
+        if id(value) in self.classes:
             return True
         return any((getattr(c, "__module__", "") or "").split(".")[0] == "sympy"
                    for c in value.__mro__)
@@ -1094,7 +1244,22 @@ class _Scan(ast.NodeVisitor):
             self._refuse(node)
         elif id(self._resolve(node.value)) in self.modules:
             self._refuse(node)
+        elif self._is_context(node):
+            self._refuse(node)
         self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if self._is_context(node):
+            self._refuse(node)
+        self.generic_visit(node)
+
+    def _is_context(self, node) -> bool:
+        # a decimal context other than the current one (`DefaultContext`,
+        # `ExtendedContext`, one the module built), which computes with
+        # its own precision and flags
+        import decimal
+        return isinstance(node.ctx, ast.Load) \
+            and isinstance(self._resolve(node), decimal.Context)
 
     def visit_Compare(self, node):
         # a type compared by identity is answered only under its bare
@@ -1162,6 +1327,7 @@ def _globals_of(fn) -> "dict | None":
     env[_LITERAL] = _literal
     env[_DIV] = _div
     env[_POW] = _pow
+    env[_MUL], env[_IMUL] = _mul, _imul
     env[_CLASS] = _class
     env[_CALLEE] = _callee
     env.update(_deciding_names())
@@ -1198,6 +1364,7 @@ def _shadow_globals(fn) -> "dict | None":
             return None
     env[_DIV] = _plain_div
     env[_POW] = pow
+    env[_MUL], env[_IMUL] = operator.mul, operator.imul
     env[_CALLEE] = _shadow_callee
     env.update(_deciding_names())
     env[_SHADOW_MARK] = True
@@ -1244,6 +1411,74 @@ def _library(fn) -> bool:
     path = getattr(getattr(fn, "__code__", None), "co_filename", "") or ""
     parts = path.replace("\\", "/").split("/")
     return "site-packages" in parts or "dist-packages" in parts
+
+
+def _numpy_lifted(func):
+    """Intent:
+        numpy's `asarray`, `asanyarray`, `array`, `dot` and `matmul` as
+        the reading calls them: on arguments holding an exact number
+        standing for a float, an array of exact numbers
+        (`_exact_array`), or the product of two such arrays, whose
+        products and sums are Python's exact arithmetic on the elements;
+        on any other arguments, as a module's C function (`_opaque`).
+        None for any other callable, or without numpy.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return None
+    kind = None
+    for candidate, what in ((np.asarray, "array"), (np.asanyarray, "array"),
+                            (np.array, "array"), (np.dot, "product"),
+                            (np.matmul, "product")):
+        if func is candidate:
+            kind = what
+    if kind is None:
+        return None
+    plain = _opaque(func)
+    name = _named(func)
+
+    def call(*args, **kwargs):
+        if not (_holds_stand_in(args) or _holds_stand_in(kwargs)):
+            return plain(*args, **kwargs)
+        if kind == "array":
+            if len(args) != 1 or any(k != "dtype" or v is not None
+                                     for k, v in kwargs.items()):
+                _not_exact(f"{name} is called on exact numbers with "
+                           f"arguments the reading does not follow")
+            return _exact_array(args[0], copy=func is np.array)
+        if len(args) != 2 or kwargs:
+            _not_exact(f"{name} is called on exact numbers with arguments "
+                       f"the reading does not follow")
+        return func(_exact_array(args[0]), _exact_array(args[1]))
+    return call
+
+
+def _exact_array(value, copy: bool = False):
+    """Intent:
+        `value` (a number, nested lists or tuples of numbers, or an
+        array) as a numpy array of exact numbers (object dtype), each
+        element an int or an exact number standing for a float; an
+        object array is returned as itself unless `copy`.
+
+    Raises:
+        NotExact: an element is anything else (a float with no exact
+            reading, a numpy float, a string), or the nesting is not
+            rectangular.
+    """
+    np = sys.modules["numpy"]
+    if isinstance(value, np.ndarray) and value.dtype == object and not copy:
+        array = value
+    else:
+        try:
+            array = np.array(value, dtype=object)
+        except (ValueError, TypeError):
+            _not_exact("an array of exact numbers is not rectangular")
+    for element in array.flat:
+        if isinstance(element, bool) or not (
+                isinstance(element, int) or _stands_for_float(element)):
+            _not_exact("an array holds a value the exact reading does not "
+                       "read as an exact number")
+    return array
 
 
 def _refuser(reason: str):
@@ -1395,6 +1630,131 @@ def _read_args(args: tuple, kwargs: dict) -> tuple:
             {k: read(v) for k, v in kwargs.items()})
 
 
+def _memoised(run):
+    """Intent:
+        `run`, a twin or a shadow (`_build`), as a run calls it: when the
+        function it reads (`__mathema_read_from__`) is shown pure
+        (`shown_pure`), each call is kept in the current run's `memo` by
+        its arguments (`memo_key`), with the decisions it took
+        (`_event`), and a later call on the same arguments in the same
+        run returns the kept value: in a shadow run its decisions are
+        recorded again; in an exact run they are checked against the
+        computation's at the place reached, and where they differ the
+        call runs as written. A call whose arguments or value have no
+        key, that raises, or that taints the run is not kept.
+    """
+    original = getattr(run, "__mathema_read_from__", None)
+    if original is None or not shown_pure(original):
+        return run
+    try:
+        return _MEMOISED[run]
+    except (KeyError, TypeError):
+        pass
+
+    @functools.wraps(run)
+    def call(*args, **kwargs):
+        memo = _STATE.memo
+        key = memo_key((args, tuple(sorted(kwargs.items())))) \
+            if memo is not None else None
+        if key is None:
+            return run(*args, **kwargs)
+        mode = _STATE.mode
+        key = (run.__code__, mode, key)
+        kept = memo.get(key)
+        if kept is not None:
+            segment, value = kept
+            if mode == "float":
+                _STATE.log.extend(segment)
+                return value
+            if mode == "exact":
+                reference = _STATE.reference
+                at = reference.at
+                if reference.log[at:at + len(segment)] == segment:
+                    reference.at = at + len(segment)
+                    return value
+                return run(*args, **kwargs)
+            return value
+        if mode == "float":
+            start = len(_STATE.log)
+        elif mode == "exact":
+            start = _STATE.reference.at
+        else:
+            start = 0
+        tainted = _STATE.taint
+        value = run(*args, **kwargs)
+        if _STATE.taint is not tainted or memo_key(value) is None:
+            return value
+        if mode == "float":
+            segment = list(_STATE.log[start:])
+        elif mode == "exact":
+            segment = list(_STATE.reference.log[start:_STATE.reference.at])
+        else:
+            segment = []
+        memo[key] = (segment, value)
+        return value
+    try:
+        _MEMOISED[run] = call
+    except TypeError:
+        pass
+    return call
+
+
+#: each memoising call of a twin or a shadow (`_memoised`)
+_MEMOISED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+#: whether a function is shown pure (`shown_pure`), per function
+_PURE: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def shown_pure(fn) -> bool:
+    """Intent:
+        Whether the examination (`_examine.examine`) shows `fn` pure: no
+        write, no hidden read, no order-sensitive step, no call or name
+        it cannot read, no write to an argument, and no module-level
+        value read or written, so a call's value and its decisions are
+        those of its arguments alone. Cached per function.
+    """
+    try:
+        return _PURE[fn]
+    except (KeyError, TypeError):
+        pass
+    from ._examine import examine
+    try:
+        found = examine(fn)
+        pure = not (found.writes or found.hidden_reads
+                    or found.order_sensitive or found.unknowns
+                    or found.unknown_writes or found.arg_writes
+                    or found.module_reads or found.module_writes)
+    except Exception:
+        pure = False
+    try:
+        _PURE[fn] = pure
+    except TypeError:
+        pass
+    return pure
+
+
+def memo_key(value):
+    """Intent:
+        A key under which `value` is the same value for a call that reads
+        it: None, a bool, an int, a str and a Fraction as themselves with
+        their type, a float by its text (so -0.0 and 0.0 differ, and a
+        nan is the same nan), a sympy number by its structure, a tuple
+        element by element; None when `value` holds anything else.
+    """
+    if value is None or isinstance(value, (bool, int, str, Fraction)):
+        return (type(value), value)
+    if isinstance(value, float):
+        return (float, repr(value))
+    if isinstance(value, tuple):
+        keys = tuple(memo_key(v) for v in value)
+        return None if any(k is None for k in keys) else (tuple, keys)
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(value, sympy.Basic) \
+            and value.is_number:
+        return ("sympy", sympy.srepr(value))
+    return None
+
+
 def _helper(fn):
     """Intent:
         A Python function the twin's body calls, as the twin calls it:
@@ -1409,6 +1769,8 @@ def _helper(fn):
     if twin is None:
         call = _refuser(reason or f"{_named(fn)} is not read exactly")
     else:
+        twin = _memoised(twin)
+
         def call(*args, **kwargs):
             if _STATE.depth >= _MAX_DEPTH:
                 _not_exact(f"the calls nest deeper than {_MAX_DEPTH}")
@@ -1431,8 +1793,8 @@ def _opaque(func, owner=None):
         class), run as itself.
 
     Raises:
-        NotExact: an exact number standing for a float is among its
-            arguments; or, outside a shadow run, a float with no exact
+        NotExact: an exact number standing for a float, or a decimal
+            context, is among its arguments; or, outside a shadow run, a float with no exact
             reading (`_raw`) is among its arguments or is `owner`, the
             value whose method it is, and the result is anything but
             such floats (`math.isfinite(y)`, `y.is_integer()`): a
@@ -1445,6 +1807,12 @@ def _opaque(func, owner=None):
         if _holds_stand_in(args) or _holds_stand_in(kwargs):
             _not_exact(f"{_named(func)} is called on an exact number it "
                        f"does not read exactly")
+        if owner is not None and _holds_stand_in(owner):
+            _not_exact(f"{_named(func)} is a method of an array of exact "
+                       f"numbers the reading does not follow")
+        if any(_decimal_context(a) for a in (*args, *kwargs.values())):
+            _not_exact(f"{_named(func)} is given a decimal context, which "
+                       f"rounds where the reading does not see")
         raw = not exception and _STATE.mode != "float" and (
             _raw(owner) or _holds_raw(args) or _holds_raw(kwargs))
         args, kwargs = _read_args(args, kwargs)
@@ -2131,10 +2499,13 @@ def _callee(func, site=None):
         exact = None
     if exact is not None and _MATH_NATIVE.get(id(func)) is func:
         return exact
+    lifted = _numpy_lifted(func)
+    if lifted is not None:
+        return lifted
     name = _named(func)
     if isinstance(func, types.FunctionType):
         if func.__globals__.get(_TWIN_MARK) is True:
-            return func
+            return _memoised(func)
         if _library(func):
             return _refuser(f"{name} is a library function the reading "
                             f"does not follow")
@@ -2145,6 +2516,9 @@ def _callee(func, site=None):
     if isinstance(func, type):
         if func.__module__ == "builtins":
             return _builtin(func)
+        if func is Fraction or func.__name__ == "Decimal" \
+                and func.__module__ in ("decimal", "_decimal"):
+            return _exact_constructor(func)
         if issubclass(func, BaseException):
             return _opaque(func)
         return _refuser(f"{name} is a class the reading does not follow")
@@ -2153,6 +2527,9 @@ def _callee(func, site=None):
         return _builtin(func)
     if isinstance(func, _C_CALLABLES):
         owner = getattr(func, "__self__", None)
+        if _decimal_context(owner):
+            return _refuser(f"{name} is a method of a decimal context, "
+                            f"which rounds where the reading does not see")
         if _stands_for_float(owner):
             return _refuser(f"{name} is a method of an exact number")
         if isinstance(owner, _BUILTIN_VALUES):
@@ -2160,6 +2537,13 @@ def _callee(func, site=None):
         return _opaque(func, owner)
     return _refuser(f"{name} is a callable object the reading does not "
                     f"follow")
+
+
+def _decimal_context(value) -> bool:
+    """Whether `value` is a decimal context, whose methods compute at its
+    own precision."""
+    module = sys.modules.get("decimal")
+    return module is not None and isinstance(value, module.Context)
 
 
 def _shadow_callee(func, site=None):
@@ -2178,11 +2562,12 @@ def _shadow_callee(func, site=None):
         if sited is not None:
             return sited
     if isinstance(func, types.FunctionType):
-        if func.__globals__.get(_SHADOW_MARK) is True or _own(func) \
-                or _library(func):
+        if func.__globals__.get(_SHADOW_MARK) is True:
+            return _memoised(func)
+        if _own(func) or _library(func):
             return func
         shadow = _shadow_of(func)
-        return func if shadow is None else shadow
+        return func if shadow is None else _memoised(shadow)
     if isinstance(func, type):
         return _builtin(func) if func.__module__ == "builtins" else func
     if isinstance(func, types.BuiltinFunctionType) \
@@ -2450,10 +2835,23 @@ class _Exact(ast.NodeTransformer):
             return ast.copy_location(ast.Call(
                 func=ast.Name(_LITERAL, ast.Load()),
                 args=[ast.Constant(text)], keywords=[]), node)
+        if self.exact and isinstance(value, float) and math.isinf(value):
+            # a literal written past float range (`1e309`) parses to an
+            # infinity; as written it is the finite number it states
+            text = ast.get_source_segment(self.src, node)
+            try:
+                Fraction(text or "")
+            except (ValueError, ZeroDivisionError):
+                return node
+            return ast.copy_location(ast.Call(
+                func=ast.Name(_LITERAL, ast.Load()),
+                args=[ast.Constant(text)], keywords=[]), node)
         return node
 
-    def _operator(self, op, left, right, at):
+    def _operator(self, op, left, right, at, augmented=False):
         name = _operator_name(op)
+        if name == _MUL and augmented:
+            name = _IMUL
         if name is None:
             return None
         args = [left, right]
@@ -2471,7 +2869,8 @@ class _Exact(ast.NodeTransformer):
         self.generic_visit(node)
         read = copy.deepcopy(node.target)
         read.ctx = ast.Load()
-        call = self._operator(node.op, read, node.value, node)
+        call = self._operator(node.op, read, node.value, node,
+                              augmented=True)
         if call is None:
             return node
         return ast.copy_location(
@@ -2532,6 +2931,8 @@ def _operator_name(op) -> "str | None":
         return _FLOORDIV
     if isinstance(op, ast.Pow):
         return _POW
+    if isinstance(op, ast.Mult):
+        return _MUL
     if isinstance(op, ast.Mod):
         return _MOD
     return None
@@ -2703,6 +3104,7 @@ def _pow(a, b, mod=None):
     if _is_rational(a) and _is_rational(b):
         exponent = Fraction(b)
         if exponent.denominator == 1:
+            _within_exact_bits(_bits(a) * abs(int(exponent)))
             if isinstance(a, int) and isinstance(b, int) and exponent >= 0:
                 return a ** int(exponent)
             return Fraction(a) ** int(exponent)
@@ -2715,6 +3117,43 @@ def _pow(a, b, mod=None):
             raise ZeroDivisionError("0 cannot be raised to a negative power")
         return _settled(base ** exponent)
     return a ** b
+
+
+def _bits(value) -> int:
+    """The bits an exact rational holds: an int's bit length, a
+    Fraction's numerator's and denominator's together."""
+    if isinstance(value, Fraction):
+        return value.numerator.bit_length() + value.denominator.bit_length()
+    return int(value).bit_length()
+
+
+def _within_exact_bits(bits: int) -> None:
+    """Intent:
+        Decline (`NotExact`) an exact value of more than `_EXACT_BITS`
+        bits before it is built.
+
+    Raises:
+        NotExact: `bits` passes `_EXACT_BITS`.
+    """
+    if bits > _EXACT_BITS:
+        _not_exact(f"an exact value would hold more than {_EXACT_BITS} "
+                   f"bits")
+
+
+def _mul(a, b):
+    """`a * b`, declining (`NotExact`) a product of two exact rationals
+    whose size would pass `_EXACT_BITS`."""
+    if _is_rational(a) and _is_rational(b):
+        _within_exact_bits(_bits(a) + _bits(b))
+    return a * b
+
+
+def _imul(a, b):
+    """`a *= b` (`operator.imul`, in place for a mutable sequence), with
+    `_mul`'s bound on two exact rationals."""
+    if _is_rational(a) and _is_rational(b):
+        _within_exact_bits(_bits(a) + _bits(b))
+    return operator.imul(a, b)
 
 
 def _stands_for_float(value) -> bool:
@@ -2747,14 +3186,18 @@ class _FloatMeta(type):
 
 class ExactFloat(metaclass=_FloatMeta):
     """`float` as the exact reading sees it: an int (a bool included)
-    as the Fraction of the same value, the identity on a Fraction, a
-    sympy number or an algebraic number, Python's `float` on anything
-    else (a string, a float, a library's number). Named `float`, as
-    `type(x).__name__` reads it in the computation."""
+    or a finite `Decimal` as the Fraction of the same value, the
+    identity on a Fraction, a sympy number or an algebraic number,
+    Python's `float` on anything else (a string, a float, a library's
+    number). Named `float`, as `type(x).__name__` reads it in the
+    computation."""
 
     def __new__(cls, x=0):
+        import decimal
         if isinstance(x, bool):
             return Fraction(int(x))
+        if isinstance(x, decimal.Decimal) and x.is_finite():
+            return Fraction(x)
         if _STATE.guard and isinstance(x, int):
             # an int past float range overflows as the computation's does
             float(x)

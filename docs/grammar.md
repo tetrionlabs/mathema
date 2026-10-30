@@ -155,17 +155,23 @@ under `~=`. A definition row in a compendium is an exact equation, written
 with `==`.
 
 On the probe route, which runs the real function in floating point, `~=`
-is the same `abs(a - b) <= ε` in float64, and `==` counts the two sides as
-equal when they agree within a relative tolerance of 1e-6 or an absolute
-tolerance of 1e-9, whichever is larger. So under `==` the computation
-`x * (1 + 1e-8)` equals `x` everywhere, while a constant offset of `1e-7`
-is caught near zero, where the relative allowance shrinks below it. A claim sets its own absolute tolerance with the
+is the same `abs(a - b) <= ε` in float64, and `==` counts the computed
+sides as equal when they agree within the computation's allowance, a
+relative 1e-7 of the result plus an absolute part of at most 1e-9. A draw
+that passes only within that allowance is decided again in exact
+arithmetic wherever the body can be read exactly, so `x * (1 + 1e-8)`
+written in the body is not `x` under `==`, while the same factor read from
+a module constant, which has no exact reading, leaves such a draw
+inconclusive and uncounted. A claim sets its own absolute tolerance with the
 `tolerance` field of a claims file, or `tolerance=` on `mathema.claim()`,
 and that value replaces the whole allowance: the two sides must agree within
-it, with no relative tolerance on top. On a function equivalence `f =:= g`
-the tolerance governs the computation line alone, since its mathematics
-line is exact, as [Multi-function claims](multi-function-claims.md)
-describes. A single `a ~= b`, and an `f =:= g`, may also name the
+it, with no relative tolerance on top. On `==`, `<=`, `>=` and `!=`, as
+on a function equivalence `f =:= g`, the tolerance governs the
+computation line alone, since the mathematics line is exact: `x + 1e-6
+== x` with a tolerance of 1e-3 is falsified by its exact gap, as is `x +
+1e-10 <= x` with a tolerance of 1e-9, and "close enough mathematically"
+is `~=`, as [Multi-function claims](multi-function-claims.md) describes
+for `=:=`. A single `a ~= b`, and an `f =:= g`, may also name the
 tolerance's kind (see [Tolerance kinds](#tolerance-kinds) below), while
 every other relation takes a bare number.
 
@@ -194,7 +200,7 @@ mathema check gaps.py --claim "for x in [0, 1], abs(f(x) - x) <= ε"
 <!-- example: eps output -->
 ```text
 ok   gaps.nearly_identity: source, no side effects; claims 3/3 checked (1 proven, 2 holds, 0 falsified)
-FAIL gaps.small_gap: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL gaps.small_gap: source, no side effects; claims 2/2 checked (0 proven, 1 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The first gap is within the default tolerance and proves for every `x` in the
@@ -205,6 +211,19 @@ The other relations use the same allowance where it makes sense: `<=` and
 `>=` accept a difference within the absolute tolerance, `<` and `>` accept
 none, since equality must not pass for strictly less, and `!=` with no
 declared tolerance fails only where the two sides are exactly equal.
+
+On the probe route a draw whose computed values meet `==`, `<=` or `>=`
+only within the allowance (inside its absolute part as well as through
+its relative part) is decided again in exact arithmetic wherever the
+body can be read exactly, its literals as the decimals written: false
+there falsifies, with that draw as the witness, so the allowance never
+carries a claim that is false at a point the probe ran. Where the body
+cannot be read exactly (a float it reads from outside, a library's
+value), such a pass is no evidence either way: it is not counted, and a
+claim with no other draw ends `unknown` with the note "N draws passed
+only within the tolerance and could not be evaluated in exact
+arithmetic, so they are not counted". A declared tolerance makes such a
+pass count, since the claim asks for that allowance.
 
 Every computation line that holds with a gap the tolerance absorbed says
 so in its note, for `==` as for `<=` and `>=`, on every route (a probe
@@ -238,14 +257,15 @@ for route in ["probe", "derive"]:
 
 <!-- example: just-below output -->
 ```text
-probe   holds
-        fails by 1e-10 at x = 0, within the default tolerance (1e-09)
+probe   falsified x = 0: -1e-10 vs 0, within the float tolerance but false here in exact arithmetic
+
 derive  falsified x = 0.06163325083761284
         reproduced exactly at derive's witness: the executed code misses the relation there by 1e-10, within the allowance (1e-09) the probe route gives the computation, and compared exactly it fails
 ```
 
-A declared tolerance is part of the claim, so it stays in force on both
-routes. Where the executed code rounds the difference away, the body is
+A declared tolerance binds the computation line only: the probe
+compares the floats within it, and derive's disproof stands on the exact
+gap however small. Where the executed code rounds the difference away, the body is
 read exactly at derive's witness: a literal is the decimal written, so
 `x + 1e-20` is `x + 1/10^20` and the claim is falsified on the
 mathematics, the record noting that the float computation holds within
@@ -458,7 +478,11 @@ letter that has no superscript form is shown as `ℝ^(x,n)` instead.
 Over `C` equality and closeness are adjudicated like any other value
 claim: `==` compares exactly and `~=` compares `abs(a - b)` against the
 same tolerance as over the reals, while an ordering (`<`, `<=`, `>`,
-`>=`) is refused, since complex numbers have no order. The computation
+`>=`) of a side that reads a complex value is skipped as misspecified,
+since complex numbers have no order: compare a real quantity instead,
+`abs(...)`, `re(...)` or `im(...)` (`z.real`, `z.imag` on a parameter).
+This holds whether the claim writes `for z in C` or the parameter's
+`complex` annotation puts it over `C`. The computation
 companion of a claim over `C` runs in complex128 and is named
 `<claim>[complex]`, with corners on both axes at float64's largest
 magnitude; a NaN or an infinity in either component is no value.
@@ -522,7 +546,7 @@ that failed, and the fix is usually one of the ones below.
 | `is_absent_safe(f)` | every parameter, field or key that may be None has a policy the code follows, and a None result is declared by the return type ([missing values](missing-values.md)) | state the policy, or annotate the parameter |
 | `is_empty_safe(xs)` | an empty sequence gets an answer or a deliberate error, not an `IndexError` or a division by a zero length | handle the empty case first |
 | `is_representation_safe(x)` | one number written differently (`1`, `1.0`, `True`) gets one answer | normalize the input type at entry |
-| `is_language_defined(s)` | no string input makes the function crash by accident: every member of the input's language reaches a branch that returns or raises on purpose | validate the input and raise the exception you mean |
+| `is_language_defined(s)` | over a language: every member gets an answer (a return or an exit status) and every non-member is refused; over a plain string: no input makes the function crash by accident, its exits and deliberate raises being its refusals, which the note lists | answer every member of the language; validate the rest and refuse it |
 | `is_recursion_safe(f)` | the recursion never runs out of stack (`RecursionError`) over the domain; suggested when the body calls itself | rewrite the recursion as a loop, or narrow the domain |
 | `is_dimension_safe(f)` | every operand and the result have shapes that fit (no `matmul` of mismatched matrices, no result breaking its `Vec`/`Mat` marker) | fix the shapes, or guard them with `@enforce_dimensions` |
 | `is_concurrency_safe(f)` | reserved for a later release: the function runs correctly under concurrent calls | |
@@ -562,7 +586,10 @@ deliberate error) has two children, `is_language_defined` and
 `is_representation_safe` and `is_recursion_safe`, and `is_input_safe(f)`
 rolls up `is_missing_safe`, `is_absent_safe` and `is_empty_safe`.
 `is_finite_over_floats(f)` is a view rather than a node: poles and
-overflow together. Each roll-up runs every child that applies to the
+overflow together. An overflow is never a point where `is_defined`
+finds no value, and an infinity nothing tells from an overflow (no
+overflow error, no numpy flag, a body the exact reading cannot follow)
+leaves `is_defined` `unknown` at that point. Each roll-up runs every child that applies to the
 function and is declared by the author, never suggested; its note
 names each child's verdict. A falsified child falsifies the roll-up with
 that child's name and witness; the roll-up is `proven` when every child
@@ -578,10 +605,16 @@ A function's own guards cut its working domain: a conditional raise,
 `@enforce_domain` (an assert at the top of the body feeds it) and an
 entry check of `@enforce_dimensions` reject a call on purpose, so
 `is_defined(f)` and the families judge only the calls the guards let
-through, and the record names each guard by its condition. A bare
+through, and the record names each guard by its condition. A domain the
+claim binds itself is the domain: `for x in [-1, 1], is_defined(f)`
+states that f has a value at every point of [-1, 1], so a guard
+refusing a call inside it falsifies the claim there, while
+`is_defined(f)` with no binding reads the working domain. A bare
 `assert` is not a guard: a failed assert counts against `is_defined`, and
 so does a `RangeError` from `@enforce_range` (a result outside its
-declared range).
+declared range). Nor is a nan or an infinity the body returns
+(`return math.nan`, `x if x > 0 else float("inf")`): it is no value,
+so it counts against `is_defined` as a failing call does.
 
 The old family names `is_builtin_safe`, `is_extremity_safe`,
 `is_arbitrary_input_safe` and `is_compendium_safe` are still read, as
@@ -914,6 +947,38 @@ A self-recursive linear recurrence over one scalar parameter is solved
 to its closed form rather than unrolled, so a Fibonacci-shaped function
 can reach `proven` over a stated integer range. See [the derive
 route](derive-route.md) for the exact shapes this covers.
+
+## Routes
+
+A claim's route says which evidence it accepts, and it is set beside
+the claim text (`route=` in Python, `route:` in a claims file), never
+inside it. The default, `best`, attempts a proof and falls through to
+running the code when the proof cannot settle the claim, so a sampled
+`holds` can stand in for a proof that did not close. `probe` runs the
+code only. `derive` asks for derive's verdict: when the proof cannot
+settle the claim the probe still samples it, but only a counterexample
+it executes counts, and the claim is then `falsified` on the probe's
+route with derive's reason in the note. A float miss or an overflow at
+a point where the claim read exactly holds is no counterexample: the
+note records it as a finding about the computation. An infinity at a
+point with no exact reading is no counterexample either, since an
+overflow and a pole cannot be told apart there. A NaN, a hole, or a
+plain miss at a point with no exact reading still falsifies. Draws that
+find no counterexample leave the claim `unknown`, never `holds`. Over a
+finite domain, a sweep that runs every point and finds the claim exact
+at each is `proven` on `derive:brute_force`; a sweep that passes only
+inexactly, or runs part of the domain, leaves the claim `unknown` on
+this route. The one `holds` on this route is a sweep that runs every
+point and finds the claim exact at each over a function the examination
+cannot show pure: it is `holds` on `derive:brute_force`, and the note
+names what stops the proof and what would make the sweep one. A proof's
+`[float]` companion and a disproof's executed witness are the same on
+every route. On every route, a miss found by sampling derive's own
+reconstruction of the function (`probe:lifted_numeric`, for a claim the
+code cannot evaluate, such as a derivative or an integral) falsifies the
+claim only where the code, run at that point, fails the relation
+exactly; otherwise the claim is `unknown`, the note naming the point and
+why it is no witness. See [Verdicts and exit codes](verdicts.md).
 
 ## When a claim will not parse
 

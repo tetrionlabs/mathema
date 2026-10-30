@@ -31,7 +31,7 @@ print(mathema.check(midpoint, claims=[
 
 <!-- example: finds output -->
 ```text
-mathema.Record(midpoint) · source, no side effects · form cc66f89ce3e7
+mathema.Record(midpoint) · source, no side effects · form py:cc66f89ce3e7
   proven    between_integers: for a in [0, 100] : int, b in [0, 100] : int, min(a, b) <= f(a, b) <= max(a, b)
            for a in [0, 100] : int, b in [0, 100] : int
   between_reals  for a in [0.0, 100.0] : float|missing, b in [0.0, 100.0] : float|missing, min(a, b) <= f(a, b) <= max(a, b)   falsified: min(a, b) <= f(a, b) fails at a = 99.9999, b = 100
@@ -68,7 +68,7 @@ print(mathema.check(discount_factor))
 
 <!-- example: finds output match=subset -->
 ```text
-mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
+mathema.Record(discount_factor) · source, no side effects · form py:ebb4c9b87847
   falsified monotonic_increasing[x]: d(f(x), x) >= 0
            counterexample x = 1
   falsified even: f(-x) = f(x)
@@ -152,7 +152,7 @@ mathema check options.py --claim "f(s,k,r,t,sigma) == s - k*exp(-r*t)"
 
 <!-- example: parity output -->
 ```text
-FAIL options.put_call_parity_gap: source, no side effects; claims 1/1 checked (0 proven, 0 holds, 1 falsified)  <- 1 falsified claim(s)
+FAIL options.put_call_parity_gap: source, no side effects; claims 6/6 checked (0 proven, 5 holds, 1 falsified)  <- 1 falsified claim(s)
 ```
 
 The counterexample is `s = 1, k = 1, r = 1, t = -1, sigma = 1`, a negative

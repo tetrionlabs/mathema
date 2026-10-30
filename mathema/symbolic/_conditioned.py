@@ -27,7 +27,8 @@ from dataclasses import dataclass, field
 import sympy
 
 from ._base import (
-    NotSymbolic, _LiftCtx, _bind_params, _expr_to_sympy, _simplify_maybe_array,
+    NotSymbolic, _LiftCtx, _bind_params, _complex_typed, _expr_to_sympy,
+    _simplify_maybe_array,
     strip_docstring, _unmodified_params, _walk_lift_body,
 )
 from ..domain import bound_to_sympy_set
@@ -894,6 +895,10 @@ def _condition_to_sympy(test: ast.AST, env: dict):
         for a, op, b in zip(lifted, test.ops, lifted[1:]):
             builder = _PIECEWISE_COMPARE_OPS.get(type(op))
             if builder is None or isinstance(a, tuple) or isinstance(b, tuple):
+                return None
+            if not isinstance(op, (ast.Eq, ast.NotEq)) and (
+                    _complex_typed(a) or _complex_typed(b)):
+                # complex numbers have no order: `<` raises TypeError
                 return None
             clauses.append(builder(a, b))
         return sympy.And(*clauses) if len(clauses) > 1 else clauses[0]

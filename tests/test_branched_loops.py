@@ -10,6 +10,8 @@ loop-then-branch regions, in-branch further branching around a loop,
 sequence parameters, and non-returning arms all stay honestly out."""
 import textwrap
 
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -131,8 +133,8 @@ def unpack_in_leaf(n: int, theta: float) -> float:
 """
 
 
-def _run(mod_fn, law, extensive=False):
-    (p,) = check_conjectures(mod_fn, [claim(law, route="derive")],
+def _run(mod_fn, law, extensive=False, route="derive"):
+    (p,) = check_conjectures(mod_fn, [claim(law, route=route)],
                              extensive=extensive)
     return p
 
@@ -210,10 +212,11 @@ def geometric(n: int, y: float, face: float) -> float:
 """, "bl_f2").geometric, [claim(
         "for n in [1,10], y in [0.01,0.2], face in [50,100], "
         "f(n,y,face) == (1 - (1+y)**(-n))/y + face*(1+y)**(-n)",
-        route="derive")])
+        route="best")])
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_elif_chain_around_a_loop(tmp_path):
     mod = _mod(tmp_path, _BODY, "bl_g")
     p = _run(mod.elif_chain,
@@ -240,15 +243,18 @@ def test_reachable_raise_region_falsifies(tmp_path):
     assert p.verdict == "falsified", (p.verdict, p.note)
 
 
+@pytest.mark.needs_full_proof_budget
 def test_avoided_raise_region_still_proves(tmp_path):
+    # rate >= 0.5 avoids the raise, and f is rate * n * (n + 1) / 2 > 0
     mod = _mod(tmp_path, _BODY, "bl_j")
     p = _run(mod.shipping,
              "for n in [1,10], rate in [0.5,5], f(n,rate) > 0")
-    assert p.verdict in ("proven", "holds"), (p.verdict, p.note)
+    assert p.verdict == "proven", (p.verdict, p.note)
 
 
 # --- designed declines, pinned ----------------------------------------------
 
+@pytest.mark.needs_full_proof_budget
 def test_loop_then_branch_proves(tmp_path):
     # the loop closes into the environment and its value flows through
     # the branches that follow, both sides prove
@@ -280,14 +286,15 @@ def test_conditional_update_inside_a_branch_leaf_lifts_exactly(tmp_path):
                     - set(pw.params.values())), (
             "a Sum dummy leaked into a top-level arm condition", pw.expr)
     p = _run(mod.branch_in_loop_branch,
-             "for n in [1,10] subset Z, u in [1,5], f(n,u) >= 0")
+             "for n in [1,10] subset Z, u in [1,5], f(n,u) >= 0",
+             route="best")
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
 
 
 def test_sequence_parameters_stay_out_of_this_slice(tmp_path):
     mod = _mod(tmp_path, _BODY, "bl_m")
     p = _run(mod.seq_branchy, "for pick in [1,5], f(xs, pick) >= 0")
-    assert p.verdict != "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
 
 
 # --- the lift itself, inspected ---------------------------------------------

@@ -24,6 +24,7 @@ import copy
 import os
 from dataclasses import dataclass, field
 
+from .identity import namespaced_form, same_form
 from .records import claim_row, classify_verdict
 
 
@@ -591,6 +592,42 @@ def _heal_concepts(key, fn, facts_now, merged_entry: dict, verified_info,
         recorded_form = (entry.get("identity") or {}).get("form")
         write_yaml(os.path.join(root, verified_info["source"]), {key: entry},
                    header=f"machine record; binds to form {recorded_form}")
+
+
+def _namespace_python_forms(entry: dict) -> bool:
+    """Intent:
+        Rewrite, in place, every form hash `entry` stores for the code
+        it describes as `<frontend>:<sha>` (`identity.namespaced_form`):
+        `identity.form`, each dependency's `form`, and each hash in
+        `meta["mathema.provenance"]["body_hashes"]`. True when one was
+        bare and now carries `py:`.
+
+    Notes:
+        The forms stamped by a human act (a claim's `accepted.form`,
+        the `locked` stamp) are left as written; they are read through
+        `identity.same_form` wherever they are compared.
+    """
+    changed = False
+    identity = entry.get("identity")
+    if isinstance(identity, dict) and isinstance(identity.get("form"), str):
+        form = namespaced_form(identity["form"])
+        if form != identity["form"]:
+            identity["form"] = form
+            changed = True
+    for dep in entry.get("dependencies") or []:
+        if isinstance(dep, dict) and isinstance(dep.get("form"), str):
+            form = namespaced_form(dep["form"])
+            if form != dep["form"]:
+                dep["form"] = form
+                changed = True
+    provenance = (entry.get("meta") or {}).get("mathema.provenance")
+    hashes = provenance.get("body_hashes") if isinstance(provenance, dict) else None
+    if isinstance(hashes, dict):
+        for name, value in list(hashes.items()):
+            if isinstance(value, str) and namespaced_form(value) != value:
+                hashes[name] = namespaced_form(value)
+                changed = True
+    return changed
 
 
 def _apply_declared_extras(rec, merged_entry: dict) -> None:
@@ -1741,7 +1778,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         elif lock_state(key, (form := analyze(fn).form), locks,
                         {}) == "changed":
             lk = locks.get(key) or {}
-            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+            msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
                    f"is now {form}; there is no record to "
                    f"compare. Restore the function, or a human runs: "
                    f"mathema unlock {key}")
@@ -1980,7 +2017,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # remedy. Restoring the function, or a human unlocking,
             # are the two ways forward.
             lk = locks.get(key) or {}
-            msg = (f"{key}: locked at form {lk.get('form')} but the code "
+            msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
                    f"is now {facts_now.form}; the record is unchanged. "
                    f"Restore the function, or a human runs: "
                    f"mathema unlock {key}")
@@ -2006,8 +2043,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 stamped = (verified_entry.get("locked") or {}).get("form")
                 lk = locks.get(key) or {}
                 msg = (f"{key}: .mathema/meta/locks.yaml pins form "
-                       f"{lk.get('form')} but the record was locked at "
-                       f"{stamped}; the lock was moved without `mathema "
+                       f"{namespaced_form(lk.get('form'))} but the record was locked at "
+                       f"{namespaced_form(stamped)}; the lock was moved without `mathema "
                        f"unlock {key}`, and the record is unchanged "
                        f"(restore the entry, or a human unlocks and "
                        f"re-locks)")
@@ -2038,7 +2075,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
         body_moved = _provenance_moved(facts_now, verified_entry)
-        is_fresh = (bool(recorded_form) and facts_now.form == recorded_form
+        is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
@@ -2058,7 +2095,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                             and d.get("key") and d.get("form")}
             dependency_changed = any(
                 d.get("key") in stored_forms and d.get("form")
-                and d.get("form") != stored_forms[d.get("key")]
+                and not same_form(d.get("form"), stored_forms[d.get("key")])
                 for d in deps_now or [] if d.get("kind") == "function")
         if is_fresh and not dependency_changed:
             # a callee's body provenance stored when this record was
@@ -2102,12 +2139,18 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # reflection is healed to match the meta entry, so the
             # fresh path cannot leave a lock invisible to the
             # removed-outside check
-            if state == "held" and verified_info:
-                lk = locks.get(key) or {}
-                want = {k: lk[k] for k in ("form", "at", "by") if k in lk}
+            # a record written before Python forms were namespaced is
+            # re-hashed once: its bare forms gain `py:`
+            if verified_info:
                 entry_now = verified_info["entry"]
-                if entry_now.get("locked") != want:
-                    entry_now["locked"] = want
+                healed = _namespace_python_forms(entry_now)
+                if state == "held":
+                    lk = locks.get(key) or {}
+                    want = {k: lk[k] for k in ("form", "at", "by") if k in lk}
+                    if entry_now.get("locked") != want:
+                        entry_now["locked"] = want
+                        healed = True
+                if healed:
                     if key not in integrity_warned:
                         from .spec import integrity_checksum
                         entry_now.setdefault("identity", {})["integrity"] = \
@@ -2115,7 +2158,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     write_yaml(os.path.join(root, verified_info["source"]),
                                {key: entry_now},
                                header=f"machine record; binds to form "
-                                      f"{recorded_form}")
+                                      f"{(entry_now.get('identity') or {}).get('form')}")
             stored = verified_entry.get("claims") or []
             pending.append((key, "fresh", stored, None, deps_now, accepted,
                             (), verified_info))
@@ -2155,21 +2198,21 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                      f"{version_moved[1]})") if version_moved is not None
                and recorded_form
                else "defaults changed" if defaults_moved
-               and facts_now.form == recorded_form
+               and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
                else "pseudo-infinity changed" if pinf_moved
-               and facts_now.form == recorded_form
+               and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
                else "definition rows changed" if definitions_moved
-               and facts_now.form == recorded_form
+               and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
                else f"{body_moved} changed" if body_moved
-               and facts_now.form == recorded_form
+               and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
-               else "claims changed" if facts_now.form == recorded_form
+               else "claims changed" if same_form(facts_now.form, recorded_form)
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}

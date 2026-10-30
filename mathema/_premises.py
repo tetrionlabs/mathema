@@ -12,7 +12,7 @@ pieces serve every route that samples points:
   premise names are computed exactly (`_exact_premises`).
 - `premise_draws` and `solve_equality` put a draw on an equality
   premise's surface, which random draws essentially never reach:
-  `x == c` draws c, `dim(a) == 0` the empty sequence, `det(a) == 0` a
+  `x == c` draws c, `det(a) == 0` a
   singular matrix, a zero spread (`std(a) == 0`, `var(a) == 0`,
   `max(a) == min(a)`) a constant sequence, and any other scalar
   equality is solved for one variable so that coordinate is computed
@@ -248,11 +248,12 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
     """A draw of a constant sequence for `param`: the length is the
     trial's planned size or the usual 2..8 band (at least `ddof + 1`),
     and the element comes from the parameter's declared element bound,
-    its ends and midpoint included."""
+    its ends and midpoint included, the integers among them for an
+    integer bound."""
     import math
     import random as _random
 
-    from .probing import _synth
+    from .probing import _synth, bound_element_type
     bound = (domain or {}).get(param)
     corners: list = []
     if bound is not None:
@@ -260,6 +261,9 @@ def _constant_sequence_draw(param: str, ddof: int, domain: dict):
         ends = _interval_ends(bound)
         if ends is not None and all(math.isfinite(e) for e in ends):
             corners = [ends[0], ends[1], (ends[0] + ends[1]) / 2]
+            if bound_element_type(bound) == "int":
+                lo, hi = math.ceil(ends[0]), math.floor(ends[1])
+                corners = [lo, hi, (lo + hi) // 2] if lo <= hi else []
 
     def draw(rng: _random.Random, size):
         n = size if size is not None else rng.randint(1, 8)
@@ -319,8 +323,7 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
     """Intent:
         Draws that satisfy an equality premise by construction, for the
         premises random sampling essentially never lands on, keyed by
-        parameter: `dim(a) == 0` (or `dim(a, 0) == 0`) draws the empty
-        sequence, `det(a) == 0` a singular square matrix, `x == c` the
+        parameter: `det(a) == 0` a singular square matrix, `x == c` the
         constant itself, and a zero spread (`std(a, ddof=k) == 0`,
         `var(a, ...) == 0`, `max(a) == min(a)`, `max(a) - min(a) == 0`)
         a constant sequence whose element comes from the declared
@@ -332,19 +335,13 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
 
     Notes:
         A length premise `dim(a) == k` for k > 0 is not here: the
-        shape plan already sizes the draw. The rejection filter still
+        shape plan already sizes the draw. `dim(a) == 0` draws nothing:
+        a sequence is never empty (`R^n` means n >= 1, and the empty
+        input is judged by its own policy rows), so no draw satisfies
+        it. The rejection filter still
         checks every conjunct, so a draw that misses another conjunct
         is a wasted trial, never a wrong verdict.
     """
-    def dim_param(node):
-        found = _call_on(node, "dim", kinds)
-        if found is None:
-            return None
-        p, rest, keywords = found
-        if keywords or len(rest) > 1 or (rest and _constant(rest[0]) != 0):
-            return None
-        return p
-
     def det_param(node):
         found = _call_on(node, "det", kinds)
         return found[0] if found and not (found[1] or found[2]) else None
@@ -354,9 +351,6 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
             value = int(c) if kinds[node.id] == "int" \
                 and float(c).is_integer() else c
             return node.id, lambda rng, size, v=value: v
-        seq = dim_param(node)
-        if seq is not None and c == 0:
-            return seq, lambda rng, size: []
         mat = det_param(node)
         if mat is not None and c == 0:
             from .matrices import _synth_singular

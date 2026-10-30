@@ -3,7 +3,9 @@
 """One spelling for a type annotation in everything mathema says, the
 same on every Python version: a union with None reads `Optional[X]`, a
 union without it `Union[X, Y]`, a generic its own name with its
-arguments read the same way, and a class its name."""
+arguments read the same way, and a class its name; and the binding
+an int annotation completes (`int_completed`), read the same by every
+layer."""
 from __future__ import annotations
 
 import types
@@ -42,3 +44,55 @@ def annotation_text(ann) -> str:
     if isinstance(ann, type):
         return ann.__name__
     return repr(ann).replace("typing.", "")
+
+
+def int_completed(bound, kind: "str | None"):
+    """Intent:
+        A real binding that states no type, completed to the integers
+        when its parameter is annotated `int` (`[0, 10]` on `n: int` is
+        `[0, 10] : int`), or when it bounds the elements of a sequence
+        whose annotation states int elements (`[0, 1]^n` on `xs:
+        list[int]`, `kind` then the slot type `list[int]`, is `[0, 1]^n
+        : int`); any other binding unchanged. A type the claim states
+        wins.
+    """
+    from dataclasses import replace
+
+    from .domain import _as_domain
+    from .domain import is_sentinel
+    elements = isinstance(kind, str) and kind.endswith("[int]")
+    if not (kind == "int" or elements) or bound is None \
+            or isinstance(bound, (str, frozenset)):
+        return bound
+    dom = _as_domain(bound)
+    # a piece listing values is a set the claim states; a piece of
+    # sentinels only (`| {missing}`) states the missing values beside
+    # the range
+    if dom.explicit_type or dom.base_type != "R" or (dom.dims and not elements) \
+            or not dom.pieces \
+            or any(isinstance(piece, frozenset)
+                   and not all(is_sentinel(v) for v in piece)
+                   for piece in dom.pieces):
+        return bound
+    return replace(dom, base_type="Z", explicit_type=True)
+
+
+def complex_parameters(fn) -> frozenset:
+    """Intent:
+        The parameters of `fn` annotated `complex` (or `Optional[complex]`),
+        the names a claim about it reads as complex numbers; empty when
+        the signature cannot be read.
+    """
+    import inspect
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return frozenset()
+    out = set()
+    for p in params:
+        ann = p.annotation
+        args = [a for a in typing.get_args(ann) if a is not type(None)] \
+            if _is_union(ann) else [ann]
+        if len(args) == 1 and args[0] in (complex, "complex"):
+            out.add(p.name)
+    return frozenset(out)

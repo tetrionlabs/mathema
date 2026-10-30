@@ -563,6 +563,12 @@ CODE_TABLE: dict[str, dict] = {
                    "deliberate rejection",
         "hint": "guard the input and raise the declared exception, or "
                 "narrow the claim to the inputs the function accepts"},
+    "implementation:absent": {
+        "derive_unlock": _NOT_APPLICABLE,
+        "meaning": "the call returned an absent value (None) from present "
+                   "inputs where the declared return type promises one",
+        "hint": "declare Optional[T] if None is an answer the function "
+                "gives, or return a value"},
 }
 
 
@@ -632,6 +638,7 @@ CODE_IDS: dict[str, str] = {
     "implementation:sub-epsilon-boundary": "5.6",
     "implementation:representation": "5.7",
     "implementation:accidental-crash": "5.8",
+    "implementation:absent": "5.9",
 }
 
 

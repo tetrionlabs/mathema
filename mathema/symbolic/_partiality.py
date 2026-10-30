@@ -46,6 +46,8 @@ from .._signatures import module_scope
 import ast
 import contextvars
 import copy
+import math
+import types
 
 import sympy
 
@@ -286,6 +288,7 @@ def _lemmas_for_call(node: ast.Call, scope: dict) -> list:
 #: lemma leaves the definedness region unknown
 _TOTAL_CALLS = frozenset({
     "builtins.abs", "builtins.float", "builtins.int", "builtins.round",
+    "builtins.complex",
     "builtins.bool", "builtins.len", "builtins.isinstance",
     "builtins.callable",
     "math.exp", "math.expm1", "math.exp2", "math.sin", "math.cos",
@@ -424,6 +427,28 @@ _CALLEE_PATH: contextvars.ContextVar = contextvars.ContextVar(
 # self parameter
 _SELF_OF: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_self_of", default=(None, None))
+
+# whether the function's return annotation admits a complex number, so
+# a complex result is one of its values
+_RETURNS_COMPLEX: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_returns_complex", default=False)
+
+
+def returns_complex(fn) -> bool:
+    """Whether f's return annotation admits a complex number (`complex`,
+    `Optional[complex]`, `float | complex`)."""
+    import inspect
+    import re
+    try:
+        annotation = inspect.signature(fn).return_annotation
+    except (TypeError, ValueError):
+        return False
+    if annotation is inspect.Signature.empty:
+        return False
+    text = annotation if isinstance(annotation, str) else (
+        getattr(annotation, "__name__", None) or repr(annotation))
+    return bool(re.search(r"\bcomplex\b", str(text)))
+
 
 # the names of the parameters the walk's domain binds to C
 _COMPLEX_NAMES: contextvars.ContextVar = contextvars.ContextVar(
@@ -669,6 +694,8 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             if region is not sympy.false:
                 out.append((sympy.And(path_cond, region), exc_name))
         _callee_guards(node, env, path_cond, out, scope, miss)
+    if _real_only_on_complex(node, env, scope):
+        out.append((path_cond, "TypeError"))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         _power_guards(node, env, path_cond, out, miss)
     if isinstance(node, ast.BinOp) \
@@ -692,6 +719,80 @@ def _guards_in_expr(node: ast.AST, env: dict, path_cond, out: list,
             # whose definedness the call's own check reports
             child = child.value
         _guards_in_expr(child, env, path_cond, out, scope, missed, int_syms)
+
+
+#: builtins that raise TypeError on a complex argument
+_REAL_ONLY_BUILTINS = frozenset({"float", "int", "round", "divmod"})
+
+#: builtins that raise TypeError ordering a complex argument against
+#: another argument
+_ORDERING_BUILTINS = frozenset({"min", "max"})
+
+
+def _holds_complex(value) -> bool:
+    """Intent:
+        Whether a lifted value is a Python complex number: it reads a
+        complex-typed parameter (`_complex_typed`'s symbols) or the
+        imaginary unit outside a call whose result is real (`abs`, the
+        real and imaginary parts, the argument), since arithmetic with a
+        complex operand returns a complex.
+    """
+    if isinstance(value, tuple):
+        return any(_holds_complex(v) for v in value)
+    if not isinstance(value, sympy.Basic):
+        return False
+    if isinstance(value, (sympy.Abs, sympy.re, sympy.im, sympy.arg)):
+        return False
+    if value is sympy.I:
+        return True
+    if isinstance(value, sympy.Symbol):
+        return _complex_typed(value)
+    return any(_holds_complex(a) for a in value.args)
+
+
+def _real_only_on_complex(node: ast.AST, env: dict, scope: dict) -> bool:
+    """Intent:
+        Whether one node applies an operation Python defines only for
+        real numbers to a complex-typed value, and so raises TypeError
+        whatever the value: a math-module function, int, float, round,
+        divmod, min or max of two or more arguments, the `%` and `//`
+        operators, and an ordering comparison (`<`, `<=`, `>`, `>=`).
+        The derive lifter refuses the same operations
+        (`_base._accepts_complex`).
+    """
+    import builtins as _builtins
+
+    def typed(sub) -> bool:
+        try:
+            value = _expr_to_sympy(sub, dict(env))
+        except NotSymbolic:
+            return False
+        except TimeoutError:
+            raise
+        except Exception:
+            return False
+        return _holds_complex(value)
+
+    if isinstance(node, ast.BinOp) and isinstance(node.op,
+                                                  (ast.Mod, ast.FloorDiv)):
+        return typed(node.left) or typed(node.right)
+    if isinstance(node, ast.Compare):
+        if any(isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
+               for op in node.ops):
+            return any(typed(sub) for sub in [node.left, *node.comparators])
+        return False
+    if not isinstance(node, ast.Call) or node.keywords:
+        return False
+    target, _keys = _call_target(node, scope)
+    if target is None:
+        return False
+    real_only = getattr(target, "__module__", None) == "math" or any(
+        target is getattr(_builtins, name) for name in _REAL_ONLY_BUILTINS)
+    ordering = len(node.args) >= 2 and any(
+        target is getattr(_builtins, name) for name in _ORDERING_BUILTINS)
+    if not (real_only or ordering):
+        return False
+    return any(typed(a) for a in node.args)
 
 
 def _power_guards(node: ast.BinOp, env: dict, path_cond, out: list,
@@ -739,13 +840,181 @@ def _power_guards(node: ast.BinOp, env: dict, path_cond, out: list,
     if complex_out is not None and exponent.is_number:
         complex_out.append(sympy.And(path_cond, negative))
     opaque = _OPAQUE_OUT.get()
-    if opaque is not None or not exponent.is_number:
+    if (opaque is not None or not exponent.is_number) \
+            and not _RETURNS_COMPLEX.get():
         # the definedness walk reads it as a guard; a value claim reads
-        # a constant exponent's region through `complex_out`
+        # a constant exponent's region through `complex_out`; where f
+        # returns complex numbers a complex result is one of its values
         out.append((sympy.And(path_cond, negative), NO_VALUE))
     if opaque is not None and not exponent.is_number:
         opaque.append(f"line {getattr(node, 'lineno', '?')}: a power whose "
                       f"exponent may be an integer at a negative base")
+
+
+def _non_finite_number(value) -> bool:
+    """Whether a Python object is a number with no finite value: a nan
+    or an infinity, real or complex (numpy scalars included)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, complex)):
+        try:
+            import numpy
+        except ImportError:
+            return False
+        if not isinstance(value, numpy.number):
+            return False
+    try:
+        z = complex(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return not (math.isfinite(z.real) and math.isfinite(z.imag))
+
+
+def _no_value_literal(node: ast.AST, scope: dict, local: frozenset) -> bool:
+    """Intent:
+        Whether one node spells a nan or an infinity whatever the input:
+        a module attribute holding one (`math.nan`, `numpy.inf`), a
+        module-level name holding one (`from math import inf`, `NAN =
+        float("nan")`), or a float or complex type called on the text of
+        one (`float("nan")`, `float("-inf")`).
+
+    Notes:
+        A name the function binds itself (a parameter or a local) is
+        never read through the module scope. A decimal literal past the
+        float range (`1e309`) is not one: it denotes a finite number,
+        10**309, and only its float64 reading overflows, which is the
+        computation's matter.
+    """
+    if isinstance(node, ast.Name):
+        return node.id not in local and node.id in scope \
+            and _non_finite_number(scope[node.id])
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+            and node.value.id not in local:
+        holder = scope.get(node.value.id)
+        return isinstance(holder, types.ModuleType) \
+            and _non_finite_number(getattr(holder, node.attr, None))
+    if isinstance(node, ast.Call) and len(node.args) == 1 \
+            and not node.keywords \
+            and isinstance(node.args[0], ast.Constant):
+        target, _keys = _call_target(node, scope)
+        if isinstance(node.func, ast.Name) and node.func.id in local:
+            return False
+        text = node.args[0].value
+        if isinstance(target, type) and issubclass(target, (float, complex)) \
+                and isinstance(text, str) \
+                and text.strip().lower().lstrip("+-") in _NO_VALUE_WORDS:
+            return True
+    return False
+
+
+#: the texts float() reads as nan or an infinity, whatever their sign
+_NO_VALUE_WORDS = frozenset({"nan", "inf", "infinity"})
+
+#: calls whose result is a truth value whatever their arguments
+_TRUTH_CALLS = frozenset({
+    "math.isnan", "math.isinf", "math.isfinite", "math.isclose",
+    "numpy.isnan", "numpy.isinf", "numpy.isfinite", "numpy.isclose",
+    "numpy.isposinf", "numpy.isneginf", "builtins.isinstance",
+    "builtins.bool",
+})
+
+
+def _infinity_sign(node: ast.AST, scope: dict, local: frozenset) -> int:
+    """The sign of an infinity literal, optionally negated (`math.inf`
+    is 1, `-math.inf` is -1); 0 for anything else, a nan included."""
+    sign = 1
+    while isinstance(node, ast.UnaryOp) \
+            and isinstance(node.op, (ast.USub, ast.UAdd)):
+        sign = -sign if isinstance(node.op, ast.USub) else sign
+        node = node.operand
+    if not _no_value_literal(node, scope, local):
+        return 0
+    if isinstance(node, ast.Constant):
+        value = node.value
+    elif isinstance(node, ast.Name):
+        value = scope[node.id]
+    elif isinstance(node, ast.Attribute):
+        value = getattr(scope[node.value.id], node.attr)
+    else:
+        value = _call_target(node, scope)[0](node.args[0].value)
+    try:
+        real = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return 0 if math.isnan(real) else (sign if real > 0 else -sign)
+
+
+def _no_value_where(node: ast.AST, env: dict, carried: dict, scope: dict,
+                    local: frozenset):
+    """Intent:
+        The region where an expression's value is a nan or an infinity
+        because a nan or infinity literal reaches it, as a sympy
+        condition over the parameters (`sympy.false` when no literal
+        reaches it), or `None` when a literal takes part in a way this
+        reading does not follow.
+
+    Notes:
+        `carried` maps a local name to the region where the value it
+        holds is such a literal's (`None` when not followed). A literal
+        reaches the value through a conditional expression's arms
+        (under its condition), a sign, a sum, difference or product
+        (with a nan or an infinity on either side the result is a nan
+        or an infinity, whatever the real other side), and a quotient's
+        numerator. A comparison or a test such as `math.isnan` gives a
+        truth value, and `min` with `+inf` or `max` with `-inf` returns
+        another argument, so none of those carries the literal on.
+    """
+    from ._conditioned import _condition_to_sympy
+
+    def where(sub):
+        return _no_value_where(sub, env, carried, scope, local)
+
+    def touches(sub) -> bool:
+        return any(_no_value_literal(n, scope, local)
+                   or (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                       and carried.get(n.id, sympy.false) is not sympy.false)
+                   for n in ast.walk(sub))
+
+    if _no_value_literal(node, scope, local):
+        return sympy.true
+    if isinstance(node, ast.Name):
+        return carried.get(node.id, sympy.false)
+    if not touches(node):
+        return sympy.false
+    if isinstance(node, ast.IfExp):
+        body, orelse = where(node.body), where(node.orelse)
+        cond = _condition_to_sympy(node.test, dict(env))
+        if cond is None or body is None or orelse is None:
+            return None
+        return sympy.Or(sympy.And(cond, body),
+                        sympy.And(sympy.Not(cond), orelse))
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return sympy.false
+        if isinstance(node.op, (ast.USub, ast.UAdd)):
+            return where(node.operand)
+        return None
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            left, right = where(node.left), where(node.right)
+            if left is None or right is None:
+                return None
+            return sympy.Or(left, right)
+        if isinstance(node.op, ast.Div) and not touches(node.right):
+            return where(node.left)
+        return None
+    if isinstance(node, ast.Compare):
+        return sympy.false
+    if isinstance(node, ast.Call):
+        _target, keys = _call_target(node, scope)
+        if any(key in _TRUTH_CALLS for key in keys):
+            return sympy.false
+        neutral = 1 if "builtins.min" in keys else (
+            -1 if "builtins.max" in keys else 0)
+        if neutral and len(node.args) >= 2 and not node.keywords:
+            rest = [a for a in node.args
+                    if _infinity_sign(a, scope, local) != neutral]
+            if rest and not any(touches(a) for a in rest):
+                return sympy.false
+    return None
 
 
 def _range_index(stmt: ast.For, env: dict) -> dict:
@@ -866,6 +1135,39 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
     unread: list = []
     missed: list = []
     lambdas: dict = {}
+    local = frozenset(set(facts.params or ()) | {
+        n.id for n in ast.walk(facts.tree)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)} | {
+        a.arg for n in ast.walk(facts.tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+        for a in ast.walk(n.args) if isinstance(a, ast.arg)})
+    # the region where each local name holds a nan or infinity literal's
+    # value (`None` where that is not followed)
+    carried: dict = {}
+
+    def no_value_where(node, env):
+        return _no_value_where(node, env, carried, scope, local)
+
+    def no_value_reach(node, env, path_cond) -> None:
+        # a returned value that is a nan or an infinity is no value
+        region = no_value_where(node, env)
+        if region is None:
+            if not _unreached(path_cond):
+                missed.append(f"line {getattr(node, 'lineno', '?')}: a nan "
+                              f"or infinity literal whose reach on the "
+                              f"returned value is not read")
+        elif region is not sympy.false:
+            guards.append((sympy.And(path_cond, region), NO_VALUE))
+
+    def carry(name, region, path_cond) -> None:
+        old = carried.get(name, sympy.false)
+        if region is None or (old is None and path_cond is not sympy.true):
+            carried[name] = None
+        elif path_cond is sympy.true:
+            carried[name] = region
+        else:
+            carried[name] = sympy.Or(sympy.And(path_cond, region),
+                                     sympy.And(sympy.Not(path_cond), old))
 
     def stop(stmt) -> None:
         if not unread:
@@ -894,12 +1196,14 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
         except Exception:
             return False
 
-    def bind(env, name, value_node, stmt):
+    def bind(env, name, value_node, stmt, region=None, read=False):
         # a name whose value does not lift is dropped from the
         # environment: any later raise region that reads it fails to
         # lift and is reported as missed
         _guards_in_expr(value_node, env, path_cond_box[0], guards, scope,
                         missed, int_syms)
+        carry(name, region if read else no_value_where(value_node, env),
+              path_cond_box[0])
         env = {k: v for k, v in env.items() if k != name}
         lambdas.pop(name, None)
         try:
@@ -959,8 +1263,9 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                     and all(isinstance(t, ast.Name) for t in target.elts):
                 # every right-hand side is evaluated before any name binds
                 new_env = dict(env)
-                for t, v in zip(target.elts, value_node.elts):
-                    bound = bind(env, t.id, v, stmt)
+                regions = [no_value_where(v, env) for v in value_node.elts]
+                for t, v, r in zip(target.elts, value_node.elts, regions):
+                    bound = bind(env, t.id, v, stmt, r, read=True)
                     if bound is None:
                         return
                     new_env[t.id] = bound[t.id]
@@ -984,6 +1289,7 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
             elif isinstance(stmt, ast.Return):
                 if stmt.value is not None:
                     _guards_in_expr(stmt.value, env, path_cond, guards, scope, missed, int_syms)
+                    no_value_reach(stmt.value, env, path_cond)
                 return   # nothing after a return executes
             elif isinstance(stmt, ast.If):
                 cond = _condition_to_sympy(stmt.test, env)
@@ -1081,6 +1387,31 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                         loop_names.add(node.id)
                 if isinstance(stmt.target, ast.Name):
                     loop_names.add(stmt.target.id)
+                # a name the body assigns a nan or infinity literal's
+                # value to, or that held one before, is not followed
+                # through the trips; a value the body returns is not read
+                for node in ast.walk(stmt):
+                    if isinstance(node, (ast.Assign, ast.AugAssign,
+                                         ast.AnnAssign)) \
+                            and node.value is not None \
+                            and no_value_where(node.value, env) \
+                            is not sympy.false:
+                        for t in (node.targets if isinstance(node, ast.Assign)
+                                  else [node.target]):
+                            for n in ast.walk(t):
+                                if isinstance(n, ast.Name):
+                                    carried[n.id] = None
+                    elif isinstance(node, ast.Return) \
+                            and node.value is not None \
+                            and no_value_where(node.value, env) \
+                            is not sympy.false:
+                        missed.append(f"line {node.lineno}: a nan or "
+                                      f"infinity literal returned inside "
+                                      f"a loop body, whose region is not "
+                                      f"read")
+                for name in loop_names:
+                    if carried.get(name, sympy.false) is not sympy.false:
+                        carried[name] = None
                 env = {k: v for k, v in env.items() if k not in loop_names}
                 if body_cond is not None:
                     # a name the body assigns changes from trip to trip,
@@ -1120,12 +1451,14 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
     int_token = _INT_SYMS.set(int_syms)
     self_token = _SELF_OF.set(_self_of(fn, facts))
     domain_token = _WALK_DOMAIN.set(domain or None)
+    returns_token = _RETURNS_COMPLEX.set(returns_complex(fn))
     names_token = _COMPLEX_NAMES.set(frozenset(
         name for name, bound in (domain or {}).items()
         if bound == "C" or getattr(bound, "base_type", None) == "C"))
     try:
         walk(strip_docstring(facts.tree.body), sympy.true, dict(params))
     finally:
+        _RETURNS_COMPLEX.reset(returns_token)
         _COMPLEX_NAMES.reset(names_token)
         _SELF_OF.reset(self_token)
         _WALK_DOMAIN.reset(domain_token)

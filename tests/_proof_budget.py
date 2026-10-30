@@ -62,6 +62,32 @@ def raise_budget(setattr_=setattr, budget=None):
                 setattr_(mod, attr, value)
 
 
+def scale_budget(setattr_=setattr, factor: float = 1.0) -> dict:
+    """Multiply every budget each loaded mathema module holds by
+    `factor`, through `setattr_(module, name, value)`, and return the
+    environment variables that give a `mathema` subprocess the scaled
+    proof caps (whole seconds, at least one, as `mathema._timeout`
+    reads them). A factor of 0.25 gives a test the budgets it would
+    have on a machine four times slower."""
+    import importlib
+    for name in _HOLDERS:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            pass
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not (name == "mathema" or name.startswith("mathema.")):
+            continue
+        for attr in GENEROUS:
+            value = vars(mod).get(attr)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                setattr_(mod, attr, value * factor)
+    from mathema import _timeout
+    return {"MATHEMA_FAST_TIMEOUT": str(max(1, int(_timeout.FAST_TIMEOUT_SECONDS))),
+            "MATHEMA_EXTENSIVE_TIMEOUT":
+                str(max(1, int(_timeout.EXTENSIVE_TIMEOUT_SECONDS)))}
+
+
 def raise_environment(env=None):
     """Put the generous caps in `env` (default `os.environ`) for any
     mathema process started from it."""

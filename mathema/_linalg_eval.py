@@ -63,23 +63,28 @@ class Table(dict):
 _HOLED: list = []
 
 
-def _holed(array, holes: dict):
+def _holed(array, holes: dict, ints: "dict | None" = None):
     """`array` carrying the hole values its missing positions were drawn
-    as (`None`, `pd.NA`), `{position: value}`, so the function receives
-    them as drawn when the array goes back to a plain list; the array
-    itself holds NaN there."""
-    if not holes:
+    as (`None`, `pd.NA`), `{position: value}`, and the ints positions
+    were drawn as, which a float array holds only as floats, so the
+    function receives them as drawn when the array goes back to a plain
+    list; the array itself holds NaN at a hole and the float nearest an
+    int. `hole_values` names the holes only."""
+    if not holes and not ints:
         return array
     if not _HOLED:
         np = _np()
 
         class HoledArray(np.ndarray):  # type: ignore[name-defined]
-            """A float array with the hole values it stands for."""
+            """A float array with the hole values and the ints it
+            stands for."""
             hole_values: dict = {}
+            int_values: dict = {}
 
         _HOLED.append(HoledArray)
     out = array.view(_HOLED[0])
     out.hole_values = dict(holes)
+    out.int_values = dict(ints or {})
     return out
 
 
@@ -151,7 +156,9 @@ def as_array(value):
     """Intent:
         A drawn value as the claim evaluates it: a vector or matrix of
         numbers (a list, nested lists, an array) as a float numpy
-        array with NaN at each missing position, its positions still
+        array with NaN at each missing position (a complex array when an
+        entry is complex, an object array holding each number exactly
+        when one is too large for a float), its positions still
         named when the list names them (`runtime_types.Labelled`), a
         dict of columns as a `Table` (a column of strings or booleans
         as an object array), anything else unchanged.
@@ -175,17 +182,64 @@ def as_array(value):
         def kept(v):
             # a hole drawn as something other than a float NaN
             return is_missing(v) and not isinstance(v, float)
-        if all(isinstance(r, (list, tuple)) for r in value):
+
+        def whole(v):
+            # an int, which the float array holds only as a float
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        def beyond(v):
+            # an exact number too large for a float
+            if isinstance(v, bool) or is_missing(v):
+                return False
+            try:
+                float(v)
+            except OverflowError:
+                return True
+            except (TypeError, ValueError):
+                return False
+            return False
+        nested = all(isinstance(r, (list, tuple)) for r in value)
+        flat = [v for r in value for v in r] if nested else list(value)
+        if any(isinstance(v, complex) for v in flat):
+            # a complex vector or matrix: a complex array, NaN at each
+            # missing position
+            complex_rows = ([[complex(math.nan, 0.0) if is_missing(v)
+                              else complex(v) for v in r] for r in value]
+                            if nested else
+                            [complex(math.nan, 0.0) if is_missing(v)
+                             else complex(v) for v in value])
+            return _holed(np.array(complex_rows, dtype=complex),
+                          ({(i, j): v for i, r in enumerate(value)
+                            for j, v in enumerate(r) if kept(v)}
+                           if nested else
+                           {(k,): v for k, v in enumerate(value) if kept(v)}))
+        if any(beyond(v) for v in flat):
+            # held exactly, entry by entry, as an object array
+            rows = ([[math.nan if is_missing(v) else v for v in r]
+                     for r in value] if nested
+                    else [math.nan if is_missing(v) else v for v in value])
+            exact = np.empty(np.shape(rows), dtype=object)
+            exact[...] = rows
+            return _holed(exact, ({(i, j): v for i, r in enumerate(value)
+                                   for j, v in enumerate(r) if kept(v)}
+                                  if nested else
+                                  {(k,): v for k, v in enumerate(value)
+                                   if kept(v)}))
+        if nested:
+            cells = {(i, j): v for i, r in enumerate(value)
+                     for j, v in enumerate(r)}
             return _holed(np.array([[math.nan if is_missing(v) else float(v)
                                      for v in r] for r in value], dtype=float),
-                          {(i, j): v for i, r in enumerate(value)
-                           for j, v in enumerate(r) if kept(v)})
+                          {k: v for k, v in cells.items() if kept(v)},
+                          {k: v for k, v in cells.items() if whole(v)})
         holes = {(k,): v for k, v in enumerate(value) if kept(v)}
+        ints = {(k,): v for k, v in enumerate(value) if whole(v)}
         array = np.array([math.nan if is_missing(v) else float(v)
                           for v in value], dtype=float)
-        if holes:
-            return _holed(array, holes)
-        return _labelled(array, getattr(value, "labels", ()))
+        labels = getattr(value, "labels", ())
+        if labels and not holes:
+            return _labelled(array, labels)
+        return _holed(array, holes, ints)
     return value
 
 
@@ -205,8 +259,10 @@ def to_plain(value):
         out = _floats(value.tolist()) \
             if getattr(value, "exact", None) is not None \
             and value.dtype.kind == "O" else value.tolist()
-        for position, hole in (getattr(value, "hole_values", None) or {}).items():
-            # the hole value the array was drawn with, back in its slot
+        drawn = {**(getattr(value, "int_values", None) or {}),
+                 **(getattr(value, "hole_values", None) or {})}
+        for position, hole in drawn.items():
+            # the value the array was drawn with, back in its slot
             if len(position) == 1 and isinstance(out, list) and position[0] < len(out):
                 out[position[0]] = hole
             elif len(position) == 2 and isinstance(out, list) \
@@ -460,6 +516,35 @@ def _abs(x):
     return builtins.abs(x)
 
 
+def _plain_norm(x) -> "float | None":
+    """Intent:
+        The Euclidean norm of a vector, or the Frobenius norm of a
+        matrix, given as a list (rows of lists) of real or complex
+        numbers, without numpy: the square root of the sum of each
+        entry's squared magnitude, a hole contributing nothing, taken
+        on the entries scaled to the largest magnitude so no square
+        overflows. None for any other value.
+    """
+    from .domain import is_missing
+    rows = x if isinstance(x, (list, tuple)) else None
+    if rows is None:
+        return None
+    flat = ([v for r in rows for v in r]
+            if rows and all(isinstance(r, (list, tuple)) for r in rows)
+            else list(rows))
+    values = [v for v in flat if not is_missing(v)]
+    if not all(isinstance(v, (int, float, complex)) and not isinstance(v, bool)
+               for v in values):
+        return None
+    if not values:
+        return 0.0
+    scale = max(builtins.abs(v) for v in values)
+    if scale == 0 or not math.isfinite(scale):
+        return float(scale)
+    return scale * math.sqrt(builtins.sum((builtins.abs(v) / scale) ** 2
+                                          for v in values))
+
+
 def _norm(x, ord=None):
     """The Euclidean norm of a vector, the Frobenius norm of a matrix,
     or `numpy.linalg.norm`'s `ord` norm (`2` spectral, `1`, `inf`); the
@@ -469,6 +554,10 @@ def _norm(x, ord=None):
     other norm of a matrix holding a hole is a hole."""
     if isinstance(x, (int, float, complex)) and not isinstance(x, bool):
         return builtins.abs(x)
+    if _numpy() is None and ord is None:
+        plain = _plain_norm(x)
+        if plain is not None:
+            return plain
     np = _np()
     a = as_array(x) if not is_array(x) else x
     if not is_array(a):
@@ -1286,11 +1375,78 @@ def _square_rows(A):
     return rows
 
 
+def _number_of(value):
+    """A numpy scalar as the Python number it holds: a complex one
+    stays complex, its imaginary part kept."""
+    item = value.item() if hasattr(value, "item") else value
+    return item if isinstance(item, complex) else float(item)
+
+
+def _plain_rows(A) -> "list | None":
+    """Intent:
+        A matrix given as nested lists or tuples of numbers (an int, a
+        float, a complex or a Fraction), as its list of rows, when numpy
+        is not installed; None for any other value, or when numpy is.
+    """
+    import numbers
+    if _numpy() is not None or not isinstance(A, (list, tuple)) or not A:
+        return None
+    rows = [list(r) for r in A if isinstance(r, (list, tuple))]
+    if len(rows) != len(A) or len({len(r) for r in rows}) != 1:
+        return None
+    if not all(isinstance(v, numbers.Number) for r in rows for v in r):
+        return None
+    return rows
+
+
+def _square(rows: list) -> list:
+    """`rows` when they form a square matrix.
+
+    Raises:
+        ValueError: the matrix is not square.
+    """
+    if len(rows) != len(rows[0]):
+        raise ValueError(f"needs a square matrix, got shape "
+                         f"({len(rows)}, {len(rows[0])})")
+    return rows
+
+
+def _plain_det(rows: list):
+    """Intent:
+        The determinant of a square matrix of numbers without numpy:
+        exact for finite real entries and rounded once, by Gaussian
+        elimination with partial pivoting otherwise (a complex entry, an
+        infinity or a NaN).
+    """
+    from fractions import Fraction
+    rows = _square(rows)
+    if all(not _is_complex(v) and math.isfinite(v) for r in rows for v in r):
+        return _rounded(_exact_det([[Fraction(v) for v in r] for r in rows]))
+    m = [[complex(v) for v in r] for r in rows]
+    n, det = len(m), complex(1.0)
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda i: abs(m[i][col]))
+        if m[pivot][col] == 0:
+            return complex(0.0)
+        if pivot != col:
+            m[col], m[pivot] = m[pivot], m[col]
+            det = -det
+        det *= m[col][col]
+        for i in range(col + 1, n):
+            factor = m[i][col] / m[col][col]
+            m[i] = [a - factor * b for a, b in zip(m[i], m[col])]
+    return det if det.imag != 0 or any(_is_complex(v) for r in rows for v in r) \
+        else det.real
+
+
 def _det(A):
     """The determinant of a square matrix, exact and rounded once."""
+    plain = _plain_rows(A)
+    if plain is not None:
+        return _plain_det(plain)
     rows = _square_rows(A)
     if rows is None:
-        return float(_np().linalg.det(_matrix(A)))
+        return _number_of(_np().linalg.det(_matrix(A)))
     return _rounded(_exact_det(rows))
 
 
@@ -1324,18 +1480,23 @@ def _inv(A):
 def _trace(A):
     """Intent:
         The sum of a square matrix's diagonal entries, exact and
-        rounded once.
+        rounded once, read from nested lists without numpy.
 
     Raises:
-        numpy.linalg.LinAlgError: the matrix is not square.
+        numpy.linalg.LinAlgError: the matrix is not square (ValueError
+            without numpy).
     """
+    plain = _plain_rows(A)
+    if plain is not None:
+        plain = _square(plain)
+        return _exact_sum([plain[i][i] for i in range(len(plain))])
     a = _matrix(A)
     if a.ndim != 2 or a.shape[0] != a.shape[1]:
         raise _np().linalg.LinAlgError(
             f"trace needs a square matrix, got shape {a.shape}")
     rows = _exact_rows(a)
     if rows is None:
-        return float(_np().trace(a))
+        return _number_of(_np().trace(a))
     return _exact_sum([rows[i][i] for i in range(len(rows))])
 
 

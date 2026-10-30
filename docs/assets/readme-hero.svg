@@ -13,7 +13,7 @@
     <text x="26" y="226" xml:space="preserve" textLength="748.0" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>full_range = mathema.claim(&quot;for rate in [0, 1], f(rate) &gt;= 1&quot;, name=&quot;full_range&quot;)</text>
     <text x="26" y="246" xml:space="preserve" textLength="774.4" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>safe_range = mathema.claim(&quot;for rate in [0, 0.99], f(rate) &gt;= 1&quot;, name=&quot;safe_range&quot;)</text>
     <text x="26" y="266" xml:space="preserve" textLength="589.6" lengthAdjust="spacingAndGlyphs"><tspan fill="#7fb4ff">&gt;&gt;&gt; </tspan>mathema.check(discount_factor, claims=[full_range, safe_range])</text>
-    <text x="26" y="286" xml:space="preserve" textLength="677.6" lengthAdjust="spacingAndGlyphs">mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847</text>
+    <text x="26" y="286" xml:space="preserve" textLength="704.0" lengthAdjust="spacingAndGlyphs">mathema.Record(discount_factor) · source, no side effects · form py:ebb4c9b87847</text>
     <text x="26" y="306" xml:space="preserve" textLength="792.0" lengthAdjust="spacingAndGlyphs">  full_range  for rate in [0.0, 1.0] : float|missing, f(rate) &gt;= 1   <tspan fill="#ff7b72">falsified</tspan> at rate = 1</text>
     <text x="26" y="326" xml:space="preserve" textLength="598.4" lengthAdjust="spacingAndGlyphs">    <tspan fill="#ff7b72">falsified</tspan>  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(rate) &gt;= 1</text>
     <text x="26" y="346" xml:space="preserve" textLength="448.8" lengthAdjust="spacingAndGlyphs">                            <tspan fill="#ff7b72" font-weight="bold">counterexample</tspan> rate = 1</text>

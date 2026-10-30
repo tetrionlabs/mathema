@@ -77,10 +77,16 @@ def test_a_mean_lies_between_the_extremes_whatever_the_runtime_type(fn):
         (proof.verdict, proof.note)
     p = _verdict(fn, _BETWEEN)
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    big = "[1.7976931348623157e+308, 1.7976931348623157e+308]"
+    received = {mean_of: f"numpy.array({big})",
+                series_mean: f"pandas.Series({big}, index=pandas.bdate_range("
+                             f"'2020-01-01', periods=2))",
+                polars_mean: f"polars.Series(values={big})",
+                marked_mean: f"pandas.Series({big}, index=pandas.bdate_range("
+                             f"'2020-01-01', periods=2))"}[fn]
     assert p.counterexample == (
-        "link 1: min(xs) <= f(xs): xs = [1.7976931348623157e+308, "
-        "1.7976931348623157e+308]: f returned inf, and an infinity for a "
-        "finite input is no value"), p.counterexample
+        f"link 1: min(xs) <= f(xs): xs = {received}: f returned inf, and an "
+        f"infinity for a finite input is no value"), p.counterexample
     bounded = _verdict(fn, "for xs in [-1e6, 1e6]^n, min(xs) <= f(xs) <= max(xs)")
     assert bounded.verdict == "holds", \
         (bounded.verdict, bounded.note, bounded.counterexample)

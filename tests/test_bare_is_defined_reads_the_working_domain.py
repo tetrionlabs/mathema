@@ -4,7 +4,8 @@
 inside the working domain. A conditional raise, `@enforce_domain` and
 an entry `@enforce_dimensions` check are the function's own guards: they
 cut the working domain, so a guarded function is defined over what is
-left. A bare `assert` is not a guard, and a failure inside the working
+left. A domain the claim binds itself is the domain, and a guard
+refusing inside it is a call with no value. A bare `assert` is not a guard, and a failure inside the working
 domain still falsifies. The record names a guard by its condition,
 never by a line number."""
 import math
@@ -36,7 +37,7 @@ def enforced_root(x: float) -> float:
     return math.sqrt(x)
 
 
-def _bare(fn, text="for x in [-4, 4], is_defined(f)", route="best"):
+def _bare(fn, text="is_defined(f)", route="best"):
     (p,) = check_conjectures(fn, [claim(text, route=route)])
     return p
 
@@ -57,11 +58,18 @@ def test_the_executed_half_skips_the_calls_a_guard_rejects():
     from mathema.claim_families import _is_defined_probe, split_probe_result
     result = _is_defined_probe(
         guarded_root, analyze_source(guarded_root),
-        claim("for x in [-4, 4], is_defined(f)"), {"x": (-4.0, 4.0)},
-        random.Random(0), 40)
+        claim("is_defined(f)"), {}, random.Random(0), 40)
     verdict, checked, _cx, _est, meta = split_probe_result(result)
     assert verdict == "holds" and checked > 0, result
     assert "x < 0" in meta["mathema.sampled"]
+
+
+def test_a_guard_refusing_inside_a_bound_domain_falsifies():
+    for fn in (guarded_root, enforced_root):
+        p = _bare(fn, "for x in [-4, 4], is_defined(f)")
+        assert p.verdict == "falsified", (fn.__name__, p.verdict, p.note)
+        found = re.search(r"\bx\s*=\s*([-0-9.e/]+)", p.counterexample)
+        assert found and found.group(1).startswith("-"), p.counterexample
 
 
 def test_an_assert_is_not_a_guard():
@@ -84,12 +92,12 @@ def test_an_enforced_domain_cuts_the_working_domain():
 
 def test_the_record_states_the_working_domain_beside_the_claim():
     p = _bare(guarded_root)
-    # the statement keeps the domain as written
-    assert "[-4.0, 4.0]" in p.statement, p.statement
+    # the statement keeps the claim as written
+    assert "for x" not in p.statement, p.statement
     working = p.meta["mathema.working_domain"]
-    assert working["x"] == "[0, 4]", working
+    assert working["x"] == "[0, oo)", working
     assert working["guards"] == ["x < 0"], working
-    assert "the working domain is x in [0, 4]" in (p.note or ""), p.note
+    assert "the working domain is x in [0, oo)" in (p.note or ""), p.note
     # a value claim's explicit domain is never narrowed
     (v,) = check_conjectures(guarded_root, [claim("for x in [-4, 4], f(x) >= 0")])
     assert "mathema.working_domain" not in (v.meta or {})

@@ -51,6 +51,6 @@ def test_a_length_floor_reports_the_lengths_drawn_above_it():
 
 
 def test_a_premise_directed_draw_is_named():
-    note = _note("for xs in R^n, assuming dim(xs) == 0, f(xs) == 0")
-    assert "len=0" in note, note
+    note = _note("for xs in R^n, assuming max(xs) == min(xs), "
+                 "f(xs) == len(xs) * xs[0]")
     assert "drawn on the premise" in note, note

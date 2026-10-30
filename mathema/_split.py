@@ -32,11 +32,13 @@ _MAX_AT = 6
 
 def _witness_lengths(probe, seqs: list) -> dict:
     """`{sequence: length}` read off the witness of a falsified claim
-    (`r = [0.0]`, `r=[0.0]`)."""
+    (`r = [0.0]`, `r=[0.0]`, `r = pandas.Series([0.0])`,
+    `r = numpy.array([0.0])`)."""
     out: dict = {}
     text = probe.counterexample or ""
     for name in seqs:
-        m = re.search(rf"\b{re.escape(name)}\s*=\s*(\[[^\]]*\])", text)
+        m = re.search(rf"\b{re.escape(name)}\s*=\s*(?:[A-Za-z_][\w.]*\()?"
+                      rf"(\[[^\]]*\])", text)
         if m:
             try:
                 out[name] = len(ast.literal_eval(m.group(1)))

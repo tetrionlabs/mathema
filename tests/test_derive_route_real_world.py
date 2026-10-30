@@ -72,6 +72,9 @@ distinct from a locally built array, which phase 4 above now handles);
 and a **reduction over a locally built array** (`np.sum`/`np.dot` on
 one, as opposed to returning it elementwise, named here, not yet
 backed by its own test case in this file)."""
+import ast
+from fractions import Fraction
+
 import pytest
 
 pytest.importorskip("numpy")
@@ -83,6 +86,14 @@ import numpy as np  # noqa: E402
 from mathema.conjecture import claim, check_conjectures  # noqa: E402
 from mathema.analysis import analyze_source  # noqa: E402
 from mathema.symbolic import lift_fold  # noqa: E402
+
+
+def _witness_list(counterexample: str, name: str) -> list:
+    """The list a witness `name = [...]` names, each element read as the
+    exact rational of the float it prints."""
+    start = counterexample.index(f"{name} = [") + len(name) + 3
+    body = counterexample[start:counterexample.index("]", start) + 1]
+    return [Fraction(v) for v in ast.literal_eval(body)]
 
 
 # --- Physics -----------------------------------------------------------
@@ -244,13 +255,28 @@ def test_sample_variance_two_pass_proves():
 
 
 @pytest.mark.xfail(strict=True, reason="[multiple-accumulators-per-loop] two running totals (sum_x, "
-                        "sum_x2) updated in the *same* loop body, a classic single-pass "
-                        "optimization, distinct from the multi-loop case above; "
-                        "lift_fold() requires the loop body be exactly one statement")
-def test_sample_second_moment_single_pass_proves():
-    results = check_conjectures(
+                        "sum_x2) updated in the same loop body; the sum lifter reads one "
+                        "statement per loop level")
+def test_sample_second_moment_single_pass_is_nonnegative():
+    # the population variance is the mean squared deviation from the
+    # mean, a mean of squares, so it is never negative
+    (p,) = check_conjectures(
+        sample_second_moment_single_pass,
+        [claim("for xs in [-10, 10]^n, f(xs) >= 0", route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+def test_sample_second_moment_single_pass_is_not_identically_zero():
+    # [multiple-accumulators-per-loop] f is the population variance
+    # sum(x^2)/n - (sum(x)/n)^2, zero only on a constant list, so
+    # `f(xs) == 0.0` is false at any list holding two different values
+    (p,) = check_conjectures(
         sample_second_moment_single_pass, [claim("f(xs) == 0.0", route="derive")])
-    assert results[0].verdict == "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    xs = _witness_list(p.counterexample, "xs")
+    n = len(xs)
+    exact = (sum(x * x for x in xs) / n) - (sum(xs) / n) ** 2
+    assert exact != 0, p.counterexample
 
 
 # --- Signal processing -----------------------------------------------------
@@ -346,13 +372,25 @@ def test_dot_weights_proves():
 
 
 @pytest.mark.xfail(strict=True, reason="[vector-valued] xs (parameter) and the list-comprehension "
-                        "return value are both array-valued, lift() only reasons over "
-                        "scalar parameters and scalar returns; out of scope without a "
-                        "real vector type")
-def test_normalize_by_max_proves():
-    results = check_conjectures(
+                        "return value are both array-valued; lift() reads scalar parameters "
+                        "and scalar returns only")
+def test_normalize_by_max_peaks_at_one():
+    # with every x >= 1, m = max(xs) > 0 and max(x / m) = m / m = 1
+    (p,) = check_conjectures(
+        normalize_by_max,
+        [claim("for xs in [1, 10]^n, max(f(xs)) == 1", route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+def test_normalize_by_max_is_not_the_identity():
+    # [vector-valued] f(xs) is xs / max(xs): no value where max(xs) is 0,
+    # and different from xs wherever max(xs) is not 1 and some x is not 0
+    (p,) = check_conjectures(
         normalize_by_max, [claim("f(xs) == xs", route="derive")])
-    assert results[0].verdict == "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    xs = _witness_list(p.counterexample, "xs")
+    top = max(xs)
+    assert top == 0 or [x / top for x in xs] != xs, p.counterexample
 
 
 # --- Geometry ----------------------------------------------------------
@@ -386,13 +424,29 @@ def test_distance_2d_proves():
 
 
 @pytest.mark.xfail(strict=True, reason="[indexed-multi-sequence-fold] xs, ys consumed together via a "
-                        "shared, modular (i+1) % n index, same underlying gap as "
-                        "dot_product, with the added complication of a non-trivial index "
-                        "expression rather than a plain range(len(...))")
-def test_polygon_area_shoelace_proves():
-    results = check_conjectures(
+                        "shared, modular (i+1) % n index, a non-trivial index expression "
+                        "rather than a plain range(len(...))")
+def test_polygon_area_shoelace_is_nonnegative_on_lists_of_one_length():
+    # xs and ys share the length n, so every index is in range, and
+    # abs(area) / 2 is never negative
+    (p,) = check_conjectures(
+        polygon_area_shoelace,
+        [claim("for xs in [-10, 10]^n, ys in [-10, 10]^n, f(xs, ys) >= 0",
+               route="derive")])
+    assert (p.verdict, p.route) == ("proven", "derive"), (p.verdict, p.note)
+
+
+def test_polygon_area_shoelace_raises_on_lists_of_different_lengths():
+    # [indexed-multi-sequence-fold] xs and ys are unbound apart, so the
+    # claim admits a ys shorter than xs, where ys[j] is past the end and
+    # the call raises IndexError inside the claim's domain
+    (p,) = check_conjectures(
         polygon_area_shoelace, [claim("f(xs, ys) >= 0", route="derive")])
-    assert results[0].verdict == "proven"
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "IndexError" in p.counterexample, p.counterexample
+    xs = _witness_list(p.counterexample, "xs")
+    ys = _witness_list(p.counterexample, "ys")
+    assert len(xs) != len(ys), p.counterexample
 
 
 def test_ellipse_path_proves():

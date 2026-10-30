@@ -56,7 +56,9 @@ def test_a_reduction_read_by_column_name_holds(fn, text):
 def test_a_wrong_reduction_read_by_column_name_is_falsified(fn):
     p = _verdict(fn, 'f(a)["x"] ~= 3 * sum(a.x)')
     assert p.verdict == "falsified", (p.verdict, p.note)
-    assert "a = {'x': [" in str(p.counterexample), p.counterexample
+    called = "pandas" if fn is pandas_sums else "polars"
+    assert f"a = {called}.DataFrame({{'x': [" in str(p.counterexample), \
+        p.counterexample
 
 
 def test_a_pandas_reduction_read_by_position_reads_the_position():

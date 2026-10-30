@@ -126,7 +126,7 @@ def test_empirical_fallback_handles_domain_typed_integer_bounds(monkeypatch):
 
     (p,) = check_conjectures(
         choose, [claim("for n in [10,11] ⊂ Z, k in [5,6] ⊂ Z, f(n,k) >= 1",
-                       route="derive")])
+                       route="best")])
     assert p.verdict == "holds"
     # the sampling line states the integers drawn
     assert "n~U{10..11}" in p.meta.get("mathema.sampling", "")

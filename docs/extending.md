@@ -196,7 +196,8 @@ outside it and what counts as answering a member, as two optional
 attributes: `refusal`, a `Refusal`, and `defined_answer`, a
 `DefinedAnswer`. `excluded_outside_domain` then holds an outside draw
 to the declared refusal instead of any raise, and `is_language_defined`
-holds a member to the declared answer instead of no unguarded crash.
+holds a member to the declared answer instead of any return or exit
+status, and a non-member to the declared refusal instead of any raise.
 Each names the exception classes that count (optionally narrowed by a
 `when` test on the exception) and a `returns` test on a returned value,
 and its `text` is how a witness names it. `Refusal.exit(2)` and
@@ -411,7 +412,9 @@ could honestly state, with `tree=None` and a namespaced form hash
 (`"<frontend>:<sha>"`). `mathema.analyze` returns it outright when present,
 which is richer than the documentation-only fallback a source-less
 callable would otherwise get. Form hashes are compared only within a
-namespace, never across.
+namespace, never across. The Python frontend writes `py:<sha>`; a
+bare hash, which records from releases before 0.6.3 hold, is read as
+Python's.
 
 Every part of mathema that reads a callable's facts reads the injected
 ones when they are present: checking and proving its claims, a

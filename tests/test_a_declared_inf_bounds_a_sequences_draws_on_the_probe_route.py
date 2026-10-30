@@ -45,10 +45,12 @@ def test_a_list_over_the_whole_line_is_drawn_inside_the_declared_inf():
 
 
 def test_a_declared_finite_end_is_kept():
+    # the float nearest 1e30 is 1.0000000000000000199e30, past 10**30 as
+    # written, so the end drawn is the float just inside it
     _p, top = _largest(largest_seen,
                        "let |inf| be 1e7, for xs in [-1e30, 1e30]^n \\ "
                        "{missing}, y0 in [-10, 10], f(xs, y0) == 0")
-    assert top == 1e30, top
+    assert top == math.nextafter(1e30, 0), top
 
 
 def test_without_a_declared_inf_the_draws_reach_far_past_it():

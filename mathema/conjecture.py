@@ -40,6 +40,7 @@ import sys
 from dataclasses import dataclass, field
 from dataclasses import replace as _dc_replace
 
+from ._annotation_text import int_completed as _int_completed
 from . import _exits, _shapes, families, routes
 from ._math_vocab import _D_AT_SENTINEL, MATH_CONSTANTS
 from .analysis import SourceUnavailable, effective_facts, hydrated
@@ -63,7 +64,8 @@ from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
-from .probing import (ComplexResult, _close, _fmt, _prepare_sampling, string_domain_hint,
+from .probing import (ComplexResult, _close, _fmt, _fmt_coordinate,
+                      _prepare_sampling, string_domain_hint,
                       _probe_density, _sampling_shorthand, _synth,
                       _synth_dict, complex_is_a_raise, holds_inf,
                       classified, holds_nan, inputs_missing, missing_class,
@@ -288,6 +290,13 @@ def _domain_corners(kinds: dict, domain: dict, literal_args: dict) -> list:
                 # an undeclared direction has no corner: its reach is
                 # visited by the sampler's far draws
                 return []
+            # a float end lies inside the interval as written
+            from ._sampling import _inside_as_written
+            moved_lo, moved_hi = _inside_as_written(
+                lo, hi, getattr(piece, "exact_lo", None),
+                getattr(piece, "exact_hi", None))
+            lo = lo if getattr(piece, "reach_lo", False) else moved_lo
+            hi = hi if getattr(piece, "reach_hi", False) else moved_hi
             if getattr(piece, "closed_lo", True):
                 ends.append(lo)
             if getattr(piece, "closed_hi", True):
@@ -620,15 +629,14 @@ def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
 def _derivative_family_by_statement(cj, fn, facts) -> "tuple | None":
     """Intent:
         The derivative-sign family whose statement the claim writes, for
-        a claim under any name on the probe or best route:
-        `(family, family_claim_name)`, e.g. the `monotonic_increasing`
-        family and `monotonic_increasing[x]` for `d(f(x), x) >= 0`. None
-        on any other route (a derive claim asks for derive alone), when
-        the statement is no family's, when the claim binds its own `d`
-        or `f`, carries a tolerance, chains comparisons or states a
-        negation, or when the family declines the function.
+        a claim under any name: `(family, family_claim_name)`, e.g. the
+        `monotonic_increasing` family and `monotonic_increasing[x]` for
+        `d(f(x), x) >= 0`. None when the statement is no family's, when
+        the claim binds its own `d` or `f`, carries a tolerance, chains
+        comparisons or states a negation, or when the family declines
+        the function.
     """
-    if cj.route not in ("probe", "best") or cj.links or cj.negated or cj.tolerance is not None \
+    if cj.links or cj.negated or cj.tolerance is not None \
             or {"d", "f"} & set(cj.funcs or {}):
         return None
     for base in _DERIVATIVE_FAMILY_FORMS:
@@ -672,19 +680,15 @@ def _derivative_outside_the_family_forms(cj, facts, *,
         (`d(f(x), x) >= 1`, `d(f(x), x) > 0`, `0 <= d(f(x), x)`): the
         probe evaluates `d` only in those spellings, and this one is not
         among them; when `unliftable` (derive could not lift the body)
-        it says so too. A claim in a family's spelling on the derive
-        route is told the probe is not run for it. None for a claim whose
-        only form the probe lacks is not `d`, one binding its own `d`, or
-        one written in a family's spelling on another route.
+        it says so too. None for a claim whose only form the probe lacks
+        is not `d`, one binding its own `d`, or one written in a family's
+        spelling.
     """
     if routes.unsupported_forms("probe", cj) != ["d"] or "d" in (cj.funcs or {}):
         return None
     if any(_states_derivative_form(cj, base, param, facts)
            for base in _DERIVATIVE_FAMILY_FORMS for param in facts.params):
-        if cj.route != "derive":
-            return None
-        return ("the claim asks for the derive route alone, so the probe "
-                "the shape claims use for this spelling is not run")
+        return None
     why = ("the probe decides a derivative claim only as the shape claims "
            "state it (a first derivative compared with 0 by <= or >=, a "
            "second derivative compared with 0 by ==, <= or >=), and "
@@ -1662,7 +1666,8 @@ def claim(law: str, name: str | None = None, source: str = "user",
     legacy spelling of "best"). A derive proof is the mathematics in
     exact arithmetic; `mathema.check` pairs it with a `<name>[float]`
     companion claim about the computation, and "derive:math_only"
-    asks for the proof alone, with no companion. the safety predicates always adjudicate on the examine route
+    reports the mathematics line only: the computation and its policy
+    rows are outside its remit. the safety predicates always adjudicate on the examine route
     regardless of the route passed in. A
     leading `let name = expr, ...` (see grammar.extract_let_bindings)
     substitutes each name for `(expr)` everywhere later in the law,
@@ -3114,6 +3119,13 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
         if cuts:
             unbound["guards"] = cuts
         return unbound
+    if cj.relation == "is_defined":
+        from .claim_families import _claim_bound, _is_defined_working
+        if not _is_defined_working(fn, facts,
+                                   set(cj.domain or {})
+                                   | _claim_bound(fn, domain), domain):
+            # the claim binds the domain a guard reads: no working domain
+            return {}
     cuts = guard_cut_texts(fn, facts)
     enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
     listed_texts = _finite_guard_texts(facts, domain)
@@ -3126,6 +3138,9 @@ def _working_domain_record(fn, facts, cj, domain: dict) -> dict:
         if domain.get(p) is None:
             out[p] = _render_bound(values)
     read = _names_in_claim(cj)
+    if (cj.lhs or "").strip() == "f" and "f" not in facts.params:
+        # a predicate on f itself (`is_defined(f)`) reads every parameter
+        read |= set(facts.params)
     for p in facts.params:
         bound = domain.get(p)
         if bound is None:
@@ -4284,13 +4299,27 @@ def _instance_bundles(fn, facts) -> dict:
         class samples the fields the body reads and builds the
         instance as `object.__new__(cls)` + setattr, the declared
         `param.field` domains are the validity contract, exactly as a
-        scalar parameter's declared domain already is.
+        scalar parameter's declared domain already is. A receiver a
+        runtime type carries (a pandas Series) is no bundle: it is drawn
+        as its type's values.
     """
     import dataclasses as _dc
 
-    from .symbolic._base import (_attr_keys_used, _dataclass_field_names,
-                                 _enclosing_class)
+    from .runtime_types._receivers import method_receiver, receiver_fields
+    from .symbolic._base import _dataclass_field_names
+    from .runtime_types import realised_parameters
     out: dict = {}
+    receiver = method_receiver(fn)
+    if receiver is not None and receiver[0] in realised_parameters(facts):
+        # a receiver a runtime type carries (a pandas Series, a numpy
+        # array) is drawn as that type's values and realised by its adapter
+        receiver = None
+    if receiver is not None and facts.params and facts.params[0] == receiver[0]:
+        # a method's receiver: an instance of its class, drawn by the
+        # fields it is known to hold, a dataclass's even without source
+        fields = receiver_fields(receiver[1], facts.tree, receiver[0])
+        if fields is not None:
+            out[receiver[0]] = (receiver[1], list(fields))
     if facts.tree is None:
         return out
     try:
@@ -4304,17 +4333,6 @@ def _instance_bundles(fn, facts) -> dict:
             fields = _dataclass_field_names(ann)
             if fields:
                 out[p] = (ann, fields)
-            continue
-        if p == facts.params[0] and p in ("self", "cls"):
-            cls = _enclosing_class(fn)
-            if cls is not None and _dc.is_dataclass(cls):
-                fields = _dataclass_field_names(cls)
-                if fields:
-                    out[p] = (cls, fields)
-            elif cls is not None:
-                read = _attr_keys_used(facts.tree, p)
-                if read:
-                    out[p] = (cls, read)
     return out
 
 
@@ -4768,15 +4786,13 @@ def _draw_trial_sizes(resolver, lo, hi, groups, rng, floor=None):
 
 def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
     """Intent:
-        One sampled instance for a bundled parameter: every field
-        drawn like a scalar parameter named `p.field` (its declared
-        domain respected when one exists). Dataclasses construct
-        normally; a plain class is built field-by-field without
-        running __init__; the declared field domains are the
-        contract.
+        One sampled instance for a bundled parameter, built as its
+        class builds one (`_receivers.construct_receiver`): every field,
+        or every argument of the class's own constructor, drawn like a
+        scalar parameter named `p.field` (its declared domain respected
+        when one exists, an int field as an int). A draw the
+        constructor refuses is drawn again.
     """
-    import dataclasses as _dc
-
     from .probing import _synth
     cls, fields = bundle
     bound = cj_domain.get(p)
@@ -4795,14 +4811,11 @@ def _synth_instance(bundle, p: str, cj_domain: dict, rng, specials):
                     and _still_member(inst, bound, domain_contains):
                 break
         return inst
-    values = {f: _synth("float", rng, cj_domain.get(f"{p}.{f}"),
-                        specials=specials) for f in fields}
-    if isinstance(cls, type) and _dc.is_dataclass(cls):
-        return cls(**values)
-    inst = object.__new__(cls)
-    for f, v in values.items():
-        setattr(inst, f, v)
-    return inst
+    from .runtime_types._receivers import construct_receiver
+    return construct_receiver(
+        cls, tuple((f, _field_kind(cls, f)) for f in fields),
+        {f: cj_domain.get(f"{p}.{f}") for f in fields},
+        lambda kind, b: _synth(kind, rng, b, specials=specials))
 
 
 def _field_kind(cls, field: str) -> str:
@@ -5256,8 +5269,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     the mathematics in exact arithmetic, and the companion is the same
     relation executed against the real code in float (see
     `gates._float_companion`). A claim authored with route
-    `derive:math_only` adjudicates as a derive claim and spawns none,
-    which its proof's meta states. `check()`, and so every CLI and
+    `derive:math_only` adjudicates as a derive claim and reports the
+    mathematics line only: no companion (which its proof's meta states)
+    and no policy row, the computation being outside its remit. `check()`, and so every CLI and
     store path, asks for companions; the default here keeps the
     adjudicator at one probe per claim.
 
@@ -5340,18 +5354,32 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
         value claims, then the stated policy rows, then the gates.
     """
     from . import policy as _policy
-    from .grammar import _BAR_MATRICES, bars_over_matrices, matrices_in_view
+    from ._annotation_text import complex_parameters
+    from .grammar import (_BAR_MATRICES, bars_over_matrices, complex_in_view,
+                          matrices_in_view)
     with bars_over_matrices(fn_mats | _BAR_MATRICES.get()), \
             matrices_in_view(fn_mats | runtime_mats), _policy.batch(), \
-            _policy.exceptions_of(fn):
-        out = _around_failing_languages(lambda claims: _check_conjectures(
-            fn, claims, domain=domain, trials=trials,
-            trials_scale=trials_scale, facts=facts, extensive=extensive,
-            known_premises=known_premises,
-            float_companions=float_companions,
-            pseudo_infinity=pseudo_infinity), values) if values else []
+            _policy.exceptions_of(fn), complex_in_view(complex_parameters(fn)):
+        remit = _policy.OUTSIDE_REMIT.set(_policy.OUTSIDE_REMIT.get())
+        decisions = _EXACT_DECISIONS.set({})
+        try:
+            out = _around_failing_languages(lambda claims: _check_conjectures(
+                fn, claims, domain=domain, trials=trials,
+                trials_scale=trials_scale, facts=facts, extensive=extensive,
+                known_premises=known_premises,
+                float_companions=float_companions,
+                pseudo_infinity=pseudo_infinity), values) if values else []
+        finally:
+            _EXACT_DECISIONS.get().clear()
+            _EXACT_DECISIONS.reset(decisions)
+            _policy.OUTSIDE_REMIT.reset(remit)
+        # a derive:math_only claim reports the mathematics line alone;
+        # what the computation does with a missing input is outside it
+        from .gates import MATH_ONLY_ROUTE
+        math_only = {c.name for c in values
+                     if getattr(c, "route", None) == MATH_ONLY_ROUTE}
         for p in out:
-            _policy.note_draws(p.name, p.n,
+            _policy.note_draws(p.name, p.n, None if p.name in math_only else
                                ((p.meta or {}).get("mathema.missing") or {}).get("origin"))
         if stated and facts is None:
             from . import analyze as _analyze
@@ -5900,9 +5928,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        if [c.name for c in conjectures].count(name) > 1}
     overflow_links = overflow_safe_links(conjectures)
     from .policy import _CLAIM as _policy_claim
+    from .policy import OUTSIDE_REMIT as _outside_remit
     adjudicating = _ADJUDICATING.get()
+    # the calls a derive:math_only claim makes (a falsifier's draws) are
+    # no evidence for a policy row: computation is outside its remit
+    outer_remit = _outside_remit.get()
+    from ._called_text import forget_realised
     for cj in ordered:
         _policy_claim.set(cj.name)
+        forget_realised()
+        _outside_remit.set(outer_remit or cj.route == MATH_ONLY_ROUTE)
         if adjudicating is not None:
             adjudicating["cj"] = cj
         if overflow_links and not cj.overflow_safe \
@@ -6363,11 +6398,39 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                     if float_companions:
                         out.extend(_stamped(line, cj, canonical=False) for line in lines)
                     continue
-                # route == "best" and the derive stage couldn't settle it:
-                # fall through to the probe stage, same as an ordinary
-                # probe claim.
-            probed = _arbitrate_empirical_fallback(
-                _adjudicate_probe(ctx, fn, facts, kinds, _sampling), ctx)
+            # the derive stage couldn't settle it: fall through to the
+            # probe stage, same as an ordinary probe claim. On route
+            # "derive" the probe is a falsifier only: its executed
+            # counterexample falsifies, and anything else leaves the
+            # claim unknown with derive's reason (`_derive_alone`).
+            from .runtime_types._receivers import ReceiverRefused
+            import copy
+            stashed = copy.deepcopy(ctx.derive_undecided)
+            raw = None
+            try:
+                raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
+                probed = _arbitrate_empirical_fallback(raw, ctx)
+            except ReceiverRefused as refused:
+                probed = Probe(cj.name, ctx.statement, "skipped", route="probe",
+                               note=f"{ctx.note}; no evaluable inputs: "
+                                    f"{refused}".lstrip("; "),
+                               meta={"mathema.probe_gap": "input-synthesis"})
+            # a miss of derive's reconstruction falsifies, on every route,
+            # only where the code run at its point fails the claim exactly
+            not_a_witness = (
+                _lifted_miss_unexecuted(ctx, fn, facts, probed)
+                if probed.verdict == "falsified"
+                and probed.route == "probe:lifted_numeric" else None)
+            # a negation proven at an executed point is a witness, as a
+            # falsification is
+            witnessed = probed.verdict == "falsified" or (
+                cj.negated and probed.verdict == "proven"
+                and (probed.route or "").startswith("probe"))
+            if not_a_witness is not None or (cj.route == "derive"
+                                             and not witnessed):
+                ctx.derive_undecided = stashed
+                probed = _derive_alone(ctx, raw if raw is not None else probed,
+                                       not_a_witness=not_a_witness)
 
             def probed_with(bound, cj=cj):
                 # the claim on the probe route under `let |inf| be bound`:
@@ -6690,13 +6753,14 @@ def passed_within_words(relation: str, gap: float, at: "str | None",
     """
     verb = "differs" if relation in ("==", "~=") else "fails"
     where = f" at {at}" if at else ""
+    from ._allowance import allowance_text
     if tolerance is None:
-        within = f"the default tolerance ({allowance:.3g})"
+        within = f"the default tolerance ({allowance_text(allowance)})"
     else:
         written = (tolerance.text() if isinstance(tolerance, ToleranceKind)
                    else _number_text(tolerance))
         within = f"the tolerance (declared {written})"
-    return f"{verb} by {gap:.3g}{where}, within {within}"
+    return f"{verb} by {allowance_text(gap)}{where}, within {within}"
 
 
 def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
@@ -6723,6 +6787,16 @@ def _undrawable_drawn(cj, fn, facts, domain: dict) -> "str | None":
             continue
         if calls_f and not re.search(rf"(?<![\w.]){re.escape(p)}\b", text):
             continue
+        if p in ("self", "cls") and facts.params and p == facts.params[0]:
+            from .runtime_types._receivers import method_receiver, undrawn_reason
+            receiver = method_receiver(fn)
+            why = (undrawn_reason(receiver[1]) if receiver is not None
+                   else "the body does not show the fields it holds")
+            return (f"no evaluable inputs: {p} is the receiver, an instance "
+                    f"of {cls}, which mathema has no way to draw ({why}); "
+                    f"check the method "
+                    f"bound to an instance ({cls}(...).{getattr(fn, '__name__', 'f')}), "
+                    f"or bind {p} in the claim (for {p} in L[...])")
         return (f"no evaluable inputs: {p} is annotated {cls}, a class "
                 f"mathema has no way to draw; supply {cls} through a "
                 f"runtime type adapter, or bind {p} in the claim "
@@ -6968,7 +7042,9 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
         return Probe(cj.name, statement, "skipped", route=None,
                      note=f"{cj.relation}(f) covers the numeric "
                           f"parameters, and this function has none")
-    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]")
+    # a negation is the positive over the whole function, inverted: each
+    # parameter's claim is the positive one
+    sub_cjs = [_replace(cj, lhs=p, name=f"{cj.relation}[{p}]", negated=False)
                for p in numeric]
     probes = check_conjectures(fn, sub_cjs, domain=domain, trials=trials,
                                trials_downscale=trials_scale, facts=facts,
@@ -6981,7 +7057,46 @@ def _adjudicate_function_wide_safety(cj, fn, facts, domain, trials,
                    if p.verdict == "falsified" and "[" in p.name), None)
         if at:
             combined.note = f"is_missing_safe(f) is false: see {at}."
+    if cj.negated:
+        combined = _negation_of(combined)
+        combined.statement = f"not {statement.strip()}"
     return combined
+
+
+def _negation_of(row: "Probe") -> "Probe":
+    """Intent:
+        The row of a negated predicate from the row its positive claim
+        got. The negation states that the positive fails somewhere: a
+        point where the positive failed when the code ran there is a
+        witness, and the negation is proven; a proven positive
+        falsifies the negation, its proof the witness; a positive that
+        held at every sampled point says nothing about whether it fails
+        elsewhere, so the negation is unknown. Any other verdict is
+        kept.
+    """
+    def _replace(old, **changes):
+        new = _dc_replace(old, **changes)
+        if hasattr(old, "_caveat"):
+            new._caveat = old._caveat
+        return new
+    if row.verdict == "falsified":
+        return _replace(
+            row, verdict="proven", counterexample=None, stratum=None,
+            sketch=(f"the positive claim fails at {row.counterexample}, a "
+                    f"point the code ran at, which proves its negation"))
+    if row.verdict == "proven":
+        return _replace(
+            row, verdict="falsified",
+            counterexample=("the positive claim is proven"
+                            + (f": {row.sketch}" if row.sketch else "")))
+    if row.verdict == "holds":
+        said = ("the positive claim held at every sampled point, which "
+                "says nothing about whether it fails elsewhere")
+        return _replace(
+            row, verdict="unknown",
+            sketch=f"{said} ({row.note})" if row.note else said,
+            note=f"{row.note or ''}; {said}".lstrip("; "))
+    return row
 
 
 #: why derive leaves a function's raise statements to the probe
@@ -6992,14 +7107,19 @@ _RAISES_UNREAD = ("derive cannot read the function's raise statements, so "
 
 def _last_clause(note: str) -> str:
     """The last `; `-separated clause of a note, a `; ` inside
-    parentheses not counting as a separator."""
+    parentheses not counting as a separator, nor the one inside the
+    Decimal arithmetic clauses (`_decimal_rounding.REASONS`)."""
+    from ._decimal_rounding import REASONS
     depth, cut = 0, 0
     for i, ch in enumerate(note):
         if ch in "([":
             depth += 1
         elif ch in ")]":
             depth = max(depth - 1, 0)
-        elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " ":
+        elif ch == ";" and depth == 0 and note[i + 1:i + 2] == " " \
+                and not any(i >= r.index(";")
+                            and note.startswith(r, i - r.index(";"))
+                            for r in REASONS):
             cut = i + 2
     return note[cut:]
 
@@ -7019,6 +7139,18 @@ def _derive_attempt_label(fallback: "Probe") -> str:
     return f"derive: {display}" + (f" ({reason})" if reason else "")
 
 
+def _last_probe_clause(note: str) -> str:
+    """The last `; `-separated clause of a probe's note, a Decimal
+    arithmetic clause (`_decimal_rounding.REASONS`, each holding a `; `
+    of its own) kept whole when it ends the note."""
+    from ._decimal_rounding import REASONS
+    for reason in REASONS:
+        _head, found, tail = note.rpartition(reason)
+        if found and "; " not in tail:
+            return reason + tail
+    return note.rsplit("; ", 1)[-1]
+
+
 def _probe_attempt_label(probed: "Probe") -> str:
     """A short 'probe: <status>' label for the attempt log."""
     if probed.verdict in ("holds", "falsified", "proven"):
@@ -7026,7 +7158,7 @@ def _probe_attempt_label(probed: "Probe") -> str:
     if probed.verdict == "skipped" and probed.sketch \
             and "not implemented" in probed.sketch:
         return f"probe: {probed.sketch.split(', ')[0]}"
-    reason = (probed.sketch or (probed.note or "").rsplit("; ", 1)[-1] or "").strip()
+    reason = (probed.sketch or _last_probe_clause(probed.note or "") or "").strip()
     if reason.startswith("conjectured by"):
         reason = "inconclusive"
     return f"probe: {probed.verdict}" + (f" ({reason})" if reason else "")
@@ -7036,7 +7168,7 @@ def _probe_said(probed: "Probe") -> str:
     """Why running the code did not settle a claim either, in words:
     `the probe could not decide it either (no point of the claim could
     be drawn)`."""
-    reason = (probed.sketch or (probed.note or "").rsplit("; ", 1)[-1] or "").strip()
+    reason = (probed.sketch or _last_probe_clause(probed.note or "") or "").strip()
     if not reason or reason.startswith("conjectured by"):
         return "the probe could not decide it either"
     return f"the probe could not decide it either ({reason})"
@@ -7098,7 +7230,8 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
         checked against its own float run), called on the point's exact
         values (`_exact_side.exact_sides` with `exact_calls`) under the
         fast wall-clock cap, the sides compared exactly (within the claim's
-        own declared tolerance, when it states one). True or False, or
+        own declared tolerance only for `~=`, `_exact_slack`). True or
+        False, or
         None when the evaluation cannot be carried out exactly.
 
     Notes:
@@ -7110,6 +7243,11 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     if not _inside_as_written(cj, env):
         return None
+    decided = _EXACT_DECISIONS.get()
+    key = (_exact_decision_key(cj, code_l, code_r, env, fn, bound_funcs)
+           if decided is not None else None)
+    if key is not None and key in decided and decided[key][0] is cj:
+        return decided[key][1]
     try:
         exact = _with_timeout(
             lambda: exact_sides(code_l, code_r, env,
@@ -7118,16 +7256,214 @@ def _exact_verdict(cj, code_l, code_r, env, fn, bound_funcs) -> "bool | None":
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return None
-    if exact is None:
+    verdict = (None if exact is None
+               else _exact_relation(cj, exact[0], exact[1]))
+    if key is not None:
+        # the claim is held with its decision, so no other claim takes
+        # its id while the check runs
+        decided[key] = (cj, verdict)
+    return verdict
+
+
+#: the exact decisions (`_exact_verdict`) one check has taken, each with
+#: its claim, by claim, point and functions (`_exact_decision_key`), None
+#: outside a check
+_EXACT_DECISIONS: contextvars.ContextVar = contextvars.ContextVar(
+    "mathema_exact_decisions", default=None)
+
+
+def _exact_decision_key(cj, code_l, code_r, env, fn, bound_funcs):
+    """Intent:
+        The key under which the exact decision of claim `cj` at the point
+        `env` is the same decision wherever it is taken in one check: the
+        claim, its relation, tolerance and negation, its two sides, the
+        point's values (`_exact_body.memo_key`; the vocabulary's functions
+        the point also carries are the same throughout the check)
+        and the functions the sides call, each read from a function shown
+        pure (`_exact_body.shown_pure`). None when a value has no key or
+        a function is not a reading of one shown pure, so the decision is
+        taken again.
+    """
+    from ._exact_body import memo_key, shown_pure
+    point = memo_key(tuple(sorted(
+        (k, v) for k, v in env.items()
+        if k != "__builtins__" and not callable(v))))
+    if point is None:
         return None
-    return _exact_relation(cj, exact[0], exact[1])
+    readings = []
+    for name, f in sorted({"f": fn, **(bound_funcs or {})}.items()):
+        inner = f
+        while getattr(inner, "__mathema_read_from__", None) is None \
+                and getattr(inner, "__wrapped__", None) is not None:
+            inner = inner.__wrapped__
+        original = getattr(inner, "__mathema_read_from__", None)
+        if original is None or not shown_pure(original):
+            return None
+        readings.append((name, id(original)))
+    return (id(cj), cj.relation, repr(cj.tolerance),
+            bool(getattr(cj, "negated", False)), code_l, code_r, point,
+            tuple(readings))
+
+
+#: the magnitude past which float64 rounds a value to an infinity
+#: (round to nearest: the largest float plus half its unit in the last
+#: place)
+_OVERFLOW_THRESHOLD = 2 ** 1024 - 2 ** 970
+
+
+def _within_an_ulp(left, right) -> bool:
+    """Intent:
+        Whether two compared sides lie within one unit in the last place
+        of the larger, so that moving a literal to a neighbouring double
+        could flip the comparison; True for sides that are not two real
+        numbers, which this does not measure.
+    """
+    import math as _math
+    from fractions import Fraction
+    if isinstance(left, bool) or isinstance(right, bool) \
+            or not isinstance(left, (int, float, Fraction)) \
+            or not isinstance(right, (int, float, Fraction)):
+        return True
+    try:
+        a, b = Fraction(left), Fraction(right)
+        unit = _math.ulp(max(abs(float(a)), abs(float(b))))
+    except (OverflowError, ValueError):
+        return True
+    return abs(a - b) <= Fraction(unit)
+
+
+def _overflowed_last(text, env) -> bool:
+    """Intent:
+        Whether the claim side written `text`, evaluated in `env`,
+        reaches its infinity at its last operation from finite operands:
+        through any `abs(...)`, unary `-` or `+` wrapping it, the
+        outermost operation whose operands are all finite numbers. False
+        when an operand is itself infinite (the overflow was in an inner
+        step), the side is a name or a literal, or it cannot be read.
+    """
+    import ast as _ast
+    import math as _math
+    if not text:
+        return False
+    try:
+        node = _ast.parse(str(text), mode="eval").body
+    except SyntaxError:
+        return False
+    while True:
+        if isinstance(node, _ast.UnaryOp) and isinstance(
+                node.op, (_ast.USub, _ast.UAdd)):
+            node = node.operand
+        elif isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name) \
+                and node.func.id == "abs" and len(node.args) == 1 \
+                and not node.keywords:
+            node = node.args[0]
+        else:
+            break
+    if isinstance(node, _ast.BinOp):
+        operands = [node.left, node.right]
+    elif isinstance(node, _ast.Call):
+        operands = [*node.args, *(k.value for k in node.keywords)]
+    else:
+        return False
+
+    def value(expr):
+        code = compile(_ast.Expression(body=expr), "<claim side>", "eval")
+        return eval(code, {"__builtins__": {}}, env)
+
+    for operand in operands:
+        try:
+            v = value(operand)
+        except Exception:
+            return False
+        try:
+            if not _math.isfinite(float(v)):
+                return False
+        except (TypeError, ValueError, OverflowError):
+            # a matrix or other value: finite when every entry is
+            try:
+                import numpy as _np
+                if not _np.all(_np.isfinite(_np.asarray(v, dtype=float))):
+                    return False
+            except Exception:
+                return False
+    return True
+
+
+def _overflow_reading(code_l, code_r, env, sides,
+                      texts=(None, None)) -> "tuple | None":
+    """Intent:
+        The sides of a draw with each infinity the claim's own float
+        arithmetic produced from finite values (a side holding one that
+        names no infinity itself: `inf`, `oo`, a constant bound to one)
+        read as what it stands for, a finite value of that sign at or
+        past float64's overflow threshold, 2**1024 - 2**970: against a
+        finite side below that threshold, or an infinity the claim
+        writes, that decides the relation by sign. This holds only when
+        the overflowing operation is the side's last one, up to `abs`
+        and a sign (`_overflowed_last`, reading the side's source in
+        `texts`): an overflow in an inner step leaves the side's value
+        unknown. None when the point is not evaluable: both sides
+        overflowed, the overflow is not the side's last operation, the
+        other side is an exact number at or past the threshold itself,
+        or a side is not a single number. `sides` unchanged when nothing
+        overflowed.
+    """
+    import math as _math
+    from fractions import Fraction
+
+    from .probing import holds_inf
+    sympy = sys.modules.get("sympy")
+
+    def infinite(value) -> bool:
+        if isinstance(value, float):
+            return _math.isinf(value)
+        return sympy is not None and isinstance(value, sympy.Basic) \
+            and value in (sympy.oo, -sympy.oo, sympy.zoo)
+
+    def writes_infinity(code) -> bool:
+        names = set()
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            names.update(c.co_names)
+            stack.extend(k for k in c.co_consts if hasattr(k, "co_names"))
+        return any(infinite(env.get(n)) or n in ("inf", "oo", "infinity")
+                   for n in names)
+
+    overflowed = [i for i, (code, side) in enumerate(((code_l, sides[0]),
+                                                      (code_r, sides[1])))
+                  if code is not None and holds_inf(side)
+                  and not writes_infinity(code)]
+    if not overflowed:
+        return sides
+    if len(overflowed) == 2:
+        return None
+    i = overflowed[0]
+    mine, other = sides[i], sides[1 - i]
+    if not isinstance(mine, float):
+        return None
+    if not _overflowed_last(texts[i], env):
+        return None
+    if isinstance(other, bool) or not isinstance(other, (int, float,
+                                                         Fraction)):
+        return None
+    if not (isinstance(other, float) and _math.isinf(other)):
+        try:
+            if abs(Fraction(other)) >= Fraction(_OVERFLOW_THRESHOLD):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    beyond = Fraction(2) ** 1024 * (1 if mine > 0 else -1)
+    out = list(sides)
+    out[i] = beyond
+    return tuple(out)
 
 
 def _exact_relation(cj, left, right) -> "bool | None":
     """Intent:
         The claim's relation between two exact sides, decided exactly:
         `a ~= b` as `abs(a - b) <= ε`, every other relation exactly
-        unless the claim declares a tolerance, a tolerance kind as the
+        whatever bare tolerance is declared, a tolerance kind as the
         whole allowance at each pair compared. A side sympy computed (a
         root, a transcendental value of a body read exactly) is settled
         symbolically (`_exact_side.decide_symbolic`), never under a
@@ -7146,16 +7482,18 @@ def _exact_relation(cj, left, right) -> "bool | None":
                                cj.tolerance, 0.0, None)
     return relation_holds_elementwise(
         left, right, cj.relation, _exact_slack(cj),
-        exact_inequality=cj.tolerance is None, rel_tol=0.0)
+        exact_inequality=True, rel_tol=0.0)
 
 
 def _exact_slack(cj) -> float:
     """The absolute slack a claim's relation gets when it is decided
-    exactly: the declared tolerance; else ε (`DEFAULT_TOLERANCE`) for
-    `~=`, which is `abs(a - b) <= ε`, and 0 for every other relation."""
-    if cj.tolerance is not None:
-        return cj.tolerance
-    return DEFAULT_TOLERANCE if cj.relation == "~=" else 0.0
+    exactly: for `~=`, which is `abs(a - b) <= ε`, ε, the declared
+    tolerance else `DEFAULT_TOLERANCE`; 0 for every other relation,
+    decided exactly on the mathematics line whatever tolerance is
+    declared (a declared tolerance binds the computation line only)."""
+    if cj.relation != "~=":
+        return 0.0
+    return cj.tolerance if cj.tolerance is not None else DEFAULT_TOLERANCE
 
 
 def _inside_as_written(cj, env) -> bool:
@@ -7230,6 +7568,23 @@ def _magnitude_corner(args) -> bool:
                for v in values)
 
 
+def _as_written_words(cj, code_l, code_r, env, calls) -> str:
+    """Intent:
+        The words a witness carries when a claim with a literal longer
+        than a double is false read as written while its float64 sides
+        pass: that the sides were in float64, then the sides read as
+        written and the relation between them, false; or, where the
+        sides cannot be shown, that it is false read as written.
+    """
+    from ._brute_force import _exact_text
+    sides = _exact_point_sides(code_l, code_r, env, *calls)({})
+    if sides is None:
+        return " in float64, and false with its literals read as written"
+    left, right = (_exact_text(v) for v in sides)
+    return (f" in float64; read as written the sides are {left} and "
+            f"{right}, and {left} {cj.relation} {right} is false")
+
+
 def _exact_point_sides(code_l, code_r, env, fn, bound_funcs):
     """A function of a point (`{param: exact value}`) evaluating the
     claim's sides with `fn` and `bound_funcs` (the functions as the exact
@@ -7275,14 +7630,19 @@ def _stands_in_for_derive(ctx: "_ClaimContext") -> bool:
     """Intent:
         Whether this probe stands in for a derive attempt that could not
         settle the mathematics (the wall clock, or sympy unable to close
-        the identity). Its draws then judge the mathematics, so a failure
+        the identity), or for any derive attempt that did not settle a
+        claim on route "derive", whose probe is a falsifier of the
+        mathematics. Its draws then judge the mathematics, so a failure
         of the float computation at a point where the claim holds exactly
         belongs to the computation line. Where derive does not apply at
-        all (an unliftable or unsupported claim) the probe is the
-        computation line itself, and such a point falsifies it.
+        all (an unliftable or unsupported claim) on another route the
+        probe is the computation line itself, and such a point falsifies
+        it.
     """
     fallen = ctx.derive_undecided
-    return fallen is not None and \
+    if fallen is None:
+        return False
+    return ctx.cj.route == "derive" or \
         (fallen.meta or {}).get("mathema.derive_status") == "undecided"
 
 
@@ -7333,12 +7693,16 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         a membership, or a comparison, in the claim loop's own words),
         or None when it holds there or cannot be evaluated.
     """
+    from ._decimal_rounding import holds_decimal, may_touch_decimal, watched
     trial_env = dict(env)
     for p, v in zip(kinds, args):
         trial_env[p] = v
+    hooked = holds_decimal(list(args)) or may_touch_decimal(
+        *(v for v in env.values() if callable(v)))
     try:
-        lv = eval(code_l, {"__builtins__": {}}, trial_env)
-        rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
+        with watched(hooked) as watch:
+            lv = eval(code_l, {"__builtins__": {}}, trial_env)
+            rv = eval(code_r, {"__builtins__": {}}, trial_env) if code_r is not None else None
     except Exception as e:
         if inputs_missing(args) and cj.relation not in ("in", "not in"):
             # a raise at a missing input is classified, not judged
@@ -7346,6 +7710,37 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         return (f"{_fmt(tuple(args), *labels)}: raised {_exits.exception_name(e)}, narrow "
                 "the claim's domain to where every call returns, or state "
                 "the raising region as its own raises(...) claim")
+    if watch.unread(lv, rv):
+        from ._decimal_rounding import touched_decimal
+        touched_decimal(*(v for v in env.values() if callable(v)))
+    if watch.rounded:
+        # a Decimal operation rounded: the point decides nothing, unless
+        # the sides miss by more than the rounding can account for
+        from ._allowance import relation_within
+        from ._decimal_rounding import beyond_rounding
+        if beyond_rounding(lv, rv, cj.relation, watch.precision,
+                           lambda a, b: relation_within(
+                               a, b, cj.relation, cj.tolerance, 0.0, None,
+                               exact_inequality=cj.tolerance is None)):
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
+                    f"a Decimal operation rounded, by more than rounding of the final "
+                    f"values to {watch.precision} digits can account for")
+        return None
+    if holds_decimal(lv) or holds_decimal(rv):
+        # a Decimal no watched context rounded may have rounded where no
+        # flag was read: a failure only past the rounding bound
+        from ._allowance import relation_within
+        from ._decimal_rounding import beyond_rounding
+        precision = watch.precision
+        if beyond_rounding(lv, rv, cj.relation, precision,
+                           lambda a, b: relation_within(
+                               a, b, cj.relation, cj.tolerance, 0.0, None,
+                               exact_inequality=cj.tolerance is None)):
+            return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}, where "
+                    f"a Decimal operation may have rounded unseen, by more "
+                    f"than rounding of the final values to {precision} "
+                    f"digits can account for")
+        return None
     if cj.relation in ("in", "not in"):
         if cj.rhs_bound is not None:
             sizes = _shapes.axis_sizes(cj.domain or {}, dict(zip(kinds, args)))
@@ -7492,7 +7887,8 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
     # exhaustive-coverage sketch), so it supersedes like any evidence;
     # a probe that found no value to compare says why, which is the
     # reason the claim stays open
-    winner = (probed if probed.verdict in ("proven", "holds", "falsified")
+    winner = (probed if probed.verdict in ("proven", "holds", "falsified",
+                                           "skipped:misspecified")
               or (probed.meta or {}).get("mathema.missing_unknown")
               else fallback)
     # the note leads with the deciding route's own sentence; the route
@@ -7593,6 +7989,10 @@ class _ClaimContext:
     # working domain, so derive excludes them and the probe skips (and
     # counts) the draws they refuse
     exclude_own_guards: bool = False
+    # an unbound method's receiver, `{name: probing.Instances}`: the
+    # instances of its class the routes that run the code draw it as,
+    # kept apart from `cj_domain`, which the mathematics reads
+    receiver: dict = field(default_factory=dict)
     guard_refused: int = 0
     # draws a path binding rejected because the path reached no value
     # (an index past the end, a field holding None) the bound does not
@@ -7607,12 +8007,13 @@ class _ClaimContext:
     # f's raise regions by construction (their negations feed the
     # decision machinery), probe skips raising samples as
     # outside-the-quantifier
-    # set by _adjudicate_derive when a route="derive" attempt came back
-    # undecided/unliftable: the unknown Probe it WOULD have reported,
-    # kept while the claim falls through to the probe stage, empirical
-    # evidence (holds or falsified) supersedes an unknown, and this
-    # fallback is what the loop reports when probe couldn't adjudicate
-    # either
+    # set by _adjudicate_derive when a derive attempt came back
+    # undecided/unliftable: the unknown Probe it WOULD have reported.
+    # On route "best" it is kept while the claim falls through to the
+    # probe stage, empirical evidence (holds or falsified) supersedes an
+    # unknown, and this fallback is what the loop reports when probe
+    # couldn't adjudicate either; on route "derive" it is the claim's
+    # row (`_derive_alone`)
 
     # whether a derive proof spawns its float companion: "spawn",
     # "math_only" (the claim opted out with route derive:math_only), or
@@ -7944,11 +8345,17 @@ def _validate_claim(cj, statement: str, note: str, facts,
                           f"{colliding[0]!r} is also a real parameter; use the "
                           f"explicit d(expr, {colliding[0][1:]}) form instead")
     cj_domain = {**domain, **cj.domain}   # inline quantifier wins
+    from .runtime_types import SEQUENCE_KINDS as _SEQ_KINDS
+    from .runtime_types import annotated_element as _annotated_element
     for p in cj.domain or {}:
         # an int annotation completes a binding that states no type to
-        # the integers (`[0, 10]` on `n: int` is `[0, 10] : int`)
-        cj_domain[p] = _int_completed(cj_domain[p],
-                                      facts.param_kinds.get(p))
+        # the integers (`[0, 10]` on `n: int` is `[0, 10] : int`), the
+        # elements' annotation a sequence's binding (`[0, 1]^n` on
+        # `xs: list[int]` is `[0, 1]^n : int`)
+        kind = facts.param_kinds.get(p)
+        if kind in _SEQ_KINDS and _annotated_element(fn, p) == "int":
+            kind = "[int]"
+        cj_domain[p] = _int_completed(cj_domain[p], kind)
     inferred_domain = _inferred_literal_domain(cj.lhs, facts.params)
     if cj.rhs:
         for p, bounds in _inferred_literal_domain(cj.rhs, facts.params).items():
@@ -7991,6 +8398,29 @@ def _validate_claim(cj, statement: str, note: str, facts,
                + "/".join(sorted({facts.param_kinds[p]
                                   for p in annotation_inferred}))
                + " annotation")
+    # a complex annotation completes an unbound parameter to the
+    # complex plane, as an int annotation does to the integers
+    complex_inferred = sorted(p for p in facts.params
+                              if facts.param_kinds.get(p) == "complex"
+                              and p in read and p not in cj_domain)
+    if complex_inferred:
+        cj_domain = {**{p: "C" for p in complex_inferred}, **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in C" for p in complex_inferred)
+               + " from its own complex annotation")
+    element_inferred = _element_inferred(fn, facts, read, cj_domain)
+    if element_inferred:
+        cj_domain = {**{p: b for p, (b, _w, _t) in element_inferred.items()},
+                     **cj_domain}
+        note = (f"{note}; inferred "
+               + ", ".join(f"{p} in {words} from its own {text} annotation"
+                           for p, (_b, words, text)
+                           in sorted(element_inferred.items())))
+    receiver = _receiver_instances(fn, facts, cj_domain)
+    receiver_draw = {receiver[0]: receiver[1]} if receiver is not None else {}
+    if receiver is not None:
+        note = (f"{note}; {receiver[0]} drawn as an instance of "
+                f"{receiver[1].cls.__name__}")
     literal_inferred = {p: b for p, (b, cat, _d) in stated.items()
                         if cat == "stated_values"}
     if literal_inferred:
@@ -8166,19 +8596,18 @@ def _validate_claim(cj, statement: str, note: str, facts,
         if refusal is not None:
             return Probe(cj.name, statement, "skipped:misspecified",
                          route=None, note=f"{note}; {refusal}")
-    if cj.relation in ("<=", ">=", "<", ">"):
-        complex_typed = sorted(
-            p for p, bound in cj_domain.items()
-            if bound == "C" or getattr(bound, "base_type", None) == "C")
-        if complex_typed:
-            # mirrors the derive route's refusal of ordering over
-            # opaque values: ordering was never meaningful to claim
-            # over the complex plane, so no route should pretend to
-            # adjudicate it.
-            return Probe(cj.name, statement, "skipped", route=None,
-                         note=f"{note}; ordering ({cj.relation}) isn't "
-                              f"meaningful over the complex plane "
-                              f"({', '.join(complex_typed)} ⊂ ℂ)")
+    complex_bound = {p for p, bound in cj_domain.items()
+                     if bound == "C" or getattr(bound, "base_type", None) == "C"}
+    ordered = _complex_ordered(cj, complex_bound, fn)
+    if ordered:
+        # the complex numbers have no order, so the claim is not well
+        # formed, whether the binding is written or inferred
+        relation, names = ordered
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=f"{note}; ordering ({relation}) has no meaning over "
+                          f"the complex plane ({', '.join(names)} ⊂ ℂ): compare "
+                          f"a real quantity instead, abs(...), re(...) or "
+                          f"im(...), or z.real and z.imag on a parameter")
     from .domain import KNOWN_BASE_TYPES, LanguageRef
     language_bound = {p: b for p, b in cj_domain.items()
                       if getattr(b, "base_type", None) == "L"}
@@ -8273,7 +8702,7 @@ def _validate_claim(cj, statement: str, note: str, facts,
                          cj_domain=cj_domain, extra=frozenset(cj.funcs),
                          missing={**implied_resolution, **resolution},
                          record_domain={**implied, **completed},
-                         implied=frozenset(implied))
+                         implied=frozenset(implied), receiver=receiver_draw)
 
 
 def _admitted_scalar_points(ctx) -> list:
@@ -9058,24 +9487,204 @@ def _as_domain_or_none(bound):
     return None if bound is None else _as_domain(bound)
 
 
-def _int_completed(bound, kind: "str | None"):
+def _complex_ordered(cj, complex_names: set, fn=None) -> "tuple | None":
     """Intent:
-        A real binding that states no type, completed to the integers
-        when its parameter is annotated `int` (`[0, 10]` on `n: int` is
-        `[0, 10] : int`); any other binding unchanged. A type the claim
-        states wins.
+        `(relation, names)` for the first ordering the claim states
+        (`<`, `<=`, `>`, `>=`, a chain's links included) that compares a
+        complex value: a side reading a parameter that ranges over C as
+        a complex number (`z`, `z * 2`, `f(z)` where f is annotated to
+        return a complex), the complex names it reads; None when every
+        ordering compares real quantities (`abs(...)`, `re(...)`,
+        `im(...)`, `.real`, `.imag`, or `f(z)` where f is annotated to
+        return a real number) or f's result type is not stated (the
+        values it returns decide).
     """
-    from dataclasses import replace
+    if not complex_names:
+        return None
+    result = _result_kind(fn)
+    links = list(cj.links or [(cj.lhs, cj.relation, cj.rhs)])
+    for lhs, relation, rhs in links:
+        if relation not in ("<=", ">=", "<", ">"):
+            continue
+        found: set = set()
+        for text in (lhs, rhs):
+            if not text:
+                continue
+            try:
+                tree = ast.parse(str(text), mode="eval")
+            except SyntaxError:
+                continue
+            found |= _complex_reads(tree, complex_names, result)
+        if found:
+            return relation, sorted(found)
+    return None
 
-    from .domain import _as_domain
-    if kind != "int" or bound is None or isinstance(bound, (str, frozenset)):
-        return bound
-    dom = _as_domain(bound)
-    if dom.explicit_type or dom.base_type != "R" or dom.dims \
-            or not dom.pieces \
-            or any(isinstance(piece, frozenset) for piece in dom.pieces):
-        return bound
-    return replace(dom, base_type="Z", explicit_type=True)
+
+def _result_kind(fn) -> "str | None":
+    """`complex` or `real` by f's return annotation, None when it states
+    neither."""
+    try:
+        ann = callable_signature(fn).return_annotation if fn is not None else None
+    except (TypeError, ValueError):
+        return None
+    if ann in (complex, "complex"):
+        return "complex"
+    if ann in (float, int, bool, "float", "int", "bool"):
+        return "real"
+    return None
+
+
+def _complex_reads(node, complex_names: set, result: "str | None" = None) -> set:
+    """The names in `complex_names` an expression reads as complex
+    numbers: outside `abs(...)`, `re(...)`, `im(...)`, `.real` and
+    `.imag`, and outside a call of f unless f returns a complex
+    (`result`)."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ("abs", "Abs", "re", "im"):
+        return set()
+    if isinstance(node, ast.Attribute) and node.attr in ("real", "imag"):
+        return set()
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == "f" and result != "complex":
+        return set()
+    if isinstance(node, ast.Name):
+        return {node.id} & complex_names
+    out: set = set()
+    for child in ast.iter_child_nodes(node):
+        out |= _complex_reads(child, complex_names, result)
+    return out
+
+
+def _receiver_premises(fn, facts) -> list:
+    """Intent:
+        The premises a method's receiver satisfies by construction,
+        `[(lhs, relation, rhs), ...]` over its fields
+        (`_receivers.constructor_premises`): what its class's
+        constructor admits. Empty for any other function, or a
+        constructor that cannot be read that way.
+    """
+    from .runtime_types._receivers import constructor_premises, method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0]:
+        return []
+    return constructor_premises(receiver[1], receiver[0]) or []
+
+
+def _receiver_witness_held(gated: "Probe", proof, fn) -> "Probe":
+    """Intent:
+        A derive disproof held to the instances the receiver's class
+        builds: when the witness sets fields of a method's receiver
+        (`self.k = -1`) and the class builds an instance through a
+        constructor of its own or a `__post_init__`, the instance is
+        built with each same-named argument at the witness's value. A
+        build the class refuses, or an instance whose fields differ from
+        the witness (a constructor that transforms its argument), means
+        the witness is no instance of the class: the disproof is not
+        reproduced and the verdict is unknown with the reason. Any other
+        verdict or witness is returned as it is.
+    """
+    import dataclasses
+
+    from .runtime_types._receivers import _own_init, constructor_kinds, method_receiver
+    if gated.verdict != "falsified":
+        return gated
+    receiver = method_receiver(fn)
+    witness = getattr(proof, "witness", None) or {}
+    if receiver is None or not isinstance(witness, dict):
+        return gated
+    name, cls = receiver
+    fields = {k[len(name) + 1:]: v for k, v in witness.items()
+              if isinstance(k, str) and k.startswith(f"{name}.")}
+    builds = (hasattr(cls, "__post_init__") if dataclasses.is_dataclass(cls)
+              else _own_init(cls))
+    if not fields or not builds:
+        return gated
+    if dataclasses.is_dataclass(cls):
+        plan = [f.name for f in dataclasses.fields(cls) if f.init]
+    else:
+        plan = list(constructor_kinds(cls) or {})
+    values = {a: fields[a] for a in plan if a in fields}
+    shown = ", ".join(f"{name}.{k} = {v}" for k, v in fields.items())
+    try:
+        inst = cls(**values)
+    except Exception as exc:
+        reason = (f"{cls.__name__}({', '.join(f'{k}={v}' for k, v in values.items())})"
+                  f" raises {type(exc).__name__}: the witness {shown} is no "
+                  f"instance of {cls.__name__}")
+    else:
+        moved = [k for k, v in fields.items() if getattr(inst, k, object()) != v]
+        if not moved:
+            return gated
+        reason = (f"{cls.__name__}'s constructor does not build an instance "
+                  f"with {shown}")
+    gated.verdict = "unknown"
+    gated.counterexample = None
+    gated.meta = {**(gated.meta or {}),
+                  "mathema.corroboration": "uncorroborated"}
+    gated.note = (f"{gated.note}; derive found this claim false at {shown}, "
+                  f"but {reason}, so the disproof is not reproduced on any "
+                  f"instance and the verdict stays unknown").lstrip("; ")
+    return gated
+
+
+def _receiver_instances(fn, facts, cj_domain: dict):
+    """Intent:
+        `(name, probing.Instances)` for an unbound method's receiver
+        the claim does not bind itself: the instances of its class every
+        route draws it as, each field inside the claim's binding of it
+        (`for self.rate in [0, 1]`); None for any other function, or a
+        receiver mathema has no way to draw.
+    """
+    from .probing import Instances
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None or not facts.params or facts.params[0] != receiver[0] \
+            or receiver[0] in cj_domain:
+        return None
+    bundle = _instance_bundles(fn, facts).get(receiver[0])
+    if bundle is None:
+        return None
+    cls, fields = bundle
+    kinds = tuple((f, _field_kind(cls, f)) for f in fields)
+    bounds = tuple((f, cj_domain.get(f"{receiver[0]}.{f}")) for f in fields)
+    return receiver[0], Instances(cls, kinds, bounds)
+
+
+def _element_inferred(fn, facts, read, cj_domain: dict) -> dict:
+    """Intent:
+        `{param: (element domain, words, annotation text)}` for each
+        sequence parameter the claim reads and nothing binds whose
+        annotation states the type of its elements as `int`, `bool` or
+        `str` (`list[int]`, `NDArray[np.int64]`): the integers, the two
+        bools or the type of strings, an element range drawn at an
+        independent length, as an `int`, `bool` or `str` annotation
+        completes a scalar. `words` renders it (`Z^n`).
+    """
+    from .domain import Domain
+    from .runtime_types import SEQUENCE_KINDS, annotated_element
+    from .types import missing_policy_from_signature
+    out: dict = {}
+    candidates = [p for p in facts.params
+                  if facts.param_kinds.get(p) in SEQUENCE_KINDS
+                  and p in read and p not in cj_domain]
+    if not candidates:
+        return out
+    policy = missing_policy_from_signature(fn)
+    for p in candidates:
+        element = annotated_element(fn, p)
+        if element == "int":
+            bound, words = "Z", "Z^n"
+        elif element == "bool":
+            bound, words = frozenset({False, True}), "{False, True}^n"
+        elif element == "str":
+            bound = Domain(base_type="S", explicit_type=True, clause=True)
+            words = "S^n"
+        else:
+            continue
+        defaults = policy.get(p)
+        text = defaults.slot_type if defaults is not None else element
+        out[p] = (bound, words, text)
+    return out
 
 
 def _complete_missing(cj, fn) -> tuple:
@@ -9139,6 +9748,10 @@ def _complete_missing(cj, fn) -> tuple:
             if defaults.slot_type == "int" and stated.base_type == "R":
                 notes.append(f"the claim widens the type of {p} from int "
                              f"to the reals")
+            elif defaults.slot_type.endswith("[int]") and stated.dims \
+                    and stated.base_type == "R":
+                notes.append(f"the claim widens the type of {p}'s elements "
+                             f"from int to the reals")
             elif defaults.slot_type == "float" and stated.base_type in ("Z", "N"):
                 notes.append(f"the claim narrows the type of {p} from float "
                              f"to the integers")
@@ -9798,13 +10411,20 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     missing = _admitted_scalar_points(ctx) + containers
 
     def run(cj, witness=None):
-        return _float_companion(proven, cj, fn, facts, ctx.cj_domain,
+        return _float_companion(proven, cj, fn, facts,
+                                {**ctx.cj_domain, **ctx.receiver},
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
                                 excluded=excluded, witness=witness)
     found_at: dict = {}
-    companion = run(ctx.cj, found_at)
+    from .runtime_types._receivers import ReceiverRefused
+    try:
+        companion = run(ctx.cj, found_at)
+    except ReceiverRefused as refused:
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion": f"none ({refused})"}
+        return
 
     def run_with(bound):
         line = run(_with_infinity(ctx.cj, bound))
@@ -10019,6 +10639,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     # claim then gets adjudicated over a region its author excluded.
     assumption = (None if ctx.assumption is None else
                   [(a.lhs, a.relation, a.rhs) for a in ctx.assumption])
+    built = _receiver_premises(fn, facts)
+    if built:
+        # derive ranges over the instances the receiver's class builds
+        assumption = (assumption or []) + built
+        note = (f"{note}; derive reads {facts.params[0]} over the instances "
+                f"its class builds ("
+                + ", ".join(f"{a} {r} {b}" for a, r, b in built) + ")").lstrip("; ")
     refused = _guard_refuses_part_of_the_claim(ctx, fn, facts)
     if refused is not None:
         # the guard is the function's domain: a claim reaching inputs it
@@ -10205,9 +10832,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                               route="derive", sketch=dproof.sketch,
                               counterexample=dproof.counterexample,
                               note=note, meta=_provenance_meta(dproof))
-            return _corroboration_gate(falsified, dproof, cj, fn, facts,
-                                       cj_domain, _bound_callables(cj),
-                                       assum=assumption or [])
+            return _receiver_witness_held(
+                _corroboration_gate(falsified, dproof, cj, fn, facts,
+                                    {**cj_domain, **ctx.receiver},
+                                    _bound_callables(cj),
+                                    assum=assumption or []), dproof, fn)
         if dproof is not None and dproof.sketch:
             definitions_hint = dproof.sketch
     # a claim over vectors or matrices (an `R^n`/`R^(m,n)` domain, a
@@ -10259,11 +10888,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {why}",
             meta={"mathema.derive_status":
                   (mproof.status if mproof is not None else "unliftable")})
-        if cj.route == "derive":
-            # strict: this route promises proof-strength evidence, so
-            # an undecided identity is the honest unknown, never a
-            # silent fall to sampling.
-            return unknown
+        # route "best" takes the probe's evidence over this unknown;
+        # route "derive" takes only a counterexample the probe executes
         ctx.derive_undecided = unknown
         return None
     no_ordinary_derive = cj.relation in routes.examine_predicates()
@@ -10279,9 +10905,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # the registered family declined and there is no ordinary
             # derive route for this predicate: the claim's own verdict
             # is unknown, but empirical evidence supersedes an unknown;
-            # stash the would-be report (feeds the cross-route trail)
-            # and fall to the probe stage, on derive OR best (the
-            # predicate families all have probe routes).
+            # stash the would-be report (feeds the cross-route trail),
+            # which route "best" takes to the probe stage (the predicate
+            # families all have probe routes) and route "derive" reports.
             ctx.derive_undecided = Probe(
                 cj.name, statement, "unknown", route="derive",
                 note=f"{note}; the built-in claim {cj.relation} could not "
@@ -10434,6 +11060,20 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             return witnessed
     elif proof.status in ("undecided", "unliftable"):
         swept = _brute_force_fallback()
+        if swept is not None and swept.meta.get("mathema.sweep_holds") \
+                and swept.meta.get("mathema.sweep_inexact") \
+                and cj.route == "derive":
+            # every point executed and agreed, but some only inexactly:
+            # no proof, and on the derive route no holds either; the
+            # probe's falsifier still runs
+            ctx.derive_undecided = Probe(
+                cj.name, statement, "unknown", route="derive",
+                sketch=swept.sketch,
+                note=(f"{note + '; ' if note else ''}the sweep ran every "
+                      f"point of the finite domain and is no proof"),
+                meta={"mathema.derive_status": "undecided",
+                      **_provenance_meta(swept)})
+            return None
         if swept is not None and swept.meta.get("mathema.sweep_holds"):
             # every point executed and agreed, over a function the strict
             # examination could not show pure: holds, never proven
@@ -10536,9 +11176,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                           meta=_provenance_meta(proof))
         # a symbolic decider can be wrong, only trust the disproof
         # once it reproduces against the REAL function
-        gated = _corroboration_gate(falsified, proof, cj, fn, facts,
-                                    cj_domain, bound_funcs,
-                                    assum=assumption or [])
+        gated = _receiver_witness_held(
+            _corroboration_gate(falsified, proof, cj, fn, facts,
+                                {**cj_domain, **ctx.receiver}, bound_funcs,
+                                assum=assumption or []), proof, fn)
         if gated.verdict == "falsified" and ctx.exclude_own_guards \
                 and _refused_by_own_guard(fn, proof.witness
                                           or _point_of(gated.counterexample)):
@@ -10591,15 +11232,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                   f"{swept.sketch}",
                              meta={**_provenance_meta(swept), **flagged})
         # an unknown is superseded by real empirical evidence like any
-        # other, stash the flagged report and fall through to the
-        # probe stage; the uncorroborated meta rides on the stash so
-        # the engine-bug signal survives whichever route wins
+        # other on route "best": stash the flagged report and fall
+        # through to the probe stage (route "derive" reports the stash);
+        # the uncorroborated meta rides on the stash so the engine-bug
+        # signal survives whichever route wins
         ctx.derive_undecided = gated
         return None
-    # undecided/unliftable. A route="derive" claim stays
-    # skipped, never downgraded to probing: it promises
-    # proof-strength evidence, and strict mode should
-    # surface the gap, not paper over it. `proof.status`
+    # undecided/unliftable. `proof.status`
     # (one of "undecided"/"unliftable") is also tagged in
     # `meta`, structured rather than only free text,
     # "genuinely unliftable" and "liftable but undecided"
@@ -10619,31 +11258,18 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # route coverage needs to tell them apart the same
         # way it already tells unliftable from undecided.
         skip_meta["mathema.timeout"] = proof.meta["mathema.timeout"]
-    # genuinely undecided/unliftable, on derive OR best: the claim's
-    # own verdict is "unknown" (its epistemic state never moved), but
-    # an unknown is superseded by real empirical evidence either way;
-    # stash the would-be report (the cross-route trail and, for
-    # route="derive", the fallback if probing can't decide either) and
-    # fall through to the probe stage. Meta says which kind of
-    # couldn't-decide this was.
+    # genuinely undecided/unliftable: the claim's own verdict is
+    # "unknown" (its epistemic state never moved). Stash the report:
+    # on route "best" empirical evidence from the probe stage
+    # supersedes it, on route "derive" it is the claim's row
+    # (`_derive_alone`). Meta says which kind of couldn't-decide this
+    # was.
     ctx.derive_undecided = Probe(
         cj.name, statement, "unknown", route="derive",
         sketch=proof.sketch,
         note=note + "; derive could not decide it",
         meta=skip_meta)
     ctx.derive_intermediates = getattr(proof, "intermediates", None)
-    return None
-    # route == "best": fall through to the probe stage rather
-    # than reporting skipped, a proof attempt that couldn't
-    # decide is not the same as a claim nobody ever tried to
-    # check empirically. The reported route is plain "probe",
-    # same as a claim that was always probe-only: why it fell
-    # back isn't carried onto the output record (a caller can
-    # run diagnostics on the function directly if they need
-    # that). "probe:semi_analytical" is reserved for when the
-    # probe itself was informed by critical-point sampling
-    # (probing.py's own battery), which this fallback path
-    # doesn't do.
     return None
 
 
@@ -10707,6 +11333,90 @@ def _recursion_depth_witness(ctx: "_ClaimContext", fn, facts, bound_funcs,
                  stratum=_machine_failure_stratum(raised[-1], where),
                  meta={"mathema.corroboration": "reproduced",
                        "mathema.recursion_depth": dict(info)})
+
+
+def _lifted_miss_unexecuted(ctx: "_ClaimContext", fn, facts,
+                            lifted: "Probe") -> "str | None":
+    """Intent:
+        Whether a miss the sampling of derive's reconstructed formula
+        found (`probe:lifted_numeric`) is a witness: None when the code,
+        run exactly at its point, fails the claim; otherwise the sentence
+        saying why the point is no witness (the claim has forms the code
+        cannot evaluate, the point cannot be read back, or the code run
+        there does not fail the relation exactly).
+    """
+    from ._exact_body import exact_callee
+    from .runtime_types import calling
+    cj = ctx.cj
+    where = f"derive's reconstruction misses the claim at {lifted.counterexample}"
+    point = _point_of(lifted.counterexample)
+    if not point:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    names = set(facts.params)
+    try:
+        code_l, _aux_l = _validate(cj.lhs, names, ctx.extra)
+        code_r, _aux_r = _validate(cj.rhs, names, ctx.extra)
+    except InvalidConjecture:
+        return (f"{where}, but the code cannot evaluate the claim there (its "
+                f"forms are read only by the reconstruction), so that point "
+                f"is no witness")
+    try:
+        env = {name: float(value) for name, value in point.items()}
+    except ValueError:
+        return f"{where}, a point that cannot be read back, so it is no witness"
+    bound = {name: exact_callee(v) for name, v in _bound_funcs_of(cj).items()}
+    exact = _exact_verdict(cj, code_l, code_r, env,
+                           calling(exact_callee(fn), facts), bound)
+    if exact is False:
+        return None
+    return (f"{where}, but the code run there "
+            f"{'satisfies it exactly' if exact else 'has no exact reading of it'}"
+            f", so that point is no witness")
+
+
+def _derive_alone(ctx: "_ClaimContext", probed: "Probe",
+                  not_a_witness: "str | None" = None) -> "Probe":
+    """Intent:
+        The row of a route="derive" claim neither derive nor the probe's
+        falsifier settled: unknown on the derive route, the derive
+        attempt's own report when one was kept (`ctx.derive_undecided`),
+        its reason in the note, then what the probe found: how many
+        draws found no counterexample (a sampled pass is no verdict on
+        this route), or why it could not run them, or, for a miss of
+        derive's reconstruction, why that point is no witness
+        (`not_a_witness`).
+        `mathema.routes_attempted` names both attempts.
+    """
+    cj = ctx.cj
+    fallen = ctx.derive_undecided
+    if fallen is None:
+        fallen = Probe(cj.name, ctx.statement, "unknown", route="derive",
+                       note=f"{ctx.note}; derive could not decide it".lstrip("; "),
+                       meta={"mathema.derive_status": "undecided"})
+    note = fallen.note or ""
+    if fallen.sketch and fallen.sketch not in note:
+        note = f"{note} ({fallen.sketch})" if note.endswith(
+            "derive could not decide it") else f"{note}; {fallen.sketch}"
+    finding = (probed.meta or {}).get("mathema.computation_finding")
+    if not_a_witness is not None:
+        said = not_a_witness
+    elif probed.verdict in ("holds", "proven"):
+        drawn = probed.n or 0
+        said = (f"the probe's {drawn} draw{'s' if drawn != 1 else ''} found "
+                f"no counterexample, and on the derive route a sampled pass "
+                f"is not a verdict")
+        if finding:
+            said = f"{said}; {finding}"
+    else:
+        said = _probe_said(probed)
+    fallen.note = f"{note}; {said}".lstrip("; ")
+    fallen.meta = {**(fallen.meta or {}),
+                   "mathema.routes_attempted":
+                       f"routes attempted, {_derive_attempt_label(fallen)}; "
+                       f"{_probe_attempt_label(probed)}"}
+    if finding and probed.verdict in ("holds", "proven"):
+        fallen.meta["mathema.computation_finding"] = finding
+    return fallen
 
 
 def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
@@ -11161,9 +11871,35 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     """
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     try:
-        return _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
+        row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
+    # a negated predicate's probe ran the positive claim
+    return _negation_of(row) if ctx.cj.negated else row
+
+
+def _literals_beyond_float(cj) -> list:
+    """Intent:
+        The numeric literals a claim's sides write that float64 reads as
+        an infinity (`1e400`), each as written; empty when there is none.
+    """
+    import math
+    out: list = []
+    for text in (cj.lhs, cj.rhs, *(part for link in (cj.links or ())
+                                   for part in (link[0], link[2]))):
+        if not text:
+            continue
+        try:
+            tree = ast.parse(str(text), mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, float) \
+                    and math.isinf(node.value):
+                written = ast.get_source_segment(str(text), node) or repr(node.value)
+                if written not in out:
+                    out.append(written)
+    return out
 
 
 #: whether a `None` that f returns is the null hole of the runtime its
@@ -11287,7 +12023,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         with _premises.active(guard):
             algo_result = algo_route(
                 guard.wrap(family_fn) if guard is not None else family_fn,
-                facts, family_cj, cj_domain, setup.rng, setup.budget)
+                facts, family_cj, {**cj_domain, **ctx.receiver}, setup.rng,
+                setup.budget)
         premise_unmet = (guard is not None and guard.admitted == 0
                          and guard.rejected > 0)
         if algo_result is not None:
@@ -11563,13 +12300,20 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     import random as _random_mod
 
     from ._sampling import _RNG_SEED
-    from .runtime_types import annotated_container, as_annotated
+    from .probing import bound_element_type
+    from .runtime_types import annotated_container, as_annotated, as_element_type
     # the set, frozenset or tuple a sequence parameter's annotation
-    # names: every draw of it, a recorded witness replayed included, is
-    # passed as a member of that type
-    annotated = {_p: made for _p, _k in kinds.items()
-                 if _k in SEQUENCE_KINDS
-                 and (made := annotated_container(fn, _p)) is not None}
+    # names, and the type of its elements: every draw of it, a recorded
+    # witness replayed included, is passed as a member of that type
+    containers_of = {_p: made for _p, _k in kinds.items()
+                     if _k in SEQUENCE_KINDS
+                     and (made := annotated_container(fn, _p)) is not None}
+
+    def as_typed(value, p):
+        typed = as_annotated(value, containers_of.get(p))
+        if kinds.get(p) not in SEQUENCE_KINDS:
+            return typed
+        return as_element_type(typed, bound_element_type(sample_bound(p)))
     implied_rng = _random_mod.Random(_RNG_SEED + 1)
     for _p, _k in kinds.items():
         # a length is the floor's to choose only when no other parameter
@@ -11586,7 +12330,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                  if key.startswith(_p + ".")
                                  and key[len(_p) + 1:].isidentifier()},
                                 reach=pinf,
-                                distinct=annotated.get(_p) in (set, frozenset))
+                                distinct=containers_of.get(_p) in (set, frozenset))
         if made is not None:
             containers[_p] = made
 
@@ -11637,8 +12381,30 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # allowance there and the arguments it happened at
     passed_gap, passed_allowance, passed_at = 0.0, 0.0, None
     inconclusive = 0
+    # whether the claim writes a literal with more digits than a double
+    # carries, which its float evaluation reads rounded
+    # a literal float64 cannot carry (more digits than a double, or past
+    # its range, where it reads as an infinity): each draw is decided on
+    # the number as written, exactly
+    long_literals = bool(overlong_literals(" ".join(
+        str(part) for part in (cj.lhs, cj.rhs,
+                               *(side for link in (cj.links or ())
+                                 for side in (link[0], link[2])))
+        if part))) or bool(_literals_beyond_float(cj))
+    # the draws where the claim's own float arithmetic overflowed and
+    # its sides have no exact reading, and the first of them
+    overflowed, overflowed_at = 0, None
     # the draws where the claim's own side has no value, exact or float
     undecided, undecided_at = 0, None
+    # the draws not counted for their Decimal arithmetic, the first of
+    # them, and why (`_decimal_rounding.REASONS`)
+    rounded, rounded_at, rounded_why = 0, None, None
+    from ._decimal_rounding import (UNSEEN, beyond_rounding, holds_decimal,
+                                    may_touch_decimal, touched_decimal,
+                                    watched)
+    # whether a draw's computation can reach decimal arithmetic, so its
+    # calls are read for the decimal contexts' own methods
+    touches_decimal = may_touch_decimal(fn, *bound_funcs.values())
     pinned = _pinned_arg_sets(cj, len(kinds), kinds=list(kinds.values()))
     # `^n` holds n = 1: after every other draw, one more takes every free
     # axis that two parameters share, or that spans a matrix, at its
@@ -11690,8 +12456,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a Decimal NaN), as `(label, member)`
     call_hole: list = [None]
     # the LABEL and sign of the first callee to return an infinity for
-    # finite arguments
-    call_inf: list = [None, 0]
+    # finite arguments, with that callee and the arguments it was called
+    # with
+    call_inf: list = [None, 0, None]
     # the first point where the float computation gave no value, or
     # missed the result beyond its precision, while the claim holds
     # there in exact arithmetic: the `[float]` line's witness, with the
@@ -11702,6 +12469,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     computation_meta: dict = {}
     computation_finding = None
     stands_in = _stands_in_for_derive(ctx)
+    # on route "derive" the probe falsifies the mathematics only: a point
+    # counts against the claim only where its exact reading fails it
+    derive_falsifier = cj.route == "derive" and ctx.derive_undecided is not None
     # a library definition row: a failure only at a magnitude corner is a
     # finding about the library's computation, and the row stands
     from .compendium import library_key_of
@@ -11764,7 +12534,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if sign and not any(
                         is_missing(v) or holds_nan(v) or holds_inf(v)
                         for v in (*a, *k.values())):
-                    call_inf[0], call_inf[1] = label, sign
+                    call_inf[:] = [label, sign, (callee, a, k)]
             return value
         return _wrapped
 
@@ -11781,10 +12551,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     array_names = [p for p in array_ranks
                    if p in kinds or p in (cj.free_vars or ())]
     as_arrays = bool(array_names) and _numpy() is not None
-    # a witness over vectors or matrices names each argument
+    # a witness names each argument the claim reads or passes, by name,
+    # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    if as_arrays:
-        arg_names, shown_names = tuple(kinds), None
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+                                  if p in kinds}
+                   if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
                      for p, k in kinds.items() if k == "table"}
     fn_call = calling(fn, facts, _declared_elements(cj_domain))
@@ -11993,7 +12765,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # a fixed implementation must clear the exact point that
             # broke it before fresh evidence counts.
             for p, v in zip(kinds, pinned[trial]):
-                v = as_annotated(v, annotated.get(p))
+                v = as_typed(v, p)
                 env[p] = v
                 args.append(v)
         else:
@@ -12039,7 +12811,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     env[p] = v
                     args.append(v)
                     continue
-                if p in bundles:
+                if p in bundles and (cj_domain.get(p) is None or getattr(
+                        cj_domain.get(p), "base_type", None) == "L"):
+                    # an instance of the class, unless the claim binds the
+                    # parameter to values itself: the binding is the draw
                     v = narrowed(p, lambda p=p: _synth_instance(
                         bundles[p], p, cj_domain, rng, specials))
                     env[p] = v
@@ -12120,7 +12895,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # claim draws are the ones it drew without them
                     v = containers[p].next(list(v), implied_rng if p in ctx.implied
                                            else rng)
-                v = as_annotated(v, annotated.get(p))
+                v = as_typed(v, p)
                 env[p] = v
                 args.append(v)
             for p, draw in premise_draws.items():
@@ -12128,8 +12903,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # the sample lies on the premise by construction
                 if p in literal_args:
                     continue
-                v = as_annotated(draw(rng, trial_sizes.get(resolver.key(p, 0))),
-                                  annotated.get(p))
+                v = as_typed(draw(rng, trial_sizes.get(resolver.key(p, 0))), p)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:
@@ -12232,8 +13006,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"
             break
         try:
-            lv = eval(code_l, {"__builtins__": {}}, env)
-            rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
+            with watched(touches_decimal or holds_decimal(list(args))) \
+                    as watch:
+                lv = eval(code_l, {"__builtins__": {}}, env)
+                rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
             if as_arrays:
                 # a 1-by-1 result (`x.T @ A @ x` over a column) is the
                 # number it holds
@@ -12256,6 +13032,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                          if call_inf[0] is not None else "f returned nan")
                       + ", and no value for a finite input")
                 break
+            if not call_raised[0] and long_literals and cj.tolerance is None:
+                # the claim's own side raised on its float evaluation,
+                # which reads a long literal rounded: decided on the
+                # number written where the sides can be read exactly
+                written = _exact_verdict(cj, code_l, code_r, env,
+                                         *_exact_calls())
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                if written is True:
+                    checked += 1
+                    continue
+                if written is False:
+                    checked += 1
+                    cx = (f"{_point_text(args)}: the claim is false here, "
+                          f"its own side read exactly as written")
+                    break
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
@@ -12464,6 +13256,53 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if exact_raise is True else
                           _machine_failure_stratum(e, _point_text(args)))
             break
+        if watch.unread(lv, rv):
+            # a Decimal from a run not read: every later draw is read
+            touched_decimal(fn, *bound_funcs.values())
+            touches_decimal = True
+        if watch.rounded and beyond_rounding(
+                lv, rv, cj.relation, watch.precision,
+                lambda a, b: relation_within(
+                    a, b, cj.relation, cj.tolerance, 0.0, claim_side,
+                    exact_inequality=cj.tolerance is None)):
+            # the executed sides miss by more than rounding to the
+            # context's precision can account for: a witness
+            checked += 1
+            cx = (f"{_point_text(args)}: {lv!r} vs {rv!r}, where a Decimal "
+                  f"operation rounded, by more than rounding of the final values to "
+                  f"{watch.precision} digits can account for")
+            break
+        unseen = False
+        if not watch.rounded and (holds_decimal(lv) or holds_decimal(rv)):
+            # a Decimal no watched context rounded, with no exact
+            # reading: it may have rounded where no flag was read
+            made = list(f_call.calls)
+            unseen = _exact_verdict(cj, code_l, code_r, env,
+                                    *_exact_calls()) is None
+            f_call.calls = made
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if unseen and beyond_rounding(
+                lv, rv, cj.relation, watch.precision,
+                lambda a, b: relation_within(
+                    a, b, cj.relation, cj.tolerance, 0.0, claim_side,
+                    exact_inequality=cj.tolerance is None)):
+            # a Decimal that may have rounded unseen, missing by more than
+            # rounding to the smallest precision watched can account
+            # for: the executed values are a witness
+            checked += 1
+            cx = (f"{_point_text(args)}: {lv!r} vs {rv!r}, where a Decimal "
+                  f"operation may have rounded unseen, by more than rounding "
+                  f"of the final values to {watch.precision} digits can "
+                  f"account for")
+            break
+        if watch.rounded or unseen:
+            # a Decimal operation rounded: the sides are neither the
+            # mathematics nor float64 values, and the draw is not counted
+            rounded += 1
+            if rounded_at is None:
+                rounded_at = _point_text(args)
+                rounded_why = watch.reason if watch.rounded else UNSEEN
+            continue
         if cj.relation in ("in", "not in") and not asks_missing \
                 and at_missing(args) \
                 and classified(args, f_call.outputs() or [lv, rv]):
@@ -12523,9 +13362,27 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 corner_finding = _drawn_text(args)
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
+        exact_at = (_exact_verdict(cj, code_l, code_r, env, *_exact_calls())
+                    if float_gave_out and (ctx.companion_mode == "spawn"
+                                           or stands_in) else None)
+        # on the derive route an infinity from finite inputs at a point
+        # with no exact reading of the claim is read from the callee's
+        # own evidence (`_nonfinite_cause`): no value (a pole numpy
+        # reports, the body's own infinity) is a counterexample, an
+        # overflow is a finding about the computation, and an infinity
+        # nothing tells either way is no counterexample; a nan or a hole
+        # there is no value in any reading, and stays one
+        inf_cause = "no value"
+        if (derive_falsifier and exact_at is None
+                and call_inf[0] is not None and call_nan[0] is None
+                and call_hole[0] is None):
+            from .claim_families import _nonfinite_cause
+            callee, inf_args, inf_kwargs = call_inf[2]
+            inf_cause = _nonfinite_cause(callee, math.inf * call_inf[1],
+                                         None, inf_args, inf_kwargs)
+        derive_overflow = inf_cause != "no value"
         if float_gave_out and (ctx.companion_mode == "spawn" or stands_in) \
-                and _exactly_holds_at(cj, code_l, code_r, env,
-                                      *_exact_calls()):
+                and (exact_at is True or derive_overflow):
             # the float computation gave no value (an overflow to inf or
             # nan) where the claim holds in exact arithmetic: a failure
             # of the computation, carried by the `[float]` line; where the
@@ -12549,7 +13406,19 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     f"the {_representation_word(cj_domain, facts)} computation "
                     f"gave no value at {_point_text(args)} ({gave}), where the "
                     f"claim holds in exact arithmetic: a finding about the "
-                    f"computation")
+                    f"computation" if exact_at is True else
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), an "
+                    f"overflow of the computation from finite inputs (an "
+                    f"overflow error, numpy's overflow flag, or {call_inf[0]} "
+                    f"read exactly there is finite), so on the derive route "
+                    f"that point is no counterexample"
+                    if inf_cause == "overflow" else
+                    f"the {_representation_word(cj_domain, facts)} computation "
+                    f"gave no value at {_point_text(args)} ({gave}), where the "
+                    f"claim has no exact reading to tell an overflow from a "
+                    f"pole, so on the derive route that point is no "
+                    f"counterexample")
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
             continue
         if not missing_in and call_hole[0] is not None:
@@ -12601,7 +13470,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if not missing_in and "absent" in (missing_class(lv), missing_class(rv)):
             # a None f returned from present inputs is the absence policy
             # line's fact: declared by the return type, or flagged there
-            from ._missing_words import absence_agrees, absence_words
+            from ._missing_words import (absence_agrees, absence_words,
+                                         undeclared_none_words)
             if any(o is None for o in f_call.outputs()):
                 if declared_return:
                     executed_record.returned_absent(dict(zip(kinds, args)),
@@ -12609,6 +13479,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 else:
                     from .policy import record_introduced
                     record_introduced(dict(zip(kinds, args)))
+                    if absence_agrees(lv, rv, cj.relation):
+                        # a None the return type does not declare is no
+                        # value, though both sides are that None
+                        checked += 1
+                        cx = (f"{_point_text(args)}: "
+                              f"{undeclared_none_words(fn)}")
+                        break
             if absence_agrees(lv, rv, cj.relation):
                 # absence compares as absence: None agrees with None
                 checked += 1
@@ -12677,8 +13554,52 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         call_raised[0] = call_nan[0] = call_inf[0] = None
         compare_l, compare_r = (exact_now if exact_now is not None
                                 else (lv, rv))
-        ok = relation_within(compare_l, compare_r, cj.relation, cj.tolerance,
+        # a claim writing a literal with more digits than a double
+        # carries is decided on the number written wherever its sides
+        # can be read exactly, whatever its float sides say: the parse
+        # rounded the literal, and a float gap or a no value may rest on
+        # that rounding alone
+        ll_decided = None
+        if long_literals and cj.tolerance is None:
+            ll_decided = _exact_verdict(cj, code_l, code_r, env,
+                                        *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        if ll_decided is None and exact_now is None and call_inf[0] is None \
+                and (holds_inf(lv) or holds_inf(rv)):
+            # an infinity only the claim's own float arithmetic produced
+            # from finite values (no call returned one) stands for a
+            # value beyond every float: compared by its sign, or, where
+            # the other side may lie past float range too, the point is
+            # not evaluable and not counted
+            read = _overflow_reading(code_l, code_r, env, (lv, rv),
+                                     (cj.lhs, cj.rhs))
+            if read is None:
+                checked -= 1
+                overflowed += 1
+                if overflowed_at is None:
+                    overflowed_at = _point_text(args)
+                continue
+            compare_l, compare_r = read
+        # an overflowed side stands for a value at or past the overflow
+        # threshold, a bound rather than a value: the relation is decided
+        # by its sign alone, with no allowance
+        overflow_read = (compare_l is not lv and exact_now is None) or \
+            (compare_r is not rv and exact_now is None)
+        ok = relation_within(compare_l, compare_r, cj.relation,
+                             _exact_slack(cj) if overflow_read
+                             else cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
+        ll_false = ll_decided is False and ok is True
+        if ll_decided is not None:
+            ok = ll_decided
+        elif long_literals and cj.tolerance is None and ok is not None \
+                and _within_an_ulp(compare_l, compare_r):
+            # no exact reading, and the float sides within one unit in
+            # the last place, where the rounded literal could flip the
+            # decision: no evidence either way, not counted
+            checked -= 1
+            inconclusive += 1
+            continue
         hidden_by_float = exact_now is not None and ok is False and \
             relation_within(lv, rv, cj.relation, cj.tolerance, 0.0, side,
                             exact_inequality=cj.tolerance is None) is True
@@ -12701,16 +13622,29 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     allowance, side, exact_inequality=cj.tolerance is None):
                 ok = True
                 roundoff_gap = _linalg_eval.largest_gap(lv, rv)
+        # `within`: an `==` or `~=` pass beyond the allowance's absolute
+        # floor, through its relative part or a draw's round-off;
+        # `inside`: a pass of `==`, `<=` or `>=` the compared sides
+        # satisfy only within the allowance, inside its floor or beyond
         within = (ok is True and cj.tolerance is None
                   and cj.relation in ("==", "~=")
                   and relation_within(compare_l, compare_r, cj.relation,
                                       ABSOLUTE, 0.0, side) is not True)
-        exactly_false = False
-        if within:
+        inside = (ok is True and cj.tolerance is None
+                  and cj.relation in ("==", "<=", ">=")
+                  and relation_within(compare_l, compare_r, cj.relation,
+                                      _exact_slack(cj), 0.0, side)
+                  is not True)
+        if ll_decided is not None:
+            # decided on the number written already
+            within = inside = False
+        exactly_false = ll_false
+        if within or inside:
             # a draw that passes only within a tolerance is decided in
             # exact arithmetic: false there falsifies, true there holds
-            # with the gap printed, and a draw that cannot be evaluated
-            # exactly is inconclusive and not counted
+            # with the gap printed; where it cannot be evaluated
+            # exactly the pass is no evidence either way, inconclusive
+            # and not counted
             exact_ok = _exact_verdict(cj, code_l, code_r, env,
                                       *_exact_calls())
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
@@ -12720,6 +13654,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 continue
             if exact_ok is False:
                 ok, exactly_false = False, True
+            elif not within:
+                pass
             elif roundoff_gap is not None:
                 if roundoff_gap > roundoff_absorbed:
                     roundoff_absorbed, roundoff_at = roundoff_gap, _point_text(args)
@@ -12728,6 +13664,18 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                        else abs(lv - rv))
                 if gap > relative_absorbed:
                     relative_absorbed, relative_at = gap, _point_text(args)
+        if derive_falsifier and ok is True and cj.tolerance is not None \
+                and not isinstance(cj.tolerance, ToleranceKind) \
+                and relation_within(compare_l, compare_r, cj.relation,
+                                    _exact_slack(cj), 0.0, side) is not True:
+            # a declared tolerance binds the computation line only: on the
+            # derive route a draw it alone admits is decided again on the
+            # body read exactly, and false there falsifies the mathematics
+            exact_ok = _exact_verdict(cj, code_l, code_r, env,
+                                      *_exact_calls())
+            call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+            if exact_ok is False:
+                ok, exactly_false = False, True
         if ok is None:
             # structurally unanswerable on this route: an ordering over
             # values that do not order (a complex value), or two
@@ -12735,10 +13683,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             # sample; skip, as the derive route refuses the same.
             # Equality and closeness over complex values are answered.
             if is_complex_value(lv) or is_complex_value(rv):
-                why = (f"; ordering ({cj.relation}) over complex values "
-                       f"isn't meaningful ({type(lv).__name__} vs "
-                       f"{type(rv).__name__}), only equality and "
-                       f"closeness are")
+                # the complex numbers have no order: the claim is not
+                # well formed, on every route
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=None,
+                             note=note + (
+                                 f"; ordering ({cj.relation}) over complex "
+                                 f"values isn't meaningful "
+                                 f"({type(lv).__name__} vs "
+                                 f"{type(rv).__name__}), only equality "
+                                 f"and closeness are"))
             else:
                 why = (f"; {cj.relation} over {type(lv).__name__} vs "
                        f"{type(rv).__name__} values isn't meaningful as a "
@@ -12770,7 +13724,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                                          *_exact_calls())
             f_call.calls = made
             call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
+        # a witness names each `let` draw at the value the claim ran with;
+        # a finding's prose reads it to three digits
         aux_part = ("; " + ", ".join(
+            f"{a} = {_fmt_coordinate(env[a])}" if isinstance(env[a], (int, float))
+            else f"{a} = {env[a]!r}" for a in aux) if aux else "")
+        aux_words = ("; " + ", ".join(
             f"{a} = {env[a]:.3g}" if isinstance(env[a], (int, float))
             else f"{a} = {env[a]!r}" for a in aux) if aux else "")
         if not ok:
@@ -12834,17 +13793,36 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                             ctx.companion_witness = dict(zip(kinds, args))
                     elif computation_finding is None:
                         computation_finding = (
-                            f"{words} at {_point_text(args)}{aux_part}, where "
+                            f"{words} at {_point_text(args)}{aux_words}, where "
                             f"the claim holds in exact arithmetic: a finding "
                             f"about the computation")
                     call_raised[0] = call_nan[0] = call_inf[0] = None
                     call_hole[0] = None
                     continue
                 miss_conditioning = found
+            if derive_falsifier and not exactly_false \
+                    and mathematics is True:
+                # the exact reading holds here: on the derive route the
+                # miss is the computation's, never a counterexample to the
+                # mathematics
+                checked += 1
+                if computation_finding is None:
+                    computation_finding = (
+                        f"the float computation misses the claim at "
+                        f"{_point_text(args)}{aux_part}, where the claim "
+                        f"holds in exact arithmetic: a finding about the "
+                        f"computation")
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                continue
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
-            if exactly_false:
+            if ll_false and not as_arrays:
+                # the claim's long literal, read as written, decides
+                cx += _as_written_words(cj, code_l, code_r, env,
+                                        _exact_calls())
+            elif exactly_false:
                 cx += (", within the float tolerance but false here in "
                        "exact arithmetic")
             elif hidden_by_float:
@@ -12927,6 +13905,20 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         f"within the tolerance and could not be evaluated in exact "
         f"arithmetic, so {'they are' if inconclusive != 1 else 'it is'} "
         f"not counted")
+    if overflowed:
+        note = (f"{note}; {overflowed} draw{'s' if overflowed != 1 else ''} "
+                f"where the claim's own arithmetic overflowed float64 and "
+                f"the other side may lie past float range too, first at "
+                f"{overflowed_at}, {'are' if overflowed != 1 else 'is'} "
+                f"not counted").lstrip("; ")
+    if rounded:
+        note = (f"{note}; {rounded_why} at {rounded} draw"
+                f"{'s' if rounded != 1 else ''}, first at {rounded_at}, so "
+                f"{'they are' if rounded != 1 else 'it is'} not "
+                f"counted").lstrip("; ")
+    if checked == 0 and rounded and not inconclusive:
+        return Probe(cj.name, statement, "unknown", route="probe",
+                     note=note, meta=dict(missing_meta))
     if checked == 0 and inconclusive:
         return Probe(cj.name, statement, "unknown", route="probe",
                      note=f"{note}; {inconclusive_words}".lstrip("; "),

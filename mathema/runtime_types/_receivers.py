@@ -129,3 +129,292 @@ def receiver_form(key: str):
     fn.__annotations__ = {RECEIVER: cls}
     fn.__signature__ = sig  # type: ignore[attr-defined]
     return fn
+
+
+# --- the receiver of a user class's method -------------------------------
+
+def method_receiver(fn) -> "tuple[str, type] | None":
+    """Intent:
+        `(name, class)` for the receiver an unbound method of a class
+        takes first: its first parameter, named `self` or `cls` and not
+        annotated, when the function's qualified name places it in a
+        class its module binds. None for any other function, a method
+        already bound to an instance included.
+    """
+    from ..symbolic._base import _enclosing_class
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return None
+    if not params or params[0].name not in ("self", "cls") \
+            or params[0].annotation is not inspect.Parameter.empty:
+        return None
+    cls = _enclosing_class(fn)
+    return (params[0].name, cls) if cls is not None else None
+
+
+def receiver_fields(cls, tree, name: str) -> "tuple | None":
+    """Intent:
+        The fields an instance of `cls` is drawn with when it stands for
+        a method's receiver `name`: a dataclass's declared fields, each
+        an int or a float; for any other class the fields the body reads
+        (`self.rate`), none when it reads none, when the class's own
+        constructor can be called with drawn arguments
+        (`constructor_kinds`); without a constructor of its own, the
+        fields the body reads, none when the body never names the
+        receiver. None when no draw is known: a dataclass with a field
+        of another type, a constructor taking an argument mathema cannot
+        draw, a body that names the receiver only otherwise (a method
+        call, passing it on), or no body to read.
+    """
+    import ast
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        if not dataclasses.fields(cls):
+            return ()
+        from ..symbolic._base import _dataclass_field_names
+        numeric = _dataclass_field_names(cls)
+        return tuple(numeric) if numeric else None
+    from ..symbolic._base import _attr_keys_used
+    read = tuple(_attr_keys_used(tree, name)) if tree is not None else ()
+    if _own_init(cls):
+        return read if constructor_kinds(cls) is not None else None
+    if tree is None:
+        return None
+    if read:
+        return read
+    body = [n for stmt in getattr(tree, "body", []) for n in ast.walk(stmt)]
+    if not any(isinstance(n, ast.Name) and n.id == name for n in body):
+        return ()
+    return None
+
+
+def undrawn_reason(cls) -> str:
+    """Intent:
+        Why an instance of `cls` cannot be drawn for a method's
+        receiver, in words: a dataclass field that is not an int or a
+        float, a constructor argument mathema cannot draw (named with its
+        annotation), or a body that does not show the fields it holds.
+    """
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        from .._annotation_text import annotation_text
+        for f in dataclasses.fields(cls):
+            if f.type not in (int, float, "int", "float"):
+                return (f"its field {f.name} ({annotation_text(f.type)}) is "
+                        f"not a number mathema draws")
+    if _own_init(cls):
+        try:
+            sig = inspect.signature(cls)
+        except (TypeError, ValueError):
+            return "its constructor's signature cannot be read"
+        from .._annotation_text import annotation_text
+        for p in sig.parameters.values():
+            if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) or p.default is not p.empty:
+                continue
+            if p.annotation not in (p.empty, int, float, bool, "int", "float", "bool"):
+                return (f"its constructor takes {p.name} "
+                        f"({annotation_text(p.annotation)}), which mathema "
+                        f"cannot draw")
+    return "the body does not show the fields it holds"
+
+
+def _own_init(cls) -> bool:
+    """Whether `cls` (or a class it inherits from, other than `object`)
+    defines its own `__init__`."""
+    return getattr(cls, "__init__", object.__init__) is not object.__init__
+
+
+def constructor_kinds(cls) -> "dict | None":
+    """Intent:
+        `{parameter: kind}` for the arguments `cls(...)` is called with
+        to build an instance: each parameter of the constructor, drawn
+        as an `int`, a `bool` or a `float` by its annotation (a float
+        when it states none); a parameter with a default and no
+        annotation is left at its default. None when a parameter cannot
+        be drawn (another annotation, `*args` or `**kwargs` without a
+        default to fall back on) or the signature cannot be read.
+    """
+    try:
+        sig = inspect.signature(cls)
+    except (TypeError, ValueError):
+        return None
+    out: dict = {}
+    for p in sig.parameters.values():
+        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            continue
+        ann = p.annotation
+        if ann is p.empty:
+            if p.default is not p.empty:
+                continue
+            out[p.name] = "float"
+        elif ann in (int, "int"):
+            out[p.name] = "int"
+        elif ann in (bool, "bool"):
+            out[p.name] = "bool"
+        elif ann in (float, "float"):
+            out[p.name] = "float"
+        elif p.default is not p.empty:
+            continue
+        else:
+            return None
+    return out
+
+
+class ReceiverRefused(BaseException):
+    """No drawn arguments built an instance of a method's receiver class:
+    its constructor refused every draw. A `BaseException` so no trial's
+    own `except Exception` reads it as the function raising."""
+
+
+def construct_receiver(cls, fields: tuple, bounds: dict, draw, tries: int = 200):
+    """Intent:
+        One instance of `cls` for a method's receiver, built as the class
+        builds one, so it holds what the class guarantees: a dataclass
+        from its fields `((name, kind), ...)`, its `__post_init__`
+        included; a class with a constructor of its own through that
+        constructor, its arguments drawn by `constructor_kinds`; any
+        other class field by field without a constructor. Each value is
+        `draw(kind, bound)`, a field's or a same-named argument's bound
+        taken from `bounds`. A draw the constructor refuses (it raises)
+        is outside the class and drawn again.
+
+    Raises:
+        ReceiverRefused: the constructor refused `tries` draws in a row.
+    """
+    import dataclasses
+    if dataclasses.is_dataclass(cls):
+        plan = dict(fields)
+    elif _own_init(cls):
+        plan = constructor_kinds(cls) or {}
+    else:
+        inst = object.__new__(cls)
+        for f, kind in fields:
+            setattr(inst, f, draw(kind, bounds.get(f)))
+        return inst
+    for _ in range(tries):
+        values = {name: draw(kind, bounds.get(name))
+                  for name, kind in plan.items()}
+        try:
+            return cls(**values)
+        except Exception:
+            continue
+    raise ReceiverRefused(f"{cls.__name__}(...) refused {tries} drawn "
+                          f"arguments in a row")
+
+
+#: the comparison a refused region's complement states, by the region's own
+_COMPLEMENT = {"Lt": ">=", "LtE": ">", "Gt": "<=", "GtE": "<", "Eq": "!=",
+               "NotEq": "=="}
+_STATED = {"Lt": "<", "LtE": "<=", "Gt": ">", "GtE": ">=", "Eq": "==",
+           "NotEq": "!="}
+
+
+def constructor_premises(cls, name: str) -> "list | None":
+    """Intent:
+        The fields of `cls`'s instances as its constructor admits them,
+        `[(lhs, relation, rhs), ...]` over `name.field` (`self.k > 0`):
+        the complement of every region the constructor refuses with a
+        raise, read from a dataclass's `__post_init__` or a class's own
+        `__init__` that stores its arguments unchanged (`self.k = k`).
+        An empty list when the class refuses nothing; None when the
+        constructor cannot be read this way: a statement other than a
+        guard raising and a plain store, a stored value computed from
+        the arguments (`self.k = k * k`), or a refused region that is no
+        conjunction of comparisons once complemented.
+    """
+    import ast
+    import dataclasses
+    import textwrap
+    if dataclasses.is_dataclass(cls):
+        method = cls.__dict__.get("__post_init__")
+        if method is None:
+            return []
+        owner = "post_init"
+    elif _own_init(cls) and "__init__" in cls.__dict__:
+        method = cls.__dict__["__init__"]
+        owner = "init"
+    else:
+        return [] if not _own_init(cls) else None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+    except (OSError, TypeError, SyntaxError):
+        return None
+    fdef = tree.body[0]
+    if not isinstance(fdef, ast.FunctionDef) or not fdef.args.args:
+        return None
+    me = fdef.args.args[0].arg
+    stored: dict = {}
+    guards: list = []
+    for stmt in fdef.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
+                and isinstance(stmt.value.value, str):
+            continue
+        if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
+                and isinstance(stmt.body[0], ast.Raise):
+            guards.append(stmt.test)
+            continue
+        if owner == "init" and isinstance(stmt, ast.Assign) \
+                and len(stmt.targets) == 1 \
+                and isinstance(stmt.targets[0], ast.Attribute) \
+                and isinstance(stmt.targets[0].value, ast.Name) \
+                and stmt.targets[0].value.id == me \
+                and isinstance(stmt.value, ast.Name):
+            stored[stmt.value.id] = stmt.targets[0].attr
+            continue
+        return None
+
+    class _Fields(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if owner == "init" and node.id in stored:
+                return ast.Attribute(value=ast.Name(id=name, ctx=ast.Load()),
+                                     attr=stored[node.id], ctx=ast.Load())
+            if owner == "init":
+                raise ValueError(node.id)
+            return ast.Name(id=name if node.id == me else node.id, ctx=node.ctx)
+
+    out: list = []
+    for test in guards:
+        if owner == "init":
+            # a guard on an argument that is stored unchanged reads the
+            # field; one on anything else is not a statement about it
+            try:
+                test = _Fields().visit(test)
+            except ValueError:
+                return None
+        else:
+            test = _Fields().visit(test)
+        complement = _complement(test)
+        if complement is None:
+            return None
+        out += complement
+    return out
+
+
+def _complement(test) -> "list | None":
+    """The conjunction of comparisons true exactly where `test` is false,
+    as `(lhs, relation, rhs)` texts, or None when it is no such
+    conjunction."""
+    import ast
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = test.operand
+        if isinstance(inner, ast.Compare) and len(inner.ops) == 1:
+            op = type(inner.ops[0]).__name__
+            if op in _STATED:
+                return [(ast.unparse(inner.left), _STATED[op],
+                         ast.unparse(inner.comparators[0]))]
+        return None
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        out: list = []
+        for value in test.values:
+            part = _complement(value)
+            if part is None:
+                return None
+            out += part
+        return out
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        op = type(test.ops[0]).__name__
+        if op in _COMPLEMENT:
+            return [(ast.unparse(test.left), _COMPLEMENT[op],
+                     ast.unparse(test.comparators[0]))]
+    return None

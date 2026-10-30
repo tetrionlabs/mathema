@@ -55,7 +55,7 @@ print(mathema.check(discounted, claims=[
 
 <!-- example: quick output match=subset wrap=88 -->
 ```text
-mathema.Record(discounted) · source, no side effects · form d2ab6eef1b84
+mathema.Record(discounted) · source, no side effects · form py:d2ab6eef1b84
   at_most_price  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
       falsified at price = -1, rate = 1
     falsified  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(price, rate) <= price
@@ -124,7 +124,7 @@ print(mathema.check(discount_factor))
 
 <!-- example: pole output match=subset -->
 ```text
-mathema.Record(discount_factor) · source, no side effects · form ebb4c9b87847
+mathema.Record(discount_factor) · source, no side effects · form py:ebb4c9b87847
   proven    is_defined: 1 - x != 0
   falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
@@ -150,7 +150,7 @@ print(mathema.check(step, claims=[
 
 <!-- example: step output -->
 ```text
-mathema.Record(step) · source, no side effects · form 8ca9c721c4cf
+mathema.Record(step) · source, no side effects · form py:8ca9c721c4cf
   unit_step  for x in [0.0, 1e+16] : float|missing, f(x) = 1   falsified at x = 1e+16
     proven     mathematics  for x in [0.0, 1e+16] ⊂ ℝ, f(x) = 1
     falsified  computation  for x in [0.0, 1e+16] : float, f(x) = 1   counterexample x = 1e+16

@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 
 import math
 import numbers
+import inspect
 import random
+import sys
 from decimal import Decimal
 from fractions import Fraction
 
@@ -104,6 +106,22 @@ def _held_at_none(fn, facts: Facts, domain: "dict | None") -> frozenset:
     return frozenset(held)
 
 
+def _typed_element_draw(fn, p: str, domain: "dict | None", rng):
+    """Intent:
+        A drawer of one element for the sequence parameter `p` when its
+        annotation states an int, bool or str element type: each draw
+        inside the parameter's binding in `domain`, held to that type
+        (`probing.typed_element_bound`); None when the annotation states
+        no such type.
+    """
+    from .probing import typed_element_bound
+    from .runtime_types import annotated_element
+    if annotated_element(fn, p) not in ("int", "bool", "str"):
+        return None
+    bound = typed_element_bound(fn, p, (domain or {}).get(p))
+    return lambda: _synth("float", rng, bound)
+
+
 def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domain: dict,
                         rng: random.Random) -> list:
     """One synthesized positional-argument list for every parameter of
@@ -117,8 +135,11 @@ def _synth_other_params(fn: Callable[..., Any], facts: Facts, target: str, domai
             args.append(None)
             continue
         k = facts.param_kinds.get(p, "unknown")
-        args.append(_synth(k, rng, domain.get(p) if k not in SEQUENCE_KINDS
-                           else None))
+        if k in SEQUENCE_KINDS:
+            from .probing import typed_element_bound
+            args.append(_synth(k, rng, typed_element_bound(fn, p, None)))
+            continue
+        args.append(_synth(k, rng, domain.get(p)))
     return args
 
 
@@ -369,6 +390,19 @@ def _short_value(v: Any, argument: bool = True) -> str:
     return f"{shown[:40]}...{size}"
 
 
+def _written_inside(piece) -> tuple:
+    """An interval piece's ends, each written end (not a reach the
+    piece marks) moved to the nearest float inside the interval as
+    written (`_sampling._inside_as_written`)."""
+    from ._sampling import _inside_as_written
+    lo, hi = piece[0], piece[1]
+    moved_lo, moved_hi = _inside_as_written(
+        lo, hi, getattr(piece, "exact_lo", None),
+        getattr(piece, "exact_hi", None))
+    return (lo if getattr(piece, "reach_lo", False) else moved_lo,
+            hi if getattr(piece, "reach_hi", False) else moved_hi)
+
+
 def _interval_ends(bounds) -> "tuple[float, float] | None":
     """Intent:
         The finite interval hull of a sampling bound: a plain `(lo, hi)`
@@ -378,14 +412,14 @@ def _interval_ends(bounds) -> "tuple[float, float] | None":
         rectangle).
     """
     if isinstance(bounds, tuple) and not isinstance(bounds, frozenset):
-        return _finite_bounds(*bounds)
+        return _finite_bounds(*_written_inside(bounds))
     if isinstance(bounds, Domain) and bounds.pieces:
         spans = [p for p in bounds.pieces
                  if isinstance(p, tuple) and not isinstance(p, frozenset)
                  and not any(isinstance(v, complex) for v in p)]
         if len(spans) != len(bounds.pieces):
             return None
-        ends = [_finite_bounds(*p) for p in spans]
+        ends = [_finite_bounds(*_written_inside(p)) for p in spans]
         return min(lo for lo, _ in ends), max(hi for _, hi in ends)
     return None
 
@@ -399,6 +433,123 @@ def _held_text(facts, target: str, args: list) -> str:
     from ._shapes import witness_text
     return ", ".join(f"{p} = {witness_text(v) or _witness_coordinate(v)}"
                      for p, v in zip(facts.params, args) if p != target)
+
+
+#: a shape probe's call the function's own guard refused, or one made at
+#: a missing argument: outside the working domain, no trial
+_REFUSED = object()
+
+#: a shape probe's call whose float64 run overflowed: the mathematics
+#: there is not shown by the computation, no trial
+_OVERFLOWED = object()
+
+
+def _shape_call(fn, facts, target: str, args: list, x) -> tuple:
+    """Intent:
+        One call a shape probe makes, with `target` at `x`, as
+        `(value, no_value)`. `no_value` is None when the call returned a
+        value, and otherwise says how the call had none: a raise that is
+        not the function's own guard, a nan, or a None its return type
+        does not admit. `value` is `_REFUSED` when the function's own
+        guard rejected the call or the call raised at a missing
+        argument, and `_OVERFLOWED` when the float64 run overflowed (an
+        OverflowError, or an infinity returned that the body does not
+        write, `_infinity_is_written`): an overflow is the
+        computation's, never a shape claim's counterexample. An
+        infinity the body writes is no value.
+
+    Raises:
+        PremiseRejected: the call lies outside the claim's premises.
+
+    Notes:
+        A None under a return type that admits it is returned as the
+        value with no `no_value`: the missing-value policy reads it.
+    """
+    from ._missing_words import declared_optional_return, value_shown
+    from ._premises import PremiseRejected
+    from .conjecture import deliberate_raise
+    from .domain import is_missing
+    try:
+        with _pinned_float_env():
+            value = _call_with_target(fn, facts, target, args, x)
+    except PremiseRejected:
+        raise
+    except Exception as exc:
+        if deliberate_raise(exc, fn) or any(
+                is_missing(a) for p, a in zip(facts.params, args)
+                if p != target):
+            return _REFUSED, None
+        if not _no_overflow(None, exc):
+            return _OVERFLOWED, None
+        return None, f"raised {exception_name(exc)}"
+    if value is None:
+        return value, (None if declared_optional_return(fn) else
+                       "returned None, which its return type does not "
+                       "admit")
+    scalar = not _is_array_like(value) or getattr(value, "shape", None) == ()
+    if scalar and _is_nonfinite(value):
+        if not _no_overflow(value, None) \
+                and not _infinity_is_written(fn, facts, target, args, x):
+            return _OVERFLOWED, None
+        return value, f"returned {value_shown(value)}"
+    return value, None
+
+
+def _infinity_is_written(fn, facts, target: str, args: list, x) -> bool:
+    """Intent:
+        Whether an infinity the call returned is the body's own (a
+        literal such as `math.inf` on the path taken), not an overflow:
+        the body read exactly (`_exact_body.exact_callee`) on the call's
+        exact arguments returns an infinity too. An overflow reads as a
+        finite value there; a body the reading cannot follow, or does
+        not finish within the fast wall-clock cap, is not shown to write
+        one.
+    """
+    import math as _math
+
+    from ._exact_body import exact_callee
+    from ._exact_side import to_exact
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        out = _with_timeout(
+            lambda: _call_with_target(exact_callee(fn), facts, target,
+                                      [to_exact(a) for a in args],
+                                      to_exact(x)),
+            FAST_TIMEOUT_SECONDS)
+    except Exception:
+        return False
+    if isinstance(out, float):
+        return _math.isinf(out)
+    sympy = sys.modules.get("sympy")
+    return sympy is not None and isinstance(out, sympy.Basic) \
+        and out in (sympy.oo, -sympy.oo)
+
+
+def _with_overflow_reason(result, target: str, overflowed: dict):
+    """Intent:
+        A shape probe's result once some call overflowed: a run that
+        found no counterexample is unknown, with the reason that the
+        float64 run overflowed at the first such point, since the
+        mathematics there is not what the computation shows. A
+        counterexample found elsewhere stands.
+    """
+    if not overflowed or result is None or result[0] not in ("holds",
+                                                             "skipped"):
+        return result
+    return ("unknown", result[1],
+            f"the float64 run overflowed at {target} = "
+            f"{_fmt_coordinate(overflowed['at'])}, where the mathematics "
+            f"has a value the computation does not show, and an overflow "
+            f"is judged by is_computation_safe")
+
+
+def _no_value_witness(target: str, x, no_value: str, held: str) -> str:
+    """The counterexample a shape probe reports at a point of the
+    domain where f has no value."""
+    return (f"{target} = {_fmt_coordinate(x)}"
+            f"{f' at {held}' if held else ''}: f {no_value}, no value; "
+            f"narrow the claim's domain to where every call returns a "
+            f"value")
 
 
 def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -418,6 +569,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     bounds = domain.get(target)
     no_value: dict = {}
+    overflowed: dict = {}
 
     def trial(args):
         x1 = _synth("float", rng, bounds)
@@ -426,19 +578,26 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
             return None
         if x1 > x2:
             x1, x2 = x2, x1
-        try:
-            v1 = _call_with_target(fn, facts, target, args, x1)
-            v2 = _call_with_target(fn, facts, target, args, x2)
-        except Exception:
+        (v1, gone1), (v2, gone2) = (_shape_call(fn, facts, target, args, x)
+                                    for x in (x1, x2))
+        for x, gone in ((x1, gone1), (x2, gone2)):
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        for x, v in ((x1, v1), (x2, v2)):
+            if v is _OVERFLOWED:
+                overflowed.setdefault("at", x)
+        if any(v is _REFUSED or v is _OVERFLOWED for v in (v1, v2)):
             return None
         for x, v in ((x1, v1), (x2, v2)):
             if not _a_value(v):
-                # a point with no value to order is skipped, and said
+                # a None the return type admits, or a value that is no
+                # number, has no order: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         e1, e2 = _exact_real(v1), _exact_real(v2)
         if e1 is None or e2 is None:
-            # an overflow or a nan says nothing about direction
+            # a value that is no real number has no direction
             return None
         slack = Fraction(1, 10 ** 9)
         ok = (e1 <= e2 + slack) if increasing else (e1 >= e2 - slack)
@@ -451,6 +610,7 @@ def _monotone_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{f' at {held}' if held else ''} (not {direction})")
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _with_overflow_reason(result, target, overflowed)
     return _with_no_value_note(result, fn, target, cj, no_value)
 
 
@@ -532,6 +692,7 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
     bounds = domain.get(target)
     lo, hi = _interval_ends(bounds) or (None, None)
     no_value: dict = {}
+    overflowed: dict = {}
 
     def trial(args):
         x0 = _synth("float", rng, bounds)
@@ -549,22 +710,34 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
         h = max(h, abs(x0) * 1e-12, 1e-300)
         if lo is not None and hi is not None and (x0 - h < lo or x0 + h > hi):
             return None
-        try:
-            v_lo = _call_with_target(fn, facts, target, args, x0 - h)
-            v_mid = _call_with_target(fn, facts, target, args, x0)
-            v_hi = _call_with_target(fn, facts, target, args, x0 + h)
-        except Exception:
+        calls = [(x, *_shape_call(fn, facts, target, args, x))
+                 for x in (x0 - h, x0, x0 + h)]
+        for x, _v, gone in calls:
+            if gone is not None:
+                return _no_value_witness(target, x, gone,
+                                         _held_text(facts, target, args))
+        for x, v, _gone in calls:
+            if v is _OVERFLOWED:
+                overflowed.setdefault("at", x)
+        if any(v is _REFUSED or v is _OVERFLOWED for _x, v, _gone in calls):
             return None
-        for x, v in ((x0 - h, v_lo), (x0, v_mid), (x0 + h, v_hi)):
+        (_, v_lo, _), (_, v_mid, _), (_, v_hi, _) = calls
+        for x, v, _gone in calls:
             if not _a_value(v):
+                # a None the return type admits, or a value that is no
+                # number, has no curvature: skipped, and said
                 no_value.setdefault("at", (x, v))
                 return None
         try:
             values = (float(v_lo), float(v_mid), float(v_hi))
+        except OverflowError:
+            # a value too large for a float (a huge int): the curvature
+            # is taken exactly, under the same tolerance
+            return _exact_curvature(kind, target, x0, h, (v_lo, v_mid, v_hi))
         except (TypeError, ValueError):
             return None
         if not all(math.isfinite(v) for v in values):
-            # an overflow or a nan says nothing about how f bends
+            # a value that is no real number has no curvature
             return None
         second_diff = values[0] - 2 * values[1] + values[2]
         # curvature, not the raw second difference: dividing by h*h
@@ -600,7 +773,42 @@ def _second_difference_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{curvature:.6g} does not settle {kind}")
 
     result = _probe_trials(fn, facts, target, domain, rng, trials, trial)
+    result = _with_overflow_reason(result, target, overflowed)
     return _with_no_value_note(result, fn, target, cj, no_value)
+
+
+def _exact_curvature(kind: str, target: str, x0: float, h: float,
+                     values: tuple):
+    """Intent:
+        `_second_difference_probe`'s verdict at one point from three
+        values one of which no float holds, read exactly: True when the
+        curvature settles `kind` (affine, convex, concave) within the
+        relative tolerance the float reading uses, the witness text when
+        it does not, None when a value is no real number.
+    """
+    from fractions import Fraction
+    try:
+        lo, mid, hi = (Fraction(v) for v in values)
+    except (TypeError, ValueError):
+        return None
+    step, at = Fraction(h), Fraction(x0)
+    curvature = (lo - 2 * mid + hi) / step / step
+    size = max(abs(lo), abs(mid), abs(hi))
+    reach = max(abs(at), step)
+    natural = size / reach / reach
+    noise = 16 * (8 * Fraction(2.220446049250313e-16) * size / step / step)
+    tol = max(natural / 10000, noise)
+    ok = (abs(curvature) <= tol if kind == "affine" else
+          curvature >= -tol if kind == "convex" else
+          curvature <= tol)
+    if ok:
+        return True
+    try:
+        shown = f"{float(curvature):.6g}"
+    except OverflowError:
+        shown = f"{'-' if curvature < 0 else ''}beyond float64"
+    return (f"{target} = {_fmt_coordinate(x0)}, h = {h:.3g}: curvature estimate "
+            f"{shown} does not settle {kind}")
 
 
 def _raise_or_nonfinite(out) -> "str | None":
@@ -711,6 +919,68 @@ def _pole_exclusion_proof(fn, facts, domain: dict, params,
     return ProofResult("proven", sketch=proven_sketch)
 
 
+def _certified_pole(fn, facts, domain: dict, param: str, pole_text: str):
+    """Intent:
+        The pole `param = pole_text` as an exact witness: `disproven`,
+        with the certificate as `mathema.witness_certified`, when a
+        region of the body where it has no value at a zero (a divisor,
+        `Eq(x*x - 2, 0)`, or a call's no-value region, `Eq(cos(x), 0)`
+        for tan) over `param` alone is zero at the pole exactly and
+        interval arithmetic certifies a zero there inside the domain,
+        independently of the solver that found it. None otherwise.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .symbolic import ProofResult
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    from .symbolic._prove import _certified_guard
+    try:
+        pole = sympy.sympify(pole_text)
+        guards, _unread = partiality_walk(fn, facts, domain)
+    except TimeoutError:
+        raise
+    except Exception:
+        return None
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        # the zero itself, and the path condition reaching the operation
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        if len(zeros) != 1:
+            continue
+        cond = zeros[0]
+        free = list(cond.free_symbols)
+        if len(free) != 1 or str(free[0]) != param \
+                or guard.free_symbols != cond.free_symbols:
+            continue
+        sym = free[0]
+        try:
+            zero = _with_timeout(
+                lambda c=cond, s=sym, g=guard: sympy.simplify(
+                    (c.lhs - c.rhs).subs(s, pole)) == 0
+                and all(bool(p.subs(s, pole)) is True
+                        for p in (g.args if isinstance(g, sympy.And) else ())
+                        if p is not c),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            continue
+        except Exception:
+            continue
+        if not zero:
+            continue
+        text = _certified_guard(cond, {sym: pole}, {param: sym}, domain)
+        if text is not None:
+            return ProofResult(
+                "disproven",
+                sketch=f"{param} = {pole_text} is a pole inside the "
+                       f"declared domain; {text}",
+                counterexample=f"{param} = {pole_text}",
+                meta={"mathema.witness_certified": text})
+    return None
+
+
 def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     """Intent:
         The pole-containment disproof as it may be reported: the real
@@ -722,8 +992,12 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
         An irrational pole (sqrt(2)) has no exact float spelling, so
         the call lands beside it, where the code may well return a
         large finite value: the pole exists in exact arithmetic and
-        floating point does not reproduce it, so the disproof is not
-        reported as one, and its reason says so.
+        floating point does not reproduce it. It is then `disproven` by
+        its exact witness when interval arithmetic certifies that a
+        divisor of the body, or a no-value region of a call it makes,
+        is zero there (`_certified_pole`), as `is_defined` certifies the
+        same point; otherwise the uncorroborated `undecided`, with a
+        reason saying so.
     """
     import sympy
     from .hazards import _admitted_spelling
@@ -735,6 +1009,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     except Exception:
         value = None
     if value is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         return _uncorroborated_family_disproof(
             sketch, f"the pole {pole_text} is not a value a float can "
                     f"hold inside the domain, so the code could not be "
@@ -742,6 +1019,9 @@ def _witnessed_pole(fn, facts, domain: dict, param: str, pole_text: str):
     what, executed = _executed_family_witness(
         fn, facts, param, value, domain, failure=_raise_or_nonfinite)
     if what is None:
+        certified = _certified_pole(fn, facts, domain, param, pole_text)
+        if certified is not None:
+            return certified
         from .corroboration import (EXACT_ARITHMETIC_ONLY,
                                     EXACT_ARITHMETIC_ONLY_NOTE)
         return _uncorroborated_family_disproof(
@@ -1159,12 +1439,81 @@ def _is_pole_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
     domain = domain or {}
     if not isinstance(domain.get(param), tuple):
         return None
-    return _pole_exclusion_proof(
+    result = _pole_exclusion_proof(
         fn, facts, domain, [param],
         proven_sketch=f"the declared domain for {param} excludes every "
                       f"pole of {facts.name} that mathema found (pole discovery "
                       f"is the fast-path search; the containment itself "
                       f"is exact)")
+    if result is not None and result.status == "disproven":
+        return result
+    inside, settled = _guard_poles(fn, facts, domain, param)
+    if inside:
+        return _witnessed_pole(fn, facts, domain, param, inside[0])
+    if result is not None and result.status == "proven" and not settled:
+        return None
+    return result
+
+
+def _guard_poles(fn, facts, domain: dict, param: str) -> tuple:
+    """Intent:
+        `(inside, settled)`: the points of `param`'s declared interval
+        where the body's raise-region reading puts an isolated point
+        with no value over `param` alone (a divisor's zero, `x*x - 2 ==
+        0`, or a call's no-value point, `cos(x) == 0` for tan), as exact
+        texts, and whether every such region was solved. The same
+        regions `is_defined` reads, so the two families name the same
+        poles.
+    """
+    import sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import bound_to_sympy_set
+    from .symbolic._partiality import NO_VALUE, partiality_walk
+    try:
+        guards, _unread = partiality_walk(fn, facts, domain)
+        region = bound_to_sympy_set(domain[param])
+    except TimeoutError:
+        raise
+    except Exception:
+        return [], False
+    inside: list = []
+    settled = True
+    for guard, exc in guards:
+        if exc not in ("ZeroDivisionError", NO_VALUE):
+            continue
+        parts = list(guard.args) if isinstance(guard, sympy.And) else [guard]
+        zeros = [c for c in parts if isinstance(c, sympy.Eq)]
+        free = list(guard.free_symbols)
+        if len(zeros) != 1 or len(free) != 1 or str(free[0]) != param:
+            continue
+        cond, sym = zeros[0], free[0]
+        try:
+            roots = _with_timeout(
+                lambda c=cond, v=sym: sympy.solveset(c, v, region),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            settled = False
+            continue
+        except Exception:
+            settled = False
+            continue
+        if roots is sympy.S.EmptySet:
+            continue
+        if not isinstance(roots, sympy.FiniteSet):
+            settled = False
+            continue
+        for r in sorted(roots, key=lambda r: float(r)):
+            # the operation is reached at the root only where the path
+            # condition holds there
+            reached = [bool(c.subs(sym, r)) if c.subs(sym, r) in
+                       (sympy.true, sympy.false) else None
+                       for c in parts if c is not cond]
+            if None in reached:
+                settled = False
+            elif all(reached) and str(r) not in inside:
+                inside.append(str(r))
+    return inside, settled
 
 
 def _hazard_value_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -1504,7 +1853,9 @@ def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     leaf = leaf[0]
                 leaf[rng.randrange(len(leaf))] = bad
             else:
-                seq = [rng.uniform(-10, 10) for _ in range(4)]
+                element = (_typed_element_draw(fn, target, None, rng)
+                           or (lambda: rng.uniform(-10, 10)))
+                seq = [element() for _ in range(4)]
                 seq[rng.randrange(len(seq))] = bad
             value = seq
             spelled = f"{target}[...] = {bad!r}"
@@ -1944,9 +2295,10 @@ def _empty_value(fn, facts, target: str, cj=None) -> tuple:
 
 def _realised(fn, facts, target: str, cells: list, cj=None):
     """A container of `cells` for `target`, through its runtime type: a
-    float numpy array, a float pandas or polars Series, a frame whose
-    columns (the ones the body reads) hold `cells` each, a plain list for
-    a list parameter; the empty container through `_empty_value`."""
+    float numpy array, a float pandas or polars Series (an int one when
+    every cell is an int), a frame whose columns (the ones the body
+    reads) hold `cells` each, a plain list for a list parameter; the
+    empty container through `_empty_value`."""
     if not cells:
         return _empty_value(fn, facts, target, cj)[0]
     from .runtime_types import realised_parameters
@@ -1965,15 +2317,16 @@ def _realised(fn, facts, target: str, cells: list, cj=None):
         side = int(math.isqrt(len(cells))) or 1
         grid = np.array(cells[: side * side], dtype=float).reshape(side, side)
         return grid if adapter in ("numpy.ndarray", "") else grid.tolist()
+    ints = all(isinstance(c, int) and not isinstance(c, bool) for c in cells)
     if adapter == "numpy.ndarray":
         import numpy as np
-        return np.array(cells, dtype=float)
+        return np.array(cells) if ints else np.array(cells, dtype=float)
     if adapter == "pandas.Series":
         import pandas as pd
-        return pd.Series(cells, dtype=float)
+        return pd.Series(cells) if ints else pd.Series(cells, dtype=float)
     if adapter == "polars.Series":
         import polars as pl
-        return pl.Series(cells, dtype=pl.Float64)
+        return pl.Series(cells) if ints else pl.Series(cells, dtype=pl.Float64)
     return list(cells)
 
 
@@ -2030,12 +2383,15 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     state: dict = {"idx": 0, "said": None}
     empty, shown = _empty_value(fn, facts, target, cj)
 
+    element = (_typed_element_draw(fn, target, None, rng)
+               or (lambda: rng.uniform(-10, 10)))
+
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
         cells = ([] if shape == "empty"
-                 else [rng.uniform(-10, 10)] if shape == "single"
-                 else [rng.uniform(-10, 10) for _ in range(5)])
+                 else [element()] if shape == "single"
+                 else [element() for _ in range(5)])
         value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
@@ -2098,23 +2454,73 @@ def _is_language_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     return None
 
 
+def _plain_str_parameter(fn, target: str) -> bool:
+    """Intent:
+        Whether `fn`'s parameter `target` is annotated plain `str`, or
+        `str` with None admitted (`Optional[str]`, `str | None`,
+        `Union[str, None]`), as a type or as its text: the annotation
+        mathema reads as every string, rather than a language marker or
+        an adaptor's type.
+    """
+    try:
+        annotation = inspect.signature(fn).parameters[target].annotation
+    except (KeyError, TypeError, ValueError):
+        return False
+    if isinstance(annotation, str):
+        import typing
+        names = {**getattr(fn, "__globals__", {}), "typing": typing,
+                 "Optional": typing.Optional, "Union": typing.Union}
+        try:
+            annotation = eval(annotation, names)
+        except Exception:
+            return annotation.replace(" ", "") in (
+                "str", "str|None", "None|str", "Optional[str]",
+                "typing.Optional[str]", "Union[str,None]", "Union[None,str]",
+                "typing.Union[str,None]", "typing.Union[None,str]")
+    return _str_or_none(annotation)
+
+
+def _str_or_none(annotation) -> bool:
+    """Whether `annotation` is `str`, or a union of `str` with None."""
+    import types
+    import typing
+    if annotation is str:
+        return True
+    union_types = (typing.Union, getattr(types, "UnionType", typing.Union))
+    if typing.get_origin(annotation) in union_types:
+        return set(typing.get_args(annotation)) == {str, type(None)}
+    return False
+
+
+#: the refused strings a record of an unbound is_language_defined names
+_REFUSALS_SHOWN = 6
+
+
 def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                            trials: int):
     """Empirical half of is_language_defined[s]: feed the target
     string parameter every edge case in the corpus (empty, whitespace,
     control chars, combining/zero-width marks, non-ascii, a very long
     string, injection-/format-/path-shaped strings) plus a few random
-    draws, every other parameter freshly sampled. An ACCIDENTAL-type
-    exception (TypeError/IndexError/UnicodeError/RecursionError/
-    AttributeError/KeyError/OverflowError) raised with NO validating
-    guard on the parameter is a crash: the minimal triggering string is
-    found by shrinking and returned as the witness. A raise the function
-    GUARDS (a validating `if ...: raise`/`assert`), or any other
-    exception type (a deliberate ValueError), is accepted; a normal
-    return is fine. When the domain's language declares a
-    `DefinedAnswer`, a member must get that answer instead: any other
-    raise, or a return the answer does not cover, falsifies with the
-    shrunk member, the answer declared and what the call did."""
+    draws, every other parameter freshly sampled.
+
+    With a language bound, the language is the declared domain: a
+    member must get an answer, a return or an exit status (the
+    statuses a declared `DefinedAnswer` names, when it names them), so
+    any other raise on a member falsifies, guarded or not and of any
+    type; a non-member must get the declared `Refusal`, else any raise
+    (an exit included), so a value returned for it falsifies. The
+    witness is shrunk inside (or outside) the language.
+
+    With no language bound, the function's refusals define its
+    language: an exit, a raise the function GUARDS (a validating
+    `if ...: raise`/`assert`) and a deliberate exception type (a
+    ValueError) refuse the string, and the record's note states the
+    strings refused and how. Only an ACCIDENTAL-type exception
+    (TypeError/IndexError/UnicodeError/RecursionError/AttributeError/
+    KeyError/OverflowError) raised with NO validating guard is a crash:
+    the minimal triggering string is found by shrinking and returned as
+    the witness."""
     from ._sampling import _STRING_SPECIALS, _synth_string
     from ._shrink import shrink
     from .analysis import _guards
@@ -2122,9 +2528,17 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
 
     target = cj.lhs
     bound = domain.get(target)
-    language_bound = getattr(bound, "base_type", None) == "L"
+    # a language the claim binds, or one the parameter's annotation
+    # names, is the declared domain; the strings mathema reads a plain
+    # `str` annotation as (every string) are no declaration, and leave
+    # the function's refusals to define its language
+    language_bound = (getattr(bound, "base_type", None) == "L"
+                      and (target in (cj.domain or {})
+                           or not _plain_str_parameter(fn, target)))
     if facts.param_kinds.get(target) != "string" and not language_bound:
         return None
+    if not language_bound and getattr(bound, "base_type", None) == "L":
+        bound = None
     # with no body there is no guard to read: an accidental-type raise
     # is then neither a declared rejection nor a crash, and the run is
     # unknown with the reason
@@ -2133,14 +2547,24 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                and _guards(facts.tree, facts.params).get(target) in ("raise", "assert"))
     unreadable: dict = {}
 
+    # the last call's refusal (an exit, a guarded raise or a deliberate
+    # one), by name, for the record of the boundary the function draws
+    last: dict = {}
+
     def crash_on(args, value):
+        last.pop("refused", None)
         try:
             with _pinned_float_env():
                 _call_with_target(fn, facts, target, args, value)
         except _ACCIDENTAL_CRASHES as exc:
-            return None if guarded else type(exc).__name__
-        except Exception:
-            return None       # a deliberate/other exception is not a crash
+            if guarded:
+                last["refused"] = exception_name(exc)
+                return None
+            return type(exc).__name__
+        except Exception as exc:
+            # a deliberate/other exception, an exit included, refuses
+            last["refused"] = exception_name(exc)
+            return None
         return None
 
     answers = _declared(bound, "defined_answer") if language_bound else []
@@ -2181,11 +2605,60 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   list(_STRING_SPECIALS) + [_synth_string(rng) for _ in range(8)]]
     state = {"i": 0}
 
+    from ._exits import exiting_as_raise
+    called = exiting_as_raise(fn)
+    refusals = _declared(bound, "refusal") if language_bound else []
+
+    def outcome_of(args, value):
+        """What the call does: `("raised", exc)`, an exit included, or
+        `("returned", value)`."""
+        try:
+            with _pinned_float_env():
+                out = _call_with_target(called, facts, target, args, value)
+        except Exception as exc:
+            return ("raised", exc)
+        return ("returned", out)
+
+    def failed_in_language(args, value, side):
+        """None when the call does what the language asks of a member
+        (an answer: a return or an exit status) or a non-member (the
+        declared refusal, else any raise), else what it did."""
+        outcome = outcome_of(args, value)
+        kind, what = outcome
+        if side == "inside":
+            if kind == "returned" or isinstance(what, SystemExit):
+                return None
+            return _outcome_text(outcome)
+        if refusals:
+            return None if _matches(refusals, outcome) else _outcome_text(outcome)
+        return None if kind == "raised" else _outcome_text(outcome)
+
     def trial(args):
         if state["i"] >= len(corpus):
             return True
         value, side = corpus[state["i"]]
         state["i"] += 1
+        if language_bound and not (answers and side == "inside"):
+            # the language is the declared domain: a member must get an
+            # answer, a non-member a refusal
+            did = failed_in_language(args, value, side)
+            if did is None:
+                return True
+            inside_now = side == "inside"
+            minimal = _shrink_in_language(
+                value, lambda s: (failed_in_language(args, s, side) is not None
+                                  and bool(domain_contains(s, bound)) == inside_now),
+                bound)
+            did = failed_in_language(args, minimal, side) or did
+            if inside_now:
+                return (f"{target} = {_witness_value(minimal)} (inside {names}) "
+                        f"{did}, where a member of the language its domain "
+                        f"declares gets an answer (a return or an exit "
+                        f"status)")
+            expected = (_declared_text(refusals) if refusals
+                        else "a raise or an exit")
+            return (f"{target} = {_witness_value(minimal)} (outside {names}) "
+                    f"{did}, where a non-member is refused ({expected})")
         if answers and side == "inside":
             if unanswered(args, value) is None:
                 return True
@@ -2197,6 +2670,11 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                     f"language declares ({_declared_text(answers)})")
         exc = crash_on(args, value)
         if exc is None:
+            if "refused" in last and len(refused) < _REFUSALS_SHOWN \
+                    and all(v != value for v, _ in refused):
+                refused.append((value, last["refused"]))
+            elif "refused" in last:
+                refused_more[0] += 1
             return True
         if unread:
             if "said" in unreadable:
@@ -2235,12 +2713,24 @@ def _arbitrary_input_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"arbitrary input, an unguarded crash, not a declared "
                 f"rejection")
 
+    refused: list = []
+    refused_more = [0]
     verdict, checked, cx = _probe_trials(fn, facts, target, domain, rng,
                                          max(trials, len(corpus)), trial)
     if unreadable and verdict != "falsified":
         return ("unknown", checked, unreadable["said"])
+    meta: dict = {}
     if sampled is not None:
-        return verdict, checked, cx, {"mathema.sampled": sampled}
+        meta["mathema.sampled"] = sampled
+    if refused and not language_bound:
+        # with no language bound, the function's refusals draw the
+        # boundary of its language: the record states it
+        shown = ", ".join(f"{_witness_value(v)} ({name})" for v, name in refused)
+        more = (f" and {refused_more[0]} more" if refused_more[0] else "")
+        meta["mathema.caveat"] = (f"the function's refusals define its "
+                                  f"language here; refused: {shown}{more}")
+    if meta:
+        return verdict, checked, cx, meta
     return verdict, checked, cx
 
 
@@ -3012,8 +3502,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         pairs). Only scalar parameters are searched, and only a
         function whose signature binds them. With `working`, a call the
         function's own guard rejects (`deliberate_raise`) is outside its
-        working domain and no trial. The whole search runs
-        under the fast wall-clock cap; a cap that fires ends it.
+        working domain and no trial. A call that overflows (other than
+        by a raise the body writes), or returns an infinity or a nan
+        `_nonfinite_cause` does not read as no value, is no trial
+        either. The whole search runs under the fast
+        wall-clock cap; a cap that fires ends it.
     """
     import itertools
 
@@ -3027,6 +3520,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
     params = list(facts.params)
     kinds = {p: facts.param_kinds.get(p, "unknown") for p in params}
     if not params or any(k not in _WITNESS_SCALAR_KINDS for k in kinds.values()):
+        return None, 0
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is not None and receiver[0] == params[0]:
+        # a method's receiver is an instance of its class, never a number
         return None, 0
     try:
         signature = callable_signature(fn)
@@ -3076,8 +3574,11 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
         return True
 
     from .probing import _bound_is_complex
-    # over real arguments a complex result is no value
-    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values())
+    from .symbolic._partiality import returns_complex
+    # over real arguments a complex result is no value, unless f's own
+    # return annotation admits a complex number
+    real_only = not any(_bound_is_complex(b) for b in (domain or {}).values()) \
+        and not returns_complex(fn)
     executed = 0
     caught: dict = {}
 
@@ -3108,13 +3609,23 @@ def _definedness_witness(fn, facts, gaps: list, says_defined, domain,
                     # the function's own guard: outside its working
                     # domain, no trial
                     continue
+                out, raised = None, exc
                 returned = False
                 from .authoring import RangeError
                 caught["range"] = isinstance(exc, RangeError)
             else:
+                raised = None
                 caught["range"] = False
                 returned = _has_value(out, None) and not (
                     real_only and isinstance(out, complex) and out.imag != 0)
+            if not returned and (
+                    (raised is None and _holds_infinity_or_nan(out))
+                    or (raised is not None and not _no_overflow(None, raised)
+                        and not deliberate_raise(raised, fn))) \
+                    and _nonfinite_cause(fn, out, raised, (), call) != "no value":
+                # an overflow of the computation, or an infinity or a nan
+                # nothing tells from one: the point shows no missing value
+                continue
             if returned != claimed:
                 return call
         return None
@@ -3306,6 +3817,142 @@ def _witnessed_disproof(sketch: str, fn, facts, gaps, says_defined, domain,
         meta=meta)
 
 
+def _is_defined_working(fn, facts, bound, domain=None) -> bool:
+    """Intent:
+        Whether the bare `is_defined` is read over the working domain
+        f's own guards leave. True when the claim (or its call) binds no
+        domain any guard refuses a point of: a domain it binds is the
+        domain, so where a guard (a conditional raise, an exit, a guard
+        to a set of strings, `@enforce_domain`) refuses a call inside
+        it, that call has no value and the working domain is not read.
+
+    Notes:
+        A refusal is ruled out only where it is shown: the guard's
+        condition, over one bound parameter, has no solution in the
+        bound domain; the bound strings all lie in the guard's set; the
+        bound domain lies inside the enforced one. A guard whose
+        condition does not lift, a raise branch true at every input and
+        a body that raises before any return refuse somewhere in any
+        bound domain.
+    """
+    import ast as _ast
+
+    import sympy as _sympy
+
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _body_always_raises, _own_guard_conditions
+    from .domain import bound_to_sympy_set
+    from .hazards import finite_guard_sets
+    bound = set(bound or ()) & set(facts.params)
+    if not bound:
+        return True
+    domain = domain or {}
+
+    def as_set(b):
+        try:
+            return bound_to_sympy_set(b)
+        except Exception:
+            return None
+
+    conds = _own_guard_conditions(fn, facts)
+    listed = finite_guard_sets(facts)
+    raises = facts.tree is not None and any(
+        isinstance(n, _ast.Raise) for n in _ast.walk(facts.tree))
+    if (raises and not conds and not listed) \
+            or any(c is _sympy.true for c in conds) \
+            or _body_always_raises(facts):
+        return False
+    for cond in conds:
+        names = {str(sym) for sym in getattr(cond, "free_symbols", ())}
+        if not names & bound:
+            continue
+        free = list(cond.free_symbols)
+        region = as_set(domain.get(str(free[0]))) if len(free) == 1 else None
+        if region is None:
+            return False
+        try:
+            refused = _with_timeout(
+                lambda c=cond, v=free[0], r=region: _sympy.solveset(c, v, r),
+                FAST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return False
+        except Exception:
+            return False
+        if refused is not _sympy.S.EmptySet:
+            return False
+    for p, allowed in listed.items():
+        if p not in bound:
+            continue
+        here = domain.get(p)
+        if not isinstance(here, (set, frozenset)) or not set(here) <= set(allowed):
+            return False
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        if p not in bound or domain.get(p) is guard:
+            continue
+        here, admitted = as_set(domain.get(p)), as_set(guard)
+        if here is None or admitted is None or not here.is_subset(admitted):
+            return False
+    return True
+
+
+def _claim_bound(fn, domain) -> set:
+    """The parameters a claim or its call binds a domain for; the domain
+    `@enforce_domain` states is f's own guard, not a binding."""
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    return {p for p, b in (domain or {}).items()
+            if b is not None and (p not in enforced or b is not enforced[p])}
+
+
+def _enforced_refusal(fn, facts, domain: dict):
+    """Intent:
+        The `is_defined` disproof where a domain the claim binds reaches
+        outside the domain `@enforce_domain` admits: the call at a point
+        of the bound domain the decorator refuses, executed; `disproven`
+        with that witness when it raises, None when no such point is
+        found or the call returns.
+    """
+    import sympy as _sympy
+
+    from .domain import bound_to_sympy_set
+    from .symbolic import ProofResult
+    enforced = getattr(fn, "__mathema_enforced_domain__", None) or {}
+    for p, guard in enforced.items():
+        bound = (domain or {}).get(p)
+        if bound is None or bound is guard or p not in facts.params:
+            continue
+        try:
+            outside = bound_to_sympy_set(bound) - bound_to_sympy_set(guard)
+        except Exception:
+            continue
+        pieces = (outside.args if isinstance(outside, _sympy.Union)
+                  else (outside,))
+        for piece in pieces:
+            if isinstance(piece, _sympy.Interval):
+                point = (piece.start + piece.end) / 2 \
+                    if piece.start.is_finite and piece.end.is_finite \
+                    else None
+            elif isinstance(piece, _sympy.FiniteSet) and piece.args:
+                point = piece.args[0]
+            else:
+                point = None
+            if point is None:
+                continue
+            what, _calls = _executed_family_witness(
+                fn, facts, p, float(point), domain or {})
+            if what is not None:
+                return ProofResult(
+                    "disproven",
+                    sketch=f"is_defined: the claim's domain for {p} reaches "
+                           f"outside the domain @enforce_domain admits, "
+                           f"and the call there has no value",
+                    counterexample=f"{p} = {_fmt_coordinate(float(point))}: "
+                                   f"f {what}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+    return None
+
+
 def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
                        relation: str, domain: dict | None = None,
                        tolerance: float | None = None,
@@ -3351,14 +3998,26 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .conjecture import _definedness_region_structured, guard_cut_texts
     from .symbolic._base import REL_TEXT as rel_of
     # the bare predicate reads the working domain: the function's own
-    # guards cut it, and only a failure inside it counts (decision A)
+    # guards cut it, and only a failure inside it counts (decision A);
+    # a domain the claim binds for a parameter a guard reads is the
+    # domain itself, and a guard refusing inside it is no value there
     bare = relation == "is_defined"
+    working = bare and _is_defined_working(fn, facts,
+                                           _claim_bound(fn, domain), domain)
     structured = _definedness_region_structured(fn, facts, region_gaps,
-                                                working=bare, domain=domain)
-    cuts = guard_cut_texts(fn, facts) if bare else []
+                                                working=working, domain=domain)
+    cuts = guard_cut_texts(fn, facts) if working else []
+    # every parameter the guards read has a domain the claim states
+    import re as _re
+    bound_here = _claim_bound(fn, domain)
+    stated = bool(cuts) and all(
+        p in bound_here for text in cuts for p in facts.params
+        if _re.search(rf"\b{_re.escape(p)}\b", text))
     cut_text = (f" (its own guard raises where {' or '.join(cuts)}, which "
-                f"cuts the working domain)" if cuts else "")
-    if bare:
+                f"refuses no point of the stated domain)" if cuts and stated
+                else f" (its own guard raises where {' or '.join(cuts)}, "
+                     f"which cuts the working domain)" if cuts else "")
+    if working:
         domain = _working_bounds(fn, domain)
     computed = [f"{rel.lhs} {rel_of[type(rel)]} {rel.rhs}"
                 for rel in structured]
@@ -3390,14 +4049,14 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
 
     def disproof(sketch: str, gaps: list, says_defined):
         return _witnessed_disproof(sketch, fn, facts, gaps, says_defined,
-                                   domain, premises, working=bare)
+                                   domain, premises, working=working)
 
     def incomplete(sketch: str, gaps: list, says_defined):
         # the computed region is not the whole definedness region: only
         # an executed disagreement decides
         point, _executed = _definedness_witness(fn, facts, gaps,
                                                 says_defined, domain,
-                                                premises, working=bare)
+                                                premises, working=working)
         if point is not None:
             return ProofResult(
                 "disproven", sketch=sketch,
@@ -3417,6 +4076,9 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         # region at all; falsified when it has one and a point in the
         # domain executes and raises. A stated region falls through
         # to the restriction reading below.
+        refused = None if working else _enforced_refusal(fn, facts, domain)
+        if refused is not None:
+            return refused
         if region_gaps:
             return incomplete(
                 "is_defined: f is not defined everywhere, an executed "
@@ -3427,8 +4089,10 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
         if not computed:
             return ProofResult(
                 "proven",
-                sketch=("is_defined: every call inside the working domain "
-                        "returns, so f is defined on it" + cut_text)
+                sketch=("is_defined: every call inside the "
+                        + ("stated" if stated else "working")
+                        + " domain returns, so f is defined on it"
+                        + cut_text)
                 if cuts else
                 "is_defined: the body has no raise region, so "
                 "every call returns and f is defined on the whole "
@@ -3844,6 +4508,294 @@ def _compiled_links(links: list, params: list) -> list:
     return out
 
 
+def _divides_by_zero(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` reaches a numpy division
+        by zero: run again with numpy's divide error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(divide="raise"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _nonfinite_cause(fn, out, raised, args, kwargs) -> "str | None":
+    """Intent:
+        What a call's missing value is, from positive evidence only:
+        "overflow" for an overflow of the computation from finite inputs
+        (an `OverflowError` or a `FloatingPointError` reporting one, a
+        numpy overflow during the call, or the body read exactly at that
+        point, helpers included, finite); "no value" for a value the
+        mathematics does not have there (a numpy division by zero, a
+        pole, or an exact reading that is itself infinite, a nan, or
+        raises); None when the call returned an infinity or a nan and
+        none of these tells which (`_exact_reading` cannot follow the
+        body, no error and no numpy flag).
+    """
+    if raised is not None:
+        if isinstance(raised, OverflowError) or (
+                isinstance(raised, FloatingPointError)
+                and "overflow" in str(raised).lower()):
+            return "overflow"
+        return "no value"
+    if _numpy_overflows(fn, args, kwargs):
+        return "overflow"
+    if _divides_by_zero(fn, args, kwargs) or _numpy_invalid(fn, args, kwargs):
+        return "no value"
+    return _exact_reading(fn, args, kwargs)
+
+
+def _numpy_invalid(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether numpy reports an invalid operation (a square root of a
+        negative, 0/0, the mean of nothing) during the call `fn(*args,
+        **kwargs)`: run again with numpy's invalid error raised, it
+        raises `FloatingPointError`. False without numpy, or when the
+        call raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(invalid="raise", over="ignore", divide="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _holds_infinity_or_nan(out) -> bool:
+    """Whether a returned value is, or holds, an infinity or a nan."""
+    from .probing import holds_inf, holds_nan
+    if out is None or isinstance(out, (bool, str)):
+        return False
+    try:
+        return bool(holds_inf(out) or holds_nan(out))
+    except Exception:
+        return False
+
+
+def _exact_reading(fn, args, kwargs) -> "str | None":
+    """Intent:
+        The body read exactly (`_exact_body.exact_callee`, the functions
+        it calls read the same way) on the call's exact arguments, as
+        evidence of what an infinity or a nan the call returned is:
+        "overflow" when the reading's value is exact and finite (an int,
+        a Fraction, a finite sympy real); "no value" when the body's own
+        mathematics has none there (the reading raises ZeroDivisionError
+        or ValueError, gives a sympy infinity or nan, or returns a float
+        infinity or nan on a run that executed a write of one,
+        `_run_writing_nonfinite`); None otherwise: the reading cannot
+        follow the body (`NotExact`, an exact value past
+        `_exact_body._EXACT_BITS`), it does not finish within the fast
+        wall-clock cap, its own machinery fails (any other raise), or it
+        returns a float the twin computed, finite or not.
+    """
+    from fractions import Fraction
+
+    from . import _exact_body
+    from ._exact_side import to_exact
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    twin = _exact_body.exact_callee(fn)
+    try:
+        exact_args = [to_exact(a) for a in args]
+        exact_kwargs = {k: to_exact(v) for k, v in kwargs.items()}
+        out, written = _with_timeout(
+            lambda: _run_writing_nonfinite(
+                lambda: twin(*exact_args, **exact_kwargs)),
+            FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    except _exact_body.NotExact:
+        return None
+    except (ZeroDivisionError, ValueError):
+        return "no value"
+    except Exception:
+        return None
+    if isinstance(out, bool):
+        return None
+    if isinstance(out, (int, Fraction)):
+        return "overflow"
+    if isinstance(out, float):
+        if not math.isfinite(out) and written:
+            return "no value"
+        return None
+    sympy = sys.modules.get("sympy")
+    if sympy is not None and isinstance(out, sympy.Basic):
+        if out.is_real and out.is_finite:
+            return "overflow"
+        if out in (sympy.oo, -sympy.oo, sympy.zoo, sympy.nan):
+            return "no value"
+    return None
+
+
+def _writes_nonfinite(instruction, names: dict) -> bool:
+    """Whether a bytecode instruction writes an infinity or a nan: it
+    loads a name or attribute `inf`, `infinity` or `nan` (any case), a
+    global of `names` holding a float infinity or nan, such a constant,
+    or the text `"inf"`, `"infinity"` or `"nan"`."""
+    op, value = instruction.opname, instruction.argval
+    if op in ("LOAD_ATTR", "LOAD_METHOD", "LOAD_GLOBAL", "LOAD_NAME",
+              "LOAD_DEREF", "LOAD_CLASSDEREF", "LOAD_FROM_DICT_OR_GLOBALS"):
+        if isinstance(value, str) and value.lower() in _NONFINITE_WORDS:
+            return True
+        if op != "LOAD_ATTR" and isinstance(value, str):
+            held = names.get(value)
+            return isinstance(held, float) and not math.isfinite(held)
+        return False
+    if op == "LOAD_CONST":
+        if isinstance(value, float):
+            return not math.isfinite(value)
+        if isinstance(value, str):
+            return value.strip().lower().lstrip("+-") in _NONFINITE_WORDS
+    return False
+
+
+#: the names and texts that write an infinity or a nan
+_NONFINITE_WORDS = ("inf", "infinity", "nan")
+
+
+def _run_writing_nonfinite(call) -> "tuple[Any, bool]":
+    """Intent:
+        `call()`'s result, with whether the run executed an instruction
+        that writes an infinity or a nan (`_writes_nonfinite`) in a body the exact
+        reading compiled (a file of `_exact_body._READ_FILES`): the
+        branch taken writes one, not merely the code somewhere.
+
+    Raises:
+        Whatever `call()` raises.
+
+    Notes:
+        Instructions are watched through `sys.monitoring` where Python
+        has it (3.12 on), else through opcode tracing (`sys.settrace`).
+        With every monitoring tool id taken, no write is seen.
+    """
+    import dis
+
+    from . import _exact_body
+    written = [False]
+    marks: dict = {}
+
+    def marked(code, names) -> set:
+        if code not in marks:
+            filename = code.co_filename
+            marks[code] = set() if (
+                filename not in _exact_body._READ_FILES
+                or filename == _exact_body.__file__) else {
+                    i.offset for i in dis.get_instructions(code)
+                    if _writes_nonfinite(i, names)}
+        return marks[code]
+
+    monitoring = getattr(sys, "monitoring", None)
+    if monitoring is None:
+        def local(frame, event, arg):
+            if event == "opcode" and frame.f_lasti in marks[frame.f_code]:
+                written[0] = True
+            return local
+
+        def tracer(frame, event, arg):
+            if not marked(frame.f_code, frame.f_globals):
+                return None
+            frame.f_trace_opcodes = True
+            return local
+
+        before = sys.gettrace()
+        sys.settrace(tracer)
+        try:
+            out = call()
+        finally:
+            sys.settrace(before)
+        return out, written[0]
+
+    events = monitoring.events
+    tool = None
+    for candidate in range(6):
+        try:
+            monitoring.use_tool_id(candidate, "mathema.written_nonfinite")
+        except ValueError:
+            continue
+        tool = candidate
+        break
+    if tool is None:
+        return call(), False
+    watched: list = []
+
+    def started(code, offset):
+        if marked(code, sys._getframe(1).f_globals):
+            monitoring.set_local_events(tool, code, events.INSTRUCTION)
+            watched.append(code)
+
+    def stepped(code, offset):
+        if offset in marks.get(code, ()):
+            written[0] = True
+
+    monitoring.register_callback(tool, events.PY_START, started)
+    monitoring.register_callback(tool, events.INSTRUCTION, stepped)
+    monitoring.set_events(tool, events.PY_START)
+    try:
+        out = call()
+    finally:
+        monitoring.set_events(tool, 0)
+        for code in watched:
+            monitoring.set_local_events(tool, code, 0)
+        monitoring.register_callback(tool, events.PY_START, None)
+        monitoring.register_callback(tool, events.INSTRUCTION, None)
+        monitoring.free_tool_id(tool)
+    return out, written[0]
+
+
+def _numpy_overflows(fn, args, kwargs) -> bool:
+    """Intent:
+        Whether the call `fn(*args, **kwargs)` overflows in numpy: run
+        again with numpy's overflow error raised, it raises
+        `FloatingPointError`. False without numpy, or when the call
+        raises anything else.
+    """
+    np = sys.modules.get("numpy")
+    if np is None:
+        return False
+    try:
+        with np.errstate(over="raise", divide="ignore", invalid="ignore"):
+            _exits.call(fn, *args, **kwargs)
+    except FloatingPointError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _constant_pair(bound, reach=None) -> "list | None":
+    """Intent:
+        The constant pair of a sequence whose elements range over
+        `bound`: two equal elements, at 1.0 when the range holds it, else
+        at the range's midpoint, else (a midpoint of zero) at half its
+        upper end. None when the elements are not one real interval.
+    """
+    from .probing import _element_range
+    span = _element_range(bound, reach)
+    if span is None:
+        return None
+    lo, hi = span
+    if lo <= 1.0 <= hi:
+        value = 1.0
+    else:
+        value = lo / 2 + hi / 2
+        if value == 0.0 and hi > 0:
+            value = hi / 2
+    return [value, value]
+
+
 def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                   trials: int, kind: str):
     """Intent:
@@ -4069,8 +5021,9 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         if shapes.get(p) == "matrix":
             return _rand(rng.randint(2, 5), rng)
         if shapes.get(p) == "sequence":
-            return [rng.uniform(-10.0, 10.0)
-                    for _ in range(rng.randint(1, 6))]
+            element = (_typed_element_draw(fn, p, domain, rng)
+                       or (lambda: rng.uniform(-10.0, 10.0)))
+            return [element() for _ in range(rng.randint(1, 6))]
         form = array_forms.get(p)
         if form == "table":
             n = rng.randint(1, 6)
@@ -4080,12 +5033,19 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             rows, cols = rng.randint(1, 5), rng.randint(1, 5)
             return [[rng.uniform(-10.0, 10.0) for _ in range(cols)]
                     for _ in range(rows)]
-        value = _synth(facts.param_kinds.get(p, "unknown"), rng,
-                       (domain or {}).get(p))
+        kind = facts.param_kinds.get(p, "unknown")
+        bound = (domain or {}).get(p)
+        if kind in SEQUENCE_KINDS:
+            from .probing import typed_element_bound
+            bound = typed_element_bound(fn, p, bound)
+        value = _synth(kind, rng, bound)
         return as_container(p, value) if form == "vec" else value
 
     def draw_marked(sizes: dict, p: str):
         bound = (domain or {}).get(p)
+        typed = _typed_element_draw(fn, p, domain, rng)
+        if typed is not None:
+            return resolver.synth(p, sizes, typed, rng)
         if getattr(bound, "pieces", None):
             # a declared element bound (`[a, b]^n`) holds every element
             return resolver.synth(p, sizes,
@@ -4160,9 +5120,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             if pinf is not None and not getattr(bound, "pieces", None) \
                     and _interval_ends(bound) is None:
                 bound = tuple(pinf)
+            if _typed_element_draw(fn, p, domain, rng) is not None:
+                # elements of another type than the reals have no
+                # magnitude corners of a real range
+                continue
             for pair in sequence_corners(
                     bound, distinct=containers.get(p) in (set, frozenset)):
                 yield draw((p, pair))
+            if containers.get(p) not in (set, frozenset):
+                flat = _constant_pair(bound, pinf)
+                if flat is not None:
+                    # two equal elements: a spread of zero
+                    yield draw((p, flat))
 
     def shape_boundaries():
         # the edge of a shape region: a singular matrix sits on
@@ -4300,7 +5269,18 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
             yield draw()
 
     from .conjecture import deliberate_raise, guard_cut_texts
+    # the plane a complex parameter no binding names is drawn over is
+    # not a binding
+    reads_working = _is_defined_working(fn, facts, set(cj.domain or {}) | {
+        p for p in _claim_bound(fn, domain)
+        if not (domain.get(p) == "C" and (cj.domain or {}).get(p) is None
+                and facts.param_kinds.get(p) == "complex")}, domain)
     checked = n_in = n_out = cut = 0
+    # the draws where f's computation overflowed, and the first of them:
+    # is_computation_safe's fact, no trial of definedness
+    overflows, overflow_at = 0, None
+    # the draws whose infinity or nan nothing tells from an overflow
+    undecidable, undecidable_at = 0, None
     seen: set = set()
     for point in candidates():
         key = tuple(repr(point[p]) for p in params)
@@ -4319,7 +5299,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         except _premises.PremiseRejected:
             continue
         except Exception as exc:
-            if kind == "is_defined" and bare and deliberate_raise(exc, fn):
+            if kind == "is_defined" and bare and reads_working \
+                    and deliberate_raise(exc, fn):
                 # the function's own guard rejects the call: outside its
                 # working domain (decision A), no trial
                 cut += 1
@@ -4329,31 +5310,72 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
         else:
             raised = None
             what = f"returned {_fmt_value(out)}"
+        ok = safe(out, raised)
+        cause = (_nonfinite_cause(fn, out, raised, call_args, call_kwargs)
+                 if kind == "is_defined" and not ok
+                 and (raised is None or not _no_overflow(None, raised))
+                 and (raised is not None or _holds_infinity_or_nan(out))
+                 else "no value")
+        if cause == "overflow":
+            # 2x has a value at every real x where its float run
+            # overflows: the computation's fact, not a missing value
+            overflows += 1
+            if overflow_at is None:
+                overflow_at = (_fmt_point(point, params), what)
+            continue
+        if cause is None:
+            # an infinity or a nan nothing tells from an overflow: the
+            # point decides nothing either way
+            undecidable += 1
+            if undecidable_at is None:
+                undecidable_at = (_fmt_point(point, params), what)
+            continue
         checked += 1
         n_in, n_out = n_in + bool(where), n_out + (not where)
-        ok = safe(out, raised)
         if kind == "is_defined" and raised is None and out is None and not declared_none:
             # None under a return type that does not admit it is no value
             ok, what = False, "returned None, which its return type does not admit"
         if ok == where or (conjunct and where):
             continue
         at = _fmt_point(point, params)
-        if bare:
+        pole = (kind == "is_overflow_safe" and raised is None
+                and _divides_by_zero(fn, call_args, call_kwargs))
+        if pole:
+            cx = (f"{at}: f {what} at a pole (numpy reports a division by "
+                  f"zero), not an overflow; the computation has no finite "
+                  f"value there")
+        elif bare:
             cx = f"{at}: f {what}, {words['bare']}"
         elif where:
             cx = f"{at}: inside the stated region, f {what}"
         else:
             cx = f"{at}: f {what}, {words['outside']}"
         found = {"mathema.witness_executed": True}
-        if kind == "is_defined" and not overflow_texts \
-                and not _no_overflow(out, raised):
-            # the missing value is an overflow of the computation
-            found["mathema.sampled"] = (
-                "the computation overflows there; state the region where "
-                "it stays in float range as an is_overflow_safe claim "
-                "and is_defined is sampled inside it")
         return ("falsified", checked, cx, None, found)
+    overflow_words = None
+    if overflows:
+        at, what = overflow_at
+        overflow_words = (
+            f"the computation overflowed at {overflows} drawn point"
+            f"{'s' if overflows != 1 else ''}, first at {at} (f {what}), "
+            f"where the inputs are finite: a finding for "
+            f"is_computation_safe (is_overflow_safe), not a point where f "
+            f"has no value, so not a trial of is_defined")
+    if undecidable:
+        at, what = undecidable_at
+        why = (f"f {what} at {at}{f' and at {undecidable - 1} more drawn point' if undecidable > 1 else ''}"
+               f"{'s' if undecidable > 2 else ''}, a value that cannot be told "
+               f"from an overflow of the computation or a point where f has "
+               f"no value, which an exact reading of the body and the "
+               f"functions it calls, an overflow error, or numpy's overflow "
+               f"flag would decide, so the claim is not decided there")
+        if overflow_words:
+            why = f"{why}, while {overflow_words}"
+        return "unknown", checked, why
     if checked == 0:
+        if overflow_words:
+            return ("skipped", 0, overflow_words, None,
+                    {"mathema.sampled": overflow_words})
         return "skipped", 0, None
     sampled = (words["sampled_bare"] if bare else
                words["sampled_conjunct"] if conjunct else
@@ -4361,6 +5383,8 @@ def _region_probe(fn, facts, cj, domain: dict, rng: random.Random,
                                         n_out=n_out)
     if reach_note:
         sampled = f"{sampled}; {reach_note}"
+    if overflow_words:
+        sampled = f"{sampled}; {overflow_words}"
     if cut:
         cuts = guard_cut_texts(fn, facts)
         sampled = (f"{sampled}; {cut} drawn points lie where f's own guard "
@@ -4533,6 +5557,15 @@ def _structured_draws(fn, facts, cj, domain: dict):
             ndim = shape.ndim if shape is not None and declared else 0
             props = structures.get(p, ())
             kind = facts.param_kinds.get(p, "scalar")
+            typed = (_typed_element_draw(fn, p, domain, rng)
+                     if kind in SEQUENCE_KINDS else None)
+            if typed is not None and ndim < 2 and not props:
+                # a sequence whose annotation states its element type: a
+                # vector of elements of that type
+                n = (sizes.get(resolver.key(p, 0)) if ndim == 1 else None) \
+                    or rng.randint(1, 5)
+                out.append([typed() for _ in range(n)])
+                continue
             if ndim == 2 or (ndim == 0 and (props or kind in SEQUENCE_KINDS)):
                 if ndim == 2:
                     rows = sizes.get(resolver.key(p, 0)) or 3
@@ -4584,7 +5617,9 @@ def _matrix_output_probe(prop):
     inside the premises). A result that is not a number, nor a vector
     or matrix of numbers, leaves `is_finite` and `is_real` undecided:
     unless another point falsifies, the probe answers unknown with the
-    first such point and `matrices.NOT_A_NUMBER`."""
+    first such point and `matrices.NOT_A_NUMBER`. A complex result
+    leaves a structural property (every one but `is_finite` and
+    `is_real`) undecided the same way, with the reason."""
     def probe(fn, facts, cj, domain, rng, trials):
         import ast as _ast
 
@@ -4596,7 +5631,7 @@ def _matrix_output_probe(prop):
                                          facts.params), "<claim>", "eval")
         except SyntaxError:
             return None
-        from .matrices import NOT_A_NUMBER, is_numeric
+        from .matrices import NOT_A_NUMBER, holds_complex, is_numeric
         draw = _structured_draws(fn, facts, cj, domain)
         held = _held_at_none(fn, facts, domain)
         # the arguments a witness names: the ones the claim's expression
@@ -4606,6 +5641,7 @@ def _matrix_output_probe(prop):
         shown = tuple(p for p in facts.params if p in read) or tuple(facts.params)
         checked = 0
         not_a_number = None
+        complex_matrix = None
         for _ in range(trials):
             point = _placed(dict(zip(facts.params, draw(rng))), rng)
             if point is None or not _admitted(point):
@@ -4625,6 +5661,13 @@ def _matrix_output_probe(prop):
                             f"{witness}: f raised "
                             f"{exception_name(raised[0])}, no value", None)
                 continue
+            if prop.level != "finite" and holds_complex(value):
+                # the structural families read real matrices only
+                if complex_matrix is None:
+                    complex_matrix = (f"{witness}: the result is a complex "
+                                      f"matrix, and {prop.name} is read over "
+                                      f"real matrices only in this release")
+                continue
             got = prop.check(value)
             if got is None:
                 if prop.level == "finite" and not_a_number is None \
@@ -4638,6 +5681,8 @@ def _matrix_output_probe(prop):
                         f"{prop.name[3:]}", None)
         if not_a_number is not None:
             return ("unknown", checked, not_a_number, None)
+        if complex_matrix is not None:
+            return ("unknown", checked, complex_matrix, None)
         if checked == 0:
             return ("skipped", 0, None, None)
         return ("holds", checked, None, None)
@@ -5117,10 +6162,27 @@ def _tree_children(fn, facts, cj, domain: dict, names) -> list:
                 out.append(claim(f"{name}(f)", name=f"{name}[f]",
                                  route="best"))
             continue
-        for target in family.suggest_targets(fn, facts):
+        targets = list(family.suggest_targets(fn, facts))
+        if name == "is_overflow_safe" and "f" not in targets \
+                and _computes_numbers(facts):
+            # an overflow can come from any arithmetic, not only the
+            # powers and functions the suggestion gate names: the
+            # whole-function claim runs too
+            targets.append("f")
+        for target in targets:
             out.append(claim(f"{name}({target})",
                              name=f"{name}[{target}]", route="best"))
     return _over_parent(out, cj, domain)
+
+
+def _computes_numbers(facts) -> bool:
+    """Whether a function takes no parameter or a scalar number: one
+    whose float64 run can overflow on its own arithmetic."""
+    params = list(facts.params or [])
+    return not params or any(
+        facts.param_kinds.get(p) not in (*SEQUENCE_KINDS, "string", "bool",
+                                         "table")
+        for p in params)
 
 
 def _tree_probe(names):
@@ -5211,9 +6273,12 @@ def _dimension_probe(fn, facts, cj, domain: dict, rng: random.Random,
             fixed = [_shapes.fixed_size(d) or sizes.setdefault(
                 d, rng.randint(1, 4)) for d in shape]
 
-            def build(axis, fixed=fixed):
+            element = (_typed_element_draw(fn, p, domain, rng)
+                       or (lambda: rng.uniform(-10, 10)))
+
+            def build(axis, fixed=fixed, element=element):
                 if axis == len(fixed):
-                    return rng.uniform(-10, 10)
+                    return element()
                 return [build(axis + 1) for _ in range(fixed[axis])]
             values[p] = build(0)
         try:

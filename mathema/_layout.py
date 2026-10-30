@@ -130,7 +130,9 @@ def _did(counterexample: str) -> str:
     calls (`f(None) raises TypeError; f(1.0) returns 1.0`) as it is."""
     if (counterexample or "").startswith("f("):
         return counterexample
-    said = (counterexample or "").split(": ", 1)[-1]
+    from ._called_text import split_witness
+    point, said = split_witness(counterexample or "")
+    said = said if said else point
     said = re.sub(r"^f raised ", "raises ", said)
     return re.sub(r"^f returned ", "returns ", said)
 
@@ -151,7 +153,8 @@ def _reached(witness: str, kind: str) -> str:
     (absent)` for an absence and `(hole)` for a hole at a null; from an
     older witness, the text before its colon."""
     if not witness.startswith("f("):
-        return witness.split(": ", 1)[0]
+        from ._called_text import split_witness
+        return split_witness(witness)[0]
     call = _first_call(witness)
     if " with " not in call:
         return ""
@@ -438,7 +441,8 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             head = _link_head(falsified[0])
         elif falsified:
             head = "falsified" + (f" at {falsified[0]}" if falsified[0] else "")
-            head = head.split(": ", 1)[0] if ": " in head else head
+            from ._called_text import split_witness
+            head = split_witness(head)[0]
         else:
             # the weakest line: proven only when every line is proven
             head = min((ln.split()[0] for ln in lines if ln.split()
@@ -462,7 +466,8 @@ def _link_head(witness: str) -> str:
     link's number stays in the witness on the line below."""
     found = _LINK.match(witness)
     comparison, rest = found.group(1), found.group(2)
-    point = rest.split(": ", 1)[0]
+    from ._called_text import split_witness
+    point = split_witness(rest)[0]
     return f"falsified: {comparison} fails at {point}"
 
 

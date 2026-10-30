@@ -7,6 +7,8 @@ manifest nonnegativity, closing symmetric-inequality gaps sympy's
 sign search leaves undecided, with no manual restatement. The rung runs
 in the FAST derive pass (no extensive=True needed), gated by a
 zero-sympy precheck so only undecided symmetric orderings pay for it."""
+import pytest
+
 from mathema.conjecture import claim, check_conjectures
 
 
@@ -39,6 +41,7 @@ def test_schur_proves_via_gap_substitution_on_the_fast_pass():
     assert "WLOG" in p.sketch
 
 
+@pytest.mark.needs_full_proof_budget
 def test_nesbitt_proves_via_gap_substitution_on_the_fast_pass():
     p = _v(nesbitt,
            "for a in [0.1,10], b in [0.1,10], c in [0.1,10], f(a,b,c) >= 1.5")

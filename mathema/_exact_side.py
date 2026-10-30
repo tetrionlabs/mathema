@@ -122,12 +122,19 @@ def to_exact(value):
     if np is not None and isinstance(value, np.floating):
         return to_exact(float(value))
     if isinstance(value, (list, tuple, set, frozenset)) and value \
-            and all(isinstance(v, float) for v in value):
+            and all(isinstance(v, float) or _rows_of_floats(v) for v in value):
         # a list stays a list, a tuple a tuple and a set a set, so the
         # function receives the type it was called with (`xs + xs`
-        # concatenates)
+        # concatenates); a list of rows of floats is read row by row
         return type(value)(to_exact(v) for v in value)
     return value
+
+
+def _rows_of_floats(value) -> bool:
+    """Whether `value` is a non-empty list or tuple whose entries are
+    floats, or are themselves such lists or tuples."""
+    return isinstance(value, (list, tuple)) and bool(value) and all(
+        isinstance(v, float) or _rows_of_floats(v) for v in value)
 
 
 def to_float(value):
@@ -317,9 +324,10 @@ def decide_symbolic(relation: str, left, right, slack) -> "bool | None":
 
 def _exact_value(value, rounded_roots: bool = False):
     """`value` as a plain exact value (an int, Fraction or bool, an exact
-    sympy number, or a nested list of them), or None when any part is
-    inexact. With `rounded_roots`, a square root of an exact rational
-    (`_linalg_eval._Root`, rounded once to a float or, beyond float
+    sympy number, a finite Decimal as its Fraction, or a nested list of
+    them), or None when any part is inexact. With `rounded_roots`, a
+    square root of an exact rational (`_linalg_eval._Root`, rounded
+    once to a float or, beyond float
     range, to 60 significant digits) is read as that rounded value, a
     reading close enough for a computation line's tolerance."""
     from ._linalg_eval import _Root
@@ -334,6 +342,10 @@ def _exact_value(value, rounded_roots: bool = False):
         return from_symbolic(value)
     if _is_exact(value):
         return value
+    from decimal import Decimal
+    if isinstance(value, Decimal) and value.is_finite():
+        # a finite Decimal is the rational its digits say
+        return Fraction(value)
     if isinstance(value, (list, tuple)):
         parts = [_exact_value(v, rounded_roots) for v in value]
         if any(p is None for p in parts):
@@ -664,6 +676,26 @@ def _exact_sides(code_l, code_r, env: dict, callees: dict,
     if left is None or (code_r is not None and right is None):
         return None
     return left, right
+
+
+def returned_sides(code_l, code_r, env: dict, callees: dict,
+                   computed_env: "dict | None" = None) -> "tuple | None":
+    """Intent:
+        `(left, right)` with each callee run on the executed floats and
+        kept only when the value it returns is exact (an int, a Fraction,
+        a bool, or a list of them), the claim's literals as written and
+        the point as `env` holds it: the claim on the exact values the
+        code itself returned. None when a callee returns a value that is
+        not exact or a side is not exact.
+    """
+    def on_floats(callee):
+        def run(*args, **kwargs):
+            return callee(*[to_float(a) for a in args],
+                          **{k: to_float(v) for k, v in kwargs.items()})
+        return run
+    return exact_sides(code_l, code_r, env,
+                       {n: on_floats(c) for n, c in callees.items()},
+                       exact_calls=True, computed_env=computed_env)
 
 
 def some_side_is_finite(code_l, code_r, env: dict, callees: dict) -> bool:

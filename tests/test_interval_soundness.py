@@ -166,8 +166,14 @@ def test_the_cauchy_schwarz_trio_resolves_the_way_the_algebra_does(
                                route=route)])
         return p.verdict, p.note
 
-    for route in ("derive", "probe"):
-        if route == "derive":
+    # derive alone gives up: unknown, never a false proven
+    v, note = verdict("f(x, y) <= 0", "derive")
+    assert v == "unknown", note
+    for false_law in ("f(x, y) <= -1", "f(x, y) >= 1"):
+        v, note = verdict(false_law, "derive")
+        assert v != "proven", ("derive", false_law, v, note)
+    for route in ("best", "probe"):
+        if route == "best":
             # derive gives up and the probe stands in for it: the body
             # read exactly holds at the 1e300 corner, so the overflow
             # there goes on the float line (ruling of 2026-10-05), which

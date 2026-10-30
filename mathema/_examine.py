@@ -1424,15 +1424,17 @@ class _Examiner:
         self.effects.add(Site("unknown", text))
 
     def _reach(self, fn, node: "ast.Call | None" = None,
-               bound=None, constructing: bool = False) -> None:
+               bound=None, constructing: bool = False,
+               written: "str | None" = None) -> None:
         """Examine a project function this body reaches, and merge it.
         At a call (`node`), a write the callee makes to one of its own
         parameters is a write here only when the argument passed there
         is not an object this call made; `bound` is the expression a
-        method is called on, the first parameter of the callee."""
+        method is called on, the first parameter of the callee; `written`
+        is the call as the body writes it, for a library function."""
         if _project_source(fn) is None:
             self._library(fn, _qualified(fn) or getattr(fn, "__name__", "?"),
-                          node)
+                          node, written=written)
             return
         found = examine(fn, constructing=constructing)
         if node is None:
@@ -1541,7 +1543,10 @@ class _Examiner:
                     callee = None
                 if callee is not None:
                     self._callee(callee, f"{owner[2]}.{func.attr}", node,
-                                 owner=owner)
+                                 owner=owner, written=(
+                                     f"{owner[1].__name__}.{func.attr}"
+                                     if isinstance(owner[1], types.ModuleType)
+                                     else None))
                     return
             self._method(owner, func.attr, node)
             return
@@ -1584,9 +1589,10 @@ class _Examiner:
             self.effects.add(Site("hidden_read", f"{self.name} reads a "
                                   f"file"))
 
-    def _callee(self, obj, shown: str, node: ast.Call, owner=None) -> None:
+    def _callee(self, obj, shown: str, node: ast.Call, owner=None,
+                written: "str | None" = None) -> None:
         if isinstance(obj, types.FunctionType):
-            self._reach(obj, node)
+            self._reach(obj, node, written=written)
             self._out_keyword(node)
             return
         if isinstance(obj, type) and not issubclass(obj, BaseException) and \
@@ -1605,7 +1611,7 @@ class _Examiner:
                             node.func, ast.Attribute) else None)
             return
         self._library(obj, _qualified(obj) or shown, node, shown=shown,
-                      owner=owner)
+                      owner=owner, written=written)
 
     def _out_keyword(self, node) -> None:
         if node is None:
@@ -1637,7 +1643,7 @@ class _Examiner:
                                           f"({keyword.arg}=True)"))
 
     def _library(self, obj, qualified: str, node, shown: "str | None" = None,
-                 owner=None) -> None:
+                 owner=None, written: "str | None" = None) -> None:
         import logging
         self._out_keyword(node)
         entry = _LIBRARY.get(qualified)
@@ -1673,7 +1679,10 @@ class _Examiner:
             # every numpy ufunc reads the floating-point error state
             # np.seterr sets: under all="raise", np.log(0) raises
             self.effects.assumes.add("numpy's default error state")
-        name = qualified if "." in qualified else (shown or qualified)
+        # the call as the body writes it (a module's alias read as the
+        # module's name), else where the object is defined
+        name = written or (qualified if "." in qualified else
+                           (shown or qualified))
         if qualified.rsplit(".", 1)[-1] in ("shuffle",) and node is not None \
                 and node.args:
             changed = self._outside(self._origin_of(node.args[0]))

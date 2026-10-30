@@ -125,12 +125,14 @@ def test_identity_minus_scalars_abs_and_subscripts_sample(fn, law, true,
                                                           route):
     p = _one(fn, law, route)
     if route == "probe" and law == "trace(c * A) ~= c * trace(A)":
-        # c is unbounded, so the computation runs it out to the float
-        # maximum, where c * A overflows: the probe is the computation
-        # and reports it
-        assert p.verdict == "falsified", (p.verdict, p.note)
-        c = float(p.counterexample.split("c = ", 1)[1].split(",", 1)[0])
-        assert abs(c) > 1e300, p.counterexample
+        # c is unbounded, so the draws run it out to the float maximum,
+        # where the claim's own c * trace(A) overflows float64 while
+        # trace(c * A) is read exactly: the claim's arithmetic, not a
+        # computation of the code, so such a draw is not evaluable and
+        # not counted, and the identity holds at every other draw
+        assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+        assert "where the claim's own arithmetic overflowed float64" \
+            in p.note, p.note
         return
     assert _holds(p) is true, (law, p.verdict, p.note, p.counterexample)
 

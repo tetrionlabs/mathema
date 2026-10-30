@@ -1635,6 +1635,13 @@ def uninstalled_project_note(fn) -> "str | None":
         them, call: mathema.compendium.install('<root>')". None when the
         function has no source file, no project is found, the project
         states no compendium file, or its files are installed.
+
+    Notes:
+        The search rises from the module's directory no higher than
+        `_search_limit`: the project the current directory is in, when
+        the module lies inside it, else the directory the module is
+        imported from. The project's tree is read by
+        `_states_compendium_files`, a bounded walk.
     """
     import inspect
 
@@ -1647,19 +1654,14 @@ def uninstalled_project_note(fn) -> "str | None":
         return None
     if not path:
         return None
-    parts = os.path.realpath(path).split(os.sep)
+    path = os.path.realpath(path)
+    parts = path.split(os.sep)
     if "site-packages" in parts or "dist-packages" in parts:
         return None
-    here = os.path.dirname(os.path.realpath(path))
-    root = None
-    while True:
-        if any(os.path.exists(os.path.join(here, m)) for m in _ROOT_MARKERS):
-            root = here
-            break
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    limit = _search_limit(path, getattr(_engine_unwrapped(fn), "__module__", None))
+    root = _marked_directory(os.path.dirname(path), limit)
+    if root is None:
+        return None
     if _INSTALLED.get("root") == os.path.abspath(root):
         return None
     if root not in _PROJECT_FILES:
@@ -1670,16 +1672,116 @@ def uninstalled_project_note(fn) -> "str | None":
             f"them, call: mathema.compendium.install({root!r})")
 
 
+def _within(path: str, directory: str) -> bool:
+    """Whether `path` is `directory` or lies below it (real paths)."""
+    return path == directory or path.startswith(directory.rstrip(os.sep) + os.sep)
+
+
+def _marked_directory(start: str, limit: "str | None") -> "str | None":
+    """Intent:
+        The nearest directory from `start` upward, no higher than
+        `limit`, holding a project marker (`_ROOT_MARKERS`); with
+        `limit` None, up to the filesystem root. None when there is
+        none.
+    """
+    here = start
+    while True:
+        if any(os.path.exists(os.path.join(here, m)) for m in _ROOT_MARKERS):
+            return here
+        if limit is not None and here == limit:
+            return None
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def _import_root(path: str, module: "str | None") -> str:
+    """Intent:
+        The directory module `module` is imported from, given its source
+        file `path` (`/p/src` for `pkg.mod` at `/p/src/pkg/mod.py`); the
+        file's own directory when the dotted name does not match the
+        file's location.
+    """
+    here = os.path.dirname(path)
+    if not module or module == "__main__":
+        return here
+    names = module.split(".")
+    if os.path.basename(path).startswith("__init__."):
+        names = names + ["__init__"]
+    rel = names[:-1]
+    if not rel:
+        return here
+    tail = os.sep + os.sep.join(rel)
+    return here[:-len(tail)] if here.endswith(tail) else here
+
+
+def _search_limit(path: str, module: "str | None") -> str:
+    """Intent:
+        The highest directory the project search may reach for source
+        file `path` of module `module`: the project the current directory
+        is in (`_marked_directory` from it) when `path` lies inside that
+        project, else `_import_root`.
+    """
+    try:
+        cwd = os.path.realpath(os.getcwd())
+    except OSError:
+        cwd = None
+    if cwd is not None:
+        project = _marked_directory(cwd, None)
+        if project is not None and _within(path, project):
+            return project
+    return _import_root(path, module)
+
+
 #: per project root, whether it states compendium files of its own,
 #: looked up once per process
 _PROJECT_FILES: dict = {}
 
+#: how many directory levels below a project root, and how many file
+#: names in all, the walk for the note reads before it stops
+_NOTE_WALK_DEPTH = 6
+_NOTE_WALK_FILES = 5000
+
+
+def _note_claims_paths(root: str) -> list:
+    """Intent:
+        The claims files under `root` (the names `spec.claims_file_paths`
+        recognises), read by a bounded walk: at most `_NOTE_WALK_DEPTH`
+        levels and `_NOTE_WALK_FILES` file names, never into a hidden
+        directory, a directory `spec` skips, a virtual environment (one
+        holding `pyvenv.cfg`) or the bundled compendium.
+    """
+    from ..spec import _SKIP_DIRS, _is_claim_file
+    bundled = os.path.realpath(_bundled_dir())
+    found: list = []
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        depth = 0 if rel == "." else len(rel.split(os.sep))
+        if depth >= _NOTE_WALK_DEPTH:
+            dirnames[:] = []
+        else:
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if not d.startswith(".") and d not in _SKIP_DIRS
+                and not os.path.exists(os.path.join(dirpath, d, "pyvenv.cfg"))
+                and os.path.realpath(os.path.join(dirpath, d)) != bundled)
+        for name in sorted(filenames):
+            seen += 1
+            if seen > _NOTE_WALK_FILES:
+                return found
+            if _is_claim_file(dirpath, name):
+                found.append(os.path.join(dirpath, name))
+    return found
+
 
 def _states_compendium_files(root: str) -> bool:
-    """Whether any claims file under `root` declares `compendium:` for a
-    library other than the project's own package."""
-    from ..spec import claims_file_paths, read_claims_file
-    for claims_path in claims_file_paths(root, exclude=(_bundled_dir(),)):
+    """Whether any claims file under `root` (`_note_claims_paths`)
+    declares `compendium:` for a library other than the project's own
+    package."""
+    from ..spec import read_claims_file
+    for claims_path in _note_claims_paths(root):
         try:
             data = read_claims_file(claims_path,
                                     os.path.relpath(claims_path, root)) or {}

@@ -50,7 +50,7 @@
 [x] docs/evidence-ladder.md:companion            run output
 [x] docs/existing-codebase.md:codebase           file file file run output run output run output run output run output run output file file run output run output  (requires)
 [x] docs/extending.md:package-rows               file file file file run output
-[ ] docs/extending.md:608
+[ ] docs/extending.md:611
 [x] docs/findings.md:finds                       file run output run run output run output run run output
 [x] docs/findings.md:parity                      file run output
 [x] docs/first-look.md:ema                       run run output run output run output run output run output
@@ -94,7 +94,7 @@
 [x] docs/missing-values.md:defines               file run output  (requires)
 [x] docs/missing-values.md:enforce               run output
 [-] docs/missing-values.md:17
-[-] docs/missing-values.md:564
+[-] docs/missing-values.md:566
 [x] docs/modes/accept.md:balance                 file file session session run file session session
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl

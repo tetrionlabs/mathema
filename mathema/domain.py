@@ -308,6 +308,18 @@ def _set_value(s: str, *, in_element: bool = False, on_field: bool = False):
     return _bound(s)
 
 
+def _exact_bound(s: str):
+    """Intent:
+        An interval end's text as the exact rational it writes (`1/3`,
+        `0.29`, `-2`, `1e-5`), or None where it writes no rational (a
+        named constant, an infinity, an expression).
+    """
+    try:
+        return fractions.Fraction(s.strip())
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def _bound(s: str):
     s = s.strip()
     if s in _BOUND_CONSTS:
@@ -1573,7 +1585,11 @@ def domain_contains(value, bound, slot: bool = False) -> bool:
     element. A number of another type (a `Decimal`, a `Fraction`, a
     numpy scalar) is judged by the number it holds, an exact one
     meeting every endpoint and member as written (`0.1` is 1/10), as
-    `number_member` reads it."""
+    `number_member` reads it. The instances a method's receiver ranges
+    over (`probing.Instances`) hold exactly the instances of its class."""
+    instances_of = getattr(bound, "instances_of", None)
+    if instances_of is not None:
+        return isinstance(value, instances_of)
     dom = _as_domain(bound)
     _require_known_base_type(dom.base_type)
     if isinstance(value, _Sentinel):
@@ -2297,7 +2313,12 @@ def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False)
             lo, hi = _bound(m.group(2)), _bound(m.group(3))
         except ValueError:
             return None
-        return Interval(lo, hi, closed_lo=m.group(1) == "[", closed_hi=m.group(4) == "]")
+        piece = Interval(lo, hi, closed_lo=m.group(1) == "[",
+                         closed_hi=m.group(4) == "]")
+        # each end as written, exactly, where it is a rational number
+        piece.exact_lo = _exact_bound(m.group(2))
+        piece.exact_hi = _exact_bound(m.group(3))
+        return piece
     m = _PIECE_SET.match(text)
     if m is not None:
         try:
@@ -3307,6 +3328,9 @@ def bound_to_sympy_set(bound: Any) -> sympy.Set:
     if bound == "S" or (isinstance(bound, Domain) and bound.base_type == "S"):
         raise InvalidDomain("the type of strings (: str) has no real-set "
                             "reading")
+    if getattr(bound, "instances_of", None) is not None:
+        raise InvalidDomain("the instances of a class (a method's receiver) "
+                            "have no real-set reading")
 
     def piece_set(piece):
         if isinstance(piece, frozenset):

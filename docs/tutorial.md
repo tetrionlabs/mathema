@@ -204,7 +204,7 @@ echo y | mathema accept funcs.settle nonneg --as evidence --by "Ada Lovelace"
 ```text
 accept funcs.settle :: nonneg as evidence, by Ada Lovelace
   holds over 129 trials
-  the claim is accepted as evidence at n=129, bound to form 3eb01e1d9919
+  the claim is accepted as evidence at n=129, bound to form py:3eb01e1d9919
 write this acceptance? [y/N] written.
 ```
 

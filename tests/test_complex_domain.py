@@ -82,12 +82,17 @@ def test_modulus_identity_proves_via_the_conjugate_rewrite():
     assert "conjugate" in p.sketch
 
 
-def test_ordering_over_c_refuses_on_both_routes():
+def test_an_ordering_of_a_complex_value_is_refused_on_both_routes():
     for route in ("derive", "probe"):
-        (p,) = check_conjectures(modsq, [claim("for z in C, f(z) >= 0",
+        (p,) = check_conjectures(modsq, [claim("for z in C, f(z) >= z",
                                                route=route)])
-        assert p.verdict == "skipped"
+        assert p.verdict == "skipped:misspecified"
         assert "complex plane" in p.note
+
+
+def test_an_ordering_of_a_real_result_over_c_is_adjudicated():
+    (p,) = check_conjectures(modsq, [claim("for z in C, f(z) >= 0")])
+    assert p.verdict == "proven", (p.verdict, p.note)
 
 
 def test_probe_route_samples_the_plane():

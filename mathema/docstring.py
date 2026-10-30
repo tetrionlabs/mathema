@@ -489,7 +489,8 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         live_form = getattr(facts, "form", None) if facts is not None \
             else None
         if recorded_form and live_form:
-            record_stale = recorded_form != live_form
+            from .identity import same_form
+            record_stale = not same_form(recorded_form, live_form)
 
     # --- the claim triplet: informational only, never scored --------------
     if claims_floor is None:
