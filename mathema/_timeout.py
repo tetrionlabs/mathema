@@ -352,7 +352,8 @@ def _disarm(guard: _Guard) -> None:
             if not g.released:
                 g.released = True
                 _hook_users -= 1
-        if pending:
+        clear_here = pending and guard.thread_id == threading.get_ident()
+        if pending and not clear_here:
             _raise_in_thread(guard.thread_id, None)
         if not stack:
             _STACKS.pop(guard.thread_id, None)
@@ -361,6 +362,37 @@ def _disarm(guard: _Guard) -> None:
             if sys.unraisablehook is _refire_swallowed_expiry:
                 sys.unraisablehook = _hook_prior
             _hook_prior = None
+    if clear_here:
+        _consume_pending_expiry()
+
+
+class _ExpiryConsumed(BaseException):
+    """Intent:
+        The stand-in exception `_consume_pending_expiry` delivers to
+        its own thread in place of an expiry that may still be pending.
+    """
+
+
+def _consume_pending_expiry() -> None:
+    """Intent:
+        Clear an expiry that may still be pending on the calling thread
+        by replacing it with `_ExpiryConsumed` and taking that at once,
+        so the interpreter's pending-exception signal is cleared the way
+        a delivered exception clears it.
+
+    Notes:
+        Clearing the pending exception directly (`_raise_in_thread`
+        with None) leaves that signal raised on CPython 3.11 with no
+        exception to clear it, and opcode tracing on any thread then
+        spins forever.
+    """
+    try:
+        _raise_in_thread(threading.get_ident(), _ExpiryConsumed)
+        for _ in range(1_000_000):
+            pass
+    except _ExpiryConsumed:
+        return
+    _raise_in_thread(threading.get_ident(), None)
 
 
 def _fire_overdue(thread_id: int) -> None:
