@@ -38,6 +38,7 @@ from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
 from .domain import _sentinel_piece, numeric_excluded
 from .runtime_types import SEQUENCE_KINDS
+from .runtime_types._abstract import OneRowColumn
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
@@ -425,16 +426,20 @@ def plain_value(v):
     """Intent:
         An executed value in the plain Python form the comparisons
         read: a numpy scalar or a 0-d array becomes its Python number,
-        an array becomes nested lists, anything else is returned as it
-        is.
+        an array becomes nested lists, the column of a one-row table a
+        `OneRowColumn`, anything else is returned as it is.
     """
     if type(v) in (bool, int, float, complex, str, type(None)):
         return v
     if hasattr(v, "shape") and hasattr(v, "tolist"):
         try:
-            return v.tolist()
+            listed = v.tolist()
         except Exception:
             return v
+        if getattr(v, "one_row_column", False) and isinstance(listed, list) \
+                and len(listed) == 1:
+            return OneRowColumn(listed)
+        return listed
     if hasattr(v, "dtype") and hasattr(v, "item"):
         try:
             return v.item()
@@ -512,10 +517,13 @@ def scalar_spreads(scalar, container, relation: str) -> bool:
         for the number 0, the zero of every shape (`x != 0` says x is
         not the zero vector): any other value against a sequence is a
         different shape, so unequal. A sequence with no elements gives
-        nothing to read, so it decides nothing.
+        nothing to read, so it decides nothing. The column of a table
+        with one row holds one value, so any relation reads that value.
     """
     if len(container) == 0:
         return False
+    if isinstance(container, OneRowColumn):
+        return True
     if relation in ("==", "~=", "!="):
         return _is_number(scalar) and scalar == 0
     return True
