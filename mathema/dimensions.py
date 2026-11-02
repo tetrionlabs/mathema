@@ -174,8 +174,10 @@ class DimResolver:
     def agrees(self, point: dict) -> bool:
         """Whether every key two or more axes share has one size across
         `point`, each axis measured on the value the point gives its
-        parameter. An axis that cannot be measured (an absent value, an
-        empty container, a value of another kind) constrains nothing."""
+        parameter. An empty container has length 0, and that constrains
+        its first axis as any length does. An axis that cannot be
+        measured (an absent value, an axis inside an empty container, a
+        value of another kind) constrains nothing."""
         sizes: dict = {}
         for p, shape in self.shapes.items():
             if p not in point:

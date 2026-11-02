@@ -8898,10 +8898,10 @@ def _admitted_container_points(ctx, facts, resolver=None) -> tuple:
         else:
             (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             base = [_synth("float", rng, bound) for _ in range(length)]
-            free = not any(fixed) and not any(
-                resolver.key(p, a) in tied
-                for a in range(resolver.shapes[p].ndim)
-                if resolver is not None and p in resolver.shapes)
+            free = not any(fixed) and not (
+                resolver is not None and p in resolver.shapes and any(
+                    resolver.key(p, a) in tied
+                    for a in range(resolver.shapes[p].ndim)))
             floor = _floor.vector_floor(holes, admits_zero,
                                         length_free=free, absent=absent)
         for item in floor:
