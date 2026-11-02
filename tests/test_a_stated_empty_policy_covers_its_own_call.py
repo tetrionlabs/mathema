@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from mathema._empty_input import _same_pin, stated_policies
 from mathema.claims import check_conjectures, claim
 
 
@@ -133,8 +134,83 @@ def test_the_same_shape_meets_a_value_policy(value, written, relation):
                        f"f([]) {relation} {written}").verdict == "holds"
 
 
+def nan_fill(xs, fill=float("nan")):
+    if not xs:
+        return fill
+    return sum(xs)
+
+
+def nan_pair_fill(xs, fill=(float("nan"), 1.0)):
+    if not xs:
+        return fill
+    return sum(xs)
+
+
+def fill_by_value(xs, fill=float("nan")):
+    if not xs:
+        if fill == fill:
+            return None
+        return 7.0
+    return sum(xs)
+
+
 def _line_of(fn, value_claim, policy):
     rows = check_conjectures(fn, [claim(value_claim, name="c"),
                                   claim(policy, name="policy")],
                              float_companions=True)
     return [r for r in rows if r.name.startswith("is_empty_safe")]
+
+
+def test_a_nan_default_is_covered_by_the_policy_that_leaves_it_out():
+    (line,) = _line_of(nan_fill, _NAN_SUM, "f([]) in {missing}")
+    assert line.verdict == "holds"
+    assert "as f([]) in {missing} states" in line.note
+
+
+def test_a_policy_naming_nan_covers_the_call_at_the_nan_default():
+    (line,) = _line_of(nan_fill, _NAN_SUM, "f([], nan) in {missing}")
+    assert line.verdict == "holds"
+    assert "states" in line.note
+
+
+def test_a_nan_inside_a_default_container_is_the_same_pin():
+    # f([]) gives a pair, no missing value, and the policy is about this call
+    (line,) = _line_of(nan_pair_fill, _NAN_SUM, "f([]) in {missing}")
+    assert line.verdict == "falsified"
+    assert "where the stated policy" in line.note
+
+
+def test_a_policy_pinned_at_a_number_says_nothing_about_the_nan_default():
+    (line,) = _line_of(fill_by_value, _NAN_SUM, "f([], 1.0) in {missing}")
+    assert "stated policy" not in (line.note or "")
+    assert "states" not in (line.note or "")
+
+
+def test_a_nan_default_is_covered_by_a_value_policy_too():
+    (line,) = _line_of(fill_by_value, _NAN_SUM, "f([]) == 7.0")
+    assert line.verdict == "holds"
+    assert "as f([]) == 7.0 states" in line.note
+
+
+@pytest.mark.parametrize("have,want,same", [
+    (_NAN, _NAN, True), (float("nan"), float("nan"), True),
+    ([_NAN, 1.0], (float("nan"), 1.0), True), (_NAN, 1.0, False),
+    (1.0, _NAN, False), ([_NAN], _NAN, False), (1.0, 1.0, True),
+    (1.0, 1.0 + 1e-12, False), (None, None, True), (None, _NAN, False),
+    (float("inf"), float("inf"), True), (float("inf"), -float("inf"), False),
+], ids=repr)
+def test_a_pin_is_met_by_the_value_it_names(have, want, same):
+    assert _same_pin(have, want) is same
+
+
+def test_the_words_nan_and_inf_are_literal_pins():
+    def fn(xs, fill=0.0):
+        return fill
+    (nan_pin, inf_pin, neg_pin, pair_pin) = [
+        stated_policies(fn, [claim(c, name="p")], "xs")[0][5]["fill"]
+        for c in ("f([], nan) in {missing}", "f([], inf) == 1",
+                  "f([], -inf) == 1", "f([], [nan, 1.0]) == 1")]
+    assert nan_pin != nan_pin
+    assert inf_pin == float("inf")
+    assert neg_pin == -float("inf")
+    assert pair_pin[0] != pair_pin[0] and pair_pin[1] == 1.0

@@ -221,6 +221,49 @@ def stated_policies(fn, siblings, target: str) -> list:
     return out
 
 
+def _pin_value(node):
+    """Intent:
+        The value of a literal argument of a claim's call: a Python
+        literal, or `nan`, `inf` and `-inf`, the claim's words for those
+        floats, at any depth of a list or a tuple.
+
+    Raises:
+        ValueError: `node` is not a literal.
+    """
+    if isinstance(node, ast.Name) and node.id in ("nan", "inf"):
+        return float(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) \
+            and isinstance(node.operand, ast.Name):
+        return -_pin_value(node.operand)
+    if isinstance(node, ast.List):
+        return [_pin_value(e) for e in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_pin_value(e) for e in node.elts)
+    return ast.literal_eval(node)
+
+
+def _same_pin(have, want) -> bool:
+    """Intent:
+        Whether a call's argument is the value a policy pins: the same
+        object, the same value exactly, slot by slot in a container. A
+        NaN agrees with no value in a comparison, but here it says which
+        call is meant, so a NaN pin is met by a NaN.
+    """
+    from .probing import holds_nan, plain_value, values_agree
+    have, want = plain_value(have), plain_value(want)
+    if have is want:
+        return True
+    sequences = (list, tuple)
+    if isinstance(have, sequences) and isinstance(want, sequences):
+        return len(have) == len(want) and all(
+            _same_pin(a, b) for a, b in zip(have, want))
+    if isinstance(have, sequences) or isinstance(want, sequences):
+        return False
+    if holds_nan(have) or holds_nan(want):
+        return holds_nan(have) and holds_nan(want)
+    return values_agree(have, want, 0.0, 0.0) is True
+
+
 def _pinned(sig, args: dict, target: str) -> dict:
     """Intent:
         The value each parameter other than `target` takes in a literal
@@ -237,7 +280,7 @@ def _pinned(sig, args: dict, target: str) -> dict:
             continue
         if q in args:
             try:
-                out[q] = ast.literal_eval(args[q])
+                out[q] = _pin_value(ast.parse(args[q], mode="eval").body)
             except (ValueError, SyntaxError, TypeError, MemoryError,
                     RecursionError):
                 continue
@@ -256,7 +299,6 @@ def _covers(policy, args: dict, sig) -> bool:
     import inspect
 
     from ._linalg_eval import from_law
-    from .probing import values_agree
     for q, want in policy[5].items():
         if q in args:
             have = from_law(args[q])
@@ -265,7 +307,7 @@ def _covers(policy, args: dict, sig) -> bool:
             if prm is None or prm.default is inspect.Parameter.empty:
                 return False
             have = prm.default
-        if values_agree(have, want, 0.0, 0.0) is not True:
+        if not _same_pin(have, want):
             return False
     return True
 
