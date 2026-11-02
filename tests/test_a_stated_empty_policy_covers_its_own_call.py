@@ -11,6 +11,8 @@ a policy names is compared as a value, a container included: `f([]) ==
 """
 from __future__ import annotations
 
+import pytest
+
 from mathema.claims import check_conjectures, claim
 
 
@@ -83,3 +85,56 @@ def test_the_siblings_keep_their_verdicts_when_the_policy_is_stated():
     for name in ("c0", "c1"):
         assert after[name].verdict == before[name].verdict, \
             (name, before[name].note, after[name].note)
+
+
+_NAN = float("nan")
+_NAN_SUM = "for xs in [0, 1]^n, f(xs) == sum(xs)"
+
+
+def _returns(value):
+    def f(xs):
+        if not xs:
+            return value
+        return sum(xs)
+    return f
+
+
+def _empty_line(fn, policy):
+    (line,) = _line_of(fn, _NAN_SUM, policy)
+    return line
+
+
+@pytest.mark.parametrize("value", [5.0, None, _NAN, "x", [5.0], [[]]],
+                         ids=repr)
+@pytest.mark.parametrize("relation", ["==", "~="])
+def test_nothing_but_an_empty_container_meets_an_empty_container_policy(
+        value, relation):
+    line = _empty_line(_returns(value), f"f([]) {relation} []")
+    assert line.verdict == "falsified"
+
+
+@pytest.mark.parametrize("value,written", [
+    ([], "0"), ([], "5"), ([5.0, 5.0], "5"), (5.0, "[5.0, 5.0]"),
+    ([[], []], "0"), ([0.0, 1.0], "0"), (0.0, "[1.0]"),
+], ids=repr)
+@pytest.mark.parametrize("relation", ["==", "~="])
+def test_a_shape_mismatch_does_not_meet_a_value_policy(value, written, relation):
+    line = _empty_line(_returns(value), f"f([]) {relation} {written}")
+    assert line.verdict == "falsified"
+
+
+@pytest.mark.parametrize("value,written", [
+    ([], "[]"), (5.0, "5"), ([5.0, 5.0], "[5.0, 5.0]"), ((), "[]"),
+    ([0.0, 0.0], "0"),
+], ids=repr)
+@pytest.mark.parametrize("relation", ["==", "~="])
+def test_the_same_shape_meets_a_value_policy(value, written, relation):
+    assert _empty_line(_returns(value),
+                       f"f([]) {relation} {written}").verdict == "holds"
+
+
+def _line_of(fn, value_claim, policy):
+    rows = check_conjectures(fn, [claim(value_claim, name="c"),
+                                  claim(policy, name="policy")],
+                             float_companions=True)
+    return [r for r in rows if r.name.startswith("is_empty_safe")]
