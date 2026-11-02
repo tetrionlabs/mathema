@@ -1034,6 +1034,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # domain
             if n in point and not _paths_hold(point[n], n, cj_domain):
                 return False
+        if resolver is not None and not resolver.agrees(point):
+            # parameters bound to one dimension name with different
+            # sizes: the point is outside the claim's domain
+            return False
         for a_l, a_rel, a_r in assum:
             try:
                 env = {**base_env, **premise_words, **_typed(point)}
@@ -1074,9 +1078,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import random as _random
     # a corner's sizes: a fixed axis at its size, every other axis at the
     # corner length 3, shared names agreeing
-    corner_sizes = ({k: (int(k) if isinstance(k, str) and k.isdigit() else 3)
-                     for k in resolver.distinct_keys()}
-                    if resolver is not None else {})
+    corner_sizes = resolver.corner_sizes() if resolver is not None else {}
 
     def _corner_value(name, value):
         # a sequence's corner is a short constant list at the

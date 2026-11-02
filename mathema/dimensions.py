@@ -143,6 +143,51 @@ class DimResolver:
                 for p, shape in self.shapes.items()
                 for a in range(shape.ndim)}
 
+    def tied_keys(self) -> set:
+        """Every canonical key whose size is not a free per-parameter
+        choice: a key two or more axes share (across parameters, or
+        both axes of a square `^(n,n)`), a literal size (`"30"`), or a
+        name a binding fixes."""
+        seen: dict = {}
+        for p, shape in self.shapes.items():
+            for a in range(shape.ndim):
+                k = self.key(p, a)
+                seen[k] = seen.get(k, 0) + 1
+        return {k for k, uses in seen.items()
+                if uses > 1 or k in self.fixed
+                or (isinstance(k, str) and k.isdigit())}
+
+    def corner_sizes(self, length: int = 3) -> dict:
+        """The size of every canonical key at a domain corner: a literal
+        size or a fixed name at that size, every other key at `length`,
+        so parameters sharing a name agree at every corner."""
+        out: dict = {}
+        for k in self.distinct_keys():
+            if isinstance(k, str) and k.isdigit():
+                out[k] = int(k)
+            elif k in self.fixed:
+                out[k] = self.fixed[k]
+            else:
+                out[k] = length
+        return out
+
+    def agrees(self, point: dict) -> bool:
+        """Whether every key two or more axes share has one size across
+        `point`, each axis measured on the value the point gives its
+        parameter. An axis that cannot be measured (an absent value, an
+        empty container, a value of another kind) constrains nothing."""
+        sizes: dict = {}
+        for p, shape in self.shapes.items():
+            if p not in point:
+                continue
+            for a in range(shape.ndim):
+                try:
+                    size = self.measure(point[p], a)
+                except Exception:
+                    continue
+                sizes.setdefault(self.key(p, a), set()).add(size)
+        return all(len(found) <= 1 for found in sizes.values())
+
     def draw_sizes(self, rng: random.Random,
                    lo: "dict | None" = None,
                    hi: "dict | None" = None,
