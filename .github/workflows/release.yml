@@ -17,10 +17,14 @@
 #     create "testpypi" (no protection) and "pypi" with a required
 #     reviewer, so the final publish is an explicit click.
 #
-# Release procedure: run scripts/stamp_license.py locally, commit the
-# stamped LICENSE in your own voice, tag vX.Y.Z, push the tag (this
-# workflow runs), then create the GitHub Release from the tag with
-# real notes, which is what triggers the docs deploy (docs.yml).
+# Release procedure: on a release branch cut from develop, bump
+# `__version__`, run scripts/stamp_license.py and add the CHANGELOG
+# entry; dispatch tests.yml on that branch, which runs the full
+# interpreter matrix; open the pull request into main. Once it is
+# merged, tag the merge commit vX.Y.Z and push the tag. This workflow
+# then checks that the tagged tree passed a full-matrix run, builds,
+# smoke-tests the built wheel, publishes, creates the GitHub Release
+# from the CHANGELOG entry and deploys the docs.
 # Stamping before the tag means the tag's tree, the public export and
 # the built artefacts all carry the same concrete Change Date. This
 # workflow only VERIFIES that stamp; it never writes one, so the date
@@ -45,6 +49,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # One release per tag, never cancelled: a half-cancelled publish is
 # worse than a slow one.
@@ -64,6 +69,8 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -94,26 +101,29 @@ jobs:
             --version "${{ steps.ver.outputs.version }}" --check \
             || { echo "::error::LICENSE.md is not stamped for ${{ steps.ver.outputs.version }}. Run scripts/stamp_license.py --version ${{ steps.ver.outputs.version }} locally, commit it, and re-tag."; exit 1; }
 
-  # A tag must never publish code the suite has not passed. tests.yml
-  # runs on push-to-main and pull requests, which does NOT cover the
-  # tagged commit, so the gate is re-run here and `build` depends on
-  # it. The matrix mirrors requires-python; a release that fails on
-  # any supported interpreter is not a release.
-  test:
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -e '.[test]'
-      - run: python -m pytest -q -n 2
+      # A tag must never publish code the suite has not passed on every
+      # supported interpreter. A dispatched tests.yml run tests the full
+      # matrix (3.10 to 3.14); this step finds a successful one whose
+      # commit has exactly the tagged tree. Trees, not commits, because
+      # the tag sits on main's merge commit while the run was on the
+      # release branch: the same files, a different commit.
+      - name: The tagged tree passed the full interpreter matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          found=""
+          for sha in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow tests.yml \
+                         --event workflow_dispatch --status success --limit 200 \
+                         --json headSha --jq '.[].headSha'); do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+            if [ "$(git rev-parse "$sha^{tree}")" = "$tree" ]; then found="$sha"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::no successful full-matrix tests.yml run has this tree ($tree). Dispatch tests.yml on the release branch, wait for it to pass, then re-run this workflow."
+            exit 1
+          fi
+          echo "the tagged tree passed the full matrix at $found"
 
   lint:
     needs: validate
@@ -131,7 +141,7 @@ jobs:
       - run: python mathema/_devtools/check_prose.py
 
   build:
-    needs: [validate, test, lint]
+    needs: [validate, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -183,10 +193,35 @@ jobs:
           name: dist
           path: dist/
 
+  # The built wheel, installed alone into a clean interpreter at each
+  # end of the supported range, reads, proves and falsifies.
+  smoke:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/release_smoke.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - run: python -m venv /tmp/smoke && /tmp/smoke/bin/pip install --quiet dist/*.whl
+      - run: cd /tmp && /tmp/smoke/bin/python "$GITHUB_WORKSPACE/scripts/release_smoke.py" "${{ needs.validate.outputs.version }}"
+
   publish-testpypi:
     # never on a rehearsal
     if: github.event_name == 'push'
-    needs: build
+    needs: smoke
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -217,3 +252,38 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The GitHub Release, with the version's CHANGELOG entry as its notes.
+  github-release:
+    if: github.event_name == 'push'
+    needs: [validate, publish-pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Notes from the CHANGELOG entry
+        run: |
+          python3 - "${{ needs.validate.outputs.version }}" > notes.md <<'PY'
+          import re, sys
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(rf"^## {re.escape(version)}\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+          if not match or not match.group(1).strip():
+              sys.exit(f"CHANGELOG.md has no entry for {version}")
+          print(match.group(1).strip())
+          PY
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "mathema ${{ needs.validate.outputs.version }}" --notes-file notes.md
+
+  # A release created with the workflow's own token starts no other
+  # workflow, so the docs deploy is called here rather than waiting on
+  # the release event.
+  docs:
+    needs: github-release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docs.yml
+    secrets: inherit
