@@ -317,7 +317,7 @@ def _matches(policy, raised, result) -> bool:
     the value it names exactly under `==`, a container element by
     element, and within ε under `~=` (`abs(result - v) <= ε` at every
     element, the computation line's reading). A container against a
-    number other than 0 is a different shape, and an empty container
+    number is a different shape, and an empty container
     meets only an empty one (`probing.scalar_spreads`)."""
     kind, operand, _text, relation, tolerance = policy[:5]
     if kind == "raises":

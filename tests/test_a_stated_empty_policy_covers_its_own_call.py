@@ -126,12 +126,18 @@ def test_a_shape_mismatch_does_not_meet_a_value_policy(value, written, relation)
 
 @pytest.mark.parametrize("value,written", [
     ([], "[]"), (5.0, "5"), ([5.0, 5.0], "[5.0, 5.0]"), ((), "[]"),
-    ([0.0, 0.0], "0"),
+    ([0.0, 0.0], "[0, 0]"),
 ], ids=repr)
 @pytest.mark.parametrize("relation", ["==", "~="])
 def test_the_same_shape_meets_a_value_policy(value, written, relation):
     assert _empty_line(_returns(value),
                        f"f([]) {relation} {written}").verdict == "holds"
+
+
+@pytest.mark.parametrize("relation", ["==", "~="])
+def test_zeros_do_not_meet_a_policy_of_the_number_0(relation):
+    assert _empty_line(_returns([0.0, 0.0]),
+                       f"f([]) {relation} 0").verdict == "falsified"
 
 
 def nan_fill(xs, fill=float("nan")):
