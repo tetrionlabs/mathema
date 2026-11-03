@@ -1229,6 +1229,56 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                      else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
+    def _small_points():
+        # the joint points at a tied dimension's least size, as the probe's
+        # guaranteed small draws (`DimResolver.draw_sizes`): vectors of
+        # length 1 side by side, and for a matrix 1-by-1, 1-by-m and n-by-1.
+        # No single container's floor can build one, since its other
+        # coordinates come from a corner. Every other coordinate is drawn,
+        # and a point the premises refuse is drawn again
+        if resolver is None:
+            return []
+        sized = [n for n in names if n in planned or n in tied_tables]
+        free = {k for k in tied if k not in resolver.fixed
+                and not (isinstance(k, str) and k.isdigit())}
+        if not any(resolver.key(n, a) in free for n in sized
+                   for a in range(resolver.shapes[n].ndim)):
+            return []
+        spans_matrix = any(resolver.shapes[n].ndim >= 2 for n in sized)
+        from ._sampling import _RNG_SEED
+        rng = _random.Random(_RNG_SEED + 2)
+        points: list = []
+        seen: list = []
+        for round_ in ((0, 1, 2) if spans_matrix else (0,)):
+            sizes = resolver.draw_sizes(rng, floor=round_)
+            if sizes in seen:
+                continue
+            seen.append(sizes)
+            point: dict = {}
+            for _ in range(_SMALL_POINT_DRAWS):
+                point = {n: _small_value(n, sizes, rng) for n in names}
+                if admits(point):
+                    break
+            points.append(point)
+        return points
+
+    def _small_value(name, sizes, rng):
+        # one coordinate of a small point: a sized container at `sizes`,
+        # with no holes, else an ordinary draw
+        b = sample_domain.get(name)
+        if name in tied_tables:
+            from .conjecture import _column_bound
+            length = sizes[resolver.key(name, 0)]
+            return {c: _synth("sequence", rng,
+                              _column_bound(cj_domain.get(f"{name}.{c}"), b),
+                              length=length)
+                    for c in table_columns[name]}
+        if name not in planned:
+            return sample(name, rng)
+        if resolver.shapes[name].ndim == 1:
+            return _synth("sequence", rng, b, length=sizes[resolver.key(name, 0)])
+        return resolver.synth(name, sizes, lambda: _synth("float", rng, b), rng)
+
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
     # whose callable stands in for fn) so the seam is testable
@@ -1322,7 +1372,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     evaluate.calls = lambda: list(point_calls)  # type: ignore[attr-defined]
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
-                sample=sample, corners=corners, names=names)
+                sample=sample, corners=corners, names=names,
+                small_points=_small_points)
+
+
+#: how many times a small joint point is drawn before it is left to the
+#: sweep's own premise check
+_SMALL_POINT_DRAWS = 32
 
 
 def _written_exactly(value):
@@ -2313,7 +2369,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
-    corners = list(deps["corners"])
+    corners = list(deps["corners"]) + deps["small_points"]()
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
     # the admitted missing inputs run first, so each is executed and

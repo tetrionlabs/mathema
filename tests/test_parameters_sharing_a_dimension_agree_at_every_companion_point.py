@@ -7,6 +7,7 @@ inputs of a proof's `[float]` companion included. A point where they
 differ is outside the claim's domain, so the code is never judged
 there."""
 import random
+import re
 from types import SimpleNamespace
 from typing import Annotated
 
@@ -223,3 +224,72 @@ def test_two_tables_on_one_n_have_one_row_count_at_every_companion_call():
                and isinstance(call.point.get("b"), dict)}
     assert lengths and all(x == y for x, y in lengths), sorted(lengths)
     assert len(lengths) > 1, sorted(lengths)
+
+
+def len_minus_one(xs: list[float], ys: list[float]) -> float:
+    total = 0.0
+    for i in range(len(xs)):
+        total += xs[i] * ys[i]
+    return total / (len(xs) - 1)
+
+
+@pytest.mark.needs_full_proof_budget
+@pytest.mark.parametrize("trials", [8, 12, 20])
+def test_tied_vectors_reach_length_one_whatever_the_trials(trials):
+    with batch():
+        rows = check_conjectures(
+            len_minus_one,
+            [claim("for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
+                   name="c", trials=trials)],
+            float_companions=True)
+    companion = next(p for p in rows if p.name == "c[float]")
+    assert companion.verdict == "falsified", (companion.verdict, companion.note)
+    assert re.search(r"xs = \[[^,\]]+\], ys = \[[^,\]]+\]", str(companion.counterexample)), (
+        companion.counterexample)
+
+
+def test_tied_keys_give_a_joint_point_at_their_least_size():
+    deps, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    assert [(len(p["xs"]), len(p["ys"])) for p in deps["small_points"]()] == [(1, 1)]
+    assert all(deps["admits"](p) for p in deps["small_points"]())
+
+
+def test_a_tied_matrix_reaches_one_by_one_one_by_m_and_n_by_one():
+    def vector_and_matrix(w, A):
+        return w[0] + A[0][0]
+    deps, _resolver = _kit(
+        vector_and_matrix, "for w in [-1, 1]^n, A in [-1, 1]^(n,m), f(w, A) == f(w, A)")
+    shapes = [(len(p["w"]), len(p["A"]), len(p["A"][0])) for p in deps["small_points"]()]
+    assert len(shapes) == 3
+    assert shapes[0] == (1, 1, 1)
+    assert shapes[1][:2] == (1, 1) and shapes[1][2] >= 2
+    assert shapes[2][0] == shapes[2][1] >= 2 and shapes[2][2] == 1
+    assert all(deps["admits"](p) for p in deps["small_points"]())
+
+
+def test_a_tied_table_reaches_one_row_beside_a_vector():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: list) -> float:
+        return float(df["a"].sum()) + sum(w)
+    deps, _resolver = _kit(table_and_vector,
+                           "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
+    assert [(_rows_of(p["df"]), len(p["w"])) for p in deps["small_points"]()] == [(1, 1)]
+    assert all(deps["admits"](p) for p in deps["small_points"]())
+
+
+def test_a_small_point_keeps_a_premise_on_its_elements():
+    def premised(xs, ys, c):
+        return xs[0] + ys[0] + c
+    deps, _resolver = _kit(
+        premised,
+        "for xs in [-1, 1]^n, ys in [-1, 1]^n, c in [0, 1], assuming c > 0.9, "
+        "f(xs, ys, c) == f(xs, ys, c)")
+    assert deps["small_points"]() and all(deps["admits"](p) for p in deps["small_points"]())
+
+
+def test_no_small_point_where_every_size_is_fixed_or_free():
+    fixed, _resolver = _kit(dot, "for xs in [-1, 1]^2, ys in [-1, 1]^2, f(xs, ys) == f(xs, ys)")
+    assert fixed["small_points"]() == []
+    free, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
+    assert free["small_points"]() == []
