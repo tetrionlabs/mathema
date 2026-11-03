@@ -2330,7 +2330,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         word, value)`: each is executed at the first domain corner,
         after the corners and before the sampled points; a container's
         floor is listed the same way (its word None for an item that
-        holds no hole). `holes`, `{param: [value, ...]}`, are the hole
+        holds no hole). Parameters sharing a dimension are also executed
+        together at its least size (`_point_evaluator`'s `small_points`),
+        after the corners and before the sampled points, and count toward
+        `budget` as corners do. `holes`, `{param: [value, ...]}`, are the hole
         values a container's slots admit, carried by its sampled draws.
         A point where the code returns a missing value or raises at a
         missing input is classified, never judged. `excluded`, when given,
