@@ -122,3 +122,26 @@ def test_no_one_row_reading_remains():
     assert not hasattr(probing, "_one_element_series")
     assert probing.plain_value(pl.Series([3.0])) == [3.0]
     assert probing.plain_value(pd.Series([3.0])) == [3.0]
+
+
+def one_true(n: int) -> list:
+    return [True]
+
+
+def one_word(n: int) -> list:
+    return ["a"]
+
+
+@pytest.mark.parametrize("fn,written", [(one_true, "True"), (one_word, "'a'")])
+def test_a_bool_or_a_word_is_offered_the_same_spellings(fn, written):
+    law = f"for n in {{1, 2}}, f(n) == {written}"
+    probe = _probe(fn, law)
+    assert probe.verdict == "falsified", (probe.verdict, probe.note)
+    offered = remedy_statements(
+        f"{probe.counterexample}\n{probe.sketch}\n{probe.note}")
+    assert f"f(n)[0] == {written}" in offered, offered
+    assert f"f(n) == [{written}]" in offered, offered
+    assert _verdict(fn, f"for n in {{1, 2}}, f(n)[0] == {written}") in (
+        "holds", "proven")
+    assert _verdict(fn, f"for n in {{1, 2}}, f(n) == [{written}]") in (
+        "holds", "proven")
