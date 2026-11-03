@@ -1696,8 +1696,9 @@ DEFAULT_BADGE_DIR = ".mathema/badges"
 
 # What `mathema badges` and the MCP `badges` tool answer with while
 # MATHEMA_BADGES is off.
-MOVED_NOTICE = ('badges now come from `mathema-ci measure --out` '
-                '(pip install "mathema[ci]")')
+MOVED_NOTICE = ("badges now come from `mathema-ci measure --out` "
+                "(pip install mathema-ci); set MATHEMA_BADGES=on for the "
+                "built-in writer, which 0.6.5 removes")
 
 
 def core_badges_enabled() -> bool:

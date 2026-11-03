@@ -520,7 +520,12 @@ def test_the_moved_notice_is_one_line_naming_the_replacement():
     from mathema.badges import MOVED_NOTICE
     assert "\n" not in MOVED_NOTICE
     assert "mathema-ci measure --out" in MOVED_NOTICE
-    assert 'pip install "mathema[ci]"' in MOVED_NOTICE
+    assert "pip install mathema-ci" in MOVED_NOTICE
+    assert "MATHEMA_BADGES=on" in MOVED_NOTICE
+    assert MOVED_NOTICE == (
+        "badges now come from `mathema-ci measure --out` "
+        "(pip install mathema-ci); set MATHEMA_BADGES=on for the built-in "
+        "writer, which 0.6.5 removes")
 
 
 def test_the_cli_prints_only_the_notice_by_default(tmp_path, monkeypatch,

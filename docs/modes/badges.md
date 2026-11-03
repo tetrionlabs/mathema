@@ -2,10 +2,20 @@
 
 Three orthogonal measures of a codebase, each 0-100, and one picture.
 
+Badges now come from [mathema-ci](https://github.com/tetrionlabs/mathema-ci):
+`pip install mathema-ci`, then `mathema-ci measure --out`, which runs your
+tests, scores the project and writes the badge files. The writer built into
+mathema is off by default, so `mathema badges` and the MCP `badges` tool
+only print a line saying this, write nothing and exit 0. Setting
+`MATHEMA_BADGES=on` in the environment turns it back on, as every command
+below assumes, and 0.6.5 removes it. The scores themselves are still
+mathema's, so the rest of this page describes what `mathema-ci measure`
+reports too.
+
 ```
-mathema badges [targets]                # print the triangle + numbers
-mathema badges [targets] --out .mathema/badges/   # also write artifacts
-mathema badges [targets] --refresh       # score every function again
+MATHEMA_BADGES=on mathema badges [targets]                # print the triangle + numbers
+MATHEMA_BADGES=on mathema badges [targets] --out .mathema/badges/   # also write artifacts
+MATHEMA_BADGES=on mathema badges [targets] --refresh       # score every function again
 ```
 
 Omit targets for the rootwide analogue of `verify` (every function the
@@ -358,8 +368,8 @@ shape is not drawn, only the numbers.
 ## The standard location, and embedding in a README
 
 ```
-mathema badges --out            # writes to .mathema/badges/ under --root
-mathema badges --out path/       # or an explicit directory
+MATHEMA_BADGES=on mathema badges --out            # writes to .mathema/badges/ under --root
+MATHEMA_BADGES=on mathema badges --out path/       # or an explicit directory
 ```
 
 Bare `--out` writes to **`.mathema/badges/`**, the documented home under
