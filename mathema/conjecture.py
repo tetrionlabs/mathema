@@ -6288,6 +6288,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped:misspecified", route=None,
                 note=f"{ctx.note}; {pin_problem}")))
             continue
+        sizes_conflict = _fixed_size_conflict(fn, facts, ctx.cj_domain)
+        if sizes_conflict is not None:
+            # the bindings fix one shared dimension to two sizes: no
+            # value satisfies the claim's own domain, on any route
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{ctx.note}; {sizes_conflict}",
+                meta={"mathema.invalid_conjecture": True,
+                      "mathema.premise": "dimension-conflict"})))
+            continue
         # the family is resolved for every concrete route: the derive
         # stage reads its derive half, and the probe stage reads its
         # probe:algorithmic half, a plain route="probe" claim on a
@@ -10174,6 +10184,24 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     except AttributeError:
         return None
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
+
+
+def _fixed_size_conflict(fn, facts, cj_domain) -> "str | None":
+    """Intent:
+        The reason text when the claim's bindings fix one shared
+        dimension to two sizes (`dimensions.FixedSizeConflict`), else
+        None. Any other dimension conflict, or a signature with no
+        markers, is left to the routes.
+    """
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        _dims.resolve(facts, shapes_from_signature(fn), claim_domain=cj_domain)
+    except _dims.FixedSizeConflict as conflict:
+        return str(conflict)
+    except _dims.DimensionConflict:
+        return None
+    return None
 
 
 def _fixed_dim_clash(ctx: "_ClaimContext") -> "tuple | None":

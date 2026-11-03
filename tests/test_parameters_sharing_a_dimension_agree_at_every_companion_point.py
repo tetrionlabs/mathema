@@ -740,3 +740,27 @@ def test_drawing_small_points_stops_at_the_wall_clock_cap(monkeypatch):
     _bare_companion(slow, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
                     assum=[("f(xs, ys)", ">", "1000")])
     assert len(at_length_one) < 32, len(at_length_one)
+
+
+def direct_sizes(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("n")]):
+    return sum(a) + sum(b)
+
+
+def aliased_sizes(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("k")],
+                  c: Annotated[list, Shape("k")]):
+    return sum(a) + sum(b) + sum(c)
+
+
+@pytest.mark.parametrize("route", ["best", "derive", "probe"])
+@pytest.mark.parametrize("fn,text", [
+    (direct_sizes, "for a in [-1, 1]^2, b in [-1, 1]^3, f(a, b) == f(a, b)"),
+    (direct_sizes, "for a in [0, 1]^2, b in [0, 1]^3, f(a, b) < 0"),
+    (aliased_sizes, "for a in [-1, 1]^2, b in [-1, 1]^3, c in [-1, 1]^n, f(a, b, c) == f(a, b, c)"),
+    (aliased_sizes, "for a in [0, 1]^2, b in [0, 1]^3, c in [0, 1]^n, f(a, b, c) < 0"),
+])
+def test_one_dimension_fixed_to_two_sizes_is_misspecified_on_every_route(fn, text, route):
+    rows, calls = _rows_and_calls(fn, text, route=route)
+    assert rows["c"].verdict == "skipped:misspecified", (rows["c"].verdict, rows["c"].note)
+    assert "is fixed to two sizes" in str(rows["c"].note), rows["c"].note
+    assert not [name for name in rows if name.startswith("c[")], sorted(rows)
+    assert not [call for call in calls if str(call.claim).startswith("c")]

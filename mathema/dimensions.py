@@ -35,6 +35,13 @@ class DimensionConflict(ValueError):
     adjudicating one of two disagreeing shapes."""
 
 
+class FixedSizeConflict(DimensionConflict):
+    """A claim's bindings fix one shared dimension to two sizes (`a` in
+    `[0, 1]^2` and `b` in `[0, 1]^3` under one marker name, directly or
+    through an alias). No value satisfies both, so the claim is not
+    mathematically possible and is misspecified on every route."""
+
+
 @dataclass(frozen=True)
 class ParamShape:
     """One parameter's dimensional structure. `axes` names each axis:
@@ -346,7 +353,7 @@ def resolve(facts, shapes: "dict | None" = None,
             aliases.update(new_aliases)
             for name, size in new_fixed.items():
                 if name in fixed and fixed[name] != size:
-                    raise DimensionConflict(
+                    raise FixedSizeConflict(
                         f"{name} is fixed to two sizes: {fixed[name]} by "
                         f"{fixed_by[name]}'s binding and {size} by {p}'s "
                         f"binding; one shared dimension has one size")
@@ -368,7 +375,7 @@ def resolve(facts, shapes: "dict | None" = None,
     for name, size in list(fixed.items()):
         key = resolver.canonical(name)
         if fixed.get(key, size) != size:
-            raise DimensionConflict(
+            raise FixedSizeConflict(
                 f"{key} is fixed to two sizes: {fixed[key]} and {size} by "
                 f"{fixed_by[name]}'s binding on its alias {name}; one shared "
                 f"dimension has one size")
