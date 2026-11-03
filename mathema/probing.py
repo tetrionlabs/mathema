@@ -532,7 +532,8 @@ def scalar_spreads(scalar, container, relation: str) -> bool:
         for the number 0, the zero of every shape (`x != 0` says x is
         not the zero vector): any other value against a sequence is a
         different shape, so unequal. A sequence with no elements gives
-        nothing to read, so it decides nothing. The column of a table
+        nothing to read, so nothing spreads over it (an ordering over it
+        does not hold, an equality with a number is a mismatch). The column of a table
         with one row holds one value, so any relation reads that value.
     """
     if len(container) == 0:
@@ -1334,11 +1335,11 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     and `!=` over arrays are one fact about the whole value
     (`values_agree`), so `!=` holds when some element differs; an
     ordering holds when it holds at every element, a scalar read at each
-    (`scalar_spreads`). A NaN anywhere fails every relation. Returns
+    (`scalar_spreads`), and over a sequence with no elements it does not
+    hold. A NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
-    meaningless (an ordering over non-orderable values, mismatched
-    shapes, or no elements), which the caller reads as skip, never
-    falsify.
+    meaningless (an ordering over non-orderable values or mismatched
+    shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
     and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
@@ -1347,8 +1348,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     ordering over a complex value is unanswerable. Two values of
     different lengths or shapes are unequal outright under `==`, `~=`
     and `!=` (a number other than 0 against a sequence, and any number
-    against an empty one, included); an ordering over them is
-    unanswerable. Leaves that are
+    against an empty one, included); an ordering over mismatched shapes
+    is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
@@ -1372,12 +1373,15 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         return agree if relation != "!=" else not agree
 
     def _walk(x, y):
-        # an ordering, at every element: over sequences of different
-        # length, sequences with no elements, or leaves that do not
+        # an ordering, at every element: over a sequence with no elements
+        # it does not hold, there being no element at which it could;
+        # over sequences of different length, or leaves that do not
         # order, it is unanswerable
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if (xs and not x) or (ys and not y):
+            return False
         if xs and ys:
-            if len(x) != len(y) or not x:
+            if len(x) != len(y):
                 return None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:

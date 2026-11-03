@@ -300,8 +300,9 @@ def relation_within(lv, rv, relation: str, declared=None,
         arrays are one fact about the whole value, so `!=` holds when
         some element differs and two values of different shapes are
         unequal outright; an ordering holds when it holds at every
-        element and is None (unanswerable) over mismatched shapes, no
-        elements, or values that do not order. A value that is not a
+        element, does not hold over a sequence with no elements, and is
+        None (unanswerable) over mismatched shapes or values that do not
+        order. A value that is not a
         sequence against a sequence is read at each element only as
         `probing.scalar_spreads` says. `exact_inequality` makes `!=`
         fail only at an actual equality.
@@ -324,14 +325,18 @@ def relation_within(lv, rv, relation: str, declared=None,
     if not arrays:
         return leaf(lv, rv)
 
+    ordering = relation not in ("==", "~=", "!=")
+
     def walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if ordering and ((xs and not x) or (ys and not y)):
+            # an ordering over no elements does not hold
+            return False
         if xs and ys:
             if len(x) != len(y):
                 return None
             if not x:
-                # two sequences with no elements are one value, and have
-                # no element to order
+                # two sequences with no elements are one value
                 return True if relation in ("==", "~=") else None
             parts = [walk(a, b) for a, b in zip(x, y)]
         elif xs:

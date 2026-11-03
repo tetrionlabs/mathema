@@ -4,9 +4,11 @@
 wrote. A number and a container are different shapes, so they are unequal,
 whichever side each is on. The number 0 is the one exception: it is the
 zero of every shape, so `x == 0` says x is the zero vector. An empty
-container has no elements, and nothing over no elements decides a verdict:
-it equals only another empty container, and an ordering over it has no
-answer."""
+container has no elements: it equals only another empty container, and an
+ordering over it does not hold, since there is no element at which it
+could (empty is not 0 and is not >= 0). A claim whose ordering fails only
+where the result is empty is told so, with the narrowed domain as the way
+out."""
 import numpy as np
 import pytest
 
@@ -115,8 +117,8 @@ def test_equal_values_fail_not_equal(fn, written):
     (_nested_empties, "5"), (_text, "[]"), (_five, "[[], []]"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 @pytest.mark.parametrize("relation", ["<=", ">=", "<", ">"])
-def test_an_ordering_over_no_elements_has_no_answer(fn, written, relation):
-    assert _verdict(fn, f"f([]) {relation} {written}") == "unknown"
+def test_an_ordering_over_no_elements_does_not_hold(fn, written, relation):
+    assert _verdict(fn, f"f([]) {relation} {written}") == "falsified"
 
 
 def test_an_ordering_still_holds_at_every_element():
@@ -159,9 +161,48 @@ def test_every_comparison_reads_a_mismatch_as_different(lv, rv):
     ([[], []], [[], []]), (np.array([]), 5), ([], np.array([])),
 ], ids=repr)
 @pytest.mark.parametrize("relation", ["<=", ">=", "<", ">"])
-def test_an_ordering_over_no_elements_is_unanswerable(lv, rv, relation):
-    assert relation_within(lv, rv, relation) is None
-    assert relation_holds_elementwise(lv, rv, relation, 1e-9) is None
+def test_an_ordering_over_no_elements_is_false(lv, rv, relation):
+    assert relation_within(lv, rv, relation) is False
+    assert relation_holds_elementwise(lv, rv, relation, 1e-9) is False
+
+
+def _ones(n):
+    return [1.0] * n
+
+
+def _probe(fn, law):
+    (probe,) = claims.check_conjectures(fn, [claim(law, name="c")])
+    return probe
+
+
+@pytest.mark.parametrize("law", [
+    "for n in {0, 1, 2}, f(n) >= 0",
+    "for n in {0, 1, 2}, f(n) <= 1",
+    "for n in {0, 1, 2}, f(n) < n + 1",
+    "for n in [0, 2] subset Z, f(n) >= 0",
+])
+def test_an_ordering_that_fails_only_at_an_empty_result_says_so(law):
+    probe = _probe(_ones, law)
+    assert probe.verdict == "falsified", (probe.verdict, probe.note)
+    assert "n = 0" in str(probe.counterexample), probe.counterexample
+    words = f"{probe.counterexample} {probe.sketch} {probe.note}"
+    assert "[] vs 0" in words or "[] vs 1" in words, words
+    assert "every other point" in words, words
+    assert "assuming n >= 1" in words, words
+
+
+def test_an_ordering_that_fails_elsewhere_too_offers_no_narrowing():
+    probe = _probe(_ones, "for n in {0, 1, 2}, f(n) >= 2")
+    assert probe.verdict == "falsified"
+    words = f"{probe.counterexample} {probe.sketch} {probe.note}"
+    assert "assuming n >= 1" not in words, words
+
+
+def test_an_empty_result_still_equals_an_empty_one_and_differs_from_a_number():
+    assert _probe(_ones, "for n in {0, 1, 2}, f(n) == [1.0] * n").verdict == "proven"
+    assert _probe(_ones, "f(0) == []").verdict == "proven"
+    assert _probe(_ones, "f(0) != 5").verdict == "proven"
+    assert _probe(_ones, "for n in {1, 2}, f(n) >= 0").verdict == "proven"
 
 
 @pytest.mark.parametrize("zero", [0, 0.0, -0.0, 0j])
