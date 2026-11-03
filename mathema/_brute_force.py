@@ -227,6 +227,69 @@ def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
                and _set_sentinels(_as_domain(cj_domain[n])) for n in names)
 
 
+def _orders_no_elements(cj, sides) -> bool:
+    """Whether the claim is an ordering and a side at this point is a
+    sequence with no elements, where no ordering holds."""
+    from .probing import plain_value
+    if cj.relation not in ("<", "<=", ">", ">=") or sides is None:
+        return False
+    return any(isinstance(side, (list, tuple)) and not side
+               for side in (plain_value(s) for s in sides))
+
+
+def _narrowed_domain(empty_points: list, held_points: list, names: list) -> str:
+    """Intent:
+        The way out of an ordering that fails only where the result has
+        no elements: `assuming p >= k` when the claim ranges over one
+        parameter and every point it holds at lies above every point it
+        fails at, else the general advice to narrow the domain.
+    """
+    plain = ("narrow the claim's domain to where the result has elements")
+    if len(names) != 1 or not held_points:
+        return plain
+    (p,) = names
+    failed = [pt[p] for pt in empty_points]
+    held = [pt[p] for pt in held_points]
+    numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                  for v in failed + held)
+    if not numbers or max(failed) >= min(held):
+        return plain
+    return f"state `assuming {p} >= {min(held)}` to claim the rest"
+
+
+def _empty_ordering_disproof(cj, empty_failures: list, other_failure,
+                             judged: list, names: list, plan, checked: int,
+                             grid, counted: dict, deps) -> "ProofResult":
+    """The disproof of an ordering that fails where its result has no
+    elements: the first such point is the witness, with the sides there;
+    the sketch says whether it holds at every other point, and then
+    offers the narrowed domain (`_narrowed_domain`)."""
+    from .gates import _fmt_point
+    from .probing import plain_value
+    point, sides = empty_failures[0]
+    lv, rv = (plain_value(s) for s in sides)
+    at = _fmt_point(point, names)
+    where = ("found by checking every point of a finite domain"
+             if plan is None else
+             f"found among the points run {plan.coverage.words(checked)}")
+    if other_failure is not None:
+        rest = f"; it also fails at {_fmt_point(other_failure, names)}"
+    else:
+        rest = (f"; it holds at every other point of the domain, so "
+                f"{_narrowed_domain([pt for pt, _ in empty_failures], judged, names)}")
+    return ProofResult(
+        "disproven",
+        sketch=(f"the claim fails at {at}, where {lv!r} {cj.relation} "
+                f"{rv!r} orders no elements and an ordering over no "
+                f"elements does not hold, {where}{rest}"),
+        counterexample=f"{at}: {lv!r} vs {rv!r}",
+        witness=dict(point),
+        meta=with_executed(
+            {"mathema.derive_route": "brute_force",
+             "mathema.witness_executed": True, **_tried(grid), **counted},
+            executed_missing(deps)))
+
+
 def _raised_at(fn, facts, point: dict) -> "str | None":
     """The exception type the function raises when called with `point`
     as its arguments, or None when it returns (or the point does not
@@ -1065,6 +1128,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
     # the points not counted for their Decimal arithmetic, with why
     # (`_decimal_rounding.ROUNDED`)
     rounded: list = []
+    # the points an ordering fails at for want of elements, with the
+    # sides there, and the first point it fails at otherwise
+    empty_failures: list = []
+    other_failure = None
     # how far the floats missed over the points compared
     precision = _Precision()
     kappa = _Kappa(cj, fn, facts)
@@ -1092,24 +1159,39 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             continue
         if verdict is None:
             return None
+        if verdict is False and _orders_no_elements(cj, evaluate.sides()):
+            empty_failures.append((point, evaluate.sides()))
+            continue
+        if verdict is False and empty_failures:
+            other_failure = point
+            break
         if verdict is False:
             raised = _raised_at(fn, facts, point)
             also: dict = ({"mathema.exact_witness": {
                 **exact_miss[2], "computation":
                     f"fails at {_fmt_point(point, names)}"}}
                     if exact_miss is not None else {})
+            from ._missing_words import element_spellings
+            computed = evaluate.sides()
+            spellings = (element_spellings(cj, *computed)
+                         if computed is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
+                       + (f", {computed[0]!r} vs {computed[1]!r}"
+                          if spellings else "")
                        + (_rounded_miss_words(evaluate.sides(),
                                               evaluate.decimal_rounded())
                           if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else
                           f", found among the points run "
-                          f"{plan.coverage.words(checked + 1)}"),
-                counterexample=_fmt_point(point, names),
+                          f"{plan.coverage.words(checked + 1)}")
+                       + (f"; {spellings}" if spellings else ""),
+                counterexample=(f"{_fmt_point(point, names)}: {computed[0]!r} "
+                                f"vs {computed[1]!r}" if spellings
+                                else _fmt_point(point, names)),
                 witness=dict(point),
                 # the witness is a call of the real function at a point
                 # the domain admits: an executed witness, which the
@@ -1143,6 +1225,10 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         elif said is False and exact_miss is None:
             exact_miss = (point, sides, _exact_witness_words(
                 _fmt_point(point, names), sides, evaluate.sides()))
+    if empty_failures:
+        return _empty_ordering_disproof(cj, empty_failures, other_failure,
+                                        judged, names, plan, checked, grid,
+                                        counted, deps)
     if exact_miss is not None:
         point, _sides, witness = exact_miss
         where = ("found by checking every point of a finite domain"

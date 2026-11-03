@@ -38,7 +38,6 @@ from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
 from .domain import _sentinel_piece, numeric_excluded
 from .runtime_types import SEQUENCE_KINDS
-from .runtime_types._abstract import OneRowColumn
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
@@ -426,20 +425,22 @@ def plain_value(v):
     """Intent:
         An executed value in the plain Python form the comparisons
         read: a numpy scalar or a 0-d array becomes its Python number,
-        an array becomes nested lists, the column of a one-row table a
-        `OneRowColumn`, anything else is returned as it is.
+        an array becomes nested lists, a polars Series its list,
+        anything else is returned as it is.
     """
     if type(v) in (bool, int, float, complex, str, type(None)):
         return v
     if hasattr(v, "shape") and hasattr(v, "tolist"):
         try:
-            listed = v.tolist()
+            return v.tolist()
         except Exception:
             return v
-        if getattr(v, "one_row_column", False) and isinstance(listed, list) \
-                and len(listed) == 1:
-            return OneRowColumn(listed)
-        return listed
+    if hasattr(v, "shape") and hasattr(v, "to_list"):
+        # a polars Series: a vector, whatever its length
+        try:
+            return v.to_list()
+        except Exception:
+            return v
     if hasattr(v, "dtype") and hasattr(v, "item"):
         try:
             return v.item()
@@ -513,20 +514,16 @@ def scalar_spreads(scalar, container, relation: str) -> bool:
     """Intent:
         Whether `relation` between a value that is not a sequence and a
         sequence is read at each of the sequence's elements. An ordering
-        is, over a sequence with elements. Equality and `!=` are, only
-        for the number 0, the zero of every shape (`x != 0` says x is
-        not the zero vector): any other value against a sequence is a
-        different shape, so unequal. A sequence with no elements gives
-        nothing to read, so it decides nothing. The column of a table
-        with one row holds one value, so any relation reads that value.
+        is, over a sequence with elements. Equality and `!=` never are:
+        a number against a sequence is a different shape, so unequal, 0
+        included (the zero vector is written `[0, 0]`). A sequence with
+        no elements gives nothing to read, so nothing spreads over it
+        (an ordering over it does not hold, an equality with a number is
+        a mismatch).
     """
     if len(container) == 0:
         return False
-    if isinstance(container, OneRowColumn):
-        return True
-    if relation in ("==", "~=", "!="):
-        return _is_number(scalar) and scalar == 0
-    return True
+    return relation not in ("==", "~=", "!=")
 
 
 def values_agree(u, v, tolerance: float | None = None,
@@ -543,9 +540,9 @@ def values_agree(u, v, tolerance: float | None = None,
         is larger.
 
     Notes:
-        `None` when the two sides have different shapes. With
-        `broadcast`, the number 0 against an array or list with elements
-        is compared with every element (`scalar_spreads`). A bool, and a
+        `None` when the two sides have different shapes, a number
+        against an array or list included; `broadcast` is kept for its
+        callers and spreads nothing (`scalar_spreads`). A bool, and a
         value that is not a number, agrees only by exact equality.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
@@ -1319,11 +1316,11 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     and `!=` over arrays are one fact about the whole value
     (`values_agree`), so `!=` holds when some element differs; an
     ordering holds when it holds at every element, a scalar read at each
-    (`scalar_spreads`). A NaN anywhere fails every relation. Returns
+    (`scalar_spreads`), and over a sequence with no elements it does not
+    hold. A NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
-    meaningless (an ordering over non-orderable values, mismatched
-    shapes, or no elements), which the caller reads as skip, never
-    falsify.
+    meaningless (an ordering over non-orderable values or mismatched
+    shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
     and a toleranced `!=` get on top of `slack`. A 0-d numpy value (a
@@ -1331,9 +1328,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     compare by `abs(a - b)`, with the tolerance rules of reals; an
     ordering over a complex value is unanswerable. Two values of
     different lengths or shapes are unequal outright under `==`, `~=`
-    and `!=` (a number other than 0 against a sequence, and any number
-    against an empty one, included); an ordering over them is
-    unanswerable. Leaves that are
+    and `!=` (a number against a sequence included); an ordering over
+    mismatched shapes is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
@@ -1357,12 +1353,15 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
         return agree if relation != "!=" else not agree
 
     def _walk(x, y):
-        # an ordering, at every element: over sequences of different
-        # length, sequences with no elements, or leaves that do not
+        # an ordering, at every element: over a sequence with no elements
+        # it does not hold, there being no element at which it could;
+        # over sequences of different length, or leaves that do not
         # order, it is unanswerable
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if (xs and not x) or (ys and not y):
+            return False
         if xs and ys:
-            if len(x) != len(y) or not x:
+            if len(x) != len(y):
                 return None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:
