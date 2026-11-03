@@ -331,9 +331,12 @@ def _exact_value(value, rounded_roots: bool = False):
     range, to 60 significant digits) is read as that rounded value, a
     reading close enough for a computation line's tolerance."""
     from ._linalg_eval import _Root
+    from .runtime_types._abstract import OneRowColumn
     np = _np()
     if np is not None and isinstance(value, np.ndarray):
-        value = value.tolist()
+        listed = value.tolist()
+        value = (OneRowColumn(listed) if getattr(value, "one_row_column", False)
+                 and isinstance(listed, list) and len(listed) == 1 else listed)
     if np is not None and isinstance(value, np.generic):
         value = value.item()
     if isinstance(value, _Root):
@@ -350,7 +353,7 @@ def _exact_value(value, rounded_roots: bool = False):
         parts = [_exact_value(v, rounded_roots) for v in value]
         if any(p is None for p in parts):
             return None
-        return parts
+        return OneRowColumn(parts) if isinstance(value, OneRowColumn) else parts
     return None
 
 

@@ -426,11 +426,14 @@ def plain_value(v):
     """Intent:
         An executed value in the plain Python form the comparisons
         read: a numpy scalar or a 0-d array becomes its Python number,
-        an array becomes nested lists, the column of a one-row table a
+        an array becomes nested lists, the column of a one-row table (a
+        marked array, a pandas or polars Series of one element) a
         `OneRowColumn`, anything else is returned as it is.
     """
     if type(v) in (bool, int, float, complex, str, type(None)):
         return v
+    if _one_element_series(v):
+        return OneRowColumn([plain_value(v.item())])
     if hasattr(v, "shape") and hasattr(v, "tolist"):
         try:
             listed = v.tolist()
@@ -446,6 +449,18 @@ def plain_value(v):
         except Exception:
             return v
     return v
+
+
+def _one_element_series(v) -> bool:
+    """Whether `v` is a pandas or polars Series holding one value: a
+    column of one row, whichever library answered it."""
+    if type(v).__module__.split(".")[0] not in ("pandas", "polars"):
+        return False
+    try:
+        return len(getattr(v, "shape", ())) == 1 and len(v) == 1 \
+            and hasattr(v, "item")
+    except TypeError:
+        return False
 
 
 def _is_number(v) -> bool:

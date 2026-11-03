@@ -98,9 +98,13 @@ def _one_row_column(array):
     the mark, which `probing.plain_value` honours only at length one."""
     kind = type(array)
     if kind not in _ONE_ROW:
+        np = _np()
         _ONE_ROW[kind] = type("OneRowArray", (kind,), {
-            "__doc__": "The column of a table with one row.",
-            "one_row_column": True})
+            "__doc__": "The column of a table with one row, shown as the "
+                       "plain array it is.",
+            "one_row_column": True,
+            "__repr__": lambda self: repr(self.view(np.ndarray)),
+            "__str__": lambda self: str(self.view(np.ndarray))})
     out = array.view(_ONE_ROW[kind])
     out.__dict__.update(getattr(array, "__dict__", {}))
     return out

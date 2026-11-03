@@ -138,3 +138,75 @@ def test_the_shape_rule_spreads_a_scalar_over_a_one_row_column(relation):
 @pytest.mark.parametrize("relation", ["==", "~=", "!="])
 def test_the_shape_rule_keeps_a_plain_list_of_one_apart(relation):
     assert not scalar_spreads(5.0, [5.0], relation)
+
+
+def no_table_pandas(n: int) -> pd.DataFrame:
+    return pd.DataFrame({"qty": [float(n)]})
+
+
+def no_table_polars(n: int) -> pl.DataFrame:
+    return pl.DataFrame({"qty": [float(n)]})
+
+
+def series_pandas(n: int) -> pd.Series:
+    return pd.Series([float(n)])
+
+
+def series_polars(n: int) -> pl.Series:
+    return pl.Series([float(n)])
+
+
+def one_row_bools(a: pd.DataFrame):
+    return pd.DataFrame({"x": [True]})
+
+
+def one_row_sum(df: pd.DataFrame):
+    return pd.DataFrame({"qty": [float(df["qty"].sum())]})
+
+
+@pytest.mark.parametrize("fn", [no_table_pandas, no_table_polars])
+def test_a_one_row_frame_from_a_function_with_no_table_parameter_reads_the_same(fn):
+    assert _verdict(fn, 'for n in {1, 2, 3}, f(n)["qty"] == n') in ("holds", "proven")
+    assert _verdict(fn, 'for n in {1, 2, 3}, f(n)["qty"] == [n]') in ("holds", "proven")
+    assert _verdict(fn, 'for n in {1, 2, 3}, f(n)["qty"] == n + 1') == "falsified"
+
+
+@pytest.mark.parametrize("fn", [series_pandas, series_polars])
+def test_a_series_of_one_element_reads_the_same_on_both_libraries(fn):
+    assert _verdict(fn, "for n in {1, 2, 3}, f(n) == n") in ("holds", "proven")
+    assert _verdict(fn, "for n in {1, 2, 3}, f(n) == [n]") in ("holds", "proven")
+    assert _verdict(fn, "for n in {1, 2, 3}, f(n) == n + 1") == "falsified"
+
+
+@pytest.mark.parametrize("law,verdicts", [
+    ('f(a)["x"] == True', ("holds", "proven")),
+    ('f(a)["x"] == 1', ("holds", "proven")),
+    ('f(a)["x"] == False', ("falsified",)),
+])
+def test_a_one_row_bool_column_is_its_value_read_exactly_too(law, verdicts):
+    assert _verdict(one_row_bools, _OVER + law) in verdicts
+
+
+def test_the_one_row_mark_never_shows_in_a_value():
+    from mathema._linalg_eval import as_array
+    from mathema.runtime_types._abstract import OneRowColumn
+    column = as_array({"qty": OneRowColumn([2.0])})["qty"]
+    assert repr(column) == "array([2.])"
+    assert str(column) == "[2.]"
+    assert repr(2 * column) == "array([4.])"
+
+
+def test_the_one_row_mark_never_reaches_a_record():
+    import json
+
+    import mathema
+    record = mathema.check(one_row_sum, claims=[mathema.claim(
+        'for df.qty in [0, 10]^n, f(df)["qty"] ~= sum(df.qty)', name="c")])
+    for probe in record.probes:
+        shown = json.dumps({"counterexample": probe.counterexample,
+                            "note": probe.note, "meta": probe.meta},
+                           default=str)
+        assert "OneRow" not in shown, (probe.name, shown[:300])
+    (missing,) = [p for p in record.probes if p.name == "missing[df]"]
+    assert "returns {'qty': array([" in str(missing.counterexample), \
+        missing.counterexample
