@@ -100,3 +100,18 @@ def test_an_examination_that_stops_leaves_no_empty_reading_behind(monkeypatch):
         pass
     monkeypatch.undo()
     assert examine(written).writes, "the second reading must see the write"
+
+
+def table_chosen_in_a_loop(flag: bool) -> int:
+    t = TABLE
+    for _ in range(2):
+        t = OTHER if flag else t
+    t["z"] = 1
+    return 0
+
+
+def test_an_object_that_may_be_one_of_two_tables_names_each_once():
+    (write,) = examine(table_chosen_in_a_loop).unknown_writes
+    assert write.text == ("table_chosen_in_a_loop changes an object that may "
+                          "be the module-level TABLE or the module-level OTHER "
+                          "(t['z'] = ...)"), write.text

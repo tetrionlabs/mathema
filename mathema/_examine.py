@@ -946,10 +946,12 @@ class _Examiner:
                       if lab is not None]
             if not labels:
                 return None
+            # a label may itself name several sources; each is named once
+            sources = [source for lab in labels for source in
+                       lab.replace(_MAYBE, "").replace(
+                           "an object that may be ", "").split(" or ")]
             return (_MAYBE + "an object that may be "
-                    + " or ".join(dict.fromkeys(
-                        lab.replace(_MAYBE, "").replace(
-                            "an object that may be ", "") for lab in labels)))
+                    + " or ".join(dict.fromkeys(sources)))
         if kind == "opaque":
             return _MAYBE + origin[1]
         if kind == "param":
