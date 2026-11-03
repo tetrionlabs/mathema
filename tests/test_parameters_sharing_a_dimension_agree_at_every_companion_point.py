@@ -139,12 +139,14 @@ def test_a_table_is_measured_by_its_rows():
     assert resolver.agrees({"df": three_rows, "w": [1.0, 2.0]}) is False
 
 
-def test_a_dict_holding_no_table_has_no_size():
+def test_a_dict_holding_no_table_is_measured_by_its_keys():
     resolver = DimResolver()
-    with pytest.raises(TypeError):
-        resolver.measure({"a": 1.0}, 0)
-    with pytest.raises(TypeError):
-        resolver.measure({"a": [1.0], "b": [1.0, 2.0]}, 0)
+    assert resolver.measure({"a": 1.0, "b": 2.0, "c": 3.0}, 0) == 3
+    assert resolver.measure({"a": [1.0], "b": [1.0, 2.0]}, 0) == 2
+    assert resolver.measure({"x": {"y": 1.0}}, 0) == 1
+    assert resolver.measure({}, 0) == 0
+    with pytest.raises(IndexError):
+        resolver.measure({"a": 1.0}, 1)
 
 
 def test_a_table_past_its_row_axis_has_no_size():
@@ -518,3 +520,50 @@ def test_a_contradicted_binding_still_reaches_its_companion():
         conflicting, "for a in [0, 1]^(n,m), b in [0, 1]^n, f(a, b) == f(a, b)")
     assert rows["c"].meta["mathema.float_companion"] == "c[float]"
     assert "c[float]" in rows
+
+
+def size_of(d: dict) -> int:
+    return len(d)
+
+
+def test_a_dimension_read_off_a_plain_dict_is_its_key_count():
+    resolver = DimResolver(shapes={"d": ParamShape(("n",))})
+    env: dict = {}
+    resolver.bind_env(env, {"d": {"k0": 0.0, "k1": 0.5}})
+    assert env["n"] == 2
+
+
+def test_the_next_anchor_binds_a_dimension_the_first_cannot_measure():
+    resolver = DimResolver(shapes={"a": ParamShape(("n",)), "b": ParamShape(("n",))})
+    env: dict = {}
+    resolver.bind_env(env, {"a": None, "b": [1.0, 2.0, 3.0]})
+    assert env["n"] == 3
+    env = {}
+    resolver.bind_env(env, {"b": [1.0, 2.0]})
+    assert env["n"] == 2
+
+
+def test_a_plain_dict_constrains_no_shared_dimension():
+    resolver = DimResolver(shapes={"cfg": ParamShape(("n",)), "xs": ParamShape(("n",))})
+    assert resolver.agrees({"cfg": {"k0": 0.0}, "xs": [1.0, 2.0]}) is True
+    assert resolver.agrees({"cfg": {"k0": [1.0]}, "xs": [1.0, 2.0]}) is False
+
+
+@pytest.mark.parametrize("text,verdict", [
+    ("for d in [0, 1]^n, f(d) == n", "holds"),
+    ("assuming n >= 2, for d in [0, 1]^n, f(d) >= 2", "holds"),
+    ("assuming n >= 2, for d in [0, 1]^n, f(d) >= 100", "falsified"),
+])
+def test_a_plain_dict_binds_its_dimension_in_a_claim(text, verdict):
+    rows, _calls = _rows_and_calls(size_of, text)
+    assert rows["c"].verdict == verdict, (rows["c"].verdict, rows["c"].counterexample)
+
+
+def marked_size_of(d: Annotated[dict, Shape("n")]) -> int:
+    return len(d)
+
+
+@pytest.mark.parametrize("text", ["f(d) == n", "assuming n >= 2, f(d) >= 2"])
+def test_a_marked_plain_dict_binds_its_dimension_in_a_claim(text):
+    rows, _calls = _rows_and_calls(marked_size_of, text)
+    assert rows["c"].verdict == "holds", (rows["c"].verdict, rows["c"].counterexample)

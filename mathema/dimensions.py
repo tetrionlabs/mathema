@@ -100,27 +100,32 @@ class DimResolver:
                  and not a.isdigit()}
         return names | set(self.aliases)
 
+    def anchors(self, name: str) -> list:
+        """Every `(param, axis)` position a marker dim name measures at,
+        in signature order."""
+        return [(param, axis) for param, shape in self.shapes.items()
+                for axis, a in enumerate(shape.axes) if a == name]
+
     def anchor(self, name: str):
         """A `(param, axis)` position a marker dim name measures at, so
         `n` can be read off a real argument's shape. Any occurrence
         will do, since a shared name means every occurrence agrees."""
-        for param, shape in self.shapes.items():
-            for axis, a in enumerate(shape.axes):
-                if a == name:
-                    return (param, axis)
-        return None
+        return next(iter(self.anchors(name)), None)
 
     def measure(self, value, axis: int) -> int:
         """The size of `value`'s `axis`-th dimension, descending first
         elements. A table (a dict of equal-length columns) has one axis,
-        its row count; a dict that is no table has no size. Raises
-        `IndexError`/`TypeError` past the value's real depth, the honest
-        failure an over-indexed axis deserves."""
+        its row count; any other dict (of scalars, of nested dicts, of
+        columns of different lengths, or empty) has one axis, its key
+        count. Raises `IndexError`/`TypeError` past the value's real
+        depth, the honest failure an over-indexed axis deserves."""
         if isinstance(value, dict):
             shape = observed_shape(value)
-            if shape is None:
-                raise TypeError("a dict that is not a table has no size")
-            return shape[axis]
+            if shape is not None:
+                return shape[axis]
+            if axis > 0:
+                raise IndexError(f"a dict has one axis, not axis {axis}")
+            return len(value)
         v = value
         for _ in range(axis):
             v = v[0]
@@ -130,18 +135,18 @@ class DimResolver:
         """Inject dimension values into a claim's evaluation env: every
         marker dim name bound to the size read off its anchoring
         argument, so `assuming n >= 2` and a law mentioning `n`
-        evaluate against the trial's real shapes. Unbound on any
-        argument the anchor is missing from, rather than guessed."""
+        evaluate against the trial's real shapes. Each occurrence of the
+        name is tried in turn; unbound when no argument measures it,
+        rather than guessed."""
         for name in self.marker_names():
-            anchor = self.anchor(self.canonical(name))
-            if anchor is None:
-                continue
-            param, axis = anchor
-            if param in args:
+            for param, axis in self.anchors(self.canonical(name)):
+                if param not in args:
+                    continue
                 try:
                     env[name] = self.measure(args[param], axis)
                 except (IndexError, TypeError):
                     continue
+                break
 
     def distinct_keys(self) -> set:
         """Every canonical dimension key in the signature, one per
@@ -185,10 +190,13 @@ class DimResolver:
         parameter. An empty container has length 0, and that constrains
         its first axis as any length does. An axis that cannot be
         measured (an absent value, an axis inside an empty container, a
-        value of another kind) constrains nothing."""
+        value of another kind) constrains nothing, nor does a dict that
+        is no table, whose keys are not drawn to a dimension."""
         sizes: dict = {}
         for p, shape in self.shapes.items():
             if p not in point:
+                continue
+            if isinstance(point[p], dict) and observed_shape(point[p]) is None:
                 continue
             for a in range(shape.ndim):
                 try:
