@@ -638,13 +638,7 @@ def test_a_small_point_counts_toward_the_trials():
 
 
 def test_a_small_point_the_premises_refuse_does_not_count(monkeypatch):
-    swept = {}
-    sweep = corroboration.sweep_stability
-
-    def spy(*args, **kwargs):
-        swept.update(kwargs)
-        return sweep(*args, **kwargs)
-    monkeypatch.setattr(corroboration, "sweep_stability", spy)
+    swept = _swept(monkeypatch)
     _bare_companion(plain_sums, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
                     budget=16, assum=[("len(xs)", ">=", "2")])
     assert not [c for c in swept["corners"] if len(c["xs"]) == 1]
@@ -713,14 +707,25 @@ def _bare_companion(fn, text, **kw):
     return line, calls.calls
 
 
-def test_a_small_point_is_drawn_inside_what_the_companion_excludes():
-    seen = set()
+def _swept(monkeypatch) -> dict:
+    swept: dict = {}
+    sweep = corroboration.sweep_stability
 
-    def scaled_seen(xs: list[float], ys: list[float], c: float) -> float:
-        seen.add((len(xs), len(ys)))
-        return 0.0
-    _bare_companion(scaled_seen, SCALED, excluded=lambda point: point["c"] > -0.9)
-    assert (1, 1) in seen, sorted(seen)
+    def spy(*args, **kwargs):
+        swept.update(kwargs)
+        return sweep(*args, **kwargs)
+    monkeypatch.setattr(corroboration, "sweep_stability", spy)
+    return swept
+
+
+def test_a_small_point_is_drawn_inside_what_the_companion_excludes(monkeypatch):
+    swept = _swept(monkeypatch)
+
+    def scaled(xs: list[float], ys: list[float], c: float) -> float:
+        return c * dot(xs, ys)
+    _bare_companion(scaled, SCALED, excluded=lambda point: point["c"] > -0.9)
+    small = [c for c in swept["corners"] if len(c["xs"]) == 1 and len(c["ys"]) == 1]
+    assert small and all(c["c"] <= -0.9 for c in small), small
 
 
 def test_drawing_small_points_stops_at_the_wall_clock_cap(monkeypatch):
