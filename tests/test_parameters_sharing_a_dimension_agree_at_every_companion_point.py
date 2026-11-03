@@ -6,6 +6,7 @@ at: the corners, the degenerate containers and the admitted missing
 inputs of a proof's `[float]` companion included. A point where they
 differ is outside the claim's domain, so the code is never judged
 there."""
+import random
 from types import SimpleNamespace
 from typing import Annotated
 
@@ -14,9 +15,10 @@ import pytest
 from mathema.analysis import analyze_source
 from mathema.conjecture import (_admitted_container_points, check_conjectures,
                                 claim)
-from mathema.dimensions import resolve
+from mathema.dimensions import DimResolver, ParamShape, resolve
+from mathema.gates import _point_evaluator
 from mathema.policy import batch
-from mathema.types import Shape
+from mathema.types import Shape, shapes_from_signature
 
 
 def dot(xs: list[float], ys: list[float]) -> float:
@@ -113,3 +115,111 @@ def test_an_empty_container_constrains_its_length():
     assert resolver.agrees({"xs": [], "ys": []}) is True
     assert resolver.agrees({"xs": [], "ys": [1.0]}) is False
     assert resolver.agrees({"xs": None, "ys": [1.0]}) is True
+
+
+def _kit(fn, text):
+    cj = claim(text, name="c")
+    facts = analyze_source(fn)
+    return (_point_evaluator(cj, fn, facts, cj.domain, {}, sequences=True),
+            resolve(facts, shapes_from_signature(fn), claim_domain=cj.domain))
+
+
+def _rows_of(value) -> int:
+    return len(next(iter(value.values())))
+
+
+def test_a_table_is_measured_by_its_rows():
+    def over_table(df, w):
+        return df["a"][0] + df["b"][0] + w[0]
+    _kit_, resolver = _kit(over_table, "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
+    three_rows = {"a": [1.0, 2.0, 3.0], "b": [1.0, 2.0, 3.0]}
+    assert resolver.measure(three_rows, 0) == 3
+    assert resolver.agrees({"df": three_rows, "w": [1.0, 2.0, 3.0]}) is True
+    assert resolver.agrees({"df": three_rows, "w": [1.0, 2.0]}) is False
+
+
+def test_a_dict_holding_no_table_has_no_size():
+    resolver = DimResolver()
+    with pytest.raises(TypeError):
+        resolver.measure({"a": 1.0}, 0)
+    with pytest.raises(TypeError):
+        resolver.measure({"a": [1.0], "b": [1.0, 2.0]}, 0)
+
+
+def test_a_table_past_its_row_axis_has_no_size():
+    with pytest.raises(IndexError):
+        DimResolver().measure({"a": [1.0, 2.0]}, 1)
+
+
+def test_a_dimension_read_off_a_table_is_its_row_count():
+    resolver = DimResolver(shapes={"df": ParamShape(("n",))})
+    env: dict = {}
+    resolver.bind_env(env, {"df": {"a": [1.0, 2.0, 3.0], "b": [1.0, 2.0, 3.0]}})
+    assert env["n"] == 3
+
+
+def test_a_table_beside_a_vector_is_admitted_at_every_corner():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: list) -> float:
+        return float(df["a"].sum()) + float(df["b"].sum()) + sum(w)
+    deps, _resolver = _kit(table_and_vector,
+                           "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
+    assert deps["corners"]
+    assert all(deps["admits"](corner) for corner in deps["corners"])
+
+
+def test_a_table_drawn_beside_a_vector_has_the_vector_length():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: list) -> float:
+        return float(df["a"].sum()) + float(df["b"].sum()) + sum(w)
+    deps, _resolver = _kit(table_and_vector,
+                           "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
+    rng = random.Random(0)
+    points = [{name: deps["sample"](name, rng) for name in deps["names"]}
+              for _ in range(40)]
+    assert {_rows_of(p["df"]) == len(p["w"]) for p in points} == {True}
+    assert len({len(p["w"]) for p in points}) > 1
+
+
+def test_a_table_at_a_literal_size_keeps_it_at_a_corner():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: list) -> float:
+        return float(df["a"].sum()) + sum(w)
+    deps, _resolver = _kit(table_and_vector,
+                           "for df in [0, 1]^2, w in [0, 1]^2, f(df, w) >= -1")
+    assert {_rows_of(c["df"]) for c in deps["corners"]} == {2}
+    assert all(deps["admits"](corner) for corner in deps["corners"])
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_companion_over_two_tables_on_one_n_finds_its_witness():
+    pd = pytest.importorskip("pandas")
+
+    def two_tables(a: pd.DataFrame, b: pd.DataFrame) -> float:
+        return float(a["x"].sum()) + float(a["y"].sum()) + float(b["z"].sum())
+    rows, calls = _rows_and_calls(
+        two_tables,
+        "for a in [-1e308, 1e308]^n, b in [-1e308, 1e308]^n, f(a, b) - f(a, b) == 0")
+    assert rows["c"].verdict == "proven", rows["c"]
+    companion = next(p for name, p in rows.items() if name.startswith("c[float"))
+    assert companion.verdict == "falsified", (companion.verdict, companion.note)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_two_tables_on_one_n_have_one_row_count_at_every_companion_call():
+    pd = pytest.importorskip("pandas")
+
+    def two_tables(a: pd.DataFrame, b: pd.DataFrame) -> float:
+        return float(a["x"].sum()) + float(a["y"].sum()) + float(b["z"].sum())
+    rows, calls = _rows_and_calls(
+        two_tables, "for a in [-1, 1]^n, b in [-1, 1]^n, f(a, b) - f(a, b) == 0")
+    companion = next(p for name, p in rows.items() if name.startswith("c[float"))
+    assert companion.verdict == "holds", (companion.verdict, companion.note)
+    lengths = {(_rows_of(call.point["a"]), _rows_of(call.point["b"])) for call in calls
+               if isinstance(call.point.get("a"), dict)
+               and isinstance(call.point.get("b"), dict)}
+    assert lengths and all(x == y for x, y in lengths), sorted(lengths)
+    assert len(lengths) > 1, sorted(lengths)

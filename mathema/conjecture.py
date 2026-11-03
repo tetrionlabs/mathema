@@ -8878,7 +8878,7 @@ def _admitted_container_points(ctx, facts, resolver=None) -> tuple:
         dims = tuple(getattr(bound, "dims", ()) or ())
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
-            (length,) = _floor.sizes(bound, rng, (3, 3))
+            (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             columns = _table_columns(p, ctx.cj, facts)
             base = {c: [_synth("float", rng,
                                _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))

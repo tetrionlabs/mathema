@@ -860,16 +860,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                and resolver.shapes.get(n) is not None
                and resolver.shapes[n].ndim >= 1
                and any(a is not None for a in resolver.shapes[n].axes)}
-    first_planned = next((n for n in names if n in planned), None)
+    # a table whose row count a dimension shares with another axis, or a
+    # binding fixes, is drawn to the plan as well
+    tied = resolver.tied_keys() if resolver is not None else set()
+    tied_tables = {n for n in table_names if resolver is not None
+                   and resolver.key(n, 0) in tied}
+    first_planned = next((n for n in names
+                          if n in planned or n in tied_tables), None)
     point_sizes: dict = {}
 
-    def _planned_draw(name, rng, b):
+    def _draw_point_sizes(name, rng):
         # a point's coordinates are drawn in `names` order, so the first
         # planned coordinate draws the point's sizes and the rest reuse
         # them
         if name == first_planned or not point_sizes:
             point_sizes.clear()
             point_sizes.update(resolver.draw_sizes(rng))
+
+    def _planned_draw(name, rng, b):
+        _draw_point_sizes(name, rng)
         if resolver.shapes[name].ndim == 1:
             return _synth("sequence", rng, b,
                           length=point_sizes.get(resolver.key(name, 0)))
@@ -901,7 +910,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if name in table_names:
             # a table: one equal-length column per name the claim or the
             # body reads
-            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            if name in tied_tables:
+                _draw_point_sizes(name, rng)
+                length = point_sizes[resolver.key(name, 0)]
+            else:
+                (length,) = _floor.sizes(cj_domain.get(name), rng)
             from .conjecture import _column_bound
             return {c: _floor.gapped(_synth("sequence", rng,
                                             _column_bound(cj_domain.get(f"{name}.{c}"), b),
@@ -1080,6 +1093,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # corner length 3, shared names agreeing
     corner_sizes = resolver.corner_sizes() if resolver is not None else {}
 
+    def _table_corner_rows(name):
+        # a table's rows at a corner: the size of its dimension, 3 for a
+        # table no dimension names
+        key = resolver.key(name, 0) if resolver is not None else None
+        return corner_sizes.get(key, 3)
+
     def _corner_value(name, value):
         # a sequence's corner is a short constant list at the
         # per-element edge, a planned coordinate nested to its axes, a
@@ -1092,7 +1111,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             n_cols = 2 if len(set(dims[:2])) == 1 else 3
             return [[value] * n_cols for _ in range(2)]
         if name in table_names:
-            return {c: [_column_end(name, c, value)] * 3 for c in table_columns[name]}
+            return {c: [_column_end(name, c, value)] * _table_corner_rows(name)
+                    for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
 
     def _column_end(name, column, value):

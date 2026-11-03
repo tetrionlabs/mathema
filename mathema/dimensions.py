@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from ._shapes import observed_shape
 from .runtime_types import SEQUENCE_KINDS
 
 
@@ -111,8 +112,15 @@ class DimResolver:
 
     def measure(self, value, axis: int) -> int:
         """The size of `value`'s `axis`-th dimension, descending first
-        elements. Raises `IndexError`/`TypeError` past the value's real
-        depth, the honest failure an over-indexed axis deserves."""
+        elements. A table (a dict of equal-length columns) has one axis,
+        its row count; a dict that is no table has no size. Raises
+        `IndexError`/`TypeError` past the value's real depth, the honest
+        failure an over-indexed axis deserves."""
+        if isinstance(value, dict):
+            shape = observed_shape(value)
+            if shape is None:
+                raise TypeError("a dict that is not a table has no size")
+            return shape[axis]
         v = value
         for _ in range(axis):
             v = v[0]
