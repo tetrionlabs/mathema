@@ -20,7 +20,8 @@ from mathema._shapes import observed_shape
 from mathema.analysis import analyze_source
 from mathema.conjecture import (_admitted_container_points, check_conjectures,
                                 claim)
-from mathema.dimensions import DimensionConflict, DimResolver, ParamShape, resolve
+from mathema.dimensions import (DimensionConflict, DimResolver, FixedSizeConflict,
+                                ParamShape, _reconcile_dims, resolve)
 from mathema.gates import _float_companion, _point_evaluator
 from mathema.policy import batch
 from mathema.probing import Probe
@@ -764,3 +765,98 @@ def test_one_dimension_fixed_to_two_sizes_is_misspecified_on_every_route(fn, tex
     assert "is fixed to two sizes" in str(rows["c"].note), rows["c"].note
     assert not [name for name in rows if name.startswith("c[")], sorted(rows)
     assert not [call for call in calls if str(call.claim).startswith("c")]
+
+
+def square_marked(A: Annotated[list, Shape("n", "n")]) -> float:
+    return sum(sum(r) for r in A)
+
+
+def square_and_vector(A: Annotated[list, Shape("n", "n")],
+                      v: Annotated[list, Shape("n")]) -> float:
+    return sum(sum(r) for r in A) + sum(v)
+
+
+def test_two_sizes_on_one_name_inside_one_binding_conflict():
+    with pytest.raises(FixedSizeConflict):
+        _reconcile_dims("A", ("n", "n"), ("2", "3"))
+    assert _reconcile_dims("A", ("n", "n"), ("2", "2")) == ({}, {"n": 2})
+    assert _reconcile_dims("A", ("n", "m"), ("2", "3")) == ({}, {"n": 2, "m": 3})
+
+
+@pytest.mark.parametrize("route", ["best", "derive", "probe"])
+@pytest.mark.parametrize("fn,text", [
+    (square_marked, "for A in [0, 1]^(2,3), f(A) >= 0"),
+    (square_marked, "for A in [0, 1]^(2,3), f(A) < 0"),
+    (square_and_vector, "for A in [0, 1]^(2,3), v in [0, 1]^2, f(A, v) >= 0"),
+    (square_and_vector, "for A in [0, 1]^(3,2), v in [0, 1]^2, f(A, v) >= 0"),
+])
+def test_a_square_marker_fixed_to_two_sizes_is_misspecified(fn, text, route):
+    rows, calls = _rows_and_calls(fn, text, route=route)
+    assert rows["c"].verdict == "skipped:misspecified", (rows["c"].verdict, rows["c"].note)
+    assert "is fixed to two sizes" in str(rows["c"].note), rows["c"].note
+    assert not [call for call in calls if str(call.claim).startswith("c")]
+
+
+def pair_marked(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("n")]) -> float:
+    return sum(a) + sum(b)
+
+
+@pytest.mark.parametrize("fn,text", [
+    (square_marked, "for A in [0, 1]^(2,2), f(A) >= 0"),
+    (pair_marked, "for a in [0, 1]^2, b in [0, 1]^2, f(a, b) >= 0"),
+    (pair_marked, "for a in [0, 1]^0, b in [0, 1]^0, f(a, b) >= 0"),
+    (pair_marked, "for a in [0, 1]^2, b in [0, 1]^n, f(a, b) >= 0"),
+])
+def test_one_size_on_one_name_is_not_misspecified(fn, text):
+    rows, _calls = _rows_and_calls(fn, text)
+    assert rows["c"].verdict != "skipped:misspecified", (rows["c"].verdict, rows["c"].note)
+    assert "is fixed to two sizes" not in str(rows["c"].note)
+
+
+def test_agreement_is_read_on_every_axis():
+    resolver = DimResolver(shapes={"A": ParamShape(("n", "m")), "v": ParamShape(("m",))})
+    two_by_three = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    assert resolver.agrees({"A": two_by_three, "v": [1.0, 2.0, 3.0]}) is True
+    assert resolver.agrees({"A": two_by_three, "v": [1.0, 2.0]}) is False
+
+
+def test_small_points_are_the_same_in_every_run():
+    first, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    second, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    assert first["evaluate"].small_points() == second["evaluate"].small_points()
+    assert first["evaluate"].small_points()
+
+
+@pytest.mark.needs_full_proof_budget
+def test_the_companion_note_names_its_small_points():
+    rows, _calls = _rows_and_calls(
+        plain_sums, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    assert "1 small point" in str(_companion(rows).note), _companion(rows).note
+
+
+def test_a_matrix_floor_takes_the_column_size_its_vector_fixes():
+    def vector_and_matrix(w: Annotated[list, Shape("n")],
+                          A: Annotated[list, Shape("m", "n")]) -> float:
+        return w[0] + A[0][0]
+    points = _floor_points(vector_and_matrix,
+                           "for w in [-1, 1]^2, A in [-1, 1]^(m,n), f(w, A) == 0")
+    columns = {len(value[0]) for p, _w, value in points if p == "A" and value is not None
+               and value and isinstance(value[0], list)}
+    assert columns == {2}, columns
+
+
+def test_a_table_at_the_wrong_row_count_is_not_admitted():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: list) -> float:
+        return float(df["a"].sum()) + sum(w)
+    deps, _resolver = _kit(table_and_vector, "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
+    assert deps["admits"]({"df": {"a": [0.5, 0.5, 0.5]}, "w": [0.5, 0.5, 0.5]}) is True
+    assert deps["admits"]({"df": {"a": [0.5, 0.5, 0.5]}, "w": [0.5, 0.5]}) is False
+
+
+def test_a_dimension_is_read_off_its_first_measurable_anchor():
+    resolver = DimResolver(shapes={"a": ParamShape(("n",)), "b": ParamShape(("n",))})
+    env: dict = {}
+    resolver.bind_env(env, {"a": [1.0, 2.0, 3.0], "b": [1.0, 2.0]})
+    assert env["n"] == 3

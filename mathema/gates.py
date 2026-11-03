@@ -2421,6 +2421,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         # the missing inputs are the policy lines' trials, not this line's
         coverage.edge_cases = max(0, coverage.edge_cases - len(missing_corners))
     corner_count = sum(1 for c in corners if admits(c))
+    small_count = sum(1 for c in small if admits(c))
     # the admitted missing inputs run for the policy lines, not as points
     # of the computation line
     holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
@@ -2470,6 +2471,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     else:
         inner = max(0, sweep.checked - corner_count)
         listing = ["every corner",
+                   *([f"{small_count} small point{'s' if small_count != 1 else ''}"]
+                     if small_count else []),
                    f"{inner} interior point{'s' if inner != 1 else ''}"]
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 f"{numbers} points: " + _and_words(", ".join(listing))

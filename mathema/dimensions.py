@@ -296,7 +296,9 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
     named, so the two are the SAME dimension, returned as an alias
     (`claim name -> marker name`). A fixed numeric claim size on an
     axis the marker names pins that name (`fixed`: marker name ->
-    size), so every parameter sharing the name is drawn at it."""
+    size), so every parameter sharing the name is drawn at it; one
+    name pinned to two sizes within the parameter (`^(2,3)` under
+    `Shape("n", "n")`) is a `FixedSizeConflict`."""
     if len(marker_dims) != len(claim_dims):
         raise DimensionConflict(
             f"{param}: the claim gives it {len(claim_dims)} dimension"
@@ -312,6 +314,11 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
             size = _axis(cd)
             if size is not None and size.isdigit() and isinstance(md, str) \
                     and not md.isdigit():
+                if fixed.get(md, int(size)) != int(size):
+                    raise FixedSizeConflict(
+                        f"{md} is fixed to two sizes: {fixed[md]} and {size} "
+                        f"by {param}'s binding; one shared dimension has one "
+                        f"size")
                 fixed[md] = int(size)
             continue
         if isinstance(md, str) and md != cd:
