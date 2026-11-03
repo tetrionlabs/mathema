@@ -283,3 +283,63 @@ def test_a_dense_cycle_is_examined_once_per_round(monkeypatch):
     found = examine(scope["d0"])
     assert not found.writes
     assert len(runs) <= 9 * 3
+
+
+def test_an_examination_stopped_in_a_later_round_leaves_nothing_behind():
+    # the stop lands in the second round, when the first round's reading
+    # of each member is held for the next
+    _clear()
+    run = _examine._Examiner.run
+    seen = []
+
+    def stop_second_time(self):
+        if self.fn is calls_back:
+            seen.append(True)
+            if len(seen) == 2:
+                raise TimeoutError("the cap fired")
+        return run(self)
+
+    _examine._Examiner.run = stop_second_time
+    try:
+        with pytest.raises(TimeoutError):
+            examine(writes_then_calls)
+    finally:
+        _examine._Examiner.run = run
+    assert len(seen) == 2
+    assert _examine._CACHE == {}
+    under_way = _examine._UNDER_WAY
+    assert (under_way.depth, under_way.low, under_way.reading,
+            under_way.finished) == ({}, [], {}, {})
+    fresh = _write_texts(calls_back)
+    assert any("TABLE" in t for t in fresh)
+    _clear()
+    assert _write_texts(writes_then_calls) == _write_texts(writes_then_calls)
+    assert _write_texts(calls_back) == fresh
+
+
+def test_an_examination_stopped_inside_an_inner_cycle_leaves_nothing_behind():
+    _clear()
+    run = _examine._Examiner.run
+    seen = []
+
+    def stop_in_the_inner_cycle(self):
+        if self.fn is inner_writer:
+            seen.append(True)
+            if len(seen) == 2:
+                raise TimeoutError("the cap fired")
+        return run(self)
+
+    _examine._Examiner.run = stop_in_the_inner_cycle
+    try:
+        with pytest.raises(TimeoutError):
+            examine(outer_of_two_cycles)
+    finally:
+        _examine._Examiner.run = run
+    assert _examine._CACHE == {}
+    under_way = _examine._UNDER_WAY
+    assert (under_way.depth, under_way.low, under_way.reading,
+            under_way.finished) == ({}, [], {}, {})
+    found = examine(outer_of_two_cycles)
+    assert any("LOG" in s.text for s in found.writes)
+    assert any("LOG" in t for t in _write_texts(inner_writer))
+    assert not examine(inner_reader).writes
