@@ -281,10 +281,11 @@ def test_a_tied_table_reaches_one_row_beside_a_vector():
 def test_a_small_point_keeps_a_premise_on_its_elements():
     def premised(xs, ys, c):
         return xs[0] + ys[0] + c
-    deps, _resolver = _kit(
-        premised,
-        "for xs in [-1, 1]^n, ys in [-1, 1]^n, c in [0, 1], assuming c > 0.9, "
-        "f(xs, ys, c) == f(xs, ys, c)")
+    cj = claim("for xs in [-1, 1]^n, ys in [-1, 1]^n, c in [0, 1], "
+               "f(xs, ys, c) == f(xs, ys, c)", name="c")
+    deps = _point_evaluator(cj, premised, analyze_source(premised), cj.domain, {},
+                            assum=[("c", ">", "0.9")], sequences=True)
+    assert deps["admits"]({"xs": [0.5], "ys": [0.5], "c": 0.1}) is False
     assert deps["small_points"]() and all(deps["admits"](p) for p in deps["small_points"]())
 
 
@@ -338,3 +339,181 @@ def test_two_sizes_on_one_aliased_dimension_conflict():
     with pytest.raises(DimensionConflict):
         resolve(analyze_source(three), shapes_from_signature(three),
                 claim_domain=cj.domain)
+
+
+def differs_past_one(xs: list[float], ys: list[float]) -> float:
+    # divides by zero once the two lengths differ by two or more
+    return sum(x for x in xs) * 0.0 + 1.0 / (2 - min(abs(len(xs) - len(ys)), 2))
+
+
+def plain_sums(xs: list[float], ys: list[float]) -> float:
+    return sum(xs) + sum(ys)
+
+
+def _companion(rows):
+    return next(p for name, p in rows.items() if name.startswith("c[float"))
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_companion_judges_the_code_where_two_names_differ_in_length():
+    rows, _calls = _rows_and_calls(
+        differs_past_one,
+        "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) - f(xs, ys) == 0")
+    companion = _companion(rows)
+    assert companion.verdict == "falsified", (companion.verdict, companion.note)
+    assert "xs = [" in str(companion.counterexample)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_companion_never_runs_one_name_at_two_lengths():
+    rows, _calls = _rows_and_calls(
+        differs_past_one,
+        "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) - f(xs, ys) == 0")
+    assert _companion(rows).verdict == "holds", _companion(rows)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_companion_over_two_names_is_called_at_unequal_lengths():
+    rows, calls = _rows_and_calls(
+        plain_sums, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
+    assert rows["c"].verdict == "proven", rows["c"]
+    assert _companion(rows).verdict == "holds", _companion(rows)
+    lengths = {(len(call.point["xs"]), len(call.point["ys"])) for call in calls
+               if call.claim == "c[float]"
+               and isinstance(call.point.get("xs"), list)
+               and isinstance(call.point.get("ys"), list)}
+    assert any(a != b for a, b in lengths), sorted(lengths)
+    assert any(a == 1 or b == 1 for a, b in lengths), sorted(lengths)
+
+
+def test_a_point_is_admitted_by_whether_its_names_agree():
+    tied, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    assert tied["admits"]({"xs": [0.5, 0.5], "ys": [0.5, 0.5]}) is True
+    assert tied["admits"]({"xs": [0.5, 0.5], "ys": [0.5]}) is False
+    free, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
+    assert free["admits"]({"xs": [0.5, 0.5], "ys": [0.5]}) is True
+
+
+def test_agreement_is_per_name():
+    _kit_, resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
+    assert resolver.agrees({"xs": [1.0, 2.0], "ys": [1.0]}) is True
+
+
+@pytest.mark.parametrize("text,tied", [
+    ("for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == 0", {"n"}),
+    ("for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == 0", set()),
+    ("for xs in [-1, 1]^2, ys in [-1, 1]^m, f(xs, ys) == 0", {"2"}),
+])
+def test_only_a_shared_or_literal_name_is_tied(text, tied):
+    cj = claim(text)
+    assert resolve(analyze_source(dot), {}, claim_domain=cj.domain).tied_keys() == tied
+
+
+def _lengths_by_param(points):
+    out: dict = {}
+    for param, _word, value in points:
+        if value is not None:
+            out.setdefault(param, set()).add(len(value))
+    return out
+
+
+def test_a_tied_vector_floor_holds_only_the_corner_length():
+    lengths = _lengths_by_param(_floor_points(
+        dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == 0"))
+    assert lengths == {"xs": {3}, "ys": {3}}
+
+
+def test_a_free_vector_floor_keeps_its_length_one_item():
+    lengths = _lengths_by_param(_floor_points(
+        dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == 0"))
+    assert 1 in lengths["xs"] and 1 in lengths["ys"], lengths
+
+
+def test_a_matrix_floor_takes_the_row_count_its_vector_shares():
+    def vector_and_matrix(w, A):
+        return w[0] + A[0][0]
+    lengths = _lengths_by_param(_floor_points(
+        vector_and_matrix, "for w in [-1, 1]^n, A in [-1, 1]^(n,m), f(w, A) == 0"))
+    assert lengths == {"w": {3}, "A": {3}}
+
+
+def test_a_table_floor_takes_the_size_a_vector_fixes():
+    pd = pytest.importorskip("pandas")
+
+    def table_and_vector(df: pd.DataFrame, w: Annotated[list, Shape("n")]) -> float:
+        return float(df["a"].sum()) + sum(w)
+    points = _floor_points(table_and_vector,
+                           "for df in [0, 1]^n, w in [0, 1]^2, f(df, w) >= -1")
+    assert {_rows_of(v) for p, _w, v in points if p == "df" and v is not None} == {2}
+
+
+def marked_dot(xs: Annotated[list, Shape("n")], ys: Annotated[list, Shape("n")]) -> float:
+    total = 0.0
+    for i in range(len(xs)):
+        total += xs[i] * ys[i]
+    return total
+
+
+@pytest.mark.needs_full_proof_budget
+def test_two_vectors_a_shape_marker_ties_agree_at_every_companion_call():
+    rows, calls = _rows_and_calls(marked_dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, "
+                                              "f(xs, ys) == f(xs, ys)")
+    assert _companion(rows).verdict == "holds", _companion(rows)
+    lengths = {(len(call.point["xs"]), len(call.point["ys"])) for call in calls
+               if call.claim == "c[float]"
+               and isinstance(call.point.get("xs"), list)
+               and isinstance(call.point.get("ys"), list)}
+    assert lengths and all(a == b for a, b in lengths), sorted(lengths)
+    assert (1, 1) in lengths, sorted(lengths)
+
+
+def test_a_marker_alone_ties_the_floor():
+    points = _floor_points(marked_dot, "for xs in [-1, 1]^k, ys in [-1, 1]^k, f(xs, ys) == 0")
+    assert _lengths_by_param(points) == {"xs": {3}, "ys": {3}}
+
+
+def test_a_table_a_shape_marker_ties_is_drawn_at_the_vector_length():
+    pd = pytest.importorskip("pandas")
+
+    def marked_table(df: Annotated[pd.DataFrame, Shape("n")],
+                     w: Annotated[list, Shape("n")]) -> float:
+        return float(df["a"].sum()) + sum(w)
+    deps, resolver = _kit(marked_table, "for w in [0, 1]^n, f(df, w) >= -1")
+    assert resolver.key("df", 0) == resolver.key("w", 0) == "n"
+    rng = random.Random(0)
+    for _ in range(20):
+        point = {name: deps["sample"](name, rng) for name in deps["names"]}
+        assert _rows_of(point["df"]) == len(point["w"])
+
+
+def fixed_beside_named(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("n")]):
+    return sum(a) + sum(b)
+
+
+FIXED = "for a in [-1, 1]^2, b in [-1, 1]^n, f(a, b) == f(a, b)"
+
+
+def test_a_fixed_size_holds_at_every_corner():
+    deps, resolver = _kit(fixed_beside_named, FIXED)
+    assert resolver.corner_sizes() == {"n": 2}
+    assert {(len(c["a"]), len(c["b"])) for c in deps["corners"]} == {(2, 2)}
+    assert all(deps["admits"](c) for c in deps["corners"])
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_fixed_size_holds_at_every_companion_call():
+    rows, calls = _rows_and_calls(fixed_beside_named, FIXED)
+    assert _companion(rows).verdict == "holds", _companion(rows)
+    lengths = {(len(call.point["a"]), len(call.point["b"])) for call in calls
+               if call.claim == "c[float]"
+               and isinstance(call.point.get("a"), list)
+               and isinstance(call.point.get("b"), list)}
+    assert lengths == {(2, 2)}, sorted(lengths)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_contradicted_binding_still_reaches_its_companion():
+    rows, _calls = _rows_and_calls(
+        conflicting, "for a in [0, 1]^(n,m), b in [0, 1]^n, f(a, b) == f(a, b)")
+    assert rows["c"].meta["mathema.float_companion"] == "c[float]"
+    assert "c[float]" in rows
