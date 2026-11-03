@@ -88,6 +88,24 @@ def _holed(array, holes: dict, ints: "dict | None" = None):
     return out
 
 
+_ONE_ROW: dict = {}
+
+
+def _one_row_column(array):
+    """`array` marked as the column of a table with one row
+    (`runtime_types.OneRowColumn`), with what it carries of the values
+    it was drawn as. An array computed from it element by element keeps
+    the mark, which `probing.plain_value` honours only at length one."""
+    kind = type(array)
+    if kind not in _ONE_ROW:
+        _ONE_ROW[kind] = type("OneRowArray", (kind,), {
+            "__doc__": "The column of a table with one row.",
+            "one_row_column": True})
+    out = array.view(_ONE_ROW[kind])
+    out.__dict__.update(getattr(array, "__dict__", {}))
+    return out
+
+
 _LABELLED: list = []
 
 
@@ -169,8 +187,12 @@ def as_array(value):
     if isinstance(value, Table):
         return value
     if isinstance(value, dict):
+        from .runtime_types._abstract import OneRowColumn
         cols = {str(k): (typed if (typed := _typed_column(v)) is not None
                          else as_array(v)) for k, v in value.items()}
+        for k, v in value.items():
+            if isinstance(v, OneRowColumn) and is_array(cols[str(k)]):
+                cols[str(k)] = _one_row_column(cols[str(k)])
         if cols and all(is_array(c) and c.ndim == 1 for c in cols.values()):
             return Table(cols)
         return value
@@ -1687,6 +1709,16 @@ _LARGEST_EXPONENT = 64
 
 
 def arith(op: str, a, b):
+    """`a <op> b` as a claim reads it (`_arith`), the column of a one-row
+    table staying one when the result is an array."""
+    out = _arith(op, a, b)
+    if is_array(out) and (getattr(a, "one_row_column", False)
+                          or getattr(b, "one_row_column", False)):
+        return _one_row_column(out)
+    return out
+
+
+def _arith(op: str, a, b):
     """Intent:
         `a <op> b` as a claim reads it (`op` one of `+ - * / **`): when
         an operand is an array and both are finite real values, each

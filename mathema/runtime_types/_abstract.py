@@ -257,6 +257,12 @@ class Labelled(list):
         return list.__getitem__(self, key)
 
 
+class OneRowColumn(list):
+    """The column of a table with one row: a list, read by position as
+    any list is, that holds the table's one value for the column, so a
+    number meets it as that value (`probing.scalar_spreads`)."""
+
+
 def label_position(labels: tuple, name: str) -> int:
     """Intent:
         The position `name` labels among `labels`.
@@ -278,7 +284,8 @@ def plain(value):
         `AbstractVec` is a list with NaN at each missing position (a
         `Labelled` list when its positions are named), an
         `AbstractMat` a list of row lists, an `AbstractTable` a dict of
-        column lists. Any other value is returned unchanged.
+        column lists (`OneRowColumn` lists when it has one row). Any
+        other value is returned unchanged.
     """
     if isinstance(value, AbstractVec):
         values = [math.nan if k in value.missing else v
@@ -287,5 +294,9 @@ def plain(value):
     if isinstance(value, AbstractMat):
         return [list(r) for r in value.rows]
     if isinstance(value, AbstractTable):
-        return {name: plain(col) for name, col in value.columns.items()}
+        columns = {name: plain(col) for name, col in value.columns.items()}
+        if value.row_count() != 1:
+            return columns
+        return {name: OneRowColumn(col) if type(col) is list else col
+                for name, col in columns.items()}
     return value
