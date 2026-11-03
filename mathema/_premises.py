@@ -64,16 +64,24 @@ def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
     """Intent:
         A premise relation as the probe filters with it: `scalar_op`
         between two numbers, and between a vector or matrix and
-        anything the relation element by element, a number
-        broadcasting (`x != 0` holds when some element of `x` is not
-        0, the vector is not the zero vector).
+        anything the relation element by element. In a premise, 0 under
+        `==` or `!=` is the zero of the other side's shape (`x != 0`
+        holds when some element of `x` is not 0, the vector is not the
+        zero vector); a claim's own sides have no such reading
+        (`probing.scalar_spreads`).
     """
-    from ._linalg_eval import is_array
+    from ._linalg_eval import _np, is_array
     from .probing import relation_holds_elementwise
+
+    def zero_of(number, array):
+        if relation in ("==", "!=") and not is_array(number) and number == 0:
+            return _np().zeros_like(array, dtype=float)
+        return number
 
     def op(a, b):
         if not (is_array(a) or is_array(b)):
             return scalar_op(a, b)
+        a, b = (zero_of(a, b), b) if is_array(b) else (a, zero_of(b, a))
         return bool(relation_holds_elementwise(
             a, b, relation,
             tolerance if relation in ("==", "!=") else 0.0,

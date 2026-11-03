@@ -7778,7 +7778,10 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if _exactly_decided(cj, code_l, code_r, trial_env, callees, ok,
                             side=side) is True:
             return None
-        return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
+        from ._missing_words import element_spellings
+        spellings = element_spellings(cj, lv, rv)
+        return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
+                + (f", {spellings}" if spellings else ""))
     return None
 
 
@@ -13815,9 +13818,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 call_hole[0] = None
                 continue
+            from ._missing_words import element_spellings
+            spellings = element_spellings(cj, lv, rv)
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
+            if spellings:
+                cx += f", {spellings}"
             if ll_false and not as_arrays:
                 # the claim's long literal, read as written, decides
                 cx += _as_written_words(cj, code_l, code_r, env,

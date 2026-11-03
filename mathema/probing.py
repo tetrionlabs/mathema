@@ -38,7 +38,6 @@ from ._sampling import _moderate_bounds, _reach_ends
 from .grammar import MISSING, Domain, domain_contains
 from .domain import _sentinel_piece, numeric_excluded
 from .runtime_types import SEQUENCE_KINDS
-from .runtime_types._abstract import OneRowColumn
 # Probe's real home is records.py (the stdlib-only leaf every layer can
 # import); re-exported here because probing is where consumers
 # historically found it.
@@ -426,41 +425,28 @@ def plain_value(v):
     """Intent:
         An executed value in the plain Python form the comparisons
         read: a numpy scalar or a 0-d array becomes its Python number,
-        an array becomes nested lists, the column of a one-row table (a
-        marked array, a pandas or polars Series of one element) a
-        `OneRowColumn`, anything else is returned as it is.
+        an array becomes nested lists, a polars Series its list,
+        anything else is returned as it is.
     """
     if type(v) in (bool, int, float, complex, str, type(None)):
         return v
-    if _one_element_series(v):
-        return OneRowColumn([plain_value(v.item())])
     if hasattr(v, "shape") and hasattr(v, "tolist"):
         try:
-            listed = v.tolist()
+            return v.tolist()
         except Exception:
             return v
-        if getattr(v, "one_row_column", False) and isinstance(listed, list) \
-                and len(listed) == 1:
-            return OneRowColumn(listed)
-        return listed
+    if hasattr(v, "shape") and hasattr(v, "to_list"):
+        # a polars Series: a vector, whatever its length
+        try:
+            return v.to_list()
+        except Exception:
+            return v
     if hasattr(v, "dtype") and hasattr(v, "item"):
         try:
             return v.item()
         except Exception:
             return v
     return v
-
-
-def _one_element_series(v) -> bool:
-    """Whether `v` is a pandas or polars Series holding one value: a
-    column of one row, whichever library answered it."""
-    if type(v).__module__.split(".")[0] not in ("pandas", "polars"):
-        return False
-    try:
-        return len(getattr(v, "shape", ())) == 1 and len(v) == 1 \
-            and hasattr(v, "item")
-    except TypeError:
-        return False
 
 
 def _is_number(v) -> bool:
@@ -528,21 +514,16 @@ def scalar_spreads(scalar, container, relation: str) -> bool:
     """Intent:
         Whether `relation` between a value that is not a sequence and a
         sequence is read at each of the sequence's elements. An ordering
-        is, over a sequence with elements. Equality and `!=` are, only
-        for the number 0, the zero of every shape (`x != 0` says x is
-        not the zero vector): any other value against a sequence is a
-        different shape, so unequal. A sequence with no elements gives
-        nothing to read, so nothing spreads over it (an ordering over it
-        does not hold, an equality with a number is a mismatch). The column of a table
-        with one row holds one value, so any relation reads that value.
+        is, over a sequence with elements. Equality and `!=` never are:
+        a number against a sequence is a different shape, so unequal, 0
+        included (the zero vector is written `[0, 0]`). A sequence with
+        no elements gives nothing to read, so nothing spreads over it
+        (an ordering over it does not hold, an equality with a number is
+        a mismatch).
     """
     if len(container) == 0:
         return False
-    if isinstance(container, OneRowColumn):
-        return True
-    if relation in ("==", "~=", "!="):
-        return _is_number(scalar) and scalar == 0
-    return True
+    return relation not in ("==", "~=", "!=")
 
 
 def values_agree(u, v, tolerance: float | None = None,
@@ -559,9 +540,9 @@ def values_agree(u, v, tolerance: float | None = None,
         is larger.
 
     Notes:
-        `None` when the two sides have different shapes. With
-        `broadcast`, the number 0 against an array or list with elements
-        is compared with every element (`scalar_spreads`). A bool, and a
+        `None` when the two sides have different shapes, a number
+        against an array or list included; `broadcast` is kept for its
+        callers and spreads nothing (`scalar_spreads`). A bool, and a
         value that is not a number, agrees only by exact equality.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
@@ -1347,9 +1328,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     compare by `abs(a - b)`, with the tolerance rules of reals; an
     ordering over a complex value is unanswerable. Two values of
     different lengths or shapes are unequal outright under `==`, `~=`
-    and `!=` (a number other than 0 against a sequence, and any number
-    against an empty one, included); an ordering over mismatched shapes
-    is unanswerable. Leaves that are
+    and `!=` (a number against a sequence included); an ordering over
+    mismatched shapes is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)

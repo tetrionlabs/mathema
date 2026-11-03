@@ -500,7 +500,7 @@ def precision_miss(lv, rv, relation: str, declared=None,
 def _exactly_equal(lv, rv) -> bool:
     """Whether two values (numbers, or nested lists of them) are equal
     exactly, element by element; different shapes are unequal, a value
-    that is not a list against a list as `probing.scalar_spreads` says."""
+    that is not a list against a list unequal (`probing.scalar_spreads`)."""
     from .probing import holds_nan, scalar_spreads
     xs, ys = isinstance(lv, (list, tuple)), isinstance(rv, (list, tuple))
     if xs and ys:

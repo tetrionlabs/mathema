@@ -2,9 +2,8 @@
 # Copyright 2026 Tetrion Ltd
 """A value claim compares what the function returned with what the claim
 wrote. A number and a container are different shapes, so they are unequal,
-whichever side each is on. The number 0 is the one exception: it is the
-zero of every shape, so `x == 0` says x is the zero vector. An empty
-container has no elements: it equals only another empty container, and an
+whichever side each is on, 0 included: the zero vector is written
+`[0, 0]`. An empty container has no elements: it equals only another empty container, and an
 ordering over it does not hold, since there is no element at which it
 could (empty is not 0 and is not >= 0). A claim whose ordering fails only
 where the result is empty is told so, with the narrowed domain as the way
@@ -67,6 +66,7 @@ _MISMATCHES = [
     (_nested_empties, "0"), (_nested_empties, "5"),
     (_nested_empties, "[5.0, 5.0]"), (_fives, "5"), (_five_array, "5"),
     (_five, "[5.0, 5.0]"), (_fives, "[]"), (_empty, "[5.0, 5.0]"),
+    (_zeros, "0"), (_zeros, "0.0"),
 ]
 _RELATIONS = ["==", "~="]
 _WHERE = [("", "[]"), ("for x in {1, 2}, ", "x"), ("for x in [0, 1], ", "x")]
@@ -90,7 +90,6 @@ def test_a_shape_mismatch_is_falsified(fn, written, prefix, arg, relation):
     (_fives, "[5.0, 5.0]", "proven"),
     (_five_array, "[5.0, 5.0]", "proven"),
     (_zeros, "[0, 0]", "proven"),
-    (_zeros, "0", "proven"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 @pytest.mark.parametrize("relation", _RELATIONS)
 def test_the_same_shape_is_compared(fn, written, expected, relation):
@@ -100,13 +99,14 @@ def test_the_same_shape_is_compared(fn, written, expected, relation):
 @pytest.mark.parametrize("fn,written", [
     (_five, "[]"), (_text, "[]"), (_empty, "0"), (_empty, "5"),
     (_fives, "5"), (_five, "[5.0, 5.0]"), (_nested_empties, "0"),
+    (_zeros, "0"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 def test_a_shape_mismatch_satisfies_not_equal(fn, written):
     assert _verdict(fn, f"f([]) != {written}") == "proven"
 
 
 @pytest.mark.parametrize("fn,written", [
-    (_empty, "[]"), (_zeros, "0"), (_zeros, "[0, 0]"), (_five, "5"),
+    (_empty, "[]"), (_zeros, "[0, 0]"), (_five, "5"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 def test_equal_values_fail_not_equal(fn, written):
     assert _verdict(fn, f"f([]) != {written}") == "falsified"
@@ -206,14 +206,13 @@ def test_an_empty_result_still_equals_an_empty_one_and_differs_from_a_number():
 
 
 @pytest.mark.parametrize("zero", [0, 0.0, -0.0, 0j])
-def test_zero_is_the_zero_of_every_shape(zero):
-    for vector in ([0.0, 0.0], [[0.0], [0.0]], np.zeros(3)):
-        assert relation_within(vector, zero, "==") is True
-        assert relation_within(zero, vector, "~=") is True
-        assert relation_holds_elementwise(vector, zero, "==", 1e-9) is True
-        assert relation_holds_elementwise(vector, zero, "!=", 1e-9) is False
-    assert relation_within([0.0, 1.0], zero, "==") is False
-    assert relation_holds_elementwise([0.0, 1.0], zero, "!=", 1e-9) is True
+def test_zero_is_a_mismatch_like_any_number(zero):
+    for vector in ([0.0, 0.0], [[0.0], [0.0]], np.zeros(3), []):
+        assert relation_within(vector, zero, "==") is False
+        assert relation_within(vector, zero, "!=") is True
+        assert relation_holds_elementwise(vector, zero, "==", 1e-9) is False
+        assert values_agree(vector, zero, broadcast=True) is None
+    assert relation_within([0.0, 0.0], [0, 0], "==") is True
 
 
 def test_two_empty_containers_are_one_value():
@@ -242,3 +241,15 @@ def test_the_row_and_its_empty_input_line_agree():
     reports = claims.check_conjectures(_five, [claim("f([]) == []", name="c")])
     assert reports[0].verdict == "falsified"
     assert "5.0" in reports[0].counterexample
+
+
+def _quadratic(x: np.ndarray) -> float:
+    return float(x @ x)
+
+
+def test_a_premise_reads_0_as_the_zero_vector_and_a_claim_does_not():
+    premised = "assuming x != 0, for x in [0, 1]^2, f(x) > 0"
+    assert _verdict(_quadratic, premised) in ("holds", "proven")
+    unpremised = "for x in [0, 1]^2, f(x) > 0"
+    assert _verdict(_quadratic, unpremised) == "falsified"
+    assert _verdict(_zeros, "f([]) != 0") == "proven"

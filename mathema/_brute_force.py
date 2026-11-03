@@ -1171,18 +1171,27 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 **exact_miss[2], "computation":
                     f"fails at {_fmt_point(point, names)}"}}
                     if exact_miss is not None else {})
+            from ._missing_words import element_spellings
+            computed = evaluate.sides()
+            spellings = (element_spellings(cj, *computed)
+                         if computed is not None else "")
             return ProofResult(
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
+                       + (f", {computed[0]!r} vs {computed[1]!r}"
+                          if spellings else "")
                        + (_rounded_miss_words(evaluate.sides(),
                                               evaluate.decimal_rounded())
                           if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else
                           f", found among the points run "
-                          f"{plan.coverage.words(checked + 1)}"),
-                counterexample=_fmt_point(point, names),
+                          f"{plan.coverage.words(checked + 1)}")
+                       + (f"; {spellings}" if spellings else ""),
+                counterexample=(f"{_fmt_point(point, names)}: {computed[0]!r} "
+                                f"vs {computed[1]!r}" if spellings
+                                else _fmt_point(point, names)),
                 witness=dict(point),
                 # the witness is a call of the real function at a point
                 # the domain admits: an executed witness, which the
