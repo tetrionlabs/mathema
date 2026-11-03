@@ -860,3 +860,37 @@ def test_a_dimension_is_read_off_its_first_measurable_anchor():
     env: dict = {}
     resolver.bind_env(env, {"a": [1.0, 2.0, 3.0], "b": [1.0, 2.0]})
     assert env["n"] == 3
+
+
+def rank_then_sizes(v: Annotated[list, Shape("n")],
+                    A: Annotated[list, Shape("n", "n")]) -> float:
+    return sum(v) + sum(sum(r) for r in A)
+
+
+def sizes_then_rank(A: Annotated[list, Shape("n", "n")],
+                    v: Annotated[list, Shape("n")]) -> float:
+    return sum(v) + sum(sum(r) for r in A)
+
+
+@pytest.mark.parametrize("route", ["best", "probe"])
+@pytest.mark.parametrize("fn,text", [
+    (rank_then_sizes, "for v in [0, 1]^(n,m), A in [0, 1]^(2,3), f(v, A) >= 0"),
+    (sizes_then_rank, "for A in [0, 1]^(2,3), v in [0, 1]^(n,m), f(A, v) >= 0"),
+])
+def test_a_two_sizes_conflict_is_misspecified_whatever_the_parameter_order(fn, text, route):
+    rows, calls = _rows_and_calls(fn, text, route=route)
+    assert rows["c"].verdict == "skipped:misspecified", (rows["c"].verdict, rows["c"].note)
+    assert "is fixed to two sizes" in str(rows["c"].note), rows["c"].note
+    assert not [call for call in calls if str(call.claim).startswith("c")]
+
+
+def test_a_fixed_size_conflict_is_found_behind_a_rank_conflict():
+    cj = claim("for v in [0, 1]^(n,m), A in [0, 1]^(2,3), f(v, A) >= 0")
+    with pytest.raises(FixedSizeConflict):
+        resolve(analyze_source(rank_then_sizes), shapes_from_signature(rank_then_sizes),
+                claim_domain=cj.domain)
+    cj = claim("for v in [0, 1]^(n,m), A in [0, 1]^(2,2), f(v, A) >= 0")
+    with pytest.raises(DimensionConflict) as err:
+        resolve(analyze_source(rank_then_sizes), shapes_from_signature(rank_then_sizes),
+                claim_domain=cj.domain)
+    assert not isinstance(err.value, FixedSizeConflict)

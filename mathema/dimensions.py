@@ -349,6 +349,10 @@ def resolve(facts, shapes: "dict | None" = None,
     aliases: dict = {}
     fixed: dict = {}
     fixed_by: dict = {}
+    # the first rank conflict met, raised once every parameter has been
+    # read for a fixed-size conflict, so the verdict does not depend on
+    # the parameter order
+    rank_conflict: "DimensionConflict | None" = None
     shapes = shapes or {}
     claim_domain = claim_domain or {}
     for p in getattr(facts, "params", ()):
@@ -356,7 +360,14 @@ def resolve(facts, shapes: "dict | None" = None,
         declared = getattr(claim_domain.get(p), "dims", ())
         marker_dims = getattr(marker, "dims", ()) if marker is not None else ()
         if marker_dims and declared:
-            new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            try:
+                new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            except FixedSizeConflict:
+                raise
+            except DimensionConflict as conflict:
+                if rank_conflict is None:
+                    rank_conflict = conflict
+                continue
             aliases.update(new_aliases)
             for name, size in new_fixed.items():
                 if name in fixed and fixed[name] != size:
@@ -387,4 +398,6 @@ def resolve(facts, shapes: "dict | None" = None,
                 f"{fixed_by[name]}'s binding on its alias {name}; one shared "
                 f"dimension has one size")
         fixed[key] = size
+    if rank_conflict is not None:
+        raise rank_conflict
     return resolver
