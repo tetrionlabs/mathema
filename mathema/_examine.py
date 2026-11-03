@@ -5,7 +5,8 @@ without running it: what it writes outside the call, what hidden inputs
 it reads, and what it does that cannot be read.
 
 `examine(fn)` walks the body and every project function it reaches
-(parsed once and cached; recursion and cycles are followed once), and
+(parsed once and cached; a call cycle is read to its least fixed point,
+so what it finds does not depend on which member comes first), and
 returns an `Effects`:
 
 - a **write** is a store, a mutating method or a library call that
@@ -44,6 +45,7 @@ import re
 import sys
 import sysconfig
 import textwrap
+import threading
 import types
 from dataclasses import dataclass, field
 
@@ -409,6 +411,28 @@ def _immutable(value) -> bool:
 
 _CACHE: dict = {}
 
+#: how many times a call cycle is examined before it is reported as not
+#: settling
+_ROUNDS_TO_SETTLE = 32
+
+
+class _UnderWay(threading.local):
+    """The examinations under way in this thread: `depth`, each open
+    function by its key and its place on the stack; `low`, per open
+    function, the lowest place on the stack its examination has read;
+    `reading`, what the last round of a cycle gave for each member;
+    `finished`, the results of this round that rest on a member still
+    open, with the lowest place each read."""
+
+    def __init__(self) -> None:
+        self.depth: dict = {}
+        self.low: list = []
+        self.reading: dict = {}
+        self.finished: dict = {}
+
+
+_UNDER_WAY = _UnderWay()
+
 
 #: library functions that hand back their first argument itself when
 #: it is already what they would make (an array of the asked type)
@@ -544,8 +568,70 @@ def examine(fn, generator: "str | None" = None,
            constructing)
     if key in _CACHE:
         return _CACHE[key]
-    _CACHE[key] = Effects()      # a cycle reaching fn again adds nothing
-    found = _Examiner(fn, generator, constructing).run()
+    under_way = _UNDER_WAY
+    if key in under_way.depth:
+        # back round a cycle: this member's reading so far
+        under_way.low[-1] = min(under_way.low[-1], under_way.depth[key])
+        return under_way.reading.get(key, Effects())
+    if key in under_way.finished:
+        found, low = under_way.finished[key]
+        under_way.low[-1] = min(under_way.low[-1], low)
+        return found
+    depth = len(under_way.depth)
+    under_way.depth[key] = depth
+    under_way.low.append(depth + 1)
+    try:
+        return _solved(key, fn, generator, constructing, depth, under_way)
+    finally:
+        del under_way.depth[key]
+        low = under_way.low.pop()
+        if under_way.low:
+            under_way.low[-1] = min(under_way.low[-1], low)
+        else:
+            under_way.reading.clear()
+            under_way.finished.clear()
+
+
+def _in_a_cycle() -> bool:
+    """Whether the examination in hand has read a member still open."""
+    under_way = _UNDER_WAY
+    return bool(under_way.low) and under_way.low[-1] < len(under_way.depth)
+
+
+def _solved(key, fn, generator, constructing, depth: int, under_way) -> Effects:
+    """Intent:
+        The examination of the function `key` names, with the depth it
+        sits at on the stack of examinations under way. A result that
+        read a member still open below it is provisional: it is kept for
+        this round only, and the member its cycle opens with decides.
+        That member re-examines the whole cycle, each reading the last
+        round's result for the others, until a round changes nothing,
+        and only that result, the least fixed point, is cached.
+
+    Notes:
+        Past `_ROUNDS_TO_SETTLE` the examination says it did not settle.
+    """
+    for _round in range(_ROUNDS_TO_SETTLE):
+        before = set(under_way.finished)
+        under_way.low[-1] = depth + 1
+        found = _Examiner(fn, generator, constructing).run()
+        low = under_way.low[-1]
+        if low < depth:
+            under_way.finished[key] = (found, low)
+            return found
+        members = {k: under_way.finished.pop(k)[0]
+                   for k in set(under_way.finished) - before}
+        members[key] = found
+        if low > depth or all(under_way.reading.get(k, Effects()) == v
+                              for k, v in members.items()):
+            for k in members:
+                under_way.reading.pop(k, None)
+            _CACHE.update(members)
+            return found
+        under_way.reading.update(members)
+    name = getattr(_unwrapped(fn), "__name__", "f")
+    found.add(Site("unknown", f"the examination of {name} in its call cycle "
+                   f"did not settle"))
     _CACHE[key] = found
     return found
 
@@ -1466,9 +1552,25 @@ class _Examiner:
             changed = self._outside(self._origin_of(arg))
             if changed is not None:
                 self._note_module_write(self._origin_of(arg))
-                self.effects.add(Site("write", f"{self.name} passes "
-                                      f"{changed} to {callee}, and "
-                                      f"{site.text}"))
+                opening = f"{self.name} passes {changed} to {callee}"
+                if not self._already_round_the_cycle(opening, site):
+                    self.effects.add(Site("write", f"{opening}, and "
+                                          f"{site.text}"))
+
+    def _already_round_the_cycle(self, opening: str, site: Site) -> bool:
+        """Intent:
+            Whether this body, examined inside a call cycle, already has
+            the write `site` comes down to, through the argument
+            `opening` passes. Going round the cycle again changes the
+            same object, so a sentence longer by one more lap says
+            nothing new, and the sentences a cycle can make stay finite.
+        """
+        if not _UNDER_WAY.reading and not _in_a_cycle():
+            return False
+        final = site.text.rsplit(", and ", 1)[-1]
+        return any(w.text.startswith(opening)
+                   and w.text.rsplit(", and ", 1)[-1] == final
+                   for w in self.effects.writes)
 
     def call(self, node: ast.Call) -> None:
         for arg in node.args:
