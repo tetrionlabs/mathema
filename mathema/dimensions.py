@@ -354,4 +354,15 @@ def resolve(facts, shapes: "dict | None" = None,
             out[p] = ParamShape(axes=(None,))
         else:
             out[p] = ParamShape(axes=())
-    return DimResolver(shapes=out, aliases=aliases, fixed=fixed)
+    resolver = DimResolver(shapes=out, aliases=aliases, fixed=fixed)
+    # a size fixed through a name is the size of that name's canonical
+    # dimension, the name every axis is keyed by
+    for name, size in list(fixed.items()):
+        key = resolver.canonical(name)
+        if fixed.get(key, size) != size:
+            raise DimensionConflict(
+                f"{key} is fixed to two sizes: {fixed[key]} and {size} by "
+                f"{fixed_by[name]}'s binding on its alias {name}; one shared "
+                f"dimension has one size")
+        fixed[key] = size
+    return resolver

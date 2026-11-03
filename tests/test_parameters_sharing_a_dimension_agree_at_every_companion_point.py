@@ -16,7 +16,7 @@ import pytest
 from mathema.analysis import analyze_source
 from mathema.conjecture import (_admitted_container_points, check_conjectures,
                                 claim)
-from mathema.dimensions import DimResolver, ParamShape, resolve
+from mathema.dimensions import DimensionConflict, DimResolver, ParamShape, resolve
 from mathema.gates import _point_evaluator
 from mathema.policy import batch
 from mathema.types import Shape, shapes_from_signature
@@ -293,3 +293,48 @@ def test_no_small_point_where_every_size_is_fixed_or_free():
     assert fixed["small_points"]() == []
     free, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
     assert free["small_points"]() == []
+
+
+def aliased(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("k")]):
+    return sum(a) + sum(b)
+
+
+ALIASED = "for a in [-1, 1]^2, b in [-1, 1]^n, f(a, b) == f(a, b)"
+
+
+def _floor_points(fn, text):
+    cj = claim(text)
+    ctx = SimpleNamespace(cj_domain=cj.domain, record_domain=cj.domain,
+                          missing={}, cj=cj)
+    facts = analyze_source(fn)
+    resolver = resolve(facts, shapes_from_signature(fn), claim_domain=cj.domain)
+    points, _holes = _admitted_container_points(ctx, facts, resolver)
+    return points
+
+
+def test_a_fixed_size_holds_through_an_aliased_name():
+    cj = claim(ALIASED)
+    resolver = resolve(analyze_source(aliased), shapes_from_signature(aliased),
+                       claim_domain=cj.domain)
+    assert resolver.key("a", 0) == resolver.key("b", 0) == "k"
+    assert resolver.fixed["k"] == 2
+    assert resolver.corner_sizes() == {"k": 2}
+    assert resolver.tied_keys() == {"k"}
+    assert resolver.draw_sizes(random.Random(0)) == {"k": 2}
+
+
+def test_the_floor_keeps_a_fixed_size_through_an_aliased_name():
+    lengths = {param: {len(value) for p, _word, value in _floor_points(aliased, ALIASED)
+                       if p == param and value is not None}
+               for param in ("a", "b")}
+    assert lengths == {"a": {2}, "b": {2}}
+
+
+def test_two_sizes_on_one_aliased_dimension_conflict():
+    def three(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("k")],
+              c: Annotated[list, Shape("k")]):
+        return sum(a) + sum(b) + sum(c)
+    cj = claim("for a in [-1, 1]^2, b in [-1, 1]^3, c in [-1, 1]^n, f(a, b, c) == 0")
+    with pytest.raises(DimensionConflict):
+        resolve(analyze_source(three), shapes_from_signature(three),
+                claim_domain=cj.domain)
