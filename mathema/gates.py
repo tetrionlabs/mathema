@@ -1229,13 +1229,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                      else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
-    def _small_points():
+    def _small_points(admitted=admits):
         # the joint points at a tied dimension's least size, as the probe's
         # guaranteed small draws (`DimResolver.draw_sizes`): vectors of
-        # length 1 side by side, and for a matrix 1-by-1, 1-by-m and n-by-1.
-        # No single container's floor can build one, since its other
-        # coordinates come from a corner. Every other coordinate is drawn,
-        # and a point the premises refuse is drawn again
+        # length 1 side by side, and for a matrix 1-by-1, 1-by-m, n-by-1 and
+        # 2-by-2. No single container's floor can build one, since its other
+        # coordinates come from a corner. Every other coordinate is drawn, a
+        # point `admitted` refuses is drawn again, and a size no draw
+        # satisfies gives no point
         if resolver is None:
             return []
         sized = [n for n in names if n in planned or n in tied_tables]
@@ -1247,19 +1248,23 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         spans_matrix = any(resolver.shapes[n].ndim >= 2 for n in sized)
         from ._sampling import _RNG_SEED
         rng = _random.Random(_RNG_SEED + 2)
+        rounds = [resolver.draw_sizes(rng, floor=round_)
+                  for round_ in ((0, 1, 2) if spans_matrix else (0,))]
+        if spans_matrix:
+            rounds.append({k: size if k in resolver.fixed
+                           or (isinstance(k, str) and k.isdigit()) else 2
+                           for k, size in rounds[0].items()})
         points: list = []
         seen: list = []
-        for round_ in ((0, 1, 2) if spans_matrix else (0,)):
-            sizes = resolver.draw_sizes(rng, floor=round_)
+        for sizes in rounds:
             if sizes in seen:
                 continue
             seen.append(sizes)
-            point: dict = {}
             for _ in range(_SMALL_POINT_DRAWS):
                 point = {n: _small_value(n, sizes, rng) for n in names}
-                if admits(point):
+                if admitted(point):
+                    points.append(point)
                     break
-            points.append(point)
         return points
 
     def _small_value(name, sizes, rng):
@@ -1377,8 +1382,7 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 sample=sample, corners=corners, names=names)
 
 
-#: how many times a small joint point is drawn before it is left to the
-#: sweep's own premise check
+#: how many times a small joint point is drawn before its size is given up
 _SMALL_POINT_DRAWS = 32
 
 
@@ -2373,7 +2377,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
-    corners = list(deps["corners"]) + deps["evaluate"].small_points()
+    try:
+        small = _with_timeout(lambda: deps["evaluate"].small_points(deps["admits"]),
+                              FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        small = []
+    corners = list(deps["corners"]) + small
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
     # the admitted missing inputs run first, so each is executed and

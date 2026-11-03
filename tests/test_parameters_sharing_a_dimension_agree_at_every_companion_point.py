@@ -8,17 +8,22 @@ differ is outside the claim's domain, so the code is never judged
 there."""
 import random
 import re
+import time
 from types import SimpleNamespace
 from typing import Annotated
 
 import pytest
 
+import mathema._timeout
+from mathema import corroboration
+from mathema._shapes import observed_shape
 from mathema.analysis import analyze_source
 from mathema.conjecture import (_admitted_container_points, check_conjectures,
                                 claim)
 from mathema.dimensions import DimensionConflict, DimResolver, ParamShape, resolve
-from mathema.gates import _point_evaluator
+from mathema.gates import _float_companion, _point_evaluator
 from mathema.policy import batch
+from mathema.probing import Probe
 from mathema.types import Shape, shapes_from_signature
 
 
@@ -29,9 +34,9 @@ def dot(xs: list[float], ys: list[float]) -> float:
     return total
 
 
-def _rows_and_calls(fn, text):
+def _rows_and_calls(fn, text, **kw):
     with batch() as calls:
-        rows = check_conjectures(fn, [claim(text, name="c")],
+        rows = check_conjectures(fn, [claim(text, name="c", **kw)],
                                  float_companions=True)
     return {p.name: p for p in rows}, calls.calls
 
@@ -262,10 +267,11 @@ def test_a_tied_matrix_reaches_one_by_one_one_by_m_and_n_by_one():
     deps, _resolver = _kit(
         vector_and_matrix, "for w in [-1, 1]^n, A in [-1, 1]^(n,m), f(w, A) == f(w, A)")
     shapes = [(len(p["w"]), len(p["A"]), len(p["A"][0])) for p in deps["evaluate"].small_points()]
-    assert len(shapes) == 3
+    assert len(shapes) == 4
     assert shapes[0] == (1, 1, 1)
     assert shapes[1][:2] == (1, 1) and shapes[1][2] >= 2
     assert shapes[2][0] == shapes[2][1] >= 2 and shapes[2][2] == 1
+    assert shapes[3] == (2, 2, 2)
     assert all(deps["admits"](p) for p in deps["evaluate"].small_points())
 
 
@@ -567,3 +573,165 @@ def marked_size_of(d: Annotated[dict, Shape("n")]) -> int:
 def test_a_marked_plain_dict_binds_its_dimension_in_a_claim(text):
     rows, _calls = _rows_and_calls(marked_size_of, text)
     assert rows["c"].verdict == "holds", (rows["c"].verdict, rows["c"].counterexample)
+
+
+def test_a_one_element_array_of_a_hole_has_a_shape():
+    np = pytest.importorskip("numpy")
+    assert observed_shape(np.array([np.nan])) == (1,)
+    assert observed_shape({"a": np.array([np.nan])}) == (1,)
+    assert observed_shape({"a": np.array([np.nan]), "b": np.array([0.5])}) == (1,)
+    assert observed_shape(np.array(np.nan)) == ()
+    assert observed_shape(float("nan")) == ()
+    assert observed_shape(None) == ()
+
+
+def test_a_one_element_nullable_array_of_a_hole_has_a_shape():
+    pd = pytest.importorskip("pandas")
+    assert observed_shape(pd.array([pd.NA], dtype="Float64")) == (1,)
+    assert observed_shape({"a": pd.array([pd.NA], dtype="Float64"),
+                           "b": pd.array([pd.NA], dtype="Float64")}) == (1,)
+    assert observed_shape(pd.NA) == ()
+
+
+def test_a_one_row_table_of_holes_binds_its_dimension():
+    np = pytest.importorskip("numpy")
+    resolver = DimResolver(shapes={"df": ParamShape(("n",))})
+    env: dict = {"n": 9.5}
+    resolver.bind_env(env, {"df": {"a": np.array([np.nan]), "b": np.array([np.nan])}})
+    assert env["n"] == 1
+
+
+def test_a_table_law_on_its_row_count_holds_through_a_hole():
+    pd = pytest.importorskip("pandas")
+
+    def rows_of(df: pd.DataFrame) -> float:
+        return float(len(df["a"])) + 0 * len(df["b"])
+    rows, _calls = _rows_and_calls(rows_of, "for df in [0, 1]^n, f(df) == n")
+    assert rows["c"].verdict == "holds", (rows["c"].verdict, rows["c"].counterexample)
+
+
+def _companion_lists(calls, *params):
+    return [tuple(call.point[p] for p in params) for call in calls
+            if str(call.claim).startswith("c[float")
+            and all(isinstance(call.point.get(p), list) for p in params)]
+
+
+def _all_holes(values) -> bool:
+    return all(v is None or v != v for v in values)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_an_all_hole_vector_runs_at_its_partners_length():
+    _rows, calls = _rows_and_calls(
+        dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
+    lengths = {(len(xs), len(ys)) for xs, ys in _companion_lists(calls, "xs", "ys")
+               if _all_holes(xs)}
+    assert (3, 3) in lengths, sorted(lengths)
+
+
+@pytest.mark.needs_full_proof_budget
+def test_a_small_point_counts_toward_the_trials():
+    rows, _calls = _rows_and_calls(
+        plain_sums, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
+        trials=20)
+    assert _companion(rows).n == 20, _companion(rows).note
+
+
+def test_a_small_point_the_premises_refuse_does_not_count(monkeypatch):
+    swept = {}
+    sweep = corroboration.sweep_stability
+
+    def spy(*args, **kwargs):
+        swept.update(kwargs)
+        return sweep(*args, **kwargs)
+    monkeypatch.setattr(corroboration, "sweep_stability", spy)
+    _bare_companion(plain_sums, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
+                    budget=16, assum=[("len(xs)", ">=", "2")])
+    assert not [c for c in swept["corners"] if len(c["xs"]) == 1]
+    assert swept["budget"] + len(swept["corners"]) == 16
+
+
+def test_a_small_point_nothing_admits_is_left_out():
+    deps, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == 0")
+    assert deps["evaluate"].small_points(lambda point: False) == []
+
+
+def test_two_tied_tables_with_no_vector_reach_one_row():
+    pd = pytest.importorskip("pandas")
+
+    def two_tables(a: pd.DataFrame, b: pd.DataFrame) -> float:
+        return float(a["x"].sum()) + float(b["z"].sum())
+    deps, _resolver = _kit(two_tables, "for a in [0, 1]^n, b in [0, 1]^n, f(a, b) >= -9")
+    assert [(_rows_of(p["a"]), _rows_of(p["b"])) for p in deps["evaluate"].small_points()] \
+        == [(1, 1)]
+
+
+def test_a_square_matrix_floor_takes_the_size_its_vector_shares():
+    def vector_and_square(w, A):
+        return w[0] + A[0][0]
+    points = _floor_points(vector_and_square,
+                           "for w in [-1, 1]^n, A in [-1, 1]^(n,n), f(w, A) == 0")
+    assert _lengths_by_param(points) == {"w": {3}, "A": {3}}
+
+
+def trace_of(A) -> float:
+    return sum(A[i][i] for i in range(len(A)))
+
+
+def test_a_square_matrix_reaches_one_by_one_and_two_by_two_once_each():
+    deps, _resolver = _kit(trace_of, "for A in [-1, 1]^(n,n), f(A) == f(A)")
+    shapes = [(len(p["A"]), len(p["A"][0])) for p in deps["evaluate"].small_points()]
+    assert shapes == [(1, 1), (2, 2)]
+
+
+def test_a_square_matrix_runs_at_two_by_two_whatever_the_trials():
+    seen = set()
+
+    def trace_seen(A) -> float:
+        seen.add((len(A), len(A[0])))
+        return 0.0
+    _bare_companion(trace_seen, "for A in [-1, 1]^(n,n), f(A) == f(A)", budget=6)
+    assert seen >= {(1, 1), (2, 2)}, sorted(seen)
+
+
+def test_a_name_a_binding_fixes_is_tied_with_one_use():
+    def one(a: Annotated[list, Shape("n")]):
+        return sum(a)
+    cj = claim("for a in [-1, 1]^2, f(a) == 0")
+    resolver = resolve(analyze_source(one), shapes_from_signature(one), claim_domain=cj.domain)
+    assert resolver.tied_keys() == {"n"}
+
+
+SCALED = "for xs in [-1, 1]^n, ys in [-1, 1]^n, c in [-1, 1], f(xs, ys, c) == f(xs, ys, c)"
+
+
+def _bare_companion(fn, text, **kw):
+    cj = claim(text, name="c")
+    with batch() as calls:
+        line = _float_companion(Probe("c", text, "proven"), cj, fn, analyze_source(fn),
+                                cj.domain, {}, **kw)
+    return line, calls.calls
+
+
+def test_a_small_point_is_drawn_inside_what_the_companion_excludes():
+    seen = set()
+
+    def scaled_seen(xs: list[float], ys: list[float], c: float) -> float:
+        seen.add((len(xs), len(ys)))
+        return 0.0
+    _bare_companion(scaled_seen, SCALED, excluded=lambda point: point["c"] > -0.9)
+    assert (1, 1) in seen, sorted(seen)
+
+
+def test_drawing_small_points_stops_at_the_wall_clock_cap(monkeypatch):
+    monkeypatch.setattr(mathema._timeout, "FAST_TIMEOUT_SECONDS", 0.2)
+    at_length_one = []
+
+    def slow(xs: list[float], ys: list[float]) -> float:
+        if len(xs) == 1 and len(ys) == 1:
+            at_length_one.append(1)
+        time.sleep(0.05)
+        return 0.0
+    _bare_companion(slow, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)",
+                    assum=[("f(xs, ys)", ">", "1000")])
+    assert len(at_length_one) < 32, len(at_length_one)
