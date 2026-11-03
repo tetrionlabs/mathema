@@ -250,8 +250,8 @@ def test_tied_vectors_reach_length_one_whatever_the_trials(trials):
 
 def test_tied_keys_give_a_joint_point_at_their_least_size():
     deps, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^n, f(xs, ys) == f(xs, ys)")
-    assert [(len(p["xs"]), len(p["ys"])) for p in deps["small_points"]()] == [(1, 1)]
-    assert all(deps["admits"](p) for p in deps["small_points"]())
+    assert [(len(p["xs"]), len(p["ys"])) for p in deps["evaluate"].small_points()] == [(1, 1)]
+    assert all(deps["admits"](p) for p in deps["evaluate"].small_points())
 
 
 def test_a_tied_matrix_reaches_one_by_one_one_by_m_and_n_by_one():
@@ -259,12 +259,12 @@ def test_a_tied_matrix_reaches_one_by_one_one_by_m_and_n_by_one():
         return w[0] + A[0][0]
     deps, _resolver = _kit(
         vector_and_matrix, "for w in [-1, 1]^n, A in [-1, 1]^(n,m), f(w, A) == f(w, A)")
-    shapes = [(len(p["w"]), len(p["A"]), len(p["A"][0])) for p in deps["small_points"]()]
+    shapes = [(len(p["w"]), len(p["A"]), len(p["A"][0])) for p in deps["evaluate"].small_points()]
     assert len(shapes) == 3
     assert shapes[0] == (1, 1, 1)
     assert shapes[1][:2] == (1, 1) and shapes[1][2] >= 2
     assert shapes[2][0] == shapes[2][1] >= 2 and shapes[2][2] == 1
-    assert all(deps["admits"](p) for p in deps["small_points"]())
+    assert all(deps["admits"](p) for p in deps["evaluate"].small_points())
 
 
 def test_a_tied_table_reaches_one_row_beside_a_vector():
@@ -274,8 +274,8 @@ def test_a_tied_table_reaches_one_row_beside_a_vector():
         return float(df["a"].sum()) + sum(w)
     deps, _resolver = _kit(table_and_vector,
                            "for df in [0, 1]^n, w in [0, 1]^n, f(df, w) >= -1")
-    assert [(_rows_of(p["df"]), len(p["w"])) for p in deps["small_points"]()] == [(1, 1)]
-    assert all(deps["admits"](p) for p in deps["small_points"]())
+    assert [(_rows_of(p["df"]), len(p["w"])) for p in deps["evaluate"].small_points()] == [(1, 1)]
+    assert all(deps["admits"](p) for p in deps["evaluate"].small_points())
 
 
 def test_a_small_point_keeps_a_premise_on_its_elements():
@@ -286,14 +286,15 @@ def test_a_small_point_keeps_a_premise_on_its_elements():
     deps = _point_evaluator(cj, premised, analyze_source(premised), cj.domain, {},
                             assum=[("c", ">", "0.9")], sequences=True)
     assert deps["admits"]({"xs": [0.5], "ys": [0.5], "c": 0.1}) is False
-    assert deps["small_points"]() and all(deps["admits"](p) for p in deps["small_points"]())
+    points = deps["evaluate"].small_points()
+    assert points and all(deps["admits"](p) for p in points)
 
 
 def test_no_small_point_where_every_size_is_fixed_or_free():
     fixed, _resolver = _kit(dot, "for xs in [-1, 1]^2, ys in [-1, 1]^2, f(xs, ys) == f(xs, ys)")
-    assert fixed["small_points"]() == []
+    assert fixed["evaluate"].small_points() == []
     free, _resolver = _kit(dot, "for xs in [-1, 1]^n, ys in [-1, 1]^m, f(xs, ys) == f(xs, ys)")
-    assert free["small_points"]() == []
+    assert free["evaluate"].small_points() == []
 
 
 def aliased(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("k")]):

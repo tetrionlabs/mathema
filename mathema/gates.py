@@ -1371,9 +1371,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # and the claim's two sides there
     evaluate.calls = lambda: list(point_calls)  # type: ignore[attr-defined]
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
+    # the joint points at a tied dimension's least size, `_small_points`
+    evaluate.small_points = _small_points  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
-                sample=sample, corners=corners, names=names,
-                small_points=_small_points)
+                sample=sample, corners=corners, names=names)
 
 
 #: how many times a small joint point is drawn before it is left to the
@@ -2331,7 +2332,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         after the corners and before the sampled points; a container's
         floor is listed the same way (its word None for an item that
         holds no hole). Parameters sharing a dimension are also executed
-        together at its least size (`_point_evaluator`'s `small_points`),
+        together at its least size (the evaluator's `small_points`),
         after the corners and before the sampled points, and count toward
         `budget` as corners do. `holes`, `{param: [value, ...]}`, are the hole
         values a container's slots admit, carried by its sampled draws.
@@ -2372,7 +2373,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
-    corners = list(deps["corners"]) + deps["small_points"]()
+    corners = list(deps["corners"]) + deps["evaluate"].small_points()
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
     # the admitted missing inputs run first, so each is executed and
