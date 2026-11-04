@@ -183,10 +183,11 @@ def _check(root, *extra) -> subprocess.CompletedProcess:
 
 
 def test_the_check_verb_says_misspecified(tmp_path):
-    root = _project(tmp_path)
+    (tmp_path / "funcs.py").write_text(_FUNCS)
+    root = tmp_path
     text = _check(root)
     assert "1 misspecified" in text.stdout, text.stdout + text.stderr
     assert "1 unknown" not in text.stdout, text.stdout
-    (row,) = json.loads(_check(root, "--format", "json").stdout)
+    (row,) = json.loads(_check(root, "--format", "json").stdout)["functions"]
     assert row["misspecified"] == 1, row
     assert row["skipped"] == 1, row
