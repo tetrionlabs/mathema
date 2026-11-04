@@ -202,7 +202,7 @@ def test_an_ordering_that_fails_only_at_an_empty_result_says_so(law, narrowed, r
     assert remedy_statements(probe.note) == [narrowed + law], probe.note
 
 
-def test_an_ordering_that_fails_elsewhere_too_offers_no_narrowing():
+def test_an_ordering_that_fails_elsewhere_too_gives_no_narrowing():
     probe = _probe(_ones, "for n in {0, 1, 2}, f(n) >= 2")
     assert probe.verdict == "falsified"
     assert remedy_statements(probe.note or "") == [], probe.note
@@ -335,3 +335,58 @@ def test_a_premise_reads_0_as_the_zero_vector_and_a_claim_does_not():
     unpremised = "for x in [0, 1]^2, f(x) > 0"
     assert _verdict(_quadratic, unpremised) == "falsified"
     assert _verdict(_zeros, "f([]) != 0") == "proven"
+
+
+def _empty_text(x: float) -> str:
+    return ""
+
+
+def _a_text(x: float) -> str:
+    return "a"
+
+
+@pytest.mark.parametrize("lv,rv,relation,expected", [
+    ("", "a", "<=", True), ("", "a", "<", True),
+    ("a", "", ">=", True), ("a", "", ">", True),
+    ("", "a", ">=", False), ("", "a", ">", False),
+    ("a", "", "<=", False), ("a", "", "<", False),
+    ("", "", "<", False), ("", "", ">", False),
+    ("", "", "<=", True), ("", "", ">=", True),
+])
+def test_an_empty_string_keeps_its_order_against_a_string(lv, rv, relation, expected):
+    assert relation_within(lv, rv, relation) is expected
+    assert relation_holds_elementwise(lv, rv, relation, 1e-9) is expected
+
+
+@pytest.mark.parametrize("route", ["best", "derive", "probe"])
+@pytest.mark.parametrize("fn,law,held", [
+    (_empty_text, 'f(x) <= "a"', True),
+    (_empty_text, 'f(x) < "a"', True),
+    (_empty_text, '"a" >= f(x)', True),
+    (_a_text, 'f(x) >= ""', True),
+    (_a_text, '"" <= f(x)', True),
+    (_empty_text, 'f(x) >= "a"', False),
+    (_empty_text, 'f(x) < ""', False),
+])
+def test_a_returned_empty_string_keeps_its_order_on_every_route(fn, law, held, route):
+    (probe,) = claims.check_conjectures(
+        fn, [claim(f"for x in {{1.0, 2.0}}, {law}", name="c", route=route)])
+    if held and route == "derive":
+        # the derive route reads no ordering of strings, and on it a sampled
+        # pass is no verdict
+        assert probe.verdict == "unknown", (probe.verdict, probe.counterexample)
+        return
+    assert (probe.verdict in ("holds", "proven")) is held, (
+        probe.verdict, probe.route, probe.note, probe.counterexample)
+    if not held:
+        assert probe.verdict == "falsified", (probe.verdict, probe.note)
+        assert "an ordering over an empty value" not in (probe.note or ""), probe.note
+
+
+@pytest.mark.parametrize("route", ["best", "probe"])
+@pytest.mark.parametrize("law", ["f(x) >= 0", "0 <= f(x)"])
+def test_an_empty_string_against_a_number_stays_falsified_with_its_note(law, route):
+    (probe,) = claims.check_conjectures(
+        _empty_text, [claim(f"for x in {{1.0, 2.0}}, {law}", name="c", route=route)])
+    assert probe.verdict == "falsified", (probe.verdict, probe.note)
+    assert "an ordering over an empty value does not hold" in probe.note, probe.note

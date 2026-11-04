@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""What the note of a falsified claim offers in its place.
+"""The corrections the note of a falsified claim gives.
 
 A claim falsified by a shape it did not mean has a spelling that says what
 it meant: a vector of one element against a number is compared by its
 element or as a whole, and an ordering that fails where the result is empty
-holds once the domain leaves that point out. An offer is the whole claim, as
-the user wrote it, with its domain. Each is adjudicated on that domain before
-it is offered, so an offered claim holds when written. That costs one more
+holds once the domain leaves that point out. A correction is the whole claim,
+as the user wrote it, with its domain. Each is adjudicated before it is given,
+so a correction holds when written. That costs one more
 check of the claim per spelling tried (`_MOST_NARROWINGS` at most for a
 narrowed domain), only on a claim falsified at one of these two shapes, and
-stops at `_OFFER_SECONDS`.
+stops at `_CORRECTION_SECONDS`.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from ._timeout import EXTENSIVE_TIMEOUT_SECONDS
 
 #: the most narrowed domains tried, each past the last one's empty point
 _MOST_NARROWINGS = 8
-_OFFER_SECONDS = EXTENSIVE_TIMEOUT_SECONDS
+_CORRECTION_SECONDS = EXTENSIVE_TIMEOUT_SECONDS
 
 _ORDERINGS = ("<", "<=", ">", ">=")
 _EQUALITIES = ("==", "~=", "!=")
@@ -32,9 +32,9 @@ _EQUALITIES = ("==", "~=", "!=")
 #: the sides and the point a claim being adjudicated last failed at
 _LAST_MISS: contextvars.ContextVar = contextvars.ContextVar(
     "mathema_last_miss", default=None)
-#: set while an offer is adjudicated, which offers nothing of its own
+#: set while a correction is adjudicated, which gives no correction of its own
 _ADJUDICATING: contextvars.ContextVar = contextvars.ContextVar(
-    "mathema_adjudicating_an_offer", default=False)
+    "mathema_adjudicating_a_correction", default=False)
 
 
 def record_miss(*seen) -> None:
@@ -58,7 +58,7 @@ def last_miss():
 
 
 def adjudicating() -> bool:
-    """Whether the claim in hand is itself an offer being adjudicated."""
+    """Whether the claim in hand is itself a correction being adjudicated."""
     return _ADJUDICATING.get()
 
 
@@ -106,6 +106,11 @@ def _indexed(side: str) -> str:
     return f"({side})[0]"
 
 
+def _container_word(lv, rv) -> str:
+    side = lv if isinstance(lv, (list, tuple)) else rv
+    return "matrix" if side and isinstance(side[0], (list, tuple)) else "vector"
+
+
 def _one_element(value) -> bool:
     return isinstance(value, (list, tuple)) and len(value) == 1
 
@@ -151,31 +156,37 @@ def _past(point: dict) -> "str | None":
 
 
 def _orders_nothing(relation: str, lv, rv) -> bool:
-    from .probing import has_no_elements
-    return relation in _ORDERINGS and (has_no_elements(lv)
-                                       or has_no_elements(rv))
+    from .probing import orders_nothing
+    return relation in _ORDERINGS and orders_nothing(lv, rv)
 
 
 def _held(verdict) -> bool:
     return str(verdict).split(":", 1)[0] in ("holds", "proven")
 
 
-def offers_for(raw: str, relation: str, miss,
+def corrections_for(raw: str, relation: str, miss,
                adjudicate: Callable[[str], tuple]) -> str:
     """Intent:
         The words a falsified claim's note gains from the miss it failed
         with, `(left, right, point)`: the mismatch or the empty ordering
-        stated, and the spellings that hold. "" when the miss is neither.
+        stated, and the corrections that hold. "" when the miss is neither.
 
         `adjudicate(claim_text)` gives `(verdict, miss)` for a claim.
     """
     lv, rv, point = miss
-    deadline = time.monotonic() + _OFFER_SECONDS
+    if not raw:
+        words = (f"a {_container_word(lv, rv)} of one element is not its "
+                 f"element") if element_spellings("f == 0", lv, rv) else (
+            "an ordering over an empty value does not hold"
+            if _orders_nothing(relation, lv, rv) else "")
+        return words
+    deadline = time.monotonic() + _CORRECTION_SECONDS
     spellings = element_spellings(raw, lv, rv)
     if spellings:
         held = [f"{words}: {text}" for words, text in spellings
                 if time.monotonic() < deadline and _held(adjudicate(text)[0])]
-        words = "a vector of one element is not its element"
+        words = (f"a {_container_word(lv, rv)} of one element is not its "
+                 f"element")
         return f"{words}\n{options(held)}" if held else words
     if not _orders_nothing(relation, lv, rv):
         return ""
@@ -195,9 +206,23 @@ def offers_for(raw: str, relation: str, miss,
     return words
 
 
-def with_offers(probe, cj, adjudicate_claim: Callable) -> object:
+def _written_claim(cj) -> str:
+    """The claim as written, its domain included, or "" when the text in
+    hand does not state the domain the claim was checked over (a claim read
+    back from a record, whose domain is stored apart). No correction is given
+    then, since a correction is that text."""
+    from .conjecture import claim
+    text = getattr(cj, "written", "") or cj.raw
+    try:
+        parsed = claim(text, funcs=cj.funcs, tolerance=cj.tolerance)
+    except Exception:
+        return ""
+    return text if repr(parsed.domain) == repr(cj.domain) else ""
+
+
+def with_corrections(probe, cj, adjudicate_claim: Callable) -> object:
     """Intent:
-        `probe` with what its claim's last miss offers added to its
+        `probe` with what its claim's last miss corrects added to its
         note, as the last lines, where `remedy_statements` reads them.
         Unchanged unless the row is the claim's own and falsified.
     """
@@ -217,9 +242,9 @@ def with_offers(probe, cj, adjudicate_claim: Callable) -> object:
         finally:
             _ADJUDICATING.reset(token)
 
-    added = offers_for(cj.raw, cj.relation, miss, adjudicate)
+    added = corrections_for(_written_claim(cj), cj.relation, miss, adjudicate)
     forget_miss()
     if added:
         probe.note = f"{probe.note}\n{added}" if probe.note else added
-        probe.meta = {**(probe.meta or {}), "mathema.offer": added}
+        probe.meta = {**(probe.meta or {}), "mathema.correction": added}
     return probe

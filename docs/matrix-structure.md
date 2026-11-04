@@ -202,8 +202,9 @@ Beyond `det`, `inv`, `trace`, `transpose` and `I(n)`:
 A decomposition is a claim about its factors, with the numpy function
 bound by `let`: `let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A`. A
 vector of the claim's own is declared with `let b be R^n`, and takes
-the size the parameters give `n`. `x != 0` over a vector says it is not
-the zero vector.
+the size the parameters give `n`. In a premise, `x != 0` over a vector
+says it is not the zero vector; a claim's own `x != 0` compares different
+shapes and holds.
 
 <!-- example: vocabulary run requires=numpy -->
 ```python
