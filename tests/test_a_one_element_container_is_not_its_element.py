@@ -231,3 +231,16 @@ def test_a_claim_with_no_offer_runs_no_second_check(monkeypatch):
     runs.clear()
     check_conjectures(one, [claim("f(1.0) == 378.0", name="c")])
     assert len(runs) == 3, runs
+
+
+def one_array(n: int):
+    return np.array([float(n)])
+
+
+def test_an_offered_index_reads_the_whole_side():
+    probe = _probe(one_array, "for n in {1, 2, 3}, f(n) + 1 == n + 1")
+    assert probe.verdict == "falsified"
+    offered = remedy_statements(probe.note)
+    assert "for n in {1, 2, 3}, (f(n) + 1)[0] == n + 1" in offered, probe.note
+    assert "for n in {1, 2, 3}, f(n) + 1 == [n + 1]" in offered, probe.note
+    assert not any(") + 1[0]" in text for text in offered), probe.note

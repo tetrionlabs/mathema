@@ -114,9 +114,8 @@ the library: a list, an array, a pandas or polars Series, and the column
 of a one-row table are all containers. The number 0 is no exception, so
 `[0.0, 0.0] == 0` is falsified and the zero vector is written `[0, 0]`;
 a claim's own `f(x) != 0` over a vector always holds. A premise reads 0
-differently, as the zero of the other side's shape on every route:
-`assuming x != 0` says x is not the zero vector, and `assuming x == 0`
-draws it. Any other number against a vector in a premise admits no point,
+differently, as the zero of the other side's shape on every route: as a
+premise, `x != 0` says x is not the zero vector, and `x == 0` draws it. Any other number against a vector in a premise admits no point,
 so the claim is `unknown` with no valid domain.
 
 An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,

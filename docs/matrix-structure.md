@@ -144,11 +144,13 @@ own runtime type: a list-of-lists matrix is evaluated as an array, so
 | <code>&#124;&#124;A&#124;&#124;_2</code>, <code>&#124;&#124;A&#124;&#124;_1</code>, <code>&#124;&#124;A&#124;&#124;_inf</code> | the same orders with double bars, the order a subscript |
 | `A ~= B` | element by element, with the scalar tolerance |
 
-An ordering between a matrix or vector and anything (`A >= 0`,
-`A * A >= 0`) is not defined, and the claim is refused as misspecified
-with the reason; compare a number drawn from it instead (`det`,
-`trace`, `norm`, an element). An elementwise reading spelled
-`all(...)` is future work. The scalar derive route never reads a
+An ordering between a matrix or vector the claim writes and anything
+(`A >= 0`, `A * A >= 0`) is not defined, and the claim is refused as
+misspecified with the reason; compare a number drawn from it instead
+(`det`, `trace`, `norm`, an element). A value the function returned is
+read element by element: `f(A) >= 0` holds when it holds at every
+element, and does not hold over an empty result. An elementwise reading
+of a written matrix, spelled `all(...)`, is future work. The scalar derive route never reads a
 vector or matrix as a number: a claim that uses one as a value goes
 to the matrix algebra below or, when that cannot close it, to
 sampling.

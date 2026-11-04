@@ -14,6 +14,7 @@ stops at `_OFFER_SECONDS`.
 """
 from __future__ import annotations
 
+import ast
 import contextvars
 import time
 from typing import Callable
@@ -92,6 +93,19 @@ def split_claim(raw: str) -> "tuple[str, str, str, str] | None":
             raw[at + len(relation):].strip())
 
 
+def _indexed(side: str) -> str:
+    """The claim side `side` read at its first element: a call, a name or
+    an index takes `[0]` as it stands, any other expression in
+    parentheses, so the index reads the whole side."""
+    try:
+        node = ast.parse(side, mode="eval").body
+    except SyntaxError:
+        return f"({side})[0]"
+    if isinstance(node, (ast.Name, ast.Call, ast.Subscript, ast.Attribute)):
+        return f"{side}[0]"
+    return f"({side})[0]"
+
+
 def _one_element(value) -> bool:
     return isinstance(value, (list, tuple)) and len(value) == 1
 
@@ -112,10 +126,10 @@ def element_spellings(raw: str, lv, rv) -> list:
         return []
     prefix, left, relation, right = parts
     if _one_element(lv) and _an_element(rv):
-        element, whole = (f"{left}[0] {relation} {right}",
+        element, whole = (f"{_indexed(left)} {relation} {right}",
                           f"{left} {relation} [{right}]")
     elif _one_element(rv) and _an_element(lv):
-        element, whole = (f"{left} {relation} {right}[0]",
+        element, whole = (f"{left} {relation} {_indexed(right)}",
                           f"[{left}] {relation} {right}")
     else:
         return []
