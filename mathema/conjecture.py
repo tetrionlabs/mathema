@@ -10419,6 +10419,17 @@ def _outside_premise_shapes(fn, structures: dict):
     return outside
 
 
+def _outside_premise_too(ctx: "_ClaimContext", fn, excluded):
+    """`excluded` over points, with a premised claim's
+    `_outside_premise_shapes` as well."""
+    if not ctx.assumption:
+        return excluded
+    lacking = _outside_premise_shapes(fn, ctx.premise_structures or {})
+    if excluded is None:
+        return lacking
+    return lambda point: excluded(point) or lacking(point)
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -10455,11 +10466,6 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                 # input f's own guards refuse
                 _refused_by_own_guards_at(fn, facts, ctx.cj)
                 if ctx.exclude_own_guards else None)
-    if ctx.assumption:
-        lacking = _outside_premise_shapes(fn, ctx.premise_structures or {})
-        excluded = (lacking if excluded is None else
-                    (lambda point, inner=excluded:
-                     inner(point) or lacking(point)))
     containers, holes = _admitted_container_points(ctx, facts)
     missing = _admitted_scalar_points(ctx) + containers
 
@@ -10469,7 +10475,8 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
-                                excluded=excluded, witness=witness)
+                                excluded=_outside_premise_too(ctx, fn, excluded),
+                                witness=witness)
     found_at: dict = {}
     from .runtime_types._receivers import ReceiverRefused
     try:
