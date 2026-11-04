@@ -338,7 +338,7 @@ def _matches(policy, raised, result) -> bool:
         from ._allowance import relation_within
         return relation_within(got, expected, "~=", tolerance, side=1) is True
     from .probing import values_agree
-    return values_agree(got, expected, 0.0, 0.0, broadcast=True) is True
+    return values_agree(got, expected, 0.0, 0.0) is True
 
 
 def _fixes(fn_name: str, call_text: str, target: str, raised,
