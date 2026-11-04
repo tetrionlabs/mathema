@@ -191,3 +191,28 @@ def test_the_check_verb_says_misspecified(tmp_path):
     (row,) = json.loads(_check(root, "--format", "json").stdout)["functions"]
     assert row["misspecified"] == 1, row
     assert row["skipped"] == 1, row
+
+
+def test_a_misspecified_claim_beside_a_valid_one_prints_misspecified_alone():
+    import mathema
+    from typing import Annotated
+
+    from mathema.conjecture import claim
+    from mathema.types import Shape
+
+    def two(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("n")]) -> float:
+        return sum(a) + sum(b)
+
+    record = mathema.check(two, claims=[
+        claim("for a in [0, 1]^2, b in [0, 1]^3, f(a, b) >= 0", name="c0"),
+        claim("for a in [0, 1]^2, b in [0, 1]^2, f(a, b) >= 0", name="c1")])
+    lines = repr(record).splitlines()
+    head = next(i for i, line in enumerate(lines) if "c0" in line)
+    block = []
+    for line in lines[head + 1:]:
+        if line.startswith("  ") and not line.startswith("    "):
+            break
+        block.append(line)
+    assert "misspecified" in lines[head], lines[head]
+    assert "falsified" not in lines[head], lines[head]
+    assert not any("policy" in line for line in block), block
