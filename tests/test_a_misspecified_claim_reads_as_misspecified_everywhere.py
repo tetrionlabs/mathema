@@ -4,7 +4,9 @@
 in the record, and the same word on the printed record, on the `verify` line
 and in its count. A record whose value claims are all misspecified carries no
 policy rows: their floors would be drawn over a domain that has no points."""
+import json
 import subprocess
+import sys
 from typing import Annotated
 
 import pytest
@@ -13,7 +15,7 @@ import mathema
 from mathema.cli import _format_check
 from mathema.types import Shape
 from mathema.verify import gate, summary_counts
-from tests.test_cli_verify import _run
+from tests.test_cli_verify import _env_with_repo_on_path, _run
 
 
 def two(a: Annotated[list, Shape("n")], b: Annotated[list, Shape("n")]) -> float:
@@ -154,3 +156,37 @@ def test_verify_prints_a_misspecified_claim_as_misspecified(tmp_path):
     assert "conflict unknown" not in run.stdout, run.stdout
     assert " unknown" not in row, row
     assert "policy" not in run.stdout, run.stdout
+
+
+def _project(tmp_path):
+    (tmp_path / "funcs.py").write_text(_FUNCS)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "demo.claims.yaml").write_text(_CLAIMS)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    return tmp_path
+
+
+def test_the_verify_json_counts_a_misspecified_claim(tmp_path):
+    run = _run(_project(tmp_path), "--format", "json")
+    assert run.returncode == 1, run.stdout + run.stderr
+    (row,) = [k for k in json.loads(run.stdout)["keys"] if k["key"] == "funcs.two"]
+    assert row["counts"]["misspecified"] == 1, row
+    assert row["counts"]["skipped"] == 1, row
+    assert row["counts"]["unknown"] == 0, row
+
+
+def _check(root, *extra) -> subprocess.CompletedProcess:
+    script = ("import sys; from mathema.cli import main; "
+              f"sys.exit(main({['check', 'funcs.py:two', '--claim', TWO_SIZES, *extra]!r}))")
+    return subprocess.run([sys.executable, "-c", script], cwd=str(root),
+                          capture_output=True, text=True, env=_env_with_repo_on_path())
+
+
+def test_the_check_verb_says_misspecified(tmp_path):
+    root = _project(tmp_path)
+    text = _check(root)
+    assert "1 misspecified" in text.stdout, text.stdout + text.stderr
+    assert "1 unknown" not in text.stdout, text.stdout
+    (row,) = json.loads(_check(root, "--format", "json").stdout)
+    assert row["misspecified"] == 1, row
+    assert row["skipped"] == 1, row
