@@ -144,11 +144,13 @@ own runtime type: a list-of-lists matrix is evaluated as an array, so
 | <code>&#124;&#124;A&#124;&#124;_2</code>, <code>&#124;&#124;A&#124;&#124;_1</code>, <code>&#124;&#124;A&#124;&#124;_inf</code> | the same orders with double bars, the order a subscript |
 | `A ~= B` | element by element, with the scalar tolerance |
 
-An ordering between a matrix or vector and anything (`A >= 0`,
-`A * A >= 0`) is not defined, and the claim is refused as misspecified
-with the reason; compare a number drawn from it instead (`det`,
-`trace`, `norm`, an element). An elementwise reading spelled
-`all(...)` is future work. The scalar derive route never reads a
+An ordering between a matrix or vector the claim writes and anything
+(`A >= 0`, `A * A >= 0`) is not defined, and the claim is refused as
+misspecified with the reason; compare a number drawn from it instead
+(`det`, `trace`, `norm`, an element). A value the function returned is
+read element by element: `f(A) >= 0` holds when it holds at every
+element, and does not hold over an empty result. An elementwise reading
+of a written matrix, spelled `all(...)`, is future work. The scalar derive route never reads a
 vector or matrix as a number: a claim that uses one as a value goes
 to the matrix algebra below or, when that cannot close it, to
 sampling.
@@ -195,7 +197,7 @@ Beyond `det`, `inv`, `trace`, `transpose` and `I(n)`:
 | `solve(A, b)`, `pinv(A)` | the solution of `A @ x == b`; the pseudo-inverse |
 | `A[i, :]`, `A[:, j]` | a row, a column |
 | `sum(A, axis=0)`, `mean(A, axis=1)` | reductions along an axis (also `prod`, `min`, `max`) |
-| `x.T @ A @ x` | a quadratic form, a number (a 1-by-1 result is its element) |
+| `x.T @ A @ x` | a quadratic form over a vector `x`, a number; a 1-by-1 matrix is not its element |
 
 A decomposition is a claim about its factors, with the numpy function
 bound by `let`: `let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A`. A

@@ -346,7 +346,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
     from ._exact_premises import premise_functions
-    from ._linalg_eval import as_array, law_callable, scalar
+    from ._premises import _premise_op
+    from .conjecture import DEFAULT_TOLERANCE
+    from .probing import DEFAULT_RELATIVE_TOLERANCE
+    from ._linalg_eval import as_array, law_callable
     from .conjecture import _bound_for_arrays
     from .matrices import _numpy
     # a claim over vectors or matrices evaluates them as arrays, so
@@ -428,9 +431,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         env = {"__builtins__": {}, **base_env, **_typed(point)}
         lv = eval(code_l, env)
         rv = eval(code_r, env) if code_r is not None else 0
-        if as_arrays:
-            # a 1-by-1 result (`x.T @ A @ x` over a column) is the number it holds
-            lv, rv = scalar(lv), scalar(rv)
         last_sides[0] = (plain_value(lv), plain_value(rv))
         return last_sides[0]
 
@@ -453,8 +453,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     rf = eval(code_r, env) if code_r is not None else 0
                 except Exception:
                     return False
-                if as_arrays:
-                    lf, rf = scalar(lf), scalar(rf)
                 if not (_same_output(plain_value(lf), lv)
                         and _same_output(plain_value(rf), rv)):
                     return False
@@ -1045,7 +1043,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                    "<": lambda x, y: x < y, ">": lambda x, y: x > y,
                    "==": lambda x, y: values_agree(x, y) is True,
                    "!=": lambda x, y: values_differ(x, y)}
-            if not ops.get(a_rel, lambda x, y: True)(al, ar):
+            if a_rel not in ops:
+                continue
+            try:
+                if not _premise_op(ops[a_rel], a_rel, DEFAULT_TOLERANCE,
+                                   DEFAULT_RELATIVE_TOLERANCE)(al, ar):
+                    return False
+            except TypeError:
                 return False
         return True
 

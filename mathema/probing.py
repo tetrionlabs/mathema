@@ -510,6 +510,17 @@ def _numbers_agree(u, v, abs_tol, rel_tol: float) -> bool:
     return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
 
 
+def has_no_elements(value) -> bool:
+    """Whether `value` is a container or a string with nothing in it: a
+    list, an array, a dict, a set, a string, a range, a table."""
+    if value is None or isinstance(value, (bool, int, float, complex)):
+        return False
+    try:
+        return len(value) == 0
+    except TypeError:
+        return False
+
+
 def scalar_spreads(scalar, container, relation: str) -> bool:
     """Intent:
         Whether `relation` between a value that is not a sequence and a
@@ -527,8 +538,7 @@ def scalar_spreads(scalar, container, relation: str) -> bool:
 
 
 def values_agree(u, v, tolerance: float | None = None,
-                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
-                 broadcast: bool = False) -> "bool | None":
+                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> "bool | None":
     """Intent:
         Whether two executed values are equal, the one reading every
         comparison shares: Python numbers, numpy scalars, 0-d arrays,
@@ -541,9 +551,8 @@ def values_agree(u, v, tolerance: float | None = None,
 
     Notes:
         `None` when the two sides have different shapes, a number
-        against an array or list included; `broadcast` is kept for its
-        callers and spreads nothing (`scalar_spreads`). A bool, and a
-        value that is not a number, agrees only by exact equality.
+        against an array or list included. A bool, and a value that is
+        not a number, agrees only by exact equality.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
     u, v = plain_value(u), plain_value(v)
@@ -555,11 +564,7 @@ def values_agree(u, v, tolerance: float | None = None,
                 return None
             parts = [walk(a, b) for a, b in zip(x, y)]
         elif xs or ys:
-            scalar, seq = (y, x) if xs else (x, y)
-            if not broadcast or not scalar_spreads(scalar, seq, "=="):
-                return None
-            parts = ([walk(a, y) for a in x] if xs
-                     else [walk(x, b) for b in y])
+            return None
         elif _is_number(x) and _is_number(y):
             return _numbers_agree(x, y, abs_tol, rel_tol)
         else:
@@ -1316,8 +1321,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     and `!=` over arrays are one fact about the whole value
     (`values_agree`), so `!=` holds when some element differs; an
     ordering holds when it holds at every element, a scalar read at each
-    (`scalar_spreads`), and over a sequence with no elements it does not
-    hold. A NaN anywhere fails every relation. Returns
+    (`scalar_spreads`), and over any value with no elements (a list, a
+    dict, a set, a string, a range) it does not hold. A NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values or mismatched
     shapes), which the caller reads as skip, never falsify.
@@ -1333,6 +1338,9 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
+    if relation not in ("==", "~=", "!=") \
+            and (has_no_elements(lv) or has_no_elements(rv)):
+        return False
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
@@ -1346,7 +1354,7 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return False
         exact = relation == "!=" and exact_inequality
         agree = values_agree(lv, rv, 0.0 if exact else slack,
-                             0.0 if exact else rel_tol, broadcast=True)
+                             0.0 if exact else rel_tol)
         if agree is None:
             # two values of different shapes are unequal outright
             return relation == "!="

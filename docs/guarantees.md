@@ -210,6 +210,12 @@ built. See [Claims transfer](claims-transfer.md).
   samples matrices by shape and structure. Complex-valued code supports
   identities, not analysis. Everything outside the lift is still checked
   by running it.
+- **Shapes are strict.** A verdict compares the values the code returned
+  with what the claim wrote, and a container is never its element, 0
+  included; an ordering over an empty value does not hold; a premise alone
+  reads 0 as the zero of the other side's shape; bindings that fix one
+  dimension to two sizes are misspecified. [Shapes](verdicts.md#shapes)
+  states the rules.
 - **Reproducibility.** Sampling is seeded (seed `20260718`) and the seed
   travels in the record's sampling plan, so a re-run on the same code and
   the same mathema version reproduces the same draws. Each record states
