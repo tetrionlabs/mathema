@@ -177,6 +177,8 @@ def _ranked_lines(probes: list, lines: list, starts: list) -> list:
         verdict = "falsified" if p.name in broken else \
             (p.verdict or "unknown").split(":", 1)[0]
         counts[verdict] = counts.get(verdict, 0) + 1
+        if p.verdict == "skipped:misspecified":
+            counts["misspecified"] = counts.get("misspecified", 0) + 1
     n = len(volunteered)
     count = (f"  {n} built-in check{'s' if n != 1 else ''}: "
              f"{summary_counts(counts)} (record.render(families=True) "
@@ -266,6 +268,8 @@ class Record:
             mark = {"holds": "holds    ", "falsified": "falsified", "proven": "proven   ",
                     "skipped": "unknown  ", "unknown": "unknown  ",
                     "invalidated": "invalidated"}.get(p.verdict.split(":", 1)[0], p.verdict)
+            if p.verdict == "skipped:misspecified":
+                mark = "misspecified"
             missing = (p.meta or {}).get("mathema.missing") or {}
             pol = (p.meta or {}).get("mathema.policy")
             if pol:
@@ -886,13 +890,15 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         pseudo_infinity = declared.get("pseudo_infinity")
     from . import policy as _policy
     with _policy.batch():
+        adjudicated: list = []
         if all_claims:
-            probes = probes + check_conjectures(fn, all_claims, domain=parent_domain or None,
-                                                trials=trials, trials_downscale=trials_scale,
-                                                facts=facts, extensive=extensive,
-                                                known_premises=known_premises,
-                                                float_companions=True,
-                                                pseudo_infinity=pseudo_infinity)
+            adjudicated = check_conjectures(fn, all_claims, domain=parent_domain or None,
+                                            trials=trials, trials_downscale=trials_scale,
+                                            facts=facts, extensive=extensive,
+                                            known_premises=known_premises,
+                                            float_companions=True,
+                                            pseudo_infinity=pseudo_infinity)
+            probes = probes + adjudicated
         # what f does with a value that is not there, for every parameter
         # that admits one and no stated policy row covers; a bare check
         # (no claim written, only suggestions) judges only the absence an
@@ -908,7 +914,13 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
         from .gates import MATH_ONLY_ROUTE
         mathematics_only = bool(all_claims) and all(
             getattr(c, "route", None) == MATH_ONLY_ROUTE for c in all_claims)
-        if not mathematics_only:
+        # a record whose value claims are all misspecified carries none
+        # either: the domain they state has no points to draw from
+        value_rows = [p for p in adjudicated
+                      if not (p.meta or {}).get("mathema.policy")]
+        misspecified_only = bool(value_rows) and all(
+            p.verdict == "skipped:misspecified" for p in value_rows)
+        if not mathematics_only and not misspecified_only:
             probes = probes + _policy.default_rows(
                 fn, facts, parent_domain or {}, covered, _policy.row_name,
                 optional_only=not written)

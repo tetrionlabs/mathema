@@ -68,6 +68,8 @@ class GateReport:
     unknown: int = 0
     owned: int = 0
     skipped: int = 0
+    # of the skipped, the claims misspecified as stated
+    misspecified: int = 0
     foreign: list = field(default_factory=list)
     # of the proven, the built-in ones mathema adds (dependencies_current)
     builtin_proven: int = 0
@@ -185,10 +187,13 @@ def summary_counts(counts) -> str:
                    f"built-in)")
     parts = [proven, f"{get('holds')} holds", f"{get('falsified')} falsified"]
     # a claim mathema could not run reads as unknown, with its reason
-    # in the problems; the count keeps the two together
+    # in the problems, and the count keeps the two together; a claim
+    # misspecified as stated reads as misspecified
     for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
+                      ("misspecified", "misspecified"),
                       ("accepted_risk", "accepted risk")):
-        n = get(key) + (get("skipped") if key == "unknown" else 0)
+        n = get(key) + (get("skipped") - get("misspecified")
+                        if key == "unknown" else 0)
         if n:
             parts.append(f"{n} {word}")
     return ", ".join(parts)
@@ -337,7 +342,10 @@ def gate(claims, *, strict: bool,
                 r.unknown_reasons.append((name, _first_sentence(note)))
         elif kind == "skipped":
             r.skipped += 1
-            r.skipped_reasons.append((name, _first_sentence(note)))
+            r.misspecified += verdict == "skipped:misspecified"
+            word = ("misspecified" if verdict == "skipped:misspecified"
+                    else "unknown")
+            r.skipped_reasons.append((name, word, _first_sentence(note)))
     # a falsified or invalidated claim is a failing check, in every
     # mode; strictness only governs structurally-skipped claims, never
     # wrong or undecided ones
@@ -370,9 +378,10 @@ def gate(claims, *, strict: bool,
         # accepted risk is visible relaxation, not laundering: lenient
         # proceeds past it, strict still refuses it
         if r.skipped:
-            # a claim mathema could not run is unknown, with its reason
-            named = [f"{n} unknown: {why}" if why else f"{n} unknown"
-                     for n, why in r.skipped_reasons]
+            # a claim mathema could not run is unknown, with its reason,
+            # and one misspecified as stated says so
+            named = [f"{n} {word}: {why}" if why else f"{n} {word}"
+                     for n, word, why in r.skipped_reasons]
             r.problems.append("; ".join(named) if named else
                               f"{r.skipped} unknown claim(s)")
         if r.owned:
@@ -2387,6 +2396,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                        "unknown": report.unknown,
                        "accepted_risk": report.owned,
                        "skipped": report.skipped,
+                       "misspecified": report.misspecified,
                        "foreign_grammar": len(report.foreign)},
             # claim_row reads a live Probe or a stored claim dict alike,
             # so fresh and re-adjudicated keys serialize identically

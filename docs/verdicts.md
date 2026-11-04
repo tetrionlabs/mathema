@@ -21,7 +21,9 @@ verdict, [the evidence ladder](evidence-ladder.md) ranks them, and
 
 A verdict may carry a colon subroute refining its base family,
 `skipped:misspecified` when the claim itself is malformed rather than
-the function unadjudicable. Everything before the colon is the base
+the function unadjudicable, which `verify` and a printed record name as
+`misspecified`; a record whose value claims are all misspecified carries
+no policy rows. Everything before the colon is the base
 family, and the fold into supported, refuted, blocked and undecided uses
 only the base, so a subroute never changes what a verdict counts as, only
 says more precisely why. The `route` field follows the same convention:

@@ -213,6 +213,7 @@ def _check_rows(args) -> list[dict]:
                      "invalidated": report.invalidated,
                      "unverifiable": report.skipped + report.owned,
                      "skipped": report.skipped,
+                     "misspecified": report.misspecified,
                      "accepted_risk": report.owned,
                      "unknown": report.unknown,
                      "verified": verified, "total": total,
@@ -282,14 +283,16 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         return "\n".join(lines)
     if fmt == "md":
         out = ["| function | tier | claims checked | proven | holds "
-               "| falsified | invalidated | unknown | accepted risk "
-               "| status |",
-               "|---|---|---|---|---|---|---|---|---|---|"]
+               "| falsified | invalidated | unknown | misspecified "
+               "| accepted risk | status |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             status = "FAIL: " + "; ".join(r["problems"]) if r["problems"] else "ok"
             out.append(f'| `{r["name"]}` | {r["tier"]} | {r["coverage"]} '
                        f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
-                       f'| {r["invalidated"]} | {r["unknown"] + r["skipped"]} '
+                       f'| {r["invalidated"]} '
+                       f'| {r["unknown"] + r["skipped"] - r.get("misspecified", 0)} '
+                       f'| {r.get("misspecified", 0)} '
                        f'| {r["accepted_risk"]} | {status} |')
         footer = ("" if all(not r["problems"] for r in rows) else
                   " A falsified claim is knowledge about the code; verify "
