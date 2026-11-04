@@ -291,33 +291,6 @@ def unknown_reason(first: dict, relation: str, listed: set) -> str:
 _ROMAN = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii")
 
 
-def element_spellings(cj, lv, rv) -> str:
-    """Intent:
-        The remedy for a claim comparing a vector of one element with a
-        number, a bool or a string, which is a different shape: the spellings that compare
-        what was meant, the element (`f(a)["x"][0]`) or the whole
-        (`[sum(a.x)]`), as `options`; "" when the sides are not such a
-        pair or the claim has no right side.
-    """
-    from .probing import plain_value
-    lv, rv = plain_value(lv), plain_value(rv)
-    element_like = (int, float, complex, str)
-    if not cj.rhs or cj.relation not in ("==", "~=", "!="):
-        return ""
-    ls, rs = isinstance(lv, (list, tuple)), isinstance(rv, (list, tuple))
-    if ls and len(lv) == 1 and isinstance(rv, element_like):
-        element = f"{cj.lhs}[0] {cj.relation} {cj.rhs}"
-        whole = f"{cj.lhs} {cj.relation} [{cj.rhs}]"
-    elif rs and len(rv) == 1 and isinstance(lv, element_like):
-        element = f"{cj.lhs} {cj.relation} {cj.rhs}[0]"
-        whole = f"[{cj.lhs}] {cj.relation} {cj.rhs}"
-    else:
-        return ""
-    return ("a vector of one element is not its element\n" + options([
-        f"to compare the element, write: {element}",
-        f"to compare the whole, write: {whole}"]))
-
-
 def options(items: list) -> str:
     """Intent:
         A remedy with its options: one option as it is, several each on

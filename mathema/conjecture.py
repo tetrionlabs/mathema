@@ -61,6 +61,7 @@ from .domain import operational_domain as _operational_domain
 from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
                          reference_side, relation_within)
+from . import _offers
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
@@ -6242,6 +6243,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             "spawn" if float_companions and cj.route in ("derive", "best")
             else None)
         ctx.companion_budget = cj.trials if cj.trials is not None else trials
+        _offers.forget_miss()
+
+        def _adjudicate_offer(text, cj=cj):
+            offered = claim(text, name=cj.name, route=cj.route, funcs=cj.funcs,
+                            tolerance=cj.tolerance)
+            rows = _check_conjectures(fn, [offered], domain=domain,
+                                      trials=trials, trials_scale=trials_scale,
+                                      facts=facts)
+            return next(p.verdict for p in rows if p.name == offered.name)
+
         def stamp(probe, _cap=None):
             # `condition` is rendered text that gets read back,
             # docsync compares a verified row by feeding
@@ -6276,7 +6287,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                   f"to {capped_to}").lstrip("; ")
                     probe.meta = {**(probe.meta or {}),
                                   "mathema.capped_by": ref_name}
-            return probe
+            return _offers.with_offers(probe, cj, _adjudicate_offer)
         if cj.route not in ("derive", "best", "probe", "examine"):
             out.append(_stamped(Probe(
                 cj.name, statement, "skipped", route=None,
@@ -6294,6 +6305,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        from . import _premises
+        no_point = _premises.number_against_a_vector(
+            ctx.assumption, kinds, ctx.cj_domain, cj.raw)
+        if no_point is not None:
+            out.append(stamp(Probe(
+                cj.name, statement, "unknown", route=None,
+                note=f"no valid domain: {no_point}")))
+            continue
         emptied = _empty_premise_parameter(ctx, facts)
         clash = None if emptied is not None else _fixed_dim_clash(ctx)
         if clash is not None:
@@ -7778,10 +7797,8 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if _exactly_decided(cj, code_l, code_r, trial_env, callees, ok,
                             side=side) is True:
             return None
-        from ._missing_words import element_spellings
-        spellings = element_spellings(cj, lv, rv)
-        return (f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
-                + (f", {spellings}" if spellings else ""))
+        _offers.record_miss(lv, rv, dict(zip(kinds, args)))
+        return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
 
@@ -11859,7 +11876,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
         compiled=compiled, params=tuple(facts.params), domain=cj_domain,
         draws=_premises.premise_draws(ctx.assumption, kinds, cj_domain,
                                       tolerance=cj.tolerance),
-        solved=_premises.solve_equality(ctx.assumption, kinds),
+        solved=_premises.solve_equality(ctx.assumption, kinds, cj_domain),
         base_env=base, array_params=array_params, bind_env=bind_env,
         ignore=ignore)
 
@@ -12198,7 +12215,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # equality for one variable symbolically, so every trial computes
     # that coordinate from the others and sits exactly on the surface
     # (the rejection filter below still checks every other conjunct)
-    assum_solved = (_premises.solve_equality(ctx.assumption, kinds)
+    assum_solved = (_premises.solve_equality(ctx.assumption, kinds, cj_domain)
                     if assum_eval is not None else None)
     from . import dimensions as _dims
     from .types import shapes_from_signature
@@ -12711,9 +12728,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if code_r is not None else None)
                 except Exception:
                     return False
-                if as_arrays:
-                    lf = _linalg_eval.scalar(lf)
-                    rf = _linalg_eval.scalar(rf) if code_r is not None else None
                 if not (_same_output(lf, lv) and _same_output(rf, rv)):
                     return False
             return True
@@ -13013,11 +13027,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
-            if as_arrays:
-                # a 1-by-1 result (`x.T @ A @ x` over a column) is the
-                # number it holds
-                lv = _linalg_eval.scalar(lv)
-                rv = _linalg_eval.scalar(rv) if code_r is not None else None
         except Exception as e:
             if not call_raised[0] and admitted_hole(args):
                 # the claim's own words at a hole or absence it only
@@ -13540,8 +13549,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # relieves only the closed relations, whose truth a float wobble
         # can obscure but not create. A matrix/array-valued side (a
         # function returning a matrix, `0 <= f(X) <= 1`) is compared
-        # ELEMENTWISE: the relation holds iff it holds at every element,
-        # a scalar broadcasting across the matrix.
+        # ELEMENTWISE: an ordering holds iff it holds at every element,
+        # a scalar read at each; under `==`, `~=` and `!=` a number against
+        # a matrix is a different shape.
         if as_arrays:
             lv, rv = _linalg_eval.comparable(lv, rv)
         # the claim read exactly decides where it can be (the code's
@@ -13818,13 +13828,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 call_hole[0] = None
                 continue
-            from ._missing_words import element_spellings
-            spellings = element_spellings(cj, lv, rv)
+            _offers.record_miss(lv, rv, dict(zip(kinds, args)))
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"
-            if spellings:
-                cx += f", {spellings}"
             if ll_false and not as_arrays:
                 # the claim's long literal, read as written, decides
                 cx += _as_written_words(cj, code_l, code_r, env,

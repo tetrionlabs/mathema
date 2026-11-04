@@ -37,6 +37,7 @@ from __future__ import annotations
 import itertools
 import math
 
+from . import _offers
 from ._exact_side import holds_number
 from ._exits import call, exception_name
 from .domain import _as_domain, _set_sentinels, finite_members
@@ -229,59 +230,59 @@ def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
 
 def _orders_no_elements(cj, sides) -> bool:
     """Whether the claim is an ordering and a side at this point is a
-    sequence with no elements, where no ordering holds."""
-    from .probing import plain_value
+    value with no elements, where no ordering holds."""
+    from .probing import has_no_elements
     if cj.relation not in ("<", "<=", ">", ">=") or sides is None:
         return False
-    return any(isinstance(side, (list, tuple)) and not side
-               for side in (plain_value(s) for s in sides))
+    return any(has_no_elements(side) for side in sides)
 
 
-def _narrowed_domain(empty_points: list, held_points: list, names: list) -> str:
-    """Intent:
-        The way out of an ordering that fails only where the result has
-        no elements: `assuming p >= k` when the claim ranges over one
-        parameter and every point it holds at lies above every point it
-        fails at, else the general advice to narrow the domain.
-    """
-    plain = ("narrow the claim's domain to where the result has elements")
-    if len(names) != 1 or not held_points:
-        return plain
-    (p,) = names
-    failed = [pt[p] for pt in empty_points]
-    held = [pt[p] for pt in held_points]
-    numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                  for v in failed + held)
-    if not numbers or max(failed) >= min(held):
-        return plain
-    return f"state `assuming {p} >= {min(held)}` to claim the rest"
+def _witness_at(point: dict, names: list, sides) -> str:
+    """The witness of a failed point: the point, with the two sides it
+    failed with when one of them is a vector of one element, since the
+    point alone does not show the mismatch."""
+    from .gates import _fmt_point
+    from ._offers import element_spellings
+    at = _fmt_point(point, names)
+    if sides is not None and element_spellings("f == 0", *sides):
+        return f"{at}: {sides[0]!r} vs {sides[1]!r}"
+    return at
 
 
-def _empty_ordering_disproof(cj, empty_failures: list, other_failure,
-                             judged: list, names: list, plan, checked: int,
+def _named_points(points: list) -> str:
+    """Points in words: every one up to three, then `and N more`."""
+    if len(points) <= 3:
+        return (", ".join(points[:-1]) + " and " + points[-1]
+                if len(points) > 1 else points[0])
+    return f"{', '.join(points[:3])} and {len(points) - 3} more"
+
+
+def _empty_ordering_disproof(cj, empty_failures: list, other_failure, judged,
+                             exact_miss, names: list, plan, checked: int,
                              grid, counted: dict, deps) -> "ProofResult":
     """The disproof of an ordering that fails where its result has no
-    elements: the first such point is the witness, with the sides there;
-    the sketch says whether it holds at every other point, and then
-    offers the narrowed domain (`_narrowed_domain`)."""
+    elements: the first such point is the witness, with the sides there.
+    The sketch names the empty points and says what is known of the
+    others."""
     from .gates import _fmt_point
-    from .probing import plain_value
-    point, sides = empty_failures[0]
-    lv, rv = (plain_value(s) for s in sides)
+    point, (lv, rv) = empty_failures[0]
     at = _fmt_point(point, names)
     where = ("found by checking every point of a finite domain"
              if plan is None else
              f"found among the points run {plan.coverage.words(checked)}")
+    empties = _named_points([_fmt_point(pt, names)
+                             for pt, _ in empty_failures])
     if other_failure is not None:
         rest = f"; it also fails at {_fmt_point(other_failure, names)}"
+    elif judged and exact_miss is None and plan is None:
+        rest = "; it holds at every other point of the domain"
     else:
-        rest = (f"; it holds at every other point of the domain, so "
-                f"{_narrowed_domain([pt for pt, _ in empty_failures], judged, names)}")
+        rest = ""
     return ProofResult(
         "disproven",
-        sketch=(f"the claim fails at {at}, where {lv!r} {cj.relation} "
-                f"{rv!r} orders no elements and an ordering over no "
-                f"elements does not hold, {where}{rest}"),
+        sketch=(f"the claim fails at {empties}, where {lv!r} {cj.relation} "
+                f"{rv!r} has no element to order and an ordering over an "
+                f"empty value does not hold, {where}{rest}"),
         counterexample=f"{at}: {lv!r} vs {rv!r}",
         witness=dict(point),
         meta=with_executed(
@@ -1160,6 +1161,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
         if verdict is None:
             return None
         if verdict is False and _orders_no_elements(cj, evaluate.sides()):
+            if not empty_failures:
+                _offers.record_miss(evaluate.sides(), point)
             empty_failures.append((point, evaluate.sides()))
             continue
         if verdict is False and empty_failures:
@@ -1171,27 +1174,20 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 **exact_miss[2], "computation":
                     f"fails at {_fmt_point(point, names)}"}}
                     if exact_miss is not None else {})
-            from ._missing_words import element_spellings
-            computed = evaluate.sides()
-            spellings = (element_spellings(cj, *computed)
-                         if computed is not None else "")
+            if evaluate.sides() is not None:
+                _offers.record_miss(evaluate.sides(), point)
             return ProofResult(
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
                        + (f", where the function raised {raised}" if raised else "")
-                       + (f", {computed[0]!r} vs {computed[1]!r}"
-                          if spellings else "")
                        + (_rounded_miss_words(evaluate.sides(),
                                               evaluate.decimal_rounded())
                           if evaluate.decimal_rounded() else "")
                        + (", found by checking every point of a finite domain"
                           if plan is None else
                           f", found among the points run "
-                          f"{plan.coverage.words(checked + 1)}")
-                       + (f"; {spellings}" if spellings else ""),
-                counterexample=(f"{_fmt_point(point, names)}: {computed[0]!r} "
-                                f"vs {computed[1]!r}" if spellings
-                                else _fmt_point(point, names)),
+                          f"{plan.coverage.words(checked + 1)}"),
+                counterexample=_witness_at(point, names, evaluate.sides()),
                 witness=dict(point),
                 # the witness is a call of the real function at a point
                 # the domain admits: an executed witness, which the
@@ -1227,8 +1223,8 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                 _fmt_point(point, names), sides, evaluate.sides()))
     if empty_failures:
         return _empty_ordering_disproof(cj, empty_failures, other_failure,
-                                        judged, names, plan, checked, grid,
-                                        counted, deps)
+                                        judged, exact_miss, names, plan,
+                                        checked, grid, counted, deps)
     if exact_miss is not None:
         point, _sides, witness = exact_miss
         where = ("found by checking every point of a finite domain"
@@ -1502,6 +1498,8 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     witness = _ground_witness(fn, facts, calls)
     if verdict is False:
         detail = _ground_failure(deps, {})
+        if evaluate.sides() is not None:
+            _offers.record_miss(evaluate.sides(), {})
         return ProofResult(
             "disproven",
             sketch=f"the claim fails at its own call, {witness}",

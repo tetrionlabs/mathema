@@ -106,6 +106,35 @@ in_unit  <claim as resolved>               falsified at f(nan)        headline: 
 A claim with nothing to say beyond its verdict, such as a family fact
 like `is_deterministic` or a claim over integers, prints on one line.
 
+## Shapes
+
+A container is never its element. `[378.0]` against `378.0` is a
+different shape, so `==` and `~=` are falsified and `!=` holds, whatever
+the library: a list, an array, a pandas or polars Series, and the column
+of a one-row table are all containers. The number 0 is no exception, so
+`[0.0, 0.0] == 0` is falsified and the zero vector is written `[0, 0]`;
+a claim's own `f(x) != 0` over a vector always holds. A premise reads 0
+differently, as the zero of the other side's shape on every route:
+`assuming x != 0` says x is not the zero vector, and `assuming x == 0`
+draws it. Any other number against a vector in a premise admits no point,
+so the claim is `unknown` with no valid domain.
+
+An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,
+2.0]` holds. Over an empty value (a list, an array, a dict, a set, a
+string, a range) it does not hold, since there is no element at which it
+could: empty is not 0 and is not `>= 0`. `[] == []` holds and `[] != 5`
+holds.
+
+A claim that fails on one of these shapes says so in its note, and offers
+the spelling that says what it may have meant, the element
+(`f(a)["x"][0] ~= sum(a.x)`), the whole (`f(a)["x"] ~= [sum(a.x)]`) or the
+narrowed domain (`assuming n >= 1, ...`). A spelling is offered only after
+it has been adjudicated on the claim's own domain and holds there.
+
+Bindings that fix one shared dimension to two sizes (`a` in `[0, 1]^2` and
+`b` in `[0, 1]^3` under one name) leave no value, so the claim is
+`skipped:misspecified` on every route.
+
 ## What fails the gate
 
 `falsified`, `invalidated` and an unaccepted `unknown` fail `mathema

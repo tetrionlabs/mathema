@@ -60,32 +60,49 @@ class CompiledPremises:
     aux: frozenset
 
 
-def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
+def _shaped(value) -> bool:
+    from ._linalg_eval import is_array
+    return is_array(value) or isinstance(value, (list, tuple))
+
+
+def premise_relation(a, b, relation: str, tolerance: float,
+                     rel_tol: float) -> bool:
     """Intent:
-        A premise relation as the probe filters with it: `scalar_op`
-        between two numbers, and between a vector or matrix and
-        anything the relation element by element. In a premise, 0 under
-        `==` or `!=` is the zero of the other side's shape (`x != 0`
-        holds when some element of `x` is not 0, the vector is not the
-        zero vector); a claim's own sides have no such reading
+        A premise relation between two values of which at least one has
+        a shape, as every route reads it: element by element, and 0 under
+        `==` or `!=` is the zero of the other side's shape (`x != 0` holds
+        when some element of `x` is not 0, the vector is not the zero
+        vector). Any other number against a shape is a different shape. A
+        claim's own sides have no such reading
         (`probing.scalar_spreads`).
     """
-    from ._linalg_eval import _np, is_array
-    from .probing import relation_holds_elementwise
+    from ._linalg_eval import _np
+    from .probing import _is_number, relation_holds_elementwise
 
-    def zero_of(number, array):
-        if relation in ("==", "!=") and not is_array(number) and number == 0:
-            return _np().zeros_like(array, dtype=float)
+    def zero_of(number, shape):
+        if relation in ("==", "!=") and _is_number(number) and number == 0:
+            return _np().zeros_like(shape, dtype=float)
         return number
 
+    if _shaped(b) and not _shaped(a):
+        a = zero_of(a, b)
+    elif _shaped(a) and not _shaped(b):
+        b = zero_of(b, a)
+    return bool(relation_holds_elementwise(
+        a, b, relation, tolerance if relation in ("==", "!=") else 0.0,
+        rel_tol=rel_tol))
+
+
+def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
+    """Intent:
+        A premise relation as every route filters with it: `scalar_op`
+        between two values with no shape, and `premise_relation`
+        otherwise.
+    """
     def op(a, b):
-        if not (is_array(a) or is_array(b)):
-            return scalar_op(a, b)
-        a, b = (zero_of(a, b), b) if is_array(b) else (a, zero_of(b, a))
-        return bool(relation_holds_elementwise(
-            a, b, relation,
-            tolerance if relation in ("==", "!=") else 0.0,
-            rel_tol=rel_tol))
+        if _shaped(a) or _shaped(b):
+            return premise_relation(a, b, relation, tolerance, rel_tol)
+        return scalar_op(a, b)
     return op
 
 
@@ -326,13 +343,90 @@ def _band_draw(centre: float, width: float, bound):
     return draw
 
 
+def _is_vector(name: str, kinds: dict, domain: "dict | None") -> bool:
+    """Whether a parameter is a vector or a matrix, by its kind or by the
+    dimensions of its binding."""
+    from .runtime_types import SEQUENCE_KINDS
+    from ._shapes import dims_of
+    return kinds.get(name) in SEQUENCE_KINDS \
+        or bool(dims_of((domain or {}).get(name)))
+
+
+def _zero_of_shape(name: str, domain: "dict | None"):
+    """The draw of `name`'s zero vector or matrix: each axis the size its
+    binding fixes, the first otherwise the trial's planned size or the
+    usual 1..8 band, any other 1..8."""
+    from ._shapes import dims_of, fixed_size
+    sizes = [fixed_size(d) for d in dims_of((domain or {}).get(name))] or [None]
+
+    def draw(rng, size):
+        axes = [fixed if fixed is not None
+                else (size if k == 0 and size is not None else rng.randint(1, 8))
+                for k, fixed in enumerate(sizes)]
+        value: list = [0.0] * axes[-1]
+        for axis in reversed(axes[:-1]):
+            value = [list(value) for _ in range(axis)]
+        return value
+    return draw
+
+
+def _vector_literal(node):
+    """The value of a list literal of numbers, or None."""
+    if not isinstance(node, ast.List):
+        return None
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        return None
+
+
+def number_against_a_vector(assumption, kinds: dict, domain: "dict | None",
+                            raw: str) -> "str | None":
+    """Intent:
+        The words for a premise that compares a vector or a matrix
+        parameter with a number other than 0 under `==`, which admits no
+        point, offering the premise that pins it where the binding fixes
+        its shape; None when no premise does.
+    """
+    from ._shapes import dims_of, fixed_size
+    for acj in assumption or ():
+        if getattr(acj, "relation", None) != "==" or not acj.rhs:
+            continue
+        try:
+            sides = (ast.parse(acj.lhs, mode="eval").body,
+                     ast.parse(acj.rhs, mode="eval").body)
+        except SyntaxError:
+            continue
+        for side, other in (sides, sides[::-1]):
+            number = _constant(other)
+            if number is None or number == 0 or not isinstance(side, ast.Name) \
+                    or side.id not in kinds \
+                    or not _is_vector(side.id, kinds, domain):
+                continue
+            words = (f"the premise {acj.lhs} == {acj.rhs} compares the vector "
+                     f"{side.id} with a number, which admits no point")
+            sizes = [fixed_size(d) for d in dims_of((domain or {}).get(side.id))]
+            written = f"{acj.lhs} == {acj.rhs}"
+            if not sizes or None in sizes or written not in (raw or ""):
+                return words
+            pinned: Any = number
+            for size in reversed(sizes):
+                pinned = [pinned] * (size or 0)
+            spelled = f"{side.id} == {pinned}"
+            return (f"{words}\nto pin the vector, state: "
+                    f"{raw.replace(written, spelled, 1)}")
+    return None
+
+
 def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
                   tolerance: "float | None" = None) -> dict:
     """Intent:
         Draws that satisfy an equality premise by construction, for the
         premises random sampling essentially never lands on, keyed by
         parameter: `det(a) == 0` a singular square matrix, `x == c` the
-        constant itself, and a zero spread (`std(a, ddof=k) == 0`,
+        constant itself (over a vector or a matrix, `x == 0` its zero of
+        that shape and `x == [..]` the literal, and never a number), and a
+        zero spread (`std(a, ddof=k) == 0`,
         `var(a, ...) == 0`, `max(a) == min(a)`, `max(a) - min(a) == 0`)
         a constant sequence whose element comes from the declared
         bound in `domain`; a band `abs(x - c) <= t` (what `x ~= c`
@@ -355,6 +449,9 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
         return found[0] if found and not (found[1] or found[2]) else None
 
     def draw_for(node, c):
+        if isinstance(node, ast.Name) and node.id in kinds \
+                and _is_vector(node.id, kinds, domain):
+            return (node.id, _zero_of_shape(node.id, domain)) if c == 0 else None
         if isinstance(node, ast.Name) and node.id in kinds:
             value = int(c) if kinds[node.id] == "int" \
                 and float(c).is_integer() else c
@@ -407,6 +504,12 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
                                                           domain or {}))
             continue
         for side, other in ((left, right), (right, left)):
+            literal = _vector_literal(other)
+            if literal is not None and isinstance(side, ast.Name) \
+                    and side.id in kinds:
+                out.setdefault(side.id, lambda rng, size, v=literal:
+                               ast.literal_eval(repr(v)))
+                break
             c = _constant(other)
             found = draw_for(side, c) if c is not None else None
             if found is not None:
@@ -415,12 +518,13 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
     return out
 
 
-def solve_equality(assumption, kinds) -> "tuple | None":
+def solve_equality(assumption, kinds, domain: "dict | None" = None) -> "tuple | None":
     """Intent:
         The first scalar equality conjunct of `assumption` solved for
         one variable, parameters first: `(name, others, compute)`, where
         `compute(*values_of_others)` is that variable's value on the
-        surface. None when no equality has a single solution.
+        surface. None when no equality has a single solution. A conjunct
+        over a vector or a matrix parameter has no scalar solution.
 
     Notes:
         Each solve runs under the fast wall-clock cap.
@@ -440,6 +544,8 @@ def solve_equality(assumption, kinds) -> "tuple | None":
             continue
         surface = l_expr - r_expr
         syms = {str(s): s for s in surface.free_symbols}
+        if any(p in kinds and _is_vector(p, kinds, domain) for p in syms):
+            continue
         for p_name in [p for p in kinds if p in syms] + \
                       [a for a in sorted(syms) if a not in kinds]:
             try:

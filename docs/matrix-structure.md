@@ -195,7 +195,7 @@ Beyond `det`, `inv`, `trace`, `transpose` and `I(n)`:
 | `solve(A, b)`, `pinv(A)` | the solution of `A @ x == b`; the pseudo-inverse |
 | `A[i, :]`, `A[:, j]` | a row, a column |
 | `sum(A, axis=0)`, `mean(A, axis=1)` | reductions along an axis (also `prod`, `min`, `max`) |
-| `x.T @ A @ x` | a quadratic form, a number (a 1-by-1 result is its element) |
+| `x.T @ A @ x` | a quadratic form over a vector `x`, a number; a 1-by-1 matrix is not its element |
 
 A decomposition is a claim about its factors, with the numpy function
 bound by `let`: `let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A`. A
