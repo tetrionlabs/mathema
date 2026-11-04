@@ -115,20 +115,27 @@ of a one-row table are all containers. The number 0 is no exception, so
 `[0.0, 0.0] == 0` is falsified and the zero vector is written `[0, 0]`;
 a claim's own `f(x) != 0` over a vector always holds. A premise reads 0
 differently, as the zero of the other side's shape on every route: as a
-premise, `x != 0` says x is not the zero vector, and `x == 0` draws it. Any other number against a vector in a premise admits no point,
-so the claim is `unknown` with no valid domain.
+premise, `x != 0` says x is not the zero vector, and `x == 0` draws it
+where the domain admits 0. Any other number is a different shape from a
+vector in a premise too: `x == 5` admits no point, so the claim is
+`unknown` with no valid domain, and `x != 5` admits every point. So does a
+list literal the binding or the bound excludes, and a list literal on a
+number. A band such as `x ~= 0` over a vector is `skipped:misspecified`.
 
 An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,
 2.0]` holds. Over an empty value (a list, an array, a dict, a set, a
 string, a range) it does not hold, since there is no element at which it
-could: empty is not 0 and is not `>= 0`. `[] == []` holds and `[] != 5`
-holds.
+could: empty is not 0 and is not `>= 0`. Two strings keep their own
+order, the empty string first, so `"" <= "a"` holds and `"" < ""` does
+not. `[] == []` holds and `[] != 5` holds.
 
-A claim that fails on one of these shapes says so in its note, and offers
-the spelling that says what it may have meant, the element
+A claim that fails on one of these shapes says so in its note, and gives
+as corrections the claims that say what it may have meant: the element
 (`f(a)["x"][0] ~= sum(a.x)`), the whole (`f(a)["x"] ~= [sum(a.x)]`) or the
-narrowed domain (`assuming n >= 1, ...`). A spelling is offered only after
-it has been adjudicated on the claim's own domain and holds there.
+narrowed domain (`assuming n >= 1, ...`). Each is the whole claim as
+written, its domain included, and is given only after it has been
+adjudicated and holds. A claim read back from a record, whose domain is
+stored apart from its law, states the mismatch and gives no correction.
 
 Bindings that fix one shared dimension to two sizes (`a` in `[0, 1]^2` and
 `b` in `[0, 1]^3` under one name) leave no value, so the claim is

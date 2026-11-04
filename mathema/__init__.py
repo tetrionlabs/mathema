@@ -337,8 +337,8 @@ class Record:
                 line += "\n           " + _pad(str(p.note))
             if p.counterexample:
                 line += f"\n           counterexample {_pad(str(p.counterexample))}"
-            if (p.meta or {}).get("mathema.offer"):
-                line += "\n           " + _pad(str(p.meta["mathema.offer"]))
+            if (p.meta or {}).get("mathema.correction"):
+                line += "\n           " + _pad(str(p.meta["mathema.correction"]))
             for said in (p.meta or {}).get("mathema.let_warning") or ():
                 line += f"\n           warning: {said}"
             stratum = getattr(p, "stratum", None)
@@ -860,6 +860,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                 if callable(v)}
         if live:
             entry["__live_funcs__"] = live
+        entry["__written__"] = getattr(cj, "written", "") or getattr(cj, "raw", "")
         explicit.append(entry)
     # distinct claims that name alike (four domain variants of one law)
     # cannot share the name-keyed merge below

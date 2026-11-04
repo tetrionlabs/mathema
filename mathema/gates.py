@@ -77,7 +77,7 @@ def _integer_bound(bound) -> bool:
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
-                     exact=False, holes=None):
+                     exact=False, holes=None, exact_premises=False):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -349,6 +349,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     from ._premises import _premise_op
     from .conjecture import DEFAULT_TOLERANCE
     from .probing import DEFAULT_RELATIVE_TOLERANCE
+    premise_allowance = ((0.0, 0.0) if exact_premises
+                         else (DEFAULT_TOLERANCE, DEFAULT_RELATIVE_TOLERANCE))
     from ._linalg_eval import as_array, law_callable
     from .conjecture import _bound_for_arrays
     from .matrices import _numpy
@@ -1041,13 +1043,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
             ops = {"<=": lambda x, y: x <= y, ">=": lambda x, y: x >= y,
                    "<": lambda x, y: x < y, ">": lambda x, y: x > y,
-                   "==": lambda x, y: values_agree(x, y) is True,
-                   "!=": lambda x, y: values_differ(x, y)}
+                   "==": lambda x, y: values_agree(x, y, *premise_allowance)
+                   is True,
+                   "!=": lambda x, y: values_differ(x, y, *premise_allowance)}
             if a_rel not in ops:
                 continue
             try:
-                if not _premise_op(ops[a_rel], a_rel, DEFAULT_TOLERANCE,
-                                   DEFAULT_RELATIVE_TOLERANCE)(al, ar):
+                if not _premise_op(ops[a_rel], a_rel,
+                                   *premise_allowance)(al, ar):
                     return False
             except TypeError:
                 return False
@@ -2282,7 +2285,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             holes.setdefault(p, []).append(v)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=representation.max_magnitude,
-                            sequences=True, holes=holes)
+                            sequences=True, holes=holes, exact_premises=True)
     if deps is None:
         return None
     if excluded is not None:

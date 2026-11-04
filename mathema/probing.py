@@ -521,6 +521,23 @@ def has_no_elements(value) -> bool:
         return False
 
 
+def orders_nothing(lv, rv) -> bool:
+    """Whether an ordering between `lv` and `rv` has a side with no
+    elements, where it does not hold. Two strings are the exception:
+    they have an order of their own, the empty string first."""
+    if isinstance(lv, str) and isinstance(rv, str):
+        return False
+    return has_no_elements(lv) or has_no_elements(rv)
+
+
+def empty_text_order(lv, rv, relation: str) -> "bool | None":
+    """The order between two strings of which one is empty, the empty
+    string first; None for any other pair."""
+    if not (isinstance(lv, str) and isinstance(rv, str)) or (lv and rv):
+        return None
+    return {"<": lv < rv, "<=": lv <= rv, ">": lv > rv, ">=": lv >= rv}[relation]
+
+
 def scalar_spreads(scalar, container, relation: str) -> bool:
     """Intent:
         Whether `relation` between a value that is not a sequence and a
@@ -1322,7 +1339,8 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     (`values_agree`), so `!=` holds when some element differs; an
     ordering holds when it holds at every element, a scalar read at each
     (`scalar_spreads`), and over any value with no elements (a list, a
-    dict, a set, a string, a range) it does not hold. A NaN anywhere fails every relation. Returns
+    dict, a set, a string, a range) it does not hold, except between two
+    strings, which keep their own order (`orders_nothing`). A NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
     meaningless (an ordering over non-orderable values or mismatched
     shapes), which the caller reads as skip, never falsify.
@@ -1338,9 +1356,12 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
-    if relation not in ("==", "~=", "!=") \
-            and (has_no_elements(lv) or has_no_elements(rv)):
-        return False
+    if relation not in ("==", "~=", "!="):
+        if orders_nothing(lv, rv):
+            return False
+        text_order = empty_text_order(lv, rv, relation)
+        if text_order is not None:
+            return text_order
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,

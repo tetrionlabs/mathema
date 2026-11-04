@@ -300,19 +300,23 @@ def relation_within(lv, rv, relation: str, declared=None,
         arrays are one fact about the whole value, so `!=` holds when
         some element differs and two values of different shapes are
         unequal outright; an ordering holds when it holds at every
-        element, does not hold over any value with no elements, and is
+        element, does not hold over any value with no elements except
+        between two strings (`probing.orders_nothing`), and is
         None (unanswerable) over mismatched shapes or values that do not
         order. A value that is not a
         sequence against a sequence is read at each element only as
         `probing.scalar_spreads` says. `exact_inequality` makes `!=`
         fail only at an actual equality.
     """
-    from .probing import (_is_matrix_value, has_no_elements, plain_value,
-                          scalar_spreads)
+    from .probing import (_is_matrix_value, empty_text_order, orders_nothing,
+                          plain_value, scalar_spreads)
     lv, rv = plain_value(lv), plain_value(rv)
-    if relation not in ("==", "~=", "!=") \
-            and (has_no_elements(lv) or has_no_elements(rv)):
-        return False
+    if relation not in ("==", "~=", "!="):
+        if orders_nothing(lv, rv):
+            return False
+        text_order = empty_text_order(lv, rv, relation)
+        if text_order is not None:
+            return text_order
     arrays = _is_matrix_value(lv) or _is_matrix_value(rv)
     # over arrays the result's magnitude is its largest entry: an entry
     # that is exactly 0 beside entries near 1 (the off-diagonal of an

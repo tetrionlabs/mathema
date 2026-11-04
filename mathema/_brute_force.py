@@ -37,7 +37,7 @@ from __future__ import annotations
 import itertools
 import math
 
-from . import _offers
+from . import _corrections
 from ._exact_side import holds_number
 from ._exits import call, exception_name
 from .domain import _as_domain, _set_sentinels, finite_members
@@ -231,10 +231,10 @@ def _lists_a_sentinel(cj_domain: dict, names: list) -> bool:
 def _orders_no_elements(cj, sides) -> bool:
     """Whether the claim is an ordering and a side at this point is a
     value with no elements, where no ordering holds."""
-    from .probing import has_no_elements
+    from .probing import orders_nothing
     if cj.relation not in ("<", "<=", ">", ">=") or sides is None:
         return False
-    return any(has_no_elements(side) for side in sides)
+    return orders_nothing(*sides)
 
 
 def _witness_at(point: dict, names: list, sides) -> str:
@@ -242,7 +242,7 @@ def _witness_at(point: dict, names: list, sides) -> str:
     failed with when one of them is a vector of one element, since the
     point alone does not show the mismatch."""
     from .gates import _fmt_point
-    from ._offers import element_spellings
+    from ._corrections import element_spellings
     at = _fmt_point(point, names)
     if sides is not None and element_spellings("f == 0", *sides):
         return f"{at}: {sides[0]!r} vs {sides[1]!r}"
@@ -1162,7 +1162,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
             return None
         if verdict is False and _orders_no_elements(cj, evaluate.sides()):
             if not empty_failures:
-                _offers.record_miss(evaluate.sides(), point)
+                _corrections.record_miss(evaluate.sides(), point)
             empty_failures.append((point, evaluate.sides()))
             continue
         if verdict is False and empty_failures:
@@ -1175,7 +1175,7 @@ def brute_force_proof(cj, fn, facts, cj_domain, bound_funcs, assumption=(),
                     f"fails at {_fmt_point(point, names)}"}}
                     if exact_miss is not None else {})
             if evaluate.sides() is not None:
-                _offers.record_miss(evaluate.sides(), point)
+                _corrections.record_miss(evaluate.sides(), point)
             return ProofResult(
                 "disproven",
                 sketch=f"the claim fails at {_fmt_point(point, names)}"
@@ -1499,7 +1499,7 @@ def _ground_proof(cj, fn, facts, bound_funcs, seen: dict):
     if verdict is False:
         detail = _ground_failure(deps, {})
         if evaluate.sides() is not None:
-            _offers.record_miss(evaluate.sides(), {})
+            _corrections.record_miss(evaluate.sides(), {})
         return ProofResult(
             "disproven",
             sketch=f"the claim fails at its own call, {witness}",

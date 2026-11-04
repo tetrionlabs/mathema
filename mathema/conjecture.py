@@ -61,7 +61,7 @@ from .domain import operational_domain as _operational_domain
 from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
                          reference_side, relation_within)
-from . import _offers
+from . import _corrections
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
@@ -1595,6 +1595,9 @@ class Conjecture:
     # of its links; proven iff every link is, falsified if any link
     # is, and lhs/rel/rhs hold the first link so every single-link
     # consumer keeps working unchanged.
+    written: str = ""
+    # the claim as its author wrote it, domain included, where `raw` holds
+    # only the law a stored row keeps beside its domain
     raw: str = ""
     # the claim's original law text, before parsing (provenance, and the
     # source `check_conjectures` re-resolves the matrix sugar from when
@@ -6243,9 +6246,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             "spawn" if float_companions and cj.route in ("derive", "best")
             else None)
         ctx.companion_budget = cj.trials if cj.trials is not None else trials
-        _offers.forget_miss()
+        _corrections.forget_miss()
 
-        def _adjudicate_offer(text, cj=cj):
+        def _adjudicate_correction(text, cj=cj):
             offered = claim(text, name=cj.name, route=cj.route, funcs=cj.funcs,
                             tolerance=cj.tolerance)
             rows = _check_conjectures(fn, [offered], domain=domain,
@@ -6287,7 +6290,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                   f"to {capped_to}").lstrip("; ")
                     probe.meta = {**(probe.meta or {}),
                                   "mathema.capped_by": ref_name}
-            return _offers.with_offers(probe, cj, _adjudicate_offer)
+            return _corrections.with_corrections(probe, cj, _adjudicate_correction)
         if cj.route not in ("derive", "best", "probe", "examine"):
             out.append(_stamped(Probe(
                 cj.name, statement, "skipped", route=None,
@@ -6306,8 +6309,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
         from . import _premises
-        no_point = _premises.number_against_a_vector(
-            ctx.assumption, kinds, ctx.cj_domain, cj.raw)
+        from .types import shapes_from_signature
+        no_point = _premises.premise_admits_no_point(
+            ctx.assumption, kinds, ctx.cj_domain, _corrections._written_claim(cj),
+            frozenset(p for p, shape in shapes_from_signature(fn).items()
+                      if len(shape.dims) > 1))
         if no_point is not None:
             out.append(stamp(Probe(
                 cj.name, statement, "unknown", route=None,
@@ -7797,7 +7803,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if _exactly_decided(cj, code_l, code_r, trial_env, callees, ok,
                             side=side) is True:
             return None
-        _offers.record_miss(lv, rv, dict(zip(kinds, args)))
+        _corrections.record_miss(lv, rv, dict(zip(kinds, args)))
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
@@ -10391,6 +10397,28 @@ def _settle_infinity_offer(row, rerun, names, cj_domain,
                                  "words": _conditioning.infinity_words(bound)}}
 
 
+def _outside_premise_shapes(fn, structures: dict):
+    """The predicate over points that a premised claim leaves out beyond
+    its relations: a matrix that does not show a premise's structure
+    (`assuming A is positive definite`), or a value without the number of
+    axes the signature's shape marker gives its parameter."""
+    from .matrices import PROPERTIES
+    from .types import shapes_from_signature
+    from ._shapes import observed_shape
+    axes = {p: len(shape.dims) for p, shape in shapes_from_signature(fn).items()}
+
+    def outside(point: dict) -> bool:
+        if any(p in point and PROPERTIES[prop].check(point[p]) is not True
+               for p, props in structures.items() for prop in props):
+            return True
+        for p, ndim in axes.items():
+            seen = observed_shape(point.get(p))
+            if p in point and (seen is None or len(seen) != ndim):
+                return True
+        return False
+    return outside
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -10427,6 +10455,11 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                 # input f's own guards refuse
                 _refused_by_own_guards_at(fn, facts, ctx.cj)
                 if ctx.exclude_own_guards else None)
+    if ctx.assumption:
+        lacking = _outside_premise_shapes(fn, ctx.premise_structures or {})
+        excluded = (lacking if excluded is None else
+                    (lambda point, inner=excluded:
+                     inner(point) or lacking(point)))
     containers, holes = _admitted_container_points(ctx, facts)
     missing = _admitted_scalar_points(ctx) + containers
 
@@ -12920,7 +12953,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # the sample lies on the premise by construction
                 if p in literal_args:
                     continue
-                v = as_typed(draw(rng, trial_sizes.get(resolver.key(p, 0))), p)
+                placed = _premises.placed_draw(
+                    draw, rng, trial_sizes.get(resolver.key(p, 0)), env.get(p))
+                if placed is _premises.NO_POINT:
+                    outside_draw[0] = True
+                    break
+                v = as_typed(placed, p)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:
@@ -13828,7 +13866,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 call_hole[0] = None
                 continue
-            _offers.record_miss(lv, rv, dict(zip(kinds, args)))
+            _corrections.record_miss(lv, rv, dict(zip(kinds, args)))
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"

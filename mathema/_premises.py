@@ -65,6 +65,15 @@ def _shaped(value) -> bool:
     return is_array(value) or isinstance(value, (list, tuple))
 
 
+def _plain(value):
+    """A value as a premise compares it: a pandas or polars table as its
+    rows, anything else as `probing.plain_value` reads it."""
+    from .probing import plain_value
+    if type(value).__name__ == "DataFrame" and hasattr(value, "to_numpy"):
+        return value.to_numpy().tolist()
+    return plain_value(value)
+
+
 def premise_relation(a, b, relation: str, tolerance: float,
                      rel_tol: float) -> bool:
     """Intent:
@@ -84,6 +93,7 @@ def premise_relation(a, b, relation: str, tolerance: float,
             return _np().zeros_like(shape, dtype=float)
         return number
 
+    a, b = _plain(a), _plain(b)
     if _shaped(b) and not _shaped(a):
         a = zero_of(a, b)
     elif _shaped(a) and not _shaped(b):
@@ -100,7 +110,7 @@ def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
         otherwise.
     """
     def op(a, b):
-        if _shaped(a) or _shaped(b):
+        if _shaped(_plain(a)) or _shaped(_plain(b)):
             return premise_relation(a, b, relation, tolerance, rel_tol)
         return scalar_op(a, b)
     return op
@@ -352,22 +362,43 @@ def _is_vector(name: str, kinds: dict, domain: "dict | None") -> bool:
         or bool(dims_of((domain or {}).get(name)))
 
 
-def _zero_of_shape(name: str, domain: "dict | None"):
-    """The draw of `name`'s zero vector or matrix: each axis the size its
-    binding fixes, the first otherwise the trial's planned size or the
-    usual 1..8 band, any other 1..8."""
-    from ._shapes import dims_of, fixed_size
-    sizes = [fixed_size(d) for d in dims_of((domain or {}).get(name))] or [None]
+class _ZeroOfShape:
+    """The draw of a parameter's zero: zeros in the shape the point in hand
+    gave that parameter, every dimension tied as the point's are."""
 
-    def draw(rng, size):
-        axes = [fixed if fixed is not None
-                else (size if k == 0 and size is not None else rng.randint(1, 8))
-                for k, fixed in enumerate(sizes)]
-        value: list = [0.0] * axes[-1]
-        for axis in reversed(axes[:-1]):
-            value = [list(value) for _ in range(axis)]
-        return value
-    return draw
+
+class _LiteralVector:
+    """The draw of a parameter pinned to a list literal: the literal, at
+    a point that gave the parameter the literal's shape."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+#: a premise draw that has no place at this point
+NO_POINT = object()
+
+
+def placed_draw(draw, rng, size, drawn):
+    """Intent:
+        The value a premise's draw puts on a parameter at a point that
+        drew `drawn` for it, or `NO_POINT` when the premise's literal
+        does not fit the shape this point gave the parameter.
+    """
+    from ._shapes import observed_shape
+    if isinstance(draw, _ZeroOfShape):
+        return _zeros_like(drawn)
+    if isinstance(draw, _LiteralVector):
+        if observed_shape(drawn) != observed_shape(draw.value):
+            return NO_POINT
+        return ast.literal_eval(repr(draw.value))
+    return draw(rng, size)
+
+
+def _zeros_like(value):
+    if isinstance(value, (list, tuple)):
+        return [_zeros_like(v) for v in value]
+    return 0.0
 
 
 def _vector_literal(node):
@@ -380,15 +411,35 @@ def _vector_literal(node):
         return None
 
 
-def number_against_a_vector(assumption, kinds: dict, domain: "dict | None",
-                            raw: str) -> "str | None":
+def _ties(shape: tuple, dims: tuple) -> bool:
+    """Whether a shape fits dimension tokens, one size to each name."""
+    from ._shapes import fits
+    if shape is None or not fits(shape, dims):
+        return False
+    sizes: dict = {}
+    return all(sizes.setdefault(d, size) == size for d, size in zip(dims, shape))
+
+
+def _every_element_in(value, bound) -> bool:
+    from ._shapes import leaves
+    from .domain import domain_contains
+    return bound is None or all(domain_contains(float(v), bound)
+                                for v in leaves(value))
+
+
+def premise_admits_no_point(assumption, kinds: dict, domain: "dict | None",
+                            raw: str, matrices: frozenset = frozenset()) -> "str | None":
     """Intent:
-        The words for a premise that compares a vector or a matrix
-        parameter with a number other than 0 under `==`, which admits no
-        point, offering the premise that pins it where the binding fixes
-        its shape; None when no premise does.
+        The words for a premise `p == value` that no point of the claim's
+        domain satisfies, or None when none is. A vector or a matrix has
+        no number but its zero, and a zero or a list literal needs a shape
+        its binding admits and elements inside its bound; a number has no
+        list literal. Where a vector pinned to the premise's number lies
+        inside the domain and its shape is fixed, the words end with the
+        premise that pins it. `matrices` names the parameters a signature
+        marks as matrices.
     """
-    from ._shapes import dims_of, fixed_size
+    from ._shapes import dims_of, fixed_size, observed_shape
     for acj in assumption or ():
         if getattr(acj, "relation", None) != "==" or not acj.rhs:
             continue
@@ -397,24 +448,48 @@ def number_against_a_vector(assumption, kinds: dict, domain: "dict | None",
                      ast.parse(acj.rhs, mode="eval").body)
         except SyntaxError:
             continue
+        written = f"{acj.lhs} == {acj.rhs}"
         for side, other in (sides, sides[::-1]):
-            number = _constant(other)
-            if number is None or number == 0 or not isinstance(side, ast.Name) \
-                    or side.id not in kinds \
-                    or not _is_vector(side.id, kinds, domain):
+            if not isinstance(side, ast.Name) or side.id not in kinds:
                 continue
-            words = (f"the premise {acj.lhs} == {acj.rhs} compares the vector "
-                     f"{side.id} with a number, which admits no point")
-            sizes = [fixed_size(d) for d in dims_of((domain or {}).get(side.id))]
-            written = f"{acj.lhs} == {acj.rhs}"
+            name, bound = side.id, (domain or {}).get(side.id)
+            dims = dims_of(bound)
+            vector = _is_vector(name, kinds, domain)
+            literal = _vector_literal(other)
+            if literal is not None:
+                if not vector and (bound is not None
+                                   or kinds.get(name) in ("float", "int")):
+                    return (f"the premise {written} compares the number "
+                            f"{name} with a vector, which admits no point")
+                if dims and not _ties(observed_shape(literal), dims):
+                    return (f"the premise {written} gives {name} a shape its "
+                            f"binding does not admit")
+                if not _every_element_in(literal, bound):
+                    return (f"the premise {written} pins {name} outside its "
+                            f"domain")
+                break
+            number = _constant(other)
+            if number is None or not vector:
+                continue
+            if number == 0:
+                if not _every_element_in([0.0], bound):
+                    return (f"the premise {written} pins {name} to its zero, "
+                            f"which its domain excludes")
+                break
+            kind = ("matrix" if name in matrices or kinds.get(name) == "mat"
+                    or len(dims) > 1 else "vector")
+            words = (f"the premise {written} compares the {kind} {name} with "
+                     f"a number, which admits no point")
+            if not _every_element_in([number], bound):
+                return f"{words}, and the domain of {name} excludes {number}"
+            sizes = [fixed_size(d) for d in dims]
             if not sizes or None in sizes or written not in (raw or ""):
                 return words
             pinned: Any = number
             for size in reversed(sizes):
                 pinned = [pinned] * (size or 0)
-            spelled = f"{side.id} == {pinned}"
-            return (f"{words}\nto pin the vector, state: "
-                    f"{raw.replace(written, spelled, 1)}")
+            return (f"{words}\nto pin the {kind}, state: "
+                    f"{raw.replace(written, f'{name} == {pinned}', 1)}")
     return None
 
 
@@ -451,7 +526,7 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
     def draw_for(node, c):
         if isinstance(node, ast.Name) and node.id in kinds \
                 and _is_vector(node.id, kinds, domain):
-            return (node.id, _zero_of_shape(node.id, domain)) if c == 0 else None
+            return (node.id, _ZeroOfShape()) if c == 0 else None
         if isinstance(node, ast.Name) and node.id in kinds:
             value = int(c) if kinds[node.id] == "int" \
                 and float(c).is_integer() else c
@@ -507,8 +582,7 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
             literal = _vector_literal(other)
             if literal is not None and isinstance(side, ast.Name) \
                     and side.id in kinds:
-                out.setdefault(side.id, lambda rng, size, v=literal:
-                               ast.literal_eval(repr(v)))
+                out.setdefault(side.id, _LiteralVector(literal))
                 break
             c = _constant(other)
             found = draw_for(side, c) if c is not None else None
@@ -666,7 +740,10 @@ class PremiseGuard:
         for p, draw in self.draws.items():
             if p in placed and p not in self.ignore \
                     and (only is None or p in only):
-                placed[p] = draw(rng, None)
+                value = placed_draw(draw, rng, None, placed[p])
+                if value is NO_POINT:
+                    return None
+                placed[p] = value
         if solve and self.solved is not None \
                 and self.solved[0] in placed and self.solved[0] not in self.ignore \
                 and (only is None or self.solved[0] in only):
