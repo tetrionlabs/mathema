@@ -19,6 +19,10 @@ def echo(x: np.ndarray):
     return np.asarray(x, dtype=float)
 
 
+def scal(x: float) -> float:
+    return x + 1.0
+
+
 def idl(x: list[float]):
     return x
 
@@ -105,6 +109,7 @@ _NO_VALID_DOMAIN = [
     (echo, "assuming x == [1,1], for x in [0,1]^3, f(x) == [1,1]"),
     (idl, "assuming x == 0, for x in {1,2}^2, f(x) == [5,5]"),
     (echo, "assuming x == 5, for x in [0,1]^3, f(x) == [5,5,5]"),
+    (scal, "assuming x == [1,2], for x in [0,5], f(x) == 3"),
 ]
 
 

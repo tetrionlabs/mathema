@@ -6,7 +6,7 @@ point is drawn. A premise that relates a value keeps its reading, on every
 route and every library: 0 is the zero of the other side's shape, so
 `assuming f(x) != 0` says f(x) is not the zero vector. A premise on an element
 is an ordinary premise. A claim's own relation stays strict."""
-from typing import Optional
+from typing import Annotated, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ import pytest
 from mathema import _premises
 from mathema._missing_words import remedy_statements
 from mathema.conjecture import _interpret_assumption, check_conjectures, claim
-from mathema.types import Mat, Vec
+from mathema.types import Mat, Shape, Vec
 
 
 def echo(x: np.ndarray):
@@ -118,7 +118,12 @@ def det_of(A: np.ndarray) -> float:
     return float(np.linalg.det(np.asarray(A, dtype=float)))
 
 
+def _marked(x: Annotated[object, Shape("n")]):
+    return x
+
+
 _PINS = [
+    (_marked, "assuming x == 0, f(x)[0] == 0"),
     (echo, "assuming x == 0, for x in [0,1]^3, f(x) == [0,0,0]"),
     (echo, "assuming 0 == x, for x in [0,1]^3, f(x) == [0,0,0]"),
     (echo, "assuming x == 0.0, for x in [0,1]^3, f(x) == [0,0,0]"),
