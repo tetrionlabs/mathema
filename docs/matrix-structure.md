@@ -197,14 +197,15 @@ Beyond `det`, `inv`, `trace`, `transpose` and `I(n)`:
 | `solve(A, b)`, `pinv(A)` | the solution of `A @ x == b`; the pseudo-inverse |
 | `A[i, :]`, `A[:, j]` | a row, a column |
 | `sum(A, axis=0)`, `mean(A, axis=1)` | reductions along an axis (also `prod`, `min`, `max`) |
-| `x.T @ A @ x` | a quadratic form over a vector `x`, a number; a 1-by-1 matrix is not its element |
+| `x.T @ A @ x` | a quadratic form over a vector `x`, a number |
 
 A decomposition is a claim about its factors, with the numpy function
 bound by `let`: `let q = numpy.linalg.qr, q(A)[0] @ q(A)[1] ~= A`. A
 vector of the claim's own is declared with `let b be R^n`, and takes
 the size the parameters give `n`. In a premise, `x != 0` over a vector
-says it is not the zero vector; a claim's own `x != 0` compares different
-shapes and holds.
+says it is not the zero vector, and a claim's own `x != 0` compares different
+shapes and holds. A premise that pins the whole of it to a value, `x == 0`,
+is not read yet, and the claim is `unknown`.
 
 <!-- example: vocabulary run requires=numpy -->
 ```python

@@ -94,10 +94,14 @@ def premise_relation(a, b, relation: str, tolerance: float,
         return number
 
     a, b = _plain(a), _plain(b)
-    if _shaped(b) and not _shaped(a):
-        a = zero_of(a, b)
-    elif _shaped(a) and not _shaped(b):
-        b = zero_of(b, a)
+    try:
+        if _shaped(b) and not _shaped(a):
+            a = zero_of(a, b)
+        elif _shaped(a) and not _shaped(b):
+            b = zero_of(b, a)
+    except ValueError:
+        # a ragged value has no zero of its shape, so it is not the zero
+        return relation == "!="
     return bool(relation_holds_elementwise(
         a, b, relation, tolerance if relation in ("==", "!=") else 0.0,
         rel_tol=rel_tol))
@@ -362,84 +366,16 @@ def _is_vector(name: str, kinds: dict, domain: "dict | None") -> bool:
         or bool(dims_of((domain or {}).get(name)))
 
 
-class _ZeroOfShape:
-    """The draw of a parameter's zero: zeros in the shape the point in hand
-    gave that parameter, every dimension tied as the point's are."""
-
-
-class _LiteralVector:
-    """The draw of a parameter pinned to a list literal: the literal, at
-    a point that gave the parameter the literal's shape."""
-
-    def __init__(self, value):
-        self.value = value
-
-
-#: a premise draw that has no place at this point
-NO_POINT = object()
-
-
-def placed_draw(draw, rng, size, drawn):
+def pinned_container_words(assumption, kinds: dict, domain: "dict | None",
+                           marked: frozenset = frozenset()) -> "str | None":
     """Intent:
-        The value a premise's draw puts on a parameter at a point that
-        drew `drawn` for it, or `NO_POINT` when the premise's literal
-        does not fit the shape this point gave the parameter.
+        The words for a premise `p == value` that pins a whole vector or
+        matrix parameter to a number or a literal, which is not read yet;
+        None when no premise does. `marked` names the parameters a
+        signature's shape marker makes containers. A relation on a value
+        (`f(x) == 0`, `x != 0`) or on an element (`x[0] == 0`) is no pin.
     """
-    from ._shapes import observed_shape
-    if isinstance(draw, _ZeroOfShape):
-        return _zeros_like(drawn)
-    if isinstance(draw, _LiteralVector):
-        if observed_shape(drawn) != observed_shape(draw.value):
-            return NO_POINT
-        return ast.literal_eval(repr(draw.value))
-    return draw(rng, size)
-
-
-def _zeros_like(value):
-    if isinstance(value, (list, tuple)):
-        return [_zeros_like(v) for v in value]
-    return 0.0
-
-
-def _vector_literal(node):
-    """The value of a list literal of numbers, or None."""
-    if not isinstance(node, ast.List):
-        return None
-    try:
-        return ast.literal_eval(node)
-    except (ValueError, SyntaxError):
-        return None
-
-
-def _ties(shape: tuple, dims: tuple) -> bool:
-    """Whether a shape fits dimension tokens, one size to each name."""
-    from ._shapes import fits
-    if shape is None or not fits(shape, dims):
-        return False
-    sizes: dict = {}
-    return all(sizes.setdefault(d, size) == size for d, size in zip(dims, shape))
-
-
-def _every_element_in(value, bound) -> bool:
-    from ._shapes import leaves
-    from .domain import domain_contains
-    return bound is None or all(domain_contains(float(v), bound)
-                                for v in leaves(value))
-
-
-def premise_admits_no_point(assumption, kinds: dict, domain: "dict | None",
-                            raw: str, matrices: frozenset = frozenset()) -> "str | None":
-    """Intent:
-        The words for a premise `p == value` that no point of the claim's
-        domain satisfies, or None when none is. A vector or a matrix has
-        no number but its zero, and a zero or a list literal needs a shape
-        its binding admits and elements inside its bound; a number has no
-        list literal. Where a vector pinned to the premise's number lies
-        inside the domain and its shape is fixed, the words end with the
-        premise that pins it. `matrices` names the parameters a signature
-        marks as matrices.
-    """
-    from ._shapes import dims_of, fixed_size, observed_shape
+    from ._shapes import dims_of
     for acj in assumption or ():
         if getattr(acj, "relation", None) != "==" or not acj.rhs:
             continue
@@ -448,48 +384,19 @@ def premise_admits_no_point(assumption, kinds: dict, domain: "dict | None",
                      ast.parse(acj.rhs, mode="eval").body)
         except SyntaxError:
             continue
-        written = f"{acj.lhs} == {acj.rhs}"
         for side, other in (sides, sides[::-1]):
-            if not isinstance(side, ast.Name) or side.id not in kinds:
+            if not isinstance(side, ast.Name) or side.id not in kinds \
+                    or not (isinstance(other, (ast.List, ast.Tuple))
+                            or _constant(other) is not None):
                 continue
-            name, bound = side.id, (domain or {}).get(side.id)
-            dims = dims_of(bound)
-            vector = _is_vector(name, kinds, domain)
-            literal = _vector_literal(other)
-            if literal is not None:
-                if not vector and (bound is not None
-                                   or kinds.get(name) in ("float", "int")):
-                    return (f"the premise {written} compares the number "
-                            f"{name} with a vector, which admits no point")
-                if dims and not _ties(observed_shape(literal), dims):
-                    return (f"the premise {written} gives {name} a shape its "
-                            f"binding does not admit")
-                if not _every_element_in(literal, bound):
-                    return (f"the premise {written} pins {name} outside its "
-                            f"domain")
-                break
-            number = _constant(other)
-            if number is None or not vector:
-                continue
-            if number == 0:
-                if not _every_element_in([0.0], bound):
-                    return (f"the premise {written} pins {name} to its zero, "
-                            f"which its domain excludes")
-                break
-            kind = ("matrix" if name in matrices or kinds.get(name) == "mat"
-                    or len(dims) > 1 else "vector")
-            words = (f"the premise {written} compares the {kind} {name} with "
-                     f"a number, which admits no point")
-            if not _every_element_in([number], bound):
-                return f"{words}, and the domain of {name} excludes {number}"
-            sizes = [fixed_size(d) for d in dims]
-            if not sizes or None in sizes or written not in (raw or ""):
-                return words
-            pinned: Any = number
-            for size in reversed(sizes):
-                pinned = [pinned] * (size or 0)
-            return (f"{words}\nto pin the {kind}, state: "
-                    f"{raw.replace(written, f'{name} == {pinned}', 1)}")
+            name = side.id
+            if name in marked or _is_vector(name, kinds, domain):
+                kind = ("matrix" if kinds.get(name) == "mat"
+                        or len(dims_of((domain or {}).get(name))) > 1
+                        else "vector or matrix" if name in marked else "vector")
+                return (f"the premise {acj.lhs} == {acj.rhs} pins the whole "
+                        f"{kind} {name} to a value, which is not read yet, so "
+                        f"no point was drawn")
     return None
 
 
@@ -499,9 +406,8 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
         Draws that satisfy an equality premise by construction, for the
         premises random sampling essentially never lands on, keyed by
         parameter: `det(a) == 0` a singular square matrix, `x == c` the
-        constant itself (over a vector or a matrix, `x == 0` its zero of
-        that shape and `x == [..]` the literal, and never a number), and a
-        zero spread (`std(a, ddof=k) == 0`,
+        constant itself (a vector or a matrix draws nothing here,
+        `pinned_container_words`), and a zero spread (`std(a, ddof=k) == 0`,
         `var(a, ...) == 0`, `max(a) == min(a)`, `max(a) - min(a) == 0`)
         a constant sequence whose element comes from the declared
         bound in `domain`; a band `abs(x - c) <= t` (what `x ~= c`
@@ -526,7 +432,7 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
     def draw_for(node, c):
         if isinstance(node, ast.Name) and node.id in kinds \
                 and _is_vector(node.id, kinds, domain):
-            return (node.id, _ZeroOfShape()) if c == 0 else None
+            return None
         if isinstance(node, ast.Name) and node.id in kinds:
             value = int(c) if kinds[node.id] == "int" \
                 and float(c).is_integer() else c
@@ -579,11 +485,6 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
                                                           domain or {}))
             continue
         for side, other in ((left, right), (right, left)):
-            literal = _vector_literal(other)
-            if literal is not None and isinstance(side, ast.Name) \
-                    and side.id in kinds:
-                out.setdefault(side.id, _LiteralVector(literal))
-                break
             c = _constant(other)
             found = draw_for(side, c) if c is not None else None
             if found is not None:
@@ -740,10 +641,7 @@ class PremiseGuard:
         for p, draw in self.draws.items():
             if p in placed and p not in self.ignore \
                     and (only is None or p in only):
-                value = placed_draw(draw, rng, None, placed[p])
-                if value is NO_POINT:
-                    return None
-                placed[p] = value
+                placed[p] = draw(rng, None)
         if solve and self.solved is not None \
                 and self.solved[0] in placed and self.solved[0] not in self.ignore \
                 and (only is None or self.solved[0] in only):

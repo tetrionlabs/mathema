@@ -114,13 +114,14 @@ the library: a list, an array, a pandas or polars Series, and the column
 of a one-row table are all containers. The number 0 is no exception, so
 `[0.0, 0.0] == 0` is falsified and the zero vector is written `[0, 0]`;
 a claim's own `f(x) != 0` over a vector always holds. A premise reads 0
-differently, as the zero of the other side's shape on every route: as a
-premise, `x != 0` says x is not the zero vector, and `x == 0` draws it
-where the domain admits 0. Any other number is a different shape from a
-vector in a premise too: `x == 5` admits no point, so the claim is
-`unknown` with no valid domain, and `x != 5` admits every point. So does a
-list literal the binding or the bound excludes, and a list literal on a
-number. A band such as `x ~= 0` over a vector is `skipped:misspecified`.
+differently, as the zero of the other side's shape on every route:
+as a premise, `f(x) != 0` says f(x) is not the zero vector, and any other
+number is a different shape, so `x != 5` as a premise admits every point. A premise on
+an element (`x[0] == 0`, `sum(x) == 0`, `norm(x) == 0`) is an ordinary premise.
+A premise that pins a whole vector or matrix parameter to a value (`x == 0`,
+`x == 5`, `x == [5, 5, 5]`) is not read yet: the claim is `unknown` on every
+route, says so in its note, and no point is drawn. A band such as `x ~= 0`
+over a vector is `skipped:misspecified`.
 
 An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,
 2.0]` holds. Over an empty value (a list, an array, a dict, a set, a

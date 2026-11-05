@@ -6310,14 +6310,12 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         ctx.family = _claim_family(cj, fn, facts)
         from . import _premises
         from .types import shapes_from_signature
-        no_point = _premises.premise_admits_no_point(
-            ctx.assumption, kinds, ctx.cj_domain, _corrections._written_claim(cj),
-            frozenset(p for p, shape in shapes_from_signature(fn).items()
-                      if len(shape.dims) > 1))
-        if no_point is not None:
-            out.append(stamp(Probe(
-                cj.name, statement, "unknown", route=None,
-                note=f"no valid domain: {no_point}")))
+        not_read = _premises.pinned_container_words(
+            ctx.assumption, kinds, ctx.cj_domain,
+            frozenset(shapes_from_signature(fn)))
+        if not_read is not None:
+            out.append(stamp(Probe(cj.name, statement, "unknown", route=None,
+                                   note=not_read)))
             continue
         emptied = _empty_premise_parameter(ctx, facts)
         clash = None if emptied is not None else _fixed_dim_clash(ctx)
@@ -12960,12 +12958,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 # the sample lies on the premise by construction
                 if p in literal_args:
                     continue
-                placed = _premises.placed_draw(
-                    draw, rng, trial_sizes.get(resolver.key(p, 0)), env.get(p))
-                if placed is _premises.NO_POINT:
-                    outside_draw[0] = True
-                    break
-                v = as_typed(placed, p)
+                v = as_typed(draw(rng, trial_sizes.get(resolver.key(p, 0))), p)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:

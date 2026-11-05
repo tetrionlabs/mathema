@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""A premise over a vector or a matrix never puts a number on it. In a
-premise 0 is the zero of the other side's shape on every route, so
-`assuming x == 0` draws the zero vector and `assuming f(x) != 0` says
-f(x) is not the zero vector. Any other number against a vector admits no
-point: the claim has no valid domain, and the note gives the vector.
-A claim's own relation stays strict."""
+"""An equality premise that pins a whole vector or matrix to a value is not
+read yet: the claim is unknown on every route, with a note saying so, and no
+point is drawn. A premise that relates a value keeps its reading, on every
+route and every library: 0 is the zero of the other side's shape, so
+`assuming f(x) != 0` says f(x) is not the zero vector. A premise on an element
+is an ordinary premise. A claim's own relation stays strict."""
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -42,65 +44,6 @@ def _probe(fn, law, **kw):
     return probe
 
 
-@pytest.mark.parametrize("fn,law", [
-    (echo, "assuming x == 0, for x in [0,1]^3, f(x) == [0,0,0]"),
-    (elist, "assuming x == 0, for x in [0,1]^3, f(x) == x"),
-    (total, "assuming x == 0, for x in [0,1]^3, f(x) == 0"),
-    (ndim, "assuming x == 0, for x in [0,1]^3, f(x) == 1"),
-])
-def test_x_equal_to_0_draws_the_zero_vector_of_its_shape(fn, law):
-    probe = _probe(fn, law)
-    assert probe.verdict in ("holds", "proven"), (probe.verdict, probe.note,
-                                                  probe.counterexample)
-
-
-def test_a_matrix_equal_to_0_draws_the_zero_matrix():
-    probe = _probe(echo, "assuming x == 0, for x in [0,1]^(2,3), "
-                         "f(x) == [[0,0,0],[0,0,0]]")
-    assert probe.verdict in ("holds", "proven"), (probe.verdict, probe.note,
-                                                  probe.counterexample)
-
-
-@pytest.mark.parametrize("fn,law", [
-    (echo, "assuming x == 5, for x in [0,10]^3, f(x) == [5,5,5]"),
-    (total, "assuming x == 5, for x in [0,10]^3, f(x) == 5"),
-    (ndim, "assuming x == 5, for x in [0,10]^3, f(x) == 0"),
-])
-def test_a_number_against_a_vector_admits_no_point(fn, law):
-    probe = _probe(fn, law)
-    assert probe.verdict == "unknown", (probe.verdict, probe.counterexample)
-    assert probe.n == 0
-    assert "no valid domain" in probe.note, probe.note
-    assert "x == [5, 5, 5]" in probe.note, probe.note
-    corrected = remedy_statements(probe.note)
-    assert corrected == [law.replace("x == 5", "x == [5, 5, 5]")], probe.note
-
-
-def test_the_corrected_vector_premise_is_drawn():
-    probe = _probe(echo, "assuming x == [5, 5, 5], for x in [0,10]^3, "
-                         "f(x) == [5,5,5]")
-    assert probe.verdict in ("holds", "proven"), (probe.verdict, probe.note,
-                                                  probe.counterexample)
-
-
-def test_a_number_against_a_vector_of_open_length_gives_nothing():
-    probe = _probe(echo, "assuming x == 5, for x in [0,10]^n, f(x)[0] == 5")
-    assert probe.verdict == "unknown", (probe.verdict, probe.counterexample)
-    assert "no valid domain" in probe.note, probe.note
-    assert remedy_statements(probe.note) == [], probe.note
-
-
-def test_the_draws_never_hold_a_number_for_a_vector():
-    import random
-    cj = claim("assuming x == 0, for x in [0,1]^3, f(x) == [0,0,0]", name="c")
-    premises = _interpret_assumption(cj, [cj])[2]
-    kinds = {"x": "vec"}
-    (draw,) = _premises.premise_draws(premises, kinds, cj.domain).values()
-    assert _premises.placed_draw(draw, random.Random(0), None,
-                                 [1.0, 1.0, 1.0]) == [0.0, 0.0, 0.0]
-    assert _premises.solve_equality(premises, kinds) is None
-
-
 @pytest.mark.parametrize("kw", [{}, {"route": "probe"}, {"route": "derive"}])
 def test_0_is_the_zero_of_the_shape_in_a_premise_on_every_route(kw):
     probe = _probe(pair, "assuming f(x) != 0, for x in {0.0, 1.0}, f(x)[0] > 0",
@@ -131,20 +74,8 @@ def test_a_claim_of_its_own_stays_strict():
     assert _probe(pair, "for x in {0.0}, f(x) != 0").verdict in ("holds", "proven")
 
 
-def test_no_valid_domain_shows_where_a_record_is_read():
-    import mathema
-    record = mathema.check(echo, claims=[mathema.claim(
-        "assuming x == 5, for x in [0,10]^3, f(x) == [5,5,5]", name="c")])
-    assert "no valid domain" in str(record), str(record)
-    assert "x == [5, 5, 5]" in str(record), str(record)
-
-
 def m(A: Mat("n", "n")):
     return A
-
-
-def det_of(A: np.ndarray) -> float:
-    return float(np.linalg.det(np.asarray(A, dtype=float)))
 
 
 def two_v(x: Vec("n"), y: Vec("n")):
@@ -153,14 +84,6 @@ def two_v(x: Vec("n"), y: Vec("n")):
 
 def form(A: Mat("n", "n"), x: Vec("n")):
     return float(x @ A @ x)
-
-
-def scal(x: float) -> float:
-    return x + 1.0
-
-
-def dot(xs: list[float], ys: list[float]) -> float:
-    return sum(a * b for a, b in zip(xs, ys))
 
 
 def pd_pair(x: float):
@@ -179,62 +102,157 @@ def tuple_pair(x: float):
     return (x, x)
 
 
-@pytest.mark.parametrize("fn,law", [
-    (echo, "assuming x == 0, for x in [1,2]^3, f(x) == [0,0,0]"),
-    (echo, "assuming x == 0, for x in [1,2]^3, f(x) == [5,5,5]"),
-    (echo, "assuming x == [5,5,5], for x in [0,1]^3, f(x) == [5,5,5]"),
-    (echo, "assuming x == [5,5,5], for x in [0,1]^3, f(x) == [6,6,6]"),
-    (echo, "assuming x == [1,1], for x in [0,1]^3, f(x) == [1,1]"),
-    (echo, "assuming x == [[1,1],[1]], for x in [0,1]^(n,n), f(x)[0][0] == 1"),
-    (echo, "assuming x == [[1,1,1],[1,1,1]], for x in [0,1]^(n,n), f(x)[0][0] == 1"),
-    (scal, "assuming x == [1,2], for x in [0,5], f(x) == 3"),
-    (elist, "assuming x == 0, for x in {1,2}^2, f(x) == [5,5]"),
-])
-def test_a_premise_the_domain_excludes_has_no_valid_domain(fn, law):
-    probe = _probe(fn, law)
-    assert probe.verdict == "unknown", (probe.verdict, probe.counterexample)
-    assert "no valid domain" in probe.note, probe.note
-    assert remedy_statements(probe.note) == [], probe.note
+def _anyx(x):
+    return x
 
 
-def test_the_pin_is_not_given_outside_the_domain():
-    probe = _probe(echo, "assuming x == 5, for x in [0,1]^3, f(x) == [5,5,5]")
-    assert probe.verdict == "unknown"
-    assert remedy_statements(probe.note) == [], probe.note
-    assert "excludes 5" in probe.note, probe.note
+def opt(x: Optional[list[float]]):
+    return x
 
 
-def test_a_literal_draw_ties_every_dimension_it_shares():
-    law = ("assuming xs == [1,1,1], for xs in [-1,1]^n, ys in [-1,1]^n, "
-           "f(xs, ys) == ys[0]+ys[1]+ys[2]")
-    probe = _probe(dot, law)
-    assert probe.verdict in ("holds", "proven", "unknown"), (
-        probe.verdict, probe.counterexample)
+def opt_array(x: Optional[np.ndarray]):
+    return x
 
 
-@pytest.mark.parametrize("fn,law", [
-    (det_of, "assuming A == 0, for A in [0,1]^(n,n), f(A) == 0"),
-    (det_of, "assuming A == 0, for A in [0,1]^(2,2), f(A) == 0"),
+def det_of(A: np.ndarray) -> float:
+    return float(np.linalg.det(np.asarray(A, dtype=float)))
+
+
+_PINS = [
+    (echo, "assuming x == 0, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (echo, "assuming 0 == x, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (echo, "assuming x == 0.0, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (echo, "assuming x == 5, for x in [0,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming 5 == x, for x in [0,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming x == -5, for x in [-10,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming x == [5,5,5], for x in [0,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming x == [5,5,5], for x in [0,10]^3, f(x) == [6,6,6]"),
+    (echo, "assuming x == (5,5,5), for x in [0,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming [5,5,5] == x, for x in [0,10]^3, f(x) == [5,5,5]"),
+    (echo, "assuming x == 0 and x[0] >= 0, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (two_v, "assuming x == 0 and y != 0, x.T @ y == 0"),
+    (form, "assuming A is positive definite and x == 0, x.T @ A @ x == 0"),
+    (total, "assuming x == 5, for x in [0,10]^3, f(x) == 5"),
+    (ndim, "assuming x == 5, for x in [0,10]^3, f(x) == 0"),
     (m, "assuming A == 0, A @ A == A"),
-    (m, "assuming A == 0, trace(A) == 0"),
-    (m, "assuming A == 0, for A in R^(n,n), A @ A == A"),
-])
-def test_the_zero_of_a_matrix_has_the_matrix_shape(fn, law):
+    (m, "assuming A == 5, trace(A) == 5"),
+    (m, "assuming A == [[1,0],[0,1]], trace(A) == 2"),
+    (det_of, "assuming A == 0, for A in [0,1]^(n,n), f(A) == 0"),
+    (elist, "assuming x == 0, for x in [0,1]^3, f(x) == x"),
+    (elist, "assuming x == 0, f(x) == x"),
+    (opt, "assuming x == 0, for x in [0,1]^3 | {None}, f(x) == [0,0,0]"),
+    (opt, "assuming x == 0, f(x) == [0,0,0]"),
+    (opt_array, "assuming x == 0, for x in [0,1]^3 | {None}, f(x) == [0,0,0]"),
+    (_anyx, "assuming x == 0, for x in [0,1]^2, f(x) == [0,0]"),
+    (_anyx, "assuming x == 0, for x in [0,1]^(2,2), f(x) == [[0,0],[0,0]]"),
+    (echo, "assuming x == ['a','b'], for x in [0,1]^2, f(x) == x"),
+    (echo, "assuming x == [None, 1], for x in [0,1]^2, f(x) == x"),
+]
+
+
+@pytest.mark.parametrize("route", ["best", "probe", "derive"])
+@pytest.mark.parametrize("fn,law", _PINS, ids=lambda v: getattr(v, "__name__", v))
+def test_a_premise_pinning_a_whole_container_is_not_read_yet(fn, law, route):
+    probe = _probe(fn, law, route=route)
+    assert probe.verdict == "unknown", (probe.verdict, probe.counterexample)
+    assert probe.n == 0
+    assert "not read yet" in probe.note, probe.note
+    assert remedy_statements(probe.note) == [], probe.note
+
+
+def test_a_pin_draws_no_point():
+    calls = []
+
+    def counted(x):
+        calls.append(x)
+        return x
+
+    probe = _probe(counted, "assuming x == 0, for x in [0,1]^2, f(x) == [0,0]")
+    assert probe.verdict == "unknown"
+    assert calls == []
+
+
+def test_a_pin_shows_where_a_record_is_read():
+    import mathema
+    record = mathema.check(echo, claims=[mathema.claim(
+        "assuming x == 5, for x in [0,10]^3, f(x) == [5,5,5]", name="c")])
+    assert "not read yet" in str(record), str(record)
+
+
+def test_no_draw_pins_a_container():
+    for law in ("assuming x == 0, for x in [0,1]^3, f(x)[0] == 0",
+                "assuming x == [1,1,1], for x in [0,1]^3, f(x)[0] == 1"):
+        cj = claim(law, name="c")
+        premises = _interpret_assumption(cj, [cj])[2]
+        assert _premises.premise_draws(premises, {"x": "vec"}, cj.domain) == {}
+        assert _premises.solve_equality(premises, {"x": "vec"}, cj.domain) is None
+
+
+@pytest.mark.parametrize("fn,law", [
+    (echo, "assuming x != 0, for x in {0,1}^2, f(x)[0] + f(x)[1] > 0"),
+    (echo, "assuming x != 5, for x in [0,1]^3, f(x)[0] <= 1"),
+    (echo, "assuming x[0] == 0, for x in [0,1]^3, f(x)[0] == 0"),
+    (echo, "assuming sum(x) == 0, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (echo, "assuming norm(x) == 0, for x in [0,1]^3, f(x) == [0,0,0]"),
+    (echo, "assuming max(x) == min(x), for x in [0,1]^3, f(x)[0] == f(x)[1]"),
+    (pair, "assuming f(x) == 0, for x in {0.0, 1.0}, x == 0"),
+    (pair, "assuming f(x) != 0, for x in {0.0, 1.0}, x > 0"),
+], ids=lambda v: getattr(v, "__name__", v))
+def test_a_relation_or_an_element_premise_stays_read(fn, law):
     probe = _probe(fn, law)
     assert probe.verdict in ("holds", "proven"), (probe.verdict, probe.note,
                                                   probe.counterexample)
 
 
-@pytest.mark.parametrize("fn,law", [
-    (two_v, "assuming x == 0, x.T @ y == 0"),
-    (form, "assuming A is positive definite and x == 0, x.T @ A @ x == 0"),
-])
-def test_a_companion_counts_only_points_inside_the_premise(fn, law):
-    rows = check_conjectures(fn, [claim(law, name="c")], float_companions=True)
-    (row, *companions) = rows
-    assert row.verdict in ("holds", "proven"), (row.verdict, row.counterexample)
-    for line in companions:
-        assert line.verdict != "falsified", (line.name, line.counterexample)
+def _ragged(x: float):
+    return [[1.0], [x, 2.0]]
+
+
+def _ragged_zeros(x: float):
+    return [[0.0], [0.0, 0.0]]
+
+
+@pytest.mark.parametrize("route", ["best", "probe"])
+def test_a_ragged_value_in_a_premise_gets_a_verdict(route):
+    probe = _probe(_ragged, "assuming f(x) != 0, for x in {0.0, 1.0}, x >= 0",
+                   route=route)
+    assert probe.verdict in ("holds", "proven", "unknown"), probe.verdict
+
+
+def test_a_ragged_value_is_not_the_zero():
+    assert _probe(_ragged, "assuming f(x) != 0, for x in {0.0, 1.0}, x >= 0"
+                  ).verdict in ("holds", "proven")
+    assert _probe(_ragged_zeros, "assuming f(x) != 0, for x in {0.0, 1.0}, x >= 0"
+                  ).verdict in ("holds", "proven")
+    assert _premises.premise_relation([[0.0], [0.0, 0.0]], 0, "==", 1e-9, 0.0) is False
+    assert _premises.premise_relation([[0.0], [0.0, 0.0]], 0, "!=", 1e-9, 0.0) is True
+
+
+def test_a_companion_reads_a_premise_exactly():
+    from mathema import gates
+    from mathema.conjecture import _effective_facts
+
+    def plain(x: float) -> float:
+        return x
+
+    cj = claim("assuming x == 0, for x in [-1, 1], f(x) == 0", name="c")
+    facts = _effective_facts(plain, None)
+    premise = [("x", "==", "0")]
+    tolerant = gates._point_evaluator(cj, plain, facts, cj.domain, {}, premise)
+    exact = gates._point_evaluator(cj, plain, facts, cj.domain, {}, premise,
+                                   exact_premises=True)
+    assert tolerant["admits"]({"x": 1e-10}) is True
+    assert exact["admits"]({"x": 1e-10}) is False
+    assert exact["admits"]({"x": 0.0}) is True
+
+
+def test_a_companion_leaves_out_what_a_premise_leaves_out():
+    from mathema.conjecture import _outside_premise_shapes
+    outside = _outside_premise_shapes(form, {"A": ("is_positive_definite",)})
+    good = {"A": [[2.0, 0.0], [0.0, 2.0]], "x": [1.0, 1.0]}
+    assert outside(good) is False
+    assert outside({**good, "A": [[-1.0, 0.0], [0.0, -1.0]]}) is True
+    assert outside({**good, "A": [1.0, 1.0]}) is True
 
 
 def test_the_zero_reading_reaches_a_tuple_on_the_probe_route():
@@ -276,20 +294,3 @@ def test_a_quadratic_form_at_size_one_is_still_a_number():
     probe = _probe(form, "assuming A is positive definite, "
                          "for A in R^(1,1), x in R^1, x.T @ A @ x == x.T @ (A @ x)")
     assert probe.verdict in ("holds", "proven"), (probe.verdict, probe.sketch)
-
-
-def test_a_family_guard_places_a_draw_by_the_points_own_shape():
-    import random
-    zero = _premises._ZeroOfShape()
-    assert _premises.placed_draw(zero, random.Random(0), None,
-                                 [[1.0, 2.0], [3.0, 4.0]]) == [[0.0, 0.0], [0.0, 0.0]]
-    literal = _premises._LiteralVector([1, 1])
-    assert _premises.placed_draw(literal, random.Random(0), None, [0.0, 0.0]) == [1, 1]
-    assert _premises.placed_draw(literal, random.Random(0), None,
-                                 [0.0, 0.0, 0.0]) is _premises.NO_POINT
-
-
-def test_a_matrix_premise_says_matrix():
-    probe = _probe(m, "assuming A == 5, trace(A) == 5")
-    assert probe.verdict == "unknown"
-    assert "the matrix A" in probe.note, probe.note
