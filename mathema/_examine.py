@@ -663,6 +663,37 @@ def _solved(key, fn, generator, constructing, depth: int, under_way) -> Effects:
     return found
 
 
+def _keep_shortest_chains(effects: Effects, name: str) -> None:
+    """Intent:
+        Of the writes in which `name` passes one object to one callee
+        and that end at the same write, keep the one with fewest
+        clauses (then the first in text order). Inside a call cycle a
+        longer one goes round the cycle again to the same write through
+        the same object, so it says nothing the shortest does not, and
+        the sentences a cycle can make stay finite. When the branch
+        conditions around them differ, the kept one counts as reached
+        outside every branch.
+    """
+    opening = f"{name} passes "
+    chains: dict = {}
+    for site in effects.writes:
+        if site.text.startswith(opening) and ", and " in site.text:
+            pair = (site.text.split(", and ", 1)[0],
+                    site.text.rsplit(", and ", 1)[-1])
+            chains.setdefault(pair, []).append(site)
+    dropped = set()
+    for sites in chains.values():
+        kept = min(sites, key=lambda s: (s.text.count(", and "), s.text))
+        if len({effects.guards.get(s, ()) for s in sites}) > 1:
+            effects.guards[kept] = ()
+        for site in sites:
+            if site is not kept:
+                dropped.add(site)
+                effects.guards.pop(site, None)
+    if dropped:
+        effects.writes = [s for s in effects.writes if s not in dropped]
+
+
 def _own_statements(tree):
     """Every node of a function's body outside the functions and
     classes defined in it."""
@@ -779,12 +810,17 @@ class _Examiner:
         self.effects.returns = [o for o in returned if o[0] != "fresh"]
         self.effects.returns_exact = bool(returned) and all(
             _same_origin(o, returned[0]) for o in returned) and returned[0][0] != "fresh"
+        if _in_a_cycle():
+            _keep_shortest_chains(self.effects, self.name)
         own = f"{self.name} "
         for site in self.effects.writes:
             if not site.text.startswith(own):
                 continue
+            # the first clause names what this function changes or passes
+            # on; the clauses after it speak of the callees' parameters
+            head = site.text.split(", and ", 1)[0]
             for p in params:
-                if re.search(rf"its argument {re.escape(p)}\b", site.text):
+                if re.search(rf"its argument {re.escape(p)}\b", head):
                     self.effects.arg_writes.append((p, site))
                     break
         return self.effects
@@ -1579,25 +1615,9 @@ class _Examiner:
             changed = self._outside(self._origin_of(arg))
             if changed is not None:
                 self._note_module_write(self._origin_of(arg))
-                opening = f"{self.name} passes {changed} to {callee}"
-                if not self._already_round_the_cycle(opening, site):
-                    self.effects.add(Site("write", f"{opening}, and "
-                                          f"{site.text}"))
-
-    def _already_round_the_cycle(self, opening: str, site: Site) -> bool:
-        """Intent:
-            Whether this body, examined inside a call cycle, already has
-            the write `site` comes down to, through the argument
-            `opening` passes. Going round the cycle again changes the
-            same object, so a sentence longer by one more lap says
-            nothing new, and the sentences a cycle can make stay finite.
-        """
-        if not _UNDER_WAY.reading and not _in_a_cycle():
-            return False
-        final = site.text.rsplit(", and ", 1)[-1]
-        return any(w.text.startswith(opening)
-                   and w.text.rsplit(", and ", 1)[-1] == final
-                   for w in self.effects.writes)
+                self.effects.add(Site("write", f"{self.name} passes "
+                                      f"{changed} to {callee}, and "
+                                      f"{site.text}"))
 
     def call(self, node: ast.Call) -> None:
         for arg in node.args:

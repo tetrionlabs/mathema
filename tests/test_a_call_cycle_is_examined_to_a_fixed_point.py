@@ -343,3 +343,335 @@ def test_an_examination_stopped_inside_an_inner_cycle_leaves_nothing_behind():
     assert any("LOG" in s.text for s in found.writes)
     assert any("LOG" in t for t in _write_texts(inner_writer))
     assert not examine(inner_reader).writes
+
+
+def two_sites_a(xs, n):
+    xs.append(n)
+    return two_sites_b(xs, n - 1) if n > 0 else 0
+
+
+def two_sites_b(xs, n):
+    return two_sites_c(xs, n)
+
+
+def two_sites_c(xs, n):
+    if n > 0:
+        return two_sites_a(xs, n)
+    xs.pop()
+    return 0
+
+
+def holds_its_own(n):
+    return two_sites_a([0], n)
+
+
+def draws_a(rng, n):
+    rng.random()
+    return draws_b(rng, n - 1) if n else 0
+
+
+def draws_b(rng, n):
+    return draws_c(rng, n)
+
+
+def draws_c(rng, n):
+    return draws_a(rng, n) if n else rng.randint(0, 1)
+
+
+def four_a(xs, n):
+    return four_b(xs, n)
+
+
+def four_b(xs, n):
+    xs.append(n)
+    return four_c(xs, n)
+
+
+def four_c(xs, n):
+    return four_d(xs, n - 1) if n > 0 else 0
+
+
+def four_d(xs, n):
+    if n > 1:
+        xs.pop()
+    TABLE["d"] = n
+    return four_a(xs, n)
+
+
+def holds_four(n):
+    return four_a([], n)
+
+
+def swaps_a(xs, ys, n):
+    xs.append(n)
+    return swaps_b(ys, xs, n - 1) if n > 0 else 0
+
+
+def swaps_b(xs, ys, n):
+    return swaps_c(xs, ys, n)
+
+
+def swaps_c(xs, ys, n):
+    return swaps_a(xs, ys, n) if n > 0 else 0
+
+
+def into(xs):
+    xs.append(1)
+    return 0
+
+
+def hands_log(xs):
+    return into(LOG)
+
+
+def fresh_to_hands_log():
+    return hands_log([])
+
+
+def log_a(xs, n):
+    return log_b(LOG, n) if n else 0
+
+
+def log_b(xs, n):
+    xs.append(n)
+    return log_a(xs, n - 1)
+
+
+def fresh_to_log_a(n):
+    return log_a([], n)
+
+
+def guarded_a(xs, n, flag=None):
+    if flag is not None:
+        guarded_b(xs, n)
+    return guarded_b(xs, n)
+
+
+def guarded_b(xs, n):
+    return guarded_c(xs, n)
+
+
+def guarded_c(xs, n):
+    xs.append(n)
+    return guarded_a(xs, n - 1) if n > 0 else 0
+
+
+def lap_a(xs, n):
+    return lap_b(xs, n)
+
+
+def lap_b(xs, n):
+    return lap_a(xs, n - 1) + lap_c(xs, n) if n > 0 else 0
+
+
+def lap_c(xs, n):
+    xs.append(n)
+    return 0
+
+
+def branch_a(xs, n, flag=None):
+    if flag is not None:
+        branch_b([], xs, n)
+    return branch_b(xs, [], n)
+
+
+def branch_b(p, q, n):
+    q.append(n)
+    return branch_c(p, n - 1) if n > 0 else 0
+
+
+def branch_c(p, n):
+    return branch_b([], p, n) + branch_a(p, n - 1) if n > 1 else 0
+
+
+def diamond_top(xs):
+    return diamond_mid(xs)
+
+
+def diamond_mid(xs):
+    return diamond_left(xs) + diamond_right(xs)
+
+
+def diamond_left(xs):
+    return diamond_sink(xs)
+
+
+def diamond_right(xs):
+    return diamond_sink(xs)
+
+
+def diamond_sink(xs):
+    xs.append(1)
+    return 0
+
+
+_SETTLING = {
+    "two_sites": [two_sites_a, two_sites_b, two_sites_c],
+    "draws": [draws_a, draws_b, draws_c],
+    "four": [four_a, four_b, four_c, four_d],
+    "swaps": [swaps_a, swaps_b, swaps_c],
+    "guarded": [guarded_a, guarded_b, guarded_c],
+    "laps": [lap_a, lap_b, lap_c],
+    "branch": [branch_a, branch_b, branch_c],
+}
+
+
+def _orders(members):
+    yield from ([m, *[o for o in members if o is not m]] for m in members)
+    for seed in range(4):
+        order = list(members)
+        random.Random(seed).shuffle(order)
+        yield order
+
+
+def _sites(found):
+    return [*found.writes, *found.hidden_reads, *found.order_sensitive,
+            *found.unknowns, *found.unknown_writes]
+
+
+@pytest.mark.parametrize("cycle", _SETTLING, ids=str)
+def test_a_cycle_passing_an_argument_settles_whichever_member_is_first(cycle):
+    members = _SETTLING[cycle]
+    seen = None
+    for order in _orders(members):
+        _clear()
+        for member in order:
+            examine(member)
+        found = {m.__name__: examine(m) for m in members}
+        for name, effects in found.items():
+            assert not any("did not settle" in s.text
+                           for s in _sites(effects)), name
+        reading = {name: sorted(s.text for s in _sites(effects))
+                   for name, effects in found.items()}
+        if seen is not None:
+            assert reading == seen, [m.__name__ for m in order]
+        seen = reading
+
+
+@pytest.mark.parametrize("cycle", _SETTLING, ids=str)
+def test_a_chain_round_a_cycle_never_repeats_a_lap(cycle):
+    members = _SETTLING[cycle]
+    _clear()
+    for member in members:
+        for site in _sites(examine(member)):
+            clauses = site.text.split(", and ")
+            assert len(clauses) == len(set(clauses)), site.text
+            assert len(clauses) <= 2 * len(members) + 1, site.text
+
+
+@pytest.mark.parametrize("cycle", ["two_sites", "four", "swaps"], ids=str)
+def test_the_examination_of_a_cycle_passing_an_argument_settles_in_few_rounds(
+        cycle):
+    members = _SETTLING[cycle]
+    runs = []
+    run = _examine._Examiner.run
+
+    def counted(self):
+        runs.append(self.fn)
+        return run(self)
+
+    _examine._Examiner.run = counted
+    try:
+        _clear()
+        examine(members[0])
+    finally:
+        _examine._Examiner.run = run
+    assert len(runs) <= 4 * len(members)
+
+
+def test_a_cycle_that_passes_on_what_it_changes_is_state_unsafe():
+    state = [claim("is_state_safe(f)")]
+    for cycle in ("two_sites", "four", "swaps", "guarded"):
+        members = _SETTLING[cycle]
+        for order in _orders(members):
+            _clear()
+            for member in order:
+                (result,) = check_conjectures(member, state)
+                assert result.verdict == "falsified", (cycle, member.__name__)
+
+
+def test_a_caller_that_owns_what_the_cycle_changes_is_state_safe():
+    state = [claim("is_state_safe(f)")]
+    for fn, members in ((holds_its_own, _SETTLING["two_sites"]),
+                        (draws_a, _SETTLING["draws"]),
+                        (draws_c, _SETTLING["draws"])):
+        for first in (None, *members):
+            _clear()
+            if first is not None:
+                examine(first)
+            (result,) = check_conjectures(fn, state)
+            assert result.verdict == "proven", (fn.__name__, first)
+
+
+def test_a_caller_that_owns_one_object_of_a_cycle_still_sees_the_other():
+    (site,) = (s for s in examine(holds_four).writes)
+    assert "TABLE" in site.text
+    for first in (four_a, four_b, four_c, four_d):
+        _clear()
+        examine(first)
+        assert [s.text for s in examine(holds_four).writes] == [site.text]
+
+
+def test_a_write_reached_through_swapped_arguments_belongs_to_both():
+    for first in _SETTLING["swaps"]:
+        _clear()
+        examine(first)
+        assert {p for p, _ in examine(swaps_a).arg_writes} == {"xs", "ys"}
+        assert {p for p, _ in examine(swaps_b).arg_writes} == {"xs", "ys"}
+
+
+def test_a_write_to_an_object_passed_on_is_not_the_caller_s_parameter():
+    state = [claim("is_state_safe(f)")]
+    for fn, middle in ((fresh_to_hands_log, hands_log),
+                       (fresh_to_log_a, log_a)):
+        _clear()
+        assert not examine(middle).arg_writes, middle.__name__
+        assert any("LOG" in t for t in _write_texts(fn)), fn.__name__
+        _clear()
+        (result,) = check_conjectures(fn, state)
+        assert result.verdict == "falsified", fn.__name__
+
+
+def test_a_cycle_member_called_outside_every_branch_writes_at_its_defaults():
+    for first in _SETTLING["guarded"]:
+        _clear()
+        examine(first)
+        found = examine(guarded_a)
+        assert _examine.writes_at_defaults(guarded_a, found), first.__name__
+
+
+def test_every_member_states_each_write_the_cycle_makes():
+    for first in _SETTLING["two_sites"]:
+        _clear()
+        examine(first)
+        for member in _SETTLING["two_sites"]:
+            ends = {t.rsplit(", and ", 1)[-1] for t in _write_texts(member)}
+            assert {"two_sites_a changes its argument xs (xs.append(n))",
+                    "two_sites_c changes its argument xs (xs.pop())"} <= ends, (
+                first.__name__, member.__name__)
+
+
+def test_the_shorter_chain_under_a_branch_leaves_the_write_at_its_defaults():
+    state = [claim("is_state_safe(f)")]
+    for first in _SETTLING["branch"]:
+        _clear()
+        examine(first)
+        found = examine(branch_a)
+        assert _examine.writes_at_defaults(branch_a, found), first.__name__
+        _clear()
+        examine(first)
+        (result,) = check_conjectures(branch_a, state)
+        assert result.verdict == "falsified", first.__name__
+
+
+def test_outside_a_cycle_every_path_to_a_write_is_stated():
+    _clear()
+    assert sorted(_write_texts(diamond_top)) == [
+        "diamond_top passes its argument xs to diamond_mid, and diamond_mid "
+        "passes its argument xs to diamond_left, and diamond_left passes its "
+        "argument xs to diamond_sink, and diamond_sink changes its argument "
+        "xs (xs.append(1))",
+        "diamond_top passes its argument xs to diamond_mid, and diamond_mid "
+        "passes its argument xs to diamond_right, and diamond_right passes "
+        "its argument xs to diamond_sink, and diamond_sink changes its "
+        "argument xs (xs.append(1))"]
