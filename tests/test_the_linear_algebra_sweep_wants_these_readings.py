@@ -43,6 +43,10 @@ def anyx(x):
     return x
 
 
+def dot(xs: list[float], ys: list[float]) -> float:
+    return sum(a * b for a, b in zip(xs, ys))
+
+
 def det_of(A: np.ndarray) -> float:
     return float(np.linalg.det(np.asarray(A, dtype=float)))
 
@@ -82,6 +86,10 @@ _HOLD = [
     (det_of, "assuming A == 0, for A in [0,1]^(n,n), f(A) == 0"),
     (det_marked, "assuming A == 0, f(A) == 0"),
     (m, "assuming A == 0, A @ A == A"),
+    (m, "assuming A == 0, trace(A) == 0"),
+    (m, "assuming A == 0, for A in R^(n,n), A @ A == A"),
+    (dot, "assuming xs == [1,1,1], for xs in [-1,1]^n, ys in [-1,1]^n, "
+          "f(xs, ys) == ys[0]+ys[1]+ys[2]"),
     # the zero and the literal the domain admits
     (echo, "assuming x == [1,1,1], for x in [0,1]^3, f(x) == [1,1,1]"),
 ]
