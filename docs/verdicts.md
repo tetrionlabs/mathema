@@ -128,9 +128,10 @@ over a vector is `skipped:misspecified`.
 An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,
 2.0]` holds. Over an empty value (a list, an array, a dict, a set, a
 string, a range) it does not hold, since there is no element at which it
-could: empty is not 0 and is not `>= 0`. Two strings keep their own
-order, the empty string first, so `"" <= "a"` holds and `"" < ""` does
-not. `[] == []` holds and `[] != 5` holds.
+could: empty is not 0 and is not `>= 0`. An empty string against a
+string keeps the order of strings, the empty string first, so `"" <=
+"a"` holds and `"" < ""` does not; an ordering between two strings that
+are both non-empty is not read. `[] == []` holds and `[] != 5` holds.
 
 A claim that fails on one of these shapes says so in its note, and gives
 as corrections the claims that say what it may have meant: the element
