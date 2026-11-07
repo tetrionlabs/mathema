@@ -488,3 +488,73 @@ def test_every_reserved_family_is_named_as_crediting_no_source():
     from mathema.badges import _NO_SOURCE
     from mathema.claim_families import RESERVED_FAMILIES
     assert set(RESERVED_FAMILIES) <= _NO_SOURCE
+
+
+# --- core's own badges are off unless MATHEMA_BADGES says otherwise ----
+
+def _unset_flag(monkeypatch):
+    monkeypatch.delenv("MATHEMA_BADGES", raising=False)
+
+
+def _never_scored(monkeypatch):
+    from mathema import badges
+
+    def refuse(*a, **k):
+        raise AssertionError("repo_badges ran with the flag off")
+    monkeypatch.setattr(badges, "repo_badges", refuse)
+
+
+def test_the_flag_is_read_from_the_environment(monkeypatch):
+    from mathema.badges import core_badges_enabled
+    _unset_flag(monkeypatch)
+    assert core_badges_enabled() is False
+    for value in ("", "0", "off", "false", "no"):
+        monkeypatch.setenv("MATHEMA_BADGES", value)
+        assert core_badges_enabled() is False, value
+    for value in ("on", "ON", "1", "true", "yes"):
+        monkeypatch.setenv("MATHEMA_BADGES", value)
+        assert core_badges_enabled() is True, value
+
+
+def test_the_moved_notice_is_one_line_naming_the_replacement():
+    from mathema.badges import MOVED_NOTICE
+    assert "\n" not in MOVED_NOTICE
+    assert "mathema-ci measure --out" in MOVED_NOTICE
+    assert "pip install mathema-ci" in MOVED_NOTICE
+    assert "MATHEMA_BADGES=on" in MOVED_NOTICE
+    assert MOVED_NOTICE == (
+        "badges now come from `mathema-ci measure --out` "
+        "(pip install mathema-ci); set MATHEMA_BADGES=on for the built-in "
+        "writer, which 0.6.5 removes")
+
+
+def test_the_cli_prints_only_the_notice_by_default(tmp_path, monkeypatch,
+                                                   capsys):
+    from mathema.badges import MOVED_NOTICE
+    from mathema.cli import main
+    _unset_flag(monkeypatch)
+    _never_scored(monkeypatch)
+    rc = main(["badges", "--root", str(tmp_path), "--out",
+               str(tmp_path / "out")])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == MOVED_NOTICE + "\n"
+    assert captured.err == ""
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_cli_runs_the_badges_with_the_flag_on(tmp_path, monkeypatch,
+                                                  capsys):
+    from mathema.cli import main
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
+    assert main(["badges", "--root", str(tmp_path)]) == 0
+    assert "IMPL" in capsys.readouterr().out
+
+
+def test_the_mcp_badges_tool_returns_only_the_notice_by_default(
+        tmp_path, monkeypatch):
+    from mathema.badges import MOVED_NOTICE
+    from mathema.interfaces.mcp import tools
+    _unset_flag(monkeypatch)
+    _never_scored(monkeypatch)
+    assert tools.badges(root=str(tmp_path)) == {"notice": MOVED_NOTICE}

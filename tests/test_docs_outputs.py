@@ -743,6 +743,7 @@ def test_the_three_layers_triangle_is_the_billing_modules_real_state(tmp_path):
     env.pop("VIRTUAL_ENV", None)
     env.pop("MATHEMA_PSEUDO_INFINITY", None)
     env["XDG_CONFIG_HOME"] = os.path.join(workdir, ".config")
+    env["MATHEMA_BADGES"] = "on"
     from tests._proof_budget import raise_environment
     raise_environment(env)
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--drive",

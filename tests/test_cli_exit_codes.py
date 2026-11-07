@@ -66,7 +66,9 @@ def test_init_with_an_unresolvable_target_writes_nothing(project, capsys):
     assert _listing(project) == before
 
 
-def test_badges_to_an_unwritable_dir_prints_no_badge(project, capsys):
+def test_badges_to_an_unwritable_dir_prints_no_badge(project, capsys,
+                                                     monkeypatch):
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
     blocker = project / "blocker"
     blocker.write_text("a file, so no directory can be made under it")
     captured = _bad(capsys, ["badges", "--out", str(blocker / "out"),
