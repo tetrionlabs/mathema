@@ -142,6 +142,31 @@ def _is_matrix(term) -> bool:
     return isinstance(term, sympy.MatrixExpr) and term.shape != (1, 1)
 
 
+def _meets_a_number_at_size_one(lhs_tree, rhs_tree, params: dict, env: dict,
+                                vectors: frozenset) -> bool:
+    """Intent:
+        Whether a claim over a parameter of size one compares an array
+        with a number. `_lift` reads a 1-by-1 result as the number it
+        holds, which a quadratic form is and `A - A` is not, so the sides
+        are lifted again with each axis of size one at size two, where an
+        array stays an array.
+    """
+    if not any(shape == (1, 1) for shape in params.values()):
+        return False
+    names = {str(v) for v in vectors}
+    wide = {p: sympy.MatrixSymbol(p, 2 if r == 1 else r,
+                                  c if p in names and c == 1
+                                  else 2 if c == 1 else c)
+            for p, (r, c) in params.items()}
+    try:
+        return _is_matrix(_lift(lhs_tree, {**env, **wide},
+                                frozenset(wide[p] for p in names))) \
+            != _is_matrix(_lift(rhs_tree, {**env, **wide},
+                                frozenset(wide[p] for p in names)))
+    except (ValueError, TypeError, KeyError, sympy.ShapeError):
+        return False
+
+
 def _vector_like(term, vectors: frozenset) -> bool:
     """Whether a column expression stands for a 1-D vector (it is built
     from a vector parameter), so `@` reads it the way numpy reads a
@@ -591,6 +616,8 @@ def try_prove_matrix(lhs_src: str, rhs_src: str, relation: str, facts,
         if not _is_matrix(lhs):
             return None
     elif _is_matrix(lhs) != _is_matrix(rhs):
+        return None
+    elif _meets_a_number_at_size_one(lhs_tree, rhs_tree, params, env, vectors):
         return None
     elif not _is_matrix(lhs):
         lhs, rhs = _scalar(lhs), _scalar(rhs)

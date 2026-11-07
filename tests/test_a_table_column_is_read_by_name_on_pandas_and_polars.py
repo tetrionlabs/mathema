@@ -3,10 +3,13 @@
 """A reduction of a table answers one value per column, and a claim
 reads the answer for a column by its name.
 
-pandas answers `df.sum()` with a Series labelled by the column names;
-polars answers with a one-row DataFrame. Either way `f(a)["x"]` is the
-answer for column `x`, whatever other columns the table has and in
-whatever order, so a row stated by name adjudicates on both libraries.
+pandas answers `df.sum()` with a Series labelled by the column names,
+so `f(a)["x"]` is the number for column `x`; polars answers with a
+one-row DataFrame, so `f(a)["x"]` is a vector of one element, which is
+not its element: the claim reads it as `f(a)["x"][0]`, or compares the
+whole, `[sum(a.x)]`. Either way the answer for column `x` is read by
+its name, whatever other columns the table has and in whatever order,
+so a row stated by name adjudicates on both libraries.
 A row stated by position reads the position, as it always has: it
 holds where column `x` is at that position and is falsified where it
 is not.
@@ -43,13 +46,30 @@ def _verdict(fn, text: str):
     return p
 
 
-@pytest.mark.parametrize("fn", [pandas_sums, polars_sums])
 @pytest.mark.parametrize("text", ['f(a)["x"] ~= sum(a.x)',
                                   'f(a)["y"] ~= 2 * sum(a.x)'])
-def test_a_reduction_read_by_column_name_holds(fn, text):
-    p = _verdict(fn, text)
+def test_a_pandas_reduction_read_by_column_name_holds(text):
+    p = _verdict(pandas_sums, text)
     assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
                                               p.counterexample)
+
+
+@pytest.mark.parametrize("text", ['f(a)["x"][0] ~= sum(a.x)',
+                                  'f(a)["x"] ~= [sum(a.x)]',
+                                  'f(a)["y"][0] ~= 2 * sum(a.x)',
+                                  'f(a)["y"] ~= [2 * sum(a.x)]'])
+def test_a_polars_reduction_read_by_column_name_holds_as_a_vector(text):
+    p = _verdict(polars_sums, text)
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.note,
+                                              p.counterexample)
+
+
+@pytest.mark.parametrize("text", ['f(a)["x"] ~= sum(a.x)',
+                                  'f(a)["y"] ~= 2 * sum(a.x)'])
+def test_a_polars_reduction_against_a_number_is_a_mismatch(text):
+    p = _verdict(polars_sums, text)
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert "] vs " in str(p.counterexample), p.counterexample
 
 
 @pytest.mark.parametrize("fn", [pandas_sums, polars_sums])

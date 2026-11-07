@@ -542,7 +542,9 @@ def _detail(p, count_words) -> str:
         from .records import within_float64_words
         return within_float64_words(p.meta)
     if verdict == "falsified" and p.counterexample:
-        return f"counterexample {p.counterexample}"
+        correction = (p.meta or {}).get("mathema.correction")
+        return (f"counterexample {p.counterexample}"
+                + (f"\n{correction}" if correction else ""))
     if verdict in ("unknown", "skipped") and p.note:
         return p.note
     return ""

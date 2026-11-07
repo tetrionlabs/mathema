@@ -702,6 +702,9 @@ def _declared_conjecture(c: dict, default_grammar: str = "mathema"):
     # serialized dotted refs, which are only their fallback spelling
     for name, target in (c.get("__live_funcs__") or {}).items():
         cj.funcs[name] = target
+    if c.get("__written__"):
+        from dataclasses import replace as _replace
+        cj = _replace(cj, written=c["__written__"])
     return cj
 
 
