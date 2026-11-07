@@ -329,10 +329,12 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 or meta.get("mathema.gate"):
             continue
         under = companions.get(main.name, [])
-        rows = [r for r in policy
-                if _is_return_row(r)
-                or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
-                           r.meta["mathema.policy"].get("kind") or "")]
+        # a misspecified claim ran nothing, so no default row is about it
+        rows = [] if "misspecified" in str(main.verdict) else [
+            r for r in policy
+            if _is_return_row(r)
+            or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
+                       r.meta["mathema.policy"].get("kind") or "")]
         if not under and not rows:
             continue
         lines = []

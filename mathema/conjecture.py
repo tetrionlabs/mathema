@@ -6302,6 +6302,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped:misspecified", route=None,
                 note=f"{ctx.note}; {pin_problem}")))
             continue
+        sizes_conflict = _fixed_size_conflict(fn, facts, ctx.cj_domain)
+        if sizes_conflict is not None:
+            # the bindings fix one shared dimension to two sizes: no
+            # value satisfies the claim's own domain, on any route
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{ctx.note}; {sizes_conflict}",
+                meta={"mathema.invalid_conjecture": True,
+                      "mathema.premise": "dimension-conflict"})))
+            continue
         # the family is resolved for every concrete route: the derive
         # stage reads its derive half, and the probe stage reads its
         # probe:algorithmic half, a plain route="probe" claim on a
@@ -8849,7 +8859,7 @@ def _container_holes(p: str, record, resolution: dict) -> tuple:
     return bool(absent), holes
 
 
-def _admitted_container_points(ctx, facts) -> tuple:
+def _admitted_container_points(ctx, facts, resolver=None) -> tuple:
     """Intent:
         `(points, holes)` for a proof's companion: `points` the floor of
         every vector, matrix and table parameter as `(param, word,
@@ -8857,6 +8867,14 @@ def _admitted_container_points(ctx, facts) -> tuple:
         container absent, None for an item holding no hole), each built
         from a fixed small draw inside the element domain; `holes` the
         realised hole values each container's slots admit.
+
+    Notes:
+        `resolver`, the claim's `dimensions.DimResolver`, ties sizes: an
+        axis whose dimension another axis shares, or that a binding
+        fixes, takes its size at a domain corner
+        (`DimResolver.corner_sizes`), and a vector on such an axis keeps
+        that length in every floor item, so the value agrees with the
+        corner it is executed beside.
     """
     import random as _random
 
@@ -8867,6 +8885,17 @@ def _admitted_container_points(ctx, facts) -> tuple:
     rng = _random.Random(_RNG_SEED)
     points: list = []
     holes_of: dict = {}
+    tied = resolver.tied_keys() if resolver is not None else set()
+    at_corner = resolver.corner_sizes() if resolver is not None else {}
+
+    def tied_sizes(p, drawn):
+        # each axis a tied dimension sizes at its corner size, the rest
+        # as drawn
+        if resolver is None:
+            return tuple(drawn)
+        return tuple(at_corner[resolver.key(p, a)]
+                     if resolver.key(p, a) in tied else size
+                     for a, size in enumerate(drawn))
     for p in facts.params:
         kind = facts.param_kinds.get(p, "unknown")
         bound = (ctx.cj_domain or {}).get(p)
@@ -8883,7 +8912,7 @@ def _admitted_container_points(ctx, facts) -> tuple:
         dims = tuple(getattr(bound, "dims", ()) or ())
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
-            (length,) = _floor.sizes(bound, rng, (3, 3))
+            (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             columns = _table_columns(p, ctx.cj, facts)
             base = {c: [_synth("float", rng,
                                _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))
@@ -8896,14 +8925,19 @@ def _admitted_container_points(ctx, facts) -> tuple:
             n_rows, n_cols = _floor.sizes(bound, rng, (2, 2) if square else (2, 3), 2)
             if not square and fixed[1:2] == (None,):
                 n_cols = 3
+            n_rows, n_cols = tied_sizes(p, (n_rows, n_cols))
             base = [[_synth("float", rng, bound) for _ in range(n_cols)]
                     for _ in range(n_rows)]
             floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
         else:
-            (length,) = _floor.sizes(bound, rng, (3, 3))
+            (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             base = [_synth("float", rng, bound) for _ in range(length)]
+            free = not any(fixed) and not (
+                resolver is not None and p in resolver.shapes and any(
+                    resolver.key(p, a) in tied
+                    for a in range(resolver.shapes[p].ndim)))
             floor = _floor.vector_floor(holes, admits_zero,
-                                        length_free=not any(fixed), absent=absent)
+                                        length_free=free, absent=absent)
         for item in floor:
             value = item(base)
             if value is None:
@@ -10176,6 +10210,24 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
 
 
+def _fixed_size_conflict(fn, facts, cj_domain) -> "str | None":
+    """Intent:
+        The reason text when the claim's bindings fix one shared
+        dimension to two sizes (`dimensions.FixedSizeConflict`), else
+        None. Any other dimension conflict, or a signature with no
+        markers, is left to the routes.
+    """
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        _dims.resolve(facts, shapes_from_signature(fn), claim_domain=cj_domain)
+    except _dims.FixedSizeConflict as conflict:
+        return str(conflict)
+    except _dims.DimensionConflict:
+        return None
+    return None
+
+
 def _fixed_dim_clash(ctx: "_ClaimContext") -> "tuple | None":
     """Intent:
         `(param, premise_text, axis_words)` for the first premise that
@@ -10464,7 +10516,14 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                 # input f's own guards refuse
                 _refused_by_own_guards_at(fn, facts, ctx.cj)
                 if ctx.exclude_own_guards else None)
-    containers, holes = _admitted_container_points(ctx, facts)
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=ctx.cj_domain)
+    except _dims.DimensionConflict:
+        resolver = None
+    containers, holes = _admitted_container_points(ctx, facts, resolver)
     missing = _admitted_scalar_points(ctx) + containers
 
     def run(cj, witness=None):

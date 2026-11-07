@@ -860,16 +860,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                and resolver.shapes.get(n) is not None
                and resolver.shapes[n].ndim >= 1
                and any(a is not None for a in resolver.shapes[n].axes)}
-    first_planned = next((n for n in names if n in planned), None)
+    # a table whose row count a dimension shares with another axis, or a
+    # binding fixes, is drawn to the plan as well
+    tied = resolver.tied_keys() if resolver is not None else set()
+    tied_tables = {n for n in table_names if resolver is not None
+                   and resolver.key(n, 0) in tied}
+    first_planned = next((n for n in names
+                          if n in planned or n in tied_tables), None)
     point_sizes: dict = {}
 
-    def _planned_draw(name, rng, b):
+    def _draw_point_sizes(name, rng):
         # a point's coordinates are drawn in `names` order, so the first
         # planned coordinate draws the point's sizes and the rest reuse
         # them
         if name == first_planned or not point_sizes:
             point_sizes.clear()
             point_sizes.update(resolver.draw_sizes(rng))
+
+    def _planned_draw(name, rng, b):
+        _draw_point_sizes(name, rng)
         if resolver.shapes[name].ndim == 1:
             return _synth("sequence", rng, b,
                           length=point_sizes.get(resolver.key(name, 0)))
@@ -901,7 +910,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if name in table_names:
             # a table: one equal-length column per name the claim or the
             # body reads
-            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            if name in tied_tables:
+                _draw_point_sizes(name, rng)
+                length = point_sizes[resolver.key(name, 0)]
+            else:
+                (length,) = _floor.sizes(cj_domain.get(name), rng)
             from .conjecture import _column_bound
             return {c: _floor.gapped(_synth("sequence", rng,
                                             _column_bound(cj_domain.get(f"{name}.{c}"), b),
@@ -1034,6 +1047,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # domain
             if n in point and not _paths_hold(point[n], n, cj_domain):
                 return False
+        if resolver is not None and not resolver.agrees(point):
+            # parameters bound to one dimension name with different
+            # sizes: the point is outside the claim's domain
+            return False
         for a_l, a_rel, a_r in assum:
             try:
                 env = {**base_env, **premise_words, **_typed(point)}
@@ -1081,9 +1098,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import random as _random
     # a corner's sizes: a fixed axis at its size, every other axis at the
     # corner length 3, shared names agreeing
-    corner_sizes = ({k: (int(k) if isinstance(k, str) and k.isdigit() else 3)
-                     for k in resolver.distinct_keys()}
-                    if resolver is not None else {})
+    corner_sizes = resolver.corner_sizes() if resolver is not None else {}
+
+    def _table_corner_rows(name):
+        # a table's rows at a corner: the size of its dimension, 3 for a
+        # table no dimension names
+        key = resolver.key(name, 0) if resolver is not None else None
+        return corner_sizes.get(key, 3)
 
     def _corner_value(name, value):
         # a sequence's corner is a short constant list at the
@@ -1097,7 +1118,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             n_cols = 2 if len(set(dims[:2])) == 1 else 3
             return [[value] * n_cols for _ in range(2)]
         if name in table_names:
-            return {c: [_column_end(name, c, value)] * 3 for c in table_columns[name]}
+            return {c: [_column_end(name, c, value)] * _table_corner_rows(name)
+                    for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
 
     def _column_end(name, column, value):
@@ -1214,6 +1236,61 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                      else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
+    def _small_points(admitted=admits):
+        # the joint points at a tied dimension's least size, as the probe's
+        # guaranteed small draws (`DimResolver.draw_sizes`): vectors of
+        # length 1 side by side, and for a matrix 1-by-1, 1-by-m, n-by-1 and
+        # 2-by-2. No single container's floor can build one, since its other
+        # coordinates come from a corner. Every other coordinate is drawn, a
+        # point `admitted` refuses is drawn again, and a size no draw
+        # satisfies gives no point
+        if resolver is None:
+            return []
+        sized = [n for n in names if n in planned or n in tied_tables]
+        free = {k for k in tied if k not in resolver.fixed
+                and not (isinstance(k, str) and k.isdigit())}
+        if not any(resolver.key(n, a) in free for n in sized
+                   for a in range(resolver.shapes[n].ndim)):
+            return []
+        spans_matrix = any(resolver.shapes[n].ndim >= 2 for n in sized)
+        from ._sampling import _RNG_SEED
+        rng = _random.Random(_RNG_SEED + 2)
+        rounds = [resolver.draw_sizes(rng, floor=round_)
+                  for round_ in ((0, 1, 2) if spans_matrix else (0,))]
+        if spans_matrix:
+            rounds.append({k: size if k in resolver.fixed
+                           or (isinstance(k, str) and k.isdigit()) else 2
+                           for k, size in rounds[0].items()})
+        points: list = []
+        seen: list = []
+        for sizes in rounds:
+            if sizes in seen:
+                continue
+            seen.append(sizes)
+            for _ in range(_SMALL_POINT_DRAWS):
+                point = {n: _small_value(n, sizes, rng) for n in names}
+                if admitted(point):
+                    points.append(point)
+                    break
+        return points
+
+    def _small_value(name, sizes, rng):
+        # one coordinate of a small point: a sized container at `sizes`,
+        # with no holes, else an ordinary draw
+        b = sample_domain.get(name)
+        if name in tied_tables:
+            from .conjecture import _column_bound
+            length = sizes[resolver.key(name, 0)]
+            return {c: _synth("sequence", rng,
+                              _column_bound(cj_domain.get(f"{name}.{c}"), b),
+                              length=length)
+                    for c in table_columns[name]}
+        if name not in planned:
+            return sample(name, rng)
+        if resolver.shapes[name].ndim == 1:
+            return _synth("sequence", rng, b, length=sizes[resolver.key(name, 0)])
+        return resolver.synth(name, sizes, lambda: _synth("float", rng, b), rng)
+
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
     # whose callable stands in for fn) so the seam is testable
@@ -1306,8 +1383,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # and the claim's two sides there
     evaluate.calls = lambda: list(point_calls)  # type: ignore[attr-defined]
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
+    # the joint points at a tied dimension's least size, `_small_points`
+    evaluate.small_points = _small_points  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
+
+
+#: how many times a small joint point is drawn before its size is given up
+_SMALL_POINT_DRAWS = 32
 
 
 def _written_exactly(value):
@@ -2261,7 +2344,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         word, value)`: each is executed at the first domain corner,
         after the corners and before the sampled points; a container's
         floor is listed the same way (its word None for an item that
-        holds no hole). `holes`, `{param: [value, ...]}`, are the hole
+        holds no hole). Parameters sharing a dimension are also executed
+        together at its least size (the evaluator's `small_points`),
+        after the corners and before the sampled points, and count toward
+        `budget` as corners do. `holes`, `{param: [value, ...]}`, are the hole
         values a container's slots admit, carried by its sampled draws.
         A point where the code returns a missing value or raises at a
         missing input is classified, never judged. `excluded`, when given,
@@ -2300,7 +2386,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
-    corners = list(deps["corners"])
+    try:
+        small = _with_timeout(lambda: deps["evaluate"].small_points(deps["admits"]),
+                              FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        small = []
+    corners = list(deps["corners"]) + small
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
     # the admitted missing inputs run first, so each is executed and
@@ -2339,6 +2430,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         # the missing inputs are the policy lines' trials, not this line's
         coverage.edge_cases = max(0, coverage.edge_cases - len(missing_corners))
     corner_count = sum(1 for c in corners if admits(c))
+    small_count = sum(1 for c in small if admits(c))
     # the admitted missing inputs run for the policy lines, not as points
     # of the computation line
     holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
@@ -2394,6 +2486,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     else:
         inner = max(0, sweep.checked - corner_count)
         listing = ["every corner",
+                   *([f"{small_count} small point{'s' if small_count != 1 else ''}"]
+                     if small_count else []),
                    f"{inner} interior point{'s' if inner != 1 else ''}"]
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 f"{numbers} points: " + _and_words(", ".join(listing))
