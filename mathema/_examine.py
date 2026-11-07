@@ -5,7 +5,8 @@ without running it: what it writes outside the call, what hidden inputs
 it reads, and what it does that cannot be read.
 
 `examine(fn)` walks the body and every project function it reaches
-(parsed once and cached; recursion and cycles are followed once), and
+(parsed once and cached; a call cycle is read to its least fixed point,
+so what it finds does not depend on which member comes first), and
 returns an `Effects`:
 
 - a **write** is a store, a mutating method or a library call that
@@ -44,6 +45,7 @@ import re
 import sys
 import sysconfig
 import textwrap
+import threading
 import types
 from dataclasses import dataclass, field
 
@@ -409,6 +411,28 @@ def _immutable(value) -> bool:
 
 _CACHE: dict = {}
 
+#: how many times a call cycle is examined before it is reported as not
+#: settling
+_ROUNDS_TO_SETTLE = 32
+
+
+class _UnderWay(threading.local):
+    """The examinations under way in this thread: `depth`, each open
+    function by its key and its place on the stack; `low`, per open
+    function, the lowest place on the stack its examination has read;
+    `reading`, what the last round of a cycle gave for each member;
+    `finished`, the results of this round that rest on a member still
+    open, with the lowest place each read."""
+
+    def __init__(self) -> None:
+        self.depth: dict = {}
+        self.low: list = []
+        self.reading: dict = {}
+        self.finished: dict = {}
+
+
+_UNDER_WAY = _UnderWay()
+
 
 #: library functions that hand back their first argument itself when
 #: it is already what they would make (an array of the asked type)
@@ -571,15 +595,103 @@ def examine(fn, generator: "str | None" = None,
            constructing)
     if key in _CACHE:
         return _CACHE[key]
-    _CACHE[key] = Effects()      # a cycle reaching fn again adds nothing
+    under_way = _UNDER_WAY
+    if key in under_way.depth:
+        # back round a cycle: this member's reading so far
+        under_way.low[-1] = min(under_way.low[-1], under_way.depth[key])
+        return under_way.reading.get(key, Effects())
+    if key in under_way.finished:
+        found, low = under_way.finished[key]
+        under_way.low[-1] = min(under_way.low[-1], low)
+        return found
+    depth = len(under_way.depth)
+    under_way.depth[key] = depth
+    under_way.low.append(depth + 1)
     try:
+        return _solved(key, fn, generator, constructing, depth, under_way)
+    finally:
+        del under_way.depth[key]
+        low = under_way.low.pop()
+        if under_way.low:
+            under_way.low[-1] = min(under_way.low[-1], low)
+        else:
+            under_way.reading.clear()
+            under_way.finished.clear()
+
+
+def _in_a_cycle() -> bool:
+    """Whether the examination in hand has read a member still open."""
+    under_way = _UNDER_WAY
+    return bool(under_way.low) and under_way.low[-1] < len(under_way.depth)
+
+
+def _solved(key, fn, generator, constructing, depth: int, under_way) -> Effects:
+    """Intent:
+        The examination of the function `key` names, with the depth it
+        sits at on the stack of examinations under way. A result that
+        read a member still open below it is provisional: it is kept for
+        this round only, and the member its cycle opens with decides.
+        That member re-examines the whole cycle, each reading the last
+        round's result for the others, until a round changes nothing,
+        and only that result, the least fixed point, is cached.
+
+    Notes:
+        Past `_ROUNDS_TO_SETTLE` the examination says it did not settle.
+    """
+    for _round in range(_ROUNDS_TO_SETTLE):
+        before = set(under_way.finished)
+        under_way.low[-1] = depth + 1
         found = _Examiner(fn, generator, constructing).run()
-    except BaseException:
-        # the empty reading stood only for the cycle, never as a result
-        _CACHE.pop(key, None)
-        raise
+        low = under_way.low[-1]
+        if low < depth:
+            under_way.finished[key] = (found, low)
+            return found
+        members = {k: under_way.finished.pop(k)[0]
+                   for k in set(under_way.finished) - before}
+        members[key] = found
+        if low > depth or all(under_way.reading.get(k, Effects()) == v
+                              for k, v in members.items()):
+            for k in members:
+                under_way.reading.pop(k, None)
+            _CACHE.update(members)
+            return found
+        under_way.reading.update(members)
+    name = getattr(_unwrapped(fn), "__name__", "f")
+    found.add(Site("unknown", f"the examination of {name} in its call cycle "
+                   f"did not settle"))
     _CACHE[key] = found
     return found
+
+
+def _keep_shortest_chains(effects: Effects, name: str) -> None:
+    """Intent:
+        Of the writes in which `name` passes one object to one callee
+        and that end at the same write, keep the one with fewest
+        clauses (then the first in text order). Inside a call cycle a
+        longer one goes round the cycle again to the same write through
+        the same object, so it says nothing the shortest does not, and
+        the sentences a cycle can make stay finite. When the branch
+        conditions around them differ, the kept one counts as reached
+        outside every branch.
+    """
+    opening = f"{name} passes "
+    chains: dict = {}
+    for site in effects.writes:
+        if site.text.startswith(opening) and ", and " in site.text:
+            pair = (site.text.split(", and ", 1)[0],
+                    site.text.rsplit(", and ", 1)[-1])
+            chains.setdefault(pair, []).append(site)
+    dropped = set()
+    for sites in chains.values():
+        kept = min(sites, key=lambda s: (s.text.count(", and "), s.text))
+        if len({effects.guards.get(s, ()) for s in sites}) > 1:
+            effects.guards[kept] = ()
+        for site in sites:
+            if site is not kept:
+                dropped.add(site)
+                effects.guards.pop(site, None)
+    if dropped:
+        effects.writes = [s for s in effects.writes if s not in dropped]
 
 
 def _own_statements(tree):
@@ -698,12 +810,17 @@ class _Examiner:
         self.effects.returns = [o for o in returned if o[0] != "fresh"]
         self.effects.returns_exact = bool(returned) and all(
             _same_origin(o, returned[0]) for o in returned) and returned[0][0] != "fresh"
+        if _in_a_cycle():
+            _keep_shortest_chains(self.effects, self.name)
         own = f"{self.name} "
         for site in self.effects.writes:
             if not site.text.startswith(own):
                 continue
+            # the first clause names what this function changes or passes
+            # on; the clauses after it speak of the callees' parameters
+            head = site.text.split(", and ", 1)[0]
             for p in params:
-                if re.search(rf"its argument {re.escape(p)}\b", site.text):
+                if re.search(rf"its argument {re.escape(p)}\b", head):
                     self.effects.arg_writes.append((p, site))
                     break
         return self.effects
