@@ -2225,9 +2225,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      holes=None, excluded=None,
                      witness: "dict | None" = None) -> "Probe | None":
     """Intent:
-        The computation claim a derive proof spawns. `parent` is proven in
-        exact arithmetic, which is all a derive `proven` says; the
-        companion `<name>[float]` is the same relation executed against
+        The computation claim a derive proof spawns, or a probe that
+        stood in for an undecided derive. `parent` is proven in exact
+        arithmetic, which is all a derive `proven` says, or holds on the
+        probe's draws; the companion `<name>[float]` is the same relation
+        executed against
         the REAL code in float: at every corner of the declared domain and
         at sampled interior points, unbounded directions running to the
         claim's resolved pseudo-infinity (`records.operational_range`:
@@ -2333,6 +2335,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     # the admitted missing inputs run for the policy lines, not as points
     # of the computation line
     holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
+    # what stands behind the parent: a proof, or the probe's draws
+    proven = str(parent.verdict or "").split(":", 1)[0] == "proven"
+    standing = (f"{parent.name} is mathematically proven" if proven else
+                f"{parent.name} holds on the probe's draws, where derive "
+                f"did not decide it")
+    said = f"{parent.name} is proven" if proven else standing
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
@@ -2409,9 +2417,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=f"{pt}: {sweep.detail}",
                 note=what,
-                sketch=f"the proof of {parent.name} failed: at {pt} the "
-                       f"claim is false in exact arithmetic as well as in "
-                       f"the computation ({sweep.detail})",
+                sketch=(f"the proof of {parent.name} failed: at {pt} the "
+                        f"claim is false in exact arithmetic as well as in "
+                        f"the computation ({sweep.detail})" if proven else
+                        f"{standing}, but at {pt} the claim is false in "
+                        f"exact arithmetic as well as in the computation "
+                        f"({sweep.detail})"),
                 meta={"mathema.proof_contradicted": pt})
         if sweep.detail.startswith("f returned None from present inputs"):
             # a None the return type does not declare: no value, whatever
@@ -2419,9 +2430,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             return Probe(
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=f"{pt}: {sweep.detail}", note=what,
-                sketch=f"{parent.name} is proven, but its computation gives "
-                       f"no value at {pt}: {sweep.detail}",
-                stratum={"mathematics": "sound", "blame": "implementation",
+                sketch=f"{said}, but its computation gives no value "
+                       f"at {pt}: {sweep.detail}",
+                stratum={**({"mathematics": "sound"} if proven else {}),
+                         "blame": "implementation",
                          "cause": "implementation:absent", "witness": pt},
                 meta=tried_meta or None)
         relation_failed = sweep.detail.startswith("the relation fails")
@@ -2447,7 +2459,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             return Probe(
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=pt, note=what,
-                sketch=f"{parent.name} is proven, but its computation "
+                sketch=f"{said}, but its computation "
                        f"fails at {pt}: {sweep.detail}{conditioned}; "
                        + (f"{covered}; " if covered else "")
                        + f"{remedy}",
@@ -2455,7 +2467,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "falsified", route=float_route,
             n=numbers, counterexample=pt, note=what,
-            sketch=f"{parent.name} is mathematically proven, but its "
+            sketch=f"{standing}, but its "
                    f"computation fails at {pt}: {sweep.detail}"
                    + (": precision loss" if relation_failed else "")
                    + ("; the claim holds there in exact arithmetic"
@@ -2463,9 +2475,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                    + f"{conditioned}; "
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
-            # the proof that coexists with the executed break is the
-            # evidence that the mathematics is sound and the code is not
-            stratum={"mathematics": "sound", "blame": "implementation",
+            # a proof that coexists with the executed break is the
+            # evidence that the mathematics is sound and the code is not;
+            # the probe's draws are no such evidence
+            stratum={**({"mathematics": "sound"} if proven else {}),
+                     "blame": "implementation",
                      "cause": "implementation:numerical-instability",
                      "representation": representation.tag, "witness": pt},
             meta={**(tried_meta or {}), **found_meta} or None)
