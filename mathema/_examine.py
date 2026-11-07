@@ -446,6 +446,33 @@ _MADE_HERE = frozenset({"fresh", "copy", "dict", "seq", "holds", "instance",
                         "local_fn"})
 
 
+def _origin_key(origin):
+    """A key two origins share exactly when they name the same source: a
+    tuple compared part by part, a str, number, bool or None by its type
+    and value, and anything else (a module's dict, list or array, a
+    function) by identity, since an origin read from module state is
+    that object itself and its contents may be unhashable or compare
+    elementwise."""
+    if isinstance(origin, tuple):
+        return tuple(_origin_key(part) for part in origin)
+    if origin is None or isinstance(origin, (str, int, float, complex, bool)):
+        return (type(origin).__name__, origin)
+    return ("object", id(origin))
+
+
+def _same_origin(a, b) -> bool:
+    """Whether origins `a` and `b` name the same source (`_origin_key`)."""
+    return _origin_key(a) == _origin_key(b)
+
+
+def _distinct(origins) -> tuple:
+    """`origins` in order, each source once (`_origin_key`)."""
+    out: dict = {}
+    for origin in origins:
+        out.setdefault(_origin_key(origin), origin)
+    return tuple(out.values())
+
+
 def _joined(*origins: dict) -> dict:
     """The origins of names after paths that may each have run: a name
     fresh on one path and from outside on another is from outside; two
@@ -458,10 +485,10 @@ def _joined(*origins: dict) -> dict:
             # a made object whose parts may come from outside wins over
             # a plainly fresh one, so those parts stay tracked
             out[name] = next((o for o in seen if o[0] != "fresh"), seen[0])
-        elif all(o == outside[0] for o in outside):
+        elif all(_same_origin(o, outside[0]) for o in outside):
             out[name] = outside[0]
         else:
-            out[name] = ("may", tuple(dict.fromkeys(outside)))
+            out[name] = ("may", _distinct(outside))
     return out
 
 
@@ -545,7 +572,12 @@ def examine(fn, generator: "str | None" = None,
     if key in _CACHE:
         return _CACHE[key]
     _CACHE[key] = Effects()      # a cycle reaching fn again adds nothing
-    found = _Examiner(fn, generator, constructing).run()
+    try:
+        found = _Examiner(fn, generator, constructing).run()
+    except BaseException:
+        # the empty reading stood only for the cycle, never as a result
+        _CACHE.pop(key, None)
+        raise
     _CACHE[key] = found
     return found
 
@@ -665,7 +697,7 @@ class _Examiner:
             isinstance(tree.body, list) else [self._origin_of(tree.body)]
         self.effects.returns = [o for o in returned if o[0] != "fresh"]
         self.effects.returns_exact = bool(returned) and all(
-            o == returned[0] for o in returned) and returned[0][0] != "fresh"
+            _same_origin(o, returned[0]) for o in returned) and returned[0][0] != "fresh"
         own = f"{self.name} "
         for site in self.effects.writes:
             if not site.text.startswith(own):
@@ -732,9 +764,9 @@ class _Examiner:
             return ("fresh",)
         if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
             parts = node.values if isinstance(node, ast.Dict) else node.elts
-            held = tuple(dict.fromkeys(
+            held = _distinct(
                 o for o in (self._origin_of(e) for e in parts if e is not None)
-                if self._outside(o) is not None))
+                if self._outside(o) is not None)
             return ("holds", held) if held else ("fresh",)
         return ("fresh",)
 
@@ -890,7 +922,7 @@ class _Examiner:
             return ("fresh",)
         if found.returns_exact and len(outside) == 1:
             return outside[0]
-        return ("may", tuple(dict.fromkeys(outside)))
+        return ("may", _distinct(outside))
 
     def _shown(self, node) -> str:
         try:
@@ -914,10 +946,12 @@ class _Examiner:
                       if lab is not None]
             if not labels:
                 return None
+            # a label may itself name several sources; each is named once
+            sources = [source for lab in labels for source in
+                       lab.replace(_MAYBE, "").replace(
+                           "an object that may be ", "").split(" or ")]
             return (_MAYBE + "an object that may be "
-                    + " or ".join(dict.fromkeys(
-                        lab.replace(_MAYBE, "").replace(
-                            "an object that may be ", "") for lab in labels)))
+                    + " or ".join(dict.fromkeys(sources)))
         if kind == "opaque":
             return _MAYBE + origin[1]
         if kind == "param":
