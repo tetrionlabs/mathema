@@ -8,15 +8,16 @@ route and every library: 0 is the zero of the other side's shape, so
 is an ordinary premise. A claim's own relation stays strict."""
 from typing import Annotated, Optional
 
-import numpy as np
-import pandas as pd
-import polars as pl
 import pytest
 
 from mathema import _premises
 from mathema._missing_words import remedy_statements
 from mathema.conjecture import _interpret_assumption, check_conjectures, claim
 from mathema.types import Mat, Shape, Vec
+
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
+pl = pytest.importorskip("polars")
 
 
 def echo(x: np.ndarray):

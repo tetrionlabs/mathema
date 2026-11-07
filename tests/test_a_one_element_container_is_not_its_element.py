@@ -8,9 +8,9 @@ what the user meant: the element, `f(a)["x"][0]`, or the whole,
 when it holds there; otherwise the note states the mismatch and corrections_given
 nothing. pandas and polars read alike, since both answer a one-row table
 with a vector of one element per column."""
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 pl = pytest.importorskip("polars")
 

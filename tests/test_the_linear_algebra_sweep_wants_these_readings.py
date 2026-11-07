@@ -6,11 +6,12 @@ matrix algebra is not always told from a number. Each case states the reading
 wanted, and fails strictly until the sweep lands, so it flips loudly then."""
 from typing import Optional
 
-import numpy as np
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
 from mathema.types import Mat
+
+np = pytest.importorskip("numpy")
 
 SWEEP = "held to the linear algebra sweep"
 

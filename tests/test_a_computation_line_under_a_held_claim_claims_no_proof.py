@@ -16,7 +16,7 @@ def nudged(c: float) -> float:
 
 
 def nudged_flat(c: float, n: float) -> float:
-    return (n + c * n) - n
+    return (n + c) - n
 
 
 def _rows(fn, law):

@@ -6,18 +6,23 @@ it holds: a dict, a list, an array. Two such origins are the same only
 when they are the same object, so a function that may hand back one of
 several module tables, or one of several arrays, is examined like any
 other, and the claim about it gets a verdict."""
-import numpy as np
+import pytest
 
 import mathema
 from mathema import check
 from mathema._examine import examine
 from mathema.conjecture import claim
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 TABLE = {"a": 1}
 OTHER = {"b": 2}
 ROW = [1.0, 2.0]
-LEFT = np.array([1.0, 2.0])
-RIGHT = np.array([1.0, 3.0])
+LEFT = np.array([1.0, 2.0]) if np is not None else None
+RIGHT = np.array([1.0, 3.0]) if np is not None else None
 
 
 def either_table(flag: bool) -> dict:
@@ -59,6 +64,7 @@ def test_module_lists_and_dicts_held_in_a_starred_list_are_examined():
     assert found.returns, found.returns
 
 
+@pytest.mark.skipif(np is None, reason="numpy is not installed")
 def test_two_arrays_with_equal_elements_are_still_two_origins():
     found = examine(either_array)
     (origin,) = found.returns

@@ -8,14 +8,20 @@ ordering over it does not hold, since there is no element at which it
 could (empty is not 0 and is not >= 0). A claim whose ordering fails only
 where the result is empty is told so, with the narrowed domain as the way
 out."""
-import numpy as np
 import pytest
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from mathema import claims
 from mathema._missing_words import remedy_statements
 from mathema._allowance import _exactly_equal, float_miss, relation_within
 from mathema.conjecture import claim
 from mathema.probing import relation_holds_elementwise, values_agree
+
+needs_numpy = pytest.mark.skipif(np is None, reason="numpy is not installed")
 
 
 def _empty(x):
@@ -63,9 +69,9 @@ def _verdict(fn, law):
 
 _MISMATCHES = [
     (_five, "[]"), (_text, "[]"), (_empty, "0"), (_empty, "5"),
-    (_empty_tuple, "0"), (_empty_array, "0"), (_empty_array, "5"),
+    (_empty_tuple, "0"), pytest.param(_empty_array, "0", marks=needs_numpy), pytest.param(_empty_array, "5", marks=needs_numpy),
     (_nested_empties, "0"), (_nested_empties, "5"),
-    (_nested_empties, "[5.0, 5.0]"), (_fives, "5"), (_five_array, "5"),
+    (_nested_empties, "[5.0, 5.0]"), (_fives, "5"), pytest.param(_five_array, "5", marks=needs_numpy),
     (_five, "[5.0, 5.0]"), (_fives, "[]"), (_empty, "[5.0, 5.0]"),
     (_zeros, "0"), (_zeros, "0.0"),
 ]
@@ -85,11 +91,11 @@ def test_a_shape_mismatch_is_falsified(fn, written, prefix, arg, relation):
 
 @pytest.mark.parametrize("fn,written,expected", [
     (_empty, "[]", "proven"),
-    (_empty_array, "[]", "proven"),
+    pytest.param(_empty_array, "[]", "proven", marks=needs_numpy),
     (_empty_tuple, "[]", "proven"),
     (_five, "5", "proven"),
     (_fives, "[5.0, 5.0]", "proven"),
-    (_five_array, "[5.0, 5.0]", "proven"),
+    pytest.param(_five_array, "[5.0, 5.0]", "proven", marks=needs_numpy),
     (_zeros, "[0, 0]", "proven"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 @pytest.mark.parametrize("relation", _RELATIONS)
@@ -114,7 +120,7 @@ def test_equal_values_fail_not_equal(fn, written):
 
 
 @pytest.mark.parametrize("fn,written", [
-    (_five, "[]"), (_empty, "5"), (_empty, "[]"), (_empty_array, "5"),
+    (_five, "[]"), (_empty, "5"), (_empty, "[]"), pytest.param(_empty_array, "5", marks=needs_numpy),
     (_nested_empties, "5"), (_text, "[]"), (_five, "[[], []]"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 @pytest.mark.parametrize("relation", ["<=", ">=", "<", ">"])
@@ -132,10 +138,19 @@ _PAIRS = [
     (5.0, []), ([], 5.0), (0, []), ([], 0), ("", []), ([], ""),
     ([[], []], 0), (0, [[], []]), ([[], []], 5), ([5.0, 5.0], 5),
     (5, [5.0, 5.0]), ([[5.0], [5.0]], 5), (None, []), ([], None),
-    (np.array([]), 0), (0, np.array([])), (np.array([5.0, 5.0]), 5),
-    (5, np.array([5.0, 5.0])), ([1, 2], [1, 2, 3]), ([], [1]),
-    ([[1], []], [[1], [2]]),
+    ([1, 2], [1, 2, 3]), ([], [1]), ([[1], []], [[1], [2]]),
 ]
+if np is not None:
+    _PAIRS += [
+        (np.array([]), 0), (0, np.array([])), (np.array([5.0, 5.0]), 5),
+        (5, np.array([5.0, 5.0])),
+    ]
+
+
+def _plain(value):
+    if np is not None and isinstance(value, np.ndarray):
+        return np.asarray(value, dtype=object).tolist()
+    return value
 
 
 @pytest.mark.parametrize("lv,rv", _PAIRS, ids=repr)
@@ -151,15 +166,13 @@ def test_every_comparison_reads_a_mismatch_as_different(lv, rv):
     assert relation_within(lv, rv, "!=") is True
     assert relation_within(lv, rv, "!=", exact_inequality=False) is True
     assert relation_holds_elementwise(lv, rv, "!=", 1e-9) is True
-    assert not _exactly_equal(np.asarray(lv, dtype=object).tolist()
-                              if isinstance(lv, np.ndarray) else lv,
-                              np.asarray(rv, dtype=object).tolist()
-                              if isinstance(rv, np.ndarray) else rv)
+    assert not _exactly_equal(_plain(lv), _plain(rv))
 
 
 @pytest.mark.parametrize("lv,rv", [
     (5.0, []), ([], 5.0), ([], []), ([[], []], 5), (5, [[], []]),
-    ([[], []], [[], []]), (np.array([]), 5), ([], np.array([])),
+    ([[], []], [[], []]),
+    *([(np.array([]), 5), ([], np.array([]))] if np is not None else []),
 ], ids=repr)
 @pytest.mark.parametrize("relation", ["<=", ">=", "<", ">"])
 def test_an_ordering_over_no_elements_is_false(lv, rv, relation):
@@ -263,10 +276,12 @@ def test_every_comparison_finds_an_ordering_over_an_empty_value_false(empty, rel
     assert relation_holds_elementwise(empty, 0, relation, 1e-9) is False
 
 
-def _one_by_one(A: np.ndarray):
-    return np.asarray(A, dtype=float)
+if np is not None:
+    def _one_by_one(A: np.ndarray):
+        return np.asarray(A, dtype=float)
 
 
+@needs_numpy
 def test_a_1_by_1_result_is_a_shape_mismatch_and_says_so():
     probe = _probe(_one_by_one, "for A in [1,1]^(1,1), f(A) == 1")
     assert probe.verdict == "falsified"
@@ -289,7 +304,8 @@ def test_an_empty_result_still_equals_an_empty_one_and_differs_from_a_number():
 
 @pytest.mark.parametrize("zero", [0, 0.0, -0.0, 0j])
 def test_zero_is_a_mismatch_like_any_number(zero):
-    for vector in ([0.0, 0.0], [[0.0], [0.0]], np.zeros(3), []):
+    arrays = [np.zeros(3)] if np is not None else []
+    for vector in ([0.0, 0.0], [[0.0], [0.0]], *arrays, []):
         assert relation_within(vector, zero, "==") is False
         assert relation_within(vector, zero, "!=") is True
         assert relation_holds_elementwise(vector, zero, "==", 1e-9) is False
@@ -325,10 +341,12 @@ def test_the_row_and_its_empty_input_line_agree():
     assert "5.0" in reports[0].counterexample
 
 
-def _quadratic(x: np.ndarray) -> float:
-    return float(x @ x)
+if np is not None:
+    def _quadratic(x: np.ndarray) -> float:
+        return float(x @ x)
 
 
+@needs_numpy
 def test_a_premise_reads_0_as_the_zero_vector_and_a_claim_does_not():
     premised = "assuming x != 0, for x in [0, 1]^2, f(x) > 0"
     assert _verdict(_quadratic, premised) in ("holds", "proven")
