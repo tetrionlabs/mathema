@@ -213,6 +213,7 @@ def _check_rows(args) -> list[dict]:
                      "invalidated": report.invalidated,
                      "unverifiable": report.skipped + report.owned,
                      "skipped": report.skipped,
+                     "misspecified": report.misspecified,
                      "accepted_risk": report.owned,
                      "unknown": report.unknown,
                      "verified": verified, "total": total,
@@ -282,14 +283,16 @@ def _format_check(rows: list[dict], fmt: str) -> str:
         return "\n".join(lines)
     if fmt == "md":
         out = ["| function | tier | claims checked | proven | holds "
-               "| falsified | invalidated | unknown | accepted risk "
-               "| status |",
-               "|---|---|---|---|---|---|---|---|---|---|"]
+               "| falsified | invalidated | unknown | misspecified "
+               "| accepted risk | status |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             status = "FAIL: " + "; ".join(r["problems"]) if r["problems"] else "ok"
             out.append(f'| `{r["name"]}` | {r["tier"]} | {r["coverage"]} '
                        f'| {r["proven"]} | {r["holds"]} | {r["falsified"]} '
-                       f'| {r["invalidated"]} | {r["unknown"] + r["skipped"]} '
+                       f'| {r["invalidated"]} '
+                       f'| {r["unknown"] + r["skipped"] - r.get("misspecified", 0)} '
+                       f'| {r.get("misspecified", 0)} '
                        f'| {r["accepted_risk"]} | {status} |')
         footer = ("" if all(not r["problems"] for r in rows) else
                   " A falsified claim is knowledge about the code; verify "
@@ -3143,11 +3146,17 @@ def cmd_badges(args) -> int:
     JSON per badge, a colored SVG twin, a JSON snapshot for CI to
     diff, and a paste-ready README snippet) to DIR, defaulting to the standard `.mathema/badges/` under
     `--root` so a README can embed `triangle.svg` by its in-repo path.
-    Omit targets for the rootwide analogue of verify."""
+    Omit targets for the rootwide analogue of verify. Unless
+    MATHEMA_BADGES is on, it prints the one line saying where badges
+    now come from, writes nothing and returns 0."""
     import os
 
-    from .badges import render_triangle, repo_badges, write_badges
+    from .badges import (MOVED_NOTICE, core_badges_enabled, render_triangle,
+                         repo_badges, write_badges)
 
+    if not core_badges_enabled():
+        print(MOVED_NOTICE)
+        return 0
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)

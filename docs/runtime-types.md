@@ -346,7 +346,9 @@ for a column by its name. pandas answers `df.sum()` with a Series
 labelled by the column names, read back with its labels, so
 `f(df)["qty"]` is the sum of column `qty` whatever the table's other
 columns and their order; polars answers with a one-row DataFrame, whose
-column `qty` holds the sum. A position reads a position: the columns
+column `qty` is a vector of one element holding the sum, so the claim
+reads the element, `f(df)["qty"][0]`, since a vector of one element is
+not its element. A position reads a position: the columns
 here are drawn `qty` then `fee`, so `f(df)[0]` is the sum of `qty` and
 `f(df)[1]` the sum of `fee`.
 
@@ -359,8 +361,9 @@ for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, 
 
 <!-- example: rt-table verdicts fn=totals_polars requires=polars -->
 ```
-for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["qty"] ~= sum(df.qty)   # holds
-for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["fee"] ~= sum(df.qty)   # falsified
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["qty"][0] ~= sum(df.qty)   # holds
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["qty"] ~= sum(df.qty)   # falsified
+for df.qty in [0, 100]^n subset Z \ {missing}, df.fee in [0, 10]^n \ {missing}, f(df)["fee"][0] ~= sum(df.qty)   # falsified
 ```
 
 Code that reads a table without knowing its library uses the neutral

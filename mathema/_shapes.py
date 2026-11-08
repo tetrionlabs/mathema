@@ -73,12 +73,12 @@ def observed_shape(value) -> "tuple | None":
     from .runtime_types import AbstractMat, AbstractTable, AbstractVec, observe
     if isinstance(value, (str, bytes)):
         return None
-    if _is_number(value) or is_missing(value):
-        return ()
     if type(value).__module__.split(".", 1)[0] == "numpy":
         shape = getattr(value, "shape", None)
         if isinstance(shape, tuple) and all(isinstance(n, int) for n in shape):
             return tuple(shape)
+    if _is_number(value) or (is_missing(value) and not hasattr(value, "__len__")):
+        return ()
     seen = observe(value)
     if isinstance(seen, AbstractVec):
         return (len(seen),)

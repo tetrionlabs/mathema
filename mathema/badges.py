@@ -23,6 +23,7 @@ scores span.
 from __future__ import annotations
 
 import contextlib
+import os
 from dataclasses import dataclass, field
 
 # The clarity ALGORITHM is versioned like a route: an open string, so a
@@ -1692,6 +1693,21 @@ def ci_snapshot(scores: BadgeScores) -> dict:
 # the tracked `.mathema/` so a README can embed `triangle.svg` by its
 # in-repo path. `mathema badges --out` writes here by default.
 DEFAULT_BADGE_DIR = ".mathema/badges"
+
+# What `mathema badges` and the MCP `badges` tool answer with while
+# MATHEMA_BADGES is off.
+MOVED_NOTICE = ("badges now come from `mathema-ci measure --out` "
+                "(pip install mathema-ci); set MATHEMA_BADGES=on for the "
+                "built-in writer, which 0.6.5 removes")
+
+
+def core_badges_enabled() -> bool:
+    """Whether `mathema badges` and the MCP `badges` tool run the badges:
+    MATHEMA_BADGES set to on, 1, true or yes, in any case. Off when it is
+    unset or holds anything else. The scoring functions in this module do
+    not read it."""
+    return os.environ.get("MATHEMA_BADGES", "").lower() in (
+        "on", "1", "true", "yes")
 
 
 # the extensions mathema's badge directory holds: it OWNS them, so one

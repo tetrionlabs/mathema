@@ -1,14 +1,16 @@
 # .github/workflows/docs.yml
 #
 # Docs deploy is an EXPLICIT step, not a side effect of commits: it
-# fires when a GitHub Release is published (which you create from a
-# version tag), or when triggered by hand from the Actions tab
-# (workflow_dispatch) for an out-of-band docs fix. Ordinary pushes to
+# fires when release.yml has published a version (it calls this
+# workflow), when a GitHub Release is published by hand, or when
+# triggered by hand from the Actions tab (workflow_dispatch) for an
+# out-of-band docs fix. Ordinary pushes to
 # main never build or deploy docs, so frequent code commits cost
 # nothing on Cloudflare.
 #
-# On the release event, checkout resolves to the release's tag, so the
-# published docs always match the released code exactly.
+# On the release event and when release.yml calls it, checkout
+# resolves to the tag, so the published docs always match the
+# released code exactly.
 #
 # One-time setup this workflow assumes:
 #   Cloudflare dashboard:
@@ -29,6 +31,7 @@ name: docs
 on:
   release:
     types: [published]
+  workflow_call: {}       # from release.yml, after it creates the release
   workflow_dispatch: {}   # manual deploy for docs-only fixes
 
 permissions:
@@ -39,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        # release event: this is the tag's tree; dispatch: current main
+        # release event or call from release.yml: the tag's tree; dispatch: current main
 
       - uses: astral-sh/setup-uv@v7
 

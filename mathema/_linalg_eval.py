@@ -27,7 +27,7 @@ from .matrices import _numpy
 
 __all__ = ["FUNCTIONS", "Table", "as_array", "comparable", "from_law",
            "is_array", "largest_gap", "law_callable", "roundoff_allowance",
-           "scalar", "shown", "to_law", "to_plain"]
+           "shown", "to_law", "to_plain"]
 
 
 def _np():
@@ -303,14 +303,6 @@ def to_law(value):
         return value.item()
     if isinstance(value, (list, tuple, dict)):
         return as_array(value)
-    return value
-
-
-def scalar(value):
-    """A 1-by-1 array as the number it holds; anything else
-    unchanged."""
-    if is_array(value) and value.shape == (1, 1):
-        return value.item()
     return value
 
 

@@ -21,7 +21,9 @@ verdict, [the evidence ladder](evidence-ladder.md) ranks them, and
 
 A verdict may carry a colon subroute refining its base family,
 `skipped:misspecified` when the claim itself is malformed rather than
-the function unadjudicable. Everything before the colon is the base
+the function unadjudicable, which `verify` and a printed record name as
+`misspecified`; a record whose value claims are all misspecified carries
+no policy rows. Everything before the colon is the base
 family, and the fold into supported, refuted, blocked and undecided uses
 only the base, so a subroute never changes what a verdict counts as, only
 says more precisely why. The `route` field follows the same convention:
@@ -105,6 +107,43 @@ in_unit  <claim as resolved>               falsified at f(nan)        headline: 
 
 A claim with nothing to say beyond its verdict, such as a family fact
 like `is_deterministic` or a claim over integers, prints on one line.
+
+## Shapes
+
+A container is never its element. `[378.0]` against `378.0` is a
+different shape, so `==` and `~=` are falsified and `!=` holds, whatever
+the library: a list, an array, a pandas or polars Series, and the column
+of a one-row table are all containers. The number 0 is no exception, so
+`[0.0, 0.0] == 0` is falsified and the zero vector is written `[0, 0]`;
+a claim's own `f(x) != 0` over a vector always holds. A premise reads 0
+differently, as the zero of the other side's shape on every route:
+as a premise, `f(x) != 0` says f(x) is not the zero vector, and any other
+number is a different shape, so `x != 5` as a premise admits every point. A premise on
+an element (`x[0] == 0`, `sum(x) == 0`, `norm(x) == 0`) is an ordinary premise.
+A premise that pins a whole vector or matrix parameter to a value (`x == 0`,
+`x == 5`, `x == [5, 5, 5]`) is not read yet: the claim is `unknown` on every
+route, says so in its note, and no point is drawn. A band such as `x ~= 0`
+over a vector is `skipped:misspecified`.
+
+An ordering reads a number at each element, so `f(x) >= 0` over `[1.0,
+2.0]` holds. Over an empty value (a list, an array, a dict, a set, a
+string, a range) it does not hold, since there is no element at which it
+could: empty is not 0 and is not `>= 0`. An empty string against a
+string keeps the order of strings, the empty string first, so `"" <=
+"a"` holds and `"" < ""` does not; an ordering between two strings that
+are both non-empty is not read. `[] == []` holds and `[] != 5` holds.
+
+A claim that fails on one of these shapes says so in its note, and gives
+as corrections the claims that say what it may have meant: the element
+(`f(a)["x"][0] ~= sum(a.x)`), the whole (`f(a)["x"] ~= [sum(a.x)]`) or the
+narrowed domain (`assuming n >= 1, ...`). Each is the whole claim as
+written, its domain included, and is given only after it has been
+adjudicated and holds. A claim read back from a record, whose domain is
+stored apart from its law, states the mismatch and gives no correction.
+
+Bindings that fix one shared dimension to two sizes (`a` in `[0, 1]^2` and
+`b` in `[0, 1]^3` under one name) leave no value, so the claim is
+`skipped:misspecified` on every route.
 
 ## What fails the gate
 

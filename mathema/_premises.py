@@ -60,24 +60,63 @@ class CompiledPremises:
     aux: frozenset
 
 
+def _shaped(value) -> bool:
+    from ._linalg_eval import is_array
+    return is_array(value) or isinstance(value, (list, tuple))
+
+
+def _plain(value):
+    """A value as a premise compares it: a pandas or polars table as its
+    rows, anything else as `probing.plain_value` reads it."""
+    from .probing import plain_value
+    if type(value).__name__ == "DataFrame" and hasattr(value, "to_numpy"):
+        return value.to_numpy().tolist()
+    return plain_value(value)
+
+
+def premise_relation(a, b, relation: str, tolerance: float,
+                     rel_tol: float) -> bool:
+    """Intent:
+        A premise relation between two values of which at least one has
+        a shape, as every route reads it: element by element, and 0 under
+        `==` or `!=` is the zero of the other side's shape (`x != 0` holds
+        when some element of `x` is not 0, the vector is not the zero
+        vector). Any other number against a shape is a different shape. A
+        claim's own sides have no such reading
+        (`probing.scalar_spreads`).
+    """
+    from ._linalg_eval import _np
+    from .probing import _is_number, relation_holds_elementwise
+
+    def zero_of(number, shape):
+        if relation in ("==", "!=") and _is_number(number) and number == 0:
+            return _np().zeros_like(shape, dtype=float)
+        return number
+
+    a, b = _plain(a), _plain(b)
+    try:
+        if _shaped(b) and not _shaped(a):
+            a = zero_of(a, b)
+        elif _shaped(a) and not _shaped(b):
+            b = zero_of(b, a)
+    except ValueError:
+        # a ragged value has no zero of its shape, so it is not the zero
+        return relation == "!="
+    return bool(relation_holds_elementwise(
+        a, b, relation, tolerance if relation in ("==", "!=") else 0.0,
+        rel_tol=rel_tol))
+
+
 def _premise_op(scalar_op, relation: str, tolerance: float, rel_tol: float):
     """Intent:
-        A premise relation as the probe filters with it: `scalar_op`
-        between two numbers, and between a vector or matrix and
-        anything the relation element by element, a number
-        broadcasting (`x != 0` holds when some element of `x` is not
-        0, the vector is not the zero vector).
+        A premise relation as every route filters with it: `scalar_op`
+        between two values with no shape, and `premise_relation`
+        otherwise.
     """
-    from ._linalg_eval import is_array
-    from .probing import relation_holds_elementwise
-
     def op(a, b):
-        if not (is_array(a) or is_array(b)):
-            return scalar_op(a, b)
-        return bool(relation_holds_elementwise(
-            a, b, relation,
-            tolerance if relation in ("==", "!=") else 0.0,
-            rel_tol=rel_tol))
+        if _shaped(_plain(a)) or _shaped(_plain(b)):
+            return premise_relation(a, b, relation, tolerance, rel_tol)
+        return scalar_op(a, b)
     return op
 
 
@@ -318,13 +357,57 @@ def _band_draw(centre: float, width: float, bound):
     return draw
 
 
+def _is_vector(name: str, kinds: dict, domain: "dict | None") -> bool:
+    """Whether a parameter is a vector or a matrix, by its kind or by the
+    dimensions of its binding."""
+    from .runtime_types import SEQUENCE_KINDS
+    from ._shapes import dims_of
+    return kinds.get(name) in SEQUENCE_KINDS \
+        or bool(dims_of((domain or {}).get(name)))
+
+
+def pinned_container_words(assumption, kinds: dict, domain: "dict | None",
+                           marked: frozenset = frozenset()) -> "str | None":
+    """Intent:
+        The words for a premise `p == value` that pins a whole vector or
+        matrix parameter to a number or a literal, which is not read yet;
+        None when no premise does. `marked` names the parameters a
+        signature's shape marker makes containers. A relation on a value
+        (`f(x) == 0`, `x != 0`) or on an element (`x[0] == 0`) is no pin.
+    """
+    from ._shapes import dims_of
+    for acj in assumption or ():
+        if getattr(acj, "relation", None) != "==" or not acj.rhs:
+            continue
+        try:
+            sides = (ast.parse(acj.lhs, mode="eval").body,
+                     ast.parse(acj.rhs, mode="eval").body)
+        except SyntaxError:
+            continue
+        for side, other in (sides, sides[::-1]):
+            if not isinstance(side, ast.Name) or side.id not in kinds \
+                    or not (isinstance(other, (ast.List, ast.Tuple))
+                            or _constant(other) is not None):
+                continue
+            name = side.id
+            if name in marked or _is_vector(name, kinds, domain):
+                kind = ("matrix" if kinds.get(name) == "mat"
+                        or len(dims_of((domain or {}).get(name))) > 1
+                        else "vector or matrix" if name in marked else "vector")
+                return (f"the premise {acj.lhs} == {acj.rhs} pins the whole "
+                        f"{kind} {name} to a value, which is not read yet, so "
+                        f"no point was drawn")
+    return None
+
+
 def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
                   tolerance: "float | None" = None) -> dict:
     """Intent:
         Draws that satisfy an equality premise by construction, for the
         premises random sampling essentially never lands on, keyed by
         parameter: `det(a) == 0` a singular square matrix, `x == c` the
-        constant itself, and a zero spread (`std(a, ddof=k) == 0`,
+        constant itself (a vector or a matrix draws nothing here,
+        `pinned_container_words`), and a zero spread (`std(a, ddof=k) == 0`,
         `var(a, ...) == 0`, `max(a) == min(a)`, `max(a) - min(a) == 0`)
         a constant sequence whose element comes from the declared
         bound in `domain`; a band `abs(x - c) <= t` (what `x ~= c`
@@ -347,6 +430,9 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
         return found[0] if found and not (found[1] or found[2]) else None
 
     def draw_for(node, c):
+        if isinstance(node, ast.Name) and node.id in kinds \
+                and _is_vector(node.id, kinds, domain):
+            return None
         if isinstance(node, ast.Name) and node.id in kinds:
             value = int(c) if kinds[node.id] == "int" \
                 and float(c).is_integer() else c
@@ -407,12 +493,13 @@ def premise_draws(assumption, kinds: dict, domain: "dict | None" = None,
     return out
 
 
-def solve_equality(assumption, kinds) -> "tuple | None":
+def solve_equality(assumption, kinds, domain: "dict | None" = None) -> "tuple | None":
     """Intent:
         The first scalar equality conjunct of `assumption` solved for
         one variable, parameters first: `(name, others, compute)`, where
         `compute(*values_of_others)` is that variable's value on the
-        surface. None when no equality has a single solution.
+        surface. None when no equality has a single solution. A conjunct
+        over a vector or a matrix parameter has no scalar solution.
 
     Notes:
         Each solve runs under the fast wall-clock cap.
@@ -432,6 +519,8 @@ def solve_equality(assumption, kinds) -> "tuple | None":
             continue
         surface = l_expr - r_expr
         syms = {str(s): s for s in surface.free_symbols}
+        if any(p in kinds and _is_vector(p, kinds, domain) for p in syms):
+            continue
         for p_name in [p for p in kinds if p in syms] + \
                       [a for a in sorted(syms) if a not in kinds]:
             try:

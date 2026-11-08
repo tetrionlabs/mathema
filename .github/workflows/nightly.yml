@@ -1,0 +1,29 @@
+# .github/workflows/nightly.yml
+#
+# Every night, dispatch the tests workflow on develop. A dispatched run
+# tests every supported interpreter (tests.yml widens its matrix on
+# workflow_dispatch) and is recorded against develop's head commit,
+# which is what release.yml looks for: a release publishes only a tree
+# that has passed one of these runs. A dispatch made with the
+# workflow's own token is one of the events GitHub lets that token
+# start.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run the full matrix on develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run tests.yml --repo "$GITHUB_REPOSITORY" --ref develop

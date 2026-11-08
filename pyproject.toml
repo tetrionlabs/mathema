@@ -146,6 +146,10 @@ version = { attr = "mathema.__version__" }
 # only in the `test` extra and one test file is slower under four
 # workers than one. CI passes it explicitly.
 testpaths = ["tests"]
+# The repo root on sys.path, so test files that import a sibling as
+# `tests.test_x` collect under bare `pytest`, `python -m pytest` and
+# `mathema-ci measure` alike.
+pythonpath = ["."]
 
 [tool.coverage.run]
 # Measuring mathema itself. Many tests drive the CLI as a subprocess, so

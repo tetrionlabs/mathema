@@ -180,9 +180,12 @@ def stated_policies(fn, siblings, target: str) -> list:
         The claims beside a value claim that state what f does with an
         empty `target`: a literal call with `[]` there, `f([]) in
         {missing}`, `raises(f([]), E)`, `f([]) == v`, `f([]) ~= v`, as
-        `[(kind, operand, text, relation, tolerance)]` with kind
-        "missing", "raises" or "value", and the claim's relation and
-        declared tolerance; f may be spelled by its own name.
+        `[(kind, operand, text, relation, tolerance, pinned)]` with
+        kind "missing", "raises" or "value", the claim's relation and
+        declared tolerance, and `pinned` the value every other
+        parameter takes in the policy's call, by name: a literal
+        argument's value, or the default a parameter the call leaves
+        out takes (`_covers`); f may be spelled by its own name.
     """
     from ._signatures import callable_signature
     try:
@@ -202,24 +205,121 @@ def stated_policies(fn, siblings, target: str) -> list:
         args = _empty_call_args(node, sig)
         if not args or args.get(target) != "[]":
             continue
+        pinned = _pinned(sig, args, target)
         rhs = (cj.rhs or "").strip()
         text = f"{cj.lhs} {cj.relation} {cj.rhs}"
         if cj.relation == "in" and re.search(r"\b(missing|None|null|nan|NA)\b",
                                              rhs):
-            out.append(("missing", rhs, text, cj.relation, cj.tolerance))
+            out.append(("missing", rhs, text, cj.relation, cj.tolerance,
+                        pinned))
         elif cj.relation == "raises" and rhs:
             out.append(("raises", rhs, f"raises({cj.lhs}, {rhs})",
-                        cj.relation, cj.tolerance))
+                        cj.relation, cj.tolerance, pinned))
         elif cj.relation in ("==", "~="):
-            out.append(("value", rhs, text, cj.relation, cj.tolerance))
+            out.append(("value", rhs, text, cj.relation, cj.tolerance,
+                        pinned))
     return out
+
+
+def _pin_value(node):
+    """Intent:
+        The value of a literal argument of a claim's call: a Python
+        literal, or `nan`, `inf` and `-inf`, the claim's words for those
+        floats, at any depth of a list or a tuple.
+
+    Raises:
+        ValueError: `node` is not a literal.
+    """
+    if isinstance(node, ast.Name) and node.id in ("nan", "inf"):
+        return float(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) \
+            and isinstance(node.operand, ast.Name):
+        return -_pin_value(node.operand)
+    if isinstance(node, ast.List):
+        return [_pin_value(e) for e in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_pin_value(e) for e in node.elts)
+    return ast.literal_eval(node)
+
+
+def _same_pin(have, want) -> bool:
+    """Intent:
+        Whether a call's argument is the value a policy pins: the same
+        object, the same value exactly, slot by slot in a container. A
+        NaN agrees with no value in a comparison, but here it says which
+        call is meant, so a NaN pin is met by a NaN.
+    """
+    from .probing import holds_nan, plain_value, values_agree
+    have, want = plain_value(have), plain_value(want)
+    if have is want:
+        return True
+    sequences = (list, tuple)
+    if isinstance(have, sequences) and isinstance(want, sequences):
+        return len(have) == len(want) and all(
+            _same_pin(a, b) for a, b in zip(have, want))
+    if isinstance(have, sequences) or isinstance(want, sequences):
+        return False
+    if holds_nan(have) or holds_nan(want):
+        return holds_nan(have) and holds_nan(want)
+    return values_agree(have, want, 0.0, 0.0) is True
+
+
+def _pinned(sig, args: dict, target: str) -> dict:
+    """Intent:
+        The value each parameter other than `target` takes in a literal
+        call whose arguments `args` holds as source text: a literal
+        argument's value, the default of a parameter the call leaves
+        out; a parameter passed an expression that is not a literal, or
+        left out with no default, is not pinned (the call ranges over
+        it).
+    """
+    import inspect
+    out: dict = {}
+    for q, prm in sig.parameters.items():
+        if q == target or prm.kind in (prm.VAR_POSITIONAL, prm.VAR_KEYWORD):
+            continue
+        if q in args:
+            try:
+                out[q] = _pin_value(ast.parse(args[q], mode="eval").body)
+            except (ValueError, SyntaxError, TypeError, MemoryError,
+                    RecursionError):
+                continue
+        elif prm.default is not inspect.Parameter.empty:
+            out[q] = prm.default
+    return out
+
+
+def _covers(policy, args: dict, sig) -> bool:
+    """Intent:
+        Whether a stated empty policy is about the call made with
+        `args` (by parameter, as the claim evaluated them): every
+        parameter the policy's call pins takes the same value in this
+        call, a parameter this call leaves out taking its default.
+    """
+    import inspect
+
+    from ._linalg_eval import from_law
+    for q, want in policy[5].items():
+        if q in args:
+            have = from_law(args[q])
+        else:
+            prm = sig.parameters.get(q) if sig is not None else None
+            if prm is None or prm.default is inspect.Parameter.empty:
+                return False
+            have = prm.default
+        if not _same_pin(have, want):
+            return False
+    return True
 
 
 def _matches(policy, raised, result) -> bool:
     """Whether what f did at the empty input is what `policy` states:
-    the value it names exactly under `==`, within ε under `~=`
-    (`abs(result - v) <= ε`, the computation line's reading)."""
-    kind, operand, _text, relation, tolerance = policy
+    the value it names exactly under `==`, a container element by
+    element, and within ε under `~=` (`abs(result - v) <= ε` at every
+    element, the computation line's reading). A container against a
+    number is a different shape, and an empty container
+    meets only an empty one (`probing.scalar_spreads`)."""
+    kind, operand, _text, relation, tolerance = policy[:5]
     if kind == "raises":
         return raised is not None and any(
             cls.__name__ == operand.split(".")[-1]
@@ -229,14 +329,16 @@ def _matches(policy, raised, result) -> bool:
     if kind == "missing":
         return _no_value(result)
     try:
-        expected = float(ast.literal_eval(operand))
-        if relation == "~=":
-            from ._allowance import relation_within
-            return relation_within(float(result), expected, "~=",
-                                   tolerance, side=1) is True
-        return float(result) == expected
-    except (ValueError, SyntaxError, TypeError):
+        expected = ast.literal_eval(operand)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
         return False
+    from ._linalg_eval import from_law
+    got = from_law(result)
+    if relation == "~=":
+        from ._allowance import relation_within
+        return relation_within(got, expected, "~=", tolerance, side=1) is True
+    from .probing import values_agree
+    return values_agree(got, expected, 0.0, 0.0) is True
 
 
 def _fixes(fn_name: str, call_text: str, target: str, raised,
@@ -340,6 +442,11 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
     # receives it back as the plain list its runtime type realises
     call = law_callable(calling(fn, facts))
     rng = random.Random(0)
+    from ._signatures import callable_signature
+    try:
+        signature = callable_signature(fn)
+    except (TypeError, ValueError):
+        signature = None
     lines = []
     for target in open_seqs:
         group = {p for p in seqs if ties[p] == ties[target]}
@@ -377,7 +484,7 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
                 note=f"{target} = []: no call to f in {cj.name} could be "
                      f"made there"))
             continue
-        policies = stated_policies(fn, siblings, target)
+        stated = stated_policies(fn, siblings, target)
         fn_name = getattr(fn, "__name__", "f")
         verdict, note, witness = "holds", "", None
         for text, args, raised, result in made:
@@ -385,6 +492,8 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
                            for p, v in args.items())
             did = (f"raises {type(raised).__name__}" if raised is not None
                    else f"returns {from_law(result)!r}")
+            # the policies stated for this call's own arguments
+            policies = [pol for pol in stated if _covers(pol, args, signature)]
             if policies:
                 broken = [pol for pol in policies
                           if not _matches(pol, raised, result)]

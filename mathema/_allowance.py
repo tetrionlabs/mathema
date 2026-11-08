@@ -300,12 +300,23 @@ def relation_within(lv, rv, relation: str, declared=None,
         arrays are one fact about the whole value, so `!=` holds when
         some element differs and two values of different shapes are
         unequal outright; an ordering holds when it holds at every
-        element and is None (unanswerable) over mismatched shapes or
-        values that do not order. `exact_inequality` makes `!=` fail
-        only at an actual equality.
+        element, does not hold over any value with no elements except
+        between two strings (`probing.orders_nothing`), and is
+        None (unanswerable) over mismatched shapes or values that do not
+        order. A value that is not a
+        sequence against a sequence is read at each element only as
+        `probing.scalar_spreads` says. `exact_inequality` makes `!=`
+        fail only at an actual equality.
     """
-    from .probing import _is_matrix_value, plain_value
+    from .probing import (_is_matrix_value, empty_text_order, orders_nothing,
+                          plain_value, scalar_spreads)
     lv, rv = plain_value(lv), plain_value(rv)
+    if relation not in ("==", "~=", "!="):
+        if orders_nothing(lv, rv):
+            return False
+        text_order = empty_text_order(lv, rv, relation)
+        if text_order is not None:
+            return text_order
     arrays = _is_matrix_value(lv) or _is_matrix_value(rv)
     # over arrays the result's magnitude is its largest entry: an entry
     # that is exactly 0 beside entries near 1 (the off-diagonal of an
@@ -322,15 +333,27 @@ def relation_within(lv, rv, relation: str, declared=None,
     if not arrays:
         return leaf(lv, rv)
 
+    ordering = relation not in ("==", "~=", "!=")
+
     def walk(x, y):
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if ordering and ((xs and not x) or (ys and not y)):
+            # an ordering over no elements does not hold
+            return False
         if xs and ys:
             if len(x) != len(y):
                 return None
+            if not x:
+                # two sequences with no elements are one value
+                return True if relation in ("==", "~=") else None
             parts = [walk(a, b) for a, b in zip(x, y)]
         elif xs:
+            if not scalar_spreads(y, x, relation):
+                return None
             parts = [walk(a, y) for a in x]
         elif ys:
+            if not scalar_spreads(x, y, relation):
+                return None
             parts = [walk(x, b) for b in y]
         else:
             return leaf(x, y)
@@ -382,7 +405,8 @@ def float_miss(lv, rv, relation: str, declared=None,
         declared tolerance is a tolerance kind.
     """
     from ._tolerance import ToleranceKind
-    from .probing import _is_matrix_value, holds_inf, holds_nan, plain_value
+    from .probing import (_is_matrix_value, holds_inf, holds_nan, plain_value,
+                          scalar_spreads)
     if isinstance(declared, ToleranceKind):
         return None
     lv, rv = plain_value(lv), plain_value(rv)
@@ -422,9 +446,9 @@ def float_miss(lv, rv, relation: str, declared=None,
         if xs and ys:
             return len(x) == len(y) and all(walk(a, b) for a, b in zip(x, y))
         if xs:
-            return all(walk(a, y) for a in x)
+            return scalar_spreads(y, x, relation) and all(walk(a, y) for a in x)
         if ys:
-            return all(walk(x, b) for b in y)
+            return scalar_spreads(x, y, relation) and all(walk(x, b) for b in y)
         return leaf(x, y)
 
     try:
@@ -483,16 +507,19 @@ def precision_miss(lv, rv, relation: str, declared=None,
 
 def _exactly_equal(lv, rv) -> bool:
     """Whether two values (numbers, or nested lists of them) are equal
-    exactly, element by element; different shapes are unequal."""
-    from .probing import holds_nan
+    exactly, element by element; different shapes are unequal, a value
+    that is not a list against a list unequal (`probing.scalar_spreads`)."""
+    from .probing import holds_nan, scalar_spreads
     xs, ys = isinstance(lv, (list, tuple)), isinstance(rv, (list, tuple))
     if xs and ys:
         return len(lv) == len(rv) and all(_exactly_equal(a, b)
                                           for a, b in zip(lv, rv))
     if xs:
-        return all(_exactly_equal(a, rv) for a in lv)
+        return scalar_spreads(rv, lv, "==") and all(_exactly_equal(a, rv)
+                                                    for a in lv)
     if ys:
-        return all(_exactly_equal(lv, b) for b in rv)
+        return scalar_spreads(lv, rv, "==") and all(_exactly_equal(lv, b)
+                                                    for b in rv)
     if holds_nan(lv) or holds_nan(rv):
         return False
     try:

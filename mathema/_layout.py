@@ -329,10 +329,12 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 or meta.get("mathema.gate"):
             continue
         under = companions.get(main.name, [])
-        rows = [r for r in policy
-                if _is_return_row(r)
-                or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
-                           r.meta["mathema.policy"].get("kind") or "")]
+        # a misspecified claim ran nothing, so no default row is about it
+        rows = [] if "misspecified" in str(main.verdict) else [
+            r for r in policy
+            if _is_return_row(r)
+            or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
+                       r.meta["mathema.policy"].get("kind") or "")]
         if not under and not rows:
             continue
         lines = []
@@ -542,7 +544,9 @@ def _detail(p, count_words) -> str:
         from .records import within_float64_words
         return within_float64_words(p.meta)
     if verdict == "falsified" and p.counterexample:
-        return f"counterexample {p.counterexample}"
+        correction = (p.meta or {}).get("mathema.correction")
+        return (f"counterexample {p.counterexample}"
+                + (f"\n{correction}" if correction else ""))
     if verdict in ("unknown", "skipped") and p.note:
         return p.note
     return ""

@@ -22,13 +22,15 @@ whether that break is acceptable to the verdicts themselves.
 
 ## Seeing all three at once
 
-[`mathema badges`](modes/badges.md) computes the three scores for a project
+`mathema-ci measure` computes the three scores for a project
 and draws them as a triangle, with implementation and intent along the base
 and clarity at the apex, so a lopsided profile has a lopsided shape. The
 overall number is the share of the full triangle that the three scores fill,
 `clarity * (implementation + intent) / 2` on the fractions, which collapses
 toward zero when any layer is empty rather than averaging politely over it.
-The `billing` module that [Add claims to an existing
+mathema's built-in writer, [`mathema badges`](modes/badges.md), draws the same
+triangle but is off by default and only runs with `MATHEMA_BADGES=on` set.
+With it on, the `billing` module that [Add claims to an existing
 codebase](existing-codebase.md) builds up, after its first sweep and with
 its tests counted, draws as:
 
