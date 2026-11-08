@@ -2669,6 +2669,54 @@ def _split_top_level(text: str, tokens: tuple) -> "tuple | None":
     return None
 
 
+_INCLUSION_TOKENS = (" subset ", " ⊆ ", " ⊂ ")
+#: the variable an inclusion `L[A] subset L[B]` binds when it is read as
+#: `for member in L[A], member in L[B]`
+INCLUSION_VARIABLE = "member"
+
+
+def _one_language_term(text: str) -> bool:
+    """Whether `text` is exactly one `L[...]` term, its opening bracket
+    closed by the last character."""
+    if not (text.startswith("L[") and text.endswith("]")):
+        return False
+    masked, _ = mask_strings(text)
+    depth = 0
+    for i, ch in enumerate(masked):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0 and i != len(masked) - 1:
+                return False
+    return depth == 0
+
+
+def split_inclusion(law: str) -> "tuple[str, str] | None":
+    """Intent:
+        `(A, B)` for a normalized law stating that one language is
+        contained in another, `L[A] subset L[B]` (or `L[A] ⊆ L[B]`):
+        every member of the first is a member of the second, equality
+        included. None when the law is not an inclusion between two
+        language terms.
+
+    Raises:
+        NoRelation: the law uses `⊂`, which reads as a proper subset,
+            a different claim from `subset`.
+    """
+    split = _split_top_level(law, _INCLUSION_TOKENS)
+    if split is None:
+        return None
+    lhs, tok, rhs = split[0].strip(), split[1], split[2].strip()
+    if not (_one_language_term(lhs) and _one_language_term(rhs)):
+        return None
+    if tok == " ⊂ ":
+        raise NoRelation(
+            f"`⊂` reads as a proper subset; `{lhs} subset {rhs}` states "
+            f"that every member of {lhs} is in {rhs}, equality included")
+    return lhs, rhs
+
+
 def split_relation(law: str) -> tuple[str, str, str]:
     """Split a normalized law into (lhs, relation, rhs), at the first
     relation OUTSIDE every bracket pair. A single `=` reads as `==`.

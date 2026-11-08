@@ -49,7 +49,9 @@ from .grammar import (Domain, InvalidDomain, NoRelation,
                       extract_diff_fraction_sugar, extract_let_bindings,
                       extract_outcome_clause, _split_top_level,
                       is_reserved, normalize,
-                      parse_domain_safety, parse_raises, split_quantifier,
+                      parse_domain_safety, parse_raises, split_inclusion,
+                      INCLUSION_VARIABLE,
+                      split_quantifier,
                       split_membership, split_relation_chain,
                       unexpanded_prime_message,
                       UnreadableSpelling)
@@ -2111,6 +2113,15 @@ def _claim(law: str, name: str | None, source: str, route: str,
             if law.strip() not in said:
                 said = f"{said}, in the claim {law.strip()!r}"
             raise InvalidConjecture(said) from e
+        try:
+            inclusion = split_inclusion(text)
+        except NoRelation as e:
+            raise InvalidConjecture(str(e)) from e
+        if inclusion is not None:
+            # `L[A] subset L[B]` is the statement that every member of
+            # L[A] is in L[B], the same claim as the quantified spelling
+            text = f"for {INCLUSION_VARIABLE} in {inclusion[0]}, " \
+                   f"{INCLUSION_VARIABLE} in {inclusion[1]}"
         try:
             new_dom, text = split_quantifier(text)
         except DuplicateBinding as e:

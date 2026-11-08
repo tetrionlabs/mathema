@@ -2810,8 +2810,21 @@ def split_quantifier(text: str) -> tuple[dict, str]:
                or ne_exclusion(seg) is not None
                or parse_binding(seg) is not None)
 
+    def bound_name(seg: str) -> str | None:
+        parsed = parse_binding(seg)
+        return parsed[0] if isinstance(parsed, tuple) else None
+
     n_bindings = 0
-    for seg in segments:
+    seen: set = set()
+    for i, seg in enumerate(segments):
+        # the last segment naming a variable an earlier segment bound is
+        # a membership statement about it, not a second binding:
+        # `for c in L[A], c in L[B]` states that every c in L[A] is in L[B]
+        name = bound_name(seg) if is_binding(seg) else None
+        if name is not None and name in seen and i == len(segments) - 1:
+            break
+        if name is not None:
+            seen.add(name)
         if not is_binding(seg):
             bad = _PATH_LIKE_BINDING.match(seg)
             if bad is not None and not re.fullmatch(_PATH, bad.group("path")):
