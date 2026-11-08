@@ -14,8 +14,6 @@ from mathema.spec import fingerprint_text, render_claim_text
 @pytest.mark.parametrize("text", [
     "L[ascii] subset L[unicode]",
     "L[ascii] ⊆ L[unicode]",
-    "for c in L[ascii], c in L[unicode]",
-    "∀ s ∈ L[ascii], s ∈ L[unicode]",
 ])
 def test_every_spelling_of_an_inclusion_renders_as_subset(text):
     cj = claim(text)
@@ -23,9 +21,11 @@ def test_every_spelling_of_an_inclusion_renders_as_subset(text):
     assert render_claim_text(cj, unicode=True) == "L[ascii] ⊆ L[unicode]"
 
 
-def test_the_two_spellings_are_one_claim():
-    assert fingerprint_text(claim("L[ascii] subset L[unicode]")) == \
-        fingerprint_text(claim("for c in L[ascii], c in L[unicode]"))
+def test_the_quantified_spelling_states_the_same_membership():
+    a, b = claim("L[ascii] subset L[unicode]"), claim("for c in L[ascii], c in L[unicode]")
+    assert (a.relation, repr(a.rhs_bound.pieces[0])) == (b.relation, repr(b.rhs_bound.pieces[0]))
+    assert [repr(d.pieces[0]) for d in a.domain.values()] == \
+        [repr(d.pieces[0]) for d in b.domain.values()]
 
 
 @pytest.mark.parametrize("text", [
@@ -75,3 +75,15 @@ def test_a_number_range_bound_twice_is_still_refused(text):
 def test_a_finite_set_rebound_last_is_a_membership_statement():
     cj = claim("for k in {1, 2}, k in {1, 2, 3}")
     assert cj.relation == "in" and cj.lhs == "k"
+
+
+def test_two_inclusions_over_different_parameters_are_different_claims():
+    assert fingerprint_text(claim("for a in L[ascii], a in L[unicode]")) != \
+        fingerprint_text(claim("for b in L[ascii], b in L[unicode]"))
+
+
+def test_an_inclusion_over_a_parameter_keeps_the_parameter_through_a_round_trip():
+    text = "for order in L[ascii], order in L[unicode]"
+    rendered = render_claim_text(claim(text), unicode=False)
+    assert rendered == text
+    assert claim(rendered).lhs == "order"

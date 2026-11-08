@@ -3094,9 +3094,10 @@ def fingerprint_text(cj) -> str:
 
 def _inclusion_parts(cj) -> "tuple[str, str] | None":
     """Intent:
-        `(A, B)` when `cj` states that every member of one language term
-        is a member of another, `for c in L[A], c in L[B]` with nothing
-        else bound, assumed or let; None otherwise.
+        `(A, B)` when `cj` is the inclusion `L[A] subset L[B]`: every
+        member of one language term is a member of another, bound
+        through the inclusion's own variable, with nothing else bound,
+        assumed or let; None otherwise.
     """
     from .domain import Domain, LanguageRef
 
@@ -3114,7 +3115,11 @@ def _inclusion_parts(cj) -> "tuple[str, str] | None":
     if cj.assuming or getattr(cj, "funcs", None) or getattr(cj, "free_vars", None):
         return None
     (var, bound), = domain.items()
-    if cj.lhs != var:
+    # the quantified spelling names its variable, which on a function is
+    # a parameter, so only the variable `L[A] subset L[B]` itself binds
+    # renders back as the inclusion
+    from .grammar import INCLUSION_VARIABLE
+    if cj.lhs != var or var != INCLUSION_VARIABLE:
         return None
     a, b = one_term(bound), one_term(getattr(cj, "rhs_bound", None))
     return (a, b) if a is not None and b is not None else None
