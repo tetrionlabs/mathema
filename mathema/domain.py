@@ -2811,8 +2811,17 @@ def split_quantifier(text: str) -> tuple[dict, str]:
                or parse_binding(seg) is not None)
 
     def bound_name(seg: str) -> str | None:
+        """The name `seg` binds when its domain is a language or a
+        finite set, the domains a membership statement is read over;
+        a number range bound twice stays a binding, and is refused."""
         parsed = parse_binding(seg)
-        return parsed[0] if isinstance(parsed, tuple) else None
+        if not isinstance(parsed, tuple):
+            return None
+        name, value = parsed
+        finite = isinstance(value, frozenset) or (
+            isinstance(value, Domain) and value.pieces
+            and all(isinstance(p, (LanguageRef, frozenset)) for p in value.pieces))
+        return name if finite else None
 
     n_bindings = 0
     seen: set = set()

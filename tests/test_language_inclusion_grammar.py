@@ -60,3 +60,18 @@ def test_a_claim_that_is_not_a_bare_inclusion_keeps_its_quantified_form(text):
     rendered = render_claim_text(claim(text), unicode=False)
     assert rendered.startswith("for c in ")
     assert render_claim_text(claim(rendered), unicode=False) == rendered
+
+
+@pytest.mark.parametrize("text", [
+    "for x in [0, 1], x in [0, 2]",
+    "for n in Z, n in Z",
+    "for x in [0, 1], x in R",
+])
+def test_a_number_range_bound_twice_is_still_refused(text):
+    with pytest.raises(InvalidConjecture, match="no statement left to quantify"):
+        claim(text)
+
+
+def test_a_finite_set_rebound_last_is_a_membership_statement():
+    cj = claim("for k in {1, 2}, k in {1, 2, 3}")
+    assert cj.relation == "in" and cj.lhs == "k"
