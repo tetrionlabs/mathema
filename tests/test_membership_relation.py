@@ -9,7 +9,7 @@ import textwrap
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
-from mathema.domain import Interval, InvalidDomain
+from mathema.domain import Interval
 from mathema.languages import StringLanguage, register_language, unregister_language
 from mathema.spec import render_claim_text
 
