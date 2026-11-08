@@ -2,6 +2,40 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## 0.6.4
+
+### Highlights
+- A container is never its element. A list, tuple, array, Series, polars Series or the column of a one-row table compared with a number by `==` or `~=` is a shape mismatch, 0 included, and so is a vector or matrix of one element, in the matrix algebra as well. The note says which reading was meant and gives a correction, the claim respelled so that it holds, which mathema adjudicates before giving it: `for x in [0, 1]^1, (x - x)[0] == 0` compares the element and `f(x) == [0]` the whole.
+- An ordering over an empty value does not hold. `f(n) >= 0` is falsified at a point where `f(n)` is `[]`, `()`, `{}`, `set()`, `""` or `range(0)`, the witness is the empty value, and where the claim holds everywhere else the correction narrows the domain (`assuming n >= 1, for n in {0, 1, 2, 3}, f(n) >= 0`). Two strings keep their own order, so `"" <= "a"` holds.
+- A dimension fixed to two sizes in one claim is `skipped:misspecified` on every route, and a printed record and `verify` name it as `misspecified` beside valid claims. A record whose value claims are all misspecified carries no policy rows.
+- A premise reads 0 as the zero of the other side's shape: `assuming f(x) != 0` says `f(x)` is not the zero vector, on every route and for numpy, lists, tuples, pandas and polars. A claim's own `f(x) != 0` stays strict.
+- A call cycle is examined to a fixed point, so `is_state_safe` no longer depends on which member of the cycle mathema reads first. A write reached through the cycle counts whichever member is read first, and is charged to a parameter only where the call passes that parameter on.
+- The `[float]` line runs parameters that share a dimension at one size, so its witness is a point the claim admits.
+- `mathema badges` is off by default and moves to mathema-ci. `pip install mathema-ci` gives `mathema-ci measure`; `MATHEMA_BADGES=on` restores the core writer until 0.6.5 removes it.
+
+### Upgrading from 0.6.3
+- Verdicts that move once, each following a rule stated in this release:
+  - A container against a number by `==` or `~=` moves holds to falsified, 0 included. Write `f(x)[0] == 1`, `f(x) == [0, 0, 0]`, `f(x) == 0 * x` or `norm(f(x)) == 0`. A claim's own `f(x) != 0` over a container always holds, so it moves falsified to holds.
+  - A vector or matrix of one element is not its element: `for A in [0,1]^(1,1), A - A == 0` and `for x in [0,1]^1, x - x == 0` move proven to falsified, and `x.T @ x ~= norm(x)**2` over a column `x`, `f(A) == 1` and `f(A) == trace(f(A))` on a 1-by-1 result move holds to falsified. Write `(x - x)[0] == 0`, `f(A)[0, 0] == 1` or `f(A) == [[1]]`. A quadratic form `x.T @ A @ x` over a vector is a number and does not move.
+  - An ordering over an empty value moves proven or holds to falsified, and `f("") >= 0` moves unknown to falsified. At an empty result `f(x) == 0` moves holds to falsified and `f(x) != 0` falsified to holds; `f([]) != 5` moves falsified to proven and `f([]) == []` holds. An empty list, tuple and array agree with one another, and `{}` and `""` do not meet `[]`. A comparison of sizes is written on the container's length.
+  - A literal call such as `f([]) == []`, `== 0` or `== 5` is decided by the shape returned, so it moves proven to falsified where the shapes differ.
+  - A premise pinning a whole vector or matrix parameter to a value (`assuming x == 0`, `x == [5, 5, 5]`, `A == 0`) reads `unknown`, with a note that this premise is not read yet. A true claim under such a premise that held in 0.6.3 now reads `unknown` (`assuming x == 0, for x in [-1, 1]^3, sum(x) == 0`), and so does a claim 0.6.3 falsified by drawing a number there. The linear algebra sweep settles this reading; until then, a premise stated on an element keeps the evidence (`assuming norm(x) == 0`). A premise on a relation (`f(x) != 0`) or an element (`x[0] == 0`, `sum(x) == 0`) is read as before, and `x != 5` as a premise admits every point.
+  - `assuming x ~= 0` over a vector is `skipped:misspecified`.
+  - `assuming f(x) != 0` over a returned vector, Series or table moves falsified to holds where the only failing point was the zero; `assuming f(x) == 0` moves unknown to holds.
+  - One dimension fixed to two sizes moves proven to `skipped:misspecified`. Use one size or two names.
+  - A stated empty policy covers the call it states and reads a container value as a value, so `is_empty_safe` moves both ways: holds to falsified where the policy pins another argument, falsified to holds where that other call is guarded or returns a value. State a policy for each call, or leave the argument free.
+  - On the `[float]` line, a row whose witness paired different lengths moves falsified to holds, and such a row under a held claim may be absent.
+  - `is_state_safe` moves proven to falsified where 0.6.3 missed a write because of the order the cycle was read in (a `c(xs, n)` that passes `xs` to an `a` that appends to it), or charged a callee's parameter to its caller. Records of cyclic code re-record with one site for each opening and final write, so they can grow: mathema-language's `draw_raw` record goes from 10 KB to 35 KB.
+  - A function reaching an unhashable module value gets verdicts where `check` raised `TypeError` or `ValueError`.
+  - A `[float]` failure under a held claim says it holds on the probe's draws, and its stratum no longer says the mathematics is sound. No verdict moves.
+- `mathema badges` and the MCP `badges` tool print a notice, write nothing and exit 0 unless `MATHEMA_BADGES=on`. A script that reads their output needs the flag, or `mathema-ci measure --out`.
+- `verify` counts `misspecified` (`1 misspecified`), and `check` and `verify` JSON gain a `misspecified` count, which is part of `skipped`, so gating and exit codes are unchanged. `check --format md` gains a `misspecified` column.
+- New record key, beside the existing ones: `mathema.correction`. No existing key changes.
+- The project's pytest settings set `pythonpath = "."`, so a bare `pytest` in the repository collects tests that import their siblings.
+
+### Known issues
+- Over a listed-set domain with a premise, the `[float]` line runs at every listed point, the premise aside, and its failure overturns the claim: `assuming x == 3, for x in {1, 2, 3}, f(x) == 6` with `f(x) = 2 * x` reads falsified at `x = 1`. 0.6.3 reads the same. An interval domain such as `[1, 3] subset Z` reads correctly, as does `route: derive`. 0.6.5 fixes this first.
+
 ## 0.6.3
 
 ### Highlights
