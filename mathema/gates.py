@@ -77,7 +77,7 @@ def _integer_bound(bound) -> bool:
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
-                     exact=False, holes=None):
+                     exact=False, holes=None, exact_premises=False):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -346,7 +346,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     from .runtime_types import calling
     from ._linalg_eval import FUNCTIONS as _VECTOR_FUNCS
     from ._exact_premises import premise_functions
-    from ._linalg_eval import as_array, law_callable, scalar
+    from ._premises import _premise_op
+    from .conjecture import DEFAULT_TOLERANCE
+    from .probing import DEFAULT_RELATIVE_TOLERANCE
+    premise_allowance = ((0.0, 0.0) if exact_premises
+                         else (DEFAULT_TOLERANCE, DEFAULT_RELATIVE_TOLERANCE))
+    from ._linalg_eval import as_array, law_callable
     from .conjecture import _bound_for_arrays
     from .matrices import _numpy
     # a claim over vectors or matrices evaluates them as arrays, so
@@ -428,9 +433,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         env = {"__builtins__": {}, **base_env, **_typed(point)}
         lv = eval(code_l, env)
         rv = eval(code_r, env) if code_r is not None else 0
-        if as_arrays:
-            # a 1-by-1 result (`x.T @ A @ x` over a column) is the number it holds
-            lv, rv = scalar(lv), scalar(rv)
         last_sides[0] = (plain_value(lv), plain_value(rv))
         return last_sides[0]
 
@@ -453,8 +455,6 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                     rf = eval(code_r, env) if code_r is not None else 0
                 except Exception:
                     return False
-                if as_arrays:
-                    lf, rf = scalar(lf), scalar(rf)
                 if not (_same_output(plain_value(lf), lv)
                         and _same_output(plain_value(rf), rv)):
                     return False
@@ -860,16 +860,25 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                and resolver.shapes.get(n) is not None
                and resolver.shapes[n].ndim >= 1
                and any(a is not None for a in resolver.shapes[n].axes)}
-    first_planned = next((n for n in names if n in planned), None)
+    # a table whose row count a dimension shares with another axis, or a
+    # binding fixes, is drawn to the plan as well
+    tied = resolver.tied_keys() if resolver is not None else set()
+    tied_tables = {n for n in table_names if resolver is not None
+                   and resolver.key(n, 0) in tied}
+    first_planned = next((n for n in names
+                          if n in planned or n in tied_tables), None)
     point_sizes: dict = {}
 
-    def _planned_draw(name, rng, b):
+    def _draw_point_sizes(name, rng):
         # a point's coordinates are drawn in `names` order, so the first
         # planned coordinate draws the point's sizes and the rest reuse
         # them
         if name == first_planned or not point_sizes:
             point_sizes.clear()
             point_sizes.update(resolver.draw_sizes(rng))
+
+    def _planned_draw(name, rng, b):
+        _draw_point_sizes(name, rng)
         if resolver.shapes[name].ndim == 1:
             return _synth("sequence", rng, b,
                           length=point_sizes.get(resolver.key(name, 0)))
@@ -901,7 +910,11 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         if name in table_names:
             # a table: one equal-length column per name the claim or the
             # body reads
-            (length,) = _floor.sizes(cj_domain.get(name), rng)
+            if name in tied_tables:
+                _draw_point_sizes(name, rng)
+                length = point_sizes[resolver.key(name, 0)]
+            else:
+                (length,) = _floor.sizes(cj_domain.get(name), rng)
             from .conjecture import _column_bound
             return {c: _floor.gapped(_synth("sequence", rng,
                                             _column_bound(cj_domain.get(f"{name}.{c}"), b),
@@ -1034,6 +1047,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             # domain
             if n in point and not _paths_hold(point[n], n, cj_domain):
                 return False
+        if resolver is not None and not resolver.agrees(point):
+            # parameters bound to one dimension name with different
+            # sizes: the point is outside the claim's domain
+            return False
         for a_l, a_rel, a_r in assum:
             try:
                 env = {**base_env, **premise_words, **_typed(point)}
@@ -1043,9 +1060,16 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                 return False
             ops = {"<=": lambda x, y: x <= y, ">=": lambda x, y: x >= y,
                    "<": lambda x, y: x < y, ">": lambda x, y: x > y,
-                   "==": lambda x, y: values_agree(x, y) is True,
-                   "!=": lambda x, y: values_differ(x, y)}
-            if not ops.get(a_rel, lambda x, y: True)(al, ar):
+                   "==": lambda x, y: values_agree(x, y, *premise_allowance)
+                   is True,
+                   "!=": lambda x, y: values_differ(x, y, *premise_allowance)}
+            if a_rel not in ops:
+                continue
+            try:
+                if not _premise_op(ops[a_rel], a_rel,
+                                   *premise_allowance)(al, ar):
+                    return False
+            except TypeError:
                 return False
         return True
 
@@ -1074,9 +1098,13 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     import random as _random
     # a corner's sizes: a fixed axis at its size, every other axis at the
     # corner length 3, shared names agreeing
-    corner_sizes = ({k: (int(k) if isinstance(k, str) and k.isdigit() else 3)
-                     for k in resolver.distinct_keys()}
-                    if resolver is not None else {})
+    corner_sizes = resolver.corner_sizes() if resolver is not None else {}
+
+    def _table_corner_rows(name):
+        # a table's rows at a corner: the size of its dimension, 3 for a
+        # table no dimension names
+        key = resolver.key(name, 0) if resolver is not None else None
+        return corner_sizes.get(key, 3)
 
     def _corner_value(name, value):
         # a sequence's corner is a short constant list at the
@@ -1090,7 +1118,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
             n_cols = 2 if len(set(dims[:2])) == 1 else 3
             return [[value] * n_cols for _ in range(2)]
         if name in table_names:
-            return {c: [_column_end(name, c, value)] * 3 for c in table_columns[name]}
+            return {c: [_column_end(name, c, value)] * _table_corner_rows(name)
+                    for c in table_columns[name]}
         return [value] * 3 if name in seq_names else value
 
     def _column_end(name, column, value):
@@ -1207,6 +1236,61 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                                      else None):
             corners.append({**corners[0], seq: _corner_sequence(seq, pair)})
 
+    def _small_points(admitted=admits):
+        # the joint points at a tied dimension's least size, as the probe's
+        # guaranteed small draws (`DimResolver.draw_sizes`): vectors of
+        # length 1 side by side, and for a matrix 1-by-1, 1-by-m, n-by-1 and
+        # 2-by-2. No single container's floor can build one, since its other
+        # coordinates come from a corner. Every other coordinate is drawn, a
+        # point `admitted` refuses is drawn again, and a size no draw
+        # satisfies gives no point
+        if resolver is None:
+            return []
+        sized = [n for n in names if n in planned or n in tied_tables]
+        free = {k for k in tied if k not in resolver.fixed
+                and not (isinstance(k, str) and k.isdigit())}
+        if not any(resolver.key(n, a) in free for n in sized
+                   for a in range(resolver.shapes[n].ndim)):
+            return []
+        spans_matrix = any(resolver.shapes[n].ndim >= 2 for n in sized)
+        from ._sampling import _RNG_SEED
+        rng = _random.Random(_RNG_SEED + 2)
+        rounds = [resolver.draw_sizes(rng, floor=round_)
+                  for round_ in ((0, 1, 2) if spans_matrix else (0,))]
+        if spans_matrix:
+            rounds.append({k: size if k in resolver.fixed
+                           or (isinstance(k, str) and k.isdigit()) else 2
+                           for k, size in rounds[0].items()})
+        points: list = []
+        seen: list = []
+        for sizes in rounds:
+            if sizes in seen:
+                continue
+            seen.append(sizes)
+            for _ in range(_SMALL_POINT_DRAWS):
+                point = {n: _small_value(n, sizes, rng) for n in names}
+                if admitted(point):
+                    points.append(point)
+                    break
+        return points
+
+    def _small_value(name, sizes, rng):
+        # one coordinate of a small point: a sized container at `sizes`,
+        # with no holes, else an ordinary draw
+        b = sample_domain.get(name)
+        if name in tied_tables:
+            from .conjecture import _column_bound
+            length = sizes[resolver.key(name, 0)]
+            return {c: _synth("sequence", rng,
+                              _column_bound(cj_domain.get(f"{name}.{c}"), b),
+                              length=length)
+                    for c in table_columns[name]}
+        if name not in planned:
+            return sample(name, rng)
+        if resolver.shapes[name].ndim == 1:
+            return _synth("sequence", rng, b, length=sizes[resolver.key(name, 0)])
+        return resolver.synth(name, sizes, lambda: _synth("float", rng, b), rng)
+
     # this dict is the point-runtime kit; `interfaces.runtime` states
     # its contract (and the narrower obligation of a foreign runner
     # whose callable stands in for fn) so the seam is testable
@@ -1299,8 +1383,14 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
     # and the claim's two sides there
     evaluate.calls = lambda: list(point_calls)  # type: ignore[attr-defined]
     evaluate.sides = lambda: last_sides[0]  # type: ignore[attr-defined]
+    # the joint points at a tied dimension's least size, `_small_points`
+    evaluate.small_points = _small_points  # type: ignore[attr-defined]
     return dict(evaluate=evaluate, probe_finite=probe_finite, admits=admits,
                 sample=sample, corners=corners, names=names)
+
+
+#: how many times a small joint point is drawn before its size is given up
+_SMALL_POINT_DRAWS = 32
 
 
 def _written_exactly(value):
@@ -2225,9 +2315,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                      holes=None, excluded=None,
                      witness: "dict | None" = None) -> "Probe | None":
     """Intent:
-        The computation claim a derive proof spawns. `parent` is proven in
-        exact arithmetic, which is all a derive `proven` says; the
-        companion `<name>[float]` is the same relation executed against
+        The computation claim a derive proof spawns, or a probe that
+        stood in for an undecided derive. `parent` is proven in exact
+        arithmetic, which is all a derive `proven` says, or holds on the
+        probe's draws; the companion `<name>[float]` is the same relation
+        executed against
         the REAL code in float: at every corner of the declared domain and
         at sampled interior points, unbounded directions running to the
         claim's resolved pseudo-infinity (`records.operational_range`:
@@ -2252,7 +2344,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         word, value)`: each is executed at the first domain corner,
         after the corners and before the sampled points; a container's
         floor is listed the same way (its word None for an item that
-        holds no hole). `holes`, `{param: [value, ...]}`, are the hole
+        holds no hole). Parameters sharing a dimension are also executed
+        together at its least size (the evaluator's `small_points`),
+        after the corners and before the sampled points, and count toward
+        `budget` as corners do. `holes`, `{param: [value, ...]}`, are the hole
         values a container's slots admit, carried by its sampled draws.
         A point where the code returns a missing value or raises at a
         missing input is classified, never judged. `excluded`, when given,
@@ -2278,7 +2373,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             holes.setdefault(p, []).append(v)
     deps = _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum,
                             cap=cap, reach=representation.max_magnitude,
-                            sequences=True, holes=holes)
+                            sequences=True, holes=holes, exact_premises=True)
     if deps is None:
         return None
     if excluded is not None:
@@ -2291,7 +2386,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     top = float(representation.max_magnitude or representation_reach())
     reach = cap if cap is not None else (-top, top)
     reach_text = _reach_text(deps["names"], cj_domain, resolved, reach)
-    corners = list(deps["corners"])
+    try:
+        small = _with_timeout(lambda: deps["evaluate"].small_points(deps["admits"]),
+                              FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        small = []
+    corners = list(deps["corners"]) + small
     missing_corners = [{**corners[0], p: v} for p, _w, v in (missing or ())
                        if corners and p in deps["names"]]
     # the admitted missing inputs run first, so each is executed and
@@ -2330,9 +2430,16 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         # the missing inputs are the policy lines' trials, not this line's
         coverage.edge_cases = max(0, coverage.edge_cases - len(missing_corners))
     corner_count = sum(1 for c in corners if admits(c))
+    small_count = sum(1 for c in small if admits(c))
     # the admitted missing inputs run for the policy lines, not as points
     # of the computation line
     holes_run = sum(1 for c in missing_corners if admits(c)) if listed is None else 0
+    # what stands behind the parent: a proof, or the probe's draws
+    proven = str(parent.verdict or "").split(":", 1)[0] == "proven"
+    standing = (f"{parent.name} is mathematically proven" if proven else
+                f"{parent.name} holds on the probe's draws, where derive "
+                f"did not decide it")
+    said = f"{parent.name} is proven" if proven else standing
     progress = C.StabilitySweep()
     try:
         sweep = _with_timeout(
@@ -2379,6 +2486,8 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
     else:
         inner = max(0, sweep.checked - corner_count)
         listing = ["every corner",
+                   *([f"{small_count} small point{'s' if small_count != 1 else ''}"]
+                     if small_count else []),
                    f"{inner} interior point{'s' if inner != 1 else ''}"]
         what = (f"the {representation_word} computation of {parent.name} ran at "
                 f"{numbers} points: " + _and_words(", ".join(listing))
@@ -2409,9 +2518,12 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=f"{pt}: {sweep.detail}",
                 note=what,
-                sketch=f"the proof of {parent.name} failed: at {pt} the "
-                       f"claim is false in exact arithmetic as well as in "
-                       f"the computation ({sweep.detail})",
+                sketch=(f"the proof of {parent.name} failed: at {pt} the "
+                        f"claim is false in exact arithmetic as well as in "
+                        f"the computation ({sweep.detail})" if proven else
+                        f"{standing}, but at {pt} the claim is false in "
+                        f"exact arithmetic as well as in the computation "
+                        f"({sweep.detail})"),
                 meta={"mathema.proof_contradicted": pt})
         if sweep.detail.startswith("f returned None from present inputs"):
             # a None the return type does not declare: no value, whatever
@@ -2419,9 +2531,10 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             return Probe(
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=f"{pt}: {sweep.detail}", note=what,
-                sketch=f"{parent.name} is proven, but its computation gives "
-                       f"no value at {pt}: {sweep.detail}",
-                stratum={"mathematics": "sound", "blame": "implementation",
+                sketch=f"{said}, but its computation gives no value "
+                       f"at {pt}: {sweep.detail}",
+                stratum={**({"mathematics": "sound"} if proven else {}),
+                         "blame": "implementation",
                          "cause": "implementation:absent", "witness": pt},
                 meta=tried_meta or None)
         relation_failed = sweep.detail.startswith("the relation fails")
@@ -2447,7 +2560,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
             return Probe(
                 name, parent.statement, "falsified", route=float_route,
                 n=numbers, counterexample=pt, note=what,
-                sketch=f"{parent.name} is proven, but its computation "
+                sketch=f"{said}, but its computation "
                        f"fails at {pt}: {sweep.detail}{conditioned}; "
                        + (f"{covered}; " if covered else "")
                        + f"{remedy}",
@@ -2455,7 +2568,7 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
         return Probe(
             name, parent.statement, "falsified", route=float_route,
             n=numbers, counterexample=pt, note=what,
-            sketch=f"{parent.name} is mathematically proven, but its "
+            sketch=f"{standing}, but its "
                    f"computation fails at {pt}: {sweep.detail}"
                    + (": precision loss" if relation_failed else "")
                    + ("; the claim holds there in exact arithmetic"
@@ -2463,9 +2576,11 @@ def _float_companion(parent, cj, fn, facts, cj_domain, bound_funcs,
                    + f"{conditioned}; "
                    + (f"{covered}; " if covered else "")
                    + f"{remedy}",
-            # the proof that coexists with the executed break is the
-            # evidence that the mathematics is sound and the code is not
-            stratum={"mathematics": "sound", "blame": "implementation",
+            # a proof that coexists with the executed break is the
+            # evidence that the mathematics is sound and the code is not;
+            # the probe's draws are no such evidence
+            stratum={**({"mathematics": "sound"} if proven else {}),
+                     "blame": "implementation",
                      "cause": "implementation:numerical-instability",
                      "representation": representation.tag, "witness": pt},
             meta={**(tried_meta or {}), **found_meta} or None)

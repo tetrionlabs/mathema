@@ -61,6 +61,7 @@ from .domain import operational_domain as _operational_domain
 from . import _conditioning
 from ._allowance import (ABSOLUTE, exact_side_at, float_miss, largest_miss,
                          reference_side, relation_within)
+from . import _corrections
 from ._exact_side import F_CALL, exact_sides, f_slot
 from ._tolerance import ToleranceKind, written_tolerance
 from ._tolerance import number_text as _number_text
@@ -1594,6 +1595,9 @@ class Conjecture:
     # of its links; proven iff every link is, falsified if any link
     # is, and lhs/rel/rhs hold the first link so every single-link
     # consumer keeps working unchanged.
+    written: str = ""
+    # the claim as its author wrote it, domain included, where `raw` holds
+    # only the law a stored row keeps beside its domain
     raw: str = ""
     # the claim's original law text, before parsing (provenance, and the
     # source `check_conjectures` re-resolves the matrix sugar from when
@@ -6242,6 +6246,16 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             "spawn" if float_companions and cj.route in ("derive", "best")
             else None)
         ctx.companion_budget = cj.trials if cj.trials is not None else trials
+        _corrections.forget_miss()
+
+        def _adjudicate_correction(text, cj=cj):
+            offered = claim(text, name=cj.name, route=cj.route, funcs=cj.funcs,
+                            tolerance=cj.tolerance)
+            rows = _check_conjectures(fn, [offered], domain=domain,
+                                      trials=trials, trials_scale=trials_scale,
+                                      facts=facts)
+            return next(p.verdict for p in rows if p.name == offered.name)
+
         def stamp(probe, _cap=None):
             # `condition` is rendered text that gets read back,
             # docsync compares a verified row by feeding
@@ -6276,7 +6290,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                                   f"to {capped_to}").lstrip("; ")
                     probe.meta = {**(probe.meta or {}),
                                   "mathema.capped_by": ref_name}
-            return probe
+            return _corrections.with_corrections(probe, cj, _adjudicate_correction)
         if cj.route not in ("derive", "best", "probe", "examine"):
             out.append(_stamped(Probe(
                 cj.name, statement, "skipped", route=None,
@@ -6288,12 +6302,31 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 cj.name, statement, "skipped:misspecified", route=None,
                 note=f"{ctx.note}; {pin_problem}")))
             continue
+        sizes_conflict = _fixed_size_conflict(fn, facts, ctx.cj_domain)
+        if sizes_conflict is not None:
+            # the bindings fix one shared dimension to two sizes: no
+            # value satisfies the claim's own domain, on any route
+            out.append(stamp(Probe(
+                cj.name, statement, "skipped:misspecified", route=None,
+                note=f"{ctx.note}; {sizes_conflict}",
+                meta={"mathema.invalid_conjecture": True,
+                      "mathema.premise": "dimension-conflict"})))
+            continue
         # the family is resolved for every concrete route: the derive
         # stage reads its derive half, and the probe stage reads its
         # probe:algorithmic half, a plain route="probe" claim on a
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        from . import _premises
+        from .types import shapes_from_signature
+        not_read = _premises.pinned_container_words(
+            ctx.assumption, kinds, ctx.cj_domain,
+            frozenset(shapes_from_signature(fn)))
+        if not_read is not None:
+            out.append(stamp(Probe(cj.name, statement, "unknown", route=None,
+                                   note=not_read)))
+            continue
         emptied = _empty_premise_parameter(ctx, facts)
         clash = None if emptied is not None else _fixed_dim_clash(ctx)
         if clash is not None:
@@ -7778,6 +7811,7 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
         if _exactly_decided(cj, code_l, code_r, trial_env, callees, ok,
                             side=side) is True:
             return None
+        _corrections.record_miss(lv, rv, dict(zip(kinds, args)))
         return f"{_fmt(tuple(args), *labels)}: {lv!r} vs {rv!r}"
     return None
 
@@ -8825,7 +8859,7 @@ def _container_holes(p: str, record, resolution: dict) -> tuple:
     return bool(absent), holes
 
 
-def _admitted_container_points(ctx, facts) -> tuple:
+def _admitted_container_points(ctx, facts, resolver=None) -> tuple:
     """Intent:
         `(points, holes)` for a proof's companion: `points` the floor of
         every vector, matrix and table parameter as `(param, word,
@@ -8833,6 +8867,14 @@ def _admitted_container_points(ctx, facts) -> tuple:
         container absent, None for an item holding no hole), each built
         from a fixed small draw inside the element domain; `holes` the
         realised hole values each container's slots admit.
+
+    Notes:
+        `resolver`, the claim's `dimensions.DimResolver`, ties sizes: an
+        axis whose dimension another axis shares, or that a binding
+        fixes, takes its size at a domain corner
+        (`DimResolver.corner_sizes`), and a vector on such an axis keeps
+        that length in every floor item, so the value agrees with the
+        corner it is executed beside.
     """
     import random as _random
 
@@ -8843,6 +8885,17 @@ def _admitted_container_points(ctx, facts) -> tuple:
     rng = _random.Random(_RNG_SEED)
     points: list = []
     holes_of: dict = {}
+    tied = resolver.tied_keys() if resolver is not None else set()
+    at_corner = resolver.corner_sizes() if resolver is not None else {}
+
+    def tied_sizes(p, drawn):
+        # each axis a tied dimension sizes at its corner size, the rest
+        # as drawn
+        if resolver is None:
+            return tuple(drawn)
+        return tuple(at_corner[resolver.key(p, a)]
+                     if resolver.key(p, a) in tied else size
+                     for a, size in enumerate(drawn))
     for p in facts.params:
         kind = facts.param_kinds.get(p, "unknown")
         bound = (ctx.cj_domain or {}).get(p)
@@ -8859,7 +8912,7 @@ def _admitted_container_points(ctx, facts) -> tuple:
         dims = tuple(getattr(bound, "dims", ()) or ())
         fixed = _floor.fixed_sizes(bound)
         if kind == "table":
-            (length,) = _floor.sizes(bound, rng, (3, 3))
+            (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             columns = _table_columns(p, ctx.cj, facts)
             base = {c: [_synth("float", rng,
                                _column_bound((ctx.cj_domain or {}).get(f"{p}.{c}"), bound))
@@ -8872,14 +8925,19 @@ def _admitted_container_points(ctx, facts) -> tuple:
             n_rows, n_cols = _floor.sizes(bound, rng, (2, 2) if square else (2, 3), 2)
             if not square and fixed[1:2] == (None,):
                 n_cols = 3
+            n_rows, n_cols = tied_sizes(p, (n_rows, n_cols))
             base = [[_synth("float", rng, bound) for _ in range(n_cols)]
                     for _ in range(n_rows)]
             floor = _floor.matrix_floor(holes, admits_zero, absent=absent)
         else:
-            (length,) = _floor.sizes(bound, rng, (3, 3))
+            (length,) = tied_sizes(p, _floor.sizes(bound, rng, (3, 3)))
             base = [_synth("float", rng, bound) for _ in range(length)]
+            free = not any(fixed) and not (
+                resolver is not None and p in resolver.shapes and any(
+                    resolver.key(p, a) in tied
+                    for a in range(resolver.shapes[p].ndim)))
             floor = _floor.vector_floor(holes, admits_zero,
-                                        length_free=not any(fixed), absent=absent)
+                                        length_free=free, absent=absent)
         for item in floor:
             value = item(base)
             if value is None:
@@ -10152,6 +10210,24 @@ def _empty_premise_parameter(ctx: "_ClaimContext", facts) -> str | None:
     return premise_empties_domain(ctx.cj_domain, set(facts.params), premises)
 
 
+def _fixed_size_conflict(fn, facts, cj_domain) -> "str | None":
+    """Intent:
+        The reason text when the claim's bindings fix one shared
+        dimension to two sizes (`dimensions.FixedSizeConflict`), else
+        None. Any other dimension conflict, or a signature with no
+        markers, is left to the routes.
+    """
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        _dims.resolve(facts, shapes_from_signature(fn), claim_domain=cj_domain)
+    except _dims.FixedSizeConflict as conflict:
+        return str(conflict)
+    except _dims.DimensionConflict:
+        return None
+    return None
+
+
 def _fixed_dim_clash(ctx: "_ClaimContext") -> "tuple | None":
     """Intent:
         `(param, premise_text, axis_words)` for the first premise that
@@ -10371,6 +10447,39 @@ def _settle_infinity_offer(row, rerun, names, cj_domain,
                                  "words": _conditioning.infinity_words(bound)}}
 
 
+def _outside_premise_shapes(fn, structures: dict):
+    """The predicate over points that a premised claim leaves out beyond
+    its relations: a matrix that does not show a premise's structure
+    (`assuming A is positive definite`), or a value without the number of
+    axes the signature's shape marker gives its parameter."""
+    from .matrices import PROPERTIES
+    from .types import shapes_from_signature
+    from ._shapes import observed_shape
+    axes = {p: len(shape.dims) for p, shape in shapes_from_signature(fn).items()}
+
+    def outside(point: dict) -> bool:
+        if any(p in point and PROPERTIES[prop].check(point[p]) is not True
+               for p, props in structures.items() for prop in props):
+            return True
+        for p, ndim in axes.items():
+            seen = observed_shape(point.get(p))
+            if p in point and (seen is None or len(seen) != ndim):
+                return True
+        return False
+    return outside
+
+
+def _outside_premise_too(ctx: "_ClaimContext", fn, excluded):
+    """`excluded` over points, with a premised claim's
+    `_outside_premise_shapes` as well."""
+    if not ctx.assumption:
+        return excluded
+    lacking = _outside_premise_shapes(fn, ctx.premise_structures or {})
+    if excluded is None:
+        return lacking
+    return lambda point: excluded(point) or lacking(point)
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -10407,7 +10516,14 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                 # input f's own guards refuse
                 _refused_by_own_guards_at(fn, facts, ctx.cj)
                 if ctx.exclude_own_guards else None)
-    containers, holes = _admitted_container_points(ctx, facts)
+    from . import dimensions as _dims
+    from .types import shapes_from_signature
+    try:
+        resolver = _dims.resolve(facts, shapes_from_signature(fn),
+                                 claim_domain=ctx.cj_domain)
+    except _dims.DimensionConflict:
+        resolver = None
+    containers, holes = _admitted_container_points(ctx, facts, resolver)
     missing = _admitted_scalar_points(ctx) + containers
 
     def run(cj, witness=None):
@@ -10416,7 +10532,8 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                                 bound_funcs, assum=assumption,
                                 budget=ctx.companion_budget,
                                 missing=missing, holes=holes,
-                                excluded=excluded, witness=witness)
+                                excluded=_outside_premise_too(ctx, fn, excluded),
+                                witness=witness)
     found_at: dict = {}
     from .runtime_types._receivers import ReceiverRefused
     try:
@@ -11856,7 +11973,7 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
         compiled=compiled, params=tuple(facts.params), domain=cj_domain,
         draws=_premises.premise_draws(ctx.assumption, kinds, cj_domain,
                                       tolerance=cj.tolerance),
-        solved=_premises.solve_equality(ctx.assumption, kinds),
+        solved=_premises.solve_equality(ctx.assumption, kinds, cj_domain),
         base_env=base, array_params=array_params, bind_env=bind_env,
         ignore=ignore)
 
@@ -12195,7 +12312,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # equality for one variable symbolically, so every trial computes
     # that coordinate from the others and sits exactly on the surface
     # (the rejection filter below still checks every other conjunct)
-    assum_solved = (_premises.solve_equality(ctx.assumption, kinds)
+    assum_solved = (_premises.solve_equality(ctx.assumption, kinds, cj_domain)
                     if assum_eval is not None else None)
     from . import dimensions as _dims
     from .types import shapes_from_signature
@@ -12708,9 +12825,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           if code_r is not None else None)
                 except Exception:
                     return False
-                if as_arrays:
-                    lf = _linalg_eval.scalar(lf)
-                    rf = _linalg_eval.scalar(rf) if code_r is not None else None
                 if not (_same_output(lf, lv) and _same_output(rf, rv)):
                     return False
             return True
@@ -13010,11 +13124,6 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
-            if as_arrays:
-                # a 1-by-1 result (`x.T @ A @ x` over a column) is the
-                # number it holds
-                lv = _linalg_eval.scalar(lv)
-                rv = _linalg_eval.scalar(rv) if code_r is not None else None
         except Exception as e:
             if not call_raised[0] and admitted_hole(args):
                 # the claim's own words at a hole or absence it only
@@ -13537,8 +13646,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         # relieves only the closed relations, whose truth a float wobble
         # can obscure but not create. A matrix/array-valued side (a
         # function returning a matrix, `0 <= f(X) <= 1`) is compared
-        # ELEMENTWISE: the relation holds iff it holds at every element,
-        # a scalar broadcasting across the matrix.
+        # ELEMENTWISE: an ordering holds iff it holds at every element,
+        # a scalar read at each; under `==`, `~=` and `!=` a number against
+        # a matrix is a different shape.
         if as_arrays:
             lv, rv = _linalg_eval.comparable(lv, rv)
         # the claim read exactly decides where it can be (the code's
@@ -13815,6 +13925,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 call_hole[0] = None
                 continue
+            _corrections.record_miss(lv, rv, dict(zip(kinds, args)))
             if as_arrays:
                 lv, rv = _linalg_eval.shown(lv), _linalg_eval.shown(rv)
             cx = f"{_point_text(args)}{aux_part}: {_sides(lv, rv)}"

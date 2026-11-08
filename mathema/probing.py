@@ -425,14 +425,20 @@ def plain_value(v):
     """Intent:
         An executed value in the plain Python form the comparisons
         read: a numpy scalar or a 0-d array becomes its Python number,
-        an array becomes nested lists, anything else is returned as it
-        is.
+        an array becomes nested lists, a polars Series its list,
+        anything else is returned as it is.
     """
     if type(v) in (bool, int, float, complex, str, type(None)):
         return v
     if hasattr(v, "shape") and hasattr(v, "tolist"):
         try:
             return v.tolist()
+        except Exception:
+            return v
+    if hasattr(v, "shape") and hasattr(v, "to_list"):
+        # a polars Series: a vector, whatever its length
+        try:
+            return v.to_list()
         except Exception:
             return v
     if hasattr(v, "dtype") and hasattr(v, "item"):
@@ -504,9 +510,52 @@ def _numbers_agree(u, v, abs_tol, rel_tol: float) -> bool:
     return math.isclose(u, v, rel_tol=rel_tol, abs_tol=abs_tol)
 
 
+def has_no_elements(value) -> bool:
+    """Whether `value` is a container or a string with nothing in it: a
+    list, an array, a dict, a set, a string, a range, a table."""
+    if value is None or isinstance(value, (bool, int, float, complex)):
+        return False
+    try:
+        return len(value) == 0
+    except TypeError:
+        return False
+
+
+def orders_nothing(lv, rv) -> bool:
+    """Whether an ordering between `lv` and `rv` has a side with no
+    elements, where it does not hold. Two strings are the exception:
+    they have an order of their own, the empty string first."""
+    if isinstance(lv, str) and isinstance(rv, str):
+        return False
+    return has_no_elements(lv) or has_no_elements(rv)
+
+
+def empty_text_order(lv, rv, relation: str) -> "bool | None":
+    """The order between two strings of which one is empty, the empty
+    string first; None for any other pair."""
+    if not (isinstance(lv, str) and isinstance(rv, str)) or (lv and rv):
+        return None
+    return {"<": lv < rv, "<=": lv <= rv, ">": lv > rv, ">=": lv >= rv}[relation]
+
+
+def scalar_spreads(scalar, container, relation: str) -> bool:
+    """Intent:
+        Whether `relation` between a value that is not a sequence and a
+        sequence is read at each of the sequence's elements. An ordering
+        is, over a sequence with elements. Equality and `!=` never are:
+        a number against a sequence is a different shape, so unequal, 0
+        included (the zero vector is written `[0, 0]`). A sequence with
+        no elements gives nothing to read, so nothing spreads over it
+        (an ordering over it does not hold, an equality with a number is
+        a mismatch).
+    """
+    if len(container) == 0:
+        return False
+    return relation not in ("==", "~=", "!=")
+
+
 def values_agree(u, v, tolerance: float | None = None,
-                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE,
-                 broadcast: bool = False) -> "bool | None":
+                 rel_tol: float = DEFAULT_RELATIVE_TOLERANCE) -> "bool | None":
     """Intent:
         Whether two executed values are equal, the one reading every
         comparison shares: Python numbers, numpy scalars, 0-d arrays,
@@ -518,10 +567,9 @@ def values_agree(u, v, tolerance: float | None = None,
         is larger.
 
     Notes:
-        `None` when the two sides have different shapes. With
-        `broadcast`, a number against an array or list is compared
-        with every element. A bool, and a value that is not a number,
-        agrees only by exact equality.
+        `None` when the two sides have different shapes, a number
+        against an array or list included. A bool, and a value that is
+        not a number, agrees only by exact equality.
     """
     abs_tol = tolerance if tolerance is not None else 1e-9
     u, v = plain_value(u), plain_value(v)
@@ -533,10 +581,7 @@ def values_agree(u, v, tolerance: float | None = None,
                 return None
             parts = [walk(a, b) for a, b in zip(x, y)]
         elif xs or ys:
-            if not broadcast:
-                return None
-            parts = ([walk(a, y) for a in x] if xs
-                     else [walk(x, b) for b in y])
+            return None
         elif _is_number(x) and _is_number(y):
             return _numbers_agree(x, y, abs_tol, rel_tol)
         else:
@@ -1288,14 +1333,16 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
                                exact_inequality: bool = False,
                                rel_tol: float = DEFAULT_RELATIVE_TOLERANCE):
     """Whether `lv <relation> rv` holds: a scalar comparison, or, when a
-    side is matrix/array-valued, the relation at EVERY element (a scalar
-    broadcasts against a matrix), numpy values read as the plain values
-    they hold (`plain_value`). `==`, `~=` and `!=` over arrays are one
-    fact about the whole value (`values_agree`), so `!=` holds when some
-    element differs; an ordering holds when it holds at every element. A
-    NaN anywhere fails every relation. Returns
+    side is matrix/array-valued, the relation at EVERY element, numpy
+    values read as the plain values they hold (`plain_value`). `==`, `~=`
+    and `!=` over arrays are one fact about the whole value
+    (`values_agree`), so `!=` holds when some element differs; an
+    ordering holds when it holds at every element, a scalar read at each
+    (`scalar_spreads`), and over any value with no elements (a list, a
+    dict, a set, a string, a range) it does not hold, except between two
+    strings, which keep their own order (`orders_nothing`). A NaN anywhere fails every relation. Returns
     `True`/`False`, or `None` when the comparison is structurally
-    meaningless (an ordering over non-orderable values, or mismatched
+    meaningless (an ordering over non-orderable values or mismatched
     shapes), which the caller reads as skip, never falsify.
     `exact_inequality` makes `!=` compare exactly (see
     `_scalar_relation`), and `rel_tol` is the relative allowance `==`
@@ -1304,10 +1351,17 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
     compare by `abs(a - b)`, with the tolerance rules of reals; an
     ordering over a complex value is unanswerable. Two values of
     different lengths or shapes are unequal outright under `==`, `~=`
-    and `!=`; an ordering over them is unanswerable. Leaves that are
+    and `!=` (a number against a sequence included); an ordering over
+    mismatched shapes is unanswerable. Leaves that are
     not numbers (a record, a string, `None`) are equal only by their
     own equality."""
     lv, rv = plain_value(lv), plain_value(rv)
+    if relation not in ("==", "~=", "!="):
+        if orders_nothing(lv, rv):
+            return False
+        text_order = empty_text_order(lv, rv, relation)
+        if text_order is not None:
+            return text_order
     if not _is_matrix_value(lv) and not _is_matrix_value(rv):
         try:
             return bool(_scalar_relation(lv, rv, relation, slack,
@@ -1321,24 +1375,32 @@ def relation_holds_elementwise(lv, rv, relation: str, slack: float,
             return False
         exact = relation == "!=" and exact_inequality
         agree = values_agree(lv, rv, 0.0 if exact else slack,
-                             0.0 if exact else rel_tol, broadcast=True)
+                             0.0 if exact else rel_tol)
         if agree is None:
             # two values of different shapes are unequal outright
             return relation == "!="
         return agree if relation != "!=" else not agree
 
     def _walk(x, y):
-        # an ordering, at every element: over sequences of different
-        # length, or leaves that do not order, it is unanswerable
+        # an ordering, at every element: over a sequence with no elements
+        # it does not hold, there being no element at which it could;
+        # over sequences of different length, or leaves that do not
+        # order, it is unanswerable
         xs, ys = isinstance(x, (list, tuple)), isinstance(y, (list, tuple))
+        if (xs and not x) or (ys and not y):
+            return False
         if xs and ys:
             if len(x) != len(y):
                 return None
             parts = [_walk(u, v) for u, v in zip(x, y)]
         elif xs:
-            parts = [_walk(u, y) for u in x]   # broadcast scalar y
+            if not scalar_spreads(y, x, relation):
+                return None
+            parts = [_walk(u, y) for u in x]
         elif ys:
-            parts = [_walk(x, v) for v in y]   # broadcast scalar x
+            if not scalar_spreads(x, y, relation):
+                return None
+            parts = [_walk(x, v) for v in y]
         else:
             try:
                 return bool(_scalar_relation(x, y, relation, slack,

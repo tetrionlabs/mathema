@@ -718,9 +718,15 @@ def badges(targets: list[str] | None = None, root: str = ".",
     worker thread, runs without it. `clarity_algo` is the clarity
     algorithm version the scores were computed under. Pass
     `implementation=false` to skip the coverage pass: `implementation`,
-    `overall`, `ascii` and each row's implementation come back null."""
-    from mathema.badges import default_jobs, render_triangle, repo_badges
+    `overall`, `ascii` and each row's implementation come back null.
+    Unless MATHEMA_BADGES is on in the server's environment, nothing is
+    scored and the result is only `notice`, saying where badges now come
+    from."""
+    from mathema.badges import (MOVED_NOTICE, core_badges_enabled,
+                                default_jobs, render_triangle, repo_badges)
 
+    if not core_badges_enabled():
+        return {"notice": MOVED_NOTICE}
     scores = repo_badges(list(targets or ()) or None, root=root,
                          implementation=implementation, jobs=default_jobs())
     rows = [[key, v["implementation"], v["intent"], v["clarity"]]

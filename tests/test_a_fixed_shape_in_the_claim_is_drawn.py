@@ -181,7 +181,7 @@ def test_one_shared_name_fixed_to_two_sizes_is_a_conflict(mod):
     from mathema.types import Vec
     text = "for a in [0, 1]^30, b in [0, 1]^15, f(a, b) >= 0"
     (p,) = check_conjectures(mod.two, [claim(text, route="probe")])
-    assert p.verdict == "skipped", (p.verdict, p.note)
+    assert p.verdict == "skipped:misspecified", (p.verdict, p.note)
     assert p.meta.get("mathema.premise") == "dimension-conflict", p.meta
     for word in ("n", "30", "15"):
         assert word in (p.note or ""), p.note

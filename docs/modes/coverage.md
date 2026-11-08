@@ -225,9 +225,10 @@ run once afterwards in the same tree.
 
 ## Where the number goes
 
-The project figure is the implementation corner of
-[`mathema badges`](badges.md), and the MCP tool `implementation_coverage`
-returns the same per-function rows to an agent. mathema's own functions
+The project figure is the implementation corner of the
+[badges](badges.md), which come from `mathema-ci measure` (the built-in
+`mathema badges` is off unless `MATHEMA_BADGES=on` is set), and the MCP tool
+`implementation_coverage` returns the same per-function rows to an agent. mathema's own functions
 get no probe source when mathema measures itself, since a probe's lines
 cannot be told apart from the machinery's; test and derive lines still
 count.

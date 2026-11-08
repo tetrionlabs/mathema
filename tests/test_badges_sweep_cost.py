@@ -250,8 +250,10 @@ def test_a_state_dependence_warning_is_shown_once_per_function(importable):
     assert len(texts) == len(set(texts))
 
 
-def test_the_mcp_badges_tool_takes_its_targets_as_optional(tmp_path):
+def test_the_mcp_badges_tool_takes_its_targets_as_optional(tmp_path,
+                                                            monkeypatch):
     from mathema.interfaces.mcp import tools
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
     out = tools.badges(root=str(tmp_path))
     assert out["rows"] == [] and out["capped"] == []
 
@@ -463,6 +465,7 @@ def test_the_cli_passes_refresh_to_the_run(tmp_path, monkeypatch, capsys):
         seen.append(k.get("cache"))
         return real(*a, **k)
     monkeypatch.setattr(badges, "repo_badges", recording)
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
     main(["badges", "--root", str(tmp_path), "--refresh"])
     main(["badges", "--root", str(tmp_path)])
     assert seen == ["refresh", True]

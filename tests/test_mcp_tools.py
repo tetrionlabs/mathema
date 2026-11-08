@@ -582,8 +582,10 @@ def test_implementation_coverage_tool_reports_sources_and_staleness(tmp_path):
     assert isinstance(rem, str)                         # the how-to-increase field
 
 
-def test_badges_tool_reports_three_scores_and_the_triangle(tmp_path):
+def test_badges_tool_reports_three_scores_and_the_triangle(tmp_path,
+                                                           monkeypatch):
     import sys
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
     pkg = tmp_path / "btpkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
@@ -608,8 +610,9 @@ def test_badges_tool_reports_three_scores_and_the_triangle(tmp_path):
     assert out["clarity"] < 35
 
 
-def _badges_on_one_function(tmp_path, **kw):
+def _badges_on_one_function(tmp_path, monkeypatch, **kw):
     import sys
+    monkeypatch.setenv("MATHEMA_BADGES", "on")
     pkg = tmp_path / "bipkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
@@ -626,14 +629,16 @@ def _badges_on_one_function(tmp_path, **kw):
             del sys.modules[m]
 
 
-def test_badges_tool_reports_the_clarity_algorithm_version(tmp_path):
+def test_badges_tool_reports_the_clarity_algorithm_version(tmp_path,
+                                                           monkeypatch):
     from mathema.badges import CLARITY_ALGO
-    out = _badges_on_one_function(tmp_path)
+    out = _badges_on_one_function(tmp_path, monkeypatch)
     assert out["clarity_algo"] == CLARITY_ALGO
 
 
-def test_badges_tool_without_implementation_skips_the_coverage_pass(tmp_path):
-    out = _badges_on_one_function(tmp_path, implementation=False)
+def test_badges_tool_without_implementation_skips_the_coverage_pass(
+        tmp_path, monkeypatch):
+    out = _badges_on_one_function(tmp_path, monkeypatch, implementation=False)
     assert out["implementation"] is None
     assert out["overall"] is None
     assert out["ascii"] is None

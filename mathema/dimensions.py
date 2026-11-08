@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from ._shapes import observed_shape
 from .runtime_types import SEQUENCE_KINDS
 
 
@@ -32,6 +33,13 @@ class DimensionConflict(ValueError):
     dimension name at the same axis. The signature is authoritative,
     so the claim is misspecified, and saying so beats silently
     adjudicating one of two disagreeing shapes."""
+
+
+class FixedSizeConflict(DimensionConflict):
+    """A claim's bindings fix one shared dimension to two sizes (`a` in
+    `[0, 1]^2` and `b` in `[0, 1]^3` under one marker name, directly or
+    through an alias). No value satisfies both, so the claim is not
+    mathematically possible and is misspecified on every route."""
 
 
 @dataclass(frozen=True)
@@ -99,20 +107,32 @@ class DimResolver:
                  and not a.isdigit()}
         return names | set(self.aliases)
 
+    def anchors(self, name: str) -> list:
+        """Every `(param, axis)` position a marker dim name measures at,
+        in signature order."""
+        return [(param, axis) for param, shape in self.shapes.items()
+                for axis, a in enumerate(shape.axes) if a == name]
+
     def anchor(self, name: str):
         """A `(param, axis)` position a marker dim name measures at, so
         `n` can be read off a real argument's shape. Any occurrence
         will do, since a shared name means every occurrence agrees."""
-        for param, shape in self.shapes.items():
-            for axis, a in enumerate(shape.axes):
-                if a == name:
-                    return (param, axis)
-        return None
+        return next(iter(self.anchors(name)), None)
 
     def measure(self, value, axis: int) -> int:
         """The size of `value`'s `axis`-th dimension, descending first
-        elements. Raises `IndexError`/`TypeError` past the value's real
+        elements. A table (a dict of equal-length columns) has one axis,
+        its row count; any other dict (of scalars, of nested dicts, of
+        columns of different lengths, or empty) has one axis, its key
+        count. Raises `IndexError`/`TypeError` past the value's real
         depth, the honest failure an over-indexed axis deserves."""
+        if isinstance(value, dict):
+            shape = observed_shape(value)
+            if shape is not None:
+                return shape[axis]
+            if axis > 0:
+                raise IndexError(f"a dict has one axis, not axis {axis}")
+            return len(value)
         v = value
         for _ in range(axis):
             v = v[0]
@@ -122,18 +142,18 @@ class DimResolver:
         """Inject dimension values into a claim's evaluation env: every
         marker dim name bound to the size read off its anchoring
         argument, so `assuming n >= 2` and a law mentioning `n`
-        evaluate against the trial's real shapes. Unbound on any
-        argument the anchor is missing from, rather than guessed."""
+        evaluate against the trial's real shapes. Each occurrence of the
+        name is tried in turn; unbound when no argument measures it,
+        rather than guessed."""
         for name in self.marker_names():
-            anchor = self.anchor(self.canonical(name))
-            if anchor is None:
-                continue
-            param, axis = anchor
-            if param in args:
+            for param, axis in self.anchors(self.canonical(name)):
+                if param not in args:
+                    continue
                 try:
                     env[name] = self.measure(args[param], axis)
                 except (IndexError, TypeError):
                     continue
+                break
 
     def distinct_keys(self) -> set:
         """Every canonical dimension key in the signature, one per
@@ -142,6 +162,56 @@ class DimResolver:
         return {self.key(p, a)
                 for p, shape in self.shapes.items()
                 for a in range(shape.ndim)}
+
+    def tied_keys(self) -> set:
+        """Every canonical key whose size is not a free per-parameter
+        choice: a key two or more axes share (across parameters, or
+        both axes of a square `^(n,n)`), a literal size (`"30"`), or a
+        name a binding fixes."""
+        seen: dict = {}
+        for p, shape in self.shapes.items():
+            for a in range(shape.ndim):
+                k = self.key(p, a)
+                seen[k] = seen.get(k, 0) + 1
+        return {k for k, uses in seen.items()
+                if uses > 1 or k in self.fixed
+                or (isinstance(k, str) and k.isdigit())}
+
+    def corner_sizes(self, length: int = 3) -> dict:
+        """The size of every canonical key at a domain corner: a literal
+        size or a fixed name at that size, every other key at `length`,
+        so parameters sharing a name agree at every corner."""
+        out: dict = {}
+        for k in self.distinct_keys():
+            if isinstance(k, str) and k.isdigit():
+                out[k] = int(k)
+            elif k in self.fixed:
+                out[k] = self.fixed[k]
+            else:
+                out[k] = length
+        return out
+
+    def agrees(self, point: dict) -> bool:
+        """Whether every key two or more axes share has one size across
+        `point`, each axis measured on the value the point gives its
+        parameter. An empty container has length 0, and that constrains
+        its first axis as any length does. An axis that cannot be
+        measured (an absent value, an axis inside an empty container, a
+        value of another kind) constrains nothing, nor does a dict that
+        is no table, whose keys are not drawn to a dimension."""
+        sizes: dict = {}
+        for p, shape in self.shapes.items():
+            if p not in point:
+                continue
+            if isinstance(point[p], dict) and observed_shape(point[p]) is None:
+                continue
+            for a in range(shape.ndim):
+                try:
+                    size = self.measure(point[p], a)
+                except Exception:
+                    continue
+                sizes.setdefault(self.key(p, a), set()).add(size)
+        return all(len(found) <= 1 for found in sizes.values())
 
     def draw_sizes(self, rng: random.Random,
                    lo: "dict | None" = None,
@@ -226,7 +296,9 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
     named, so the two are the SAME dimension, returned as an alias
     (`claim name -> marker name`). A fixed numeric claim size on an
     axis the marker names pins that name (`fixed`: marker name ->
-    size), so every parameter sharing the name is drawn at it."""
+    size), so every parameter sharing the name is drawn at it; one
+    name pinned to two sizes within the parameter (`^(2,3)` under
+    `Shape("n", "n")`) is a `FixedSizeConflict`."""
     if len(marker_dims) != len(claim_dims):
         raise DimensionConflict(
             f"{param}: the claim gives it {len(claim_dims)} dimension"
@@ -242,6 +314,11 @@ def _reconcile_dims(param: str, marker_dims: tuple, claim_dims: tuple) -> tuple:
             size = _axis(cd)
             if size is not None and size.isdigit() and isinstance(md, str) \
                     and not md.isdigit():
+                if fixed.get(md, int(size)) != int(size):
+                    raise FixedSizeConflict(
+                        f"{md} is fixed to two sizes: {fixed[md]} and {size} "
+                        f"by {param}'s binding; one shared dimension has one "
+                        f"size")
                 fixed[md] = int(size)
             continue
         if isinstance(md, str) and md != cd:
@@ -272,6 +349,10 @@ def resolve(facts, shapes: "dict | None" = None,
     aliases: dict = {}
     fixed: dict = {}
     fixed_by: dict = {}
+    # the first rank conflict met, raised once every parameter has been
+    # read for a fixed-size conflict, so the verdict does not depend on
+    # the parameter order
+    rank_conflict: "DimensionConflict | None" = None
     shapes = shapes or {}
     claim_domain = claim_domain or {}
     for p in getattr(facts, "params", ()):
@@ -279,11 +360,18 @@ def resolve(facts, shapes: "dict | None" = None,
         declared = getattr(claim_domain.get(p), "dims", ())
         marker_dims = getattr(marker, "dims", ()) if marker is not None else ()
         if marker_dims and declared:
-            new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            try:
+                new_aliases, new_fixed = _reconcile_dims(p, marker_dims, declared)
+            except FixedSizeConflict:
+                raise
+            except DimensionConflict as conflict:
+                if rank_conflict is None:
+                    rank_conflict = conflict
+                continue
             aliases.update(new_aliases)
             for name, size in new_fixed.items():
                 if name in fixed and fixed[name] != size:
-                    raise DimensionConflict(
+                    raise FixedSizeConflict(
                         f"{name} is fixed to two sizes: {fixed[name]} by "
                         f"{fixed_by[name]}'s binding and {size} by {p}'s "
                         f"binding; one shared dimension has one size")
@@ -299,4 +387,17 @@ def resolve(facts, shapes: "dict | None" = None,
             out[p] = ParamShape(axes=(None,))
         else:
             out[p] = ParamShape(axes=())
-    return DimResolver(shapes=out, aliases=aliases, fixed=fixed)
+    resolver = DimResolver(shapes=out, aliases=aliases, fixed=fixed)
+    # a size fixed through a name is the size of that name's canonical
+    # dimension, the name every axis is keyed by
+    for name, size in list(fixed.items()):
+        key = resolver.canonical(name)
+        if fixed.get(key, size) != size:
+            raise FixedSizeConflict(
+                f"{key} is fixed to two sizes: {fixed[key]} and {size} by "
+                f"{fixed_by[name]}'s binding on its alias {name}; one shared "
+                f"dimension has one size")
+        fixed[key] = size
+    if rank_conflict is not None:
+        raise rank_conflict
+    return resolver
