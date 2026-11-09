@@ -108,6 +108,47 @@ def test_each_ascii_edge_steps_one_column_per_row():
         assert line[15 - y] in "·◆" and line[15 + y] in "·◆"
 
 
+def _line(x0, y0, x1, y1, ys):
+    """The cells of a line stepped along x, with the row for each step
+    given by hand in `ys` (offsets from y0)."""
+    step = 1 if x1 > x0 else -1
+    return {(x0 + step * k, y0 + dy) for k, dy in enumerate(ys)}
+
+
+def test_the_ascii_score_triangle_is_an_outline_between_its_points():
+    # 60/60/60: points (15, 4), (6, 13), (24, 13); the slanted edges step
+    # one column per row and the third edge is row 13
+    want = ({(15 - k, 4 + k) for k in range(10)}
+            | {(15 + k, 4 + k) for k in range(10)}
+            | {(x, 13) for x in range(6, 25)})
+    out = render_triangle(60, 60, 60)
+    assert _cells(out, "•") | _cells(out, "●") == want
+    assert _cells(out, "●") == {(15, 4), (6, 13), (24, 13)}
+    # 88/71/52: points (15, 5), (2, 14), (26, 14); each slanted edge steps
+    # one column at a time, its row the nearest to the true line
+    left = _line(15, 5, 2, 14, (0, 1, 1, 2, 3, 3, 4, 5, 6, 6, 7, 8, 8, 9))
+    right = _line(15, 5, 26, 14, (0, 1, 2, 2, 3, 4, 5, 6, 7, 7, 8, 9))
+    want = left | right | {(x, 14) for x in range(2, 27)}
+    out = render_triangle(88, 71, 52)
+    assert _cells(out, "•") | _cells(out, "●") == want
+    # 100/100/100: the outline is the frame itself, which keeps its dots,
+    # with a point at each tip
+    full = render_triangle(100, 100, 100)
+    assert _cells(full, "•") == set()
+    assert _cells(full, "●") == {(15, 0), (0, 15), (30, 15)}
+    frame = ({(15 - k, k) for k in range(16)} | {(15 + k, k)
+             for k in range(16)} | {(x, 15) for x in range(31)})
+    assert _cells(full, "·") | _cells(full, "●") == frame
+
+
+def test_the_ascii_inside_of_the_score_triangle_is_left_empty():
+    # row 10 of 60/60/60 meets the outline at columns 9 and 21
+    row = render_triangle(60, 60, 60).split("\n")[1:17][10]
+    assert row[9] == "•" and row[21] == "•"
+    assert row[10:21].replace("+", " ").strip() == ""
+    assert _cells(render_triangle(60, 60, 60), "+") == {(15, 10)}
+
+
 def test_the_ascii_labels_sit_outside_the_frame():
     out = render_triangle(88, 71, 52).split("\n")
     assert out[0].strip() == "CLARITY 52"

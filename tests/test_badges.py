@@ -191,7 +191,8 @@ def test_triangle_render_is_deterministic_and_hides_degenerate():
     a = render_triangle(88, 71, 52)
     assert a == render_triangle(88, 71, 52)          # byte-stable
     assert "IMPL 88" in a and "overall" in a
-    # dotted frame with ◆ corners, dot-filled score triangle, ● vertices
+    # dotted frame with ◆ corners, the score triangle outlined between
+    # its ● vertices
     assert "·" in a and "●" in a and "◆" in a and "░" not in a
     # at 100/100/100 the score vertices reach the corners, so ◆ is gone
     full = render_triangle(100, 100, 100)

@@ -1635,16 +1635,17 @@ def _repo_badges(targets, root: str, implementation: bool,
 # up (90 degrees), IMPL down-left (210) and INTENT down-right (330),
 # angles counter-clockwise from the positive x axis. The frame joins the
 # three spokes' tips; each score is the point at its fraction of its
-# spoke, and the triangle those points span is filled. Two spokes of
-# lengths x and y at 120 degrees enclose a wedge of x * y * sin(120) / 2,
-# so the filled share of the frame is (ab + bc + ca) / 3, which is
-# `triangle_area`. The ASCII grid is a fixed integer canvas, so the same
+# spoke, and the triangle those points span is the current state. Two
+# spokes of lengths x and y at 120 degrees enclose a wedge of
+# x * y * sin(120) / 2, so the score triangle's share of the frame is
+# (ab + bc + ca) / 3, which is `triangle_area`; the SVG fills it exactly
+# and the ASCII draws its outline. The ASCII grid is a fixed integer canvas, so the same
 # scores always render the same bytes (clean git diffs). A terminal cell
 # is about twice as tall as it is wide, so columns are scaled by sqrt(3),
 # about 1.73 to 1, which puts each slanted edge at one column per row.
 _ORDER = ("CLARITY", "IMPL", "INTENT")
 _SPOKE_DEG = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
-_DOT, _CORNER, _CENTRE, _MARK = "·", "◆", "+", "●"
+_DOT, _CORNER, _CENTRE, _MARK, _EDGE = "·", "◆", "+", "●", "•"
 _ASCII_RADIUS = 10                    # rows from the centre to a tip
 _ASCII_XSCALE = 3 ** 0.5              # columns per row of height
 _ASCII_CENTRE = (15, 10)              # (column, row)
@@ -1661,18 +1662,19 @@ def _spoke_xy(name: str, fraction: float, centre, radius: float,
             centre[1] - radius * fraction * math.sin(t))
 
 
-def _inside(x: float, y: float, tri) -> bool:
-    (ax, ay), (bx, by), (cx, cy) = tri
+def _line_cells(x0: int, y0: int, x1: int, y1: int) -> list:
+    """The grid cells of the segment between two cells: one cell per step
+    along the longer axis, the other coordinate the nearest to the true
+    line, a half rounded up."""
+    dx, dy = x1 - x0, y1 - y0
+    n = max(abs(dx), abs(dy))
+    if n == 0:
+        return [(x0, y0)]
 
-    def sign(px, py, qx, qy, rx, ry):
-        return (px - rx) * (qy - ry) - (qx - rx) * (py - ry)
+    def near(d, k):
+        return (2 * d * k + n) // (2 * n)
 
-    d1 = sign(x, y, ax, ay, bx, by)
-    d2 = sign(x, y, bx, by, cx, cy)
-    d3 = sign(x, y, cx, cy, ax, ay)
-    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-    return not (has_neg and has_pos)
+    return [(x0 + near(dx, k), y0 + near(dy, k)) for k in range(n + 1)]
 
 
 def render_triangle(a: int, b: int, c: int) -> str:
@@ -1682,10 +1684,12 @@ def render_triangle(a: int, b: int, c: int) -> str:
         (`+`): CLARITY up, IMPL down-left, INTENT down-right. The dotted
         outer triangle with its `◆` tips is the full 100/100/100 frame;
         each score is a `●` at its fraction of its spoke, and the triangle
-        those three points span is filled with dots, so the filled share
-        of the frame is the overall number (`triangle_area`), up to the
-        grid's resolution. The scores label the frame from outside, with
-        CLARITY above, IMPL and INTENT below and the overall under them.
+        those three points span is outlined in `•`, edges that run along
+        the frame keeping its dots. The outline shows the shape; its
+        share of the frame, the overall number (`triangle_area`), is
+        drawn exactly by `render_svg`. The scores label the frame from
+        outside, with CLARITY above, IMPL and INTENT below and the
+        overall under them.
         If any score is under 5 the shape is degenerate and is not drawn,
         only the numbers are shown, and so is a score that is unknown
         (None), shown as `unknown`.
@@ -1720,15 +1724,16 @@ def render_triangle(a: int, b: int, c: int) -> str:
     for x, y in tips.values():
         put(round(x), round(y), _CORNER, over=True)
     put(centre[0], centre[1], _CENTRE, over=True)
-    inner = {n: _spoke_xy(n, max(0.0, min(1.0, scores[n] / 100.0)),
-                          centre, r, xs) for n in _ORDER}
-    tri = [inner[n] for n in _ORDER]
-    for y in range(h):                              # fill the score triangle
-        for x in range(w):
-            if grid[y][x] == " " and _inside(x, y, tri):
-                put(x, y, _DOT)
+    inner = {}
+    for n in _ORDER:
+        x, y = _spoke_xy(n, max(0.0, min(1.0, scores[n] / 100.0)),
+                         centre, r, xs)
+        inner[n] = (round(x), round(y))
+    for i, n in enumerate(_ORDER):                  # the score outline
+        for x, y in _line_cells(*inner[n], *inner[_ORDER[i - 1]]):
+            put(x, y, _EDGE)
     for name in _ORDER:                             # the score points on top
-        put(round(inner[name][0]), round(inner[name][1]), _MARK, over=True)
+        put(*inner[name], _MARK, over=True)
     body = "\n".join("".join(row).rstrip() for row in grid)
 
     def centred(text):

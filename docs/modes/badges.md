@@ -380,9 +380,9 @@ The three scores sit on three spokes from a common centre, 120 degrees
 apart: **CLARITY** straight up, **IMPL** down and to the left, **INTENT**
 down and to the right. The sharp dotted outline joining the spokes' tips
 is the full `100/100/100` frame; each score is a point at its fraction of
-its spoke, and the triangle those three points span is filled, so the
-filled area is the current state and the gap to the frame is the room to
-grow. A dimension under 5% is degenerate and the shape is not drawn, only
+its spoke, and the triangle those three points span is the current
+state, so the gap to the frame is the room to grow. The SVG card fills
+it; the ASCII triangle draws its outline. A dimension under 5% is degenerate and the shape is not drawn, only
 the numbers.
 
 The filled share of the frame is the **overall** number. Two spokes of
@@ -395,10 +395,12 @@ three are 100 and s squared when all three are s (60/60/60 reads 36),
 and a single zero leaves the one wedge between the other two, so
 100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers
 shows the change in overall characterisation; to hold a line on one
-score, gate on that score itself. The SVG card draws the shape exactly;
-the ASCII triangle draws it on a grid of characters, with columns scaled
-by about 1.7 to 1 for the height of a terminal cell, so its filled share
-matches the overall number to within the grid's resolution.
+score, gate on that score itself. The SVG card's shaded share of its
+frame is exactly the overall number. The ASCII triangle is drawn on a
+grid of characters, with columns scaled by about 1.7 to 1 for the height
+of a terminal cell, and outlines the score triangle in `•` between its
+`●` points, so it shows the shape; the exact shaded share is the
+SVG's.
 
 ## The standard location, and embedding in a README
 
