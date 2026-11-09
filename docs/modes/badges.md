@@ -356,14 +356,22 @@ The three scores are the corners of a triangle: **CLARITY** at the top,
 the full `100/100/100` frame; inside it, each score is a dot on its spoke
 from the base (all-zero) out to its corner, and the triangle those three
 dots span is filled, so the filled area is the current state and the gap
-to the frame is the room to grow. The fraction of the frame that area
-shades is the **overall** number, so half the triangle shaded reads 50:
-with clarity the apex height and implementation and intent the base, it
-is `clarity * (implementation + intent) / 2` on the fractions. It is 100
-when all three are 100, and 0 whenever clarity is 0 (a flat shape) or
-both base scores are, so comparing two commits' areas shows the change in
-overall characterisation. A dimension under 5% is degenerate and the
-shape is not drawn, only the numbers.
+to the frame is the room to grow. A dimension under 5% is degenerate and
+the shape is not drawn, only the numbers.
+
+The **overall** number is the share of the full frame shaded by the
+triangle the three scores span when their spokes sit 120 degrees apart.
+Two spokes of lengths x and y at angle t enclose a wedge of area
+`x * y * sin(t) / 2`, so with equal angles each pair of scores counts the
+same and overall is `(implementation * intent + intent * clarity +
+clarity * implementation) / 3` on the 0 to 1 fractions, rounded to a
+whole percent. It is 100 when all three are 100 and s squared when all
+three are s (60/60/60 reads 36), and a single zero leaves the one wedge
+between the other two, so 100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers shows the
+change in overall characterisation; to hold a line on one score, gate on
+that score itself. The drawing keeps clarity at the apex for reading, so
+its filled share is a picture of the three scores rather than the overall
+number itself.
 
 ## The standard location, and embedding in a README
 

@@ -17,8 +17,8 @@ Three orthogonal measures of a codebase, each 0-100:
 The two per-function-quality scores (intent, clarity) roll up to the
 repo by a CENTRALITY-WEIGHTED mean (`centrality.centrality_weights`): a
 function the rest of the codebase depends on counts for more than a leaf.
-The overall/health number is the AREA of the radar triangle the three
-scores span.
+The overall/health number is the AREA of the triangle the three scores
+span on spokes 120 degrees apart, `(ab + bc + ca) / 3` on 0-1 fractions.
 """
 from __future__ import annotations
 
@@ -968,7 +968,8 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
 class BadgeScores:
     """The four repo numbers plus the per-function rows behind them.
     `implementation`/`intent`/`clarity` are 0-100; `overall` is the
-    radar-triangle area (0-100), the single health number CI diffs across
+    area of the triangle the three span on spokes 120 degrees apart
+    (`triangle_area`, 0-100), the single health number CI diffs across
     commits. `per_function` maps each key to its own three scores (a
     clarity None means the function posed no question). `capped` maps
     each key whose step outran the wall-clock cap to the scores that
@@ -1020,15 +1021,18 @@ def _weighted_mean(pairs: list[tuple[float, float]]) -> int:
 
 def triangle_area(a: float, b: float, c: float) -> int:
     """Intent:
-        The overall/health number, 0-100: the fraction of the frame the
-        drawn triangle SHADES, so half the triangle shaded reads 50. With
-        clarity (c) the apex height and implementation (a) and intent (b)
-        the base, that area is `clarity * (implementation + intent) / 2`
-        on the 0-1 fractions: 100 when all three are 100, and 0 whenever
-        clarity is 0 (a flat, zero-height shape) or both base scores are.
+        The overall/health number, 0-100, for implementation a, intent b
+        and clarity c: the share of the full frame shaded by the triangle
+        whose three spokes, of lengths a, b and c, sit 120 degrees apart.
+        Two spokes x and y at angle t enclose a wedge of area
+        `x * y * sin(t) / 2`, so with equal angles each pair counts the
+        same and the share is `(a*b + b*c + c*a) / 3` on the 0-1
+        fractions. It is 100 when all three are 100, s squared when all
+        three are s, and a single zero leaves the one remaining wedge:
+        `(100, 100, 0)` reads 33.
     """
     fa, fb, fc = a / 100.0, b / 100.0, c / 100.0
-    return round(100 * fc * (fa + fb) / 2.0)
+    return round(100 * (fa * fb + fb * fc + fc * fa) / 3.0)
 
 
 class _Capped(Exception):
@@ -1097,7 +1101,7 @@ def repo_badges(targets=None, root: str = ".",
         repo line ratio of the test-union-probe-union-derive coverage (no
         averaging, no centrality); intent and clarity are
         centrality-weighted means of their per-function scores. `overall`
-        is the triangle area. `implementation=False` SKIPS the coverage
+        is `triangle_area` of the three. `implementation=False` SKIPS the coverage
         pass entirely: the implementation score and `overall` come back
         None (nothing is output for them), it does not fall back to a
         cheaper, different number. `progress`, when given, is called as
@@ -1602,8 +1606,8 @@ def render_svg(scores: BadgeScores) -> str:
     alike: CLARITY at the apex, IMPL and INTENT the bottom nodes, the full
     100/100/100 triangle as a faint dashed frame, and each score a vertex
     on its spoke from the bottom centre (all-zero) out to its corner, with
-    the triangle they span filled in the accent. The overall number sits
-    top right. Self-contained (no external CSS or fonts), so it reads
+    the triangle they span filled in the accent. The overall number
+    (`triangle_area`) sits top right. Self-contained (no external CSS or fonts), so it reads
     the same on a light or a dark README."""
     w, h = 360, 300
     apex = (180.0, 72.0)          # CLARITY, top
@@ -1770,8 +1774,9 @@ _MEANINGS = (
                "specified", "#the-three-badges"),
     ("clarity", "how much of each function's knowable behaviour its "
                 "verified claims have pinned down", "#how-clarity-is-scored"),
-    ("overall", "the area the three span, so it falls toward zero when any "
-                "one of them is empty", "#the-triangle"),
+    ("overall", "the area the three span, where each pair of scores counts "
+                "equally, so a low score pulls it down without zeroing it",
+     "#the-triangle"),
 )
 
 

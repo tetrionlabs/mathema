@@ -3140,8 +3140,9 @@ def cmd_badges(args) -> int:
     (code), intent (spec), and clarity (behaviour), each 0-100, rolled up
     to the repo with intent and clarity weighted by each function's
     CENTRALITY (a core function counts more than a leaf; implementation
-    stays a raw line ratio). Renders them as a radar triangle whose area
-    is the overall health number. Prints the triangle; with `--out [DIR]`
+    stays a raw line ratio). Renders them as a radar triangle, with
+    the overall health number the area the three span on spokes 120
+    degrees apart. Prints the triangle; with `--out [DIR]`
     also writes the artifacts (the ASCII triangle, one shields.io
     JSON per badge, a colored SVG twin, a JSON snapshot for CI to
     diff, and a paste-ready README snippet) to DIR, defaulting to the standard `.mathema/badges/` under
