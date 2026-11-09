@@ -155,6 +155,53 @@ def form_hash(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return f"{PYTHON_FORM_NAMESPACE}:{digest}"
 
 
+def _strip_docstring(body: list) -> list:
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        return body[1:] or [ast.Pass()]
+    return body
+
+
+def _normalized_class(cdef: ast.ClassDef) -> ast.ClassDef:
+    """A class with its docstring stripped, each method alpha-normalised
+    as `normalized()` does a function but keeping the method's name (a
+    method name is part of the class's interface, a local name is not),
+    nested classes normalised the same way, and every reference to the
+    class's own name read as `C`, so renaming the class alone leaves
+    its form unchanged."""
+    own = cdef.name
+    cdef.body = _strip_docstring(cdef.body)
+    for node in ast.walk(cdef):
+        if isinstance(node, ast.Name) and node.id == own:
+            node.id = "C"
+    body = []
+    for stmt in cdef.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name = stmt.name
+            stmt = normalized(stmt)
+            stmt.name = name
+        elif isinstance(stmt, ast.ClassDef):
+            stmt = _normalized_class(stmt)
+        body.append(stmt)
+    cdef.body = body
+    cdef.name = "C"
+    return cdef
+
+
+def class_form_hash(cdef: ast.ClassDef) -> str:
+    """The `form` identity of a class, `py:<sha>`: a 12-hex-char hash of
+    its normalised definition (bases, decorators, fields with their
+    annotations and defaults, and methods, see `_normalized_class`),
+    rendered by `form_text` like a function's. A docstring, a local or
+    parameter name inside a method, or the class's own name do not
+    change it; a field, a default, a base, a decorator, a method body
+    or a method name does."""
+    tree = ast.parse(ast.unparse(cdef))
+    digest = hashlib.sha256(
+        form_text(_normalized_class(tree.body[0])).encode()).hexdigest()[:12]
+    return f"{PYTHON_FORM_NAMESPACE}:{digest}"
+
+
 def namespaced_form(form: "str | None") -> "str | None":
     """Intent:
         `form` as `<frontend>:<sha>`. A bare hash, the spelling a record

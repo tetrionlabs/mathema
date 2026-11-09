@@ -1650,7 +1650,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .conjecture import InvalidConjecture, _resolve_func_ref
-    from .inventory import function_dependencies
+    from .inventory import class_chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
                        record as write_record, write_yaml)
@@ -2106,6 +2106,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 d.get("key") in stored_forms and d.get("form")
                 and not same_form(d.get("form"), stored_forms[d.get("key")])
                 for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
+            dependency_changed = class_chain_moved(
+                verified_entry.get("dependencies") or [], deps_now or [])
         if is_fresh and not dependency_changed:
             # a callee's body provenance stored when this record was
             # adjudicated against the callee's live one: a body that

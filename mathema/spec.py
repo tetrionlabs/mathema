@@ -1172,9 +1172,10 @@ def _dependency_state(dep: dict, verified: dict,
                       root: "str | None" = None) -> str | None:
     """One function-kind dependency's freshness against the verified
     store: `current` / `stale` / `invalidated` / `unverified`, or
-    `None` for a dependency that carries no form (modules, classes,
-    signature callables); those have no verification to be fresh
-    against. Given the project `root`, a callee installed outside it
+    `None` for a dependency that carries no form (modules, signature
+    callables) or is not a function: a class has no record of its own,
+    its form and reach are compared against the ones this function's
+    record stored when it was adjudicated. Given the project `root`, a callee installed outside it
     (the standard library, a third-party package) with no record is
     `None` too: the project's store records it only when a claims file
     states claims about it, and then it is compared like any other.
@@ -1183,7 +1184,7 @@ def _dependency_state(dep: dict, verified: dict,
     from its record's, even under the same form."""
     form = dep.get("form")
     key = dep.get("key")
-    if not form or not key:
+    if not form or not key or dep.get("kind", "function") != "function":
         return None
     stored = verified.get(key)
     if stored is None:

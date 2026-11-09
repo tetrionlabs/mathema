@@ -942,6 +942,151 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
     return out
 
 
+def class_form(cls: type) -> "str | None":
+    """The form hash of a class defined in the project (see
+    `identity.class_form_hash`), or None for a class with no readable
+    source or one defined in the standard library or an installed
+    package, whose freshness is its library's version, not a form."""
+    import textwrap
+    from .analysis import _installed_code, foreign_body
+    from .identity import class_form_hash
+    if not inspect.isclass(cls) or foreign_body(cls) or _installed_code(cls):
+        return None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    except (OSError, TypeError, SyntaxError):
+        return None
+    cdef = next((n for n in tree.body if isinstance(n, ast.ClassDef)), None)
+    return class_form_hash(cdef) if cdef is not None else None
+
+
+def _annotation_classes(ann) -> list[type]:
+    """The classes named in a type annotation, through generic
+    arguments (`list[Money]`, `Optional[Money]`, `dict[str, Money]`)."""
+    import typing as t
+    found: list[type] = []
+    stack = [ann]
+    while stack:
+        a = stack.pop()
+        if inspect.isclass(a) and not t.get_args(a):
+            found.append(a)
+        stack.extend(t.get_args(a))
+    return found
+
+
+def _class_rests_on(cls: type) -> list[object]:
+    """What a class's definition rests on one level down: its bases,
+    the classes its fields are annotated with, and the classes and
+    functions its body names (decorators, validators, helpers its
+    methods call), each resolved against the class's module."""
+    import sys
+    import textwrap
+    import typing as t
+    out: list[object] = list(cls.__bases__)
+    try:
+        hints = t.get_type_hints(cls)
+    except Exception:
+        hints = {}
+    for ann in hints.values():
+        out.extend(_annotation_classes(ann))
+    g = vars(sys.modules.get(cls.__module__) or object())
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    except (OSError, TypeError, SyntaxError):
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            obj = g.get(node.id)
+            if inspect.isclass(obj) or inspect.isfunction(obj):
+                out.append(obj)
+    return out
+
+
+def _form_entry(obj: object) -> "dict | None":
+    if inspect.isclass(obj):
+        form = class_form(obj)
+        kind = "class"
+    elif inspect.isfunction(obj):
+        from .analysis import _installed_code
+        facts = None if _installed_code(obj) else quiet_facts(obj)
+        form = facts.form if facts is not None else None
+        kind = "function"
+    else:
+        return None
+    if not form:
+        return None
+    return {"key": f"{obj.__module__}.{obj.__qualname__}", "kind": kind,
+            "form": form}
+
+
+def class_reach(cls: type) -> list[dict]:
+    """Every project class and function a class's definition rests on,
+    transitively through classes (bases, field classes, what the body
+    names), each as `{key, kind, form}`, sorted by key and excluding
+    the class itself. A function is a leaf here: what it calls is its
+    own record's dependency chain. Classes and functions with no form
+    (installed, or with no source) are left out."""
+    own = f"{cls.__module__}.{cls.__qualname__}"
+    seen: dict[str, dict] = {}
+    stack = [cls]
+    while stack:
+        current = stack.pop()
+        for obj in _class_rests_on(current):
+            entry = _form_entry(obj)
+            if entry is None or entry["key"] == own or entry["key"] in seen:
+                continue
+            seen[entry["key"]] = entry
+            if entry["kind"] == "class":
+                stack.append(obj)
+    return [seen[k] for k in sorted(seen)]
+
+
+def _class_chain(dep: dict) -> dict:
+    chain = {dep.get("key"): dep.get("form")}
+    chain.update({r.get("key"): r.get("form") for r in dep.get("reaches") or []})
+    return chain
+
+
+def class_chain_moved(stored: list, live: list) -> "list[str]":
+    """The keys along a class dependency's chain whose form differs
+    between the dependencies a record `stored` and the `live` ones: the
+    class itself and every entry of its reach, a key that appeared or
+    disappeared counting as moved, so a class the record stored without
+    a form (a record written before classes carried forms) is moved
+    once, and re-adjudicating writes its form. Empty when every class
+    this record read is as it was, or one it did not list at all."""
+    from .identity import same_form
+    before = {d.get("key"): d for d in stored if d.get("kind") == "class"}
+    moved: list[str] = []
+    for dep in live:
+        old = before.get(dep.get("key"))
+        if dep.get("kind") != "class" or not dep.get("form") or old is None:
+            continue
+        a, b = _class_chain(old), _class_chain(dep)
+        moved.extend(k for k in sorted(set(a) | set(b))
+                     if not same_form(a.get(k), b.get(k)) and k not in moved)
+    return moved
+
+
+def _class_dependency(name: str, cls: type) -> dict:
+    """A dependency entry for a class, with its form and reach when the
+    class is the project's own."""
+    dep: dict = {"name": name, "kind": "class",
+                 "key": f"{cls.__module__}.{cls.__qualname__}"}
+    try:
+        src = inspect.getsourcefile(cls)
+        if src:
+            dep["file"] = src
+        dep["line"] = inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        pass
+    form = class_form(cls)
+    if form:
+        dep["form"] = form
+        dep["reaches"] = class_reach(cls)
+    return dep
+
+
 def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
@@ -1006,6 +1151,11 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
                 line = None
         if line is not None:
             dep["line"] = line
+        if kind == "class":
+            form = class_form(obj)
+            if form:
+                dep["form"] = form
+                dep["reaches"] = class_reach(obj)
         if kind == "function":
             callee_facts = quiet_facts(obj)
             if callee_facts is not None:
@@ -1023,6 +1173,18 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
         return out
     import collections.abc
     import typing as t
+    listed = {d.get("key") for d in out}
+    annotated = [(p.name, p.annotation) for p in sig.parameters.values()]
+    annotated.append(("return", sig.return_annotation))
+    for name, ann in annotated:
+        if ann is inspect.Parameter.empty or ann is inspect.Signature.empty:
+            continue
+        for cls in _annotation_classes(ann):
+            key = f"{cls.__module__}.{cls.__qualname__}"
+            if key in listed or class_form(cls) is None:
+                continue
+            listed.add(key)
+            out.append(_class_dependency(name, cls))
     for p in sig.parameters.values():
         ann = p.annotation
         if ann is inspect.Parameter.empty:
