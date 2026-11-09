@@ -1631,22 +1631,34 @@ def _repo_badges(targets, root: str, implementation: bool,
 
 
 # --- the radar triangle -----------------------------------------------
-# A fixed integer canvas so the same scores always render the same bytes
-# (clean git diffs). The frame is the sharp full 100/100/100 triangle,
-# CLARITY at the top apex, IMPL and INTENT the two bottom nodes, with
-# exact 45-degree edges so each side is one dot per row (no doubling).
-# Each score grows from the bottom centre (all-zero) out to its corner,
-# and the triangle those three dots span is filled with dots: the filled
-# area is the state, the gap to the frame the room to grow.
-_TRI_SIZE = 14
+# Three spokes from a common centre, 120 degrees apart: CLARITY straight
+# up (90 degrees), IMPL down-left (210) and INTENT down-right (330),
+# angles counter-clockwise from the positive x axis. The frame joins the
+# three spokes' tips; each score is the point at its fraction of its
+# spoke, and the triangle those points span is filled. Two spokes of
+# lengths x and y at 120 degrees enclose a wedge of x * y * sin(120) / 2,
+# so the filled share of the frame is (ab + bc + ca) / 3, which is
+# `triangle_area`. The ASCII grid is a fixed integer canvas, so the same
+# scores always render the same bytes (clean git diffs). A terminal cell
+# is about twice as tall as it is wide, so columns are scaled by sqrt(3),
+# about 1.73 to 1, which puts each slanted edge at one column per row.
 _ORDER = ("CLARITY", "IMPL", "INTENT")
+_SPOKE_DEG = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
 _DOT, _CORNER, _CENTRE, _MARK = "·", "◆", "+", "●"
+_ASCII_RADIUS = 10                    # rows from the centre to a tip
+_ASCII_XSCALE = 3 ** 0.5              # columns per row of height
+_ASCII_CENTRE = (15, 10)              # (column, row)
 
 
-def _corner_xy(size: int) -> dict:
-    """The three frame corners on a `2*size+1` by `size+1` grid: CLARITY
-    at the top apex, IMPL bottom-left, INTENT bottom-right."""
-    return {"CLARITY": (size, 0), "IMPL": (0, size), "INTENT": (2 * size, size)}
+def _spoke_xy(name: str, fraction: float, centre, radius: float,
+              xscale: float = 1.0) -> tuple:
+    """The point at `fraction` (0 to 1) of spoke `name`, from `centre`
+    with tip at `radius`, on a canvas whose y grows downwards and whose
+    x is stretched by `xscale`."""
+    import math
+    t = math.radians(_SPOKE_DEG[name])
+    return (centre[0] + xscale * radius * fraction * math.cos(t),
+            centre[1] - radius * fraction * math.sin(t))
 
 
 def _inside(x: float, y: float, tri) -> bool:
@@ -1666,15 +1678,17 @@ def _inside(x: float, y: float, tri) -> bool:
 def render_triangle(a: int, b: int, c: int) -> str:
     """Intent:
         The radar for scores (implementation a, intent b, clarity c), each
-        0-100: the sharp dotted outer triangle is the full 100/100/100
-        frame, CLARITY at the apex and IMPL/INTENT the bottom nodes; each
-        score is a dot on its spoke from the bottom centre (all-zero) out
-        to its corner, and the triangle those three dots span is filled
-        with dots, so the filled area is the current state and the gap to
-        the frame is the room to grow. The three scores label the corners
-        and the overall area sits below. If any score is under 5 the shape
-        is degenerate and is not drawn, only the numbers are shown, and so
-        is a score that is unknown (None), shown as `unknown`.
+        0-100, on three spokes 120 degrees apart from a common centre
+        (`+`): CLARITY up, IMPL down-left, INTENT down-right. The dotted
+        outer triangle with its `◆` tips is the full 100/100/100 frame;
+        each score is a `●` at its fraction of its spoke, and the triangle
+        those three points span is filled with dots, so the filled share
+        of the frame is the overall number (`triangle_area`), up to the
+        grid's resolution. The scores label the frame from outside, with
+        CLARITY above, IMPL and INTENT below and the overall under them.
+        If any score is under 5 the shape is degenerate and is not drawn,
+        only the numbers are shown, and so is a score that is unknown
+        (None), shown as `unknown`.
     """
     if None in (a, b, c):
         def said(v):
@@ -1686,61 +1700,45 @@ def render_triangle(a: int, b: int, c: int) -> str:
     if min(a, b, c) < 5:
         return (f"IMPL {a}   INTENT {b}   CLARITY {c}   overall {overall}\n"
                 "(no triangle: a dimension is below 5%)")
-    size = _TRI_SIZE
-    w, h = 2 * size + 1, size + 1
+    r, xs, centre = _ASCII_RADIUS, _ASCII_XSCALE, _ASCII_CENTRE
+    tips = {n: _spoke_xy(n, 1.0, centre, r, xs) for n in _ORDER}
+    w = round(tips["INTENT"][0]) + 1
+    h = round(tips["IMPL"][1]) + 1
     grid = [[" "] * w for _ in range(h)]
 
     def put(x, y, ch, over=False):
         if 0 <= y < h and 0 <= x < w and (over or grid[y][x] == " "):
             grid[y][x] = ch
 
-    corners = _corner_xy(size)
-    for y in range(h):                              # the two sharp 45-deg edges
-        put(size - y, y, _DOT)
-        put(size + y, y, _DOT)
-    for x in range(w):                              # the dotted base
-        put(x, size, _DOT)
-    for name, (x, y) in corners.items():
-        put(x, y, _CORNER, over=True)
-    origin = (size, size)                           # all-zero sits at the base
-    put(origin[0], origin[1], _CENTRE, over=True)
-    inner = {}
-    for name in _ORDER:
-        f = max(0.0, min(1.0, scores[name] / 100.0))
-        cx, cy = corners[name]
-        inner[name] = (origin[0] + f * (cx - origin[0]),
-                       origin[1] + f * (cy - origin[1]))
+    top, left, right = tips["CLARITY"], tips["IMPL"], tips["INTENT"]
+    for y in range(h):                              # the two slanted edges
+        k = (y - top[1]) / (left[1] - top[1])
+        put(round(top[0] + k * (left[0] - top[0])), y, _DOT)
+        put(round(top[0] + k * (right[0] - top[0])), y, _DOT)
+    for x in range(round(left[0]), round(right[0]) + 1):   # the base
+        put(x, round(left[1]), _DOT)
+    for x, y in tips.values():
+        put(round(x), round(y), _CORNER, over=True)
+    put(centre[0], centre[1], _CENTRE, over=True)
+    inner = {n: _spoke_xy(n, max(0.0, min(1.0, scores[n] / 100.0)),
+                          centre, r, xs) for n in _ORDER}
     tri = [inner[n] for n in _ORDER]
     for y in range(h):                              # fill the score triangle
         for x in range(w):
             if grid[y][x] == " " and _inside(x, y, tri):
                 put(x, y, _DOT)
-    for name in _ORDER:                             # the score vertices on top
+    for name in _ORDER:                             # the score points on top
         put(round(inner[name][0]), round(inner[name][1]), _MARK, over=True)
-    rows = ["".join(row).rstrip() for row in grid]
-    while rows and not rows[0].strip():
-        rows.pop(0)
-    while rows and not rows[-1].strip():
-        rows.pop()
-    body = "\n".join(rows)
-    return (f"        CLARITY {c}\n{body}\n"
-            f"  IMPL {a}{' ' * 11}INTENT {b}\n"
-            f"        overall {overall}")
+    body = "\n".join("".join(row).rstrip() for row in grid)
 
+    def centred(text):
+        return " " * max(0, centre[0] - len(text) // 2) + text
 
-_SPOKE_DEG = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
-
-
-def _spoke_xy(name: str, fraction: float, centre, radius: float,
-              xscale: float = 1.0) -> tuple:
-    """The point at `fraction` (0 to 1) of spoke `name`, from `centre`
-    with tip at `radius`, on a canvas whose y grows downwards and whose
-    x is stretched by `xscale`. The spokes sit 120 degrees apart, at the
-    angles in `_SPOKE_DEG`, counter-clockwise from the positive x axis."""
-    import math
-    t = math.radians(_SPOKE_DEG[name])
-    return (centre[0] + xscale * radius * fraction * math.cos(t),
-            centre[1] - radius * fraction * math.sin(t))
+    impl, intent = f"IMPL {a}", f"INTENT {b}"
+    gap = max(3, w - len(impl) - len(intent))
+    return (f"{centred(f'CLARITY {c}')}\n{body}\n"
+            f"{impl}{' ' * gap}{intent}\n"
+            f"{centred(f'overall {overall}')}")
 
 
 # --- emission ---------------------------------------------------------

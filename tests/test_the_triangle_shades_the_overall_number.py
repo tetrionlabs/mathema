@@ -11,7 +11,8 @@ import re
 
 import pytest
 
-from mathema.badges import BadgeScores, render_svg, triangle_area
+from mathema.badges import (BadgeScores, render_svg, render_triangle,
+                            triangle_area)
 
 _TRIPLES = [(88, 71, 52), (89, 75, 28), (100, 31, 37), (60, 60, 60),
             (100, 100, 0), (100, 0, 50), (5, 5, 5), (100, 100, 100),
@@ -76,3 +77,50 @@ def test_each_svg_score_point_sits_on_its_own_spoke():
                                   abs=0.06)
         assert y == pytest.approx(cy - f * r * math.sin(math.radians(deg)),
                                   abs=0.06)
+
+
+def _cells(text: str, ch: str) -> set:
+    lines = text.split("\n")[1:]           # below the CLARITY label
+    return {(x, y) for y, line in enumerate(lines)
+            for x, c in enumerate(line) if c == ch}
+
+
+def test_the_ascii_points_land_on_their_spokes():
+    # radius 10 rows, columns scaled by sqrt(3), centre at column 15, row
+    # 10: a score s on the spoke at angle t sits at
+    # (15 + sqrt(3) * 10 * s * cos t, 10 - 10 * s * sin t), rounded, so
+    # CLARITY at (15, 10 - 10s), IMPL at (15 - 15s, 10 + 5s) and INTENT
+    # at (15 + 15s, 10 + 5s)
+    assert _cells(render_triangle(100, 100, 100), "●") == \
+        {(15, 0), (0, 15), (30, 15)}
+    assert _cells(render_triangle(40, 40, 40), "●") == \
+        {(15, 6), (9, 12), (21, 12)}
+    assert _cells(render_triangle(88, 71, 52), "●") == \
+        {(15, 5), (2, 14), (26, 14)}
+    assert _cells(render_triangle(88, 71, 52), "+") == {(15, 10)}
+    assert _cells(render_triangle(60, 60, 60), "◆") == \
+        {(15, 0), (0, 15), (30, 15)}
+
+
+def test_each_ascii_edge_steps_one_column_per_row():
+    rows = render_triangle(60, 60, 60).split("\n")[1:16]
+    for y, line in enumerate(rows[:-1]):
+        assert line[15 - y] in "·◆" and line[15 + y] in "·◆"
+
+
+def test_the_ascii_labels_sit_outside_the_frame():
+    out = render_triangle(88, 71, 52).split("\n")
+    assert out[0].strip() == "CLARITY 52"
+    assert "◆" not in out[0] and "·" not in out[0]
+    assert re.fullmatch(r"\s*IMPL 88\s+INTENT 71", out[-2])
+    assert out[-1].strip() == "overall 48"
+    for line in out[1:-2]:
+        assert not re.search(r"[A-Z0-9]", line)
+
+
+def test_the_ascii_is_byte_stable_and_keeps_the_degenerate_rule():
+    for triple in _TRIPLES:
+        assert render_triangle(*triple) == render_triangle(*triple)
+    assert "below 5%" in render_triangle(100, 100, 0)
+    assert "below 5%" in render_triangle(100, 0, 50)
+    assert "●" in render_triangle(5, 5, 5)

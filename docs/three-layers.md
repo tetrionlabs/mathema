@@ -23,11 +23,11 @@ whether that break is acceptable to the verdicts themselves.
 ## Seeing all three at once
 
 `mathema-ci measure` computes the three scores for a project
-and draws them as a triangle, with implementation and intent along the base
-and clarity at the apex, so a lopsided profile has a lopsided shape. The
-overall number is the share of the full frame shaded by the triangle the three
-scores span when their spokes sit 120 degrees apart, `(implementation * intent
-+ intent * clarity + clarity * implementation) / 3` on the fractions. Every
+and draws them as a triangle on three spokes 120 degrees apart, clarity at
+the top and implementation and intent at the lower corners, so a lopsided
+profile has a lopsided shape. The overall number is the share of the full
+frame that shape shades, `(implementation * intent + intent * clarity +
+clarity * implementation) / 3` on the fractions. Every
 pair of layers counts the same, so a weak layer pulls the number down further
 than a plain average would, and an empty one leaves only the wedge between the
 other two.
@@ -39,24 +39,25 @@ its tests counted, draws as:
 
 <!-- illustration -->
 ```text
-        CLARITY 37
-              ◆
-             · ·
-            ·   ·
-           ·     ·
-          ·       ·
-         ·         ·
-        ·           ·
-       ·             ·
-      ·               ·
-     ·        ●        ·
-    ·      ····         ·
-   ·     ·······         ·
-  ·   ···········         ·
- · ···············         ·
-●·············+···●·········◆
-  IMPL 100           INTENT 31
-        overall 26
+          CLARITY 37
+               ◆
+              · ·
+             ·   ·
+            ·     ·
+           ·       ·
+          ·         ·
+         ·     ●     ·
+        ·     ··      ·
+       ·     ····      ·
+      ·    ·······      ·
+     ·   ······+···      ·
+    ·  ·············      ·
+   ·  ············  ●      ·
+  · ········                ·
+ ·····                       ·
+●·····························◆
+IMPL 100              INTENT 31
+          overall 26
 ```
 
 Every line is exercised, intent is about a third specified and clarity

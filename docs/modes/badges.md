@@ -376,27 +376,29 @@ way.
 
 ## The triangle
 
-The three scores are the corners of a triangle: **CLARITY** at the top,
-**IMPL** and **INTENT** the two bottom nodes. The sharp dotted outline is
-the full `100/100/100` frame; inside it, each score is a dot on its spoke
-from the base (all-zero) out to its corner, and the triangle those three
-dots span is filled, so the filled area is the current state and the gap
-to the frame is the room to grow. A dimension under 5% is degenerate and
-the shape is not drawn, only the numbers.
+The three scores sit on three spokes from a common centre, 120 degrees
+apart: **CLARITY** straight up, **IMPL** down and to the left, **INTENT**
+down and to the right. The sharp dotted outline joining the spokes' tips
+is the full `100/100/100` frame; each score is a point at its fraction of
+its spoke, and the triangle those three points span is filled, so the
+filled area is the current state and the gap to the frame is the room to
+grow. A dimension under 5% is degenerate and the shape is not drawn, only
+the numbers.
 
-The **overall** number is the share of the full frame shaded by the
-triangle the three scores span when their spokes sit 120 degrees apart.
-Two spokes of lengths x and y at angle t enclose a wedge of area
-`x * y * sin(t) / 2`, so with equal angles each pair of scores counts the
-same and overall is `(implementation * intent + intent * clarity +
+The filled share of the frame is the **overall** number. Two spokes of
+lengths x and y at 120 degrees enclose a wedge of area
+`x * y * sin(120°) / 2`, and the frame is three such wedges at full
+length, so the share is `(implementation * intent + intent * clarity +
 clarity * implementation) / 3` on the 0 to 1 fractions, rounded to a
-whole percent. It is 100 when all three are 100 and s squared when all
-three are s (60/60/60 reads 36), and a single zero leaves the one wedge
-between the other two, so 100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers shows the
-change in overall characterisation; to hold a line on one score, gate on
-that score itself. The drawing keeps clarity at the apex for reading, so
-its filled share is a picture of the three scores rather than the overall
-number itself.
+whole percent. Every pair of scores counts the same. It is 100 when all
+three are 100 and s squared when all three are s (60/60/60 reads 36),
+and a single zero leaves the one wedge between the other two, so
+100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers
+shows the change in overall characterisation; to hold a line on one
+score, gate on that score itself. The SVG card draws the shape exactly;
+the ASCII triangle draws it on a grid of characters, with columns scaled
+by about 1.7 to 1 for the height of a terminal cell, so its filled share
+matches the overall number to within the grid's resolution.
 
 ## The standard location, and embedding in a README
 
@@ -434,10 +436,11 @@ score means.
 - `implementation.json` / `intent.json` / `clarity.json`, shields.io
   endpoint badges in the Tetrion Labs colours (an ink label, a deep green
   value) a README references by raw URL.
-- `triangle.svg`, a dark-card twin of the ASCII triangle with the same
-  layout: the dashed `100/100/100` frame, each score a vertex on its
-  spoke, the triangle they span filled in the accent green, and the
-  overall number in the top right. It carries its own background and needs
+- `triangle.svg`, a dark-card twin of the ASCII triangle on the same
+  three spokes: the dashed `100/100/100` frame, each score a vertex on its
+  spoke, the triangle they span filled in the accent green, its share of
+  the frame exactly the overall number, and that number in the top
+  right. It carries its own background and needs
   no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and
