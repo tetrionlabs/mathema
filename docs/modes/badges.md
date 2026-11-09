@@ -183,6 +183,31 @@ that domain, not also as a branch and a raise site, so
 `@enforce_domain({"side": {"buy", "sell"}})` and
 `if side not in {"buy", "sell"}: raise ValueError(side)` score the same.
 
+### Clarity by aspect
+
+`mathema.badges.clarity_aspects(fn)` returns the same reading split into
+the five dimensions, as five aspects in a fixed order: `computes` (what
+it computes), `accepts` (what it accepts), `shape` (bounds and shape),
+`safety` (how safely it runs) and `failure` (where it can go wrong). Each
+aspect carries `bits`, the a-priori entropy of its sources, and `left`,
+the bits its verified claims and its callees' records leave, so its
+score is `1 - left / bits`. Its `weight` is its share of the function's
+bits, and the function's clarity is the mean of its aspect scores
+weighted that way, which is `1 - H_rem / H0` again. An aspect with no
+sources cannot apply: it is marked `applies: False`, with no score and a
+weight of 0, rather than read as 0 or as fully known. The 99 rule holds
+per aspect too: an aspect reads 100 only when nothing in it is left.
+
+`mathema.badges.repo_clarity_aspects(root)` rolls each aspect up across
+the functions the badges score by pooled bits, `1 - sum(w * left) /
+sum(w * bits)` with `w` each function's centrality weight, over the
+functions where the aspect applies. A large aspect left open therefore
+outweighs a small one settled: 0.1 bits settled in one function and 20
+bits open in another read about 0.5%, not the 50% a mean of the two
+scores would give. Repo clarity itself is still a centrality-weighted
+mean of function scores, so the five rolled-up aspects do not yet roll
+up exactly into it; repo clarity moves to pooled bits in clarity 1.5.
+
 ### What a parameter accepts
 
 Each parameter's entropy is what its completed domain leaves unknown, read

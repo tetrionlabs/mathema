@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import os
 from dataclasses import dataclass, field
+from datetime import date
 
 # The clarity ALGORITHM is versioned like a route: an open string, so a
 # score is only ever compared against one computed the same way. A
@@ -32,6 +33,13 @@ from dataclasses import dataclass, field
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
 CLARITY_ALGO = "entropy-dimensions@1.4"
+
+#: The date by which repo clarity is pooled bits, `1 - sum(w * left) /
+#: sum(w * bits)` over every source of every function, the rule
+#: `repo_clarity_aspects` rolls each aspect up by. Until then repo
+#: clarity is a centrality-weighted mean of function scores, so the five
+#: rolled-up aspects do not roll up exactly into it.
+POOLED_REPO_CLARITY_BY = date(2026, 11, 30)
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -902,18 +910,38 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
                f"{getattr(fn, '__qualname__', '')}")
         verified_claims = (((store.get(key) or {}).get("entry") or {})
                            .get("claims") or []) if fn is not None else []
+    rows = _clarity_rows(fn, verified_claims, root, facts, store,
+                         library_keys)
+    if rows is None:
+        return None
+    h0 = h_rem = 0.0
+    for _dim, bits, left in rows:
+        h0 += bits
+        h_rem += left
+    return h0, min(h0, max(0.0, h_rem))
+
+
+def _clarity_rows(fn, verified_claims, root: str, facts,
+                  store: dict, library_keys: "frozenset | None"
+                  ) -> "list[tuple[str, float, float]] | None":
+    """Intent:
+        Each entropy source of `fn` (`_clarity_sources`) as `(dimension,
+        bits, bits left)`: its a-priori bits, and the share of them its
+        reducer leaves after the verified claims (`_reductions`) and the
+        callees' recorded evidence. None when the source is unavailable.
+    """
     profile = _clarity_profile(fn, facts, root, store, library_keys)
     if profile is None:
         return None
     reductions = _reductions(verified_claims, profile.pure, profile)
     reductions.update({f"callee:{key}": evidence
                        for key, evidence in profile.callees})
-    h0 = h_rem = 0.0
-    for _dim, bits, reducer in _clarity_sources(profile):
+    rows = []
+    for dim, bits, reducer in _clarity_sources(profile):
         bits = max(0.0, bits)
-        h0 += bits
-        h_rem += bits * (1.0 - _unit(reductions.get(reducer, 0.0)))
-    return h0, min(h0, max(0.0, h_rem))
+        rows.append((dim, bits,
+                     bits * (1.0 - _unit(reductions.get(reducer, 0.0)))))
+    return rows
 
 
 def _unit(value: float) -> float:
@@ -958,10 +986,164 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     h0, h_rem = bits
     if h0 <= 0:
         return 0
+    return _entropy_score(h0, h_rem)
+
+
+def _entropy_score(h0: float, h_rem: float) -> int:
+    """Intent:
+        `1 - h_rem / h0` as a whole percent, 0 to 100, for `h0` above 0.
+        100 means every source is settled by proof: anything left,
+        however small, reads 99 at most.
+    """
     score = min(100, max(0, round(100 * (1.0 - h_rem / h0))))
-    # 100 means every source is settled by proof: anything left, however
-    # small, reads below it
     return 99 if score == 100 and h_rem > 0 else score
+
+
+#: The five clarity aspects in order: `(id, dimension in
+#: `_clarity_sources`, label)`.
+_ASPECTS = (
+    ("computes", "identity", "what it computes"),
+    ("accepts", "domain", "what it accepts"),
+    ("shape", "form", "bounds and shape"),
+    ("safety", "safety", "how safely it runs"),
+    ("failure", "failure", "where it can go wrong"),
+)
+
+
+@dataclass(frozen=True)
+class Aspect:
+    """One clarity aspect. `bits` are the a-priori bits of its sources and
+    `left` the bits its verified claims, and its callees' recorded
+    evidence, leave. An aspect with no bits cannot apply: `applies` is
+    False, `score` None and `weight` 0. Otherwise `score` is `1 - left /
+    bits` as a whole percent (99 at most while anything is left) and
+    `weight` is its share of all the bits, so the weights of the aspects
+    that apply sum to 1."""
+    id: str
+    label: str
+    bits: float
+    left: float
+    applies: bool
+    score: int | None
+    weight: float
+
+
+@dataclass(frozen=True)
+class ClarityAspects:
+    """A function's clarity by aspect: the five `aspects` in `_ASPECTS`
+    order, the function's a-priori bits `h0` and bits `left`, its
+    `clarity_score`, and the clarity algorithm version `algo`. `score`
+    is the `weight`-weighted mean of the aspects' unrounded scores,
+    rounded."""
+    aspects: tuple[Aspect, ...]
+    h0: float
+    left: float
+    score: int | None
+    algo: str
+
+
+def _aspects_of(bits_left: dict) -> tuple[Aspect, ...]:
+    """The five `Aspect`s from `{dimension: (bits, left)}`, each weighted
+    by its share of the total bits."""
+    total = sum(b for b, _l in bits_left.values())
+    out = []
+    for ident, dim, label in _ASPECTS:
+        bits, left = bits_left.get(dim, (0.0, 0.0))
+        applies = bits > 0
+        out.append(Aspect(ident, label, bits, left, applies,
+                          _entropy_score(bits, left) if applies else None,
+                          bits / total if applies else 0.0))
+    return tuple(out)
+
+
+def clarity_aspects(fn=None, verified_claims=None, root: str = ".",
+                    facts=None, store: "dict | None" = None,
+                    library_keys: "frozenset | None" = None
+                    ) -> ClarityAspects | None:
+    """Intent:
+        `clarity_score` for one function split into its five aspects:
+        each aspect gathers the entropy sources of one dimension
+        (`_clarity_sources`), with their a-priori bits and the bits the
+        verified claims leave, read exactly as `clarity_bits` reads them.
+        None when the source is unavailable.
+    Notes:
+        The function's score is the mean of its aspect scores weighted by
+        each aspect's share of the a-priori bits, `1 - left / h0`, so an
+        aspect that cannot apply (no sources, no bits) has weight 0 and
+        no score, and adds nothing to the score.
+    """
+    if store is None:
+        from .spec import load_verified
+        store = load_verified(root)
+    if verified_claims is None:
+        key = (f"{getattr(fn, '__module__', '')}."
+               f"{getattr(fn, '__qualname__', '')}")
+        verified_claims = (((store.get(key) or {}).get("entry") or {})
+                           .get("claims") or []) if fn is not None else []
+    rows = _clarity_rows(fn, verified_claims, root, facts, store,
+                         library_keys)
+    if rows is None:
+        return None
+    per: dict = {}
+    for dim, bits, left in rows:
+        b, rem = per.get(dim, (0.0, 0.0))
+        per[dim] = (b + bits, rem + left)
+    h0 = sum(b for b, _l in per.values())
+    left = min(h0, max(0.0, sum(rem for _b, rem in per.values())))
+    return ClarityAspects(_aspects_of(per), h0, left,
+                          _entropy_score(h0, left) if h0 > 0 else 0,
+                          CLARITY_ALGO)
+
+
+def _pool_aspects(weighted) -> dict[str, Aspect]:
+    """Intent:
+        The five aspects rolled up over `[(w, ClarityAspects), ...]` by
+        pooled bits: each aspect's `bits` and `left` are `sum(w * bits)`
+        and `sum(w * left)` over the functions where it applies, its
+        score `1 - left / bits`, and its weight its share of the pooled
+        bits of all five.
+    """
+    per: dict = {}
+    for w, ca in weighted:
+        for (_ident, dim, _label), a in zip(_ASPECTS, ca.aspects):
+            if a.applies:
+                b, rem = per.get(dim, (0.0, 0.0))
+                per[dim] = (b + w * a.bits, rem + w * a.left)
+    return {a.id: a for a in _aspects_of(per)}
+
+
+def repo_clarity_aspects(root: str = ".", targets=None) -> dict[str, Aspect]:
+    """Intent:
+        The five clarity aspects rolled up across the population
+        `repo_badges` scores, by pooled bits: for each aspect, `1 -
+        sum(w * left) / sum(w * bits)` with `w` each function's
+        centrality weight (`centrality.centrality_weights`), over the
+        functions where it applies; keyed by aspect id in `_ASPECTS`
+        order. A function whose source is unavailable drops out.
+    Notes:
+        Repo clarity is still a centrality-weighted mean of function
+        scores, so the five do not yet roll up exactly into it; it
+        becomes pooled bits by `POOLED_REPO_CLARITY_BY`.
+    """
+    from ._run_scope import run_scope
+    from .centrality import centrality_weights
+    from .compendium import load_library_claims
+    from .spec import load_verified
+    root = os.path.abspath(root)
+    with run_scope():
+        functions = _population(targets, root)
+        weights = centrality_weights(functions)
+        store = load_verified(root)
+        library_keys = frozenset(load_library_claims(root))
+        weighted = []
+        for key, fn in functions.items():
+            claims = ((store.get(key) or {}).get("entry", {})
+                      .get("claims") or [])
+            ca = clarity_aspects(fn, claims, root, store=store,
+                                 library_keys=library_keys)
+            if ca is not None:
+                weighted.append((weights.get(key, 1.0), ca))
+    return _pool_aspects(weighted)
 
 
 @dataclass(frozen=True)
