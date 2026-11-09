@@ -1728,6 +1728,21 @@ def render_triangle(a: int, b: int, c: int) -> str:
             f"        overall {overall}")
 
 
+_SPOKE_DEG = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
+
+
+def _spoke_xy(name: str, fraction: float, centre, radius: float,
+              xscale: float = 1.0) -> tuple:
+    """The point at `fraction` (0 to 1) of spoke `name`, from `centre`
+    with tip at `radius`, on a canvas whose y grows downwards and whose
+    x is stretched by `xscale`. The spokes sit 120 degrees apart, at the
+    angles in `_SPOKE_DEG`, counter-clockwise from the positive x axis."""
+    import math
+    t = math.radians(_SPOKE_DEG[name])
+    return (centre[0] + xscale * radius * fraction * math.cos(t),
+            centre[1] - radius * fraction * math.sin(t))
+
+
 # --- emission ---------------------------------------------------------
 # The Tetrion Labs identity (brand tokens v1): warm ink and paper
 # neutrals with a single green accent. The accent is legible on the ink
@@ -1775,27 +1790,29 @@ def shields_payloads(scores: BadgeScores) -> dict:
 
 
 def _svg_score_point(origin, corner, score):
-    """A score's point on its spoke from `origin` (all-zero) out to its
-    frame `corner`, the SVG twin of the ASCII spoke placement; an
-    unknown score (None) sits at the origin."""
+    """A score's point on its spoke from `origin` (the centre, all-zero)
+    out to its frame `corner`, the SVG twin of the ASCII spoke placement;
+    an unknown score (None) sits at the origin."""
     f = 0.0 if score is None else max(0.0, min(1.0, score / 100.0))
     return (origin[0] + f * (corner[0] - origin[0]),
             origin[1] + f * (corner[1] - origin[1]))
 
 
 def render_svg(scores: BadgeScores) -> str:
-    """A dark-card twin of the ASCII triangle, same layout so the two read
-    alike: CLARITY at the apex, IMPL and INTENT the bottom nodes, the full
-    100/100/100 triangle as a faint dashed frame, and each score a vertex
-    on its spoke from the bottom centre (all-zero) out to its corner, with
-    the triangle they span filled in the accent. The overall number
-    (`triangle_area`) sits top right. Self-contained (no external CSS or fonts), so it reads
-    the same on a light or a dark README."""
+    """A dark-card twin of the ASCII triangle, on the same three spokes
+    from a common centre, 120 degrees apart (radius 112 about (180, 184)
+    on a 360 by 300 card): CLARITY up, IMPL down-left, INTENT down-right,
+    the full 100/100/100 triangle as a faint dashed frame, and each score
+    a vertex at its fraction of its spoke, with the triangle they span
+    filled in the accent. The filled share of the frame is exactly the
+    overall number (`triangle_area`), which sits top right.
+    Self-contained (no external CSS or fonts), so it reads the same on a
+    light or a dark README."""
     w, h = 360, 300
-    apex = (180.0, 72.0)          # CLARITY, top
-    left = (56.0, 240.0)          # IMPL, bottom-left
-    right = (304.0, 240.0)        # INTENT, bottom-right
-    origin = (180.0, 240.0)       # all-zero sits at the base centre
+    origin = (180.0, 184.0)       # the common centre, all-zero
+    apex = _spoke_xy("CLARITY", 1.0, origin, 112.0)
+    left = _spoke_xy("IMPL", 1.0, origin, 112.0)
+    right = _spoke_xy("INTENT", 1.0, origin, 112.0)
     frame = {"CLARITY": apex, "IMPL": left, "INTENT": right}
     dims = (("CLARITY", scores.clarity),
             ("IMPL", scores.implementation),
