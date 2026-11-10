@@ -13,9 +13,11 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install "mathema[all]"
 ```
 
-`[all]` adds numpy, the z3 proof rung, the MCP server and the coverage
-reader; `pip install mathema` is the minimal core, enough for everything on
-this page.
+`[all]` adds numpy, the z3 proof rung, the MCP server, the coverage
+reader and mathema-language; `pip install mathema` is the minimal core,
+enough for everything on this page except the exact counterexample below,
+which was found with z3 installed (the `smt` extra). Without it the claim
+is still falsified, but the witness reported may be a different point.
 
 mathema is fully offline. The one command that reaches the network is
 `mathema init --agents`, which you run by name to fetch the optional agent
