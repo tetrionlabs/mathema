@@ -11747,13 +11747,68 @@ def _call_arity_mismatch(src: str, fn, param_set: set,
             sig.bind(*([None] * len(node.args)), **given_kw,
                      **{p: None for p in pinned
                         if p not in bound.arguments and p in sig.parameters})
-        except TypeError:
-            params = list(sig.parameters)
-            given = len(node.args) + len(node.keywords)
-            return (f"f is called here with {given} argument(s), but its "
-                    f"signature takes {len(params)} ({', '.join(params)}), "
-                    f"so any TypeError is raised by the malformed call "
-                    f"itself; call f with its own parameters")
+        except TypeError as e:
+            what = _arity_misfit(sig, len(node.args), list(given_kw),
+                                 pinned) or str(e)
+            return (f"{what}, so any TypeError is raised by the malformed "
+                    f"call itself; call f with its own parameters")
+    return None
+
+
+def _arity_misfit(sig, n_positional: int, keywords: list,
+                  pinned: frozenset = frozenset()) -> str | None:
+    """Intent:
+        What a call with `n_positional` positional arguments and the
+        named `keywords` gets wrong against `sig`: too many positional
+        arguments (naming the keyword-only parameters they ran into),
+        a keyword the signature does not have, one parameter given
+        twice, or a required parameter left out. None when none of
+        these applies.
+
+    Notes:
+        A `pinned` parameter counts as passed, though not toward the
+        argument count the text reports. The signature is shown
+        as its parameter names, `(a, b, flag)`.
+    """
+    P = inspect.Parameter
+    params = sig.parameters
+    shown = f"({', '.join(params)})"
+    positional = [n for n, p in params.items()
+                  if p.kind in (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)]
+    kinds = {p.kind for p in params.values()}
+    if P.VAR_POSITIONAL not in kinds and n_positional > len(positional):
+        kwonly = [n for n, p in params.items() if p.kind is P.KEYWORD_ONLY]
+        tail = (f"; {', '.join(kwonly)} "
+                f"{'is' if len(kwonly) == 1 else 'are'} keyword-only, "
+                f"passed as {kwonly[0]}=..." if kwonly else "")
+        return (f"f is called here with {n_positional} positional "
+                f"argument(s), but its signature {shown} takes at most "
+                f"{len(positional)} by position{tail}")
+    for k in keywords:
+        if k not in params and P.VAR_KEYWORD not in kinds:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} does not have")
+        if k in params and params[k].kind is P.POSITIONAL_ONLY:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} takes only by position")
+    by_position = set(positional[:n_positional])
+    for k in keywords:
+        if k in by_position:
+            return (f"f is called here with {k} both by position and by "
+                    f"keyword")
+    covered = by_position | set(keywords) | set(pinned)
+    missing = [n for n, p in params.items()
+               if p.default is P.empty
+               and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)
+               and n not in covered]
+    if missing:
+        required = [n for n, p in params.items()
+                    if p.default is P.empty
+                    and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)]
+        return (f"f is called here with {n_positional + len(keywords)} "
+                f"argument(s), but its signature {shown} requires "
+                f"{len(required)}: {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} missing")
     return None
 
 
