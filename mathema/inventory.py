@@ -1042,7 +1042,7 @@ def _release_line(version: str) -> str:
 @functools.lru_cache(maxsize=1)
 def _distributions_by_module() -> dict:
     import importlib.metadata
-    return importlib.metadata.packages_distributions()
+    return dict(importlib.metadata.packages_distributions())
 
 
 @functools.lru_cache(maxsize=None)

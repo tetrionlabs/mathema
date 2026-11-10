@@ -171,7 +171,10 @@ def test_changed_module_constant_invalidates_the_record(tmp_path):
         "    return SCALE * x\n")
     r = run_verify()
     assert "dependency changed" in r.stdout, r.stdout
-    assert "1 invalidated" in r.stdout   # f(x) == 2*x held before and is now false
+    # f(x) == 2*x held before and is now false: the fresh verdict, with
+    # the move the record keeps beside it
+    assert "1 falsified" in r.stdout
+    assert "doubles regressed proven to falsified" in r.stdout
     assert r.returncode == 1
 
 

@@ -1494,6 +1494,7 @@ def _carry_trust(c: dict, accepted: dict, history: list) -> None:
         leaves the acceptance standing too, never `invalidated`, with
         `meta["mathema.trusted_unsettled"]` recording what the sweep got.
     """
+    from .transitions import drop_move
     meta = dict(c.get("meta") or {})
     fresh = c.get("verdict") or ""
     if classify_verdict(fresh) == "invalidated":
@@ -1501,18 +1502,26 @@ def _carry_trust(c: dict, accepted: dict, history: list) -> None:
     level = accepted.get("level") or "holds"
     kind = classify_verdict(fresh)
     meta.pop("mathema.strongest_evidence", None)
-    if kind in ("unknown", "skipped", "declared"):
+
+    def stands():
+        # the row's state stays the trusted level, so the move away
+        # from it the history pass recorded is not a transition
         c["verdict"] = level
         meta.pop("mathema.regressed_to", None)
         if meta.get("mathema.previous_verdict") == level:
             meta.pop("mathema.previous_verdict")
+        kept = drop_move(meta.get("mathema.transitions") or [], level, fresh,
+                         at=datetime.date.today().isoformat())
+        if kept:
+            meta["mathema.transitions"] = kept
+        else:
+            meta.pop("mathema.transitions", None)
+    if kind in ("unknown", "skipped", "declared"):
+        stands()
         meta["mathema.trusted_unsettled"] = fresh
     elif kind == "holds" and classify_verdict(level) == "proven":
-        c["verdict"] = level
-        meta.pop("mathema.regressed_to", None)
+        stands()
         meta.pop("mathema.trusted_unsettled", None)
-        if meta.get("mathema.previous_verdict") == level:
-            meta.pop("mathema.previous_verdict")
         meta["mathema.strongest_evidence"] = fresh
         c["note"] = (f"trusted as: {level}, strongest evidence seen: "
                      f"{fresh}")
@@ -2258,7 +2267,8 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
     from .transitions import describe, open_transitions
     path, doc = _load_record(root, key)
     claims = {c.get("name"): c for c in doc[key].get("claims") or []}
-    lines, names = [], []
+    lines: list[str] = []
+    names: list[str] = []
     for name in claim_names:
         claim = claims.get(name)
         if claim is None:

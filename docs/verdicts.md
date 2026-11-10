@@ -13,7 +13,6 @@ verdict, [the evidence ladder](evidence-ladder.md) ranks them, and
 | `proven` | derive | The claim holds for every input in the declared domain, established by algebra in exact real arithmetic. On a finite integer domain, `derive:brute_force` has instead evaluated every point, each decided exactly (the body read exactly, its literals as written). A decision the body takes on a value the computation holds as a float (a comparison, a branch, a rounding, a dict key) keeps the point exact only where the function's own float run at that point takes it the same way. Where a point of that domain has no exact value (a library's float, a module constant), the sweep is `proven` on `derive:brute_force:within_float64` only when every point ran in float64, the claim held at each, and at each point with no exact value the float64 result misses the relation by no more than float64's own precision there (8 unit roundoffs of the value compared against, plus the function's relative condition number times the magnitude of the value it returned there, where both can be read); the record line adds `(all N points in float64, largest delta ...)`, and the note states that a difference below that delta would not show. A larger miss at a point with no exact value rests on the default allowance alone, so it is not counted, as on the probe route, and the claim is `unknown`; under a declared tolerance it counts, and the claim `holds` on `derive:brute_force`, the note naming the point, its miss and float64's precision there. The record keeps the route and a sketch naming the mechanism. | That floating point reproduces what the reals prove. A proof of a relation between values spawns a `<name>[float]` companion, the same relation run through the real code, whose verdict is its own. A claim proven as a fact about the function rather than at points (a derivative sign, a shape) spawns none, and the record's `mathema.float_companion` field says so: `none (the claim has no point evaluation against the code)`. A point inside the domain where the mathematics is undefined, or where the source raises, falsifies the claim itself. |
 | `holds (n=...)` | probe | The real function survived exactly `n` executed trials without a counterexample, on seeded inputs biased toward domain edges, corners, poles and special values. A trial the computed values pass only within the default allowance is decided again in exact arithmetic; where the body cannot be read exactly it is not counted in `n`, and a claim with no counted trial is `unknown`. A declared tolerance makes such a trial count, and binds the computation line only: the mathematics line decides `==`, `<=`, `>=` and `!=` exactly. The record keeps `n`, the sampling plan with its seed, and the confidence breakdown. | A probability of failure. No statistical bound is computed or implied. |
 | `falsified` | either | The real function, called at an in-domain point, violates the claim. That point is the **witness**, and a `falsified` always has one; it is kept permanently and replayed on every later run. A raise, a NaN computed from inputs that are not missing, or an infinity returned for a finite input is no value, so it falsifies every relation, `!=` included. On `route: derive` the probe falsifies the mathematics only: an overflow or a float miss where the claim read exactly holds is a finding in the note, and an infinity at a point with no exact reading is no counterexample, while a NaN, a raise, or a miss with no exact reading still falsifies. | Why. A falsification may mean the code is wrong or the claim is, and [the CDD loop](tutorial.md) exists to tell those apart. |
-| `invalidated` | either | The claim was `proven` or `holds` in the previous record and the current code no longer supports it. The record keeps the previous verdict, what it regressed to, and the last commit where it was supported. | That it can be re-adjudicated away. It stays `invalidated` until the claim is supported again, or a person accepts it as a discovery or as history. |
 | `unknown` | either | Adjudication ran and decided nothing; the record keeps why each route stopped (unliftable, undecided, timed out). A claim pinned to `route: derive` that derive cannot settle and the probe's draws do not falsify ends here, never at `holds`: the note gives derive's reason and how many draws found no counterexample. On every route a miss found by sampling derive's reconstruction (`probe:lifted_numeric`) falsifies only where the code, run at that point, fails the claim exactly; otherwise the claim ends here and the note names the point and why it is no witness. A finite-domain sweep on that route that passes only inexactly, or runs part of the domain, ends here too, where the default route reports `holds`. A sweep that runs every point exactly over a function the examination cannot show pure is `holds` on `derive:brute_force` on every route, the note naming what stops the proof and what would make the sweep one. A symbolic disproof that no executed point reproduces lands here, flagged as a probable engine fault rather than reported as a bug in your code. | A pass. `verify` fails on an `unknown` in every mode. Accepted as risk, it still fails strict and is reported, not failed, under `--lenient`. |
 | `skipped` | either | The claim could not be adjudicated as stated: misspecified, or a form the chosen route cannot evaluate. The record keeps the reason, with a [reason code](reason-codes.md). | A pass in strict mode. `--lenient` reports it and proceeds. |
 | `documented` | none | Of intent, not of a claim: stated intent a person has accepted with `mathema accept --intent`. | Anything about behaviour; it is the human rung of the evidence ladder. |
@@ -145,10 +144,44 @@ Bindings that fix one shared dimension to two sizes (`a` in `[0, 1]^2` and
 `b` in `[0, 1]^3` under one name) leave no value, so the claim is
 `skipped:misspecified` on every route.
 
+## Transitions, and what `invalidated` names
+
+A claim's verdict is what its latest adjudication found. When that is
+weaker than the previous record's, the record keeps the move beside
+the claim, in `mathema.transitions`: the verdict it fell from and to,
+the kind, the cause, the date and the commit. The kinds are
+`regressed` (`proven` or `holds` to `falsified`), `weakened` (`proven`
+to `holds`, or a supported claim to `unknown` or `skipped`),
+`strengthened`, and `fixed` (`falsified` to supported when the function
+changed). A claim that was never supported and is now falsified is a
+finding, not a transition. The cause is `this function changed`, `a
+callee changed` or `nothing changed`; the last means two runs disagree
+about unchanged code (the engine, a library version, the seed or a
+timeout), and the line says so.
+
+A move stays open until a person acknowledges it with `mathema accept
+KEY CLAIM --transition`, or a later run brings the claim back to the
+level it fell from. The gate acts on open moves by kind and mode (see
+[what fails the run](modes/verify.md#what-fails-the-run)), and the
+project's `.mathema/meta/policy.yaml` can set that per kind.
+
+`invalidated` is a word about a function, not a claim. A function is
+invalidated when it changed since its record: its form, its body's
+provenance, a parameter default, its own claims, the pseudo-infinity a
+claim runs to, a library version, a definition row, a premise, or
+anything along its dependency chain. The record names the triggers that
+fired in `mathema.invalidated_by` (empty when the function is current),
+and the roots of a moved chain in `mathema.chain_moved`. Reverify is the
+action, and it lives on that function. A record written before 0.6.5
+stored a regression as the verdict `invalidated`; it is read as the
+verdict the claim fell to, with the move open and its cause `recorded
+before 0.6.5`.
+
 ## What fails the gate
 
-`falsified`, `invalidated` and an unaccepted `unknown` fail `mathema
-verify` in every mode. `skipped` and accepted risk fail in the default
+`falsified` and an unaccepted `unknown` fail `mathema verify` in
+every mode, and so does an open `regressed` transition; an open
+`weakened` one fails strict and warns under `--lenient`. `skipped` and accepted risk fail in the default
 strict mode and are reported, not failed, under `--lenient`. The full
 table, including tripped locks, unresolved names and acceptances the
 policy rejects, is on [`mathema verify`](modes/verify.md#what-fails-the-run).
@@ -161,7 +194,7 @@ apart from a broken invocation without parsing output:
 | Code | Meaning |
 |---|---|
 | 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
-| 1 | ran, and the gate failed: a claim is falsified, invalidated or unknown, a claim is skipped or accepted as risk in strict mode, a lock is tripped, or an acceptance fails the policy |
+| 1 | ran, and the gate failed: a claim is falsified or unknown, a transition is open and the mode fails it, a claim is skipped or accepted as risk in strict mode, a lock is tripped, or an acceptance fails the policy |
 | 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional dependency |
 | 130 | interrupted (Ctrl-C or EOF) |
 

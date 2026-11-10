@@ -100,6 +100,20 @@ def open_transitions(meta: dict) -> list[dict]:
             and not t.get("recovered")]
 
 
+def drop_move(transitions: list, frm: str, to: str, *, at: str) -> list[dict]:
+    """The transitions without the latest open move from `frm` to `to`
+    recorded at `at`: what a run takes back when it settles the claim
+    again before anyone has read the move."""
+    out = [dict(t) for t in transitions or [] if isinstance(t, dict)]
+    for i in range(len(out) - 1, -1, -1):
+        t = out[i]
+        if (t.get("from") == frm and t.get("to") == to and t.get("at") == at
+                and not t.get("acknowledged") and not t.get("recovered")):
+            del out[i]
+            break
+    return out
+
+
 def carry(prior: list, new: "dict | None", verdict: str, *,
           commit: "str | None", at: str) -> list[dict]:
     """The transitions a claim carries after a run: the open ones from

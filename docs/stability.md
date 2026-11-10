@@ -28,10 +28,15 @@ change to the spec and not a change to mathema. Every record stamps
 so a record always states the vocabulary it was adjudicated under.
 
 **The verdict vocabulary.** `proven`, `holds`, `falsified`,
-`invalidated`, `unknown` and `skipped` mean what
+`unknown` and `skipped` mean what
 [Guarantees and limits](guarantees.md) says they mean. A verdict never silently changes
 meaning; new evidence strengths arrive as colon subroutes on the
-`route` field, which is documented as an open string.
+`route` field, which is documented as an open string. `invalidated`
+left the claim vocabulary in 0.6.5: it names a function that changed
+since its record, and a claim that fell keeps the verdict it fell to
+with the move recorded beside it (`mathema.transitions`). A record
+written before 0.6.5 is read that way too, and `schema_version` 0.3.0
+marks the records written since.
 
 **Reason codes.** `ReasonCode` and `Category` values are interface.
 An existing name is never repointed at a different meaning and never

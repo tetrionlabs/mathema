@@ -42,7 +42,8 @@ bare-name key fails as a clear per-key problem line.
 | Finding | Default (strict) | `--lenient` |
 |---|---|---|
 | `falsified` claim | fails | fails |
-| `invalidated` claim (held before, fails now) | fails | fails |
+| open transition, `regressed` (a supported claim fell to `falsified`) | fails | fails |
+| open transition, `weakened` (`proven` to `holds`, or a supported claim to `unknown` or `skipped`) | fails | warns, named in the row |
 | `unknown` claim, not accepted | fails | fails |
 | `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `skipped` (unverifiable) claim | fails | passes, informational |
@@ -154,15 +155,16 @@ and re-run:
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
-FAIL functions.softmax: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
+FAIL functions.softmax: form changed; 1 proven, 3 holds, 1 falsified  <- sums_to_one regressed holds to falsified (this function changed); to acknowledge it, run: mathema accept functions.softmax sums_to_one --transition; 1 falsified claim(s)
+1 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 1 intent to accept (1 function): mathema accept --intent
 ```
 
-`sums_to_one` now fails, and because it held before it is reported
-as `invalidated` rather than `falsified`; the counterexample is kept
-in the record, and the exit code is 1. Restore the fix (the first
+`sums_to_one` now fails, and because it held before the record keeps
+the move beside the fresh verdict, `regressed holds to falsified (this
+function changed)`, with the command that acknowledges it. The
+counterexample is kept in the record, and the exit code is 1. Restore the fix (the first
 version of `functions.py` above) and re-verify:
 
 <!-- example: sweep file=functions.py -->

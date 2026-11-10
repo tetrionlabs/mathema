@@ -28,7 +28,7 @@ from .routes import examine_predicates, is_proof_route
 # The CDD spec version this module's writer/reader conforms to: see the
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
 # CHANGELOG.md. Stamped into every record's lineage.CDD_spec_version field.
-SPEC_VERSION = "0.2.0"
+SPEC_VERSION = "0.3.0"
 
 
 def reasoning_chain(ex) -> list[dict]:
@@ -1421,6 +1421,36 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
             meta.pop("mathema.transitions", None)
         meta.pop("mathema.regressed_to", None)
         c["meta"] = meta
+
+
+def resettle_history(claim: dict, verdict: str, triggers, *, before: str,
+                     commit: "str | None", at: str) -> None:
+    """Re-derive one claim's history when its verdict is settled again
+    after the record was written: `dependencies_current` is adjudicated
+    against the completed store once the sweep is over. The move this
+    run recorded from `before` is replaced by the move from `before` to
+    `verdict`, and the transitions carried from earlier runs are read
+    against `verdict` again."""
+    from .transitions import carry, drop_move, transition
+    meta = dict(claim.get("meta") or {})
+    first = claim.get("verdict") or ""
+    older = drop_move(meta.get("mathema.transitions") or [], before, first, at=at)
+    for t in older:
+        if isinstance(t.get("recovered"), dict) and t["recovered"].get("at") == at:
+            t.pop("recovered")
+    new = None
+    if before != verdict:
+        meta["mathema.previous_verdict"] = before
+        new = transition(before, verdict, triggers, commit=commit, at=at)
+    else:
+        meta.pop("mathema.previous_verdict", None)
+    kept = carry(older, new, verdict, commit=commit, at=at)
+    if kept:
+        meta["mathema.transitions"] = kept
+    else:
+        meta.pop("mathema.transitions", None)
+    claim["meta"] = meta
+    claim["verdict"] = verdict
 
 
 #: directories a claims-file scan never enters: tool, environment, build

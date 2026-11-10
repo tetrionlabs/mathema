@@ -70,13 +70,20 @@ def test_foreign_grammar_reported_never_gated():
 
 
 def test_stored_claim_dicts_gate_identically():
+    # `dep` is a regression as a record written before 0.6.5 stored it:
+    # it reads as the verdict it fell to, with the move still open
     stored = [{"name": "law", "verdict": "falsified", "note": "", "meta": {}},
-              {"name": "dep", "verdict": "invalidated"},
+              {"name": "dep", "verdict": "invalidated",
+               "meta": {"mathema.previous_verdict": "proven",
+                        "mathema.regressed_to": "falsified"}},
               {"name": "s", "verdict": "unknown",
                "meta": {"mathema.surface": "mathema"}}]
     r = gate(stored, strict=False)
-    assert r.refuted == 2 and r.unknown == 0
-    assert r.problems == ["1 falsified claim(s)", "1 invalidated claim(s)"]
+    assert r.refuted == 2 and r.unknown == 0 and r.transitions == 1
+    assert r.problems == [
+        "dep regressed proven to falsified (recorded before 0.6.5); to "
+        "acknowledge it, run: mathema accept KEY dep --transition",
+        "2 falsified claim(s)"]
 
 
 def test_unresolved_names_gate_in_every_mode():

@@ -211,6 +211,7 @@ def _check_rows(args) -> list[dict]:
                      "proven": proven, "holds": holds, "refuted": report.refuted,
                      "falsified": report.falsified,
                      "invalidated": report.invalidated,
+                     "transitions": report.transitions,
                      "unverifiable": report.skipped + report.owned,
                      "skipped": report.skipped,
                      "misspecified": report.misspecified,

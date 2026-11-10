@@ -138,8 +138,8 @@ mathema verify --root .
 
 <!-- example: loop output -->
 ```text
-FAIL funcs.settle: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
+FAIL funcs.settle: form changed; 1 proven, 3 holds, 1 falsified  <- negative_exposure_negative regressed holds to falsified (this function changed); to acknowledge it, run: mathema accept funcs.settle negative_exposure_negative --transition; 1 falsified claim(s)
+1 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 2 intents to accept (2 functions): mathema accept --intent
 ```
@@ -152,12 +152,17 @@ and the record now keeps the arc (trimmed):
 ```yaml
     - name: "negative_exposure_negative"
       statement: "for x in [-5.0, -1.0] : float|missing, f(x) <= 0"
-      verdict: "invalidated"
+      verdict: "falsified"
       n: 1
       counterexample: "(-5): 5.0 vs 0"
       # ...
         mathema.previous_verdict: "holds"
-        mathema.regressed_to: "falsified"
+        mathema.transitions:
+          - from: "holds"
+            to: "falsified"
+            kind: "regressed"
+            cause: "this function changed"
+            at: "2026-11-10"
     - name: "nonneg"
       statement: "for x in [-5.0, 5.0] : float|missing, f(x) >= 0"
       verdict: "holds"
@@ -177,15 +182,19 @@ clear the exact points that falsified them before: a recorded
 counterexample replays on every later run, so a bug cannot be fixed by
 accident and un-fixed quietly.
 
-And `negative_exposure_negative` went from `holds` to **`invalidated`**.
-That is its own verdict, not an ordinary failure: a claim that used to
-be supported and no longer is. Fixing the code exposed a belief that
-was never true. mathema will not launder that into a plain
-`falsified`, because "this used to pass" is information a reviewer
-needs.
+And `negative_exposure_negative` went from `holds` to `falsified`, and
+the row says more than that: `regressed holds to falsified (this
+function changed)`. A claim that used to be supported and no longer is
+gets the fresh verdict, and the record keeps the move beside it as a
+transition, because "this used to pass" is information a reviewer
+needs. Fixing the code exposed a belief that was never true. The move
+stays open until someone acknowledges it (`mathema accept funcs.settle
+negative_exposure_negative --transition`) or the claim is back at
+`holds`.
 
 `mathema.previous_verdict` is one step: the verdict immediately before
-this one, not a history. The record has no history field because the
+this one, not a history, and `mathema.transitions` holds only the moves
+still waiting on a person. The record has no history field because the
 record is in git. `mathema review` reports which verdicts flipped
 between two refs, and `git log .mathema/verified` lists every commit
 that changed a record.
@@ -216,7 +225,8 @@ acceptance and asks again: you accepted evidence about *that* code.
 
 ## 4. There is no accepting a bug
 
-The invalidated claim is still sitting there. The obvious move is to
+The falsified claim is still sitting there, its regression on the
+record. The obvious move is to
 wave it through as a known risk, and mathema refuses:
 
 <!-- example: loop run -->
@@ -226,7 +236,7 @@ mathema accept funcs.settle negative_exposure_negative --as risk
 
 <!-- example: loop output -->
 ```text
-cannot accept: negative_exposure_negative is invalidated: a falsification is never accepted as risk, diagnose it (--as discovery), or fix the code until it stops falsifying
+cannot accept: negative_exposure_negative is falsified: a falsification is never accepted as risk, diagnose it (--as discovery), or fix the code until it stops falsifying
 ```
 
 This is the rule that makes the rest of it worth trusting. A
@@ -247,7 +257,7 @@ echo y | mathema accept funcs.settle negative_exposure_negative --as discovery -
 <!-- example: loop output -->
 ```text
 accept funcs.settle :: negative_exposure_negative as a discovery, by Ada Lovelace
-  invalidated at x = -5: 5.0 vs 0
+  falsified at x = -5: 5.0 vs 0
   the claim moves to discoveries with that witness, out of claims/demo.claims.yaml
   the corrected claim takes its place: negative_exposure_negative_corrected [probe]: for x in [-5.0, -1.0] : float|missing, f(x) > 0, checked now: holds over 127 trials
 write this acceptance? [y/N] written.

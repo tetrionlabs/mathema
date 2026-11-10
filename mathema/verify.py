@@ -2290,6 +2290,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                 deps_now or []) if dependency_changed else []
             if roots:
                 rec.meta["mathema.chain_moved"] = roots
+        else:
+            # a first record is current by construction, and says so,
+            # so a later run that finds nothing changed rewrites it
+            # unmoved
+            rec.meta["mathema.invalidated_by"] = []
         if definitions_now:
             rec.meta["mathema.definition_rows"] = definitions_now
         written = write_record(rec, key=key, root=root,
@@ -2314,7 +2319,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # record where the verdict moved (the memoization rung's verdict
     # depends on the STORE, never on this function's own form)
     settled = load_verified(root)
-    from .spec import integrity_checksum
+    from .spec import integrity_checksum, resettle_history
+    import datetime
+    today = datetime.date.today().isoformat()
     for key, why, claims_for_gate, rec, deps, _accepted, _unres, vinfo in pending:
         if deps is None:
             continue
@@ -2331,12 +2338,20 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         if dc_now.verdict == old_verdict and not stamps_moved:
             continue
         if isinstance(stored_dc, dict):
+            entry = vinfo["entry"] if vinfo else None
+            if dc_now.verdict != old_verdict:
+                # a function the sweep left as it was, whose rung moved
+                # with the store: the move is from its stored verdict
+                resettle_history(
+                    stored_dc, dc_now.verdict, ["dependency"],
+                    before=old_verdict,
+                    commit=((entry or {}).get("lineage") or {}).get("commit"),
+                    at=today)
             stored_dc["verdict"] = dc_now.verdict
             stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
             stored_dc["meta"] = {**(stored_dc.get("meta") or {}), **(dc_now.meta or {})}
-            entry = vinfo["entry"] if vinfo else None
             if entry is not None:
                 recorded_form = (entry.get("identity") or {}).get("form")
                 if key not in integrity_warned:
@@ -2356,6 +2371,23 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if entry is not None:
                 for c in entry["entry"].get("claims") or []:
                     if c.get("name") == "dependencies_current":
+                        if dc_now.verdict != old_verdict:
+                            # the record this sweep wrote holds the
+                            # rung's provisional move; the move is
+                            # from the verdict before the run
+                            resettle_history(
+                                c, dc_now.verdict,
+                                (rec.meta or {}).get("mathema.invalidated_by"),
+                                before=(c.get("meta") or {}).get(
+                                    "mathema.previous_verdict") or old_verdict,
+                                commit=(entry["entry"].get("lineage") or {}).get("commit"),
+                                at=today)
+                            stored_dc.meta = {**(stored_dc.meta or {}), **{
+                                k: v for k, v in (c.get("meta") or {}).items()
+                                if k in ("mathema.previous_verdict",
+                                         "mathema.transitions")}}
+                            if "mathema.transitions" not in (c.get("meta") or {}):
+                                (stored_dc.meta or {}).pop("mathema.transitions", None)
                         c["verdict"] = dc_now.verdict
                         c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
