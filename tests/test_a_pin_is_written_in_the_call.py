@@ -76,3 +76,22 @@ def test_a_bundled_pinned_row_writes_its_pin_in_the_call(key, name, statement):
 @pytest.mark.parametrize("text", [s for _k, _n, s in _PINNED] + list(LEXICON.values()))
 def test_every_pinned_row_and_lexicon_row_is_a_fixed_point(text, unicode):
     _fixed_point(text, unicode)
+
+
+def stamped(label: str, *, at: str) -> str:
+    return label + "@" + at
+
+
+def _row(text: str, name: str):
+    (row,) = [p for p in mathema.check(stamped, claims=[claim(
+        text, name=name)]).probes if p.name == name]
+    return row
+
+
+def test_a_literal_in_the_call_leaves_a_bound_name_of_that_parameter_free():
+    # `at="t"` is the call's argument; the `at` the claim binds with
+    # `for` is still drawn from its own domain everywhere else it is read
+    row = _row('for at in {"u", "v"}, f("a", at="t") != "a@" + at', "apart")
+    assert row.verdict.startswith(("holds", "proven")), (row.verdict, row.note)
+    row = _row('for at in {"u", "v"}, f("a", at="t") == "a@" + at', "same")
+    assert row.verdict.startswith("falsified"), (row.verdict, row.note)
