@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
-from ._scan import _split_commas
+from ._scan import _split_commas, mask_strings, unmask_strings
 
 # superscript rendering for a vector/matrix space exponent, so `R^n`
 # reads `ℝⁿ` in unicode the way `x^2` reads `x²` elsewhere. Only
@@ -2510,11 +2510,15 @@ def _parse_binding(part: str):
     type_explicit = None
     text, tail_words = _peel_trailing_sentinels(text)
 
-    m = _SUBSET_ANYWHERE.search(text)
+    # a quoted member is data: a type word inside it (`{"x:float"}`) is
+    # part of the string, never a type clause
+    masked, literals = mask_strings(text)
+    m = _SUBSET_ANYWHERE.search(masked)
     clause_stated = m is not None
     if m is not None:
         type_explicit = _SUBSET_ASCII.get(m.group("type"), m.group("type"))
-        text = (text[:m.start()] + " " + text[m.end():]).strip()
+        text = unmask_strings(
+            (masked[:m.start()] + " " + masked[m.end():]).strip(), literals)
     # a type clause can sit between the set expression and a sentinel
     # clause, so look again once it is gone
     text, more = _peel_trailing_sentinels(text)
