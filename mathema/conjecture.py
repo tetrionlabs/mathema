@@ -175,6 +175,58 @@ def _literal_call_args(text: str, sig_params: list,
     return {p: v for p, v in fixed.items() if p not in moving}
 
 
+def _passed_whole(text: str, sig_params: list, name: str) -> bool:
+    """Whether some `f(...)` call in `text` passes the bare name `name`
+    as f's own parameter of that name, by position or by keyword."""
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        for p, arg in zip(sig_params, node.args):
+            if p == name and isinstance(arg, ast.Name) and arg.id == name:
+                return True
+        for k in node.keywords:
+            if k.arg == name and isinstance(k.value, ast.Name) \
+                    and k.value.id == name:
+                return True
+    return False
+
+
+def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
+    """Intent:
+        The kind each parameter of a claim is drawn as. A parameter the
+        claim binds to a finite set, an interval or a number set takes
+        values from that binding, drawn as values rather than as f's
+        mapping or container kind, where f's kind cannot hold the
+        binding's members: a mapping bound to numbers, or a sequence
+        whose name the claim never passes whole to f (`f([triggers,
+        "dependency"])` passes it as one element). A sequence passed
+        whole keeps its kind, its binding read as its element domain;
+        a language binding or a space (`[0, 1]^n`) keeps the kind it
+        names.
+    """
+    from .probing import _classify_bound
+    from .runtime_types import SEQUENCE_KINDS
+    out = dict(kinds)
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ())
+                               for t in (link[0], link[2])]]
+    for p, k in kinds.items():
+        bound = (cj.domain or {}).get(p)
+        if bound is None or getattr(bound, "dims", ()) \
+                or _classify_bound(bound) in ("language", "instances", "none"):
+            continue
+        if k == "dict":
+            out[p] = "unknown"
+        elif k in SEQUENCE_KINDS and not any(
+                _passed_whole(t, sig_params, p) for t in sides if t):
+            out[p] = "unknown"
+    return out
+
+
 def _yaml_safe_args(args) -> list:
     """Intent:
         A falsifying argument tuple as YAML-safe values a later run can
@@ -6380,7 +6432,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_examined(ctx, fn, facts),
                              _cap=verdict_cap))
             continue
-        grounded = (None if call_pins or ctx.family is not None
+        # a pin the claim writes in every call to f is part of the call
+        # derive reads; only a pin no call writes (`let p be v`) is not
+        written = _pins_in_calls(cj)
+        unread_pins = {p: v for p, v in call_pins.items() if p not in written}
+        grounded = (None if unread_pins or ctx.family is not None
                     or ctx.assumption else _ground_proof_of(ctx, fn, facts))
         if grounded is not None and (grounded.status == "disproven"
                                      or cj.route == "probe"):
@@ -6391,14 +6447,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             continue
         from .probing import LanguageDrawFailed
         try:
-            if call_pins:
+            if unread_pins:
                 # the derive route reads the call the claim writes, never a
                 # pinned parameter it does not pass, so a pinned claim is
                 # adjudicated by execution
                 ctx.derive_undecided = Probe(
                     cj.name, statement, "unknown", route="derive",
                     note=f"{ctx.note}; the derive route does not model the "
-                         f"pinned parameter(s) {', '.join(sorted(call_pins))}",
+                         f"pinned parameter(s) {', '.join(sorted(unread_pins))}",
                     meta={"mathema.derive_status": "unsupported"})
             elif cj.route in ("derive", "best", "examine"):
                 # route="best" IS the cascade: its derive attempt engages
@@ -12059,6 +12115,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     cj_domain, extra, family = ctx.cj_domain, ctx.extra, ctx.family
+    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params))
+    # the parameters drawn as plain values from their binding
+    as_values = {p for p, k in drawn_kinds.items() if k != kinds.get(p)}
+    kinds = drawn_kinds
     bundles = _instance_bundles(fn, facts)
     from .domain import unbounded_directions
     from .records import operational_infinity, operational_range
@@ -12705,8 +12765,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
                                 )) is not None}
     from ._missing_policy import Presence
+    # a parameter the call fixes to a missing input (`commit=None`) is
+    # drawn present too, so an absence f gives with it present is read as
+    # another argument's, not as this parameter's
+    from .probing import inputs_missing
     executed_record.presence = Presence(
-        {p: k for p, k in sampled_kinds.items() if p not in literal_args},
+        {p: k for p, k in kinds.items()
+         if (p in sampled_kinds and p not in literal_args)
+         or (p in literal_args and inputs_missing([literal_args[p]]))},
         {p: (ctx.record_domain or {}).get(p) or cj_domain.get(p) for p in kinds})
     from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
@@ -12969,7 +13035,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     key = resolver.key(p, 0)
                     n = trial_sizes.get(key) or rng.randint(1, 5)
                     v = _mtx.synth_for(param_structures[p], n, rng)
-                elif shape is not None and (
+                elif shape is not None and p not in as_values and (
                         shape.ndim >= 2
                         or (shape.ndim == 1 and k not in SEQUENCE_KINDS)):
                     # a matrix-shaped (marker-declared) parameter, or a
