@@ -185,3 +185,14 @@ def test_the_cli_acknowledges_a_transition(tmp_path, capsys):
     assert "weakened proven to unknown" in out and "written." in out
     assert open_transitions(_stored(root, "t.f")["meta"]) == []
     assert main(["accept", "t.f", "nonneg", "--transition", "--yes", "--root", root]) == 1
+
+
+def test_an_old_record_that_fell_to_invalidated_is_never_read_as_invalidated():
+    from mathema.transitions import read_invalidated_verdict
+    verdict, meta = read_invalidated_verdict(
+        "invalidated", {"mathema.previous_verdict": "proven",
+                        "mathema.regressed_to": "invalidated"})
+    assert verdict != "invalidated"
+    assert verdict == "unknown"
+    (t,) = meta["mathema.transitions"]
+    assert (t["from"], t["to"]) == ("proven", "unknown")

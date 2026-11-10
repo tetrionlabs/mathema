@@ -11,7 +11,8 @@ falsified):
 
 - `regressed`: proven or holds to falsified.
 - `weakened`: proven to holds, or proven or holds to unknown or skipped.
-- `strengthened`: to a stronger verdict.
+- `strengthened`: to a stronger verdict, except falsified to unknown or
+  skipped, which is no transition.
 - `fixed`: falsified to proven or holds when the function changed.
 
 A claim never supported that becomes falsified is a finding, not a
@@ -148,6 +149,8 @@ def read_invalidated_verdict(verdict: str, meta: dict) -> "tuple[str, dict]":
         return verdict, meta
     meta = dict(meta or {})
     fell_to = meta.pop("mathema.regressed_to", None) or "unknown"
+    if classify_verdict(fell_to) == "invalidated":
+        fell_to = "unknown"
     fell_from = meta.get("mathema.previous_verdict") or "proven"
     if classify_verdict(fell_from) == "invalidated":
         fell_from = "proven"

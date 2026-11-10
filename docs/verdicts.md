@@ -152,8 +152,9 @@ the claim, in `mathema.transitions`: the verdict it fell from and to,
 the kind, the cause, the date and the commit. The kinds are
 `regressed` (`proven` or `holds` to `falsified`), `weakened` (`proven`
 to `holds`, or a supported claim to `unknown` or `skipped`),
-`strengthened`, and `fixed` (`falsified` to supported when the function
-changed). A claim that was never supported and is now falsified is a
+`strengthened` (to a stronger verdict; `falsified` to `unknown` or
+`skipped` is not one), and `fixed` (`falsified` to supported when the
+function changed). A claim that was never supported and is now falsified is a
 finding, not a transition. The cause is `this function changed`, `a
 callee changed` or `nothing changed`; the last means two runs disagree
 about unchanged code (the engine, a library version, the seed or a
