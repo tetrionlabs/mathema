@@ -1651,6 +1651,22 @@ _ASCII_XSCALE = 3 ** 0.5              # columns per row of height
 _ASCII_CENTRE = (15, 10)              # (column, row)
 
 
+#: A score below this counts as empty for drawing the triangle.
+TRIANGLE_HIDE_BELOW = 5
+#: The triangle is not drawn when at least this many scores are empty
+#: (or unknown): two empty scores leave only a line or a point, while a
+#: single one still leaves the wedge between the other two.
+TRIANGLE_HIDE_WHEN_COUNT = 2
+
+
+def _triangle_hidden(a, b, c) -> bool:
+    """Whether the triangle for scores a, b, c is too degenerate to draw:
+    at least `TRIANGLE_HIDE_WHEN_COUNT` of them unknown (None) or below
+    `TRIANGLE_HIDE_BELOW`."""
+    empty = sum(1 for v in (a, b, c) if v is None or v < TRIANGLE_HIDE_BELOW)
+    return empty >= TRIANGLE_HIDE_WHEN_COUNT
+
+
 def _spoke_xy(name: str, fraction: float, centre, radius: float,
               xscale: float = 1.0) -> tuple:
     """The point at `fraction` (0 to 1) of spoke `name`, from `centre`
@@ -1690,9 +1706,9 @@ def render_triangle(a: int, b: int, c: int) -> str:
         drawn exactly by `render_svg`. The scores label the frame from
         outside, with CLARITY above, IMPL and INTENT below and the
         overall under them.
-        If any score is under 5 the shape is degenerate and is not drawn,
-        only the numbers are shown, and so is a score that is unknown
-        (None), shown as `unknown`.
+        When `_triangle_hidden` (two or more scores under 5) the shape is
+        degenerate and is not drawn, only the numbers are shown; so too
+        when a score is unknown (None), shown as `unknown`.
     """
     if None in (a, b, c):
         def said(v):
@@ -1701,9 +1717,10 @@ def render_triangle(a: int, b: int, c: int) -> str:
                 f"overall unknown\n(no triangle: a dimension is unknown)")
     overall = triangle_area(a, b, c)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
-    if min(a, b, c) < 5:
+    if _triangle_hidden(a, b, c):
         return (f"IMPL {a}   INTENT {b}   CLARITY {c}   overall {overall}\n"
-                "(no triangle: a dimension is below 5%)")
+                f"(no triangle: {TRIANGLE_HIDE_WHEN_COUNT} or more dimensions "
+                f"are below {TRIANGLE_HIDE_BELOW}%)")
     r, xs, centre = _ASCII_RADIUS, _ASCII_XSCALE, _ASCII_CENTRE
     tips = {n: _spoke_xy(n, 1.0, centre, r, xs) for n in _ORDER}
     w = round(tips["INTENT"][0]) + 1
@@ -1847,7 +1864,8 @@ def render_svg(scores: BadgeScores) -> str:
     down-right, IMPL down-left. Rings at a quarter, a half and three
     quarters of the radius, the spokes, the full 100/100/100 frame and the
     scored triangle, its share of the frame exactly the overall number
-    (`triangle_area`), which is the caption under the figure. The layers
+    (`triangle_area`), which is the caption under the figure. The scored
+    triangle is left out when `_triangle_hidden`. The layers
     are drawn in order, so a further shape (an earlier snapshot's) goes in
     before the scored one. Self-contained (no external CSS, fonts or
     script), so it reads the same on a light or a dark README."""
@@ -1876,7 +1894,9 @@ def render_svg(scores: BadgeScores) -> str:
     for x, y in frame:
         parts.append(f'<line x1="{cx:.0f}" y1="{cy:.0f}" x2="{x:.1f}" '
                      f'y2="{y:.1f}" stroke="{_GRAPHITE}" stroke-width="1"/>')
-    parts.append(_svg_shape(scores))
+    if not _triangle_hidden(scores.implementation, scores.intent,
+                            scores.clarity):
+        parts.append(_svg_shape(scores))
     for name, sc in (("CLARITY", scores.clarity), ("INTENT", scores.intent),
                      ("IMPL", scores.implementation)):
         lx, ly = _svg_label_xy(name)

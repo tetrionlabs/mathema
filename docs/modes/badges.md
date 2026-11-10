@@ -382,8 +382,10 @@ down and to the right. The sharp dotted outline joining the spokes' tips
 is the full `100/100/100` frame; each score is a point at its fraction of
 its spoke, and the triangle those three points span is the current
 state, so the gap to the frame is the room to grow. The SVG card fills
-it; the ASCII triangle draws its outline. A dimension under 5% is degenerate and the shape is not drawn, only
-the numbers.
+it; the ASCII triangle draws its outline. A single score of 0 still
+leaves the wedge between the other two, with a corner at the centre, so
+the shape is left out, and only the numbers shown, when two or more
+scores are under 5% (a line or a point).
 
 The filled share of the frame is the **overall** number. Two spokes of
 lengths x and y at 120 degrees enclose a wedge of area

@@ -11,8 +11,9 @@ import re
 
 import pytest
 
-from mathema.badges import (BadgeScores, render_svg, render_triangle,
-                            triangle_area)
+from mathema.badges import (TRIANGLE_HIDE_BELOW, TRIANGLE_HIDE_WHEN_COUNT,
+                            BadgeScores, _triangle_hidden, render_svg,
+                            render_triangle, triangle_area)
 
 _TRIPLES = [(88, 71, 52), (89, 75, 28), (100, 31, 37), (60, 60, 60),
             (100, 100, 0), (100, 0, 50), (5, 5, 5), (100, 100, 100),
@@ -229,9 +230,34 @@ def test_the_ascii_labels_sit_outside_the_frame():
         assert not re.search(r"[A-Z0-9]", line)
 
 
-def test_the_ascii_is_byte_stable_and_keeps_the_degenerate_rule():
+def test_the_ascii_is_byte_stable():
     for triple in _TRIPLES:
         assert render_triangle(*triple) == render_triangle(*triple)
-    assert "below 5%" in render_triangle(100, 100, 0)
-    assert "below 5%" in render_triangle(100, 0, 50)
-    assert "●" in render_triangle(5, 5, 5)
+
+
+def test_the_triangle_is_hidden_only_when_two_scores_are_under_5():
+    assert TRIANGLE_HIDE_BELOW == 5 and TRIANGLE_HIDE_WHEN_COUNT == 2
+    assert _triangle_hidden(100, 4, 4) and _triangle_hidden(4, 100, 0)
+    assert _triangle_hidden(0, 0, 0)
+    assert not _triangle_hidden(100, 100, 0)
+    assert not _triangle_hidden(100, 0, 50)        # one zero leaves a wedge
+    assert not _triangle_hidden(5, 5, 5)
+    assert "no triangle" in render_triangle(100, 4, 4)
+    assert "●" not in render_triangle(100, 4, 4)
+    assert '<polygon class="head"' not in _svg(100, 4, 4)
+
+
+def test_one_zero_draws_a_wedge_with_a_corner_at_the_centre():
+    frame, head = _frame_and_head(_svg(100, 100, 0))
+    assert (100.0, 100.0) in head                  # clarity 0 is the centre
+    assert 100 * _area(head) / _area(frame) == pytest.approx(100 / 3,
+                                                             abs=0.1)
+    out = render_triangle(100, 100, 0)
+    assert _cells(out, "●") == {(15, 10), (0, 15), (30, 15)}
+
+
+def test_both_renderers_hide_the_same_triangles():
+    for triple in itertools.product((0, 4, 5, 50, 100), repeat=3):
+        shown = not _triangle_hidden(*triple)
+        assert ("●" in render_triangle(*triple)) == shown, triple
+        assert ('<polygon class="head"' in _svg(*triple)) == shown, triple

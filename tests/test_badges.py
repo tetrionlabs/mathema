@@ -197,8 +197,8 @@ def test_triangle_render_is_deterministic_and_hides_degenerate():
     # at 100/100/100 the score vertices reach the corners, so ◆ is gone
     full = render_triangle(100, 100, 100)
     assert "·" in full and "●" in full
-    degen = render_triangle(90, 3, 40)
-    # a sub-5% dimension draws no shape at all, only the numbers
+    degen = render_triangle(90, 3, 4)
+    # two sub-5% dimensions draw no shape at all, only the numbers
     assert "◆" not in degen and "●" not in degen and "below 5%" in degen
 
 
