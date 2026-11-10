@@ -1187,6 +1187,21 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _restamp_freshness(entry: dict, root: str) -> bool:
+    """Re-stamp each function dependency's `freshness` in a record
+    `entry` against the store as it now stands, so the stamps agree
+    with the settled `dependencies_current`. Whether any stamp moved."""
+    from .spec import _dependency_state, _verified_view
+    verified = _verified_view(root)
+    moved = False
+    for dep in entry.get("dependencies") or []:
+        state = _dependency_state(dep, verified, root)
+        if state is not None and dep.get("freshness") != state:
+            dep["freshness"] = state
+            moved = True
+    return moved
+
+
 def _library_version_moved(merged_entry: dict,
                            verified_entry: dict) -> "tuple | None":
     """Intent:
@@ -1650,7 +1665,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .conjecture import InvalidConjecture, _resolve_func_ref
-    from .inventory import class_chain_moved, function_dependencies
+    from .inventory import chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
                        record as write_record, write_yaml)
@@ -2092,7 +2107,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
         dependency_changed = is_fresh and any(
-            _dependency_state(d, verified) in ("stale", "invalidated")
+            _dependency_state(d, verified) == "invalidated"
             for d in deps_now or [])
         if is_fresh and not dependency_changed:
             # a callee's form stored when this record was adjudicated
@@ -2107,7 +2122,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 and not same_form(d.get("form"), stored_forms[d.get("key")])
                 for d in deps_now or [] if d.get("kind") == "function")
         if is_fresh and not dependency_changed:
-            dependency_changed = class_chain_moved(
+            dependency_changed = chain_moved(
                 verified_entry.get("dependencies") or [], deps_now or [])
         if is_fresh and not dependency_changed:
             # a callee's body provenance stored when this record was
@@ -2263,13 +2278,17 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             continue
         dc_now = dependencies_current_probe(deps, root=root)
         _, old_verdict, _, _ = _claim_fields(stored_dc)
-        if dc_now.verdict == old_verdict:
+        target = (vinfo["entry"] if isinstance(stored_dc, dict) and vinfo
+                  else (settled.get(key) or {}).get("entry"))
+        stamps_moved = target is not None and _restamp_freshness(target, root)
+        if dc_now.verdict == old_verdict and not stamps_moved:
             continue
         if isinstance(stored_dc, dict):
             stored_dc["verdict"] = dc_now.verdict
             stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
+            stored_dc["meta"] = {**(stored_dc.get("meta") or {}), **(dc_now.meta or {})}
             entry = vinfo["entry"] if vinfo else None
             if entry is not None:
                 recorded_form = (entry.get("identity") or {}).get("form")
@@ -2294,6 +2313,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
+                        c["meta"] = {**(c.get("meta") or {}), **(dc_now.meta or {})}
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")
                 entry["entry"].setdefault("identity", {})["integrity"] = \
                     integrity_checksum(entry["entry"])

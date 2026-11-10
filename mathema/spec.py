@@ -1171,17 +1171,21 @@ def _dependency_file(dep: dict, root: str) -> "str | None":
 def _dependency_state(dep: dict, verified: dict,
                       root: "str | None" = None) -> str | None:
     """One function-kind dependency's freshness against the verified
-    store: `current` / `stale` / `invalidated` / `unverified`, or
+    store: `current` (its record's form and body provenance match its
+    live ones), `invalidated` (the function changed since its record:
+    its form, or under the same form its body provenance), or
+    `unverified` (no record). Freshness only: a callee whose claim
+    regressed while its code did not change is `current`, the
+    regression showing on the callee's own record.
+
     `None` for a dependency that carries no form (modules, signature
     callables) or is not a function: a class has no record of its own,
     its form and reach are compared against the ones this function's
-    record stored when it was adjudicated. Given the project `root`, a callee installed outside it
-    (the standard library, a third-party package) with no record is
-    `None` too: the project's store records it only when a claims file
-    states claims about it, and then it is compared like any other.
-    A callee whose body arrived as KOINE is also `stale` when its body
-    provenance (`provenance`, its `koine_hash` and frontend) differs
-    from its record's, even under the same form."""
+    record stored when it was adjudicated. Given the project `root`, a
+    callee installed outside it (the standard library, a third-party
+    package) with no record is `None` too: the project's store records
+    it only when a claims file states claims about it, and then it is
+    compared like any other."""
     form = dep.get("form")
     key = dep.get("key")
     if not form or not key or dep.get("kind", "function") != "function":
@@ -1193,83 +1197,115 @@ def _dependency_state(dep: dict, verified: dict,
             return None
         return "unverified"
     entry = stored.get("entry") or {}
-    if any(classify_verdict(c.get("verdict") or "") == "invalidated"
-           for c in entry.get("claims") or []):
-        return "invalidated"
     stored_form = (entry.get("identity") or {}).get("form")
     from .identity import same_form
     if not same_form(stored_form, form):
-        return "stale"
+        return "invalidated"
     from .koine.facts import provenance_change
     moved = provenance_change(dep.get("provenance"),
                               (entry.get("meta") or {}).get("mathema.provenance"))
-    return "current" if moved is None else "stale"
+    return "current" if moved is None else "invalidated"
+
+
+def _chain_functions(dependencies: list) -> dict:
+    """Every function along the chains of `dependencies`, direct and
+    reached, keyed by dotted key, each as a dependency entry carrying
+    its live form."""
+    out: dict = {}
+    for dep in dependencies or []:
+        if dep.get("kind", "function") == "function" and dep.get("key") and dep.get("form"):
+            out[dep["key"]] = dep
+        for r in dep.get("reaches") or []:
+            if r.get("kind") == "function" and r.get("key") and r.get("form"):
+                out.setdefault(r["key"], r)
+    return out
+
+
+def _chain_roots(changed: list[str], reaches: "dict[str, list[dict]]") -> list[str]:
+    """The roots of a broken chain: each changed function whose own
+    chain reaches no other changed function, the deepest place a
+    change sits and so where reverifying starts."""
+    moved = set(changed)
+    return sorted(k for k in changed
+                  if not moved & {r.get("key") for r in reaches.get(k) or []} - {k})
+
+
+def _live_reach(key: str, known: dict) -> list[dict]:
+    if known.get(key, {}).get("reaches") is not None:
+        return known[key]["reaches"]
+    from .conjecture import _resolve_func_ref
+    from .inventory import dependency_reach
+    try:
+        obj = _resolve_func_ref(key)
+    except Exception:
+        return []
+    return dependency_reach(obj) if obj is not None else []
 
 
 def dependencies_current_probe(dependencies: list, root: str = "."):
     """Adjudicate the `dependencies_current` fact for one function: a
-    machine-generated derive-route claim stating that every direct
-    function dependency's form hash matches its own verified record
-    (and none of those records is invalidated). This is the
-    memoization rung of the freshness design, a caller trusts its
-    callee's `dependencies_current` instead of walking deeper, so
-    transitive freshness stays one comparison per level.
+    machine-generated derive-route claim that every function along its
+    dependency chain, the functions it calls and transitively the ones
+    they and the classes it reads call, is current against its own
+    verified record.
 
-    Verdicts: `proven` when every function dependency is current
-    (vacuously, when there are none); `falsified` when any is stale or
-    invalidated (they are the counterexample); `unknown` when none
-    regressed but at least one has no verified record yet, the fact
-    can't be established either way until the callee is verified."""
+    Verdicts: `proven` when every one is current (vacuously, when there
+    are none); `falsified` when any changed since its record, the
+    counterexample naming the chain's roots (the deepest functions that
+    changed, `mathema.chain_roots`), where reverifying starts;
+    `unknown` when none changed but at least one has no record, read as
+    not checked rather than as a failure. Freshness only: a callee's
+    regression without a change does not break the chain."""
     from .records import Probe
 
     verified = _verified_view(root)
-    states = [(dep, _dependency_state(dep, verified, root))
-              for dep in dependencies or []]
-    checked = [(dep, st) for dep, st in states if st is not None]
+    chain = _chain_functions(dependencies)
+    states = {key: _dependency_state(dep, verified, root) for key, dep in chain.items()}
+    checked = {k: st for k, st in states.items() if st is not None}
     note = "generated by mathema verify; checked against the verified store"
+    meta = {"mathema.surface": "builtin"}
     if not checked:
         return Probe("dependencies_current", "", "proven",
-                     route="derive", note=note,
-                     meta={"mathema.surface": "builtin"},
-                     sketch="no direct function dependencies, vacuously current")
-    bad = [(dep, st) for dep, st in checked if st in ("stale", "invalidated")]
-    if bad:
-        cx = ", ".join(f"{dep['key']} is {st}" for dep, st in bad)
+                     route="derive", note=note, meta=meta,
+                     sketch="no function dependencies, vacuously current")
+    changed = sorted(k for k, st in checked.items() if st == "invalidated")
+    if changed:
+        roots = _chain_roots(changed, {k: _live_reach(k, chain) for k in changed})
+        rest = [k for k in changed if k not in roots]
+        cx = "chain broken at " + ", ".join(roots) + ": changed since its record"
+        if rest:
+            cx += "; above it, also changed: " + ", ".join(rest)
         return Probe("dependencies_current", "", "falsified",
                      route="derive", note=note,
-                     meta={"mathema.surface": "builtin"}, counterexample=cx,
-                     sketch="a direct dependency's verified record no longer "
-                            "matches its live form")
-    unverified = [dep for dep, st in checked if st == "unverified"]
-    if unverified:
-        names = ", ".join(dep["key"] for dep in unverified)
+                     meta={**meta, "mathema.chain_roots": roots,
+                           "mathema.chain_invalidated": changed},
+                     counterexample=cx,
+                     sketch="a function this one rests on changed since its "
+                            "verified record")
+    unrecorded = sorted(k for k, st in checked.items() if st == "unverified")
+    if unrecorded:
+        names = ", ".join(unrecorded)
         return Probe("dependencies_current", "", "unknown",
                      route="derive",
-                     note=(f"no verified record yet for {names}; state "
-                           f"claims about it and run mathema verify"),
-                     meta={"mathema.surface": "builtin"},
-                     sketch=f"no verified record yet for: {names}")
+                     note=(f"not checked, no record: {names}; state claims "
+                           f"about it and run mathema verify"),
+                     meta={**meta, "mathema.chain_unrecorded": unrecorded},
+                     sketch=f"not checked, no record: {names}")
     return Probe("dependencies_current", "", "proven",
-                 route="derive", note=note,
-                     meta={"mathema.surface": "builtin"},
-                 sketch="every direct function dependency's form matches its "
-                        "verified record")
+                 route="derive", note=note, meta=meta,
+                 sketch="every function along the dependency chain matches "
+                        "its verified record")
 
 
 def _annotate_dependency_freshness(spec: dict, root: str) -> None:
     """Intent:
-        Stamp each of the record's one-deep dependencies with its
-        freshness against the store: `current` (the callee's verified
-        record exists and its recorded form matches the callee's live
-        form), `stale` (recorded form differs, the callee changed
-        since its claims were verified, so this function's claims about
-        it can't be trusted either), `invalidated` (the callee's own
-        record carries an invalidated claim, the regression
-        propagates one level up as a freshness state, exactly the
-        composition that makes one-deep dependencies enough), or
-        `unverified` (no record at all). Non-function dependencies
-        (modules, classes, signature callables) carry no form and get
-        no freshness verdict.
+        Stamp each of the record's function dependencies with its
+        freshness against the store (`_dependency_state`): `current`
+        when its verified record matches its live form, `invalidated`
+        when it changed since that record, `unverified` when it has
+        none. A callee's regression without a change leaves it
+        `current`. Classes carry no stamp: they have no record, and
+        their chain is compared against the one this record stored.
     """
     deps = spec.get("dependencies") or []
     if not any(d.get("form") for d in deps):

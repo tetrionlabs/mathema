@@ -215,9 +215,9 @@ def test_a_class_stored_without_a_form_is_read_as_moved_once():
     live = [{"name": "Order", "kind": "class", "key": "shop.Order", "form": "py:aaaaaaaaaaaa",
              "reaches": [{"key": "shop.Base", "kind": "class", "form": "py:bbbbbbbbbbbb"}]}]
     before = [{"name": "Order", "kind": "class", "key": "shop.Order"}]
-    from mathema.inventory import class_chain_moved
-    assert class_chain_moved(before, live) == ["shop.Base", "shop.Order"]
-    assert class_chain_moved(live, live) == []
+    from mathema.inventory import chain_moved
+    assert chain_moved(before, live) == ["shop.Base", "shop.Order"]
+    assert chain_moved(live, live) == []
 
 
 def test_a_class_built_on_an_installed_package_records_the_package_version(tmp_path):
@@ -238,19 +238,41 @@ def test_a_class_built_on_an_installed_package_records_the_package_version(tmp_p
             qty: int
     ''')
     reach = {r["key"]: r for r in class_reach(mod.Order)}
-    version = importlib.metadata.version("pydantic")
+    line = ".".join(importlib.metadata.version("pydantic").split(".")[:2])
     assert reach["lib:pydantic"] == {"key": "lib:pydantic", "kind": "library",
-                                     "form": f"lib:pydantic=={version}"}
-    import platform
-    assert class_reach(mod.Line) == [{"key": "lib:python", "kind": "library",
-                                      "form": f"lib:python=={platform.python_version()}"}]
+                                     "form": f"lib:pydantic=={line}"}
+    assert class_reach(mod.Line) == [{"key": "lib:python", "kind": "interpreter",
+                                      "form": f"lib:python=={sys.version_info[0]}.{sys.version_info[1]}"}]
 
 
 def test_a_library_version_change_moves_the_chain():
-    from mathema.inventory import class_chain_moved
+    from mathema.inventory import chain_moved
     before = [{"name": "Order", "kind": "class", "key": "shop.Order", "form": "py:aaaaaaaaaaaa",
                "reaches": [{"key": "lib:pydantic", "kind": "library",
-                            "form": "lib:pydantic==2.9.2"}]}]
+                            "form": "lib:pydantic==2.9"}]}]
     after = [dict(before[0], reaches=[{"key": "lib:pydantic", "kind": "library",
-                                       "form": "lib:pydantic==2.10.0"}])]
-    assert class_chain_moved(before, after) == ["lib:pydantic"]
+                                       "form": "lib:pydantic==2.10"}])]
+    assert chain_moved(before, after) == ["lib:pydantic"]
+
+
+def _with_reach(*reach):
+    return [{"name": "Order", "kind": "class", "key": "shop.Order",
+             "form": "py:aaaaaaaaaaaa", "reaches": list(reach)}]
+
+
+def test_an_interpreter_line_change_is_reported_but_does_not_move_the_chain():
+    from mathema.inventory import chain_moved
+    a = _with_reach({"key": "lib:python", "kind": "interpreter", "form": "lib:python==3.12"})
+    b = _with_reach({"key": "lib:python", "kind": "interpreter", "form": "lib:python==3.14"})
+    assert chain_moved(a, b) == []
+    assert chain_moved(a, b, partitions=("interpreter",)) == ["lib:python"]
+
+
+def test_the_chain_summary_shows_which_partition_moved():
+    from mathema.inventory import chain_summary
+    lib = {"key": "lib:pydantic", "kind": "library", "form": "lib:pydantic==2.9"}
+    py = {"key": "lib:python", "kind": "interpreter", "form": "lib:python==3.12"}
+    a = chain_summary(_with_reach(lib, py)[0]).split("|")
+    b = chain_summary(_with_reach(dict(lib, form="lib:pydantic==2.10"), py)[0]).split("|")
+    assert [x.split(":")[0] for x in a] == ["code", "library", "interpreter"]
+    assert [x == y for x, y in zip(a, b)] == [True, False, True]
