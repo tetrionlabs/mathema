@@ -1,0 +1,660 @@
+# machine record; binds to form py:2d001ace82c3
+mathema.transitions.carry:
+  schema_version: "0.3.0"
+  name: "carry"
+  signature: "(prior: 'list', new: \"'dict | None'\", verdict: 'str', *, commit: \"'str | None'\", at: 'str') -> 'list[dict]'"
+  intent: "The transitions a claim carries after a run: the open ones from before, each marked recovered when the claim is back at or above the level it fell from, then the new one, unless it is the move that recovered them. Acknowledged and recovered transitions are dropped from the record at the next run after they closed."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:2d001ace82c3"
+    sig: "21e26b845bcb"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "c5930636ae5b"
+    pin: "none"
+    integrity: "v2:e275b5bb1eeb70f6"
+  math: null
+  claims:
+    - name: "absent[commit]"
+      statement: "absent(f, commit) drops"
+      verdict: "holds"
+      n: 1
+      note: "observed: commit is 'str | None', so f promised to take None; f drops it (None in, [{'k0': 0.6057006177453985, 'k1': 4.03...] out) on 1 call"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          parameter: "commit"
+          evidence: "confirmed on 1 call"
+          behaviour: "drops"
+          source: "observed"
+          reason: "observed: commit is 'str | None', so f promised to take None; f drops it (None in, [{'k0': 0.6057006177453985, 'k1': 4.03...] out) on 1 call"
+        mathema.surface: "mathema"
+    - name: "absent[new]"
+      statement: "absent(f, new) drops"
+      verdict: "holds"
+      n: 1536
+      note: "observed: new is 'dict | None', so f promised to take None; f drops it (None in, [{'kind': 'weakened', 'from': 'proven'...] out) on the draws of skips_an_entry_that_is_not_a_move, keeps_an_open_move, unrecovered_below_the_level, recovered_at_the_level, never_readds_an_acknowledged_move and drops_a_closed_recovery"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          parameter: "new"
+          evidence: "confirmed on the draws of skips_an_entry_that_is_not_a_move, keeps_an_open_move, unrecovered_below_the_level, recovered_at_the_level, never_readds_an_acknowledged_move and drops_a_closed_recovery"
+          behaviour: "drops"
+          source: "observed"
+          reason: "observed: new is 'dict | None', so f promised to take None; f drops it (None in, [{'kind': 'weakened', 'from': 'proven'...] out) on the draws of skips_an_entry_that_is_not_a_move, keeps_an_open_move, unrecovered_below_the_level, recovered_at_the_level, never_readds_an_acknowledged_move and drops_a_closed_recovery"
+        mathema.surface: "mathema"
+    - name: "appends_a_move_with_nothing_recovered"
+      statement: "let k be {\"fixed\", \"regressed\", \"strengthened\", \"weakened\"}, for verdict in {\"falsified\", \"skipped\", \"unknown\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], {\"kind\": k}, verdict, commit=\"c\", at=\"t\")) = 2"
+      verdict: "holds"
+      n: 255
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        k:
+          base_type: "R"
+          pieces:
+            - set:
+                - "fixed"
+                - "regressed"
+                - "strengthened"
+                - "weakened"
+          excluded: []
+          explicit_type: false
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, skipped, unknown}, seed=20260718, n=255"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 255
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          tried:
+            new:
+              - "None"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 255
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "dependencies_current"
+      verdict: "proven"
+      note: "generated by mathema verify; checked against the verified store"
+      sketch: "no direct function dependencies, vacuously current"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema.records.classify_verdict"
+      counterexample: null
+    - name: "drops_a_closed_recovery"
+      statement: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"recovered\": {\"at\": \"s\"}}], None, verdict, commit=\"c\", at=\"t\") = []"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at new = None f returned [], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, holds, proven, skipped, unknown}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            new:
+              None: "None in, [] out (drops)"
+          behaviour:
+            new:
+              None: "drops"
+          said:
+            new:
+              None: "at new = None f returned [], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 256
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "drops_a_missing_entry"
+      statement: "missing(f, prior) drops"
+      verdict: "holds"
+      n: 256
+      note: "stated; confirmed on the 256 draws of skips_an_entry_that_is_not_a_move"
+      route: "probe:counterfactual"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      meta:
+        mathema.policy:
+          kind: "missing"
+          parameter: "prior"
+          behaviour: "drops"
+          source: "stated"
+          evidence: "confirmed on the 256 draws of skips_an_entry_that_is_not_a_move"
+          reason: "stated; confirmed on the 256 draws of skips_an_entry_that_is_not_a_move"
+        mathema.surface: "declared"
+    - name: "keeps_an_open_move"
+      statement: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")) = 1"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, holds, proven, skipped, unknown}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            new:
+              None: "None in, [{'kind': 'weakened', 'from': 'proven'...] out (drops)"
+          behaviour:
+            new:
+              None: "drops"
+          said:
+            new:
+              None: "at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 256
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "never_readds_an_acknowledged_move"
+      statement: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"acknowledged\": True}], None, verdict, commit=\"c\", at=\"t\") = []"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at new = None f returned [], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, holds, proven, skipped, unknown}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            new:
+              None: "None in, [] out (drops)"
+          behaviour:
+            new:
+              None: "drops"
+          said:
+            new:
+              None: "at new = None f returned [], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 256
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "no_strengthening_after_a_recovery"
+      statement: "let k be {\"fixed\", \"strengthened\"}, for verdict in {\"proven\", \"proven:x\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], {\"kind\": k, \"from\": \"unknown\", \"to\": \"proven\"}, verdict, commit=\"c\", at=\"t\")) = 1"
+      verdict: "holds"
+      n: 255
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        k:
+          base_type: "R"
+          pieces:
+            - set:
+                - "fixed"
+                - "strengthened"
+          excluded: []
+          explicit_type: false
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "proven"
+                - "proven:x"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{proven, proven:x}, seed=20260718, n=255"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 255
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          tried:
+            new:
+              - "None"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 255
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "recovered_at_the_level"
+      statement: "for verdict in {\"proven\", \"proven:x\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")[0][\"recovered\"] = {\"at\": \"t\", \"commit\": \"c\"}"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "proven"
+                - "proven:x"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{proven, proven:x}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            new:
+              None: "None in, [{'kind': 'weakened', 'from': 'proven'...] out (drops)"
+          behaviour:
+            new:
+              None: "drops"
+          said:
+            new:
+              None: "at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 256
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "skips_an_entry_that_is_not_a_move"
+      statement: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, len(f([None, {\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")) = 1"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at prior = [null, {'kind': 'weakened', 'from': 'proven'...] f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the null slot; at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=2; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, holds, proven, skipped, unknown}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            prior:
+              "null": "null slot in, [{'kind': 'weakened', 'from': 'proven'...] out (drops)"
+            new:
+              None: "None in, [{'kind': 'weakened', 'from': 'proven'...] out (drops)"
+          behaviour:
+            prior:
+              "null": "drops"
+            new:
+              None: "drops"
+          said:
+            prior:
+              "null": "at prior = [null, {'kind': 'weakened', 'from': 'proven'...] f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the null slot"
+            new:
+              None: "at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 2
+            - 1
+          largest:
+            - 2
+            - 1
+          entries: 512
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+    - name: "unrecovered_below_the_level"
+      statement: "for verdict in {\"falsified\", \"holds\", \"skipped\", \"unknown\"}, \"recovered\" not in f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")[0]"
+      verdict: "holds"
+      n: 256
+      note: "derive could not decide it (the derive route does not model the pinned parameter(s) at, commit), so the probe decided it by running the code; at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence; held at their defaults: at='t' (pinned), commit='c' (pinned)"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        verdict:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "prior~Seq(len=1; shape∈{U,const,sorted,rev,+0,extreme}[p=.3]), new~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), verdict~U{falsified, holds, skipped, unknown}, seed=20260718, n=256"
+        mathema.confidence:
+          score: 5.0
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 1
+            params: 3
+            wide_domain: 0
+            float_extremes: 0
+        mathema.missing:
+          admitted: {}
+          tried:
+            new:
+              - "None"
+          executed:
+            new:
+              None: "None in, [{'kind': 'weakened', 'from': 'proven'...] out (drops)"
+          behaviour:
+            new:
+              None: "drops"
+          said:
+            new:
+              None: "at new = None f returned [{'kind': 'weakened', 'from': 'proven'...], so it drops the absence"
+        mathema.drawn:
+          form: "vec"
+          smallest:
+            - 1
+            - 1
+          largest:
+            - 1
+            - 1
+          entries: 256
+        mathema.routes_attempted: "routes attempted, derive: unsupported (the derive route does not model the pinned parameter(s) at, commit); probe: holds"
+        mathema.derive_status: "unsupported"
+        mathema.defaults:
+          mathema.transitions.carry:
+            at: "'t' (pinned)"
+            commit: "'c' (pinned)"
+        mathema.surface: "declared"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The transitions a claim carries after a run: the open ones from before, each marked recovered when the claim is back at or above the level it fell from, then the new one, unless it is the move that recovered them. Acknowledged and recovered transitions are dropped from the record at the next run after they closed."
+      basis: "documented; the author's stated purpose"
+    - step: "evidence"
+      claim: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, len(f([None, {\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")) = 1"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")) = 1"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for verdict in {\"falsified\", \"holds\", \"skipped\", \"unknown\"}, \"recovered\" not in f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")[0]"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for verdict in {\"proven\", \"proven:x\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], None, verdict, commit=\"c\", at=\"t\")[0][\"recovered\"] = {\"at\": \"t\", \"commit\": \"c\"}"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"acknowledged\": True}], None, verdict, commit=\"c\", at=\"t\") = []"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for verdict in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"recovered\": {\"at\": \"s\"}}], None, verdict, commit=\"c\", at=\"t\") = []"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "let k be {\"fixed\", \"strengthened\"}, for verdict in {\"proven\", \"proven:x\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], {\"kind\": k, \"from\": \"unknown\", \"to\": \"proven\"}, verdict, commit=\"c\", at=\"t\")) = 1"
+      basis: "probed, n=255"
+    - step: "evidence"
+      claim: "let k be {\"fixed\", \"regressed\", \"strengthened\", \"weakened\"}, for verdict in {\"falsified\", \"skipped\", \"unknown\"}, len(f([{\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\"}], {\"kind\": k}, verdict, commit=\"c\", at=\"t\")) = 2"
+      basis: "probed, n=255"
+    - step: "evidence"
+      claim: "missing(f, prior) drops"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "absent(f, new) drops"
+      basis: "probed, n=1536"
+    - step: "evidence"
+      claim: "absent(f, commit) drops"
+      basis: "probed, n=1"
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema.records.classify_verdict"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-10"
+    commit: "7636bb67e91b62b5ddd36c892fc453699c803840"
+  dependencies:
+    - name: "classify_verdict"
+      kind: "function"
+      key: "mathema.records.classify_verdict"
+      file: "mathema/records.py"
+      line: 134
+      form: "py:3b815a9b9c6e"
+      reaches: []
+      chain: "code:b83e5d738479|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "unverified"
+  meta:
+    mathema.not_run:
+      - check: "callable"
+        statement: "f(prior, new, verdict, commit, at) can be called"
+        reason: "parameter 'commit' is a string with no declared domain; declare its values, e.g. 'for commit in L[unicode], ...' in a claim, or annotate it Literal[...]"
+        gap: "string-domain-missing"
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"
