@@ -2801,6 +2801,21 @@ def _string_literals(node: ast.AST) -> list:
             and id(n) not in keys]
 
 
+_SEQUENCE_DISPLAYS = (ast.List, ast.Tuple, ast.ListComp)
+
+
+def _joins_a_sequence(node: ast.AST) -> bool:
+    """Whether `node` is a `+` or `*` with a list or tuple display
+    among its operands, directly or through a chain of such operators:
+    `xs + [t]`, `[t] + xs + ys`, `(t,) * 3`. In Python each is a
+    concatenation or a repetition of that sequence."""
+    if not (isinstance(node, ast.BinOp)
+            and isinstance(node.op, (ast.Add, ast.Mult))):
+        return False
+    return any(isinstance(side, _SEQUENCE_DISPLAYS) or _joins_a_sequence(side)
+               for side in (node.left, node.right))
+
+
 class ClaimKeyword(sympy.Function):
     """A keyword argument of a call to a function the claim names,
     `k=2`, held as the last arguments of that call so the claim prints
@@ -2886,11 +2901,14 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _node_to_sympy(node.operand, funcs, matrix_names)
         return -v if isinstance(node.op, ast.USub) else v
-    if isinstance(node, ast.BinOp) and _string_literals(node):
-        # an operator over a string literal is concatenation or
-        # repetition, which does not commute: sympy's sum would reorder
-        # `s + "0"` into `"0" + s`, a different claim, so the whole
-        # operation is one verbatim atom, rendered as written
+    if isinstance(node, ast.BinOp) and (_string_literals(node)
+                                        or _joins_a_sequence(node)):
+        # an operator over a string literal, or `+`/`*` with a list or
+        # tuple display as an operand, is concatenation or repetition,
+        # which does not commute: sympy's sum would reorder `s + "0"`
+        # into `"0" + s`, or `xs + [t]` into `[t] + xs`, a different
+        # claim, so the whole operation is one verbatim atom, rendered
+        # as written
         return _verbatim_atom(node)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return _quotient(_operand(node.left, node, funcs, matrix_names),
