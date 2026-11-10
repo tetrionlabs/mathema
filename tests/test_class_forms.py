@@ -218,3 +218,39 @@ def test_a_class_stored_without_a_form_is_read_as_moved_once():
     from mathema.inventory import class_chain_moved
     assert class_chain_moved(before, live) == ["shop.Base", "shop.Order"]
     assert class_chain_moved(live, live) == []
+
+
+def test_a_class_built_on_an_installed_package_records_the_package_version(tmp_path):
+    import importlib.metadata
+    pytest.importorskip("pydantic")
+    mod = _load(tmp_path, "class_form_lib", '''
+        import dataclasses
+
+        from pydantic import BaseModel
+
+
+        class Order(BaseModel):
+            total: int
+
+
+        @dataclasses.dataclass
+        class Line:
+            qty: int
+    ''')
+    reach = {r["key"]: r for r in class_reach(mod.Order)}
+    version = importlib.metadata.version("pydantic")
+    assert reach["lib:pydantic"] == {"key": "lib:pydantic", "kind": "library",
+                                     "form": f"lib:pydantic=={version}"}
+    import platform
+    assert class_reach(mod.Line) == [{"key": "lib:python", "kind": "library",
+                                      "form": f"lib:python=={platform.python_version()}"}]
+
+
+def test_a_library_version_change_moves_the_chain():
+    from mathema.inventory import class_chain_moved
+    before = [{"name": "Order", "kind": "class", "key": "shop.Order", "form": "py:aaaaaaaaaaaa",
+               "reaches": [{"key": "lib:pydantic", "kind": "library",
+                            "form": "lib:pydantic==2.9.2"}]}]
+    after = [dict(before[0], reaches=[{"key": "lib:pydantic", "kind": "library",
+                                       "form": "lib:pydantic==2.10.0"}])]
+    assert class_chain_moved(before, after) == ["lib:pydantic"]

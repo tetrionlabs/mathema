@@ -994,15 +994,77 @@ def _class_rests_on(cls: type) -> list[object]:
         tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
     except (OSError, TypeError, SyntaxError):
         return out
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            obj = g.get(node.id)
-            if inspect.isclass(obj) or inspect.isfunction(obj):
-                out.append(obj)
+    out.extend(_names_resolved(tree, g))
     return out
 
 
+def _names_resolved(tree: ast.AST, g: dict) -> list[object]:
+    """The classes and functions a piece of source names, each bare name
+    and each dotted name through a module (`dataclasses.dataclass`)
+    resolved against the namespace `g`."""
+    found: list[object] = []
+    for node in ast.walk(tree):
+        path: list[str] = []
+        cur: ast.expr = node
+        while isinstance(cur, ast.Attribute):
+            path.append(cur.attr)
+            cur = cur.value
+        if not (isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Load)):
+            continue
+        if path and not inspect.ismodule(g.get(cur.id)):
+            continue
+        obj = g.get(cur.id)
+        for attr in reversed(path):
+            obj = getattr(obj, attr, None)
+        if inspect.isclass(obj) or inspect.isfunction(obj):
+            found.append(obj)
+    return found
+
+
+#: modules whose code is the language itself, read as part of every
+#: program rather than as a library a definition builds on
+_LANGUAGE_MODULES = frozenset({"builtins", "typing", "types", "abc",
+                               "collections.abc", "typing_extensions"})
+
+
+def library_entry(obj: object) -> "dict | None":
+    """The chain entry for a class or function from the standard library
+    or an installed package: `{key: lib:<dist>, kind: library, form:
+    lib:<dist>==<version>}`, the version standing in for a form because
+    what a library does changes with its release, not with the
+    project's code. The standard library is `lib:python` at the running
+    interpreter's version. None for the language's own modules
+    (`_LANGUAGE_MODULES`) and for a module no installed distribution
+    provides."""
+    import importlib.metadata
+    import platform
+    import sys
+    module = getattr(obj, "__module__", None) or ""
+    if not module or module in _LANGUAGE_MODULES:
+        return None
+    top = module.split(".")[0]
+    if top in sys.stdlib_module_names:
+        dist, version = "python", platform.python_version()
+    else:
+        dists = importlib.metadata.packages_distributions().get(top) or []
+        if not dists:
+            return None
+        dist = sorted(dists)[0]
+        try:
+            version = importlib.metadata.version(dist)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+        dist = dist.lower()
+    return {"key": f"lib:{dist}", "kind": "library",
+            "form": f"lib:{dist}=={version}"}
+
+
 def _form_entry(obj: object) -> "dict | None":
+    from .analysis import _installed_code
+    if (inspect.isclass(obj) or inspect.isfunction(obj)) and (
+            _installed_code(obj)
+            or getattr(obj, "__module__", None) in _LANGUAGE_MODULES):
+        return library_entry(obj)
     if inspect.isclass(obj):
         form = class_form(obj)
         kind = "class"
