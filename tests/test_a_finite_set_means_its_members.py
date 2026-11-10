@@ -67,3 +67,14 @@ def test_a_set_of_numbers_is_proven_without_a_missing_point(text):
     probe = next(p for p in report.probes if p.name == "c")
     assert probe.verdict == "proven"
     assert probe.statement == f"for n in {text}, f(n) >= 0"
+
+
+@pytest.mark.parametrize("text, members", [
+    ('{"x:float", "y"}', {"x:float", "y"}),
+    ('{"x:int"}', {"x:int"}),
+    ('{"a : float", "b subset Z"}', {"a : float", "b subset Z"}),
+])
+def test_a_type_word_inside_a_quoted_member_is_part_of_the_string(text, members):
+    b = bound(text)
+    assert b == frozenset(members), b
+
