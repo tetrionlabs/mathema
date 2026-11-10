@@ -1,0 +1,128 @@
+mathema.transitions.kind_of:
+  claims:
+    - name: same_verdict_is_no_move
+      statement: 'for before in {"proven", "holds", "unknown", "skipped", "falsified"}, function_changed in {True, False}, f(before, before, function_changed=function_changed) == None'
+    - name: unknown_and_skipped_are_one_level
+      statement: 'for before in {"unknown", "skipped"}, after in {"unknown", "skipped"}, function_changed in {True, False}, f(before, after, function_changed=function_changed) == None'
+    - name: supported_to_falsified_is_regressed
+      statement: 'for before in {"proven", "holds"}, function_changed in {True, False}, f(before, "falsified", function_changed=function_changed) == "regressed"'
+    - name: never_supported_to_falsified_is_no_move
+      statement: 'for before in {"unknown", "skipped", "falsified"}, function_changed in {True, False}, f(before, "falsified", function_changed=function_changed) == None'
+    - name: before_outside_the_order_is_no_move
+      statement: 'for before in {"invalidated", "invalidated:stale", "disproven", "blocked", "unliftable", "", "Proven", "proven "}, after in {"proven", "holds", "unknown", "skipped", "falsified"}, function_changed in {True, False}, f(before, after, function_changed=function_changed) == None'
+    - name: after_outside_the_order_is_no_move
+      statement: 'for before in {"proven", "holds", "unknown", "skipped", "falsified"}, after in {"invalidated", "invalidated:stale", "disproven", "blocked", "unliftable", "", "Proven", "proven "}, function_changed in {True, False}, f(before, after, function_changed=function_changed) == None'
+    - name: function_change_matters_only_from_falsified
+      statement: 'for before in {"proven", "holds", "unknown", "skipped"}, after in {"proven", "holds", "unknown", "skipped", "falsified"}, f(before, after, function_changed=True) == f(before, after, function_changed=False)'
+    - name: falsified_to_supported_unchanged_is_strengthened
+      statement: 'for after in {"proven", "holds"}, f("falsified", after, function_changed=False) == "strengthened"'
+    - name: falsified_to_supported_changed_is_fixed
+      statement: 'for after in {"proven", "holds"}, f("falsified", after, function_changed=True) == "fixed"'
+    - name: falsified_to_unsupported_is_no_move
+      statement: 'for after in {"unknown", "skipped"}, function_changed in {True, False}, f("falsified", after, function_changed=function_changed) == None'
+    - name: supported_to_unsupported_is_weakened
+      statement: 'for before in {"proven", "holds"}, after in {"unknown", "skipped"}, function_changed in {True, False}, f(before, after, function_changed=function_changed) == "weakened"'
+    - name: unsupported_to_supported_is_strengthened
+      statement: 'for before in {"unknown", "skipped"}, after in {"proven", "holds"}, function_changed in {True, False}, f(before, after, function_changed=function_changed) == "strengthened"'
+    - name: read_by_verdict_family
+      statement: 'for before in {"proven", "holds", "unknown", "skipped", "falsified"}, after in {"proven", "holds", "unknown", "skipped", "falsified"}, function_changed in {True, False}, f(before + ":a", after + ":b", function_changed=function_changed) == f(before, after, function_changed=function_changed)'
+
+mathema.transitions.cause_of:
+  claims:
+    - name: own_trigger_wins
+      statement: 'let t be {"form", "provenance", "defaults", "claims", "pseudo-infinity", "library-version", "definition-rows", "premises"}, for triggers in {"dependency", "seed", "form"}^n, f([t] + triggers) == "this function changed"'
+    - name: dependency_alone_is_a_callee
+      statement: 'for triggers in {"dependency", "seed", "engine"}^n, f(triggers + ["dependency"]) == "a callee changed"'
+    - name: no_trigger_is_nothing
+      statement: 'for triggers in {"seed", "timeout", "engine", ""}^n, f(triggers) == "nothing changed"'
+
+mathema.transitions.transition:
+  claims:
+    - name: no_move_no_record
+      statement: 'for before in {"proven", "holds", "unknown", "skipped", "falsified"}, f(before, before, ["form"], commit="c1", at="t") == None'
+    - name: kind_is_kind_of_under_own_change
+      statement: 'let g = mathema.transitions.kind_of, for before in {"proven", "holds"}, after in {"falsified", "unknown"}, f(before, after, ["form"], commit="c1", at="t")["kind"] == g(before, after, function_changed=True)'
+    - name: cause_is_cause_of
+      statement: 'let g = mathema.transitions.cause_of, for triggers in {"form", "dependency", "seed"}^n, f("proven", "unknown", triggers, commit="c1", at="t")["cause"] == g(triggers)'
+    - name: fixed_only_when_this_function_changed
+      statement: 'for after in {"proven", "holds"}, triggers in {"dependency", "seed"}^n, f("falsified", after, triggers, commit="c1", at="t")["kind"] == "strengthened"'
+    - name: records_the_verdict_it_fell_from
+      statement: 'for before in {"proven", "holds"}, f(before, "falsified", ["seed"], commit="c1", at="t")["from"] == before'
+
+mathema.transitions.open_transitions:
+  claims:
+    - name: acknowledged_is_closed
+      statement: 'let a be {True, "yes"}, f({"mathema.transitions": [{"kind": "weakened", "acknowledged": a}]}) == []'
+    - name: recovered_is_closed
+      statement: 'let r be {True, "t"}, f({"mathema.transitions": [{"kind": "weakened", "recovered": r}]}) == []'
+    - name: open_move_is_kept
+      statement: 'let k be {"regressed", "weakened", "strengthened", "fixed"}, f({"mathema.transitions": [{"kind": k, "acknowledged": False}]}) == [{"kind": k, "acknowledged": False}]'
+
+mathema.transitions.drop_move:
+  claims:
+    - name: skips_an_entry_that_is_not_a_move
+      statement: 'for frm in {"proven", "holds", "unknown", "skipped", "falsified"}, to in {"proven", "holds", "unknown", "skipped", "falsified"}, f([None, {"from": "holds", "to": "proven", "at": "u"}], frm, to, at="t") == [{"from": "holds", "to": "proven", "at": "u"}]'
+    - name: removes_at_most_one
+      statement: 'for frm in {"proven", "holds", "unknown", "skipped", "falsified"}, to in {"proven", "holds", "unknown", "skipped", "falsified"}, len(f([{"from": "proven", "to": "unknown", "at": "t"}, {"from": "proven", "to": "unknown", "at": "t"}, {"from": "proven", "to": "unknown", "at": "t"}], frm, to, at="t")) >= 2'
+    - name: removes_the_latest_match
+      statement: 'f([{"from": "proven", "to": "unknown", "at": "t", "n": 1}, {"from": "proven", "to": "unknown", "at": "t", "n": 2}], "proven", "unknown", at="t") == [{"from": "proven", "to": "unknown", "at": "t", "n": 1}]'
+    - name: keeps_an_acknowledged_move
+      statement: 'let a be {True, "yes"}, for frm in {"proven", "holds", "unknown", "skipped", "falsified"}, to in {"proven", "holds", "unknown", "skipped", "falsified"}, f([{"from": "proven", "to": "unknown", "at": "t", "acknowledged": a}], frm, to, at="t") == [{"from": "proven", "to": "unknown", "at": "t", "acknowledged": a}]'
+    - name: keeps_a_move_from_another_run
+      statement: 'for at in {"u", "", "t2"}, f([{"from": "proven", "to": "unknown", "at": "t"}], "proven", "unknown", at=at) == [{"from": "proven", "to": "unknown", "at": "t"}]'
+
+mathema.transitions.carry:
+  claims:
+    - name: drops_a_missing_entry
+      statement: 'missing(f, prior) drops'
+    - name: skips_an_entry_that_is_not_a_move
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified"}, len(f([None, {"kind": "weakened", "from": "proven", "to": "unknown"}], None, verdict, commit="c", at="t")) == 1'
+    - name: keeps_an_open_move
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified"}, len(f([{"kind": "weakened", "from": "proven", "to": "unknown"}], None, verdict, commit="c", at="t")) == 1'
+    - name: unrecovered_below_the_level
+      statement: 'for verdict in {"holds", "unknown", "skipped", "falsified"}, "recovered" not in f([{"kind": "weakened", "from": "proven", "to": "unknown"}], None, verdict, commit="c", at="t")[0]'
+    - name: recovered_at_the_level
+      statement: 'for verdict in {"proven", "proven:x"}, f([{"kind": "weakened", "from": "proven", "to": "unknown"}], None, verdict, commit="c", at="t")[0]["recovered"] == {"at": "t", "commit": "c"}'
+    - name: never_readds_an_acknowledged_move
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified"}, f([{"kind": "weakened", "from": "proven", "to": "unknown", "acknowledged": True}], None, verdict, commit="c", at="t") == []'
+    - name: drops_a_closed_recovery
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified"}, f([{"kind": "weakened", "from": "proven", "to": "unknown", "recovered": {"at": "s"}}], None, verdict, commit="c", at="t") == []'
+    - name: no_strengthening_after_a_recovery
+      statement: 'let k be {"strengthened", "fixed"}, for verdict in {"proven", "proven:x"}, len(f([{"kind": "weakened", "from": "proven", "to": "unknown"}], {"kind": k, "from": "unknown", "to": "proven"}, verdict, commit="c", at="t")) == 1'
+    - name: appends_a_move_with_nothing_recovered
+      statement: 'let k be {"regressed", "weakened", "strengthened", "fixed"}, for verdict in {"unknown", "skipped", "falsified"}, len(f([{"kind": "weakened", "from": "proven", "to": "unknown"}], {"kind": k}, verdict, commit="c", at="t")) == 2'
+
+mathema.transitions.read_invalidated_verdict:
+  claims:
+    - name: other_verdict_unchanged
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified", "skipped:misspecified"}, f(verdict, {"mathema.previous_verdict": "proven", "mathema.regressed_to": "unknown"})[0] == verdict'
+    - name: other_meta_unchanged
+      statement: 'for verdict in {"proven", "holds", "unknown", "skipped", "falsified", "skipped:misspecified"}, f(verdict, {"mathema.previous_verdict": "proven", "mathema.regressed_to": "unknown"})[1] == {"mathema.previous_verdict": "proven", "mathema.regressed_to": "unknown"}'
+    - name: reads_as_the_verdict_it_fell_to
+      statement: 'let r be {"unknown", "skipped", "falsified", "skipped:misspecified"}, for verdict in {"invalidated", "invalidated:stale"}, f(verdict, {"mathema.regressed_to": r})[0] == r'
+    - name: never_returns_invalidated_without_a_recorded_fall
+      statement: 'let p be {"proven", "holds", "invalidated"}, for verdict in {"invalidated", "invalidated:stale"}, f(verdict, {"mathema.previous_verdict": p})[0] == "unknown"'
+    - name: opens_one_move
+      statement: 'let g = mathema.transitions.open_transitions, let r be {"unknown", "skipped", "falsified"}, for verdict in {"invalidated", "invalidated:stale"}, len(g(f(verdict, {"mathema.regressed_to": r})[1])) == 1'
+
+mathema.transitions.load_actions:
+  claims:
+    - name: every_action_is_known
+      statement: 'let k be {"regressed", "weakened", "strengthened", "fixed"}, let m be {"strict", "lenient"}, f("/nonexistent-mathema-root")[k][m] in {"fail", "warn", "pass"}'
+    - name: regressed_fails_by_default
+      statement: 'let m be {"strict", "lenient"}, f("/nonexistent-mathema-root")["regressed"][m] == "fail"'
+
+mathema.transitions.describe:
+  claims:
+    - name: names_the_kind
+      statement: 'let k be {"regressed", "weakened", "strengthened", "fixed"}, let c be {"this function changed", "a callee changed", "nothing changed"}, k in f({"kind": k, "from": "proven", "to": "unknown", "cause": c})'
+    - name: names_from_and_to
+      statement: 'let a be {"proven", "holds", "unknown", "skipped", "falsified"}, let b be {"proven", "holds", "unknown", "skipped", "falsified"}, a + " to " + b in f({"kind": "weakened", "from": a, "to": b, "cause": "nothing changed"})'
+    - name: names_the_cause
+      statement: 'let c be {"this function changed", "a callee changed", "nothing changed"}, "(" + c + ")" in f({"kind": "weakened", "from": "proven", "to": "unknown", "cause": c})'
+    - name: contradiction_only_for_a_regression_with_nothing_changed
+      statement: 'let k be {"weakened", "strengthened", "fixed"}, let c be {"this function changed", "a callee changed", "nothing changed"}, "two runs disagree" not in f({"kind": k, "from": "proven", "to": "unknown", "cause": c})'
+    - name: regression_with_a_cause_is_no_contradiction
+      statement: 'let c be {"this function changed", "a callee changed"}, "two runs disagree" not in f({"kind": "regressed", "from": "proven", "to": "falsified", "cause": c})'
+    - name: regression_with_nothing_changed_says_so
+      statement: 'let a be {"proven", "holds"}, "two runs disagree" in f({"kind": "regressed", "from": a, "to": "falsified", "cause": "nothing changed"})'
