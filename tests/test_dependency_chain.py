@@ -114,9 +114,14 @@ def test_a_function_with_no_record_reads_as_not_checked(tmp_path):
     _claims_for(tmp_path, "middle", "top")
     r = _settle(tmp_path, gate_passes=False)
     assert "not checked, no record: chain.leaf" in r.stdout
-    dc = _claims(tmp_path, "chain.top")["dependencies_current"]
+    # a direct callee with no record leaves the rung open
+    dc = _claims(tmp_path, "chain.middle")["dependencies_current"]
     assert dc["verdict"] == "unknown"
     assert "not checked, no record" in dc["note"] and "chain.leaf" in dc["note"]
+    # reached only further down, it is listed and the verdict stands
+    dc = _claims(tmp_path, "chain.top")["dependencies_current"]
+    assert dc["verdict"] == "proven"
+    assert dc["meta"]["mathema.chain_unrecorded"] == ["chain.leaf"]
 
 
 def test_a_callee_regression_without_a_change_leaves_the_caller_chain_intact(tmp_path):

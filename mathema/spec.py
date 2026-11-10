@@ -1130,7 +1130,6 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
                       header=f"machine record; binds to form {form}")
 
 
-_REGRESSABLE = ("falsified", "unknown", "skipped")
 
 
 def _installed_outside(path: "str | None", root: str) -> bool:
@@ -1253,9 +1252,13 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
     are none); `falsified` when any changed since its record, the
     counterexample naming the chain's roots (the deepest functions that
     changed, `mathema.chain_roots`), where reverifying starts;
-    `unknown` when none changed but at least one has no record, read as
-    not checked rather than as a failure. Freshness only: a callee's
-    regression without a change does not break the chain."""
+    `unknown` when none changed but a function it calls directly has no
+    record. A function reached only further down with no record is
+    listed as not checked (`mathema.chain_unrecorded`) and leaves the
+    verdict as it is: it has no claims to go out of date, and a change
+    to it is caught through the chain the caller's record stores.
+    Freshness only: a callee's regression without a change does not
+    break the chain."""
     from .records import Probe
 
     verified = _verified_view(root)
@@ -1282,19 +1285,24 @@ def dependencies_current_probe(dependencies: list, root: str = "."):
                      counterexample=cx,
                      sketch="a function this one rests on changed since its "
                             "verified record")
+    direct = {d.get("key") for d in dependencies or []}
     unrecorded = sorted(k for k, st in checked.items() if st == "unverified")
     if unrecorded:
-        names = ", ".join(unrecorded)
+        meta["mathema.chain_unrecorded"] = unrecorded
+    names = ", ".join(unrecorded)
+    if any(k in direct for k in unrecorded):
         return Probe("dependencies_current", "", "unknown",
                      route="derive",
                      note=(f"not checked, no record: {names}; state claims "
                            f"about it and run mathema verify"),
-                     meta={**meta, "mathema.chain_unrecorded": unrecorded},
-                     sketch=f"not checked, no record: {names}")
+                     meta=meta, sketch=f"not checked, no record: {names}")
+    sketch = ("every function along the dependency chain matches its "
+              "verified record")
+    if unrecorded:
+        sketch += (f"; not checked, no record: {names} (their changes are "
+                   f"still caught through the chain this record stores)")
     return Probe("dependencies_current", "", "proven",
-                 route="derive", note=note, meta=meta,
-                 sketch="every function along the dependency chain matches "
-                        "its verified record")
+                 route="derive", note=note, meta=meta, sketch=sketch)
 
 
 def _annotate_dependency_freshness(spec: dict, root: str) -> None:
@@ -1317,26 +1325,48 @@ def _annotate_dependency_freshness(spec: dict, root: str) -> None:
             dep["freshness"] = state
 
 
+def _triggers(spec: dict, prior_entry: dict) -> list[str]:
+    """What changed between the prior record and this one, for a
+    transition's cause: the triggers verify found
+    (`meta["mathema.invalidated_by"]`), else the function's own form and
+    its dependencies' chains as the two records store them."""
+    stated = (spec.get("meta") or {}).get("mathema.invalidated_by")
+    if stated is not None:
+        return list(stated)
+    from .identity import same_form
+    out = []
+    if not same_form((spec.get("identity") or {}).get("form"),
+                     (prior_entry.get("identity") or {}).get("form")):
+        out.append("form")
+
+    def chains(entry):
+        return {d.get("key"): d.get("chain") or d.get("form")
+                for d in entry.get("dependencies") or [] if d.get("key")}
+    if chains(spec) != chains(prior_entry):
+        out.append("dependency")
+    return out
+
+
 def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
     """Intent:
         The record layer's memory: compare each claim's fresh verdict
-        against the prior record at `path` and (a) stamp
-        `meta["mathema.previous_verdict"]` whenever the verdict
-        changed, (b) turn a supported->unsupported transition into the
-        `invalidated` error state; a claim that was `proven`/`holds`
-        and can no longer be established is a regression, categorically
-        different from a claim that was never supported. The raw fresh
-        outcome is kept in `meta["mathema.regressed_to"]`, and an
-        already-`invalidated` claim that still fails stays
-        `invalidated` (the error stands until the claim is re-
-        supported).
+        against the prior record at `path`, stamp
+        `meta["mathema.previous_verdict"]` whenever the verdict changed,
+        and keep the move as a transition beside the claim
+        (`meta["mathema.transitions"]`, see `mathema.transitions`): its
+        kind, its cause, the date and commit. The claim's verdict is
+        always the fresh one. Open transitions carry forward until a
+        person acknowledges them or the claim is back at the level it
+        fell from. A claim whose statement changed is a different claim,
+        and starts with no history.
 
     Notes:
         Runs at write time, in `record()`, because this is the one
         place that holds both the fresh adjudication and the history.
-        The reasoning chain reflects the raw adjudication (built before
-        this pass); the claim's own `verdict` reflects the state.
-        Degrades to a plain write when the prior record can't be read.
+        A prior record written before 0.6.5 with the verdict
+        `invalidated` is read as the verdict it fell to plus its
+        regression (`transitions.read_invalidated_verdict`). Degrades
+        to a plain write when the prior record can't be read.
     """
     if not os.path.exists(path):
         return
@@ -1346,42 +1376,50 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
             prior_doc = yaml.safe_load(fh) or {}
         prior_entry = prior_doc.get(key) or {}
         prior_claims = prior_entry.get("claims") or []
-        prior = {c.get("name"): c.get("verdict") for c in prior_claims
-                if c.get("name") and c.get("verdict")}
         prior_commit = (prior_entry.get("lineage") or {}).get("commit")
-        prior_meta = {c.get("name"): c.get("meta") or {}
-                      for c in prior_claims if c.get("name")}
     except Exception:
         return
+    import datetime
+    from .transitions import carry, read_invalidated_verdict, transition
+    prior, prior_meta, prior_statement = {}, {}, {}
+    for pc in prior_claims:
+        name = pc.get("name")
+        if not name:
+            continue
+        verdict, meta = read_invalidated_verdict(pc.get("verdict") or "",
+                                                 pc.get("meta") or {})
+        prior[name], prior_meta[name] = verdict, meta
+        prior_statement[name] = pc.get("statement") or pc.get("law")
+    triggers = _triggers(spec, prior_entry)
+    commit = (spec.get("lineage") or {}).get("commit")
+    today = datetime.date.today().isoformat()
     for c in spec.get("claims") or []:
+        name = c.get("name")
+        if name not in prior or prior_statement.get(name) != (
+                c.get("statement") or c.get("law")):
+            continue
+        meta = dict(c.get("meta") or {})
         # the last-supported pointer survives every rewrite: set when a
         # supported verdict is left behind, carried forward otherwise,
         # what a historical acceptance points at ("the commit when the
         # previous version of this truth held")
-        carried = prior_meta.get(c.get("name"), {}).get(
-            "mathema.last_supported_commit")
+        carried = prior_meta[name].get("mathema.last_supported_commit")
         if carried:
-            meta0 = dict(c.get("meta") or {})
-            meta0.setdefault("mathema.last_supported_commit", carried)
-            c["meta"] = meta0
-        prev = prior.get(c.get("name"))
-        if prev is None or prev == c.get("verdict"):
-            continue
-        meta = dict(c.get("meta") or {})
-        meta["mathema.previous_verdict"] = prev
-        if classify_verdict(prev) in SUPPORTED_VERDICTS and prior_commit:
-            meta["mathema.last_supported_commit"] = prior_commit
-        base_prev = classify_verdict(prev)
-        base_new = classify_verdict(c["verdict"] or "")
-        if base_prev in SUPPORTED_VERDICTS and base_new in _REGRESSABLE:
-            meta["mathema.regressed_to"] = c["verdict"]
-            c["verdict"] = "invalidated"
-        elif base_prev == "invalidated" and base_new in _REGRESSABLE:
-            # the standing error persists until the claim is genuinely
-            # re-supported; a still-failing re-run never launders an
-            # invalidation back into an ordinary failure.
-            meta["mathema.regressed_to"] = c["verdict"]
-            c["verdict"] = "invalidated"
+            meta.setdefault("mathema.last_supported_commit", carried)
+        prev, now = prior[name], c.get("verdict") or ""
+        new = None
+        if prev and prev != now:
+            meta["mathema.previous_verdict"] = prev
+            if classify_verdict(prev) in SUPPORTED_VERDICTS and prior_commit:
+                meta["mathema.last_supported_commit"] = prior_commit
+            new = transition(prev, now, triggers, commit=commit, at=today)
+        kept = carry(prior_meta[name].get("mathema.transitions") or [], new,
+                     now, commit=commit, at=today)
+        if kept:
+            meta["mathema.transitions"] = kept
+        else:
+            meta.pop("mathema.transitions", None)
+        meta.pop("mathema.regressed_to", None)
         c["meta"] = meta
 
 

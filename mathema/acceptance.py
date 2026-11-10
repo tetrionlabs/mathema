@@ -2243,3 +2243,61 @@ def reread_intent(root: str, item: dict) -> "dict | None":
     if live and live != fresh["text"]:
         fresh["live_text"] = live
     return fresh
+
+
+def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
+                                    *, by: "str | None" = None,
+                                    note: "str | None" = None) -> dict:
+    """Intent:
+        The write that acknowledges the open transitions on the named
+        claims of `key` (`mathema accept KEY CLAIM --transition`): each
+        open transition gains `acknowledged: {at, by, note}`, and the
+        gate stops acting on it. Refused for a claim the record does not
+        hold, or one with no open transition.
+    """
+    from .transitions import describe, open_transitions
+    path, doc = _load_record(root, key)
+    claims = {c.get("name"): c for c in doc[key].get("claims") or []}
+    lines, names = [], []
+    for name in claim_names:
+        claim = claims.get(name)
+        if claim is None:
+            raise UnknownAcceptanceTarget(f"{key} has no claim {name!r}")
+        opened = open_transitions(claim.get("meta") or {})
+        if not opened:
+            raise AcceptanceError(f"{name} has no open transition to "
+                                  f"acknowledge")
+        names.append(name)
+        lines.extend(f"  {name}: {describe(t)}" for t in opened)
+    return {"root": root, "key": key, "path": path, "claims": names,
+            "by": by, "note": note, "lines": lines}
+
+
+def apply_transition_acknowledgement(plan: dict) -> list[str]:
+    """Intent:
+        Write an acknowledgement planned by
+        `plan_transition_acknowledgement`, through the same human gate
+        (PIN, policy) as every acceptance. Returns the claims written.
+    """
+    from . import auth
+    from .transitions import open_transitions
+    attestation = auth.require_human("accept --transition")
+    auth.enforce_policy(attestation, plan.get("root", "."))
+    path, doc = _load_record(plan["root"], plan["key"])
+    entry = doc[plan["key"]]
+    stamp: dict = {"at": datetime.date.today().isoformat()}
+    if plan.get("by"):
+        stamp["by"] = plan["by"]
+    if plan.get("note"):
+        stamp["note"] = plan["note"]
+    if attestation:
+        stamp["verified_by"] = dict(attestation)
+    for claim in entry.get("claims") or []:
+        if claim.get("name") not in plan["claims"]:
+            continue
+        for t in open_transitions(claim.get("meta") or {}):
+            t["acknowledged"] = dict(stamp)
+    _restamp_integrity(entry)
+    write_yaml(path, {plan["key"]: entry},
+               header=f"machine record; transitions acknowledged on {plan['key']}")
+    return list(plan["claims"])

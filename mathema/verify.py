@@ -64,6 +64,8 @@ class GateReport:
     proven: int = 0
     holds: int = 0
     falsified: int = 0
+    # the functions invalidated, changed since their record, among
+    # those this report covers (set by the sweep, not by the gate)
     invalidated: int = 0
     unknown: int = 0
     owned: int = 0
@@ -80,13 +82,16 @@ class GateReport:
     unaccounted: list = field(default_factory=list)
     # the clauses of the declared policy rows that are falsified
     policy_problems: list = field(default_factory=list)
+    # open transitions on these claims, and the lines the gate warns
+    # with rather than failing on
+    transitions: int = 0
+    warnings: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
-        """The claims a counterexample stands against, `falsified` and
-        `invalidated` together: the `refuted` stance of the claim-row
-        vocabulary."""
-        return self.falsified + self.invalidated
+        """The claims a counterexample stands against: the `refuted`
+        stance of the claim-row vocabulary."""
+        return self.falsified
 
 
 #: whether the missing-value policy rows mathema writes are gated and
@@ -189,7 +194,7 @@ def summary_counts(counts) -> str:
     # a claim mathema could not run reads as unknown, with its reason
     # in the problems, and the count keeps the two together; a claim
     # misspecified as stated reads as misspecified
-    for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
+    for key, word in (("unknown", "unknown"),
                       ("misspecified", "misspecified"),
                       ("accepted_risk", "accepted risk")):
         n = get(key) + (get("skipped") - get("misspecified")
@@ -220,15 +225,12 @@ def _record_has_unreadable_claim(entry: dict) -> bool:
 
 def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     """Intent:
-        Give each probe the verdict its record now stores where the
-        record layer changed it. A claim that was supported before and
-        fails now is written as `invalidated`, and the sweep reports it
-        under that name rather than as the fresh `falsified`.
+        Give each probe what its record now stores beside the fresh
+        verdict: the verdict before it and the transitions it carries
+        (`mathema.transitions`), so the gate acts on them.
 
     Notes:
-        A stored `invalidated` is carried over with the verdict it fell
-        from and the one it fell to, and so is the accepted
-        level of a trusted row the sweep could not settle
+        The accepted level of a trusted row the sweep could not settle
         (`mathema.trusted_unsettled`) or settled only more weakly
         (`mathema.strongest_evidence`, with the row's note), with that
         marker; every other verdict is already the probe's own.
@@ -247,12 +249,11 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
                & set(c.get("meta") or {})}
     rows = {c.get("name"): c for c in entry.get("claims") or []}
     for p in probes:
-        if classify_verdict(stored.get(p.name) or "") == "invalidated":
-            p.verdict = stored[p.name]
-            p.meta = {**(p.meta or {}), **{
-                k: v for k, v in (rows[p.name].get("meta") or {}).items()
-                if k in ("mathema.previous_verdict", "mathema.regressed_to")}}
-        elif p.name in trusted:
+        history = {k: v for k, v in (rows.get(p.name, {}).get("meta") or {}).items()
+                   if k in ("mathema.previous_verdict", "mathema.transitions")}
+        if history:
+            p.meta = {**(p.meta or {}), **history}
+        if p.name in trusted:
             row = trusted[p.name]
             p.verdict = stored[p.name]
             p.meta = {**(p.meta or {}), **{
@@ -270,14 +271,20 @@ _GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
 
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
-         unresolved=(), key: "str | None" = None) -> GateReport:
+         unresolved=(), key: "str | None" = None,
+         transition_actions: "dict | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
-    Rules: a falsified or invalidated claim fails in every mode; an
-    unknown claim fails unless its name is in `accepted_risk` (then it
-    is `owned`, and only strict refuses it); strict additionally fails
-    skipped claims; an unresolved global name fails in every mode.
+    Rules: a falsified claim fails in every mode; an unknown claim
+    fails unless its name is in `accepted_risk` (then it is `owned`,
+    and only strict refuses it); strict additionally fails skipped
+    claims; an unresolved global name fails in every mode. Each open
+    transition fails, warns or passes by its kind and the mode
+    (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None). A
+    claim a record written before 0.6.5 stores as `invalidated` is read
+    as the verdict it fell to, with the regression as an open
+    transition (`transitions.read_invalidated_verdict`).
     Suggestions mathema volunteered and foreign-grammar claims never
     gate (foreign ones are collected on the report for the caller to
     surface).
@@ -288,11 +295,24 @@ def gate(claims, *, strict: bool,
     # a line under a claim mathema suggested is part of the suggestion
     suggested = {_claim_fields(c)[0] for c in claims
                  if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
+    from .transitions import (DEFAULT_ACTIONS, describe, open_transitions,
+                              read_invalidated_verdict)
+    actions = transition_actions or DEFAULT_ACTIONS
+    mode = "strict" if strict else "lenient"
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
+        verdict, meta = read_invalidated_verdict(verdict, meta)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
+        for t in open_transitions(meta):
+            action = (actions.get(t.get("kind")) or {}).get(mode, "fail")
+            if action == "pass":
+                continue
+            r.transitions += 1
+            line = (f"{name} {describe(t)}; to acknowledge it, run: mathema "
+                    f"accept {key or 'KEY'} {name} --transition")
+            (r.problems if action == "fail" else r.warnings).append(line)
         statement = _claim_statement(c)
         label = next((lab for rel, lab in _GATE_LABELS.items()
                       if statement.startswith(rel + "(")), None)
@@ -332,8 +352,6 @@ def gate(claims, *, strict: bool,
             r.holds += 1
         elif kind == "falsified":
             r.falsified += 1
-        elif kind == "invalidated":
-            r.invalidated += 1
         elif kind == "unknown":
             if name in accepted_risk:
                 r.owned += 1
@@ -346,9 +364,9 @@ def gate(claims, *, strict: bool,
             word = ("misspecified" if verdict == "skipped:misspecified"
                     else "unknown")
             r.skipped_reasons.append((name, word, _first_sentence(note)))
-    # a falsified or invalidated claim is a failing check, in every
-    # mode; strictness only governs structurally-skipped claims, never
-    # wrong or undecided ones
+    # a falsified claim is a failing check, in every mode; strictness
+    # only governs structurally-skipped claims, never wrong or
+    # undecided ones
     if r.falsified:
         # a falsified gate names itself and its reason, and the policy
         # rows under it are the same fact; else the policy rows name
@@ -364,8 +382,6 @@ def gate(claims, *, strict: bool,
         others = r.falsified - len(r.policy_problems) - len(gate_fails)
         if others > 0:
             r.problems.append(f"{others} falsified claim(s)")
-    if r.invalidated:
-        r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
@@ -1187,6 +1203,19 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
+                    provenance, library_version, premises, dependency) -> list[str]:
+    """The triggers that make a function invalidated, changed since its
+    record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
+    each one that fired."""
+    fired = {"form": form, "provenance": provenance, "defaults": defaults,
+             "claims": claims, "pseudo-infinity": pseudo_infinity,
+             "library-version": library_version is not None and library_version is not False,
+             "definition-rows": definitions, "premises": premises,
+             "dependency": dependency}
+    return [name for name, on in fired.items() if on]
+
+
 def _restamp_freshness(entry: dict, root: str) -> bool:
     """Re-stamp each function dependency's `freshness` in a record
     `entry` against the store as it now stands, so the stamps agree
@@ -1689,6 +1718,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"own package, so the file is ignored; its claims are the "
             f"project's own, stated in its ordinary claims files")
     integrity_warned: set = set()
+    # the functions this sweep found changed since their record
+    invalidated_keys: set = set()
     from .auth import acceptance_policy_problems, load_policy
     from .locks import load_locks, lock_state
     policy = load_policy(root)
@@ -2243,6 +2274,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
+        if recorded_form:
+            triggers = _fired_triggers(
+                form=not same_form(facts_now.form, recorded_form),
+                claims=recorded_fp != current_fp, defaults=defaults_moved,
+                pseudo_infinity=pinf_moved, definitions=definitions_moved,
+                provenance=body_moved, library_version=version_moved,
+                premises=premise_now != (recorded_premises or {})
+                if premise_now or recorded_premises else False,
+                dependency=dependency_changed)
+            rec.meta["mathema.invalidated_by"] = triggers
+            if triggers:
+                invalidated_keys.add(key)
+            roots = chain_moved(verified_entry.get("dependencies") or [],
+                                deps_now or []) if dependency_changed else []
+            if roots:
+                rec.meta["mathema.chain_moved"] = roots
         if definitions_now:
             rec.meta["mathema.definition_rows"] = definitions_now
         written = write_record(rec, key=key, root=root,
@@ -2323,6 +2370,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   f"{recorded_form}")
 
     # phase 3: gate every key through the one policy and render lines
+    from .transitions import load_actions
+    transition_actions = load_actions(root)
     for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
         is_library = key in library
         if is_library:
@@ -2340,7 +2389,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
                       accepted_risk=accepted,
-                      unresolved=() if is_library else unres, key=key)
+                      unresolved=() if is_library else unres, key=key,
+                      transition_actions=transition_actions)
+        report.invalidated = int(key in invalidated_keys)
         hints = (_unsettled_library_hints(key, claims_for_gate)
                  if is_library and report.problems else [])
         standing = [
@@ -2365,6 +2416,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if is_library:
                 line += f"; library claims from {library[key]}"
             line += _unaccounted_text(report)
+            if report.warnings:
+                line += "; " + "; ".join(f"warning: {w}" for w in report.warnings)
             if report.problems:
                 line += "; " + "; ".join(report.problems + hints)
         else:
@@ -2379,6 +2432,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                    for p in report.foreign})
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
+            standing += [f"warning: {w}" for w in report.warnings]
             if standing:
                 line += "; " + "; ".join(standing)
             if report.problems:
@@ -2411,11 +2465,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          else []) + key_problems.get(key, [])
                         + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
+            "warnings": list(report.warnings),
             **({"library_claims": library[key]} if is_library else {}),
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,
                        "falsified": report.falsified,
                        "invalidated": report.invalidated,
+                       "transitions": report.transitions,
                        "unknown": report.unknown,
                        "accepted_risk": report.owned,
                        "skipped": report.skipped,
