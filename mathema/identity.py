@@ -105,7 +105,13 @@ class _Alpha(ast.NodeTransformer):
 
 def normalized(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
     """Alpha-normalized copy: locals renamed by binding order, docstring
-    stripped, function name canonicalized (so recursion normalizes too)."""
+    stripped, function name canonicalized (so recursion normalizes too).
+
+    The canonical names, `<local N>` and `<self>`, are not identifiers,
+    so no name in the source can be mistaken for one: a free `v0` or a
+    global `f` keeps its own spelling. The function's name means the
+    function only where no local binds it, as in Python's scoping, so a
+    parameter named like its function is renamed like any other local."""
     tree = ast.parse(ast.unparse(fdef))  # deep, location-free copy
     f = tree.body[0]
     body = f.body
@@ -113,10 +119,12 @@ def normalized(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
             and isinstance(body[0].value.value, str):
         body = body[1:]
         f.body = body or [ast.Pass()]
-    mapping = {name: f"v{i}" for i, name in enumerate(local_names(f))}
-    mapping[f.name] = "f"
+    locals_ = local_names(f)
+    mapping = {name: f"<local {i}>" for i, name in enumerate(locals_)}
+    if f.name not in mapping:
+        mapping[f.name] = "<self>"
     _Alpha(mapping).visit(f)
-    f.name = "f"
+    f.name = "<self>"
     return f
 
 
