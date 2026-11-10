@@ -1792,85 +1792,110 @@ def shields_payloads(scores: BadgeScores) -> dict:
     return out
 
 
-def _svg_score_point(origin, corner, score):
-    """A score's point on its spoke from `origin` (the centre, all-zero)
-    out to its frame `corner`, the SVG twin of the ASCII spoke placement;
-    an unknown score (None) sits at the origin."""
+# The SVG card's geometry, in the card's own coordinates: the spokes
+# (`_SPOKE_DEG`, through `_spoke_xy`) leave `_SVG_CENTRE` and their tips
+# sit at `_SVG_RADIUS`, so the frame is (100, 20), (169.3, 140) and
+# (30.7, 140). Rings mark 25, 50 and 75 percent of the radius. CLARITY's
+# label is centred `_SVG_LABEL_ABOVE` above its tip, the other two are
+# centred `_SVG_LABEL_BELOW` below theirs, and the overall number is a
+# caption under the figure. The figure occupies x -30 to 230 and y -4 to
+# 168; the card adds a header above and the caption below, and is drawn
+# at `_SVG_SCALE` times the viewBox size.
+_SVG_CENTRE = (100.0, 100.0)
+_SVG_RADIUS = 80.0
+_SVG_RINGS = (0.25, 0.5, 0.75)
+_SVG_LABEL_ABOVE = 10.0
+_SVG_LABEL_BELOW = 18.0
+_SVG_VIEWBOX = (-30.0, -30.0, 260.0, 242.0)
+_SVG_SCALE = 1.4
+_SVG_CAPTION_Y = 196.0
+
+
+def _svg_point(name: str, score) -> tuple:
+    """Score `score` (0-100) on spoke `name` of the SVG card; an unknown
+    score (None) sits at the centre."""
     f = 0.0 if score is None else max(0.0, min(1.0, score / 100.0))
-    return (origin[0] + f * (corner[0] - origin[0]),
-            origin[1] + f * (corner[1] - origin[1]))
+    return _spoke_xy(name, f, _SVG_CENTRE, _SVG_RADIUS)
+
+
+def _svg_points(pts) -> str:
+    return " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+
+
+def _svg_label_xy(name: str) -> tuple:
+    """Where spoke `name`'s label is centred: above the CLARITY tip,
+    below the other two."""
+    x, y = _spoke_xy(name, 1.0, _SVG_CENTRE, _SVG_RADIUS)
+    if name == "CLARITY":
+        return x, y - _SVG_LABEL_ABOVE
+    return x, y + _SVG_LABEL_BELOW
+
+
+def _svg_shape(scores: BadgeScores) -> str:
+    """The scored triangle: its fill, stroke and round joins."""
+    pts = [_svg_point("CLARITY", scores.clarity),
+           _svg_point("INTENT", scores.intent),
+           _svg_point("IMPL", scores.implementation)]
+    return (f'<polygon class="head" points="{_svg_points(pts)}" '
+            f'fill="{_ACCENT}" fill-opacity="0.16" stroke="{_ACCENT}" '
+            'stroke-width="2" stroke-linejoin="round"/>')
 
 
 def render_svg(scores: BadgeScores) -> str:
     """A dark-card twin of the ASCII triangle, on the same three spokes
-    from a common centre, 120 degrees apart (radius 112 about (180, 184)
-    on a 360 by 300 card): CLARITY up, IMPL down-left, INTENT down-right,
-    the full 100/100/100 triangle as a faint dashed frame, and each score
-    a vertex at its fraction of its spoke, with the triangle they span
-    filled in the accent. The filled share of the frame is exactly the
-    overall number (`triangle_area`), which sits top right.
-    Self-contained (no external CSS or fonts), so it reads the same on a
-    light or a dark README."""
-    w, h = 360, 300
-    origin = (180.0, 184.0)       # the common centre, all-zero
-    apex = _spoke_xy("CLARITY", 1.0, origin, 112.0)
-    left = _spoke_xy("IMPL", 1.0, origin, 112.0)
-    right = _spoke_xy("INTENT", 1.0, origin, 112.0)
-    frame = {"CLARITY": apex, "IMPL": left, "INTENT": right}
-    dims = (("CLARITY", scores.clarity),
-            ("IMPL", scores.implementation),
-            ("INTENT", scores.intent))
-    ghost = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in (apex, left, right))
-    pts = {name: _svg_score_point(origin, frame[name], sc)
-           for name, sc in dims}
-    cur = " ".join(f"{pts[n][0]:.1f},{pts[n][1]:.1f}"
-                   for n in ("CLARITY", "IMPL", "INTENT"))
+    from a common centre, 120 degrees apart: CLARITY up, INTENT
+    down-right, IMPL down-left. Rings at a quarter, a half and three
+    quarters of the radius, the spokes, the full 100/100/100 frame and the
+    scored triangle, its share of the frame exactly the overall number
+    (`triangle_area`), which is the caption under the figure. The layers
+    are drawn in order, so a further shape (an earlier snapshot's) goes in
+    before the scored one. Self-contained (no external CSS, fonts or
+    script), so it reads the same on a light or a dark README."""
+    vx, vy, vw, vh = _SVG_VIEWBOX
+    cx, cy = _SVG_CENTRE
+    tips = {n: _spoke_xy(n, 1.0, _SVG_CENTRE, _SVG_RADIUS)
+            for n in ("CLARITY", "INTENT", "IMPL")}
+    frame = [tips["CLARITY"], tips["INTENT"], tips["IMPL"]]
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="{_MONO_FONT}">',
-        f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="10" '
-        f'fill="{_INK}" stroke="{_LINE}"/>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{vw * _SVG_SCALE:.0f}" height="{vh * _SVG_SCALE:.0f}" '
+        f'viewBox="{vx:.0f} {vy:.0f} {vw:.0f} {vh:.0f}" '
+        f'font-family="{_MONO_FONT}">',
+        f'<rect x="{vx + 0.5:.1f}" y="{vy + 0.5:.1f}" width="{vw - 1:.0f}" '
+        f'height="{vh - 1:.0f}" rx="8" fill="{_INK}" stroke="{_LINE}"/>',
         # the header: the product name in the bracket-label motif
-        f'<text x="20" y="28" fill="{_DMUTE}" font-size="11" '
-        f'letter-spacing="1.2">[ mathema ]</text>',
-        # the full 100/100/100 frame: a faint dashed triangle with open
-        # corner pips, the room to grow
-        f'<polygon points="{ghost}" fill="none" stroke="{_GRAPHITE}" '
-        'stroke-dasharray="2 5" stroke-width="1.25"/>',
+        f'<text x="{vx + 12:.0f}" y="{vy + 18:.0f}" fill="{_DMUTE}" '
+        'font-size="9" letter-spacing="1.2">[ mathema ]</text>',
     ]
-    for name in ("CLARITY", "IMPL", "INTENT"):
-        parts.append(f'<line x1="{origin[0]:.0f}" y1="{origin[1]:.0f}" '
-                     f'x2="{frame[name][0]:.1f}" y2="{frame[name][1]:.1f}" '
-                     f'stroke="{_LINE}" stroke-width="1"/>')
-    for p in (apex, left, right):
-        parts.append(f'<circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="3" '
-                     f'fill="{_INK}" stroke="{_GRAPHITE}" stroke-width="1.25"/>')
-    parts.append(f'<polygon points="{cur}" fill="{_ACCENT}" '
-                 f'fill-opacity="0.16" stroke="{_ACCENT}" stroke-width="1.5" '
-                 'stroke-linejoin="round"/>')
-    label_pos = {"CLARITY": (apex[0], apex[1] - 16, "middle"),
-                 "IMPL": (left[0] - 8, left[1] + 30, "start"),
-                 "INTENT": (right[0] + 8, right[1] + 30, "end")}
-    for name, sc in dims:
-        vx, vy = pts[name]
-        parts.append(f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="4.5" '
-                     f'fill="{_ACCENT}" stroke="{_INK}" stroke-width="2"/>')
-        lx, ly, anchor = label_pos[name]
-        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" '
-                     f'letter-spacing="1.2" text-anchor="{anchor}">'
+    for f in _SVG_RINGS:
+        ring = [(cx + f * (x - cx), cy + f * (y - cy)) for x, y in frame]
+        parts.append(f'<polygon class="ring" points="{_svg_points(ring)}" '
+                     f'fill="none" stroke="{_LINE}" stroke-width="1"/>')
+    parts.append(f'<polygon class="frame" points="{_svg_points(frame)}" '
+                 f'fill="none" stroke="{_GRAPHITE}" stroke-width="1.5"/>')
+    for x, y in frame:
+        parts.append(f'<line x1="{cx:.0f}" y1="{cy:.0f}" x2="{x:.1f}" '
+                     f'y2="{y:.1f}" stroke="{_GRAPHITE}" stroke-width="1"/>')
+    parts.append(_svg_shape(scores))
+    for name, sc in (("CLARITY", scores.clarity), ("INTENT", scores.intent),
+                     ("IMPL", scores.implementation)):
+        lx, ly = _svg_label_xy(name)
+        parts.append(f'<text class="label" x="{lx:.1f}" y="{ly:.1f}" '
+                     'font-size="11" letter-spacing="1.2" '
+                     'text-anchor="middle">'
                      f'<tspan fill="{_DMUTE}">{name}</tspan> '
                      f'<tspan fill="{_PAPER}" font-weight="600">'
                      f'{"unknown" if sc is None else f"{sc}%"}</tspan>'
                      '</text>')
-    # the overall (shaded-area) number, top right, clear of the shape at
-    # every score
-    parts.append(f'<text x="{w - 20}" y="37" fill="{_PAPER}" '
-                 f'font-family="{_DISPLAY_FONT}" font-size="20" '
-                 f'font-weight="600" text-anchor="end">'
-                 f'{"unknown" if scores.overall is None else f"{scores.overall}%"}'
-                 '</text>')
-    parts.append(f'<text x="{w - 20}" y="51" fill="{_DMUTE}" font-size="10" '
-                 'letter-spacing="1.2" text-anchor="end">overall</text>')
+    # the caption: the overall number, then its name
+    overall = "unknown" if scores.overall is None else f"{scores.overall}%"
+    parts.append(f'<text class="caption" x="{cx - 4:.0f}" '
+                 f'y="{_SVG_CAPTION_Y:.0f}" fill="{_PAPER}" '
+                 f'font-family="{_DISPLAY_FONT}" font-size="26" '
+                 f'font-weight="600" text-anchor="end">{overall}</text>')
+    parts.append(f'<text class="caption" x="{cx + 4:.0f}" '
+                 f'y="{_SVG_CAPTION_Y:.0f}" fill="{_DMUTE}" font-size="11" '
+                 'letter-spacing="1.2" text-anchor="start">overall</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 

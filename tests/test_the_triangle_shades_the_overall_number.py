@@ -19,12 +19,18 @@ _TRIPLES = [(88, 71, 52), (89, 75, 28), (100, 31, 37), (60, 60, 60),
             (7, 93, 58)]
 
 
-def _polygons(svg: str) -> list:
+def _polygons(svg: str, kind: str) -> list:
+    """The polygons of class `kind` in `svg`, each a list of points."""
     out = []
-    for pts in re.findall(r'<polygon points="([^"]+)"', svg):
+    for pts in re.findall(rf'<polygon class="{kind}" points="([^"]+)"', svg):
         out.append([tuple(float(v) for v in p.split(","))
                     for p in pts.split()])
     return out
+
+
+def _frame_and_head(svg: str):
+    (frame,), (head,) = _polygons(svg, "frame"), _polygons(svg, "head")
+    return frame, head
 
 
 def _area(poly) -> float:
@@ -37,21 +43,30 @@ def _svg(a, b, c):
 
 
 def test_the_svg_frame_has_three_spokes_120_degrees_apart():
-    frame, _shaded = _polygons(_svg(88, 71, 52))
-    cx = sum(x for x, _ in frame) / 3
-    cy = sum(y for _, y in frame) / 3
-    radii = [math.hypot(x - cx, y - cy) for x, y in frame]
-    assert max(radii) - min(radii) < 0.1
-    angles = sorted(math.degrees(math.atan2(cy - y, x - cx)) % 360
+    frame, _head = _frame_and_head(_svg(88, 71, 52))
+    # centre (100, 100), radius 80, y growing downwards
+    assert sorted(frame) == sorted([(100.0, 20.0), (169.3, 140.0),
+                                    (30.7, 140.0)])
+    angles = sorted(math.degrees(math.atan2(100 - y, x - 100)) % 360
                     for x, y in frame)
     assert angles == pytest.approx([90.0, 210.0, 330.0], abs=0.05)
+    spokes = re.findall(r'<line x1="100" y1="100" x2="([^"]+)" y2="([^"]+)"',
+                        _svg(88, 71, 52))
+    assert sorted((float(x), float(y)) for x, y in spokes) == sorted(frame)
+
+
+def test_the_svg_rings_sit_at_a_quarter_a_half_and_three_quarters():
+    rings = _polygons(_svg(88, 71, 52), "ring")
+    radii = sorted(round(math.hypot(x - 100, y - 100), 1)
+                   for ring in rings for x, y in ring[:1])
+    assert radii == [20.0, 40.0, 60.0]
 
 
 @pytest.mark.parametrize("triple", _TRIPLES)
 def test_the_svg_shaded_share_is_the_overall_number(triple):
     a, b, c = (s / 100.0 for s in triple)
-    frame, shaded = _polygons(_svg(*triple))
-    share = 100 * _area(shaded) / _area(frame)
+    frame, head = _frame_and_head(_svg(*triple))
+    share = 100 * _area(head) / _area(frame)
     # vertices are written to 0.1 px, so the share is exact to about that
     assert share == pytest.approx(100 * (a * b + b * c + c * a) / 3, abs=0.1)
 
@@ -60,23 +75,78 @@ def test_permuting_the_scores_leaves_the_shaded_area_unchanged():
     for triple in ((88, 71, 52), (100, 0, 50), (7, 93, 58)):
         shares = []
         for p in itertools.permutations(triple):
-            frame, shaded = _polygons(_svg(*p))
-            shares.append(100 * _area(shaded) / _area(frame))
+            frame, head = _frame_and_head(_svg(*p))
+            shares.append(100 * _area(head) / _area(frame))
         # the same 0.1 px vertex resolution as the share itself
         assert max(shares) - min(shares) <= 0.1
 
 
 def test_each_svg_score_point_sits_on_its_own_spoke():
-    svg = _svg(88, 71, 52)
-    frame, shaded = _polygons(svg)
-    cx = sum(x for x, _ in frame) / 3
-    cy = sum(y for _, y in frame) / 3
-    r = math.hypot(frame[0][0] - cx, frame[0][1] - cy)
-    for (x, y), f, deg in zip(shaded, (0.52, 0.88, 0.71), (90, 210, 330)):
-        assert x == pytest.approx(cx + f * r * math.cos(math.radians(deg)),
+    _frame, head = _frame_and_head(_svg(88, 71, 52))
+    want = {90: 0.52, 210: 0.88, 330: 0.71}      # clarity, impl, intent
+    seen = set()
+    for x, y in head:
+        deg = round(math.degrees(math.atan2(100 - y, x - 100)) % 360)
+        seen.add(deg)
+        f = want[deg]
+        assert x == pytest.approx(100 + f * 80 * math.cos(math.radians(deg)),
                                   abs=0.06)
-        assert y == pytest.approx(cy - f * r * math.sin(math.radians(deg)),
+        assert y == pytest.approx(100 - f * 80 * math.sin(math.radians(deg)),
                                   abs=0.06)
+    assert seen == set(want)
+
+
+def _texts(svg: str) -> list:
+    """Each `<text>` as `(x, y, font_size, anchor, words)`."""
+    out = []
+    for attrs, body in re.findall(r"<text([^>]*)>(.*?)</text>", svg):
+        get = dict(re.findall(r'([\w-]+)="([^"]*)"', attrs))
+        out.append((float(get["x"]), float(get["y"]),
+                    float(get.get("font-size", 11)),
+                    get.get("text-anchor", "start"),
+                    re.sub(r"<[^>]+>", "", body)))
+    return out
+
+
+def _box(x, y, size, anchor, words):
+    """A text's box, its advance taken as 0.6 em per character (a
+    monospace face) and its height from 0.8 em above the baseline to
+    0.25 em below."""
+    w = 0.6 * size * len(words)
+    left = {"start": x, "middle": x - w / 2, "end": x - w}[anchor]
+    return left, y - 0.8 * size, left + w, y + 0.25 * size
+
+
+def _overlap(p, q) -> bool:
+    return p[0] < q[2] and q[0] < p[2] and p[1] < q[3] and q[1] < p[3]
+
+
+def test_the_svg_labels_sit_where_the_layout_puts_them():
+    texts = {words.split()[0]: (x, y) for x, y, _s, _a, words
+             in _texts(_svg(88, 71, 52))}
+    assert texts["CLARITY"] == (100.0, 10.0)       # 10 above the apex
+    assert texts["IMPL"] == (30.7, 158.0)          # 18 below its corner
+    assert texts["INTENT"] == (169.3, 158.0)
+    assert texts["48%"][1] > 168 and texts["overall"][1] > 168
+
+
+@pytest.mark.parametrize("scores", [
+    BadgeScores(None, None, None, None), BadgeScores(100, 100, 100, 100),
+    BadgeScores(None, 71, None, None), BadgeScores(88, 71, 52, 48)])
+def test_the_svg_labels_never_overlap_even_when_unknown(scores):
+    svg = render_svg(scores)
+    vx, vy, vw, vh = (float(v) for v in
+                      re.search(r'viewBox="([^"]+)"', svg).group(1).split())
+    boxes = [_box(*t) for t in _texts(svg)]
+    frame = _polygons(svg, "frame")[0]
+    figure = (min(x for x, _ in frame), min(y for _, y in frame),
+              max(x for x, _ in frame), max(y for _, y in frame))
+    for i, b in enumerate(boxes):
+        assert vx <= b[0] and b[2] <= vx + vw and vy <= b[1] \
+            and b[3] <= vy + vh
+        assert not _overlap(b, figure)
+        for other in boxes[i + 1:]:
+            assert not _overlap(b, other)
 
 
 def _cells(text: str, ch: str) -> set:

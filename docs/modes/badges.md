@@ -439,10 +439,10 @@ score means.
   endpoint badges in the Tetrion Labs colours (an ink label, a deep green
   value) a README references by raw URL.
 - `triangle.svg`, a dark-card twin of the ASCII triangle on the same
-  three spokes: the dashed `100/100/100` frame, each score a vertex on its
-  spoke, the triangle they span filled in the accent green, its share of
-  the frame exactly the overall number, and that number in the top
-  right. It carries its own background and needs
+  three spokes: rings at a quarter, a half and three quarters, the spokes,
+  the `100/100/100` frame, each score a vertex on its spoke, the triangle
+  they span filled in the accent green, its share of the frame exactly
+  the overall number, and that number as a caption under the figure. It carries its own background and needs
   no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and
