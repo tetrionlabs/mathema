@@ -1,0 +1,5 @@
+# mathema verified records are machine-generated evidence: collapse
+# them in diffs by default and keep them out of language stats. They
+# stay reviewable (expandable), and `mathema review` shows the
+# claim-level changes.
+/.mathema/verified/**/*.yaml linguist-generated
