@@ -46,7 +46,11 @@ and `--transition` acknowledges a claim's move since an earlier run.
   reclassifies to an accepted state that `verify` passes in both
   strict and lenient mode, named in the row as accepted risk; a
   `falsified` claim is never accepted as risk. This is the only way an unknown claim stops failing the
-  gate, see [what fails the run](verify.md#what-fails-the-run).
+  gate, see [what fails the run](verify.md#what-fails-the-run). When
+  the project's policy sets `accepted_risk_lifetime_days`, the
+  acceptance records the date it `expires`; from that date verify fails
+  the claim again and names the command that accepts it again (see
+  [project policy](pin.md#project-policy)).
 - **`--as discovery`**: a falsification that was right about the code
   and wrong about the claim: the function's actual behavior is the
   interesting fact. Accepting it retires the claim into the record's
@@ -150,10 +154,13 @@ verdict it fell from, and goes through the project's
 [acceptance policy](pin.md#project-policy) like every other
 acceptance, so a required PIN applies when it is written and
 `mathema verify` checks it on every run. The claim is then accepted
-risk at that level, as `--as risk` makes it: `--lenient` passes it,
-strict refuses it. Unlike a plain acknowledgement, the sign-off stays
-on the record while the claim is below the level it fell from, and
-closes as recovered when the claim is back there.
+risk at that level, as `--as risk` makes it: both modes pass it, named
+in the row. Unlike a plain acknowledgement, the sign-off stays on the
+record while the claim is below the level it fell from, and closes as
+recovered when the claim is back there. Under a policy lifetime
+(`accepted_risk_lifetime_days`) the sign-off also records `expires`;
+from that date the transition is open again, its line names the date,
+and the same command accepts it again.
 
 <!-- illustration -->
 ```text

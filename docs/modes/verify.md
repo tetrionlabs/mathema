@@ -48,6 +48,7 @@ bare-name key fails as a clear per-key problem line.
 | `unknown` or `skipped` claim whose fall carries a risk sign-off | passes, named in the row | passes, named in the row |
 | `unknown` claim, not accepted | fails | fails |
 | `unknown` or `skipped` claim, accepted as risk | passes, named in the row | passes, named in the row |
+| risk acceptance or risk sign-off past its `expires` date ([lifetime](pin.md#project-policy)) | fails, naming the date and the command that accepts it again | fails, naming the date and the command that accepts it again |
 | `skipped` (unverifiable) claim, not accepted | fails | passes, informational |
 | unresolved global name | fails | fails |
 | silently-unenforced declared domain | fails | passes, informational |

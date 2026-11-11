@@ -107,7 +107,20 @@ acceptance:
   require_verification: true   # every acceptance must carry verified_by
   methods: [totp]              # allowed methods; omitting pin disables the static PIN
   keys: [a3f2c1]               # optional allowlist of key ids
+  accepted_risk_lifetime_days: 90   # optional: a risk acceptance expires after 90 days
 ```
+
+`accepted_risk_lifetime_days` gives risk acceptances a lifetime. With
+no key there is none, and a risk acceptance stands until the claim
+changes. With the key set, every risk acceptance written from then on
+(`mathema accept --as risk`, and a risk sign-off on a transition)
+records `expires`, the date that many days after it was written. From
+that date `mathema verify` treats the acceptance as lapsed: the claim
+fails again in both modes, and its line names the date and the command
+that accepts it again, which is running the same acceptance again. The
+lifetime is time only; nothing else makes an acceptance lapse. An
+acceptance written before the key was set carries no `expires` and
+never lapses, and evidence acceptances (`--as evidence`) never expire.
 
 The same file sets what the gate does with an unacknowledged
 [transition](../verdicts.md#transitions-and-what-invalidated-names) of

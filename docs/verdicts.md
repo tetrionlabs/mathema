@@ -185,8 +185,8 @@ two runs disagreeing. Either fails the gate in both modes until a
 person accepts the risk at the level it fell from, and the
 acknowledgement records it as a risk acceptance, `as: risk` and
 `level`, under the project's acceptance policy. The claim is then
-accepted risk, as `mathema accept --as risk` makes it: `--lenient`
-passes it and strict refuses it. The sign-off stays on the record while
+accepted risk, as `mathema accept --as risk` makes it: both modes pass
+it, named in the row. The sign-off stays on the record while
 the claim is below the level it fell from, and closes as recovered when
 the claim is back. `--lenient` tolerates
 only a claim that was always `skipped`; `skipped` to `skipped` is no
