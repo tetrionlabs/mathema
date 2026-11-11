@@ -1391,6 +1391,7 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
         prior[name], prior_meta[name] = verdict, meta
         prior_statement[name] = pc.get("statement") or pc.get("law")
     triggers = _triggers(spec, prior_entry)
+    roots = (spec.get("meta") or {}).get("mathema.chain_moved")
     commit = (spec.get("lineage") or {}).get("commit")
     today = datetime.date.today().isoformat()
     for c in spec.get("claims") or []:
@@ -1412,7 +1413,8 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
             meta["mathema.previous_verdict"] = prev
             if classify_verdict(prev) in SUPPORTED_VERDICTS and prior_commit:
                 meta["mathema.last_supported_commit"] = prior_commit
-            new = transition(prev, now, triggers, commit=commit, at=today)
+            new = transition(prev, now, triggers, commit=commit, at=today,
+                             chain_moved=roots)
         kept = carry(prior_meta[name].get("mathema.transitions") or [], new,
                      now, commit=commit, at=today)
         if kept:
@@ -1424,13 +1426,15 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
 
 
 def resettle_history(claim: dict, verdict: str, triggers, *, before: str,
-                     commit: "str | None", at: str) -> None:
+                     commit: "str | None", at: str,
+                     chain_moved=None) -> None:
     """Re-derive one claim's history when its verdict is settled again
     after the record was written: `dependencies_current` is adjudicated
     against the completed store once the sweep is over. The move this
     run recorded from `before` is replaced by the move from `before` to
     `verdict`, and the transitions carried from earlier runs are read
-    against `verdict` again."""
+    against `verdict` again. `chain_moved` is the run's moved chain
+    roots, kept on the new move as `transitions.transition` keeps them."""
     from .transitions import carry, drop_move, transition
     meta = dict(claim.get("meta") or {})
     first = claim.get("verdict") or ""
@@ -1441,7 +1445,8 @@ def resettle_history(claim: dict, verdict: str, triggers, *, before: str,
     new = None
     if before != verdict:
         meta["mathema.previous_verdict"] = before
-        new = transition(before, verdict, triggers, commit=commit, at=at)
+        new = transition(before, verdict, triggers, commit=commit, at=at,
+                         chain_moved=chain_moved)
     else:
         meta.pop("mathema.previous_verdict", None)
     kept = carry(older, new, verdict, commit=commit, at=at)

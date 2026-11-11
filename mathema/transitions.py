@@ -19,7 +19,13 @@ A claim never supported that becomes falsified is a finding, not a
 transition. Each transition names its cause: `this function changed`,
 `a callee changed`, or `nothing changed`, a regression with nothing
 changed being a contradiction between two runs (engine, library
-version, seed or timeout).
+version, seed or timeout). A transition after a code change also keeps
+the triggers that fired (`invalidated_by`) and, when a dependency
+fired, the roots of the moved chain (`chain_moved`).
+
+A `weakened` transition to `unknown` or `skipped` is a supported claim
+that is no longer supported at all: it needs a risk sign-off, which
+records the level the claim fell from (`needs_risk_signoff`).
 
 `invalidated` names a function, not a claim: a function is invalidated
 when it changed since its record, by the triggers in
@@ -42,7 +48,9 @@ OWN_TRIGGERS = ("form", "provenance", "defaults", "claims", "pseudo-infinity",
 
 #: what the gate does with an unacknowledged transition of each kind,
 #: in strict and in lenient mode, unless the project's policy says
-#: otherwise (`.mathema/meta/policy.yaml`, `transitions:`)
+#: otherwise (`.mathema/meta/policy.yaml`, `transitions:`). The
+#: `weakened` row is the action for proven to holds; a weakening that
+#: needs a risk sign-off fails in both modes (`action_for`).
 DEFAULT_ACTIONS = {
     "regressed": {"strict": "fail", "lenient": "fail"},
     "weakened": {"strict": "fail", "lenient": "warn"},
@@ -81,8 +89,12 @@ def cause_of(triggers) -> str:
 
 
 def transition(before: str, after: str, triggers, *, commit: "str | None",
-               at: str) -> "dict | None":
-    """The transition record for a move, or None when there is none."""
+               at: str, chain_moved=None) -> "dict | None":
+    """The transition record for a move, or None when there is none.
+    The triggers that fired are kept as `invalidated_by`, and when
+    `dependency` is among them, the moved chain's roots (`chain_moved`,
+    from `inventory.chain_moved`) are kept beside them."""
+    triggers = list(triggers or [])
     cause = cause_of(triggers)
     kind = kind_of(before, after, function_changed=cause == "this function changed")
     if kind is None:
@@ -90,7 +102,33 @@ def transition(before: str, after: str, triggers, *, commit: "str | None",
     out = {"from": before, "to": after, "kind": kind, "cause": cause, "at": at}
     if commit:
         out["commit"] = commit
+    if triggers:
+        out["invalidated_by"] = triggers
+    if chain_moved and "dependency" in triggers:
+        out["chain_moved"] = list(chain_moved)
     return out
+
+
+def needs_risk_signoff(t: dict) -> bool:
+    """Whether a transition is a supported claim falling to unknown or
+    skipped: proven or holds to a verdict that supports nothing. Such a
+    move is closed by a person accepting the risk at the level it fell
+    from, never by a plain acknowledgement."""
+    return (t.get("kind") == "weakened"
+            and classify_verdict(t.get("to") or "") in ("unknown", "skipped"))
+
+
+def action_for(t: dict, mode: str, actions: "dict | None" = None) -> str:
+    """The gate's action on an open transition in `mode` (strict or
+    lenient), from `actions` (`load_actions`; `DEFAULT_ACTIONS` when
+    None). A weakening that needs a risk sign-off fails in both modes,
+    unless the project's policy sets an action for `weakened`, which
+    then applies to every weakened transition whatever it fell to."""
+    actions = actions or DEFAULT_ACTIONS
+    entry = actions.get(t.get("kind")) or {}
+    if needs_risk_signoff(t) and entry is DEFAULT_ACTIONS["weakened"]:
+        return "fail"
+    return entry.get(mode, "fail")
 
 
 def open_transitions(meta: dict) -> list[dict]:
@@ -175,9 +213,12 @@ def load_actions(root: str = ".") -> dict:
           weakened: fail
           regressed: {strict: fail, lenient: warn}
 
-    An action is `fail`, `warn` or `pass`; anything else is refused."""
+    An action is `fail`, `warn` or `pass`; anything else is refused. A
+    kind the policy does not name keeps its `DEFAULT_ACTIONS` entry
+    itself, which is how `action_for` tells a default from a policy
+    choice."""
     import yaml
-    actions = {k: dict(v) for k, v in DEFAULT_ACTIONS.items()}
+    actions = dict(DEFAULT_ACTIONS)
     path = os.path.join(root, ".mathema", "meta", "policy.yaml")
     try:
         with open(path, encoding="utf-8") as fh:
@@ -190,6 +231,7 @@ def load_actions(root: str = ".") -> dict:
             raise ValueError(f"policy.yaml transitions: {kind!r} is not a "
                              f"transition kind ({', '.join(KINDS)})")
         per_mode = value if isinstance(value, dict) else {"strict": value, "lenient": value}
+        actions[kind] = dict(DEFAULT_ACTIONS[kind])
         for mode, action in per_mode.items():
             if mode not in ("strict", "lenient") or action not in ACTIONS:
                 raise ValueError(f"policy.yaml transitions.{kind}: {mode}: {action!r} "
@@ -201,10 +243,23 @@ def load_actions(root: str = ".") -> dict:
 
 def describe(t: dict) -> str:
     """One line for a transition: `weakened proven to unknown (a callee
-    changed)`, a regression with nothing changed said as the
-    contradiction it is."""
+    changed); triggers: dependency; chain moved at shop.Base`. A fall to
+    unknown or skipped names what changed, the triggers and the moved
+    chain's roots. A regression with nothing changed is said as the
+    contradiction it is, and a fall to unknown with nothing changed as
+    suspicious, for the same reason."""
     text = f"{t.get('kind')} {t.get('from')} to {t.get('to')} ({t.get('cause')})"
-    if t.get("kind") == "regressed" and t.get("cause") == "nothing changed":
-        text += ("; nothing changed, so two runs disagree: the engine, a "
-                 "library version, the seed or a timeout differs")
+    if needs_risk_signoff(t):
+        if t.get("invalidated_by"):
+            text += f"; triggers: {', '.join(t['invalidated_by'])}"
+        if t.get("chain_moved"):
+            text += f"; chain moved at {', '.join(t['chain_moved'])}"
+    disagree = ("nothing changed, so two runs disagree: the engine, a "
+                "library version, the seed or a timeout differs")
+    if t.get("cause") == "nothing changed":
+        if t.get("kind") == "regressed":
+            text += f"; {disagree}"
+        elif (needs_risk_signoff(t)
+              and classify_verdict(t.get("to") or "") == "unknown"):
+            text += f"; suspicious: {disagree}"
     return text
