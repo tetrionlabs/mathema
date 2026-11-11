@@ -13,7 +13,7 @@ the verdict it addresses. The vocabulary is deliberately small:
   (it was a decision about a different function).
 - `unknown` accepts as **risk**: the claim couldn't be established and
   someone owns that. The verdict becomes `skipped:unknown_but_accepted`;
-  strict mode still refuses it, lenient mode lets work proceed.
+  verify passes it in every mode and names it as accepted risk.
 - `skipped` accepts as **risk**: the structural blocker is understood.
 - `falsified` (or `invalidated`) accepts only as a **discovery**: the
   claim was wrong about the world. Accepting it retires the claim into
@@ -525,6 +525,18 @@ def apply_acceptances(plans: list) -> list:
     return [_apply_attested(plan, attestation) for plan in plans]
 
 
+def _superseded(prior: dict, **extra) -> dict:
+    """Intent:
+        The history event for a risk acceptance a fresh one replaces:
+        the date it was replaced, and the replaced acceptance's `at`,
+        `by`, `note`, `level` and `expires`, those it carries.
+    """
+    kept = {k: prior[k] for k in ("at", "by", "note", "level", "expires")
+            if prior.get(k) is not None}
+    return {"at": datetime.date.today().isoformat(), "event": "superseded",
+            "as": "risk", **extra, "superseded": kept}
+
+
 def _event(as_: str, by: str | None, verdict: str, note: str | None) -> dict:
     event = {"at": datetime.date.today().isoformat(), "as": as_,
              "verdict": verdict}
@@ -1030,6 +1042,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                                   "(--as risk)")
         accepted = {"as": "risk", "at": datetime.date.today().isoformat(),
                     "form": form}
+        from . import auth
+        expires = auth.accepted_risk_expiry(auth.load_policy(root),
+                                            accepted["at"])
+        if expires:
+            accepted["expires"] = expires
         if by:
             accepted["by"] = by
         if note:
@@ -1039,7 +1056,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             plan["new_verdict"] = "skipped:unknown_but_accepted"
             plan["actions"].append(
                 f"reclassify {claim_name}: unknown -> skipped:unknown_but_accepted "
-                "(strict mode still refuses it; lenient proceeds)")
+                "(verify passes it in every mode, named as accepted risk)")
         else:
             plan["actions"].append(f"annotate {claim_name} as accepted risk")
         return plan
@@ -1284,7 +1301,11 @@ def _apply_attested(plan: dict, attestation) -> str:
                    header=f"machine record; historical acceptance of "
                           f"{target.get('name')}")
         return f"accepted historical: {target.get('name')}"
-    target.setdefault("acceptance_history", []).append(event)
+    history = target.setdefault("acceptance_history", [])
+    prior = target.get("accepted")
+    if plan["as"] == "risk" and (prior or {}).get("as") == "risk":
+        history.append(_superseded(prior))
+    history.append(event)
     target["accepted"] = plan["accepted"]
     if plan.get("new_verdict"):
         meta = dict(target.get("meta") or {})
@@ -1438,10 +1459,12 @@ def describe_acceptance(plan: dict) -> list:
                      f", bound to form {accepted.get('form')}")
     elif as_ == "risk":
         if plan.get("new_verdict"):
-            lines.append(f"its verdict becomes {plan['new_verdict']}; strict "
-                         "mode still refuses it, lenient mode proceeds")
+            lines.append(f"its verdict becomes {plan['new_verdict']}; verify "
+                         "passes it in every mode, named as accepted risk")
         else:
             lines.append("the claim is recorded as an accepted risk")
+        if accepted.get("expires"):
+            lines.append(f"the acceptance expires on {accepted['expires']}")
     elif as_ == "historical":
         lines.append("the claim moves to historical, last supported at "
                      f"commit {accepted.get('commit') or 'unknown'}")
@@ -2264,10 +2287,14 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
         gate stops acting on it. A supported claim fallen to unknown or
         skipped (`transitions.needs_risk_signoff`) is a risk acceptance
         instead, `acknowledged: {at, by, note, as: risk, level}`, the
-        level being the verdict it fell from. Refused for a claim the
-        record does not hold, or one with no open transition.
+        level being the verdict it fell from, with `expires` when the
+        project's policy sets a lifetime (`auth.accepted_risk_expiry`).
+        A risk sign-off past its expiry date is open again and is
+        accepted again the same way. Refused for a claim the record
+        does not hold, or one with no open transition.
     """
     from .transitions import describe, needs_risk_signoff, open_transitions
+    today = datetime.date.today().isoformat()
     path, doc = _load_record(root, key)
     claims = {c.get("name"): c for c in doc[key].get("claims") or []}
     lines: list[str] = []
@@ -2276,7 +2303,7 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
         claim = claims.get(name)
         if claim is None:
             raise UnknownAcceptanceTarget(f"{key} has no claim {name!r}")
-        opened = open_transitions(claim.get("meta") or {})
+        opened = open_transitions(claim.get("meta") or {}, today)
         if not opened:
             raise AcceptanceError(f"{name} has no open transition to "
                                   f"acknowledge")
@@ -2293,7 +2320,9 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     """Intent:
         Write an acknowledgement planned by
         `plan_transition_acknowledgement`, through the same human gate
-        (PIN, the `acceptance:` policy) as every acceptance. Returns the
+        (PIN, the `acceptance:` policy) as every acceptance. A lapsed
+        risk sign-off it replaces goes to the claim's
+        `acceptance_history` as a `superseded` event. Returns the
         claims written.
     """
     from . import auth
@@ -2303,6 +2332,8 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     path, doc = _load_record(plan["root"], plan["key"])
     entry = doc[plan["key"]]
     stamp: dict = {"at": datetime.date.today().isoformat()}
+    expires = auth.accepted_risk_expiry(auth.load_policy(plan.get("root", ".")),
+                                        stamp["at"])
     if plan.get("by"):
         stamp["by"] = plan["by"]
     if plan.get("note"):
@@ -2312,10 +2343,16 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     for claim in entry.get("claims") or []:
         if claim.get("name") not in plan["claims"]:
             continue
-        for t in open_transitions(claim.get("meta") or {}):
+        for t in open_transitions(claim.get("meta") or {}, stamp["at"]):
+            if (t.get("acknowledged") or {}).get("as") == "risk":
+                claim.setdefault("acceptance_history", []).append(
+                    _superseded(t["acknowledged"], transition=(
+                        f"{t.get('from')} to {t.get('to')}")))
             t["acknowledged"] = dict(stamp)
             if needs_risk_signoff(t):
                 t["acknowledged"].update({"as": "risk", "level": t.get("from")})
+                if expires:
+                    t["acknowledged"]["expires"] = expires
     _restamp_integrity(entry)
     write_yaml(path, {plan["key"]: entry},
                header=f"machine record; transitions acknowledged on {plan['key']}")

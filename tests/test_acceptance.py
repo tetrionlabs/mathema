@@ -2,7 +2,7 @@
 # Copyright 2026 Tetrion Ltd
 """The acceptance layer: human decisions over adjudicated evidence.
 The vocabulary rules are the tests; holds accepts as evidence,
-unknown/skipped as owned risk (strict mode still refuses), falsified
+unknown/skipped as owned risk (passing verify in every mode), falsified
 ONLY as a discovery (there is no accepting a bug: the code changes and
 the recorded counterexample replays until the claim proves), proven
 needs nothing. Acceptance survives re-adjudication, goes stale when

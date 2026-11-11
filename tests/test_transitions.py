@@ -366,10 +366,10 @@ def test_a_risk_sign_off_on_a_fall_to_unknown_is_accepted_risk_under_lenient():
 
 
 @pytest.mark.parametrize("to", ["unknown", "skipped"])
-def test_strict_refuses_a_signed_off_fall_as_accepted_risk(to):
+def test_strict_passes_a_signed_off_fall_as_accepted_risk(to):
     r = gate([_probe(to, _fell(to, acknowledged=_SIGNED))], strict=True,
              transition_actions=load_actions("/nonexistent"))
-    assert r.problems == ["1 accepted-risk claim(s)"] and r.owned == 1
+    assert r.problems == [] and r.owned == 1
 
 
 def test_a_recovered_risk_sign_off_accepts_nothing():

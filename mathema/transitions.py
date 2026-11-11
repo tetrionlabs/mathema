@@ -131,21 +131,36 @@ def action_for(t: dict, mode: str, actions: "dict | None" = None) -> str:
     return entry.get(mode, "fail")
 
 
-def open_transitions(meta: dict) -> list[dict]:
+def lapsed(acceptance, today: "str | None") -> bool:
+    """Whether an acceptance carrying an `expires` date has lapsed on
+    `today` (ISO): it holds up to the day before that date. One with no
+    `expires`, or no `today` to compare with, never lapses."""
+    if not isinstance(acceptance, dict) or not today:
+        return False
+    expires = acceptance.get("expires")
+    return bool(expires) and str(today) >= str(expires)
+
+
+def open_transitions(meta: dict, today: "str | None" = None) -> list[dict]:
     """The transitions on a claim still waiting on a person: neither
-    acknowledged nor recovered."""
+    acknowledged nor recovered, or carrying a risk sign-off that has
+    lapsed on `today` (`lapsed`)."""
+    def waiting(t):
+        ack = t.get("acknowledged")
+        return not ack or ((ack or {}).get("as") == "risk"
+                           and lapsed(ack, today))
     return [t for t in (meta or {}).get("mathema.transitions") or []
-            if isinstance(t, dict) and not t.get("acknowledged")
-            and not t.get("recovered")]
+            if isinstance(t, dict) and not t.get("recovered") and waiting(t)]
 
 
-def risk_signed(meta: dict) -> bool:
+def risk_signed(meta: dict, today: "str | None" = None) -> bool:
     """Whether a person has accepted the risk of a fall on this claim
-    (`acknowledged: {as: risk}`) and the claim has not recovered: the
-    claim's accepted risk at the level it fell from, as `accept --as
-    risk` would make it."""
+    (`acknowledged: {as: risk}`), the claim has not recovered, and the
+    sign-off has not lapsed on `today`: the claim's accepted risk at
+    the level it fell from, as `accept --as risk` would make it."""
     return any(isinstance(t, dict) and not t.get("recovered")
                and (t.get("acknowledged") or {}).get("as") == "risk"
+               and not lapsed(t.get("acknowledged"), today)
                for t in (meta or {}).get("mathema.transitions") or [])
 
 

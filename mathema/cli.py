@@ -22,8 +22,9 @@ its record (new or changed code), and refreshes the machine records so the
 next run has a baseline. A falsified claim fails the run in every mode,
 and so does an unknown claim until a human accepts the risk
 (`mathema accept --as risk`), an unadjudicated claim in an agentic
-loop is indistinguishable from one that would have failed. Strict by
-default: an unverifiable (skipped) claim, accepted risk, or a
+loop is indistinguishable from one that would have failed. Accepted
+risk passes in every mode, named in the row. Strict by default: an
+unverifiable (skipped) claim nobody accepted, or a
 silently-unenforced declared domain also fails; `--lenient` relaxes
 those structural cases to informational-only, never the wrong or
 undecided ones. An unresolved global name fails in every mode.
@@ -44,6 +45,23 @@ from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
 from ._signatures import callable_signature
+
+
+def _require_readable_policy(verb: str, root: str) -> None:
+    """Intent:
+        Stop `verb` with exit 2 when `.mathema/meta/policy.yaml` under
+        `root` sets a value the gate cannot read: a `transitions:`
+        entry outside the kinds, modes and actions, or an
+        `accepted_risk_lifetime_days` that is not a positive whole
+        number. The line names the entry and its value."""
+    from .auth import accepted_risk_lifetime, load_policy
+    from .transitions import load_actions
+    try:
+        load_actions(root)
+        accepted_risk_lifetime(load_policy(root))
+    except ValueError as e:
+        _bad_argument(f"mathema {verb}: unreadable policy "
+                      f".mathema/meta/policy.yaml: {e}")
 
 
 def _bad_argument(message: str) -> NoReturn:
@@ -137,7 +155,7 @@ def _check_rows(args) -> list[dict]:
     from .authoring import retrieve
     from .records import claim_row
     from .spec import load_declared, load_verified
-    from .verify import (_accepted_risk, gate, split_unparseable_entry,
+    from .verify import (_accepted_risk, _lapsed_risk, gate, split_unparseable_entry,
                          unparseable_claim_message)
 
     _validate_trials_scale(args.trials_scale)
@@ -186,9 +204,11 @@ def _check_rows(args) -> list[dict]:
         # pre-adoption, it is nobody's claim. Risk a human accepted on
         # this key's verified record is honored here the same as in
         # the verify sweep.
-        accepted = _accepted_risk((verified_store.get(name) or {}).get("entry"))
+        stored_entry = (verified_store.get(name) or {}).get("entry")
+        accepted = _accepted_risk(stored_entry)
         report = gate(rec.probes, strict=args.strict,
                       accepted_risk=accepted,
+                      lapsed_risk=_lapsed_risk(stored_entry),
                       unresolved=rec.facts.unresolved, key=name)
         proven, holds = report.proven, report.holds
         total = (proven + holds + report.refuted + report.skipped
@@ -408,6 +428,7 @@ def cmd_verify(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    _require_readable_policy("verify", root)
     if args.status is not None:
         # the fresh/stale report, adjudicating nothing (the old
         # `mathema status` verb): a TARGET value imports first, so a
@@ -1395,8 +1416,8 @@ _CI_FILES = {
 # one, and also a claim that could not be checked at all (an unreachable
 # surface, an unsupported shape). Most stores have some of the last
 # kind at first, so expect the first run to be red and to tell you
-# exactly which claims it means. Add --lenient to report those
-# unverifiable claims and accepted risk without failing, and keep
+# exactly which claims it means. Accepted risk passes in both modes.
+# Add --lenient to report those unverifiable claims without failing, and keep
 # strict for falsified and unknown, once you have decided each one is
 # understood. Exit codes: 0 clean, 1 gate failure, 2 broken invocation
 # or store, so a failing gate is distinguishable from a broken job
@@ -2926,6 +2947,7 @@ def cmd_accept(args) -> int:
                              describe_acceptance, plan_acceptance,
                              plan_acceptances, suggest_acceptance)
 
+    _require_readable_policy("accept", args.root)
     by = args.by or default_identity()
     args.claims = list(getattr(args, "claims", None) or [])
     args.claim = args.claims[0] if args.claims else None
@@ -3067,14 +3089,15 @@ def _add_gate_flags(parser, *, default_strict: bool) -> None:
     """
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--strict", dest="strict", action="store_true",
-                       help="unverifiable (skipped) claims and accepted "
-                            "risk fail too; falsified and "
+                       help="unverifiable (skipped) claims nobody "
+                            "accepted as risk fail too; falsified and "
                             "unaccepted-unknown claims fail in every mode"
                             + (" (the default here)" if default_strict
                                else ""))
     group.add_argument("--lenient", dest="strict", action="store_false",
-                       help="report unverifiable claims and accepted risk "
-                            "instead of failing on them"
+                       help="report unverifiable claims instead of "
+                            "failing on them; accepted risk passes in "
+                            "both modes"
                             + ("" if default_strict
                                else " (the default here)"))
     parser.set_defaults(strict=default_strict)
