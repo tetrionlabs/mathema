@@ -58,8 +58,8 @@ numpy's `clip` takes `a`, `a_min` and `a_max`), and every row is a
 claim like any other, with a `note:` on the row where the library's
 behaviour needs saying in prose. A library function's intent is its
 own, read from its docstring like any function's, so a compendium file
-states none. mathema bundles such files for `math`, `numpy`
-(numpy's 81 covered functions split into scalars, reductions, bounds,
+states none. mathema bundles such files for `math`, `statistics`, `numpy`
+(numpy's covered functions split into scalars, reductions, bounds,
 definitions, linear algebra, elementwise functions and statistics),
 `pandas` and `polars.Series` (their
 [definition rows](#definition-rows)), and a project states its own

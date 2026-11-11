@@ -19,7 +19,7 @@ mathema checks Python functions against claims, short mathematical statements of
 - A bare `mathema.check(fn)` runs [built-in claims](https://mathema.tetrionlabs.com/first-look/#step-1-the-built-in-claims-before-you-write-one) of both kinds with no claim written: mathematical ones about the formula (where it is defined, its poles, monotonicity, convexity, symmetry) and computational ones about the code as it runs (side effects, determinism, overflow, numerical stability).
 - Each claim is judged twice: its mathematics exactly over the reals, and its computation as the code runs in float64. When the computation misses, the record names the condition number and says whether the inputs or the code lost the precision.
 - Functions that call [numpy](https://mathema.tetrionlabs.com/runtime-types/#proofs-on-pandas-and-numpy-code), [pandas](https://mathema.tetrionlabs.com/pandas-function/) or [polars](https://mathema.tetrionlabs.com/runtime-types/#the-built-in-runtime-types) are checked through [bundled claims about those libraries](https://mathema.tetrionlabs.com/library-claims/), and parameters annotated as a `Series` or `DataFrame` are run on real ones.
-- Records are bound to the code by a hash of its form, so `mathema verify` re-checks a function when it or anything it calls changes, and a claim that held before and fails now is reported as `invalidated`.
+- Records are bound to the code by a hash of its form, so `mathema verify` re-checks a function when it or anything it calls changes. A claim that held before and fails now keeps its fresh verdict, and the record keeps the move beside it until a person acknowledges it.
 - CI gets distinct exit codes, GitHub Actions and JUnit output, a claim-level diff of a pull request (`mathema review`) and a population report over a package (`mathema audit`).
 - Coding agents connect through an MCP server and agent skills, and can propose and check claims while accepting a verdict stays with a person.
 - Claims about strings and structured records take their domains from the mathema-language package.
@@ -55,7 +55,7 @@ print(mathema.check(discounted, claims=[
 
 <!-- example: quick output match=subset wrap=88 -->
 ```text
-mathema.Record(discounted) · source, no side effects · form py:d2ab6eef1b84
+mathema.Record(discounted) · source, no side effects · form py:33f04232830d
   at_most_price  for rate in [0.0, 1.0] : float|missing, f(price, rate) <= price
       falsified at price = -1, rate = 1
     falsified  mathematics  for rate in [0.0, 1.0] ⊂ ℝ, f(price, rate) <= price
@@ -124,7 +124,7 @@ print(mathema.check(discount_factor))
 
 <!-- example: pole output match=subset -->
 ```text
-mathema.Record(discount_factor) · source, no side effects · form py:ebb4c9b87847
+mathema.Record(discount_factor) · source, no side effects · form py:bc2becbbf4fb
   proven    is_defined: 1 - x != 0
   falsified is_pole_safe[x]: is_pole_safe(x)
            counterexample x = 1 is admitted by the declared domain but sits at or beside a pole: the call raised ZeroDivisionError
@@ -150,7 +150,7 @@ print(mathema.check(step, claims=[
 
 <!-- example: step output -->
 ```text
-mathema.Record(step) · source, no side effects · form py:8ca9c721c4cf
+mathema.Record(step) · source, no side effects · form py:fc901991b36b
   unit_step  for x in [0.0, 1e+16] : float|missing, f(x) = 1   falsified at x = 1e+16
     proven     mathematics  for x in [0.0, 1e+16] ⊂ ℝ, f(x) = 1
     falsified  computation  for x in [0.0, 1e+16] : float, f(x) = 1   counterexample x = 1e+16
@@ -242,15 +242,15 @@ def rate_for(years: int) -> float:
 <!-- example: stale session -->
 ```
 $ mathema verify; echo "exit $?"
-FAIL pricing.discounted: dependency changed; 1 proven, 1 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
+FAIL pricing.discounted: dependency changed; 1 proven, 1 holds, 1 falsified  <- never_raises regressed proven to falsified (a callee changed); to acknowledge it, run: mathema accept pricing.discounted never_raises --transition; 1 falsified claim(s)
 ok   rates.rate_for: form changed; 1 proven, 0 holds, 0 falsified
-0 unchanged since the last run (not run again), 2 checked, 1 problem(s)
+0 unchanged since the last run (not run again), 2 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 2 intents to accept (2 functions): mathema accept --intent
 exit 1
 ```
 
-`discounted` did not change, but a new customer now gets a negative rate and the claim that held is `invalidated`, so `verify` exits 1. [mathema verify](https://mathema.tetrionlabs.com/modes/verify/) covers the rest.
+`discounted` did not change, but a new customer now gets a negative rate, and the claim that held is falsified. The record says it regressed from `proven` because a callee changed, `verify` exits 1, and the move stays on the record until someone acknowledges it or the code is fixed. [mathema verify](https://mathema.tetrionlabs.com/modes/verify/) covers the rest.
 
 ### CI and review
 

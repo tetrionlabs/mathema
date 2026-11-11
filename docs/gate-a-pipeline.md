@@ -244,8 +244,9 @@ the gate is green. Had the claim been the wrong one rather than the code,
 
 ## 6. Strict or lenient
 
-`verify` is strict by default: falsified, invalidated and unknown claims
-fail, and so do claims that could not be checked at all (`skipped`) and
+`verify` is strict by default: falsified and unknown claims fail, and so
+does a regression no one has acknowledged, a claim that could not be
+checked at all (`skipped`), and
 gaps a person has accepted as risk. `--lenient` reports the last two by
 name and proceeds; it never passes a falsified or an unaccepted unknown
 claim. The full table is on [`mathema verify`](modes/verify.md#what-fails-the-run).

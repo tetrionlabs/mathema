@@ -109,6 +109,31 @@ acceptance:
   keys: [a3f2c1]               # optional allowlist of key ids
 ```
 
+The same file sets what the gate does with an unacknowledged
+[transition](../verdicts.md#transitions-and-what-invalidated-names) of
+each kind, one action for both modes or one per mode, where an action
+is `fail`, `warn` or `pass`; the defaults are `regressed` fails in both
+modes, `weakened` from `proven` to `holds` fails strict and warns
+lenient, `weakened` to `unknown` or `skipped` fails in both modes until
+a person accepts the risk, and `strengthened` and `fixed` pass:
+
+```yaml
+transitions:
+  weakened: fail
+  regressed: {strict: fail, lenient: warn}
+```
+
+An entry sets the action for every move of its kind: `weakened: {lenient:
+warn}` makes a fall to `unknown` or `skipped` warn under `--lenient`
+too.
+
+A risk acceptance on a transition (`mathema accept KEY CLAIM
+--transition` on a claim that fell to `unknown` or `skipped`) is an
+acceptance under the `acceptance:` section, held to the same required
+verification, methods and keys at write time and at verify time. It
+stays on the record while the claim is below the level it fell from,
+so every run checks it.
+
 Enforced twice. At **write time**, an acceptance the policy forbids is
 refused: no credential when one is required, a static PIN where only
 stronger methods are allowed, a key outside the allowlist. At

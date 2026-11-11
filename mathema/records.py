@@ -217,9 +217,11 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
     never be misread the way null or "" can. `gates` says whether the
     row is in the gated population at all (suggestions and foreign-
     grammar claims are not); an accepted-risk unknown stays in the
-    population, its verdict itself saying why it passes. An invalidated
-    row's `reason` is its note, else its derivation sketch, and its
-    `evidence` adds the sketch, `previous_verdict` and `regressed_to`."""
+    population, its verdict itself saying why it passes. A row with an
+    open transition has its note, else its derivation sketch, as its
+    `reason`, and its `evidence` adds the sketch, `previous_verdict` and
+    the open `transitions` (a record written before 0.6.5 keeps
+    `regressed_to`)."""
     if isinstance(c, dict):
         name, verdict = c.get("name") or "", c.get("verdict") or ""
         meta, note = c.get("meta") or {}, str(c.get("note") or "")
@@ -263,9 +265,13 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
         row["accepted"] = "risk"
     if meta.get("mathema.let_warning"):
         row["warnings"] = list(meta["mathema.let_warning"])
-    if classify_verdict(verdict) == "invalidated":
-        # a regression says why through what the record holds: its note
-        # or derivation, and the verdict it fell from and to
+    open_moves = [t for t in meta.get("mathema.transitions") or []
+                  if isinstance(t, dict) and not t.get("acknowledged")
+                  and not t.get("recovered")]
+    if open_moves or classify_verdict(verdict) == "invalidated":
+        # a claim that moved says why through what the record holds:
+        # its note or derivation, the verdict before the move and the
+        # moves still waiting on a person
         sketch = c.get("sketch") if isinstance(c, dict) else c.sketch
         row["reason"] = note or sketch or row["reason"]
         if sketch:
@@ -273,6 +279,8 @@ def claim_row(c, *, accepted_risk: frozenset = frozenset()) -> dict:
         for k in ("previous_verdict", "regressed_to"):
             if meta.get(f"mathema.{k}"):
                 row["evidence"][k] = meta[f"mathema.{k}"]
+        if open_moves:
+            row["evidence"]["transitions"] = open_moves
     if st == "refuted":
         row["counterexample"] = counterexample
         if stratum:
@@ -374,10 +382,16 @@ def resolve_pseudo_infinity(claim_value,
         and every consumer keeps its default.
 
     Raises:
-        InvalidDomain: a function-level or environment value `let
-            |inf| be` would refuse.
+        InvalidDomain: a claim, function-level or environment magnitude
+            `let |inf| be` would refuse.
+
+    Notes:
+        A claim value that is a `(lo, hi)` pair states both sides and
+        passes through as written.
     """
     if claim_value is not None:
+        if not isinstance(claim_value, (tuple, list)):
+            claim_value = _checked_magnitude(claim_value)
         return PseudoInfinity(claim_value, "claim")
     if function_value is not None:
         return PseudoInfinity(_checked_magnitude(function_value), "function")

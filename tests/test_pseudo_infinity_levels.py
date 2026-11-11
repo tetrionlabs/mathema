@@ -84,6 +84,25 @@ def test_an_invalid_function_value_refuses():
                       pseudo_infinity=0)
 
 
+@pytest.mark.parametrize("value", [float("nan"), -5.0, 0.0,
+                                   float("inf")])
+def test_an_invalid_claim_value_refuses_like_a_bad_let(value):
+    from mathema.records import resolve_pseudo_infinity
+    with pytest.raises(InvalidDomain, match="finite positive magnitude"):
+        resolve_pseudo_infinity(value, None)
+    with pytest.raises(InvalidDomain, match="finite positive magnitude"):
+        claim("for x in [0, oo), f(x) >= 0", pseudo_infinity=value)
+
+
+def test_a_nan_claim_value_never_reaches_the_probe_domain():
+    def shrinking(x):
+        return 10.0 - x
+    with pytest.raises(InvalidDomain, match="finite positive magnitude"):
+        check_conjectures(shrinking, [claim(
+            "for x in [0, oo), f(x) >= 0", pseudo_infinity=float("nan"),
+            route="probe")])
+
+
 def test_an_invalid_entry_field_is_refused_by_the_claims_file_check():
     from mathema.spec import ClaimsFileError, validate_claims_file
     with pytest.raises(ClaimsFileError, match="pseudo_infinity"):

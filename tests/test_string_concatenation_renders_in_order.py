@@ -36,3 +36,25 @@ def test_a_numeric_sum_still_canonicalises():
     cj = claim("for x in [0, 1], f(x + 1) == f(1 + x)")
     canon = canonical_claim_text(cj)
     assert canon.count("x + 1") + canon.count("1 + x") == 2
+
+
+def test_a_list_concatenation_keeps_its_order():
+    # `triggers + [t]` appends and `[t] + triggers` prepends; with no
+    # string literal in the sum, the list display alone marks it as a
+    # concatenation
+    cj = claim('for t in {"form", "claims"}, triggers in {"seed", "form"}^n, '
+               'f(triggers + [t]) == "x"')
+    canon = canonical_claim_text(cj)
+    assert "triggers + [t]" in canon, canon
+    assert _same_expression(claim(canon).lhs, cj.lhs)
+    cj = claim('for t in {"form", "claims"}, triggers in {"seed", "form"}^n, '
+               'f([t] + triggers) == "x"')
+    canon = canonical_claim_text(cj)
+    assert "[t] + triggers" in canon, canon
+    assert _same_expression(claim(canon).lhs, cj.lhs)
+
+
+def test_a_tuple_concatenation_keeps_its_order():
+    cj = claim('for t in {"form", "claims"}, f(xs + (t,)) == "x"')
+    canon = canonical_claim_text(cj)
+    assert _same_expression(claim(canon).lhs, cj.lhs), canon
