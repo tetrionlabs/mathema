@@ -664,7 +664,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         families match `d(f(<params>), p) >= 0` and its siblings, with
         `p` the bracketed parameter. `is_numerically_stable` matches
         `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
-        `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
+        `is_state_safe` match `f(<params>) == f(<params>)`, a keyword-only
+        parameter passed by keyword (`analysis.call_text`). `is_defined` states a region under its name (the
         restriction form in docs/conditional-claims.md) and so accepts
         any comparison. A family that dispatches on the function's
         shape and reads the claim's own text (the dot-product, sum and
@@ -684,6 +685,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
             return False
         return _states_derivative_form(cj, base, param[1:-1], facts)
     if base in _SELF_AGREEMENT_FAMILIES:
+        from .analysis import call_text
+        call = call_text(facts)
         return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
                 and _squash(cj.rhs) == _squash(call))
     if base == "is_numerically_stable":
@@ -2176,6 +2179,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
+    if pseudo_infinity is not None \
+            and not isinstance(pseudo_infinity, (tuple, list)):
+        # the keyword magnitude is read as `let |inf| be` reads its own
+        from .records import _checked_magnitude
+        pseudo_infinity = _checked_magnitude(pseudo_infinity)
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None
