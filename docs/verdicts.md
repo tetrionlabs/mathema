@@ -158,13 +158,35 @@ function changed). A claim that was never supported and is now falsified is a
 finding, not a transition. The cause is `this function changed`, `a
 callee changed` or `nothing changed`; the last means two runs disagree
 about unchanged code (the engine, a library version, the seed or a
-timeout), and the line says so.
+timeout), and the line says so: a regression with nothing changed is a
+contradiction, and a fall to `unknown` with nothing changed is
+suspicious. A move after a code change also keeps what changed: the
+triggers that fired, in `invalidated_by`, and for a callee change the
+roots of the moved chain, in `chain_moved`. The line for a fall to
+`unknown` or `skipped` names both:
+
+<!-- illustration -->
+```text
+nonneg weakened proven to unknown (a callee changed); triggers: dependency; chain moved at shop.Base
+```
 
 A move stays open until a person acknowledges it with `mathema accept
 KEY CLAIM --transition`, or a later run brings the claim back to the
 level it fell from. The gate acts on open moves by kind and mode (see
 [what fails the run](modes/verify.md#what-fails-the-run)), and the
 project's `.mathema/meta/policy.yaml` can set that per kind.
+
+A `weakened` move from `proven` to `holds` is still supported, and a
+plain acknowledgement closes it. A supported claim that fell to
+`unknown` or `skipped` is no longer supported at all: a `skipped` one
+most likely lost a resource it needs (a solver, an optional library),
+and an `unknown` one either changed or, with nothing changed, points at
+two runs disagreeing. Either fails the gate in both modes until a
+person accepts the risk at the level it fell from, and the
+acknowledgement records it as a risk acceptance, `as: risk` and
+`level`, under the project's acceptance policy. `--lenient` tolerates
+only a claim that was always `skipped`; `skipped` to `skipped` is no
+move.
 
 `invalidated` is a word about a function, not a claim. A function is
 invalidated when it changed since its record: its form, its body's
@@ -181,8 +203,10 @@ before 0.6.5`.
 ## What fails the gate
 
 `falsified` and an unaccepted `unknown` fail `mathema verify` in
-every mode, and so does an open `regressed` transition; an open
-`weakened` one fails strict and warns under `--lenient`. `skipped` and accepted risk fail in the default
+every mode, and so does an open `regressed` transition and an open
+`weakened` one to `unknown` or `skipped`, until a person accepts the
+risk; an open `weakened` one from `proven` to `holds` fails strict and
+warns under `--lenient`. `skipped` and accepted risk fail in the default
 strict mode and are reported, not failed, under `--lenient`. The full
 table, including tripped locks, unresolved names and acceptances the
 policy rejects, is on [`mathema verify`](modes/verify.md#what-fails-the-run).

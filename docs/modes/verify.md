@@ -43,7 +43,8 @@ bare-name key fails as a clear per-key problem line.
 |---|---|---|
 | `falsified` claim | fails | fails |
 | open transition, `regressed` (a supported claim fell to `falsified`) | fails | fails |
-| open transition, `weakened` (`proven` to `holds`, or a supported claim to `unknown` or `skipped`) | fails | warns, named in the row |
+| open transition, `weakened` `proven` to `holds` | fails | warns, named in the row |
+| open transition, `weakened` to `unknown` or `skipped` (a supported claim no longer supported), until the risk is accepted | fails | fails |
 | `unknown` claim, not accepted | fails | fails |
 | `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `skipped` (unverifiable) claim | fails | passes, informational |
@@ -63,6 +64,16 @@ a human explicitly owns the gap with
 [`mathema accept --as risk`](accept.md). Accepted risk is visible
 relaxation, not laundering: `--lenient` proceeds past it (the row still
 names it), strict mode still refuses it.
+
+A supported claim that falls to `unknown` or `skipped` fails in both
+modes as an open transition, even though `--lenient` passes a claim
+that was always `skipped`. The failing line names the move, what
+changed, and the command that accepts the risk at the level it fell
+from (`mathema accept KEY CLAIM --transition`, see
+[acknowledging a transition](accept.md#acknowledging-a-transition)).
+A `transitions:` entry in the project's
+[policy](pin.md#project-policy) sets one action per kind, and an entry
+for `weakened` applies to every weakened move, whatever it fell to.
 
 Freshness never bypasses the gate: a function whose `form` hash is
 unchanged skips re-adjudication, but its *stored* verdicts are still
