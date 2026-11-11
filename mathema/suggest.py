@@ -348,12 +348,16 @@ def _loop_closed_form(fn, facts) -> "tuple[str, str] | None":
         return None
 
 
-def _homogeneous_degree_one(fn, facts) -> bool:
+def _homogeneous_degree_one(fn, facts, operands=None,
+                            held=None) -> bool:
     """Whether the lift satisfies f(c*x, ...) == c*f(x, ...)
-    symbolically, checked under the fast wall-clock cap. False on any
-    doubt (no lift, tuple return, timeout, sympy stall): the caller
-    only SUGGESTS the equivariance claim when adjudication will land
-    it as a proof, so the battery adds signal, never noise."""
+    symbolically in the parameters `operands` (every parameter by
+    default), each parameter in `held` fixed at the literal its default
+    node spells, checked under the fast wall-clock cap. False on any
+    doubt (no lift, tuple return, a default that is no literal,
+    timeout, sympy stall): the caller only SUGGESTS the equivariance
+    claim when adjudication will land it as a proof, so the battery
+    adds signal, never noise."""
     try:
         import sympy
 
@@ -362,20 +366,41 @@ def _homogeneous_degree_one(fn, facts) -> bool:
         lifted = lift(fn, facts)
         if lifted is None or isinstance(lifted.expr, tuple):
             return False
-        syms = [sy for sy in lifted.expr.free_symbols
-                if sy.name in facts.params]
+        names = set(facts.params if operands is None else operands)
+        fixed = {name: sympy.nsimplify(ast.literal_eval(node))
+                 for name, node in (held or {}).items()}
+        expr = lifted.expr.subs({sy: fixed[sy.name]
+                                 for sy in lifted.expr.free_symbols
+                                 if sy.name in fixed}, simultaneous=True)
+        syms = [sy for sy in expr.free_symbols if sy.name in names]
         if not syms:
             return False
         c = sympy.Symbol("_mathema_scale", positive=True)
-        scaled = lifted.expr.subs({sy: c * sy for sy in syms},
-                                  simultaneous=True)
+        scaled = expr.subs({sy: c * sy for sy in syms}, simultaneous=True)
         return _with_timeout(
-            lambda: sympy.simplify(scaled - c * lifted.expr) == 0,
+            lambda: sympy.simplify(scaled - c * expr) == 0,
             FAST_TIMEOUT_SECONDS)
     except TimeoutError:
         return False
     except Exception:
         return False
+
+
+def _swappable_operands(facts) -> "tuple[list, dict] | None":
+    """Intent:
+        The parameters a suggestion may move between call slots, swap,
+        scale or transform: those passed by position, in order, with
+        every keyword-only parameter held at its default by leaving it
+        out of the call. Returned as `(operands, held)`, `held` mapping
+        each keyword-only parameter to its default's expression node;
+        None when a keyword-only parameter has no default, so no call
+        can leave it out.
+    """
+    from .analysis import keyword_only_params
+    held = keyword_only_params(facts)
+    if any(node is None for node in held.values()):
+        return None
+    return [p for p in facts.params if p not in held], held
 
 
 def _declared_intervals(fn, facts) -> dict:
@@ -562,7 +587,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         convexity per real scalar parameter; symmetry (even/odd) and
         idempotence per real scalar parameter when the return value is
         also scalar; commutativity and associativity when fn takes
-        exactly two real scalar parameters and returns one;
+        exactly two real scalar parameters by position and returns one;
         determinism (and seeded reproducibility where randomness is detected); numerical stability; is_pole_safe[param]/
         is_number_set_safe[param] when fn's own body actually calls
         something whose real domain a declared bound could be checked
@@ -575,6 +600,12 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
 
     Notes:
         Declares, never verifies. Nothing here is run or proven.
+        Every call passes a keyword-only parameter by keyword
+        (`analysis.call_text`), except in a suggestion that swaps,
+        scales or transforms arguments, which moves only the positional
+        operands and leaves each keyword-only parameter at its default
+        (`_swappable_operands`); a keyword-only parameter with no
+        default rules those suggestions out.
         Monotonicity/affine-ness/convexity/numerical-stability all use
         route="best": check_conjectures() attempts a proof first and
         falls back to an empirical route only when derive can't decide,
@@ -615,7 +646,13 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
         # that try/except alone.
         return []
     scalar_params = [p for p in facts.params if facts.param_kinds.get(p) == "scalar"]
-    call = f"f({', '.join(facts.params)})"
+    from .analysis import call_text, keyword_only_params
+    call = call_text(facts)
+    # a swap or transform moves only the positional operands, calling
+    # f with every keyword-only parameter at its default
+    moved = _swappable_operands(facts)
+    operands, held = moved if moved is not None else ([], {})
+    scalar_operands = [p for p in operands if p in scalar_params]
     declared = _declared_intervals(fn, facts)
     # the working domain a parameter's own raise guards leave, which
     # every suggestion binding that parameter stays inside
@@ -655,8 +692,8 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                              source="mathema", route="best"))
 
     numeric_return = facts.returns_kind == "scalar"
-    if len(facts.params) == 1 and scalar_params and numeric_return:
-        p = scalar_params[0]
+    if len(operands) == 1 and scalar_operands and numeric_return:
+        p = scalar_operands[0]
         # f(-p) stays inside a declared [lo, hi] only for p in
         # [max(lo, -hi), min(hi, -lo)]; f(f(p)) reaches the function's
         # own output, whose range nothing states
@@ -690,24 +727,25 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
                          + f"{call} == {text}",
                          name="closed_form", source="mathema",
                          route="best"))
-    if (scalar_params and len(scalar_params) == len(facts.params)
-            and numeric_return and _homogeneous_degree_one(fn, facts)):
+    if (scalar_operands and len(scalar_operands) == len(operands)
+            and numeric_return
+            and _homogeneous_degree_one(fn, facts, operands, held)):
         aux = "c" if "c" not in facts.params else "aux_c"
-        args = ", ".join(facts.params)
-        scaled_args = ", ".join(f"{aux}*{q}" for q in facts.params)
+        args = ", ".join(operands)
+        scaled_args = ", ".join(f"{aux}*{q}" for q in operands)
         factor = _scale_factor_range((0.1, 10.0), [
             declared.get(q) if q not in cut else _single_interval(cut[q])
-            for q in facts.params])
+            for q in operands])
         if any(q in cut and _single_interval(cut[q]) is None
-               for q in facts.params):
+               for q in operands):
             factor = None
         if factor is not None:
             out.append(_made(
                 f"let {aux} be {_interval_words(factor)}, "
                 f"f({scaled_args}) == {aux}*f({args})",
                 name="scale_equivariant", source="mathema", route="best"))
-    if len(facts.params) == 2 and len(scalar_params) == 2 and numeric_return:
-        p1, p2 = facts.params
+    if len(operands) == 2 and len(scalar_operands) == 2 and numeric_return:
+        p1, p2 = operands
         # swapping puts each argument in the other's slot: both are
         # bound to where both slots admit them
         shared = _shared_binding([declared.get(p1), declared.get(p2)])
@@ -766,8 +804,7 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # hardcoded battery ran unconditionally. On the derive route a
     # lifted function proves this trivially, honestly: lifting already
     # assumes purity.
-    from .analysis import call_text
-    agree = call_text(facts)
+    agree = call
     out.append(_made(f"{agree} == {agree}", name="is_deterministic",
                      source="mathema", route="best"))
     # the mutation member rides the same ceremonial law (the family's
@@ -790,7 +827,9 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # accuracy is read for a function computing a number from numbers:
     # one parameter at least holds a number or a container of them, and
     # the return annotation, when there is one, names a number
-    if _computes_a_number(fn, facts):
+    # mathema.f.accurate passes the drawn arguments by position, so a
+    # keyword-only parameter has no slot in its call
+    if _computes_a_number(fn, facts) and not keyword_only_params(facts):
         out.append(_made(f"g(f, {', '.join(facts.params)}) == 1", name="is_numerically_stable",
                          source="mathema", route="best", funcs={"g": "mathema.f.accurate"}))
 
@@ -891,80 +930,85 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
             and all(facts.param_kinds.get(p) in scalar_ish for p in facts.params[1:])
             and numeric_return):
         xs = facts.params[0]
-        rest = facts.params[1:]
+        # the transforms move the sequence in the first positional slot,
+        # the other operands passed as they are
+        transforms = operands[:1] == [xs]
+        rest = operands[1:]
         rest_str = (", " + ", ".join(rest)) if rest else ""
+        same = f"f({', '.join(operands)})"
 
         out.append(_made(f"min({xs}) <= {call}", name="bounded_lower",
                          source="mathema", route="best"))
         out.append(_made(f"{call} <= max({xs})", name="bounded_upper",
                          source="mathema", route="best"))
 
-        # a fixed reversal, not a random shuffle: necessary but not
-        # sufficient for true permutation-invariance (invariant under
-        # every permutation implies invariant under reversal, not the
-        # converse), traded for a pure, stateless, by-name-referenceable
-        # transform.
-        out.append(_made(f"{call} == f(g({xs}){rest_str})", name="permutation_invariant",
-                         source="mathema", route="probe",
-                         funcs={"g": "mathema.f.reverse_seq"}))
+        if transforms:
+            # a fixed reversal, not a random shuffle: necessary but not
+            # sufficient for true permutation-invariance (invariant under
+            # every permutation implies invariant under reversal, not the
+            # converse), traded for a pure, stateless, by-name-referenceable
+            # transform.
+            out.append(_made(f"{same} == f(g({xs}){rest_str})", name="permutation_invariant",
+                             source="mathema", route="probe",
+                             funcs={"g": "mathema.f.reverse_seq"}))
 
-        aux = "c" if "c" not in facts.params else "aux_c"
-        # route best: the derive route composes these elementwise
-        # transforms through a recognized fold's closed form, so a
-        # linear fold's equivariance is proven rather than sampled. A
-        # declared entry domain restricts the factor, or binds the
-        # entries with the shift, so every transformed entry stays in it
-        # entries declared as a union of intervals are bound to its
-        # widest piece, so a scaled or shifted entry stays in that piece
-        piece = _widest_piece(fn, xs) or _open_entries(fn, xs)
-        entry_bounds = piece[:2] if piece is not None else declared.get(xs)
-        # an entry domain open at an end keeps the factor and the shift
-        # off their own ends, so no moved entry lands on the open end
-        open_end = piece is not None and not (piece[2] and piece[3])
-        factor = _scale_factor_range((-5.0, 5.0), [entry_bounds])
-        if factor is not None:
-            within = (f"for {xs} in {_interval_words(piece)}^n, "
-                      if piece is not None else "")
-            factor_words = _interval_words(
-                (*factor, not open_end, not open_end))
-            out.append(_made(f"{within}let {aux} be "
-                             f"{factor_words}, "
-                             f"{aux}*{call} == f(g({xs}, {aux}){rest_str})",
-                             name="scale_equivariant", source="mathema",
-                             route="best", funcs={"g": "mathema.f.scale_seq"}))
-        shift = _shift_binding((-5.0, 5.0), entry_bounds)
-        if shift is not None:
-            entries, offsets = shift
-            bind = (f"for {xs} in {_interval_words(entries)}^n, "
-                    if entries is not None else "")
-            offset_words = _interval_words(
-                (*offsets, not open_end, not open_end))
-            out.append(_made(f"{bind}let {aux} be {offset_words}, "
-                             f"{call} + {aux} == f(g({xs}, {aux}){rest_str})",
-                             name="translation_equivariant", source="mathema",
-                             route="best", funcs={"g": "mathema.f.shift_seq"}))
+            aux = "c" if "c" not in facts.params else "aux_c"
+            # route best: the derive route composes these elementwise
+            # transforms through a recognized fold's closed form, so a
+            # linear fold's equivariance is proven rather than sampled. A
+            # declared entry domain restricts the factor, or binds the
+            # entries with the shift, so every transformed entry stays in it
+            # entries declared as a union of intervals are bound to its
+            # widest piece, so a scaled or shifted entry stays in that piece
+            piece = _widest_piece(fn, xs) or _open_entries(fn, xs)
+            entry_bounds = piece[:2] if piece is not None else declared.get(xs)
+            # an entry domain open at an end keeps the factor and the shift
+            # off their own ends, so no moved entry lands on the open end
+            open_end = piece is not None and not (piece[2] and piece[3])
+            factor = _scale_factor_range((-5.0, 5.0), [entry_bounds])
+            if factor is not None:
+                within = (f"for {xs} in {_interval_words(piece)}^n, "
+                          if piece is not None else "")
+                factor_words = _interval_words(
+                    (*factor, not open_end, not open_end))
+                out.append(_made(f"{within}let {aux} be "
+                                 f"{factor_words}, "
+                                 f"{aux}*{same} == f(g({xs}, {aux}){rest_str})",
+                                 name="scale_equivariant", source="mathema",
+                                 route="best", funcs={"g": "mathema.f.scale_seq"}))
+            shift = _shift_binding((-5.0, 5.0), entry_bounds)
+            if shift is not None:
+                entries, offsets = shift
+                bind = (f"for {xs} in {_interval_words(entries)}^n, "
+                        if entries is not None else "")
+                offset_words = _interval_words(
+                    (*offsets, not open_end, not open_end))
+                out.append(_made(f"{bind}let {aux} be {offset_words}, "
+                                 f"{same} + {aux} == f(g({xs}, {aux}){rest_str})",
+                                 name="translation_equivariant", source="mathema",
+                                 route="best", funcs={"g": "mathema.f.shift_seq"}))
 
-        if _sum_like_fold(fn, facts) is not None:
-            # a plain accumulation treats every element alike, so the
-            # order-insensitive family applies and, being a linear
-            # fold, mostly proves
-            out.append(_made(
-                f"f(g({xs}, {xs}){rest_str}) == {call} + {call}",
-                name="self_concat_additive", source="mathema",
-                route="best", funcs={"g": "mathema.f.concat_seq"}))
-            out.append(_made(
-                f"f(g({xs}){rest_str}) == {call}",
-                name="order_invariant", source="mathema", route="best",
-                funcs={"g": "mathema.f.sort_seq"}))
-            if not rest and _resolvable("numpy.sum"):
-                # the call form, not `=:=`: numpy.sum's own signature
-                # carries seven optional parameters, so positional
-                # equivalence is not meaningful, but the one-argument
-                # call is
+            if _sum_like_fold(fn, facts) is not None:
+                # a plain accumulation treats every element alike, so the
+                # order-insensitive family applies and, being a linear
+                # fold, mostly proves
                 out.append(_made(
-                    f"{call} == g({xs})", name="sum_like",
-                    source="mathema", route="best",
-                    funcs={"g": "numpy.sum"}))
+                    f"f(g({xs}, {xs}){rest_str}) == {same} + {same}",
+                    name="self_concat_additive", source="mathema",
+                    route="best", funcs={"g": "mathema.f.concat_seq"}))
+                out.append(_made(
+                    f"f(g({xs}){rest_str}) == {same}",
+                    name="order_invariant", source="mathema", route="best",
+                    funcs={"g": "mathema.f.sort_seq"}))
+                if len(facts.params) == 1 and _resolvable("numpy.sum"):
+                    # the call form, not `=:=`: numpy.sum's own signature
+                    # carries seven optional parameters, so positional
+                    # equivalence is not meaningful, but the one-argument
+                    # call is
+                    out.append(_made(
+                        f"{call} == g({xs})", name="sum_like",
+                        source="mathema", route="best",
+                        funcs={"g": "numpy.sum"}))
 
     # Output-contract invariants for a SEQUENCE-returning function whose
     # first argument is also a sequence: length, permutation, and type

@@ -1337,12 +1337,23 @@ def call_text(facts: Facts, name: str = "f") -> str:
         no keyword-only parameters on record, so every parameter goes
         positionally.
     """
-    tree = getattr(facts, "tree", None)
-    kwonly = ({a.arg for a in tree.args.kwonlyargs}
-              if isinstance(tree, (ast.FunctionDef, ast.AsyncFunctionDef))
-              else set())
+    kwonly = keyword_only_params(facts)
     args = [f"{p}={p}" if p in kwonly else p for p in facts.params]
     return f"{name}({', '.join(args)})"
+
+
+def keyword_only_params(facts: Facts) -> dict:
+    """Intent:
+        The keyword-only parameters of the function `facts` describes,
+        each mapped to its default's expression node, or None for one
+        a call must supply. `{"b": <Constant 1>}` for `def g(a, *,
+        b=1)`; empty for a function with no readable source.
+    """
+    tree = getattr(facts, "tree", None)
+    if not isinstance(tree, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return {}
+    return {a.arg: default for a, default
+            in zip(tree.args.kwonlyargs, tree.args.kw_defaults)}
 
 
 def effective_facts(fn: Callable[..., Any]) -> Facts:

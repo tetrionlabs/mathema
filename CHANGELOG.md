@@ -2,6 +2,13 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## 0.6.5 (unreleased)
+
+### Highlights
+- A claim's `pseudo_infinity=(lo, hi)` pair is two finite numbers with `lo` below `hi`. A pair such as `(nan, nan)`, `(1e6, -1e6)`, `(5, 5)` or one with an infinite side is refused with that reason when the claim is made, in the same words and place as a single magnitude `let |inf| be` would refuse, so it never reaches a probe as a nan or backwards range.
+- Suggested claims call a function the way its signature accepts. A derivative-sign suggestion passes a keyword-only parameter by keyword (`d(f(a, k=k), a) >= 0`), and the derivative-sign families read that spelling as their own statement.
+- The suggestions that swap, scale or transform arguments (`commutative`, `associative`, `scale_equivariant`, `even`, `odd`, `idempotent` and the sequence transforms) move only the parameters passed by position and hold every keyword-only parameter at its default: `def f(a, b, *, s=1.0)` gets `f(a, b) == f(b, a)`. A function whose operands are keyword-only, or with a keyword-only parameter that has no default, gets none of them, and `is_numerically_stable` is not suggested for a function with a keyword-only parameter.
+
 ## 0.6.4
 
 ### Highlights
