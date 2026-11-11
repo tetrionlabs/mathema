@@ -474,8 +474,8 @@ like) or given a sequence runtime type, it is the domain of each
 element instead: on `def total(xs: list)`, `for xs in [0, 10]` draws
 lists whose elements lie in `[0, 10]`. A body that iterates or indexes
 an unannotated parameter does not make it a sequence, so on an
-unannotated `xs` the same binding draws numbers; write `[0, 10]^n` to
-range over sequences there.
+unannotated `xs` the same binding draws numbers. For a parameter that
+takes a sequence, annotate it as one.
 
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
