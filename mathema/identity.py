@@ -12,6 +12,7 @@ Line-anchored artifacts bind to form; everything else binds to meaning
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 
 from ._signatures import callable_signature
@@ -112,8 +113,7 @@ def normalized(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
     global `f` keeps its own spelling. The function's name means the
     function only where no local binds it, as in Python's scoping, so a
     parameter named like its function is renamed like any other local."""
-    tree = ast.parse(ast.unparse(fdef))  # deep, location-free copy
-    f = tree.body[0]
+    f = copy.deepcopy(fdef)
     body = f.body
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
             and isinstance(body[0].value.value, str):
