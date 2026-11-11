@@ -766,18 +766,20 @@ def suggest_claims(fn, facts=None, extensive: bool = False, write: bool = False,
     # hardcoded battery ran unconditionally. On the derive route a
     # lifted function proves this trivially, honestly: lifting already
     # assumes purity.
-    out.append(_made(f"{call} == {call}", name="is_deterministic",
+    from .analysis import call_text
+    agree = call_text(facts)
+    out.append(_made(f"{agree} == {agree}", name="is_deterministic",
                      source="mathema", route="best"))
     # the mutation member rides the same ceremonial law (the family's
     # own halves adjudicate; the law text never compiles): does calling
     # the function mutate an argument, a global, or module state?
     if not _default_side_effects(fn):
-        out.append(_made(f"{call} == {call}", name="is_state_safe",
+        out.append(_made(f"{agree} == {agree}", name="is_state_safe",
                          source="mathema", route="best"))
     if any("randomness" in e for e in facts.effects):
         # the weaker stateless member is only worth asking where
         # randomness structurally exists: reproducible up to the seed
-        out.append(_made(f"{call} == {call}", name="is_reproducible",
+        out.append(_made(f"{agree} == {agree}", name="is_reproducible",
                          source="mathema", route="best"))
 
     # numerical stability is accuracy: whether the float result agrees
