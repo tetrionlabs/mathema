@@ -938,7 +938,10 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         # a call indifferent to the slot breaks only raises and
         # propagates: a hole read as a fixed value is consistent with the
         # other words
+        ignored = [(p, c) for p, c in rows_calls if c.indifferent]
         rows_calls = [(p, c) for p, c in rows_calls if not c.indifferent]
+    else:
+        ignored = []
     if not rows_calls and undecided:
         p, c = undecided[0]
         nxt = _undecided_next(c, p, stated.kind)
@@ -950,6 +953,8 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                      meta={**meta, "mathema.policy": {
                          **meta["mathema.policy"],
                          "reason": _undecided_reason(c, p, stated.kind)}})
+    if not rows_calls and ignored:
+        return unknown(_ignored_reason(stated, *ignored[0]))
     if not rows_calls:
         return unknown(_why_undecided(stated, params, current))
     calls = [c for _p, c in rows_calls]
@@ -1063,6 +1068,20 @@ def _why_undecided(stated: Policy, params: list, current: "Batch | None") -> str
                 f"{who} in a claim that admits None")
     return (f"no call reached a missing {who}, so nothing says what f does there; bind "
             f"{who} in a claim that admits it")
+
+
+def _ignored_reason(stated: Policy, p: str, call: Call) -> str:
+    """Why a stated `drops`, `converts` or `introduces` row is undecided
+    when every call that reached the hole left f indifferent to it: a
+    value no fill of the slot changes cannot tell that word from f
+    ignoring the slot."""
+    from ._missing_words import value_shown
+    hole = "None" if stated.kind == "absent" else "a missing value"
+    return (f"every call that reached {hole} in {p} shows f ignores the hole: at "
+            f"{_at(call, None)} it returns {value_shown(call.output)}, and no fill "
+            f"of it changes that, so nothing tells {stated.behaviour} from "
+            f"ignoring the slot; bind {p} in a claim where a value in that slot "
+            f"changes what f returns")
 
 
 def _adjudicate_return(cj, fn, stated, statement, current, meta, unknown):
