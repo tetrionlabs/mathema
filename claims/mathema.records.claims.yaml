@@ -1,0 +1,92 @@
+mathema.records.classify_verdict:
+  claims:
+    - name: base_family_unchanged
+      statement: 'for verdict in L[identifier], f(verdict) == verdict'
+    - name: strips_subroute
+      statement: 'for verdict in L[identifier], f(verdict + ":" + verdict) == verdict'
+mathema.records.stance:
+  claims:
+    - name: closed_fold
+      statement: 'for verdict in L[unicode], f(verdict) in {"supported", "refuted", "blocked", "undecided"}'
+    - name: reads_base_family_only
+      statement: 'let g = mathema.records.classify_verdict, for verdict in L[unicode], f(g(verdict)) == f(verdict)'
+    - name: supporting_verdicts
+      statement: 'for verdict in {"proven", "holds", "proven:derive", "holds:probe"}, f(verdict) == "supported"'
+    - name: refuting_verdicts
+      statement: 'for verdict in {"falsified", "invalidated", "disproven", "falsified:probe", "invalidated:regressed"}, f(verdict) == "refuted"'
+    - name: everything_else_undecided
+      statement: 'for verdict in {"unknown", "declared", "documented", "", "unknown:timeout", "Proven", "proven "}, f(verdict) == "undecided"'
+mathema.records.row_source:
+  claims:
+    - name: closed_vocabulary
+      statement: 'let m = claims.support.surface_meta, for meta in L[unicode], note in L[unicode], f(m(meta), note) in {"suggested", "docstring", "decorator", "declared", "builtin", "types", "ad_hoc", "compendium", "unknown"}'
+    - name: recorded_surface_outranks_note
+      statement: 'let m = claims.support.surface_meta, for meta in L[identifier], f(m(meta), "conjectured by mathema") == f(m(meta), "")'
+mathema.records.claim_row:
+  claims:
+    - name: live_and_stored_rows_agree
+      statement: 'let p = claims.support.live_row, q = claims.support.stored_row, for c in L[unicode], f(p(c)) == f(q(c))'
+    - name: refuted_row_carries_counterexample
+      statement: 'let p = claims.support.refuted_row, for c in L[identifier], "counterexample" in f(p(c))'
+    - name: other_rows_carry_no_counterexample
+      statement: 'let p = claims.support.open_row, for c in L[identifier], "counterexample" not in f(p(c))'
+    - name: blocked_by_names_subroute
+      statement: 'let p = claims.support.blocked_row, for c in L[identifier] \ {""}, f(p(c))["blocked_by"] == c'
+mathema.records.pseudo_infinity_range:
+  claims:
+    - name: pair_keeps_low_side
+      statement: 'for value in [-1e300, 1e300]^2, f(value)[0] == value[0]'
+mathema.records.PseudoInfinity.magnitude:
+  claims:
+    - name: magnitude_is_value
+      statement: 'for self in L[mathema.records.PseudoInfinity], self.value in [1, 1e300], f(self) == self.value'
+mathema.records.PseudoInfinity.render:
+  claims:
+    - name: render_reads_back
+      statement: 'let q = claims.support.bound_read_back, for self in L[mathema.records.PseudoInfinity], self.value in (0, 1e300], q(f(self)) == self.value'
+mathema.records.PseudoInfinity.meta:
+  claims:
+    - name: meta_value
+      statement: 'for self in L[mathema.records.PseudoInfinity], self.value in [1, 1e300], f(self)["value"] == self.value'
+mathema.records.resolve_pseudo_infinity:
+  claims:
+    - name: claim_level_wins
+      statement: 'let v = claims.support.value_of, for claim_value in [1, 1e300], function_value in [1, 1e300], v(f(claim_value, function_value)) == claim_value'
+    - name: function_level_next
+      statement: 'let s = claims.support.source_of, for claim_value in {None}, function_value in [1, 1e300], s(f(claim_value, function_value)) == "function"'
+mathema.records.operational_infinity:
+  claims:
+    - name: reads_claim_bound
+      statement: 'let p = claims.support.bounded_claim, v = claims.support.value_of, for cj in [1, 1e300], v(f(p(cj))) == cj'
+mathema.records.operational_range:
+  claims:
+    - name: reaches_claim_bound
+      statement: 'let p = claims.support.bounded_claim, for cj in [1, 1e300], f(p(cj))[1] == cj'
+mathema.records.statement_text:
+  claims:
+    - name: infix_relations
+      statement: 'for relation in {"==", "!=", "<=", ">=", "<", ">", "~="}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) == lhs + " " + relation + " " + rhs'
+    - name: safety_predicates_as_calls
+      statement: 'for relation in {"is_pole_safe", "is_number_set_safe", "is_overflow_safe"}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) == relation + "(" + lhs + ")"'
+mathema.records.claim_statement:
+  claims:
+    - name: chain_renders_every_link
+      statement: 'let p = claims.support.chain_claim, n = claims.support.ascii_name, for cj in L[unicode], f(p(cj)) == "0 <= f(" + n(cj) + ") <= 1"'
+    - name: reparse_fixed_point
+      statement: 'let p = claims.support.chain_claim, r = claims.support.claim_text, for cj in L[unicode], f(r(f(p(cj)))) == f(p(cj))'
+mathema.records.delta_text:
+  claims:
+    - name: two_significant_digits
+      statement: 'let g = claims.support.number, for value in [-1e300, 1e300], abs(g(f(value)) - value) <= 0.05 * abs(value)'
+    - name: none_policy
+      statement: 'absent(f, value) drops'
+    - name: nan_policy
+      statement: 'missing(f, value) drops'
+mathema.records.within_float64_words:
+  claims:
+    - name: names_points_and_delta
+      statement: 'let m = claims.support.sweep_meta, for meta in L[unicode], f(m(meta)) == "all " + str(len(meta) + 2) + " points in float64, largest delta 2.2e-16"'
+mathema.records.environment_pseudo_infinity:
+  claims:
+    - name: is_state_safe
+      statement: 'is_state_safe(f)'

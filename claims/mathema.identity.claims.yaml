@@ -1,0 +1,44 @@
+mathema.identity.form_hash:
+  claims:
+    - name: parameter_rename_invariant
+      statement: 'let p = claims.support.squaring_def, for fdef in L[identifier], f(p(fdef)) == f(p("x"))'
+    - name: function_rename_invariant
+      statement: 'let p = claims.support.named_def, for fdef in L[identifier], f(p(fdef)) == f(p("g"))'
+    - name: docstring_invariant
+      statement: 'let p = claims.support.documented_def, for fdef in L[unicode], f(p(fdef)) == f(p("plain"))'
+    - name: constant_sensitive
+      statement: 'let p = claims.support.adding_def, for fdef in [0, 1000] subset Z, f(p(fdef)) != f(p(fdef + 1))'
+    - name: free_name_differs_from_parameter
+      statement: 'let p = claims.support.returning_free_name, q = claims.support.returning_parameter, for fdef in {"v0", "v1", "f", "y", "total"}, f(p(fdef)) != f(q(fdef))'
+    - name: call_differs_from_recursion
+      statement: 'let p = claims.support.calling_def, q = claims.support.recursive_def, for fdef in L[identifier] \ {"f"}, f(p(fdef)) != f(q(fdef))'
+mathema.identity.normalized:
+  claims:
+    - name: idempotent
+      statement: 'let p = claims.support.adding_def, t = mathema.identity.form_text, for fdef in [0, 50] subset Z, t(f(f(p(fdef)))) == t(f(p(fdef)))'
+mathema.identity.local_names:
+  claims:
+    - name: parameter_and_local
+      statement: 'let p = claims.support.squaring_def, for fdef in L[identifier], len(f(p(fdef))) == 2'
+mathema.identity.form_text:
+  claims:
+    - name: omits_empty_fields
+      statement: 'let p = claims.support.squaring_def, for node in L[identifier], "type_params" not in f(p(node))'
+mathema.identity.namespaced_form:
+  claims:
+    - name: bare_hash_is_python
+      statement: 'for form in L[hex] \ {""}, f(form) == "py:" + form'
+mathema.identity.same_form:
+  claims:
+    - name: symmetric
+      statement: 'for a in L[unicode], b in L[unicode], f(a, b) == f(b, a)'
+    - name: other_namespaces_never_match
+      statement: 'for a in L[hex] \ {""}, b in {"koine", "js", "cobol"}, f(a, b + ":" + a) == False'
+mathema.identity.sig_hash:
+  claims:
+    - name: arity_sensitive
+      statement: 'let p = claims.support.function_of_arity, for fn in [0, 30] subset Z, f(p(fn)) != f(p(fn + 1))'
+mathema.identity.signature_string:
+  claims:
+    - name: renders_signature_not_body
+      statement: 'let p = claims.support.function_with_constant, for fn in [0, 200] subset Z, f(p(fn)) == "(x, y=0)"'
