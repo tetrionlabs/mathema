@@ -183,6 +183,31 @@ that domain, not also as a branch and a raise site, so
 `@enforce_domain({"side": {"buy", "sell"}})` and
 `if side not in {"buy", "sell"}: raise ValueError(side)` score the same.
 
+### Clarity by aspect
+
+`mathema.badges.clarity_aspects(fn)` returns the same reading split into
+the five dimensions, as five aspects in a fixed order: `computes` (what
+it computes), `accepts` (what it accepts), `shape` (bounds and shape),
+`safety` (how safely it runs) and `failure` (where it can go wrong). Each
+aspect carries `bits`, the a-priori entropy of its sources, and `left`,
+the bits its verified claims and its callees' records leave, so its
+score is `1 - left / bits`. Its `weight` is its share of the function's
+bits, and the function's clarity is the mean of its aspect scores
+weighted that way, which is `1 - H_rem / H0` again. An aspect with no
+sources cannot apply: it is marked `applies: False`, with no score and a
+weight of 0, rather than read as 0 or as fully known. The 99 rule holds
+per aspect too: an aspect reads 100 only when nothing in it is left.
+
+`mathema.badges.repo_clarity_aspects(root)` rolls each aspect up across
+the functions the badges score by pooled bits, `1 - sum(w * left) /
+sum(w * bits)` with `w` each function's centrality weight, over the
+functions where the aspect applies. A large aspect left open therefore
+outweighs a small one settled: 0.1 bits settled in one function and 20
+bits open in another read about 0.5%, not the 50% a mean of the two
+scores would give. Repo clarity itself is still a centrality-weighted
+mean of function scores, so the five rolled-up aspects do not yet roll
+up exactly into it; repo clarity moves to pooled bits in clarity 1.5.
+
 ### What a parameter accepts
 
 Each parameter's entropy is what its completed domain leaves unknown, read
@@ -351,19 +376,33 @@ way.
 
 ## The triangle
 
-The three scores are the corners of a triangle: **CLARITY** at the top,
-**IMPL** and **INTENT** the two bottom nodes. The sharp dotted outline is
-the full `100/100/100` frame; inside it, each score is a dot on its spoke
-from the base (all-zero) out to its corner, and the triangle those three
-dots span is filled, so the filled area is the current state and the gap
-to the frame is the room to grow. The fraction of the frame that area
-shades is the **overall** number, so half the triangle shaded reads 50:
-with clarity the apex height and implementation and intent the base, it
-is `clarity * (implementation + intent) / 2` on the fractions. It is 100
-when all three are 100, and 0 whenever clarity is 0 (a flat shape) or
-both base scores are, so comparing two commits' areas shows the change in
-overall characterisation. A dimension under 5% is degenerate and the
-shape is not drawn, only the numbers.
+The three scores sit on three spokes from a common centre, 120 degrees
+apart: **CLARITY** straight up, **IMPL** down and to the left, **INTENT**
+down and to the right. The sharp dotted outline joining the spokes' tips
+is the full `100/100/100` frame; each score is a point at its fraction of
+its spoke, and the triangle those three points span is the current
+state, so the gap to the frame is the room to grow. The SVG card fills
+it; the ASCII triangle draws its outline. A single score of 0 still
+leaves the wedge between the other two, with a corner at the centre, so
+the shape is left out, and only the numbers shown, when two or more
+scores are under 5% (a line or a point).
+
+The filled share of the frame is the **overall** number. Two spokes of
+lengths x and y at 120 degrees enclose a wedge of area
+`x * y * sin(120°) / 2`, and the frame is three such wedges at full
+length, so the share is `(implementation * intent + intent * clarity +
+clarity * implementation) / 3` on the 0 to 1 fractions, rounded to a
+whole percent. Every pair of scores counts the same. It is 100 when all
+three are 100 and s squared when all three are s (60/60/60 reads 36),
+and a single zero leaves the one wedge between the other two, so
+100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers
+shows the change in overall characterisation; to hold a line on one
+score, gate on that score itself. The SVG card's shaded share of its
+frame is exactly the overall number. The ASCII triangle is drawn on a
+grid of characters, with columns scaled by about 1.7 to 1 for the height
+of a terminal cell, and outlines the score triangle in `•` between its
+`●` points, so it shows the shape; the exact shaded share is the
+SVG's.
 
 ## The standard location, and embedding in a README
 
@@ -401,10 +440,11 @@ score means.
 - `implementation.json` / `intent.json` / `clarity.json`, shields.io
   endpoint badges in the Tetrion Labs colours (an ink label, a deep green
   value) a README references by raw URL.
-- `triangle.svg`, a dark-card twin of the ASCII triangle with the same
-  layout: the dashed `100/100/100` frame, each score a vertex on its
-  spoke, the triangle they span filled in the accent green, and the
-  overall number in the top right. It carries its own background and needs
+- `triangle.svg`, a dark-card twin of the ASCII triangle on the same
+  three spokes: rings at a quarter, a half and three quarters, the spokes,
+  the `100/100/100` frame, each score a vertex on its spoke, the triangle
+  they span filled in the accent green, its share of the frame exactly
+  the overall number, and that number as a caption under the figure. It carries its own background and needs
   no external fonts, so it reads the same on a light or a dark README.
 - `snapshot.json`, the numbers (implementation, intent, clarity, overall,
   plus `clarity_algo` and the per-function rows), for CI to compute and

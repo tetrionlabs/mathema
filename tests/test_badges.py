@@ -3,7 +3,8 @@
 """The three badges: implementation (raw line ratio), intent (docsync),
 clarity (known-about-behaviour from VERIFIED claims, a
 falsified claim counts). Repo roll-up weights intent + clarity by
-centrality; the overall number is the radar-triangle area. Plus the
+centrality; the overall number is the area the three span on spokes 120 degrees
+apart. Plus the
 git-diffable render and the four emitters."""
 import json
 import re
@@ -33,6 +34,23 @@ def test_triangle_area_is_full_at_100_and_shrinks_with_imbalance():
     assert triangle_area(0, 0, 0) == 0
     assert triangle_area(100, 100, 0) < 40          # a spike has little area
     assert triangle_area(60, 60, 60) < triangle_area(80, 80, 80)
+
+
+def test_triangle_area_weights_the_three_wedges_equally():
+    # spokes 120 degrees apart: (ab + bc + ca) / 3 on the 0-1 fractions
+    assert triangle_area(89, 61, 40) == 38
+    assert triangle_area(100, 100, 0) == 33       # one zero no longer zeroes it
+    assert triangle_area(100, 0, 50) == 17        # 16.67 rounds up
+    assert triangle_area(100, 31, 37) == 26
+    for s in (0, 10, 30, 50, 70, 90, 100):
+        assert triangle_area(s, s, s) == round(s * s / 100)
+
+
+def test_triangle_area_does_not_depend_on_which_score_is_where():
+    import itertools
+    for triple in ((89, 61, 40), (100, 0, 50), (7, 93, 58), (100, 100, 0)):
+        assert len({triangle_area(*p)
+                    for p in itertools.permutations(triple)}) == 1
 
 
 # --- clarity ----------------------------------------------
@@ -173,13 +191,14 @@ def test_triangle_render_is_deterministic_and_hides_degenerate():
     a = render_triangle(88, 71, 52)
     assert a == render_triangle(88, 71, 52)          # byte-stable
     assert "IMPL 88" in a and "overall" in a
-    # dotted frame with ◆ corners, dot-filled score triangle, ● vertices
+    # dotted frame with ◆ corners, the score triangle outlined between
+    # its ● vertices
     assert "·" in a and "●" in a and "◆" in a and "░" not in a
     # at 100/100/100 the score vertices reach the corners, so ◆ is gone
     full = render_triangle(100, 100, 100)
     assert "·" in full and "●" in full
-    degen = render_triangle(90, 3, 40)
-    # a sub-5% dimension draws no shape at all, only the numbers
+    degen = render_triangle(90, 3, 4)
+    # two sub-5% dimensions draw no shape at all, only the numbers
     assert "◆" not in degen and "●" not in degen and "below 5%" in degen
 
 
@@ -315,6 +334,8 @@ def test_readme_snippet_states_the_meanings_and_links(tmp_path):
     assert "explicitly specified" in text
     assert "pinned down" in text
     assert "the area the three span" in text
+    assert "each pair of scores counts equally" in text
+    assert "toward zero when any one of them is empty" not in text
     assert "know what your code actually does" in text
     # links resolve on the public docs site, never a private repository
     assert "https://mathema.tetrionlabs.com/modes/badges/#the-three-badges" in text
