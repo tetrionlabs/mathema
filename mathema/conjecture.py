@@ -231,19 +231,51 @@ def _yaml_safe_args(args) -> list:
     """Intent:
         A falsifying argument tuple as YAML-safe values a later run can
         replay exactly: numbers pass through, a complex value becomes
-        its coordinate spelling, sequences recurse.
+        its coordinate spelling, a set or frozenset becomes its members
+        under a `set` or `frozenset` tag, and sequences and mapping
+        values recurse.
     """
-    out = []
-    for v in args:
-        if isinstance(v, complex) and not isinstance(v, (int, float)):
-            # tagged, so a string witness that reads as a complex
-            # number (`"j"`) can never be mistaken for one
-            out.append({"complex": f"{v.real:g}{v.imag:+g}j"})
-        elif isinstance(v, (list, tuple)):
-            out.append(_yaml_safe_args(v))
-        else:
-            out.append(v)
-    return out
+    return [_yaml_safe_value(v) for v in args]
+
+
+def _yaml_safe_value(v):
+    """One argument value in the spelling `_yaml_safe_args` stores."""
+    if isinstance(v, complex) and not isinstance(v, (int, float)):
+        # tagged, so a string witness that reads as a complex
+        # number (`"j"`) can never be mistaken for one
+        return {"complex": f"{v.real:g}{v.imag:+g}j"}
+    if isinstance(v, (set, frozenset)):
+        # members in a fixed order, so the same set is stored the same
+        # way in every process whatever its iteration order
+        members = sorted((_yaml_safe_value(m) for m in v),
+                         key=lambda m: (type(m).__name__, repr(m)))
+        return {"frozenset" if isinstance(v, frozenset) else "set": members}
+    if isinstance(v, (list, tuple)):
+        return _yaml_safe_args(v)
+    if isinstance(v, dict):
+        return {k: _yaml_safe_value(x) for k, x in v.items()}
+    return v
+
+
+def _restored_value(v):
+    """A stored argument value read back: a tagged complex number or
+    set becomes the value it spells, and lists and mapping values
+    recurse."""
+    if isinstance(v, dict) and len(v) == 1:
+        (tag, inner), = v.items()
+        if tag == "complex" and isinstance(inner, str):
+            return complex(inner)
+        if tag in ("set", "frozenset") and isinstance(inner, list):
+            members = [_restored_value(m) for m in inner]
+            try:
+                return set(members) if tag == "set" else frozenset(members)
+            except TypeError:
+                return v
+    if isinstance(v, list):
+        return [_restored_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _restored_value(x) for k, x in v.items()}
+    return v
 
 
 _MAX_CORNERS = 64
@@ -524,8 +556,9 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         than misapplied.
 
     Notes:
-        A complex witness is stored tagged, `{"complex": "1+2j"}`. An
-        older record stored it as a bare string, which is read as a
+        A complex witness is stored tagged, `{"complex": "1+2j"}`, and a
+        set as `{"set": [...]}` or `{"frozenset": [...]}`. An
+        older record stored a complex witness as a bare string, which is read as a
         complex number only where the parameter's kind can hold one:
         a string parameter's `"j"` stays the string it was.
     """
@@ -537,8 +570,8 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         restored = []
         for i, v in enumerate(stored):
             kind = kinds[i] if kinds is not None and i < len(kinds) else None
-            if isinstance(v, dict) and set(v) == {"complex"}:
-                restored.append(complex(v["complex"]))
+            if isinstance(v, (dict, list)):
+                restored.append(_restored_value(v))
                 continue
             if (isinstance(v, str) and ("j" in v or "J" in v)
                     and kind not in ("string", "dict", "bool", "table")
@@ -11803,13 +11836,68 @@ def _call_arity_mismatch(src: str, fn, param_set: set,
             sig.bind(*([None] * len(node.args)), **given_kw,
                      **{p: None for p in pinned
                         if p not in bound.arguments and p in sig.parameters})
-        except TypeError:
-            params = list(sig.parameters)
-            given = len(node.args) + len(node.keywords)
-            return (f"f is called here with {given} argument(s), but its "
-                    f"signature takes {len(params)} ({', '.join(params)}), "
-                    f"so any TypeError is raised by the malformed call "
-                    f"itself; call f with its own parameters")
+        except TypeError as e:
+            what = _arity_misfit(sig, len(node.args), list(given_kw),
+                                 pinned) or str(e)
+            return (f"{what}, so any TypeError is raised by the malformed "
+                    f"call itself; call f with its own parameters")
+    return None
+
+
+def _arity_misfit(sig, n_positional: int, keywords: list,
+                  pinned: frozenset = frozenset()) -> str | None:
+    """Intent:
+        What a call with `n_positional` positional arguments and the
+        named `keywords` gets wrong against `sig`: too many positional
+        arguments (naming the keyword-only parameters they ran into),
+        a keyword the signature does not have, one parameter given
+        twice, or a required parameter left out. None when none of
+        these applies.
+
+    Notes:
+        A `pinned` parameter counts as passed, though not toward the
+        argument count the text reports. The signature is shown
+        as its parameter names, `(a, b, flag)`.
+    """
+    P = inspect.Parameter
+    params = sig.parameters
+    shown = f"({', '.join(params)})"
+    positional = [n for n, p in params.items()
+                  if p.kind in (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)]
+    kinds = {p.kind for p in params.values()}
+    if P.VAR_POSITIONAL not in kinds and n_positional > len(positional):
+        kwonly = [n for n, p in params.items() if p.kind is P.KEYWORD_ONLY]
+        tail = (f"; {', '.join(kwonly)} "
+                f"{'is' if len(kwonly) == 1 else 'are'} keyword-only, "
+                f"passed as {kwonly[0]}=..." if kwonly else "")
+        return (f"f is called here with {n_positional} positional "
+                f"argument(s), but its signature {shown} takes at most "
+                f"{len(positional)} by position{tail}")
+    for k in keywords:
+        if k not in params and P.VAR_KEYWORD not in kinds:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} does not have")
+        if k in params and params[k].kind is P.POSITIONAL_ONLY:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} takes only by position")
+    by_position = set(positional[:n_positional])
+    for k in keywords:
+        if k in by_position:
+            return (f"f is called here with {k} both by position and by "
+                    f"keyword")
+    covered = by_position | set(keywords) | set(pinned)
+    missing = [n for n, p in params.items()
+               if p.default is P.empty
+               and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)
+               and n not in covered]
+    if missing:
+        required = [n for n, p in params.items()
+                    if p.default is P.empty
+                    and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)]
+        return (f"f is called here with {n_positional + len(keywords)} "
+                f"argument(s), but its signature {shown} requires "
+                f"{len(required)}: {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} missing")
     return None
 
 
