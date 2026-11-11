@@ -27,8 +27,8 @@ A few words recur on every path:
   on: `mathematics`, `computation` and `policy`, explained in
   [Reading a record](verdicts.md#reading-a-record).
 - A **compendium** is a claims file about a library's functions rather
-  than your own; mathema ships ones for Python's `math` module, numpy,
-  pandas and polars.
+  than your own; mathema ships ones for Python's `math` and `statistics`
+  modules, numpy, pandas and polars.
 
 ## Checking a numerical library function
 

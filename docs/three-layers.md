@@ -22,7 +22,8 @@ whether that break is acceptable to the verdicts themselves.
 
 ## Seeing all three at once
 
-`mathema-ci measure` computes the three scores for a project
+`mathema-ci measure`, from the separate `mathema-ci` package
+(`pip install mathema-ci`), computes the three scores for a project
 and draws them as a triangle on three spokes 120 degrees apart, clarity at
 the top and implementation and intent at the lower corners, so a lopsided
 profile has a lopsided shape. The overall number is the share of the full
