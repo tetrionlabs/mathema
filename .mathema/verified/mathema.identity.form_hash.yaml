@@ -1,0 +1,367 @@
+# machine record; binds to form py:6aa448de6f12
+mathema.identity.form_hash:
+  schema_version: "0.3.0"
+  name: "form_hash"
+  signature: "(fdef: 'ast.FunctionDef | ast.AsyncFunctionDef') -> 'str'"
+  intent: "The `form` identity, `py:<sha>`: the Python frontend's namespace and a 12-hex-char hash of the function's alpha-normalized AST (`normalized()`, locals/parameters replaced by binding-order names, so a pure rename doesn't change it, but any real structural change does), rendered by `form_text` so the hash is the same on every supported Python."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:6aa448de6f12"
+    sig: "f8212e11291e"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "ea05f8235758"
+    pin: "none"
+    integrity: "v2:a359f96101fc7c1a"
+  math: null
+  claims:
+    - name: "call_differs_from_recursion"
+      statement: "let p = claims.support.calling_def, let q = claims.support.recursive_def, for fdef in L[identifier] \\ {\"f\"}, f(p(fdef)) != f(q(fdef))"
+      verdict: "holds"
+      n: 160
+      note: "fdef in L[identifier] (entry point mathema_language.text:IDENTIFIER); derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code; let p = claims.support.calling_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would; let q = claims.support.recursive_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "L"
+          pieces:
+            - language: "identifier"
+          excluded:
+            - "f"
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "fdef~L[identifier] \\ {\"f\"}, seed=20260718, n=160"
+        mathema.confidence:
+          score: 9.3
+          stars: 4
+          max_stars: 5
+          n: 160
+          factors:
+            branches: 0
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+            language: 1
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          fdef:
+            - name: "identifier"
+              source: "entry point mathema_language.text:IDENTIFIER"
+              level: "predicate"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "identifier"
+                level: "predicate"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.calling_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+          - "let q = claims.support.recursive_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "constant_sensitive"
+      statement: "let p = claims.support.adding_def, for fdef in [0, 1000] : int, f(p(fdef)) != f(p(fdef + 1))"
+      verdict: "holds"
+      note: "the claim ranges over 1001 points, and it holds at every one; every point executed; proven needs the function to be shown pure: normalized calls ast.unparse, which mathema has no purity entry for; a body whose every call the examination reads, or a purity entry for that call, would make the sweep a proof; let p = claims.support.adding_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      sketch: "the claim ranges over 1001 points, and it holds at every one; every point executed; proven needs the function to be shown pure: normalized calls ast.unparse, which mathema has no purity entry for; a body whose every call the examination reads, or a purity entry for that call, would make the sweep a proof"
+      condition: "for fdef in [0, 1000] : int"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "Z"
+          pieces:
+            - lo: 0.0
+              hi: 1000.0
+              closed_lo: true
+              closed_hi: true
+          excluded:
+            - sentinel: "None"
+          explicit_type: true
+          clause: true
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.sweep_inexact:
+          points: 1001
+          first: "fdef = 0"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.adding_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "dependencies_current"
+      verdict: "proven"
+      note: "generated by mathema verify; checked against the verified store"
+      sketch: "every function along the dependency chain matches its verified record"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema.identity.form_text"
+          - "mathema.identity.local_names"
+          - "mathema.identity.normalized"
+        mathema.previous_verdict: "unknown"
+        mathema.transitions:
+          - from: "unknown"
+            to: "proven"
+            kind: "strengthened"
+            cause: "nothing changed"
+            at: "2026-11-11"
+            commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+      counterexample: null
+    - name: "docstring_invariant"
+      statement: "let p = claims.support.documented_def, for fdef in L[unicode], f(p(fdef)) = f(p(\"plain\"))"
+      verdict: "holds"
+      n: 224
+      note: "fdef in L[unicode] (entry point mathema_language.text:UNICODE); derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code; let p = claims.support.documented_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "L"
+          pieces:
+            - language: "unicode"
+          excluded: []
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "fdef~L[unicode], seed=20260718, n=224"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 224
+          factors:
+            branches: 0
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+            language: 3
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          fdef:
+            - name: "unicode"
+              source: "entry point mathema_language.text:UNICODE"
+              level: "alphabet"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "unicode"
+                level: "alphabet"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.documented_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "free_name_differs_from_parameter"
+      statement: "let p = claims.support.returning_free_name, let q = claims.support.returning_parameter, for fdef in {\"f\", \"total\", \"v0\", \"v1\", \"y\"}, f(p(fdef)) != f(q(fdef))"
+      verdict: "holds"
+      note: "the claim ranges over 5 points, and it holds at every one; every point executed; proven needs the function to be shown pure: normalized calls ast.unparse, which mathema has no purity entry for; a body whose every call the examination reads, or a purity entry for that call, would make the sweep a proof; let p = claims.support.returning_free_name calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would; let q = claims.support.returning_parameter calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      sketch: "the claim ranges over 5 points, and it holds at every one; every point executed; proven needs the function to be shown pure: normalized calls ast.unparse, which mathema has no purity entry for; a body whose every call the examination reads, or a purity entry for that call, would make the sweep a proof"
+      condition: "for fdef in {\"f\", \"total\", \"v0\", \"v1\", \"y\"}"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "R"
+          pieces:
+            - set:
+                - "f"
+                - "total"
+                - "v0"
+                - "v1"
+                - "y"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.sweep_inexact:
+          points: 5
+          first: "fdef = 'f'"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.returning_free_name calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+          - "let q = claims.support.returning_parameter calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "function_rename_invariant"
+      statement: "let p = claims.support.named_def, for fdef in L[identifier], f(p(fdef)) = f(p(\"g\"))"
+      verdict: "holds"
+      n: 160
+      note: "fdef in L[identifier] (entry point mathema_language.text:IDENTIFIER); derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code; let p = claims.support.named_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "L"
+          pieces:
+            - language: "identifier"
+          excluded: []
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "fdef~L[identifier], seed=20260718, n=160"
+        mathema.confidence:
+          score: 9.3
+          stars: 4
+          max_stars: 5
+          n: 160
+          factors:
+            branches: 0
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+            language: 1
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          fdef:
+            - name: "identifier"
+              source: "entry point mathema_language.text:IDENTIFIER"
+              level: "predicate"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "identifier"
+                level: "predicate"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.named_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "parameter_rename_invariant"
+      statement: "let p = claims.support.squaring_def, for fdef in L[identifier], f(p(fdef)) = f(p(\"x\"))"
+      verdict: "holds"
+      n: 160
+      note: "fdef in L[identifier] (entry point mathema_language.text:IDENTIFIER); derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code; let p = claims.support.squaring_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        fdef:
+          base_type: "L"
+          pieces:
+            - language: "identifier"
+          excluded: []
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "fdef~L[identifier], seed=20260718, n=160"
+        mathema.confidence:
+          score: 9.3
+          stars: 4
+          max_stars: 5
+          n: 160
+          factors:
+            branches: 0
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+            language: 1
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read fdef, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          fdef:
+            - name: "identifier"
+              source: "entry point mathema_language.text:IDENTIFIER"
+              level: "predicate"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "identifier"
+                level: "predicate"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let p = claims.support.squaring_def calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The `form` identity, `py:<sha>`: the Python frontend's namespace and a 12-hex-char hash of the function's alpha-normalized AST (`normalized()`, locals/parameters replaced by binding-order names, so a pure rename doesn't change it, but any real structural change does), rendered by `form_text` so the hash is the same on every supported Python."
+      basis: "documented; the author's stated purpose"
+    - step: "evidence"
+      claim: "let p = claims.support.squaring_def, for fdef in L[identifier], f(p(fdef)) = f(p(\"x\"))"
+      basis: "probed, n=160"
+    - step: "evidence"
+      claim: "let p = claims.support.named_def, for fdef in L[identifier], f(p(fdef)) = f(p(\"g\"))"
+      basis: "probed, n=160"
+    - step: "evidence"
+      claim: "let p = claims.support.documented_def, for fdef in L[unicode], f(p(fdef)) = f(p(\"plain\"))"
+      basis: "probed, n=224"
+    - step: "evidence"
+      claim: "let p = claims.support.adding_def, for fdef in [0, 1000] : int, f(p(fdef)) != f(p(fdef + 1))"
+      basis: "probed, n=0"
+    - step: "evidence"
+      claim: "let p = claims.support.returning_free_name, let q = claims.support.returning_parameter, for fdef in {\"f\", \"total\", \"v0\", \"v1\", \"y\"}, f(p(fdef)) != f(q(fdef))"
+      basis: "probed, n=0"
+    - step: "evidence"
+      claim: "let p = claims.support.calling_def, let q = claims.support.recursive_def, for fdef in L[identifier] \\ {\"f\"}, f(p(fdef)) != f(q(fdef))"
+      basis: "probed, n=160"
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema.identity.form_text, mathema.identity.local_names, mathema.identity.normalized"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "form_text"
+      kind: "function"
+      key: "mathema.identity.form_text"
+      file: "mathema/identity.py"
+      line: 131
+      form: "py:465002889f5b"
+      reaches:
+        - key: "lib:python"
+          kind: "interpreter"
+          form: "lib:python==3.12"
+      chain: "code:894345f36934|library:e3b0c44298fc|interpreter:287c26325cfc"
+      freshness: "current"
+    - name: "hashlib"
+      kind: "module"
+      key: "hashlib"
+    - name: "normalized"
+      kind: "function"
+      key: "mathema.identity.normalized"
+      file: "mathema/identity.py"
+      line: 106
+      form: "py:915f109a447f"
+      reaches:
+        - key: "lib:python"
+          kind: "interpreter"
+          form: "lib:python==3.12"
+        - key: "mathema.identity._Alpha"
+          kind: "class"
+          form: "py:9725c6957635"
+        - key: "mathema.identity.local_names"
+          kind: "function"
+          form: "py:0843c6386013"
+      chain: "code:44fd52de0d20|library:e3b0c44298fc|interpreter:287c26325cfc"
+      freshness: "current"
+  meta:
+    mathema.not_run:
+      - check: "callable"
+        statement: "f(fdef) can be called"
+        reason: "f could not be called with a value mathema built from the signature (fdef: ast.FunctionDef | ast.AsyncFunctionDef): AttributeError: 'str' object has no attribute '_fields'"
+        gap: "input-synthesis"
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"

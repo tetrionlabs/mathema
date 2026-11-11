@@ -1,0 +1,655 @@
+# machine record; binds to form py:8f4761b2a35b
+mathema.transitions.kind_of:
+  schema_version: "0.3.0"
+  name: "kind_of"
+  signature: "(before: 'str', after: 'str', *, function_changed: 'bool') -> \"'str | None'\""
+  intent: "The kind of the move from verdict `before` to `after`, or None when there is no transition (the same strength, a verdict outside the strength order, or a never-supported claim found falsified)."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:8f4761b2a35b"
+    sig: "b9a5046791c1"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "4c11f2d920bd"
+    pin: "none"
+    integrity: "v2:dbd2897ca7596842"
+  math: null
+  claims:
+    - name: "absent[f]"
+      statement: "absent(f) introduces"
+      verdict: "proven"
+      n: 250
+      note: "from the return type str | None: f returned None at before = \"falsified\", function_changed = False from present inputs; confirmed on the draws of same_verdict_is_no_move, unknown_and_skipped_are_one_level, never_supported_to_falsified_is_no_move, before_outside_the_order_is_no_move, after_outside_the_order_is_no_move, function_change_matters_only_from_falsified, falsified_to_unsupported_is_no_move and read_by_verdict_family"
+      route: "examine"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          behaviour: "introduces"
+          source: "annotation"
+          reason: "from the return type str | None: f returned None at before = \"falsified\", function_changed = False from present inputs; confirmed on the draws of same_verdict_is_no_move, unknown_and_skipped_are_one_level, never_supported_to_falsified_is_no_move, before_outside_the_order_is_no_move, after_outside_the_order_is_no_move, function_change_matters_only_from_falsified, falsified_to_unsupported_is_no_move and read_by_verdict_family"
+        mathema.surface: "mathema"
+    - name: "after_outside_the_order_is_no_move"
+      statement: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"\", \"Proven\", \"blocked\", \"disproven\", \"invalidated\", \"invalidated:stale\", \"proven \", \"unliftable\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = '', function_changed = False could not be computed exactly (kind_of('falsified', '', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"falsified\", after = \"\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = '', function_changed = False could not be computed exactly (kind_of('falsified', '', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, after, function_changed in the claim's finite scope (80 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - ""
+                - "Proven"
+                - "blocked"
+                - "disproven"
+                - "invalidated"
+                - "invalidated:stale"
+                - "proven "
+                - "unliftable"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"falsified\", after = \"\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 80
+          first: "before = 'falsified', after = '', function_changed = False"
+        mathema.surface: "declared"
+    - name: "before_outside_the_order_is_no_move"
+      statement: "for before in {\"\", \"Proven\", \"blocked\", \"disproven\", \"invalidated\", \"invalidated:stale\", \"proven \", \"unliftable\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = '', after = 'falsified', function_changed = False could not be computed exactly (kind_of('', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"\", after = \"falsified\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = '', after = 'falsified', function_changed = False could not be computed exactly (kind_of('', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, after, function_changed in the claim's finite scope (80 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - ""
+                - "Proven"
+                - "blocked"
+                - "disproven"
+                - "invalidated"
+                - "invalidated:stale"
+                - "proven "
+                - "unliftable"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"\", after = \"falsified\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 80
+          first: "before = '', after = 'falsified', function_changed = False"
+        mathema.surface: "declared"
+    - name: "dependencies_current"
+      verdict: "proven"
+      note: "generated by mathema verify; checked against the verified store"
+      sketch: "every function along the dependency chain matches its verified record"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+    - name: "falsified_to_supported_changed_is_fixed"
+      statement: "for after in {\"holds\", \"proven\"}, f(\"falsified\", after, function_changed=True) = \"fixed\""
+      verdict: "proven"
+      note: "held at their defaults: function_changed=True (pinned)"
+      sketch: "the claim ranges over 2 points, and it holds at every one"
+      condition: "∀ after in the claim's finite scope (2 points)"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.defaults:
+          mathema.transitions.kind_of:
+            function_changed: "True (pinned)"
+        mathema.surface: "declared"
+    - name: "falsified_to_supported_unchanged_is_strengthened"
+      statement: "for after in {\"holds\", \"proven\"}, f(\"falsified\", after, function_changed=False) = \"strengthened\""
+      verdict: "proven"
+      note: "held at their defaults: function_changed=False (pinned)"
+      sketch: "the claim ranges over 2 points, and it holds at every one"
+      condition: "∀ after in the claim's finite scope (2 points)"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.defaults:
+          mathema.transitions.kind_of:
+            function_changed: "False (pinned)"
+        mathema.surface: "declared"
+    - name: "falsified_to_unsupported_is_no_move"
+      statement: "for after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(\"falsified\", after, function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 4 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at after = \"skipped\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 4 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ after, function_changed in the claim's finite scope (4 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "after = \"skipped\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 4
+          first: "after = 'skipped', function_changed = False"
+        mathema.surface: "declared"
+    - name: "function_change_matters_only_from_falsified"
+      statement: "for before in {\"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f(before, after, function_changed=True) = f(before, after, function_changed=False)"
+      verdict: "proven"
+      note: "all 20 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'holds', after = 'holds' could not be computed exactly (kind_of('holds', 'holds')), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"holds\", after = \"holds\", which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 20 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'holds', after = 'holds' could not be computed exactly (kind_of('holds', 'holds')), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, after in the claim's finite scope (20 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"holds\", after = \"holds\""
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 8
+          first: "before = 'holds', after = 'holds'"
+        mathema.surface: "declared"
+    - name: "never_supported_to_falsified_is_no_move"
+      statement: "for before in {\"falsified\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, \"falsified\", function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 6 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"falsified\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 6 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, function_changed in the claim's finite scope (6 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"falsified\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 6
+          first: "before = 'falsified', function_changed = False"
+        mathema.surface: "declared"
+    - name: "read_by_verdict_family"
+      statement: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before + \":a\", after + \":b\", function_changed=function_changed) = f(before, after, function_changed=function_changed)"
+      verdict: "proven"
+      note: "all 50 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"falsified\", after = \"falsified\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 50 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, after, function_changed in the claim's finite scope (50 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"falsified\", after = \"falsified\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 22
+          first: "before = 'falsified', after = 'falsified', function_changed = False"
+        mathema.surface: "declared"
+    - name: "same_verdict_is_no_move"
+      statement: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, before, function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 10 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"falsified\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 10 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, function_changed in the claim's finite scope (10 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "falsified"
+                - "holds"
+                - "proven"
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"falsified\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 10
+          first: "before = 'falsified', function_changed = False"
+        mathema.surface: "declared"
+    - name: "supported_to_falsified_is_regressed"
+      statement: "for before in {\"holds\", \"proven\"}, function_changed in {False, True}, f(before, \"falsified\", function_changed=function_changed) = \"regressed\""
+      verdict: "proven"
+      sketch: "the claim ranges over 4 points, and it holds at every one"
+      condition: "∀ before, function_changed in the claim's finite scope (4 points)"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.surface: "declared"
+    - name: "supported_to_unsupported_is_weakened"
+      statement: "for before in {\"holds\", \"proven\"}, after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = \"weakened\""
+      verdict: "proven"
+      sketch: "the claim ranges over 8 points, and it holds at every one"
+      condition: "∀ before, after, function_changed in the claim's finite scope (8 points)"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.surface: "declared"
+    - name: "unknown_and_skipped_are_one_level"
+      statement: "for before in {\"skipped\", \"unknown\"}, after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      verdict: "proven"
+      note: "all 8 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'skipped', after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', 'skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show; f returns None at before = \"skipped\", after = \"skipped\", function_changed = False, which its return type str | None allows; that point has no value to compare, so it is recorded, not judged"
+      sketch: "all 8 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'skipped', after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', 'skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+      condition: "∀ before, after, function_changed in the claim's finite scope (8 points)"
+      route: "derive:brute_force:within_float64"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force:within_float64"
+        mathema.missing:
+          admitted: {}
+          returned:
+            absent: "introduces"
+            source: "annotation"
+            at: "before = \"skipped\", after = \"skipped\", function_changed = False"
+            declared: "str | None"
+        mathema.sweep_inexact:
+          points: 8
+          first: "before = 'skipped', after = 'skipped', function_changed = False"
+        mathema.surface: "declared"
+    - name: "unsupported_to_supported_is_strengthened"
+      statement: "for before in {\"skipped\", \"unknown\"}, after in {\"holds\", \"proven\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = \"strengthened\""
+      verdict: "proven"
+      sketch: "the claim ranges over 8 points, and it holds at every one"
+      condition: "∀ before, after, function_changed in the claim's finite scope (8 points)"
+      route: "derive:brute_force"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        before:
+          base_type: "R"
+          pieces:
+            - set:
+                - "skipped"
+                - "unknown"
+          excluded: []
+          explicit_type: false
+        after:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+        function_changed:
+          base_type: "R"
+          pieces:
+            - set:
+                - false
+                - true
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.derive_route: "brute_force"
+        mathema.surface: "declared"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The kind of the move from verdict `before` to `after`, or None when there is no transition (the same strength, a verdict outside the strength order, or a never-supported claim found falsified)."
+      basis: "documented; the author's stated purpose"
+    - step: "derivation"
+      claim: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, before, function_changed=function_changed) = None"
+      basis: "all 10 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"skipped\", \"unknown\"}, after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      basis: "all 8 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'skipped', after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', 'skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"holds\", \"proven\"}, function_changed in {False, True}, f(before, \"falsified\", function_changed=function_changed) = \"regressed\""
+      basis: "the claim ranges over 4 points, and it holds at every one"
+    - step: "derivation"
+      claim: "for before in {\"falsified\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, \"falsified\", function_changed=function_changed) = None"
+      basis: "all 6 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"\", \"Proven\", \"blocked\", \"disproven\", \"invalidated\", \"invalidated:stale\", \"proven \", \"unliftable\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      basis: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = '', after = 'falsified', function_changed = False could not be computed exactly (kind_of('', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"\", \"Proven\", \"blocked\", \"disproven\", \"invalidated\", \"invalidated:stale\", \"proven \", \"unliftable\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = None"
+      basis: "all 80 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = '', function_changed = False could not be computed exactly (kind_of('falsified', '', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, f(before, after, function_changed=True) = f(before, after, function_changed=False)"
+      basis: "all 20 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'holds', after = 'holds' could not be computed exactly (kind_of('holds', 'holds')), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for after in {\"holds\", \"proven\"}, f(\"falsified\", after, function_changed=False) = \"strengthened\""
+      basis: "the claim ranges over 2 points, and it holds at every one"
+    - step: "derivation"
+      claim: "for after in {\"holds\", \"proven\"}, f(\"falsified\", after, function_changed=True) = \"fixed\""
+      basis: "the claim ranges over 2 points, and it holds at every one"
+    - step: "derivation"
+      claim: "for after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(\"falsified\", after, function_changed=function_changed) = None"
+      basis: "all 4 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at after = 'skipped', function_changed = False could not be computed exactly (kind_of('skipped', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "for before in {\"holds\", \"proven\"}, after in {\"skipped\", \"unknown\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = \"weakened\""
+      basis: "the claim ranges over 8 points, and it holds at every one"
+    - step: "derivation"
+      claim: "for before in {\"skipped\", \"unknown\"}, after in {\"holds\", \"proven\"}, function_changed in {False, True}, f(before, after, function_changed=function_changed) = \"strengthened\""
+      basis: "the claim ranges over 8 points, and it holds at every one"
+    - step: "derivation"
+      claim: "for before in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, after in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, function_changed in {False, True}, f(before + \":a\", after + \":b\", function_changed=function_changed) = f(before, after, function_changed=function_changed)"
+      basis: "all 50 points were run in float64 and the claim held at each; the largest delta was 0 against an allowance of 0. The value at before = 'falsified', after = 'falsified', function_changed = False could not be computed exactly (kind_of('falsified', 'falsified', False)), so this proof is capped at within_float64: a difference below float64's resolution at these values would not show"
+    - step: "derivation"
+      claim: "absent(f) introduces"
+      basis: "symbolic derivation"
+    - step: "derivation"
+      claim: ""
+      basis: "every function along the dependency chain matches its verified record"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "classify_verdict"
+      kind: "function"
+      key: "mathema.records.classify_verdict"
+      file: "mathema/records.py"
+      line: 134
+      form: "py:0714602072a2"
+      reaches: []
+      chain: "code:b3063b76c0cb|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "current"
+  meta:
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"

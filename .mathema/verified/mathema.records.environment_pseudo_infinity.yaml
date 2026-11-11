@@ -1,0 +1,77 @@
+# machine record; binds to form py:a2f1458edcf0
+mathema.records.environment_pseudo_infinity:
+  schema_version: "0.3.0"
+  name: "environment_pseudo_infinity"
+  signature: "() -> \"'float | None'\""
+  intent: "The project-level pseudo-infinity, `MATHEMA_PSEUDO_INFINITY`, read at call time; None when unset or empty."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:a2f1458edcf0"
+    sig: "cc233ae6c45b"
+    tier: 3
+    source_available: true
+    pure: false
+    claims_fingerprint: "37ee6ee84af2"
+    pin: "none"
+    integrity: "v2:4e2e1f4aec0189a7"
+  math: null
+  claims:
+    - name: "dependencies_current"
+      verdict: "unknown"
+      note: "not checked, no record: mathema.records._checked_magnitude; state claims about it and run mathema verify"
+      sketch: "not checked, no record: mathema.records._checked_magnitude"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema.records._checked_magnitude"
+    - name: "is_state_safe"
+      statement: "is_state_safe(f)"
+      verdict: "unknown"
+      note: "_checked_magnitude calls grammar._parse_pseudo_infinity, which mathema has no purity entry for"
+      sketch: "_checked_magnitude calls grammar._parse_pseudo_infinity, which mathema has no purity entry for"
+      route: "examine"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      meta:
+        mathema.surface: "declared"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The project-level pseudo-infinity, `MATHEMA_PSEUDO_INFINITY`, read at call time; None when unset or empty."
+      basis: "documented; the author's stated purpose"
+    - step: "gap"
+      claim: "is_state_safe(f)"
+      basis: "_checked_magnitude calls grammar._parse_pseudo_infinity, which mathema has no purity entry for"
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema.records._checked_magnitude"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "_checked_magnitude"
+      kind: "function"
+      key: "mathema.records._checked_magnitude"
+      file: "mathema/records.py"
+      line: 349
+      form: "py:b4c7e8f3955d"
+      reaches: []
+      chain: "code:40c9ed0b8560|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "unverified"
+  meta:
+    mathema.effects:
+      line: "reads os.environ"
+      sites:
+        - "reads os.environ"
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"

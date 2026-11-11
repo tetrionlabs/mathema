@@ -1,0 +1,143 @@
+# machine record; binds to form py:c12847c6099b
+mathema.records.PseudoInfinity.render:
+  schema_version: "0.3.0"
+  name: "render"
+  signature: "(self) -> 'str'"
+  intent: "The binding as the claim grammar spells it: `let |inf| be 1e+100`. The level it came from is in `meta()`."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:c12847c6099b"
+    sig: "bb418bb7ece8"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "bbeb1f73437a"
+    pin: "none"
+    integrity: "v2:21dbc738334a83ff"
+  math: null
+  claims:
+    - name: "dependencies_current"
+      verdict: "unknown"
+      note: "not checked, no record: mathema._float_text.exact_float_text; state claims about it and run mathema verify"
+      sketch: "not checked, no record: mathema._float_text.exact_float_text"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema._float_text.exact_float_text"
+    - name: "render_reads_back"
+      statement: "let q = claims.support.bound_read_back, for self in L[mathema.records.PseudoInfinity], self.value in (0.0, 1e+300] : float, q(f(self)) = self.value"
+      verdict: "holds"
+      n: 221
+      note: "self in L[mathema.records.PseudoInfinity] (adaptor dataclass); derive cannot read the function, which reads no field of self, so the claim is decided by running the code; let q = claims.support.bound_read_back calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        self:
+          base_type: "L"
+          pieces:
+            - language: "mathema.records.PseudoInfinity"
+          excluded: []
+          explicit_type: true
+        self.value:
+          base_type: "R"
+          pieces:
+            - lo: 0.0
+              hi: 1.0e+300
+              closed_lo: false
+              closed_hi: true
+          excluded:
+            - sentinel: "None"
+            - sentinel: "missing"
+          explicit_type: false
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "self~L[mathema.records.PseudoInfinity], seed=20260718, n=221"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 221
+          factors:
+            branches: 0
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+            language: 3
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read the function, which reads no field of self, so the claim is decided by running the code); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          self:
+            - name: "mathema.records.PseudoInfinity"
+              source: "adaptor dataclass"
+              level: "schema"
+              kind: "row"
+              schema:
+                type: "object"
+                title: "PseudoInfinity"
+                properties:
+                  value:
+                    type: "number"
+                  source:
+                    type: "string"
+                required:
+                  - "value"
+                  - "source"
+                additionalProperties: false
+                $defs:
+                  PseudoInfinity:
+                    type: "object"
+                    title: "PseudoInfinity"
+                    properties:
+                      value:
+                        type: "number"
+                      source:
+                        type: "string"
+                    required:
+                      - "value"
+                      - "source"
+                    additionalProperties: false
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let q = claims.support.bound_read_back calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The binding as the claim grammar spells it: `let |inf| be 1e+100`. The level it came from is in `meta()`."
+      basis: "documented; the author's stated purpose"
+    - step: "evidence"
+      claim: "let q = claims.support.bound_read_back, for self in L[mathema.records.PseudoInfinity], self.value in (0.0, 1e+300] : float, q(f(self)) = self.value"
+      basis: "probed, n=221"
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema._float_text.exact_float_text"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "exact_float_text"
+      kind: "function"
+      key: "mathema._float_text.exact_float_text"
+      file: "mathema/_float_text.py"
+      line: 16
+      form: "py:caceb29f2d74"
+      reaches: []
+      chain: "code:31263203efae|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "unverified"
+  meta:
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"

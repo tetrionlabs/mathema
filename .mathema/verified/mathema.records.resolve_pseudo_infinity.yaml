@@ -1,0 +1,390 @@
+# machine record; binds to form py:ddd800ecdd7b
+mathema.records.resolve_pseudo_infinity:
+  schema_version: "0.3.0"
+  name: "resolve_pseudo_infinity"
+  signature: "(claim_value, function_value) -> \"'PseudoInfinity | None'\""
+  intent: "The pseudo-infinity that applies to a claim's computation, by precedence claim > function > environment (P6). None means no level set one: the computation runs to the number representation's own maximum (`sys.float_info.max` for float64) and every consumer keeps its default."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:ddd800ecdd7b"
+    sig: "a75b6b4cd3eb"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "2c2de9ac184c"
+    pin: "none"
+    integrity: "v2:1f767eb3177570f3"
+  math: null
+  claims:
+    - name: "absent[claim_value]"
+      statement: "absent(f, claim_value)"
+      verdict: "falsified"
+      n: 257
+      counterexample: "f(claim_value=None, function_value=6.16e+298) returns PseudoInfinity(value=6.16332508376128..."
+      note: "f has no single policy for claim_value = None. f drops the hole at claim_value = None, function_value = 6.16e+298 and gives a hole back at claim_value = None, function_value = None; at claim_value = None, function_value = nan it raises InvalidDomain instead. give each case a premise on another parameter that tells them apart, or make f treat claim_value = None one way"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          parameter: "claim_value"
+          evidence: "confirmed on the draws of claim_level_wins and function_level_next"
+          source: "observed"
+          reason: "f has no single policy for claim_value = None"
+          next: "give each case a premise on another parameter that tells them apart, or make f treat claim_value = None one way"
+          sentence: "f has no single policy for claim_value = None"
+          said: "f drops the hole at claim_value = None, function_value = 6.16e+298 and gives a hole back at claim_value = None, function_value = None; at claim_value = None, function_value = nan it raises InvalidDomain instead"
+        mathema.surface: "mathema"
+    - name: "absent[function_value]"
+      statement: "absent(f, function_value)"
+      verdict: "falsified"
+      n: 2
+      counterexample: "f(claim_value=7.46e+299, function_value=None) returns PseudoInfinity(value=7.46128874629172..."
+      note: "f has no single policy for function_value = None. f drops the hole at claim_value = 7.46e+299, function_value = None and gives a hole back at claim_value = None, function_value = None. give each case a premise on another parameter that tells them apart, or make f treat function_value = None one way"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          parameter: "function_value"
+          evidence: "confirmed on the draws of claim_level_wins and function_level_next"
+          source: "observed"
+          reason: "f has no single policy for function_value = None"
+          next: "give each case a premise on another parameter that tells them apart, or make f treat function_value = None one way"
+          sentence: "f has no single policy for function_value = None"
+          said: "f drops the hole at claim_value = 7.46e+299, function_value = None and gives a hole back at claim_value = None, function_value = None"
+        mathema.surface: "mathema"
+    - name: "claim_level_wins"
+      statement: "let v = claims.support.value_of, for claim_value in [1.0, 1e+300] : float|absent|missing, function_value in [1.0, 1e+300] : float|absent|missing, v(f(claim_value, function_value)) = claim_value"
+      verdict: "holds"
+      n: 252
+      note: "derive could not decide it (bound function v (value_of) is not derivable, likely reason: unsupported-construct: unsupported-attribute (line 3), an expression form the derive vocabulary doesn't cover yet), so the probe decided it by running the code; at claim_value = None f returned PseudoInfinity(value=6.16332508376128..., so it drops the absence; at claim_value = nan f raised InvalidDomain; at function_value = None f returned PseudoInfinity(value=7.46128874629172..., so it drops the absence; let v = claims.support.value_of calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        claim_value:
+          base_type: "R"
+          pieces:
+            - lo: 1.0
+              hi: 1.0e+300
+              closed_lo: true
+              closed_hi: true
+            - set:
+                - sentinel: "missing"
+          excluded: []
+          explicit_type: false
+          absent: true
+          members:
+            - "nan"
+        function_value:
+          base_type: "R"
+          pieces:
+            - lo: 1.0
+              hi: 1.0e+300
+              closed_lo: true
+              closed_hi: true
+            - set:
+                - sentinel: "missing"
+          excluded: []
+          explicit_type: false
+          absent: true
+          members:
+            - "nan"
+      meta:
+        mathema.sampling: "claim_value~U(1,1e+300)⊔{lo,hi,mid,±ε}[p=.3], function_value~U(1,1e+300)⊔{lo,hi,mid,±ε}[p=.3], seed=20260718, n=252"
+        mathema.confidence:
+          score: 4.0
+          stars: 2
+          max_stars: 5
+          n: 252
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 2
+            float_extremes: 2
+        mathema.missing:
+          admitted:
+            claim_value:
+              absent: true
+              missing:
+                - "nan"
+            function_value:
+              absent: true
+              missing:
+                - "nan"
+          tried:
+            claim_value:
+              - "None"
+              - "nan"
+            function_value:
+              - "None"
+              - "nan"
+          indifferent:
+            function_value: 1
+          executed:
+            claim_value:
+              None: "None in, PseudoInfinity(value=6.16332508376128... out (drops)"
+              nan: "raised InvalidDomain"
+            function_value:
+              None: "None in, PseudoInfinity(value=7.46128874629172... out (drops)"
+          behaviour:
+            claim_value:
+              None: "drops"
+              nan: "raises"
+            function_value:
+              None: "drops"
+          said:
+            claim_value:
+              None: "at claim_value = None f returned PseudoInfinity(value=6.16332508376128..., so it drops the absence"
+              nan: "at claim_value = nan f raised InvalidDomain"
+            function_value:
+              None: "at function_value = None f returned PseudoInfinity(value=7.46128874629172..., so it drops the absence"
+          means: "missing for claim_value (unannotated) means nan; missing for function_value (unannotated) means nan"
+          origin:
+            claim_value:
+              absent: "type"
+              missing: "type"
+            function_value:
+              absent: "type"
+              missing: "type"
+        mathema.routes_attempted: "routes attempted, derive: underivable (bound function v (value_of) is not derivable, likely reason: unsupported-construct: unsupported-attribute (line 3), an expression form the derive vocabulary doesn't cover yet); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let v = claims.support.value_of calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "dependencies_current"
+      verdict: "unknown"
+      note: "not checked, no record: mathema._float_text.exact_float_text, mathema.records._checked_magnitude; state claims about it and run mathema verify"
+      sketch: "not checked, no record: mathema._float_text.exact_float_text, mathema.records._checked_magnitude"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema._float_text.exact_float_text"
+          - "mathema.records._checked_magnitude"
+    - name: "function_level_next"
+      statement: "let s = claims.support.source_of, for claim_value in {absent}, function_value in [1.0, 1e+300] : float|absent|missing, s(f(claim_value, function_value)) = \"function\""
+      verdict: "holds"
+      n: 254
+      note: "derive could not decide it (bound function s (source_of) is not derivable, likely reason: unsupported-construct: unsupported-attribute (line 3), an expression form the derive vocabulary doesn't cover yet), so the probe decided it by running the code; f drops the hole at claim_value = None, function_value = 2.5e+299 and gives a hole back at claim_value = None, function_value = None; at claim_value = None, function_value = nan it raises InvalidDomain instead; at function_value = None f gave None back; at function_value = nan f raised InvalidDomain; let s = claims.support.source_of calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        claim_value:
+          base_type: "R"
+          pieces:
+            - set:
+                - sentinel: "None"
+          excluded: []
+          explicit_type: false
+        function_value:
+          base_type: "R"
+          pieces:
+            - lo: 1.0
+              hi: 1.0e+300
+              closed_lo: true
+              closed_hi: true
+            - set:
+                - sentinel: "missing"
+          excluded: []
+          explicit_type: false
+          absent: true
+          members:
+            - "nan"
+      meta:
+        mathema.sampling: "claim_value~U{None}, function_value~U(1,1e+300)⊔{lo,hi,mid,±ε}[p=.3], seed=20260718, n=254"
+        mathema.confidence:
+          score: 6.0
+          stars: 2
+          max_stars: 5
+          n: 254
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 1
+            float_extremes: 1
+        mathema.missing:
+          admitted:
+            claim_value:
+              absent: true
+              missing: []
+            function_value:
+              absent: true
+              missing:
+                - "nan"
+          tried:
+            claim_value:
+              - "None"
+            function_value:
+              - "None"
+              - "nan"
+          executed:
+            claim_value:
+              None: "None in, None out (propagates)"
+            function_value:
+              None: "None in, None out (propagates)"
+              nan: "raised InvalidDomain"
+          behaviour:
+            claim_value:
+              None: "mixed"
+            function_value:
+              None: "propagates"
+              nan: "raises"
+          said:
+            claim_value:
+              None: "at claim_value = None f gave None back"
+            function_value:
+              None: "at function_value = None f gave None back"
+              nan: "at function_value = nan f raised InvalidDomain"
+          mixed:
+            claim_value:
+              None:
+                propagates: "claim_value = None, function_value = None"
+                raises: "claim_value = None, function_value = nan"
+                drops: "claim_value = None, function_value = 2.5e+299"
+          raised:
+            claim_value:
+              None: "InvalidDomain"
+          means: "missing for function_value (unannotated) means nan"
+          origin:
+            claim_value:
+              absent: "listed"
+            function_value:
+              absent: "type"
+              missing: "type"
+        mathema.routes_attempted: "routes attempted, derive: underivable (bound function s (source_of) is not derivable, likely reason: unsupported-construct: unsupported-attribute (line 3), an expression form the derive vocabulary doesn't cover yet); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
+        mathema.let_warning:
+          - "let s = claims.support.source_of calls third-party code whose effects mathema cannot establish, in the same way as importing it and calling it directly would"
+    - name: "missing[claim_value]"
+      statement: "missing(f, claim_value) propagates"
+      verdict: "falsified"
+      n: 1
+      counterexample: "f(claim_value=nan, function_value=3.64e+299) raises InvalidDomain; with claim_value=5e+299 it returns PseudoInfinity(value=5e+299, source='..."
+      note: "default: claim_value has no annotation, so it may be nan; f raises instead: nan in, InvalidDomain. (i) if the raise is intended, state: missing(f, claim_value) raises(InvalidDomain)\n(ii) if not, make f give nan back\n(iii) to accept it as a discovery, run: mathema accept mathema.records.resolve_pseudo_infinity missing[claim_value] --as discovery --corrected \"missing(f, claim_value) raises(InvalidDomain)\""
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "missing"
+          parameter: "claim_value"
+          evidence: "confirmed on the 252 draws of claim_level_wins"
+          behaviour: "propagates"
+          source: "default"
+          reason: "default: claim_value has no annotation, so it may be nan; f raises instead: nan in, InvalidDomain"
+          next: "(i) if the raise is intended, state: missing(f, claim_value) raises(InvalidDomain)\n(ii) if not, make f give nan back\n(iii) to accept it as a discovery, run: mathema accept mathema.records.resolve_pseudo_infinity missing[claim_value] --as discovery --corrected \"missing(f, claim_value) raises(InvalidDomain)\""
+        mathema.surface: "mathema"
+    - name: "missing[function_value]"
+      statement: "missing(f, function_value)"
+      verdict: "falsified"
+      n: 2
+      counterexample: "f(claim_value=1e+294, function_value=nan) returns PseudoInfinity(value=9.99999999999999..."
+      note: "f has no single policy for a missing function_value. at claim_value = None, function_value = nan f raised InvalidDomain; at claim_value = 1e+294, function_value = nan it returns a value no fill of the hole changes. give each case a premise on another parameter that tells them apart, or make f treat a missing function_value one way"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "missing"
+          parameter: "function_value"
+          evidence: "confirmed on the draws of claim_level_wins and function_level_next"
+          source: "observed"
+          reason: "f has no single policy for a missing function_value"
+          next: "give each case a premise on another parameter that tells them apart, or make f treat a missing function_value one way"
+          sentence: "f has no single policy for a missing function_value"
+          said: "at claim_value = None, function_value = nan f raised InvalidDomain; at claim_value = 1e+294, function_value = nan it returns a value no fill of the hole changes"
+        mathema.surface: "mathema"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The pseudo-infinity that applies to a claim's computation, by precedence claim > function > environment (P6). None means no level set one: the computation runs to the number representation's own maximum (`sys.float_info.max` for float64) and every consumer keeps its default."
+      basis: "documented; the author's stated purpose"
+    - step: "evidence"
+      claim: "let v = claims.support.value_of, for claim_value in [1.0, 1e+300] : float|absent|missing, function_value in [1.0, 1e+300] : float|absent|missing, v(f(claim_value, function_value)) = claim_value"
+      basis: "probed, n=252"
+    - step: "evidence"
+      claim: "let s = claims.support.source_of, for claim_value in {absent}, function_value in [1.0, 1e+300] : float|absent|missing, s(f(claim_value, function_value)) = \"function\""
+      basis: "probed, n=254"
+    - step: "refutation"
+      claim: "NOT (missing(f, claim_value) propagates)"
+      basis: "counterexample f(claim_value=nan, function_value=3.64e+299) raises InvalidDomain; with claim_value=5e+299 it returns PseudoInfinity(value=5e+299, source='..."
+    - step: "refutation"
+      claim: "NOT (absent(f, claim_value))"
+      basis: "counterexample f(claim_value=None, function_value=6.16e+298) returns PseudoInfinity(value=6.16332508376128..."
+    - step: "refutation"
+      claim: "NOT (missing(f, function_value))"
+      basis: "counterexample f(claim_value=1e+294, function_value=nan) returns PseudoInfinity(value=9.99999999999999..."
+    - step: "refutation"
+      claim: "NOT (absent(f, function_value))"
+      basis: "counterexample f(claim_value=7.46e+299, function_value=None) returns PseudoInfinity(value=7.46128874629172..."
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema._float_text.exact_float_text, mathema.records._checked_magnitude"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "PseudoInfinity"
+      kind: "class"
+      key: "mathema.records.PseudoInfinity"
+      file: "mathema/records.py"
+      line: 323
+      form: "py:57f200dc6471"
+      reaches:
+        - key: "lib:python"
+          kind: "interpreter"
+          form: "lib:python==3.12"
+        - key: "mathema._float_text.exact_float_text"
+          kind: "function"
+          form: "py:caceb29f2d74"
+        - key: "mathema.records.pseudo_infinity_range"
+          kind: "function"
+          form: "py:c17818842cb9"
+      chain: "code:2b119c283ff1|library:e3b0c44298fc|interpreter:287c26325cfc"
+    - name: "_checked_magnitude"
+      kind: "function"
+      key: "mathema.records._checked_magnitude"
+      file: "mathema/records.py"
+      line: 349
+      form: "py:b4c7e8f3955d"
+      reaches: []
+      chain: "code:40c9ed0b8560|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "unverified"
+    - name: "environment_pseudo_infinity"
+      kind: "function"
+      key: "mathema.records.environment_pseudo_infinity"
+      file: "mathema/records.py"
+      line: 362
+      form: "py:a2f1458edcf0"
+      reaches:
+        - key: "mathema.records._checked_magnitude"
+          kind: "function"
+          form: "py:b4c7e8f3955d"
+      chain: "code:a078b4df05b9|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "current"
+  meta:
+    mathema.effects:
+      line: "environment_pseudo_infinity reads os.environ"
+      sites:
+        - "environment_pseudo_infinity reads os.environ"
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    notes: "A claim value that is a `(lo, hi)` pair states both sides and passes through as written."
+    mathema.intent_provenance: "declared"

@@ -1,0 +1,236 @@
+# machine record; binds to form py:c28da541cb64
+mathema.records.statement_text:
+  schema_version: "0.3.0"
+  name: "statement_text"
+  signature: "(relation: 'str', lhs: 'str', rhs: 'str | None') -> 'str'"
+  intent: "The one raw claim-statement spelling: predicate forms (`raises(...)` and the domain-safety trio) render as calls, everything else as `lhs relation rhs`. Every producer of a raw statement (adjudication's Probe.statement, the declared-layer writer) goes through here, so a domain-safety claim can never again render as the drifted `\"x is_pole_safe \"` in one place and `\"is_pole_safe(x)\"` in another."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:c28da541cb64"
+    sig: "178023ae4a09"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "b9e915a84ede"
+    pin: "none"
+    integrity: "v2:2c8a0b559ba47695"
+  math: null
+  claims:
+    - name: "absent[rhs]"
+      statement: "absent(f, rhs) drops"
+      verdict: "holds"
+      n: 1
+      note: "observed: rhs is str | None, so f promised to take None; f drops it (None in, \".日c.  None\" out) on 1 call"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "absent"
+          parameter: "rhs"
+          evidence: "confirmed on 1 call"
+          behaviour: "drops"
+          source: "observed"
+          reason: "observed: rhs is str | None, so f promised to take None; f drops it (None in, \".日c.  None\" out) on 1 call"
+        mathema.surface: "mathema"
+    - name: "dependencies_current"
+      verdict: "unknown"
+      note: "not checked, no record: mathema.routes.examine_predicates, mathema.routes.output_predicates, mathema.routes.registered_predicates; state claims about it and run mathema verify"
+      sketch: "not checked, no record: mathema.routes.examine_predicates, mathema.routes.output_predicates, mathema.routes.registered_predicates"
+      route: "derive"
+      authored:
+        surface: "builtin"
+      meta:
+        mathema.surface: "builtin"
+        mathema.chain_unrecorded:
+          - "mathema.routes.examine_predicates"
+          - "mathema.routes.output_predicates"
+          - "mathema.routes.registered_predicates"
+    - name: "infix_relations"
+      statement: "for relation in {\"!=\", \"<\", \"<=\", \"==\", \">\", \">=\", \"~=\"}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) = lhs + \" \" + relation + \" \" + rhs"
+      verdict: "holds"
+      n: 256
+      note: "lhs in L[unicode] (entry point mathema_language.text:UNICODE), rhs in L[unicode] (entry point mathema_language.text:UNICODE); the claim excludes absence, which rhs's type str | None admits; the claim no longer covers rhs = None; derive cannot read lhs, rhs, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        relation:
+          base_type: "R"
+          pieces:
+            - set:
+                - "!="
+                - "<"
+                - "<="
+                - "=="
+                - ">"
+                - ">="
+                - "~="
+          excluded: []
+          explicit_type: false
+        lhs:
+          base_type: "L"
+          pieces:
+            - language: "unicode"
+          excluded: []
+          explicit_type: true
+        rhs:
+          base_type: "L"
+          pieces:
+            - language: "unicode"
+          excluded: []
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "relation~U{!=, <, <=, ==, >, >=, ~=}, lhs~L[unicode], rhs~L[unicode], seed=20260718, n=256"
+        mathema.confidence:
+          score: 4.5
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 0
+            params: 1
+            wide_domain: 0
+            float_extremes: 0
+            language: 3
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read lhs, rhs, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          lhs:
+            - name: "unicode"
+              source: "entry point mathema_language.text:UNICODE"
+              level: "alphabet"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "unicode"
+                level: "alphabet"
+          rhs:
+            - name: "unicode"
+              source: "entry point mathema_language.text:UNICODE"
+              level: "alphabet"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "unicode"
+                level: "alphabet"
+        mathema.surface: "declared"
+    - name: "safety_predicates_as_calls"
+      statement: "for relation in {\"is_number_set_safe\", \"is_overflow_safe\", \"is_pole_safe\"}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) = relation + \"(\" + lhs + \")\""
+      verdict: "holds"
+      n: 256
+      note: "lhs in L[unicode] (entry point mathema_language.text:UNICODE), rhs in L[unicode] (entry point mathema_language.text:UNICODE); the claim excludes absence, which rhs's type str | None admits; the claim no longer covers rhs = None; derive cannot read lhs, rhs, a string or structured value from a language domain (it decides only a finite language, member by member), so the probe decided it by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        relation:
+          base_type: "R"
+          pieces:
+            - set:
+                - "is_number_set_safe"
+                - "is_overflow_safe"
+                - "is_pole_safe"
+          excluded: []
+          explicit_type: false
+        lhs:
+          base_type: "L"
+          pieces:
+            - language: "unicode"
+          excluded: []
+          explicit_type: true
+        rhs:
+          base_type: "L"
+          pieces:
+            - language: "unicode"
+          excluded: []
+          explicit_type: true
+      grammar: "mathema/language"
+      meta:
+        mathema.sampling: "relation~U{is_number_set_safe, is_overflow_safe, is_pole_safe}, lhs~L[unicode], rhs~L[unicode], seed=20260718, n=256"
+        mathema.confidence:
+          score: 4.5
+          stars: 2
+          max_stars: 5
+          n: 256
+          factors:
+            branches: 3
+            loops: 0
+            params: 1
+            wide_domain: 0
+            float_extremes: 0
+            language: 3
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read lhs, rhs, a string or structured value from a language domain (it decides only a finite language, member by member)); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.language:
+          lhs:
+            - name: "unicode"
+              source: "entry point mathema_language.text:UNICODE"
+              level: "alphabet"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "unicode"
+                level: "alphabet"
+          rhs:
+            - name: "unicode"
+              source: "entry point mathema_language.text:UNICODE"
+              level: "alphabet"
+              kind: "string"
+              schema:
+                type: "string"
+                language: "unicode"
+                level: "alphabet"
+        mathema.surface: "declared"
+  concepts: []
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "The one raw claim-statement spelling: predicate forms (`raises(...)` and the domain-safety trio) render as calls, everything else as `lhs relation rhs`. Every producer of a raw statement (adjudication's Probe.statement, the declared-layer writer) goes through here, so a domain-safety claim can never again render as the drifted `\"x is_pole_safe \"` in one place and `\"is_pole_safe(x)\"` in another."
+      basis: "documented; the author's stated purpose"
+    - step: "evidence"
+      claim: "for relation in {\"!=\", \"<\", \"<=\", \"==\", \">\", \">=\", \"~=\"}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) = lhs + \" \" + relation + \" \" + rhs"
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "for relation in {\"is_number_set_safe\", \"is_overflow_safe\", \"is_pole_safe\"}, lhs in L[unicode], rhs in L[unicode], f(relation, lhs, rhs) = relation + \"(\" + lhs + \")\""
+      basis: "probed, n=256"
+    - step: "evidence"
+      claim: "absent(f, rhs) drops"
+      basis: "probed, n=1"
+    - step: "gap"
+      claim: ""
+      basis: "not checked, no record: mathema.routes.examine_predicates, mathema.routes.output_predicates, mathema.routes.registered_predicates"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-11"
+    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+  dependencies:
+    - name: "examine_predicates"
+      kind: "function"
+      key: "mathema.routes.examine_predicates"
+      file: "mathema/routes.py"
+      line: 112
+      form: "py:cde38eec2f9b"
+      reaches:
+        - key: "mathema.routes.output_predicates"
+          kind: "function"
+          form: "py:f66b621c53a5"
+        - key: "mathema.routes.registered_predicates"
+          kind: "function"
+          form: "py:a304c2914895"
+      chain: "code:2b50ead72c01|library:e3b0c44298fc|interpreter:e3b0c44298fc"
+      freshness: "unverified"
+  meta:
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.premise_state: {}
+    mathema.invalidated_by: []
+    mathema.intent_provenance: "declared"
