@@ -196,18 +196,73 @@ def _passed_whole(text: str, sig_params: list, name: str) -> bool:
     return False
 
 
-def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
+def _stated_sequences(fn, facts) -> frozenset:
+    """Intent:
+        The parameters of `fn` stated to be sequences: by an annotation
+        (`list`, `tuple`, `Sequence[float]`, `np.ndarray`, `pd.Series`,
+        a `Vec`/`Mat` marker) or by a runtime type, the signature's own
+        or a claims-file entry's `runtime_types:`. A parameter the body
+        merely iterates or indexes is not among them.
+    """
+    from .analysis import signature_kinds
+    from .runtime_types import SEQUENCE_KINDS
+    from .types import shapes_from_signature
+    params = list(getattr(facts, "params", None) or ())
+    out = set()
+    if fn is not None:
+        try:
+            kinds = signature_kinds(fn, params)[0]
+        except Exception:
+            kinds = {}
+        out |= {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
+        try:
+            out |= set(shapes_from_signature(fn) or {})
+        except Exception:
+            pass
+    for p, found in (getattr(facts, "runtime_types", None) or {}).items():
+        if found and (found[0].kind in SEQUENCE_KINDS
+                      or found[0].adapter == "list"):
+            out.add(p)
+    return frozenset(out)
+
+
+def _bound_as_values(fn, facts, cj_domain: dict) -> list:
+    """Intent:
+        The parameters, sorted, that the body reads as sequences but
+        whose sequence kind no annotation or runtime type states, and
+        that the claim binds to a plain domain (a finite set or an
+        interval, no `^n`, no language): the claim binds their values.
+    """
+    from .probing import _classify_bound
+    stated = _stated_sequences(fn, facts)
+    out = []
+    for p, k in (getattr(facts, "param_kinds", None) or {}).items():
+        bound = (cj_domain or {}).get(p)
+        if (k not in SEQUENCE_KINDS or p in stated or bound is None
+                or getattr(bound, "dims", ())
+                or _classify_bound(bound) in ("language", "instances", "none")):
+            continue
+        out.append(p)
+    return sorted(out)
+
+
+def _bound_kinds(cj, kinds: dict, sig_params: list,
+                 stated: "frozenset | None" = None) -> dict:
     """Intent:
         The kind each parameter of a claim is drawn as. A parameter the
         claim binds to a finite set, an interval or a number set takes
         values from that binding, drawn as values rather than as f's
         mapping or container kind, where f's kind cannot hold the
-        binding's members: a mapping bound to numbers, or a sequence
-        whose name the claim never passes whole to f (`f([triggers,
-        "dependency"])` passes it as one element). A sequence passed
-        whole keeps its kind, its binding read as its element domain;
-        a language binding or a space (`[0, 1]^n`) keeps the kind it
-        names.
+        binding's members: a mapping bound to numbers, a sequence the
+        signature does not state to be one (`stated`, from
+        `_stated_sequences`; a body that iterates or indexes a
+        parameter makes it a sequence only by inference), or a stated
+        sequence whose name the claim never passes whole to f
+        (`f([triggers, "dependency"])` passes it as one element). A
+        stated sequence passed whole keeps its kind, its binding read
+        as its element domain; a language binding or a space (`[0,
+        1]^n`) keeps the kind it names. `stated=None` reads every
+        sequence kind as stated.
     """
     from .probing import _classify_bound
     from .runtime_types import SEQUENCE_KINDS
@@ -221,8 +276,10 @@ def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
             continue
         if k == "dict":
             out[p] = "unknown"
-        elif k in SEQUENCE_KINDS and not any(
-                _passed_whole(t, sig_params, p) for t in sides if t):
+        elif k in SEQUENCE_KINDS and (
+                (stated is not None and p not in stated)
+                or not any(_passed_whole(t, sig_params, p)
+                           for t in sides if t)):
             out[p] = "unknown"
     return out
 
@@ -10874,6 +10931,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {refused}",
             meta={"mathema.derive_status": "undecided"})
         return None
+    as_values = _bound_as_values(fn, facts, cj_domain)
+    if as_values:
+        # the body's lift reads each of these as a sequence, while the
+        # claim draws its value
+        names = ", ".join(as_values)
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=(f"{note}; the claim binds the value of {names}, which "
+                  f"the body reads as a sequence").lstrip("; "),
+            meta={"mathema.derive_status": "undecided"})
+        return None
     family_derive = family.routes().get("derive") if family is not None else None
     # literals a double does not read exactly reach only the ordinary
     # prover exactly (`exact_literal_text`); every other derive route
@@ -12042,28 +12110,25 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         verdict and witness are the same in every process.
     """
     from .probing import _pinned_float_env
-    kinds = _kinds_as_bound(fn, kinds, ctx.cj_domain)
+    kinds = _kinds_as_bound(fn, kinds, ctx.cj_domain,
+                            _stated_sequences(fn, facts))
     with _pinned_float_env():
         return _probe_stage(ctx, fn, facts, kinds, sampling)
 
 
-def _kinds_as_bound(fn, kinds: dict, cj_domain: dict) -> dict:
+def _kinds_as_bound(fn, kinds: dict, cj_domain: dict,
+                    stated: frozenset = frozenset()) -> dict:
     """Intent:
-        The kinds the probe draws with: an unannotated parameter the
-        body could read as a sequence, but which the claim binds to a
-        scalar real domain (`q in [0, 1]`, no `^n`), is drawn as the
-        scalar the claim states.
+        The kinds the probe draws with: a parameter the body could read
+        as a sequence, but which is not stated to be one (`stated`, from
+        `_stated_sequences`) and which the claim binds to a scalar real
+        domain (`q in [0, 1]`, no `^n`), is drawn as the scalar the
+        claim states.
     """
-    try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return kinds
     out = dict(kinds)
     for p, kind in kinds.items():
         bound = (cj_domain or {}).get(p)
-        param = params.get(p)
-        if (kind not in SEQUENCE_KINDS or bound is None or param is None
-                or param.annotation is not inspect.Parameter.empty):
+        if kind not in SEQUENCE_KINDS or bound is None or p in stated:
             continue
         if getattr(bound, "dims", ()) or getattr(bound, "base_type", "R") not in ("R", "Z", "N"):
             continue
@@ -12215,7 +12280,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     cj_domain, extra, family = ctx.cj_domain, ctx.extra, ctx.family
-    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params))
+    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params),
+                               _stated_sequences(fn, facts))
     # the parameters drawn as plain values from their binding
     as_values = {p for p, k in drawn_kinds.items() if k != kinds.get(p)}
     kinds = drawn_kinds
