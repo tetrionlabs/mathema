@@ -179,19 +179,51 @@ def _yaml_safe_args(args) -> list:
     """Intent:
         A falsifying argument tuple as YAML-safe values a later run can
         replay exactly: numbers pass through, a complex value becomes
-        its coordinate spelling, sequences recurse.
+        its coordinate spelling, a set or frozenset becomes its members
+        under a `set` or `frozenset` tag, and sequences and mapping
+        values recurse.
     """
-    out = []
-    for v in args:
-        if isinstance(v, complex) and not isinstance(v, (int, float)):
-            # tagged, so a string witness that reads as a complex
-            # number (`"j"`) can never be mistaken for one
-            out.append({"complex": f"{v.real:g}{v.imag:+g}j"})
-        elif isinstance(v, (list, tuple)):
-            out.append(_yaml_safe_args(v))
-        else:
-            out.append(v)
-    return out
+    return [_yaml_safe_value(v) for v in args]
+
+
+def _yaml_safe_value(v):
+    """One argument value in the spelling `_yaml_safe_args` stores."""
+    if isinstance(v, complex) and not isinstance(v, (int, float)):
+        # tagged, so a string witness that reads as a complex
+        # number (`"j"`) can never be mistaken for one
+        return {"complex": f"{v.real:g}{v.imag:+g}j"}
+    if isinstance(v, (set, frozenset)):
+        # members in a fixed order, so the same set is stored the same
+        # way in every process whatever its iteration order
+        members = sorted((_yaml_safe_value(m) for m in v),
+                         key=lambda m: (type(m).__name__, repr(m)))
+        return {"frozenset" if isinstance(v, frozenset) else "set": members}
+    if isinstance(v, (list, tuple)):
+        return _yaml_safe_args(v)
+    if isinstance(v, dict):
+        return {k: _yaml_safe_value(x) for k, x in v.items()}
+    return v
+
+
+def _restored_value(v):
+    """A stored argument value read back: a tagged complex number or
+    set becomes the value it spells, and lists and mapping values
+    recurse."""
+    if isinstance(v, dict) and len(v) == 1:
+        (tag, inner), = v.items()
+        if tag == "complex" and isinstance(inner, str):
+            return complex(inner)
+        if tag in ("set", "frozenset") and isinstance(inner, list):
+            members = [_restored_value(m) for m in inner]
+            try:
+                return set(members) if tag == "set" else frozenset(members)
+            except TypeError:
+                return v
+    if isinstance(v, list):
+        return [_restored_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _restored_value(x) for k, x in v.items()}
+    return v
 
 
 _MAX_CORNERS = 64
@@ -472,8 +504,9 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         than misapplied.
 
     Notes:
-        A complex witness is stored tagged, `{"complex": "1+2j"}`. An
-        older record stored it as a bare string, which is read as a
+        A complex witness is stored tagged, `{"complex": "1+2j"}`, and a
+        set as `{"set": [...]}` or `{"frozenset": [...]}`. An
+        older record stored a complex witness as a bare string, which is read as a
         complex number only where the parameter's kind can hold one:
         a string parameter's `"j"` stays the string it was.
     """
@@ -485,8 +518,8 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         restored = []
         for i, v in enumerate(stored):
             kind = kinds[i] if kinds is not None and i < len(kinds) else None
-            if isinstance(v, dict) and set(v) == {"complex"}:
-                restored.append(complex(v["complex"]))
+            if isinstance(v, (dict, list)):
+                restored.append(_restored_value(v))
                 continue
             if (isinstance(v, str) and ("j" in v or "J" in v)
                     and kind not in ("string", "dict", "bool", "table")
