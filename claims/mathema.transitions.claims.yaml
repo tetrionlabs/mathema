@@ -120,8 +120,14 @@ mathema.transitions.describe:
       statement: 'let a be {"proven", "holds", "unknown", "skipped", "falsified"}, let b be {"proven", "holds", "unknown", "skipped", "falsified"}, a + " to " + b in f({"kind": "weakened", "from": a, "to": b, "cause": "nothing changed"})'
     - name: names_the_cause
       statement: 'let c be {"this function changed", "a callee changed", "nothing changed"}, "(" + c + ")" in f({"kind": "weakened", "from": "proven", "to": "unknown", "cause": c})'
-    - name: contradiction_only_for_a_regression_with_nothing_changed
-      statement: 'let k be {"weakened", "strengthened", "fixed"}, let c be {"this function changed", "a callee changed", "nothing changed"}, "two runs disagree" not in f({"kind": k, "from": "proven", "to": "unknown", "cause": c})'
+    - name: a_rise_is_never_called_a_disagreement
+      statement: 'let k be {"strengthened", "fixed"}, let c be {"this function changed", "a callee changed", "nothing changed"}, "two runs disagree" not in f({"kind": k, "from": "unknown", "to": "proven", "cause": c})'
+    - name: a_fall_to_unknown_with_a_cause_is_no_disagreement
+      statement: 'let c be {"this function changed", "a callee changed"}, "two runs disagree" not in f({"kind": "weakened", "from": "proven", "to": "unknown", "cause": c})'
+    - name: a_fall_to_unknown_with_nothing_changed_is_suspicious
+      statement: 'let a be {"proven", "holds"}, "suspicious" in f({"kind": "weakened", "from": a, "to": "unknown", "cause": "nothing changed"})'
+    - name: proven_to_holds_with_nothing_changed_is_no_disagreement
+      statement: '"two runs disagree" not in f({"kind": "weakened", "from": "proven", "to": "holds", "cause": "nothing changed"})'
     - name: regression_with_a_cause_is_no_contradiction
       statement: 'let c be {"this function changed", "a callee changed"}, "two runs disagree" not in f({"kind": "regressed", "from": "proven", "to": "falsified", "cause": c})'
     - name: regression_with_nothing_changed_says_so

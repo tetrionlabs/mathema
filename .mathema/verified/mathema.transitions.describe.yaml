@@ -12,16 +12,127 @@ mathema.transitions.describe:
     tier: 2
     source_available: true
     pure: true
-    claims_fingerprint: "dc974c5dcd60"
+    claims_fingerprint: "55258345ffb9"
     pin: "none"
-    integrity: "v2:4d8ce686e9e88c53"
+    integrity: "v2:62acfbbe908bfaf7"
   math: null
   claims:
+    - name: "a_fall_to_unknown_with_a_cause_is_no_disagreement"
+      statement: "let c be {\"a callee changed\", \"this function changed\"}, \"two runs disagree\" not in f({\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
+      verdict: "holds"
+      n: 224
+      note: "derive cannot read membership in a language or a set, so `not in` is decided by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        c:
+          base_type: "R"
+          pieces:
+            - set:
+                - "a callee changed"
+                - "this function changed"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=224"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 224
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `not in` is decided by running the code); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
+    - name: "a_fall_to_unknown_with_nothing_changed_is_suspicious"
+      statement: "let a be {\"holds\", \"proven\"}, \"suspicious\" in f({\"kind\": \"weakened\", \"from\": a, \"to\": \"unknown\", \"cause\": \"nothing changed\"})"
+      verdict: "holds"
+      n: 224
+      note: "derive cannot read membership in a language or a set, so `in` is decided by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        a:
+          base_type: "R"
+          pieces:
+            - set:
+                - "holds"
+                - "proven"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=224"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 224
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `in` is decided by running the code); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
+    - name: "a_rise_is_never_called_a_disagreement"
+      statement: "let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, let k be {\"fixed\", \"strengthened\"}, \"two runs disagree\" not in f({\"kind\": k, \"from\": \"unknown\", \"to\": \"proven\", \"cause\": c})"
+      verdict: "holds"
+      n: 224
+      note: "derive cannot read membership in a language or a set, so `not in` is decided by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      domain:
+        c:
+          base_type: "R"
+          pieces:
+            - set:
+                - "a callee changed"
+                - "nothing changed"
+                - "this function changed"
+          excluded: []
+          explicit_type: false
+        k:
+          base_type: "R"
+          pieces:
+            - set:
+                - "fixed"
+                - "strengthened"
+          excluded: []
+          explicit_type: false
+      meta:
+        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=224"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 224
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `not in` is decided by running the code); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
     - name: "contradiction_only_for_a_regression_with_nothing_changed"
       statement: "let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, let k be {\"fixed\", \"strengthened\", \"weakened\"}, \"two runs disagree\" not in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
       verdict: "falsified"
-      n: 24
-      counterexample: "t = {'invalidated_by': -1.4964466833185526, 'chain_moved': -6.034269513256172}: 'two runs disagree' is in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
+      n: 26
+      counterexample: "t = {'invalidated_by': 3.5632471386789994, 'chain_moved': 3.5151620655637466, 'extra3': 3.159916073497266}: 'two runs disagree' is in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
       note: "derive cannot read membership in a language or a set, so `not in` is decided by running the code"
       route: "probe"
       authored:
@@ -47,12 +158,13 @@ mathema.transitions.describe:
           excluded: []
           explicit_type: false
       meta:
-        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=24"
+        mathema.membership: "repopulated-from-verified"
+        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=26"
         mathema.confidence:
-          score: 4.6
+          score: 4.7
           stars: 2
           max_stars: 5
-          n: 24
+          n: 26
           factors:
             branches: 3
             loops: 0
@@ -60,8 +172,9 @@ mathema.transitions.describe:
             wide_domain: 0
             float_extremes: 0
         mathema.counterexample_args:
-          - invalidated_by: -1.4964466833185526
-            chain_moved: -6.034269513256172
+          - invalidated_by: 3.5632471386789994
+            chain_moved: 3.5151620655637466
+            extra3: 3.159916073497266
         mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `not in` is decided by running the code); probe: falsified"
         mathema.derive_status: "unliftable"
         mathema.surface: "declared"
@@ -204,6 +317,31 @@ mathema.transitions.describe:
         mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `in` is decided by running the code); probe: holds"
         mathema.derive_status: "unliftable"
         mathema.surface: "declared"
+    - name: "proven_to_holds_with_nothing_changed_is_no_disagreement"
+      statement: "\"two runs disagree\" not in f({\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"holds\", \"cause\": \"nothing changed\"})"
+      verdict: "holds"
+      n: 224
+      note: "derive cannot read membership in a language or a set, so `not in` is decided by running the code"
+      route: "probe"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      meta:
+        mathema.sampling: "t~Dict(keys the body reads, else 1 to 4 generic keys; values~U(-10,10)⊔{0,±1,±.5,2,±1e-9,±1e6}[p=.3]), seed=20260718, n=224"
+        mathema.confidence:
+          score: 7.8
+          stars: 3
+          max_stars: 5
+          n: 224
+          factors:
+            branches: 3
+            loops: 0
+            params: 0
+            wide_domain: 0
+            float_extremes: 0
+        mathema.routes_attempted: "routes attempted, derive: underivable (derive cannot read membership in a language or a set, so `not in` is decided by running the code); probe: holds"
+        mathema.derive_status: "unliftable"
+        mathema.surface: "declared"
     - name: "regression_with_a_cause_is_no_contradiction"
       statement: "let c be {\"a callee changed\", \"this function changed\"}, \"two runs disagree\" not in f({\"kind\": \"regressed\", \"from\": \"proven\", \"to\": \"falsified\", \"cause\": c})"
       verdict: "holds"
@@ -287,15 +425,27 @@ mathema.transitions.describe:
     - step: "evidence"
       claim: "let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, \"(\" + c + \")\" in f({\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
       basis: "probed, n=224"
-    - step: "refutation"
-      claim: "NOT (let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, let k be {\"fixed\", \"strengthened\", \"weakened\"}, \"two runs disagree\" not in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c}))"
-      basis: "counterexample t = {'invalidated_by': -1.4964466833185526, 'chain_moved': -6.034269513256172}: 'two runs disagree' is in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
+    - step: "evidence"
+      claim: "let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, let k be {\"fixed\", \"strengthened\"}, \"two runs disagree\" not in f({\"kind\": k, \"from\": \"unknown\", \"to\": \"proven\", \"cause\": c})"
+      basis: "probed, n=224"
+    - step: "evidence"
+      claim: "let c be {\"a callee changed\", \"this function changed\"}, \"two runs disagree\" not in f({\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
+      basis: "probed, n=224"
+    - step: "evidence"
+      claim: "let a be {\"holds\", \"proven\"}, \"suspicious\" in f({\"kind\": \"weakened\", \"from\": a, \"to\": \"unknown\", \"cause\": \"nothing changed\"})"
+      basis: "probed, n=224"
+    - step: "evidence"
+      claim: "\"two runs disagree\" not in f({\"kind\": \"weakened\", \"from\": \"proven\", \"to\": \"holds\", \"cause\": \"nothing changed\"})"
+      basis: "probed, n=224"
     - step: "evidence"
       claim: "let c be {\"a callee changed\", \"this function changed\"}, \"two runs disagree\" not in f({\"kind\": \"regressed\", \"from\": \"proven\", \"to\": \"falsified\", \"cause\": c})"
       basis: "probed, n=224"
     - step: "evidence"
       claim: "let a be {\"holds\", \"proven\"}, \"two runs disagree\" in f({\"kind\": \"regressed\", \"from\": a, \"to\": \"falsified\", \"cause\": \"nothing changed\"})"
       basis: "probed, n=224"
+    - step: "refutation"
+      claim: "NOT (let c be {\"a callee changed\", \"nothing changed\", \"this function changed\"}, let k be {\"fixed\", \"strengthened\", \"weakened\"}, \"two runs disagree\" not in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c}))"
+      basis: "counterexample t = {'invalidated_by': 3.5632471386789994, 'chain_moved': 3.5151620655637466, 'extra3': 3.159916073497266}: 'two runs disagree' is in f({\"kind\": k, \"from\": \"proven\", \"to\": \"unknown\", \"cause\": c})"
     - step: "gap"
       claim: ""
       basis: "not checked, no record: mathema.transitions.needs_risk_signoff"
@@ -303,7 +453,7 @@ mathema.transitions.describe:
     generated_by: "mathema 0.6.4"
     CDD_spec_version: "0.3.0"
     date: "2026-11-11"
-    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+    commit: "65c4e4b663a1720dc86cdb9151dfa664d35a5254"
   dependencies:
     - name: "classify_verdict"
       kind: "function"
@@ -332,5 +482,6 @@ mathema.transitions.describe:
       sites: []
       writes: []
     mathema.premise_state: {}
-    mathema.invalidated_by: []
+    mathema.invalidated_by:
+      - "claims"
     mathema.intent_provenance: "declared"
