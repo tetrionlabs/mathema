@@ -276,12 +276,15 @@ def gate(claims, *, strict: bool,
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
-    Rules: a falsified claim fails in every mode; an unknown claim
-    fails unless its name is in `accepted_risk` (then it is `owned`,
-    and only strict refuses it); strict additionally fails skipped
-    claims; an unresolved global name fails in every mode. A claim
-    whose fall to unknown or skipped carries a risk sign-off
-    (`transitions.risk_signed`) is accepted risk too. Each open
+    Rules: a falsified claim fails in every mode; an unknown or
+    skipped claim whose name is in `accepted_risk` is `owned`, and
+    passes in every mode, counted in the summary as accepted risk; an
+    unknown claim nobody accepted fails in every mode; strict
+    additionally fails a skipped claim nobody accepted; an unresolved
+    global name fails in every mode. A claim whose fall to unknown or
+    skipped carries a risk sign-off (`transitions.risk_signed`), and
+    one stored as `skipped:unknown_but_accepted`, is accepted risk
+    too. Each open
     transition fails, warns or passes by its kind and the mode
     (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None), a
     supported claim fallen to unknown or skipped failing in both modes
@@ -367,6 +370,8 @@ def gate(claims, *, strict: bool,
             else:
                 r.unknown += 1
                 r.unknown_reasons.append((name, _first_sentence(note)))
+        elif kind == "skipped" and name in accepted_risk:
+            r.owned += 1
         elif kind == "skipped":
             r.skipped += 1
             r.misspecified += verdict == "skipped:misspecified"
@@ -399,18 +404,14 @@ def gate(claims, *, strict: bool,
                  for n, why in r.unknown_reasons]
         r.problems.append("; ".join(named) if named else
                           f"{r.unknown} unknown claim(s)")
-    if strict and (r.skipped or r.owned):
-        # accepted risk is visible relaxation, not laundering: lenient
-        # proceeds past it, strict still refuses it
-        if r.skipped:
-            # a claim mathema could not run is unknown, with its reason,
-            # and one misspecified as stated says so
-            named = [f"{n} {word}: {why}" if why else f"{n} {word}"
-                     for n, word, why in r.skipped_reasons]
-            r.problems.append("; ".join(named) if named else
-                              f"{r.skipped} unknown claim(s)")
-        if r.owned:
-            r.problems.append(f"{r.owned} accepted-risk claim(s)")
+    if strict and r.skipped:
+        # a claim mathema could not run is unknown, with its reason,
+        # and one misspecified as stated says so; accepted risk is
+        # counted in the summary and fails no mode
+        named = [f"{n} {word}: {why}" if why else f"{n} {word}"
+                 for n, word, why in r.skipped_reasons]
+        r.problems.append("; ".join(named) if named else
+                          f"{r.skipped} unknown claim(s)")
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r

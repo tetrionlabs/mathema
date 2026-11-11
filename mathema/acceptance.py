@@ -13,7 +13,7 @@ the verdict it addresses. The vocabulary is deliberately small:
   (it was a decision about a different function).
 - `unknown` accepts as **risk**: the claim couldn't be established and
   someone owns that. The verdict becomes `skipped:unknown_but_accepted`;
-  strict mode still refuses it, lenient mode lets work proceed.
+  verify passes it in every mode and names it as accepted risk.
 - `skipped` accepts as **risk**: the structural blocker is understood.
 - `falsified` (or `invalidated`) accepts only as a **discovery**: the
   claim was wrong about the world. Accepting it retires the claim into
@@ -1039,7 +1039,7 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
             plan["new_verdict"] = "skipped:unknown_but_accepted"
             plan["actions"].append(
                 f"reclassify {claim_name}: unknown -> skipped:unknown_but_accepted "
-                "(strict mode still refuses it; lenient proceeds)")
+                "(verify passes it in every mode, named as accepted risk)")
         else:
             plan["actions"].append(f"annotate {claim_name} as accepted risk")
         return plan
@@ -1438,8 +1438,8 @@ def describe_acceptance(plan: dict) -> list:
                      f", bound to form {accepted.get('form')}")
     elif as_ == "risk":
         if plan.get("new_verdict"):
-            lines.append(f"its verdict becomes {plan['new_verdict']}; strict "
-                         "mode still refuses it, lenient mode proceeds")
+            lines.append(f"its verdict becomes {plan['new_verdict']}; verify "
+                         "passes it in every mode, named as accepted risk")
         else:
             lines.append("the claim is recorded as an accepted risk")
     elif as_ == "historical":
