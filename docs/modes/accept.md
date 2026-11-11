@@ -8,6 +8,7 @@ human act, never exposed to agent tooling or any MCP surface.
 ```bash
 mathema accept KEY CLAIM [CLAIM ...] --as evidence|risk|discovery [--by NAME] [--note TEXT]
 mathema accept KEY --as reconciled [--from OLD_KEY]
+mathema accept KEY CLAIM [CLAIM ...] --transition [--by NAME] [--note TEXT]
 ```
 
 Three acceptances cover the everyday loop (`evidence`, `risk`,
@@ -15,7 +16,8 @@ Three acceptances cover the everyday loop (`evidence`, `risk`,
 section below: `historical` and `superseded` retire a claim with its
 history intact, `reconciled` restamps a record after a merge or rebase,
 and `trusted` records testimony from a source you vouch for. `--intent`
-and `--concepts` accept the function's stated intent and concept tags.
+and `--concepts` accept the function's stated intent and concept tags,
+and `--transition` acknowledges a claim's move since an earlier run.
 
 ## Arguments
 
@@ -27,6 +29,7 @@ and `--concepts` accept the function's stated intent and concept tags.
 | `--all` | with `--as reconciled` and no key: reconcile every record whose checksum no longer matches, in one act |
 | `--from OLD_KEY` | with `--as reconciled`: rename `OLD_KEY`'s record to `KEY`, for a function that moved (see [moved functions](#moved-functions-as-reconciled-from)) |
 | `--accept-form-change` | with `--from`: rename even though the record's form hash differs from the live function's |
+| `--transition` | acknowledge the open transitions on the named claims (a claim that regressed, weakened, strengthened or was fixed since an earlier run): the gate stops acting on them, and the record keeps who acknowledged each and when. Takes no `--as` |
 | `--by` | who decided (default: `git config user.name`) |
 | `--note` | free-text rationale, kept in the record |
 | `--yes` | skip the confirmation prompt (for scripted use by a human; never wire this into agent tooling) |
@@ -123,6 +126,20 @@ There is deliberately **no accepting a bug**: if the code is wrong,
 fix the code, the recorded counterexample replays on every
 re-adjudication until the claim proves, so a falsified claim can't be
 waved through.
+
+## Acknowledging a transition
+
+A claim whose verdict is weaker than in the previous record carries the
+move beside it, see [transitions](../verdicts.md#transitions-and-what-invalidated-names).
+`verify` fails on an open `regressed` move in every mode and on an open
+`weakened` one in strict mode, and each failing line ends with the
+command that acknowledges it. Acknowledging says a person has seen the
+move and the fresh verdict stands as it is; it does not change the
+verdict, and a falsified claim still fails the gate as falsified. The
+acknowledgement is kept on the transition (`acknowledged: {at, by,
+note}`), and the record drops the transition on the run after it
+closes. A move the claim recovers from on its own, by coming back to
+the level it fell from, closes without anyone's hand.
 
 ## Machine-readable acceptance
 

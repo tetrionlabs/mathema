@@ -225,7 +225,7 @@ def test_check_format_json_shape(tmp_path):
     assert set(doc.keys()) == {"tool", "version", "CDD_spec_version", "functions",
                                "totals"}
     assert doc["tool"] == "mathema"
-    assert doc["CDD_spec_version"] == "0.2.0"
+    assert doc["CDD_spec_version"] == "0.3.0"
     names = {f["name"] for f in doc["functions"]}
     assert names == {"funcs.add", "funcs.neg"}
     for f in doc["functions"]:
@@ -316,7 +316,7 @@ def test_check_format_md_is_a_table(tmp_path):
     assert lines[1].startswith("|---|")
     assert any("`funcs.add`" in ln for ln in lines)
     assert any("`funcs.neg`" in ln for ln in lines)
-    assert "cdd spec v0.2.0" in r.stdout
+    assert "cdd spec v0.3.0" in r.stdout
 
 
 # ---------------------------------------------------------------------------

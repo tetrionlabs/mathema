@@ -116,7 +116,7 @@ Three things, deliberately together: the run fails (exit 1, so a CI
 gate or an agent loop stops), the message names both hashes and the two
 ways forward, and **the record is byte-identical to before the edit**.
 The verified baseline never moves onto code a human did not sanction,
-so a failing loop cannot accumulate `invalidated` noise against an
+so a failing loop cannot pile up regressions against an
 implementation that was never supposed to change.
 
 A function can be locked before it has any record or declared claim.

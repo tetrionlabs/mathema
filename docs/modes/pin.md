@@ -109,6 +109,19 @@ acceptance:
   keys: [a3f2c1]               # optional allowlist of key ids
 ```
 
+The same file sets what the gate does with an unacknowledged
+[transition](../verdicts.md#transitions-and-what-invalidated-names) of
+each kind, one action for both modes or one per mode, where an action
+is `fail`, `warn` or `pass`; the defaults are `regressed` fails in both
+modes, `weakened` fails strict and warns lenient, `strengthened` and
+`fixed` pass:
+
+```yaml
+transitions:
+  weakened: fail
+  regressed: {strict: fail, lenient: warn}
+```
+
 Enforced twice. At **write time**, an acceptance the policy forbids is
 refused: no credential when one is required, a static PIN where only
 stronger methods are allowed, a key outside the allowlist. At

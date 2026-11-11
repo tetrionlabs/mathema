@@ -211,6 +211,7 @@ def _check_rows(args) -> list[dict]:
                      "proven": proven, "holds": holds, "refuted": report.refuted,
                      "falsified": report.falsified,
                      "invalidated": report.invalidated,
+                     "transitions": report.transitions,
                      "unverifiable": report.skipped + report.owned,
                      "skipped": report.skipped,
                      "misspecified": report.misspecified,
@@ -2871,6 +2872,47 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
     return 0
 
 
+def _accept_transition(args, by, as_json: bool) -> int:
+    """`mathema accept KEY CLAIM... --transition`: acknowledge the open
+    transitions on the named claims, printing them first and writing
+    nothing without a yes (JSON mode: a plan unless --yes)."""
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_transition_acknowledgement,
+                             plan_transition_acknowledgement)
+    if args.as_:
+        _bad_argument("mathema accept: --transition takes no --as")
+    if not args.key or not args.claims:
+        _bad_argument("mathema accept: --transition needs a key and the "
+                      "claims whose transitions to acknowledge")
+    try:
+        plan = plan_transition_acknowledgement(
+            args.root, args.key, list(dict.fromkeys(args.claims)),
+            by=by, note=args.note)
+    except AcceptanceError as e:
+        code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
+        if as_json:
+            _emit_json({"kind": "transition", "error": str(e)},
+                       getattr(args, "output", None))
+            return code
+        print(f"cannot accept: {e}")
+        return code
+    if as_json:
+        written = apply_transition_acknowledgement(plan) if args.yes else []
+        _emit_json({"kind": "transition", "key": plan["key"],
+                    "transitions": plan["lines"], "applied": bool(args.yes),
+                    "written": written}, getattr(args, "output", None))
+        return 0
+    print(f"acknowledge on {plan['key']}" + (f", by {by}" if by else "") + ":")
+    for line in plan["lines"]:
+        print(line)
+    if not args.yes and not _confirmed(1):
+        print("nothing written")
+        return 1
+    apply_transition_acknowledgement(plan)
+    print("written.")
+    return 0
+
+
 def cmd_accept(args) -> int:
     """The human decision verb: annotate adjudicated claims of one
     function with an acceptance (`--as evidence | risk | discovery`).
@@ -2890,6 +2932,8 @@ def cmd_accept(args) -> int:
     if args.intent or args.concepts or args.dismiss_concepts:
         return _accept_context(args, by)
     as_json = getattr(args, "format", "text") == "json"
+    if getattr(args, "transition", False):
+        return _accept_transition(args, by, as_json)
     if getattr(args, "from_key", None):
         return _accept_rename(args, by, as_json)
     if getattr(args, "accept_form_change", False):
@@ -3694,6 +3738,12 @@ def main(argv: list[str] | None = None) -> int:
                           "changed, top down, each answered y/n/e/q "
                           "(--yes prints the list, then accepts each; "
                           "--format json lists them and writes nothing)")
+    pac.add_argument("--transition", action="store_true",
+                     help="acknowledge the open verdict transitions on the "
+                          "named claims (a claim that weakened, regressed, "
+                          "strengthened or was fixed since an earlier run); "
+                          "the gate stops acting on them, and the record "
+                          "keeps who acknowledged each and when")
     pac.add_argument("--concepts", default=None, metavar="A,B",
                      help="accept concepts (tags) as documented, "
                           "comma-separated, lightweight, never gates")

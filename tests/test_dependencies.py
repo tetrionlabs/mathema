@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """One-deep dependency records in the verified spec: every callee with
-key, file, line, and form; freshness annotated at record time
-(current / stale / invalidated / unverified), composing so a caller
-never needs a deeper walk; an unchanged callee form means the
-callee's own claims still stand."""
+key, file, line, form and the chain it reaches; freshness annotated
+at record time (current / invalidated / unverified), a callee being
+invalidated when it changed since its own record, never because one
+of its claims regressed."""
 import importlib.util
 import sys
 import textwrap
@@ -97,7 +97,7 @@ def _read_deps(tmp_path, key):
     return {d["name"]: d for d in doc[key].get("dependencies") or []}
 
 
-def test_freshness_unverified_then_current_then_stale(tmp_path):
+def test_freshness_unverified_then_current_then_invalidated(tmp_path):
     root = str(tmp_path)
     mod = _load_module(tmp_path, "fresh_fixture", _SOURCE)
 
@@ -109,14 +109,15 @@ def test_freshness_unverified_then_current_then_stale(tmp_path):
     assert _read_deps(tmp_path, "fresh_fixture.caller")["helper"]["freshness"] == "current"
 
     # the callee's body changes: its recorded form no longer matches the
-    # live one, so the caller's next record marks the dependency stale.
+    # live one, so the caller's next record marks the dependency
+    # invalidated, changed since its record.
     mod2 = _load_module(tmp_path, "fresh_fixture",
                         _SOURCE.replace("return x + 1.0", "return x + 2.0"))
     _record_claims_free(mod2.caller, "fresh_fixture.caller", root)
-    assert _read_deps(tmp_path, "fresh_fixture.caller")["helper"]["freshness"] == "stale"
+    assert _read_deps(tmp_path, "fresh_fixture.caller")["helper"]["freshness"] == "invalidated"
 
 
-def test_freshness_propagates_a_callee_invalidation(tmp_path):
+def test_a_callee_regression_without_a_change_leaves_the_dependency_current(tmp_path):
     from mathema.records import Probe
     from mathema.spec import record
 
@@ -132,8 +133,10 @@ def test_freshness_propagates_a_callee_invalidation(tmp_path):
         Probe("nonneg", "f(x) >= 0", "unknown", route="derive")]),
         key="invfresh_fixture.helper", root=root)
 
+    # freshness only: the callee's code did not change, so the caller's
+    # dependency on it is current and the regression shows on the callee
     _record_claims_free(mod.caller, "invfresh_fixture.caller", root)
-    assert _read_deps(tmp_path, "invfresh_fixture.caller")["helper"]["freshness"] == "invalidated"
+    assert _read_deps(tmp_path, "invfresh_fixture.caller")["helper"]["freshness"] == "current"
 
 
 def test_check_populates_dependencies_end_to_end(tmp_path):
