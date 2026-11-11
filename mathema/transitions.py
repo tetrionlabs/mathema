@@ -139,6 +139,16 @@ def open_transitions(meta: dict) -> list[dict]:
             and not t.get("recovered")]
 
 
+def risk_signed(meta: dict) -> bool:
+    """Whether a person has accepted the risk of a fall on this claim
+    (`acknowledged: {as: risk}`) and the claim has not recovered: the
+    claim's accepted risk at the level it fell from, as `accept --as
+    risk` would make it."""
+    return any(isinstance(t, dict) and not t.get("recovered")
+               and (t.get("acknowledged") or {}).get("as") == "risk"
+               for t in (meta or {}).get("mathema.transitions") or [])
+
+
 def drop_move(transitions: list, frm: str, to: str, *, at: str) -> list[dict]:
     """The transitions without the latest open move from `frm` to `to`
     recorded at `at`: what a run takes back when it settles the claim
@@ -158,14 +168,18 @@ def carry(prior: list, new: "dict | None", verdict: str, *,
     """The transitions a claim carries after a run: the open ones from
     before, each marked recovered when the claim is back at or above
     the level it fell from, then the new one, unless it is the move
-    that recovered them. Acknowledged and
-    recovered transitions are dropped from the record at the next run
-    after they closed."""
+    that recovered them. A risk sign-off stays with them, open to the
+    gate as accepted risk, until the claim recovers. Recovered
+    transitions and plain acknowledgements are dropped from the record
+    at the next run after they closed."""
     out: list[dict] = []
     now = _RANK.get(classify_verdict(verdict or ""), -1)
     recovered = False
     for t in prior or []:
-        if not isinstance(t, dict) or t.get("acknowledged") or t.get("recovered"):
+        if not isinstance(t, dict) or t.get("recovered"):
+            continue
+        ack = t.get("acknowledged")
+        if ack and not (isinstance(ack, dict) and ack.get("as") == "risk"):
             continue
         t = dict(t)
         if t.get("kind") in ("regressed", "weakened") \

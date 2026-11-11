@@ -351,3 +351,60 @@ def test_verify_checks_a_risk_sign_off_against_the_acceptance_policy():
     entry["claims"][0]["meta"]["mathema.transitions"][0]["acknowledged"][
         "verified_by"] = {"method": "totp", "key": "k1"}
     assert acceptance_policy_problems("t.f", entry, policy) == []
+
+
+# a risk sign-off on a fall is the claim's accepted risk at the level
+# it fell from, kept on the record while the claim stays below it
+
+_SIGNED = {"at": "2026-11-11", "by": "aaron", "as": "risk", "level": "proven"}
+
+
+def test_a_risk_sign_off_on_a_fall_to_unknown_is_accepted_risk_under_lenient():
+    r = gate([_probe("unknown", _fell("unknown", acknowledged=_SIGNED))],
+             strict=False, transition_actions=load_actions("/nonexistent"))
+    assert r.problems == [] and r.owned == 1 and r.unknown == 0
+
+
+@pytest.mark.parametrize("to", ["unknown", "skipped"])
+def test_strict_refuses_a_signed_off_fall_as_accepted_risk(to):
+    r = gate([_probe(to, _fell(to, acknowledged=_SIGNED))], strict=True,
+             transition_actions=load_actions("/nonexistent"))
+    assert r.problems == ["1 accepted-risk claim(s)"] and r.owned == 1
+
+
+def test_a_recovered_risk_sign_off_accepts_nothing():
+    t = _fell("unknown", acknowledged=_SIGNED, recovered={"at": "2026-11-12"})
+    r = gate([_probe("unknown", t)], strict=False,
+             transition_actions=load_actions("/nonexistent"))
+    assert r.unknown == 1 and r.owned == 0
+
+
+def test_a_risk_sign_off_stays_while_the_claim_is_below_its_level():
+    signed = _fell("unknown", acknowledged=_SIGNED)
+    kept = carry([signed], None, "holds", commit=None, at="2026-11-12")
+    assert kept == [signed]
+    back = carry(kept, None, "proven", commit="def", at="2026-11-13")
+    assert back[0]["recovered"] == {"at": "2026-11-13", "commit": "def"}
+    assert carry(back, None, "proven", commit=None, at="2026-11-14") == []
+
+
+def test_a_signed_off_fall_stays_on_the_record_run_after_run(tmp_path):
+    from mathema.acceptance import (apply_transition_acknowledgement,
+                                    plan_transition_acknowledgement)
+    root = str(tmp_path)
+    _record(_square, "t.f", root, "proven")
+    _record(_square, "t.f", root, "unknown")
+    apply_transition_acknowledgement(
+        plan_transition_acknowledgement(root, "t.f", ["nonneg"], by="aaron"))
+    for _ in range(2):
+        _record(_square, "t.f", root, "unknown")
+        (t,) = _stored(root, "t.f")["meta"]["mathema.transitions"]
+        assert t["acknowledged"]["as"] == "risk" and "recovered" not in t
+    r = gate([_stored(root, "t.f")], strict=False,
+             transition_actions=load_actions(root))
+    assert r.problems == [] and r.owned == 1
+    _record(_square, "t.f", root, "proven")
+    (t,) = _stored(root, "t.f")["meta"]["mathema.transitions"]
+    assert "recovered" in t
+    _record(_square, "t.f", root, "proven")
+    assert "mathema.transitions" not in _stored(root, "t.f")["meta"]
