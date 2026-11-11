@@ -204,6 +204,11 @@ def total(xs: list) -> float:
     return t
 ```
 
+`xs` is annotated `list`, so its plain domain is the domain of each
+element. On an unannotated parameter the same binding is the domain of
+the value itself, and a sequence is written as a space
+(`[0, 10]^n`).
+
 ## Checking a docstring against the schema
 
 <!-- example: ema repl -->

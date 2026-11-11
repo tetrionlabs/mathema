@@ -467,6 +467,16 @@ stronger than you mean. The `for` clause narrows it:
 | `for s in L[unicode], f(f(s)) == f(s)` | every string, the empty string included: a language |
 | `for s in L[unicode] \ {""}, len(f(s)) >= 1` | a language with the empty string excluded |
 
+A plain domain, a finite set or an interval with no `^n`, binds the
+value of the parameter itself. On a parameter annotated as a sequence
+(`list`, `tuple`, `Sequence[float]`, `np.ndarray`, `pd.Series` and the
+like) or given a sequence runtime type, it is the domain of each
+element instead: on `def total(xs: list)`, `for xs in [0, 10]` draws
+lists whose elements lie in `[0, 10]`. A body that iterates or indexes
+an unannotated parameter does not make it a sequence, so on an
+unannotated `xs` the same binding draws numbers; write `[0, 10]^n` to
+range over sequences there.
+
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
 `ℝᵐˣⁿ` are the same space, as are `ℝ³ˣ³` and `ℝ^{3×3}` for a fixed size,
