@@ -210,6 +210,7 @@ def load_policy(root: str = ".") -> dict:
           require_verification: true   # every acceptance carries verified_by
           methods: [totp]              # omitting pin disables the static PIN
           keys: [a3f2c1]               # optional allowlist of key ids
+          accepted_risk_lifetime_days: 90   # a risk acceptance expires
     """
     import yaml
     path = os.path.join(root, ".mathema", "meta", "policy.yaml")
@@ -220,6 +221,22 @@ def load_policy(root: str = ".") -> dict:
         return {}
     section = data.get("acceptance")
     return section if isinstance(section, dict) else {}
+
+
+def accepted_risk_expiry(policy: dict, today: str) -> "str | None":
+    """The date a risk acceptance written on `today` (ISO) expires,
+    `accepted_risk_lifetime_days` after it, or None when the policy
+    sets no lifetime (a positive whole number of days):
+
+        acceptance:
+          accepted_risk_lifetime_days: 90
+    """
+    import datetime
+    days = (policy or {}).get("accepted_risk_lifetime_days")
+    if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+        return None
+    start = datetime.date.fromisoformat(str(today))
+    return (start + datetime.timedelta(days=days)).isoformat()
 
 
 def enforce_policy(attestation: dict | None, root: str = ".") -> None:

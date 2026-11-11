@@ -138,7 +138,7 @@ def _check_rows(args) -> list[dict]:
     from .authoring import retrieve
     from .records import claim_row
     from .spec import load_declared, load_verified
-    from .verify import (_accepted_risk, gate, split_unparseable_entry,
+    from .verify import (_accepted_risk, _lapsed_risk, gate, split_unparseable_entry,
                          unparseable_claim_message)
 
     _validate_trials_scale(args.trials_scale)
@@ -187,9 +187,11 @@ def _check_rows(args) -> list[dict]:
         # pre-adoption, it is nobody's claim. Risk a human accepted on
         # this key's verified record is honored here the same as in
         # the verify sweep.
-        accepted = _accepted_risk((verified_store.get(name) or {}).get("entry"))
+        stored_entry = (verified_store.get(name) or {}).get("entry")
+        accepted = _accepted_risk(stored_entry)
         report = gate(rec.probes, strict=args.strict,
                       accepted_risk=accepted,
+                      lapsed_risk=_lapsed_risk(stored_entry),
                       unresolved=rec.facts.unresolved, key=name)
         proven, holds = report.proven, report.holds
         total = (proven + holds + report.refuted + report.skipped

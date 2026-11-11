@@ -1030,6 +1030,11 @@ def plan_acceptance(root: str, key: str, claim_name: str, as_: str,
                                   "(--as risk)")
         accepted = {"as": "risk", "at": datetime.date.today().isoformat(),
                     "form": form}
+        from . import auth
+        expires = auth.accepted_risk_expiry(auth.load_policy(root),
+                                            accepted["at"])
+        if expires:
+            accepted["expires"] = expires
         if by:
             accepted["by"] = by
         if note:
@@ -1442,6 +1447,8 @@ def describe_acceptance(plan: dict) -> list:
                          "passes it in every mode, named as accepted risk")
         else:
             lines.append("the claim is recorded as an accepted risk")
+        if accepted.get("expires"):
+            lines.append(f"the acceptance expires on {accepted['expires']}")
     elif as_ == "historical":
         lines.append("the claim moves to historical, last supported at "
                      f"commit {accepted.get('commit') or 'unknown'}")
@@ -2264,10 +2271,14 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
         gate stops acting on it. A supported claim fallen to unknown or
         skipped (`transitions.needs_risk_signoff`) is a risk acceptance
         instead, `acknowledged: {at, by, note, as: risk, level}`, the
-        level being the verdict it fell from. Refused for a claim the
-        record does not hold, or one with no open transition.
+        level being the verdict it fell from, with `expires` when the
+        project's policy sets a lifetime (`auth.accepted_risk_expiry`).
+        A risk sign-off past its expiry date is open again and is
+        accepted again the same way. Refused for a claim the record
+        does not hold, or one with no open transition.
     """
     from .transitions import describe, needs_risk_signoff, open_transitions
+    today = datetime.date.today().isoformat()
     path, doc = _load_record(root, key)
     claims = {c.get("name"): c for c in doc[key].get("claims") or []}
     lines: list[str] = []
@@ -2276,7 +2287,7 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
         claim = claims.get(name)
         if claim is None:
             raise UnknownAcceptanceTarget(f"{key} has no claim {name!r}")
-        opened = open_transitions(claim.get("meta") or {})
+        opened = open_transitions(claim.get("meta") or {}, today)
         if not opened:
             raise AcceptanceError(f"{name} has no open transition to "
                                   f"acknowledge")
@@ -2303,6 +2314,8 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     path, doc = _load_record(plan["root"], plan["key"])
     entry = doc[plan["key"]]
     stamp: dict = {"at": datetime.date.today().isoformat()}
+    expires = auth.accepted_risk_expiry(auth.load_policy(plan.get("root", ".")),
+                                        stamp["at"])
     if plan.get("by"):
         stamp["by"] = plan["by"]
     if plan.get("note"):
@@ -2312,10 +2325,12 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     for claim in entry.get("claims") or []:
         if claim.get("name") not in plan["claims"]:
             continue
-        for t in open_transitions(claim.get("meta") or {}):
+        for t in open_transitions(claim.get("meta") or {}, stamp["at"]):
             t["acknowledged"] = dict(stamp)
             if needs_risk_signoff(t):
                 t["acknowledged"].update({"as": "risk", "level": t.get("from")})
+                if expires:
+                    t["acknowledged"]["expires"] = expires
     _restamp_integrity(entry)
     write_yaml(path, {plan["key"]: entry},
                header=f"machine record; transitions acknowledged on {plan['key']}")

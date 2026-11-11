@@ -86,6 +86,8 @@ class GateReport:
     # with rather than failing on
     transitions: int = 0
     warnings: list = field(default_factory=list)
+    # the lines for the risk acceptances past their expiry date
+    lapsed: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
@@ -272,7 +274,9 @@ _GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
          unresolved=(), key: "str | None" = None,
-         transition_actions: "dict | None" = None) -> GateReport:
+         transition_actions: "dict | None" = None,
+         lapsed_risk: "dict | None" = None,
+         today: "str | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
@@ -284,7 +288,12 @@ def gate(claims, *, strict: bool,
     global name fails in every mode. A claim whose fall to unknown or
     skipped carries a risk sign-off (`transitions.risk_signed`), and
     one stored as `skipped:unknown_but_accepted`, is accepted risk
-    too. Each open
+    too. A risk acceptance that has lapsed on `today` (the current
+    date when None) accepts nothing: a claim named in `lapsed_risk`
+    (name to expiry date), or a stored claim dict whose own acceptance
+    has lapsed, fails in every mode as unknown, its line naming the
+    date and the command that accepts it again, and a lapsed risk
+    sign-off is an open transition again. Each open
     transition fails, warns or passes by its kind and the mode
     (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None), a
     supported claim fallen to unknown or skipped failing in both modes
@@ -302,17 +311,19 @@ def gate(claims, *, strict: bool,
     # a line under a claim mathema suggested is part of the suggestion
     suggested = {_claim_fields(c)[0] for c in claims
                  if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
-    from .transitions import (action_for, describe, needs_risk_signoff,
-                              open_transitions, read_invalidated_verdict,
-                              risk_signed)
+    from .transitions import (action_for, describe, lapsed,
+                              needs_risk_signoff, open_transitions,
+                              read_invalidated_verdict, risk_signed)
     mode = "strict" if strict else "lenient"
+    today = today or _today()
+    lapsed_risk = dict(lapsed_risk or {})
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
         verdict, meta = read_invalidated_verdict(verdict, meta)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
-        for t in open_transitions(meta):
+        for t in open_transitions(meta, today):
             action = action_for(t, mode, transition_actions)
             if action == "pass":
                 continue
@@ -321,6 +332,12 @@ def gate(claims, *, strict: bool,
                     if needs_risk_signoff(t) else "acknowledge it")
             line = (f"{name} {describe(t)}; to {verb}, run: mathema "
                     f"accept {key or 'KEY'} {name} --transition")
+            if t.get("acknowledged"):
+                # a risk sign-off past its expiry date
+                line = (f"{name} accepted risk at {t.get('from')} expired "
+                        f"on {t['acknowledged'].get('expires')}; to accept "
+                        f"it again, run: mathema accept {key or 'KEY'} "
+                        f"{name} --transition")
             (r.problems if action == "fail" else r.warnings).append(line)
         statement = _claim_statement(c)
         label = next((lab for rel, lab in _GATE_LABELS.items()
@@ -349,6 +366,16 @@ def gate(claims, *, strict: bool,
         if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
+        own = c.get("accepted") if isinstance(c, dict) else None
+        expired = lapsed_risk.get(name) or (
+            str(own["expires"]) if (own or {}).get("as") == "risk"
+            and not own.get("stale") and lapsed(own, today) else None)
+        if expired and kind in ("unknown", "skipped"):
+            r.unknown += 1
+            r.lapsed.append(
+                f"{name} accepted risk expired on {expired}; to accept it "
+                f"again, run: mathema accept {key or 'KEY'} {name} --as risk")
+            continue
         if verdict == "skipped:unknown_but_accepted":
             # the stored form of an unknown a person accepted as risk
             r.owned += 1
@@ -361,7 +388,7 @@ def gate(claims, *, strict: bool,
             r.holds += 1
         elif kind == "falsified":
             r.falsified += 1
-        elif kind in ("unknown", "skipped") and risk_signed(meta):
+        elif kind in ("unknown", "skipped") and risk_signed(meta, today):
             # a fall a person accepted at the level it fell from
             r.owned += 1
         elif kind == "unknown":
@@ -402,8 +429,10 @@ def gate(claims, *, strict: bool,
         # (mathema accept --as risk)
         named = [f"{n} unknown: {why}" if why else f"{n} unknown"
                  for n, why in r.unknown_reasons]
-        r.problems.append("; ".join(named) if named else
-                          f"{r.unknown} unknown claim(s)")
+        if named or r.unknown > len(r.lapsed):
+            r.problems.append("; ".join(named) if named else
+                              f"{r.unknown - len(r.lapsed)} unknown claim(s)")
+        r.problems.extend(r.lapsed)
     if strict and r.skipped:
         # a claim mathema could not run is unknown, with its reason,
         # and one misspecified as stated says so; accepted risk is
@@ -442,18 +471,56 @@ def _first_sentence(note) -> str:
     return head[:120]
 
 
-def _accepted_risk(entry: dict | None) -> frozenset:
+def _risk_acceptances(entry: dict | None) -> list:
+    """Intent:
+        `(name, acceptance)` for each claim of this record a human has
+        accepted as risk whose acceptance is not stale.
+    """
+    return [(c.get("name"), c.get("accepted"))
+            for c in (entry or {}).get("claims") or []
+            if (c.get("accepted") or {}).get("as") == "risk"
+            and not (c.get("accepted") or {}).get("stale")]
+
+
+def _today() -> str:
+    """Intent: the current date, ISO."""
+    import datetime
+    return datetime.date.today().isoformat()
+
+
+def _accepted_risk(entry: dict | None,
+                   today: "str | None" = None) -> frozenset:
     """Intent:
         The names of this record's claims a human has accepted as risk
-        (and whose acceptance is not stale), the one exemption the
-        gate grants to an unknown verdict.
+        (and whose acceptance is neither stale nor lapsed on `today`,
+        the current date when None), the one exemption the gate grants
+        to an unknown or skipped verdict.
     """
-    if not entry:
-        return frozenset()
-    return frozenset(
-        c.get("name") for c in entry.get("claims") or []
-        if (c.get("accepted") or {}).get("as") == "risk"
-        and not (c.get("accepted") or {}).get("stale"))
+    from .transitions import lapsed
+    today = today or _today()
+    return frozenset(name for name, acc in _risk_acceptances(entry)
+                     if not lapsed(acc, today))
+
+
+def _risk_state(entry: dict | None) -> tuple:
+    """Intent:
+        `(accepted, lapsed)` for this record today: `_accepted_risk`
+        and `_lapsed_risk`, what the gate reads for its risk
+        acceptances.
+    """
+    return _accepted_risk(entry), _lapsed_risk(entry)
+
+
+def _lapsed_risk(entry: dict | None, today: "str | None" = None) -> dict:
+    """Intent:
+        The claims of this record whose risk acceptance has lapsed on
+        `today` (the current date when None), each with the date it
+        expired.
+    """
+    from .transitions import lapsed
+    today = today or _today()
+    return {name: str(acc["expires"]) for name, acc in _risk_acceptances(entry)
+            if lapsed(acc, today)}
 
 
 def _split_unparseable(claims: list, grammar: str, fn,
@@ -2090,7 +2157,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             lock_messages[key] = msg
             stored = verified_entry.get("claims") or []
             pending.append((key, "locked-changed", stored, None, None,
-                            _accepted_risk(verified_entry), (),
+                            _risk_state(verified_entry), (),
                             verified_info))
             continue
         if state in ("removed-outside", "moved-outside"):
@@ -2117,7 +2184,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             lock_messages[key] = msg
             pending.append((key, "lock-" + state,
                             verified_entry.get("claims") or [], None, None,
-                            _accepted_risk(verified_entry), (),
+                            _risk_state(verified_entry), (),
                             verified_info))
             continue
         from .compendium import premise_state as _premise_state
@@ -2192,7 +2259,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   or any(stored_deps[n].get("value")
                                          != live_consts[n].get("value")
                                          for n in stored_deps))
-        accepted = _accepted_risk(verified_entry)
+        risk = _risk_state(verified_entry)
 
         # a key the user NAMED is always re-adjudicated: freshness is
         # an optimisation for a whole-store sweep, and silently
@@ -2228,7 +2295,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                header=f"machine record; binds to form "
                                       f"{(entry_now.get('identity') or {}).get('form')}")
             stored = verified_entry.get("claims") or []
-            pending.append((key, "fresh", stored, None, deps_now, accepted,
+            pending.append((key, "fresh", stored, None, deps_now, risk,
                             (), verified_info))
             continue
 
@@ -2315,14 +2382,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # the record just written carries each acceptance forward or
         # marks it stale (a changed form), so the gate reads the
         # accepted risk from it, never from the record it replaced
-        accepted = _accepted_risk(_entry_at(written, key))
+        risk = _risk_state(_entry_at(written, key))
         out.adjudicated += 1
         if key in library or key in prerequisite_keys:
             # this key's rows now resolve premises at their local verdict
             stub_premises = _external_premises(
                 root, library_claims=library_claims)
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
-                        accepted, rec.facts.unresolved, verified_info))
+                        risk, rec.facts.unresolved, verified_info))
 
     # phase 2: every record is on disk, settle each key's
     # dependencies_current against the completed store, patching the
@@ -2415,7 +2482,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # phase 3: gate every key through the one policy and render lines
     from .transitions import load_actions
     transition_actions = load_actions(root)
-    for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
+    for key, why, claims_for_gate, rec, deps, risk, unres, _vinfo in pending:
+        accepted, lapsed_risk = risk
         is_library = key in library
         if is_library:
             # a library's missing-value posture is its compendium's own
@@ -2431,7 +2499,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # that check reads the analysed body of the project's own
         # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
-                      accepted_risk=accepted,
+                      accepted_risk=accepted, lapsed_risk=lapsed_risk,
                       unresolved=() if is_library else unres, key=key,
                       transition_actions=transition_actions)
         report.invalidated = int(key in invalidated_keys)
