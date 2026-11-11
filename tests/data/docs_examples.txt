@@ -96,6 +96,7 @@
 [-] docs/missing-values.md:17
 [-] docs/missing-values.md:566
 [x] docs/modes/accept.md:balance                 file file session session run file session session
+[-] docs/modes/accept.md:159
 [x] docs/modes/audit.md:branches                 file session
 [x] docs/modes/audit.md:half                     run repl
 [x] docs/modes/check.md:softmax                  file session file session
@@ -112,7 +113,7 @@
 [x] docs/modes/review.md:delta                   file file run output file file run output
 [x] docs/modes/verify.md:sweep                   file run session file session file session file file session session session run file session
 [x] docs/modes/verify.md:eager                   session
-[-] docs/modes/verify.md:452
+[-] docs/modes/verify.md:464
 [x] docs/multi-function-claims.md:ratio          run output
 [x] docs/multi-function-claims.md:equiv-tolerance run output
 [x] docs/pandas-function.md:pandas               file run output run output run output run output run output run output run output  (requires)
@@ -138,6 +139,7 @@
 [x] docs/tutorial.md:loop                        file run file run output file run output run output run output run output run output
 [x] docs/verdicts.md:reading                     file run output
 [-] docs/verdicts.md:75
+[-] docs/verdicts.md:169
 [x] README.md:quick                              run output  (requires)
 [x] README.md:parity                             file run output
 [x] README.md:pole                               run output

@@ -131,15 +131,36 @@ waved through.
 
 A claim whose verdict is weaker than in the previous record carries the
 move beside it, see [transitions](../verdicts.md#transitions-and-what-invalidated-names).
-`verify` fails on an open `regressed` move in every mode and on an open
-`weakened` one in strict mode, and each failing line ends with the
-command that acknowledges it. Acknowledging says a person has seen the
-move and the fresh verdict stands as it is; it does not change the
-verdict, and a falsified claim still fails the gate as falsified. The
-acknowledgement is kept on the transition (`acknowledged: {at, by,
-note}`), and the record drops the transition on the run after it
-closes. A move the claim recovers from on its own, by coming back to
-the level it fell from, closes without anyone's hand.
+`verify` fails on an open `regressed` move in every mode, on an open
+`weakened` move to `unknown` or `skipped` in every mode, and on an open
+`weakened` move from `proven` to `holds` in strict mode, and each
+failing line ends with the command that closes it. Acknowledging says a
+person has seen the move and the fresh verdict stands as it is; it does
+not change the verdict, and a falsified claim still fails the gate as
+falsified. The acknowledgement is kept on the transition
+(`acknowledged: {at, by, note}`), and the record drops the transition
+on the run after it closes. A move the claim recovers from on its own,
+by coming back to the level it fell from, closes without anyone's hand.
+
+On a supported claim that fell to `unknown` or `skipped`, the same
+command is a risk acceptance: the person accepts that the claim is no
+longer supported at the level it fell from. It is recorded as
+`acknowledged: {at, by, note, as: risk, level}`, `level` being the
+verdict it fell from, and goes through the project's
+[acceptance policy](pin.md#project-policy) like every other
+acceptance, so a required PIN applies when it is written and
+`mathema verify` checks it on every run. The claim is then accepted
+risk at that level, as `--as risk` makes it: `--lenient` passes it,
+strict refuses it. Unlike a plain acknowledgement, the sign-off stays
+on the record while the claim is below the level it fell from, and
+closes as recovered when the claim is back there.
+
+<!-- illustration -->
+```text
+$ mathema accept t.f nonneg --transition --by aaron --note "no solver on CI"
+acknowledge on t.f, by aaron:
+  nonneg: weakened proven to skipped (nothing changed); accepting the risk at proven
+```
 
 ## Machine-readable acceptance
 

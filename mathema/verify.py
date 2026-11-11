@@ -279,9 +279,13 @@ def gate(claims, *, strict: bool,
     Rules: a falsified claim fails in every mode; an unknown claim
     fails unless its name is in `accepted_risk` (then it is `owned`,
     and only strict refuses it); strict additionally fails skipped
-    claims; an unresolved global name fails in every mode. Each open
+    claims; an unresolved global name fails in every mode. A claim
+    whose fall to unknown or skipped carries a risk sign-off
+    (`transitions.risk_signed`) is accepted risk too. Each open
     transition fails, warns or passes by its kind and the mode
-    (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None). A
+    (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None), a
+    supported claim fallen to unknown or skipped failing in both modes
+    until a person accepts the risk (`transitions.action_for`). A
     claim a record written before 0.6.5 stores as `invalidated` is read
     as the verdict it fell to, with the regression as an open
     transition (`transitions.read_invalidated_verdict`).
@@ -295,9 +299,9 @@ def gate(claims, *, strict: bool,
     # a line under a claim mathema suggested is part of the suggestion
     suggested = {_claim_fields(c)[0] for c in claims
                  if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
-    from .transitions import (DEFAULT_ACTIONS, describe, open_transitions,
-                              read_invalidated_verdict)
-    actions = transition_actions or DEFAULT_ACTIONS
+    from .transitions import (action_for, describe, needs_risk_signoff,
+                              open_transitions, read_invalidated_verdict,
+                              risk_signed)
     mode = "strict" if strict else "lenient"
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
@@ -306,11 +310,13 @@ def gate(claims, *, strict: bool,
             r.foreign.append(c)
             continue
         for t in open_transitions(meta):
-            action = (actions.get(t.get("kind")) or {}).get(mode, "fail")
+            action = action_for(t, mode, transition_actions)
             if action == "pass":
                 continue
             r.transitions += 1
-            line = (f"{name} {describe(t)}; to acknowledge it, run: mathema "
+            verb = (f"accept the risk at {t.get('from')}"
+                    if needs_risk_signoff(t) else "acknowledge it")
+            line = (f"{name} {describe(t)}; to {verb}, run: mathema "
                     f"accept {key or 'KEY'} {name} --transition")
             (r.problems if action == "fail" else r.warnings).append(line)
         statement = _claim_statement(c)
@@ -352,6 +358,9 @@ def gate(claims, *, strict: bool,
             r.holds += 1
         elif kind == "falsified":
             r.falsified += 1
+        elif kind in ("unknown", "skipped") and risk_signed(meta):
+            # a fall a person accepted at the level it fell from
+            r.owned += 1
         elif kind == "unknown":
             if name in accepted_risk:
                 r.owned += 1
@@ -2378,6 +2387,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                             resettle_history(
                                 c, dc_now.verdict,
                                 (rec.meta or {}).get("mathema.invalidated_by"),
+                                chain_moved=(rec.meta or {}).get("mathema.chain_moved"),
                                 before=(c.get("meta") or {}).get(
                                     "mathema.previous_verdict") or old_verdict,
                                 commit=(entry["entry"].get("lineage") or {}).get("commit"),

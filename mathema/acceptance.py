@@ -2261,10 +2261,13 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
         The write that acknowledges the open transitions on the named
         claims of `key` (`mathema accept KEY CLAIM --transition`): each
         open transition gains `acknowledged: {at, by, note}`, and the
-        gate stops acting on it. Refused for a claim the record does not
-        hold, or one with no open transition.
+        gate stops acting on it. A supported claim fallen to unknown or
+        skipped (`transitions.needs_risk_signoff`) is a risk acceptance
+        instead, `acknowledged: {at, by, note, as: risk, level}`, the
+        level being the verdict it fell from. Refused for a claim the
+        record does not hold, or one with no open transition.
     """
-    from .transitions import describe, open_transitions
+    from .transitions import describe, needs_risk_signoff, open_transitions
     path, doc = _load_record(root, key)
     claims = {c.get("name"): c for c in doc[key].get("claims") or []}
     lines: list[str] = []
@@ -2278,7 +2281,10 @@ def plan_transition_acknowledgement(root: str, key: str, claim_names: list,
             raise AcceptanceError(f"{name} has no open transition to "
                                   f"acknowledge")
         names.append(name)
-        lines.extend(f"  {name}: {describe(t)}" for t in opened)
+        lines.extend(f"  {name}: {describe(t)}"
+                     + (f"; accepting the risk at {t.get('from')}"
+                        if needs_risk_signoff(t) else "")
+                     for t in opened)
     return {"root": root, "key": key, "path": path, "claims": names,
             "by": by, "note": note, "lines": lines}
 
@@ -2287,10 +2293,11 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     """Intent:
         Write an acknowledgement planned by
         `plan_transition_acknowledgement`, through the same human gate
-        (PIN, policy) as every acceptance. Returns the claims written.
+        (PIN, the `acceptance:` policy) as every acceptance. Returns the
+        claims written.
     """
     from . import auth
-    from .transitions import open_transitions
+    from .transitions import needs_risk_signoff, open_transitions
     attestation = auth.require_human("accept --transition")
     auth.enforce_policy(attestation, plan.get("root", "."))
     path, doc = _load_record(plan["root"], plan["key"])
@@ -2307,6 +2314,8 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
             continue
         for t in open_transitions(claim.get("meta") or {}):
             t["acknowledged"] = dict(stamp)
+            if needs_risk_signoff(t):
+                t["acknowledged"].update({"as": "risk", "level": t.get("from")})
     _restamp_integrity(entry)
     write_yaml(path, {plan["key"]: entry},
                header=f"machine record; transitions acknowledged on {plan['key']}")
