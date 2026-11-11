@@ -29,7 +29,9 @@ records the level the claim fell from (`needs_risk_signoff`).
 
 `invalidated` names a function, not a claim: a function is invalidated
 when it changed since its record, by the triggers in
-`OWN_TRIGGERS` or along its dependency chain (`dependency`).
+`OWN_TRIGGERS` or along its dependency chain (`dependency`), or when its
+record predates the current form-hash scheme (`record-format`, see
+`FORM_SCHEME`), which asks for the function to be verified again.
 """
 from __future__ import annotations
 
@@ -77,10 +79,45 @@ def kind_of(before: str, after: str, *, function_changed: bool) -> "str | None":
     return "weakened" if _RANK[b] < _RANK[a] else "strengthened"
 
 
+#: the record schema version at which form hashes were last
+#: redefined: a record older than it cannot be compared by form, so the
+#: first verify re-adjudicates its function under the `record-format`
+#: trigger
+FORM_SCHEME = "0.3.0"
+
+#: the mathema release that introduced `FORM_SCHEME`
+FORM_SCHEME_RELEASE = "0.6.5"
+
+#: the cause a `record-format` move records
+REVERIFY_CAUSE = f"recorded before {FORM_SCHEME_RELEASE}, reverification needed"
+
+
+def _version_tuple(text) -> tuple:
+    """Intent:
+        A dotted version as a tuple of numbers, `()` for anything else.
+    """
+    try:
+        return tuple(int(part) for part in str(text).split("."))
+    except ValueError:
+        return ()
+
+
+def predates_form_scheme(entry: dict) -> bool:
+    """Whether a record entry was written under an earlier form-hash
+    scheme than `FORM_SCHEME`: its `schema_version` is older, or it
+    states none."""
+    found = _version_tuple((entry or {}).get("schema_version") or "")
+    return not found or found < _version_tuple(FORM_SCHEME)
+
+
 def cause_of(triggers) -> str:
     """The cause of a move, from the triggers that made the function
-    re-adjudicate."""
+    re-adjudicate. `record-format` names a record from before
+    `FORM_SCHEME`, re-adjudicated because its form hash cannot be
+    compared: nothing shows that the function itself changed."""
     triggers = list(triggers or [])
+    if "record-format" in triggers:
+        return REVERIFY_CAUSE
     if any(t in OWN_TRIGGERS for t in triggers):
         return "this function changed"
     if "dependency" in triggers:

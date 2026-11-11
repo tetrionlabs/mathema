@@ -2260,7 +2260,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             grammar_changes[key] = moved
         rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                      root=root))
-        why = ("dependency changed" if dependency_changed
+        from .transitions import REVERIFY_CAUSE, predates_form_scheme
+        why = (REVERIFY_CAUSE if recorded_form
+               and predates_form_scheme(verified_entry or {})
+               else "dependency changed" if dependency_changed
                else (f"library version changed ({version_moved[0]} to "
                      f"{version_moved[1]})") if version_moved is not None
                and recorded_form
@@ -2283,7 +2286,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
-        if recorded_form:
+        if recorded_form and predates_form_scheme(verified_entry or {}):
+            triggers = ["record-format"]
+            rec.meta["mathema.invalidated_by"] = triggers
+            invalidated_keys.add(key)
+        elif recorded_form:
             triggers = _fired_triggers(
                 form=not same_form(facts_now.form, recorded_form),
                 claims=recorded_fp != current_fp, defaults=defaults_moved,

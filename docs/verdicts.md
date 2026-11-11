@@ -156,7 +156,10 @@ to `holds`, or a supported claim to `unknown` or `skipped`),
 `skipped` is not one), and `fixed` (`falsified` to supported when the
 function changed). A claim that was never supported and is now falsified is a
 finding, not a transition. The cause is `this function changed`, `a
-callee changed` or `nothing changed`; the last means two runs disagree
+callee changed`, `recorded before 0.6.5, reverification needed` or
+`nothing changed`. The third is a move found on the first run over a
+record from before the current form hashes (see below); nothing shows
+the function changed, so such a move is never `fixed`. The last means two runs disagree
 about unchanged code (the engine, a library version, the seed or a
 timeout), and the line says so: a regression with nothing changed is a
 contradiction, and a fall to `unknown` with nothing changed is
@@ -203,6 +206,12 @@ action, and it lives on that function. A record written before 0.6.5
 stored a regression as the verdict `invalidated`; it is read as the
 verdict the claim fell to, with the move open and its cause `recorded
 before 0.6.5`.
+
+A record from before the current form hashes (a `schema_version` below
+0.3.0, written before 0.6.5) cannot be compared by form: the same code
+hashes differently. Its function is invalidated by `record-format`
+alone and re-adjudicated once, and the acceptances in it, which name
+the form they were given against, read as stale until given again.
 
 ## What fails the gate
 
