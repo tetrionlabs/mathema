@@ -107,7 +107,51 @@ acceptance:
   require_verification: true   # every acceptance must carry verified_by
   methods: [totp]              # allowed methods; omitting pin disables the static PIN
   keys: [a3f2c1]               # optional allowlist of key ids
+  accepted_risk_lifetime_days: 90   # optional: a risk acceptance expires after 90 days
 ```
+
+`accepted_risk_lifetime_days` gives risk acceptances a lifetime. With
+no key there is none, and a risk acceptance stands until the claim
+changes. With the key set, every risk acceptance written from then on
+(`mathema accept --as risk`, and a risk sign-off on a transition)
+records `expires`, the date that many days after it was written. From
+that date `mathema verify` treats the acceptance as lapsed: the claim
+fails again in both modes, and its line names the date and the command
+that accepts it again, which is running the same acceptance again.
+The acceptance it replaces stays in the claim's `acceptance_history`
+as a `superseded` event, with its `at`, `by`, `note`, `level` and
+`expires`. The lifetime is time only; nothing else makes an acceptance
+lapse. An acceptance written before the key was set carries no
+`expires` and never lapses, and evidence acceptances (`--as evidence`)
+never expire. A value that is not a positive whole number is refused:
+`mathema verify` and `mathema accept` stop with exit 2, naming the key
+and the value as an unreadable policy, as they do for a `transitions:`
+entry they cannot read.
+
+The same file sets what the gate does with an unacknowledged
+[transition](../verdicts.md#transitions-and-what-invalidated-names) of
+each kind, one action for both modes or one per mode, where an action
+is `fail`, `warn` or `pass`; the defaults are `regressed` fails in both
+modes, `weakened` from `proven` to `holds` fails strict and warns
+lenient, `weakened` to `unknown` or `skipped` fails in both modes until
+a person accepts the risk, and `strengthened` and `fixed` pass:
+
+```yaml
+transitions:
+  weakened: fail
+  regressed: {strict: fail, lenient: warn}
+```
+
+An entry sets the action for every move of its kind: `weakened: {lenient:
+warn}` makes a fall to `unknown` or `skipped` warn under `--lenient`
+too.
+
+A risk acceptance on a transition (`mathema accept KEY CLAIM
+--transition` on a claim that fell to `unknown` or `skipped`) is an
+acceptance under the `acceptance:` section, held to the same required
+verification, methods and keys at write time and at verify time. It
+stays on the record while the claim is below the level it fell from,
+so every run checks it.
 
 Enforced twice. At **write time**, an acceptance the policy forbids is
 refused: no credential when one is required, a static PIN where only

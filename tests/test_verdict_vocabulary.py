@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Verdict vocabulary v2: `unknown` for attempted-but-undecided
-adjudication, `invalidated` as the record layer's regression error
-state (with `mathema.previous_verdict`/`mathema.regressed_to`
-history), strict mode counting both unestablished families, and a
-declared-spec `intent:` earning the `documented` rung."""
+adjudication, a regression kept as the fresh verdict with the move
+recorded beside it (`mathema.previous_verdict` and
+`mathema.transitions`), strict mode counting both unestablished
+families, and a declared-spec `intent:` earning the `documented` rung."""
 import math
 
 import yaml
@@ -54,36 +54,51 @@ def _read(tmp_path, key):
     return {c["name"]: c for c in doc[key]["claims"]}
 
 
-def test_supported_to_unsupported_regression_is_invalidated(tmp_path):
+def test_supported_to_unsupported_regression_is_a_transition(tmp_path):
     key = "vocab.regression"
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "proven", route="derive")])
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "falsified", route="probe",
                                  counterexample="x=-1: -1 vs 0")])
     c = _read(tmp_path, key)["nonneg"]
-    assert c["verdict"] == "invalidated"
+    # the verdict is what the latest adjudication found; the move from
+    # the level it fell from is kept beside it
+    assert c["verdict"] == "falsified"
     assert c["meta"]["mathema.previous_verdict"] == "proven"
-    assert c["meta"]["mathema.regressed_to"] == "falsified"
-    # the evidence itself is preserved alongside the error state
+    (t,) = c["meta"]["mathema.transitions"]
+    assert (t["from"], t["to"], t["kind"]) == ("proven", "falsified", "regressed")
+    assert t["cause"] == "nothing changed"
+    assert "mathema.regressed_to" not in c["meta"]
+    # the evidence itself is preserved alongside the move
     assert c["counterexample"] == "x=-1: -1 vs 0"
 
 
-def test_invalidation_persists_until_genuinely_resupported(tmp_path):
+def test_a_transition_stays_open_until_the_claim_is_back_at_its_level(tmp_path):
     key = "vocab.persistence"
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "holds", n=64, route="probe")])
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "unknown", route="derive")])
-    assert _read(tmp_path, key)["nonneg"]["verdict"] == "invalidated"
+    c = _read(tmp_path, key)["nonneg"]
+    assert c["verdict"] == "unknown"
+    (t,) = c["meta"]["mathema.transitions"]
+    assert (t["from"], t["to"], t["kind"]) == ("holds", "unknown", "weakened")
+    assert "recovered" not in t
 
-    # a still-failing re-run never launders the error back to ordinary
+    # a still-unsettled re-run carries the open move, and a move
+    # between two verdicts of the same strength is no transition
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "skipped", route=None)])
     c = _read(tmp_path, key)["nonneg"]
-    assert c["verdict"] == "invalidated"
-    assert c["meta"]["mathema.previous_verdict"] == "invalidated"
+    assert c["verdict"] == "skipped"
+    assert c["meta"]["mathema.previous_verdict"] == "unknown"
+    (t,) = c["meta"]["mathema.transitions"]
+    assert t["from"] == "holds" and "recovered" not in t
 
-    # genuine re-support recovers, with the history still visible
+    # back at or above the level it fell from: the move is recovered,
+    # and the recovering move is not a transition of its own
     _write(tmp_path, key, [Probe("nonneg", "f(x) >= 0", "proven", route="derive")])
     c = _read(tmp_path, key)["nonneg"]
     assert c["verdict"] == "proven"
-    assert c["meta"]["mathema.previous_verdict"] == "invalidated"
+    assert c["meta"]["mathema.previous_verdict"] == "skipped"
+    (t,) = c["meta"]["mathema.transitions"]
+    assert t["from"] == "holds" and t["recovered"]["at"]
 
 
 def test_verdict_change_within_supported_keeps_verdict_but_records_history(tmp_path):

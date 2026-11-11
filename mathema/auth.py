@@ -210,6 +210,7 @@ def load_policy(root: str = ".") -> dict:
           require_verification: true   # every acceptance carries verified_by
           methods: [totp]              # omitting pin disables the static PIN
           keys: [a3f2c1]               # optional allowlist of key ids
+          accepted_risk_lifetime_days: 90   # a risk acceptance expires
     """
     import yaml
     path = os.path.join(root, ".mathema", "meta", "policy.yaml")
@@ -220,6 +221,36 @@ def load_policy(root: str = ".") -> dict:
         return {}
     section = data.get("acceptance")
     return section if isinstance(section, dict) else {}
+
+
+def accepted_risk_lifetime(policy: dict) -> "int | None":
+    """The policy's lifetime for a risk acceptance in days, or None
+    when the key is absent:
+
+        acceptance:
+          accepted_risk_lifetime_days: 90
+
+    A value that is not a positive whole number is refused."""
+    key = "accepted_risk_lifetime_days"
+    if key not in (policy or {}):
+        return None
+    days = policy[key]
+    if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+        raise ValueError(f"policy.yaml acceptance.{key}: {days!r} (a "
+                         f"lifetime is a positive whole number of days)")
+    return days
+
+
+def accepted_risk_expiry(policy: dict, today: str) -> "str | None":
+    """The date a risk acceptance written on `today` (ISO) expires,
+    `accepted_risk_lifetime` days after it, or None when the policy
+    sets no lifetime."""
+    import datetime
+    days = accepted_risk_lifetime(policy)
+    if days is None:
+        return None
+    start = datetime.date.fromisoformat(str(today))
+    return (start + datetime.timedelta(days=days)).isoformat()
 
 
 def enforce_policy(attestation: dict | None, root: str = ".") -> None:
@@ -254,8 +285,9 @@ def enforce_policy(attestation: dict | None, root: str = ".") -> None:
 def acceptance_policy_problems(key: str, entry: dict,
                                policy: dict) -> list[str]:
     """The verify-time check (the CI gate): every non-stale acceptance
-    on a live claim, every acceptance on a retirement row (`discoveries`,
-    `historical`, `superseded`), and the intent acceptance must carry a
+    on a live claim, every risk sign-off on a transition, every
+    acceptance on a retirement row (`discoveries`, `historical`,
+    `superseded`), and the intent acceptance must carry a
     `verified_by` the policy accepts. Returns problem strings; empty
     without a policy."""
     if not policy or not policy.get("require_verification"):
@@ -289,6 +321,11 @@ def acceptance_policy_problems(key: str, entry: dict,
     for c in entry.get("claims") or []:
         if c.get("accepted"):
             _check(f"claim {c.get('name')!r}", c["accepted"])
+        # a risk sign-off on a transition is an acceptance like any other
+        for t in (c.get("meta") or {}).get("mathema.transitions") or []:
+            ack = t.get("acknowledged") if isinstance(t, dict) else None
+            if isinstance(ack, dict) and ack.get("as") == "risk":
+                _check(f"claim {c.get('name')!r} transition risk", ack)
     # a retirement row takes its claim out of the gate, so its
     # acceptance is held to the same policy; a row carrying no
     # acceptance at all retires nothing, and the sweep reports it apart

@@ -27,7 +27,7 @@ names no record fails as a clear per-key problem line, exit 2.
 | `<claims file> ...` | a claims file path: every entry in it is adjudicated up front, a library's [compendium](../claims-transfer.md#in-the-compendium) file included (see [Library claims](#library-claims-lazy-by-default-a-file-up-front)) |
 | `--root` | project root holding `.mathema/verified` and `claimspec.yaml` (default `.`) |
 | `--all` | re-adjudicate everything, ignoring form-hash freshness |
-| `--strict` / `--lenient` | one strictness pair shared with `check`; strict is the default here (CI gates a settled store), `--lenient` reports unverifiable claims and accepted risk instead of failing on them |
+| `--strict` / `--lenient` | one strictness pair shared with `check`; strict is the default here (CI gates a settled store), `--lenient` reports unverifiable claims instead of failing on them; accepted risk passes in both |
 | `--status [TARGET]` | report fresh/stale per `@track_claims`-tagged function, adjudicate nothing, exit 0; an optional TARGET (dotted name or file path) is imported first so its tagged functions register |
 | `--format` | `text` (default) or `json`: the whole sweep as data; per-key entries with `why`, gate `counts`, and claim rows in the same vocabulary `check --format compact` and the MCP tools speak (`stance`/`verdict`/`route`/`source`/`gates`, `counterexample` iff refuted, `supersession` iff the claim was re-authored after it was verified: the new text and the `mathema accept` command that adopts it); `totals.skip_reasons` counts the skipped claims per reason. Exit codes are identical either way |
 | `--output FILE` | write the report to a file instead of stdout |
@@ -42,10 +42,14 @@ bare-name key fails as a clear per-key problem line.
 | Finding | Default (strict) | `--lenient` |
 |---|---|---|
 | `falsified` claim | fails | fails |
-| `invalidated` claim (held before, fails now) | fails | fails |
+| open transition, `regressed` (a supported claim fell to `falsified`) | fails | fails |
+| open transition, `weakened` `proven` to `holds` | fails | warns, named in the row |
+| open transition, `weakened` to `unknown` or `skipped` (a supported claim no longer supported), until the risk is accepted | fails | fails |
+| `unknown` or `skipped` claim whose fall carries a risk sign-off | passes, named in the row | passes, named in the row |
 | `unknown` claim, not accepted | fails | fails |
-| `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
-| `skipped` (unverifiable) claim | fails | passes, informational |
+| `unknown` or `skipped` claim, accepted as risk | passes, named in the row | passes, named in the row |
+| risk acceptance or risk sign-off past its `expires` date ([lifetime](pin.md#project-policy)) | fails, naming the date and the command that accepts it again | fails, naming the date and the command that accepts it again |
+| `skipped` (unverifiable) claim, not accepted | fails | passes, informational |
 | unresolved global name | fails | fails |
 | silently-unenforced declared domain | fails | passes, informational |
 | record whose function no longer resolves | fails (names the rename when an unrecorded function has its form hash) | fails |
@@ -60,8 +64,19 @@ fails in every mode; in an agentic loop a claim nobody could
 adjudicate is indistinguishable from one that would have failed, until
 a human explicitly owns the gap with
 [`mathema accept --as risk`](accept.md). Accepted risk is visible
-relaxation, not laundering: `--lenient` proceeds past it (the row still
-names it), strict mode still refuses it.
+relaxation, not laundering: both modes pass it and the row names it as
+accepted risk. The acceptance is still held to the project's
+[acceptance policy](pin.md#project-policy) in both modes.
+
+A supported claim that falls to `unknown` or `skipped` fails in both
+modes as an open transition, even though `--lenient` passes a claim
+that was always `skipped`. The failing line names the move, what
+changed, and the command that accepts the risk at the level it fell
+from (`mathema accept KEY CLAIM --transition`, see
+[acknowledging a transition](accept.md#acknowledging-a-transition)).
+A `transitions:` entry in the project's
+[policy](pin.md#project-policy) sets one action per kind, and an entry
+for `weakened` applies to every weakened move, whatever it fell to.
 
 Freshness never bypasses the gate: a function whose `form` hash is
 unchanged skips re-adjudication, but its *stored* verdicts are still
@@ -154,15 +169,16 @@ and re-run:
 <!-- example: sweep session -->
 ```
 $ mathema verify --root .
-FAIL functions.softmax: form changed; 1 proven, 3 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
+FAIL functions.softmax: form changed; 1 proven, 3 holds, 1 falsified  <- sums_to_one regressed holds to falsified (this function changed); to acknowledge it, run: mathema accept functions.softmax sums_to_one --transition; 1 falsified claim(s)
+1 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 1 intent to accept (1 function): mathema accept --intent
 ```
 
-`sums_to_one` now fails, and because it held before it is reported
-as `invalidated` rather than `falsified`; the counterexample is kept
-in the record, and the exit code is 1. Restore the fix (the first
+`sums_to_one` now fails, and because it held before the record keeps
+the move beside the fresh verdict, `regressed holds to falsified (this
+function changed)`, with the command that acknowledges it. The
+counterexample is kept in the record, and the exit code is 1. Restore the fix (the first
 version of `functions.py` above) and re-verify:
 
 <!-- example: sweep file=functions.py -->
@@ -325,7 +341,7 @@ re-checks it, so the row counts the accepted claim:
 $ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
 accept balances.running_total :: never_overshoots_much as a risk, by Charles Babbage
   verdict unknown
-  its verdict becomes skipped:unknown_but_accepted; strict mode still refuses it, lenient mode proceeds
+  its verdict becomes skipped:unknown_but_accepted; verify passes it in every mode, named as accepted risk
 written.
 $ mathema verify balances.running_total --root . --lenient
 FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in), 5 holds, 2 falsified, 1 accepted risk  <- 1 policy row to settle: missing[xs, null], f raises TypeError at a null slot of xs where mathema's default says propagates
@@ -338,8 +354,9 @@ grammars detected: mathema; verified by this run: mathema
 2 intents to accept (2 functions): mathema accept --intent
 ```
 
-Strict mode (the default) still refuses the accepted risk, so a
-pipeline can choose whether owned gaps block it:
+Strict mode (the default) passes the accepted risk as well, named in
+the row; the row still fails on the falsified claim, which no
+acceptance as risk can pass:
 
 <!-- example: sweep session -->
 ```
@@ -349,8 +366,7 @@ FAIL balances.running_total: targeted re-verify; 2 proven (1 claim, 1 built-in),
        (ii) write: missing(f, xs, null) raises(TypeError)
        to list them, run: mathema claims balances.running_total
        1 falsified claim(s)
-       1 accepted-risk claim(s)
-0 unchanged since the last run (not run again), 1 checked, 3 problem(s)
+0 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 2 intents to accept (2 functions): mathema accept --intent
 ```

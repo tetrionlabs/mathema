@@ -154,7 +154,7 @@ reported alongside it, and none of them is a weak form of support:
 | `falsified` | A counterexample was found by running the function, and it is kept permanently. A falsification is equally definitive whichever route found it. |
 | `unknown` | An adjudication ran and decided nothing either way, for instance a proof attempt that could not close. |
 | `skipped` | The claim could not be adjudicated at all, for a reason the record names. |
-| `invalidated` | A claim that was once `proven` or `holds` could no longer be established after the code changed, and the record says what it used to be. |
+| a transition | Not a verdict: a claim that was once `proven` or `holds` and no longer is keeps the verdict it fell to, and the record keeps the move (`regressed` or `weakened`, with its cause) beside it until a person acknowledges it. |
 
 A `falsified` verdict is knowledge rather than failure: it tells you exactly
 where the function and the claim part ways, and the

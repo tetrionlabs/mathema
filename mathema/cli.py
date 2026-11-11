@@ -22,8 +22,9 @@ its record (new or changed code), and refreshes the machine records so the
 next run has a baseline. A falsified claim fails the run in every mode,
 and so does an unknown claim until a human accepts the risk
 (`mathema accept --as risk`), an unadjudicated claim in an agentic
-loop is indistinguishable from one that would have failed. Strict by
-default: an unverifiable (skipped) claim, accepted risk, or a
+loop is indistinguishable from one that would have failed. Accepted
+risk passes in every mode, named in the row. Strict by default: an
+unverifiable (skipped) claim nobody accepted, or a
 silently-unenforced declared domain also fails; `--lenient` relaxes
 those structural cases to informational-only, never the wrong or
 undecided ones. An unresolved global name fails in every mode.
@@ -44,6 +45,23 @@ from typing import NoReturn
 
 from .targets import TargetError, resolve, resolve_function
 from ._signatures import callable_signature
+
+
+def _require_readable_policy(verb: str, root: str) -> None:
+    """Intent:
+        Stop `verb` with exit 2 when `.mathema/meta/policy.yaml` under
+        `root` sets a value the gate cannot read: a `transitions:`
+        entry outside the kinds, modes and actions, or an
+        `accepted_risk_lifetime_days` that is not a positive whole
+        number. The line names the entry and its value."""
+    from .auth import accepted_risk_lifetime, load_policy
+    from .transitions import load_actions
+    try:
+        load_actions(root)
+        accepted_risk_lifetime(load_policy(root))
+    except ValueError as e:
+        _bad_argument(f"mathema {verb}: unreadable policy "
+                      f".mathema/meta/policy.yaml: {e}")
 
 
 def _bad_argument(message: str) -> NoReturn:
@@ -137,7 +155,7 @@ def _check_rows(args) -> list[dict]:
     from .authoring import retrieve
     from .records import claim_row
     from .spec import load_declared, load_verified
-    from .verify import (_accepted_risk, gate, split_unparseable_entry,
+    from .verify import (_accepted_risk, _lapsed_risk, gate, split_unparseable_entry,
                          unparseable_claim_message)
 
     _validate_trials_scale(args.trials_scale)
@@ -186,9 +204,11 @@ def _check_rows(args) -> list[dict]:
         # pre-adoption, it is nobody's claim. Risk a human accepted on
         # this key's verified record is honored here the same as in
         # the verify sweep.
-        accepted = _accepted_risk((verified_store.get(name) or {}).get("entry"))
+        stored_entry = (verified_store.get(name) or {}).get("entry")
+        accepted = _accepted_risk(stored_entry)
         report = gate(rec.probes, strict=args.strict,
                       accepted_risk=accepted,
+                      lapsed_risk=_lapsed_risk(stored_entry),
                       unresolved=rec.facts.unresolved, key=name)
         proven, holds = report.proven, report.holds
         total = (proven + holds + report.refuted + report.skipped
@@ -211,6 +231,7 @@ def _check_rows(args) -> list[dict]:
                      "proven": proven, "holds": holds, "refuted": report.refuted,
                      "falsified": report.falsified,
                      "invalidated": report.invalidated,
+                     "transitions": report.transitions,
                      "unverifiable": report.skipped + report.owned,
                      "skipped": report.skipped,
                      "misspecified": report.misspecified,
@@ -407,6 +428,7 @@ def cmd_verify(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    _require_readable_policy("verify", root)
     if args.status is not None:
         # the fresh/stale report, adjudicating nothing (the old
         # `mathema status` verb): a TARGET value imports first, so a
@@ -1394,8 +1416,8 @@ _CI_FILES = {
 # one, and also a claim that could not be checked at all (an unreachable
 # surface, an unsupported shape). Most stores have some of the last
 # kind at first, so expect the first run to be red and to tell you
-# exactly which claims it means. Add --lenient to report those
-# unverifiable claims and accepted risk without failing, and keep
+# exactly which claims it means. Accepted risk passes in both modes.
+# Add --lenient to report those unverifiable claims without failing, and keep
 # strict for falsified and unknown, once you have decided each one is
 # understood. Exit codes: 0 clean, 1 gate failure, 2 broken invocation
 # or store, so a failing gate is distinguishable from a broken job
@@ -2871,6 +2893,47 @@ def _accept_rename(args, by: "str | None", as_json: bool) -> int:
     return 0
 
 
+def _accept_transition(args, by, as_json: bool) -> int:
+    """`mathema accept KEY CLAIM... --transition`: acknowledge the open
+    transitions on the named claims, printing them first and writing
+    nothing without a yes (JSON mode: a plan unless --yes)."""
+    from .acceptance import (AcceptanceError, UnknownAcceptanceTarget,
+                             apply_transition_acknowledgement,
+                             plan_transition_acknowledgement)
+    if args.as_:
+        _bad_argument("mathema accept: --transition takes no --as")
+    if not args.key or not args.claims:
+        _bad_argument("mathema accept: --transition needs a key and the "
+                      "claims whose transitions to acknowledge")
+    try:
+        plan = plan_transition_acknowledgement(
+            args.root, args.key, list(dict.fromkeys(args.claims)),
+            by=by, note=args.note)
+    except AcceptanceError as e:
+        code = 2 if isinstance(e, UnknownAcceptanceTarget) else 1
+        if as_json:
+            _emit_json({"kind": "transition", "error": str(e)},
+                       getattr(args, "output", None))
+            return code
+        print(f"cannot accept: {e}")
+        return code
+    if as_json:
+        written = apply_transition_acknowledgement(plan) if args.yes else []
+        _emit_json({"kind": "transition", "key": plan["key"],
+                    "transitions": plan["lines"], "applied": bool(args.yes),
+                    "written": written}, getattr(args, "output", None))
+        return 0
+    print(f"acknowledge on {plan['key']}" + (f", by {by}" if by else "") + ":")
+    for line in plan["lines"]:
+        print(line)
+    if not args.yes and not _confirmed(1):
+        print("nothing written")
+        return 1
+    apply_transition_acknowledgement(plan)
+    print("written.")
+    return 0
+
+
 def cmd_accept(args) -> int:
     """The human decision verb: annotate adjudicated claims of one
     function with an acceptance (`--as evidence | risk | discovery`).
@@ -2884,12 +2947,15 @@ def cmd_accept(args) -> int:
                              describe_acceptance, plan_acceptance,
                              plan_acceptances, suggest_acceptance)
 
+    _require_readable_policy("accept", args.root)
     by = args.by or default_identity()
     args.claims = list(getattr(args, "claims", None) or [])
     args.claim = args.claims[0] if args.claims else None
     if args.intent or args.concepts or args.dismiss_concepts:
         return _accept_context(args, by)
     as_json = getattr(args, "format", "text") == "json"
+    if getattr(args, "transition", False):
+        return _accept_transition(args, by, as_json)
     if getattr(args, "from_key", None):
         return _accept_rename(args, by, as_json)
     if getattr(args, "accept_form_change", False):
@@ -3023,14 +3089,15 @@ def _add_gate_flags(parser, *, default_strict: bool) -> None:
     """
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--strict", dest="strict", action="store_true",
-                       help="unverifiable (skipped) claims and accepted "
-                            "risk fail too; falsified and "
+                       help="unverifiable (skipped) claims nobody "
+                            "accepted as risk fail too; falsified and "
                             "unaccepted-unknown claims fail in every mode"
                             + (" (the default here)" if default_strict
                                else ""))
     group.add_argument("--lenient", dest="strict", action="store_false",
-                       help="report unverifiable claims and accepted risk "
-                            "instead of failing on them"
+                       help="report unverifiable claims instead of "
+                            "failing on them; accepted risk passes in "
+                            "both modes"
                             + ("" if default_strict
                                else " (the default here)"))
     parser.set_defaults(strict=default_strict)
@@ -3693,6 +3760,12 @@ def main(argv: list[str] | None = None) -> int:
                           "changed, top down, each answered y/n/e/q "
                           "(--yes prints the list, then accepts each; "
                           "--format json lists them and writes nothing)")
+    pac.add_argument("--transition", action="store_true",
+                     help="acknowledge the open verdict transitions on the "
+                          "named claims (a claim that weakened, regressed, "
+                          "strengthened or was fixed since an earlier run); "
+                          "the gate stops acting on them, and the record "
+                          "keeps who acknowledged each and when")
     pac.add_argument("--concepts", default=None, metavar="A,B",
                      help="accept concepts (tags) as documented, "
                           "comma-separated, lightweight, never gates")

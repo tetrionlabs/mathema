@@ -62,8 +62,8 @@ mathema init: scaffolded the CI gate:
 # one, and also a claim that could not be checked at all (an unreachable
 # surface, an unsupported shape). Most stores have some of the last
 # kind at first, so expect the first run to be red and to tell you
-# exactly which claims it means. Add --lenient to report those
-# unverifiable claims and accepted risk without failing, and keep
+# exactly which claims it means. Accepted risk passes in both modes.
+# Add --lenient to report those unverifiable claims without failing, and keep
 # strict for falsified and unknown, once you have decided each one is
 # understood. Exit codes: 0 clean, 1 gate failure, 2 broken invocation
 # or store, so a failing gate is distinguishable from a broken job
@@ -170,7 +170,7 @@ the failure line named the first:
   claims. It is testimony, recorded as such, and a later sweep that can
   settle the row locally replaces it with a local verdict.
 - `--as risk` records that the team owns the gap, with a note, and keeps
-  the row visible in every report; strict mode still refuses it.
+  the row visible in every report; verify passes it in both modes.
 
 For a row mathema ships about a library you did not write, trusting it
 is the usual decision. `--yes` answers the confirmation prompt, which is
@@ -244,8 +244,9 @@ the gate is green. Had the claim been the wrong one rather than the code,
 
 ## 6. Strict or lenient
 
-`verify` is strict by default: falsified, invalidated and unknown claims
-fail, and so do claims that could not be checked at all (`skipped`) and
+`verify` is strict by default: falsified and unknown claims fail, and so
+does a regression no one has acknowledged, a claim that could not be
+checked at all (`skipped`), and
 gaps a person has accepted as risk. `--lenient` reports the last two by
 name and proceeds; it never passes a falsified or an unaccepted unknown
 claim. The full table is on [`mathema verify`](modes/verify.md#what-fails-the-run).

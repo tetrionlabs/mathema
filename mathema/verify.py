@@ -64,6 +64,8 @@ class GateReport:
     proven: int = 0
     holds: int = 0
     falsified: int = 0
+    # the functions invalidated, changed since their record, among
+    # those this report covers (set by the sweep, not by the gate)
     invalidated: int = 0
     unknown: int = 0
     owned: int = 0
@@ -80,13 +82,18 @@ class GateReport:
     unaccounted: list = field(default_factory=list)
     # the clauses of the declared policy rows that are falsified
     policy_problems: list = field(default_factory=list)
+    # open transitions on these claims, and the lines the gate warns
+    # with rather than failing on
+    transitions: int = 0
+    warnings: list = field(default_factory=list)
+    # the lines for the risk acceptances past their expiry date
+    lapsed: list = field(default_factory=list)
 
     @property
     def refuted(self) -> int:
-        """The claims a counterexample stands against, `falsified` and
-        `invalidated` together: the `refuted` stance of the claim-row
-        vocabulary."""
-        return self.falsified + self.invalidated
+        """The claims a counterexample stands against: the `refuted`
+        stance of the claim-row vocabulary."""
+        return self.falsified
 
 
 #: whether the missing-value policy rows mathema writes are gated and
@@ -189,7 +196,7 @@ def summary_counts(counts) -> str:
     # a claim mathema could not run reads as unknown, with its reason
     # in the problems, and the count keeps the two together; a claim
     # misspecified as stated reads as misspecified
-    for key, word in (("invalidated", "invalidated"), ("unknown", "unknown"),
+    for key, word in (("unknown", "unknown"),
                       ("misspecified", "misspecified"),
                       ("accepted_risk", "accepted risk")):
         n = get(key) + (get("skipped") - get("misspecified")
@@ -220,15 +227,12 @@ def _record_has_unreadable_claim(entry: dict) -> bool:
 
 def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     """Intent:
-        Give each probe the verdict its record now stores where the
-        record layer changed it. A claim that was supported before and
-        fails now is written as `invalidated`, and the sweep reports it
-        under that name rather than as the fresh `falsified`.
+        Give each probe what its record now stores beside the fresh
+        verdict: the verdict before it and the transitions it carries
+        (`mathema.transitions`), so the gate acts on them.
 
     Notes:
-        A stored `invalidated` is carried over with the verdict it fell
-        from and the one it fell to, and so is the accepted
-        level of a trusted row the sweep could not settle
+        The accepted level of a trusted row the sweep could not settle
         (`mathema.trusted_unsettled`) or settled only more weakly
         (`mathema.strongest_evidence`, with the row's note), with that
         marker; every other verdict is already the probe's own.
@@ -247,12 +251,11 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
                & set(c.get("meta") or {})}
     rows = {c.get("name"): c for c in entry.get("claims") or []}
     for p in probes:
-        if classify_verdict(stored.get(p.name) or "") == "invalidated":
-            p.verdict = stored[p.name]
-            p.meta = {**(p.meta or {}), **{
-                k: v for k, v in (rows[p.name].get("meta") or {}).items()
-                if k in ("mathema.previous_verdict", "mathema.regressed_to")}}
-        elif p.name in trusted:
+        history = {k: v for k, v in (rows.get(p.name, {}).get("meta") or {}).items()
+                   if k in ("mathema.previous_verdict", "mathema.transitions")}
+        if history:
+            p.meta = {**(p.meta or {}), **history}
+        if p.name in trusted:
             row = trusted[p.name]
             p.verdict = stored[p.name]
             p.meta = {**(p.meta or {}), **{
@@ -270,14 +273,34 @@ _GATE_LABELS = {"is_missing_safe": "gate", "is_absent_safe": "gate",
 
 def gate(claims, *, strict: bool,
          accepted_risk: frozenset = frozenset(),
-         unresolved=(), key: "str | None" = None) -> GateReport:
+         unresolved=(), key: "str | None" = None,
+         transition_actions: "dict | None" = None,
+         lapsed_risk: "dict | None" = None,
+         today: "str | None" = None) -> GateReport:
     """Apply the one gate policy to a set of adjudicated claims (live
     Probes or stored claim dicts, mixed freely).
 
-    Rules: a falsified or invalidated claim fails in every mode; an
-    unknown claim fails unless its name is in `accepted_risk` (then it
-    is `owned`, and only strict refuses it); strict additionally fails
-    skipped claims; an unresolved global name fails in every mode.
+    Rules: a falsified claim fails in every mode; an unknown or
+    skipped claim whose name is in `accepted_risk` is `owned`, and
+    passes in every mode, counted in the summary as accepted risk; an
+    unknown claim nobody accepted fails in every mode; strict
+    additionally fails a skipped claim nobody accepted; an unresolved
+    global name fails in every mode. A claim whose fall to unknown or
+    skipped carries a risk sign-off (`transitions.risk_signed`), and
+    one stored as `skipped:unknown_but_accepted`, is accepted risk
+    too. A risk acceptance that has lapsed on `today` (the current
+    date when None) accepts nothing: a claim named in `lapsed_risk`
+    (name to expiry date), or a stored claim dict whose own acceptance
+    has lapsed, fails in every mode as unknown, its line naming the
+    date and the command that accepts it again, and a lapsed risk
+    sign-off is an open transition again. Each open
+    transition fails, warns or passes by its kind and the mode
+    (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None), a
+    supported claim fallen to unknown or skipped failing in both modes
+    until a person accepts the risk (`transitions.action_for`). A
+    claim a record written before 0.6.5 stores as `invalidated` is read
+    as the verdict it fell to, with the regression as an open
+    transition (`transitions.read_invalidated_verdict`).
     Suggestions mathema volunteered and foreign-grammar claims never
     gate (foreign ones are collected on the report for the caller to
     surface).
@@ -288,11 +311,34 @@ def gate(claims, *, strict: bool,
     # a line under a claim mathema suggested is part of the suggestion
     suggested = {_claim_fields(c)[0] for c in claims
                  if _volunteered(_claim_fields(c)[2], _claim_fields(c)[3])}
+    from .transitions import (action_for, describe, lapsed,
+                              needs_risk_signoff, open_transitions,
+                              read_invalidated_verdict, risk_signed)
+    mode = "strict" if strict else "lenient"
+    today = today or _today()
+    lapsed_risk = dict(lapsed_risk or {})
     for c in claims:
         name, verdict, meta, note = _claim_fields(c)
+        verdict, meta = read_invalidated_verdict(verdict, meta)
         if "mathema.foreign_grammar" in meta:
             r.foreign.append(c)
             continue
+        for t in open_transitions(meta, today):
+            action = action_for(t, mode, transition_actions)
+            if action == "pass":
+                continue
+            r.transitions += 1
+            verb = (f"accept the risk at {t.get('from')}"
+                    if needs_risk_signoff(t) else "acknowledge it")
+            line = (f"{name} {describe(t)}; to {verb}, run: mathema "
+                    f"accept {key or 'KEY'} {name} --transition")
+            if t.get("acknowledged"):
+                # a risk sign-off past its expiry date
+                line = (f"{name} accepted risk at {t.get('from')} expired "
+                        f"on {t['acknowledged'].get('expires')}; to accept "
+                        f"it again, run: mathema accept {key or 'KEY'} "
+                        f"{name} --transition")
+            (r.problems if action == "fail" else r.warnings).append(line)
         statement = _claim_statement(c)
         label = next((lab for rel, lab in _GATE_LABELS.items()
                       if statement.startswith(rel + "(")), None)
@@ -320,6 +366,16 @@ def gate(claims, *, strict: bool,
         if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
+        own = c.get("accepted") if isinstance(c, dict) else None
+        expired = lapsed_risk.get(name) or (
+            str(own["expires"]) if (own or {}).get("as") == "risk"
+            and not own.get("stale") and lapsed(own, today) else None)
+        if expired and kind in ("unknown", "skipped"):
+            r.unknown += 1
+            r.lapsed.append(
+                f"{name} accepted risk expired on {expired}; to accept it "
+                f"again, run: mathema accept {key or 'KEY'} {name} --as risk")
+            continue
         if verdict == "skipped:unknown_but_accepted":
             # the stored form of an unknown a person accepted as risk
             r.owned += 1
@@ -332,23 +388,26 @@ def gate(claims, *, strict: bool,
             r.holds += 1
         elif kind == "falsified":
             r.falsified += 1
-        elif kind == "invalidated":
-            r.invalidated += 1
+        elif kind in ("unknown", "skipped") and risk_signed(meta, today):
+            # a fall a person accepted at the level it fell from
+            r.owned += 1
         elif kind == "unknown":
             if name in accepted_risk:
                 r.owned += 1
             else:
                 r.unknown += 1
                 r.unknown_reasons.append((name, _first_sentence(note)))
+        elif kind == "skipped" and name in accepted_risk:
+            r.owned += 1
         elif kind == "skipped":
             r.skipped += 1
             r.misspecified += verdict == "skipped:misspecified"
             word = ("misspecified" if verdict == "skipped:misspecified"
                     else "unknown")
             r.skipped_reasons.append((name, word, _first_sentence(note)))
-    # a falsified or invalidated claim is a failing check, in every
-    # mode; strictness only governs structurally-skipped claims, never
-    # wrong or undecided ones
+    # a falsified claim is a failing check, in every mode; strictness
+    # only governs structurally-skipped claims, never wrong or
+    # undecided ones
     if r.falsified:
         # a falsified gate names itself and its reason, and the policy
         # rows under it are the same fact; else the policy rows name
@@ -364,28 +423,24 @@ def gate(claims, *, strict: bool,
         others = r.falsified - len(r.policy_problems) - len(gate_fails)
         if others > 0:
             r.problems.append(f"{others} falsified claim(s)")
-    if r.invalidated:
-        r.problems.append(f"{r.invalidated} invalidated claim(s)")
     if r.unknown:
         # an unaccepted unknown is an open epistemic gap: it fails in
         # every mode until it is resolved or a human owns the risk
         # (mathema accept --as risk)
         named = [f"{n} unknown: {why}" if why else f"{n} unknown"
                  for n, why in r.unknown_reasons]
-        r.problems.append("; ".join(named) if named else
-                          f"{r.unknown} unknown claim(s)")
-    if strict and (r.skipped or r.owned):
-        # accepted risk is visible relaxation, not laundering: lenient
-        # proceeds past it, strict still refuses it
-        if r.skipped:
-            # a claim mathema could not run is unknown, with its reason,
-            # and one misspecified as stated says so
-            named = [f"{n} {word}: {why}" if why else f"{n} {word}"
-                     for n, word, why in r.skipped_reasons]
+        if named or r.unknown > len(r.lapsed):
             r.problems.append("; ".join(named) if named else
-                              f"{r.skipped} unknown claim(s)")
-        if r.owned:
-            r.problems.append(f"{r.owned} accepted-risk claim(s)")
+                              f"{r.unknown - len(r.lapsed)} unknown claim(s)")
+        r.problems.extend(r.lapsed)
+    if strict and r.skipped:
+        # a claim mathema could not run is unknown, with its reason,
+        # and one misspecified as stated says so; accepted risk is
+        # counted in the summary and fails no mode
+        named = [f"{n} {word}: {why}" if why else f"{n} {word}"
+                 for n, word, why in r.skipped_reasons]
+        r.problems.append("; ".join(named) if named else
+                          f"{r.skipped} unknown claim(s)")
     if unresolved:
         r.problems.append(f"unresolved names: {', '.join(unresolved)}")
     return r
@@ -416,18 +471,56 @@ def _first_sentence(note) -> str:
     return head[:120]
 
 
-def _accepted_risk(entry: dict | None) -> frozenset:
+def _risk_acceptances(entry: dict | None) -> list:
+    """Intent:
+        `(name, acceptance)` for each claim of this record a human has
+        accepted as risk whose acceptance is not stale.
+    """
+    return [(c.get("name"), c.get("accepted"))
+            for c in (entry or {}).get("claims") or []
+            if (c.get("accepted") or {}).get("as") == "risk"
+            and not (c.get("accepted") or {}).get("stale")]
+
+
+def _today() -> str:
+    """Intent: the current date, ISO."""
+    import datetime
+    return datetime.date.today().isoformat()
+
+
+def _accepted_risk(entry: dict | None,
+                   today: "str | None" = None) -> frozenset:
     """Intent:
         The names of this record's claims a human has accepted as risk
-        (and whose acceptance is not stale), the one exemption the
-        gate grants to an unknown verdict.
+        (and whose acceptance is neither stale nor lapsed on `today`,
+        the current date when None), the one exemption the gate grants
+        to an unknown or skipped verdict.
     """
-    if not entry:
-        return frozenset()
-    return frozenset(
-        c.get("name") for c in entry.get("claims") or []
-        if (c.get("accepted") or {}).get("as") == "risk"
-        and not (c.get("accepted") or {}).get("stale"))
+    from .transitions import lapsed
+    today = today or _today()
+    return frozenset(name for name, acc in _risk_acceptances(entry)
+                     if not lapsed(acc, today))
+
+
+def _risk_state(entry: dict | None) -> tuple:
+    """Intent:
+        `(accepted, lapsed)` for this record today: `_accepted_risk`
+        and `_lapsed_risk`, what the gate reads for its risk
+        acceptances.
+    """
+    return _accepted_risk(entry), _lapsed_risk(entry)
+
+
+def _lapsed_risk(entry: dict | None, today: "str | None" = None) -> dict:
+    """Intent:
+        The claims of this record whose risk acceptance has lapsed on
+        `today` (the current date when None), each with the date it
+        expired.
+    """
+    from .transitions import lapsed
+    today = today or _today()
+    return {name: str(acc["expires"]) for name, acc in _risk_acceptances(entry)
+            if lapsed(acc, today)}
 
 
 def _split_unparseable(claims: list, grammar: str, fn,
@@ -1187,6 +1280,34 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
+                    provenance, library_version, premises, dependency) -> list[str]:
+    """The triggers that make a function invalidated, changed since its
+    record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
+    each one that fired."""
+    fired = {"form": form, "provenance": provenance, "defaults": defaults,
+             "claims": claims, "pseudo-infinity": pseudo_infinity,
+             "library-version": library_version is not None and library_version is not False,
+             "definition-rows": definitions, "premises": premises,
+             "dependency": dependency}
+    return [name for name, on in fired.items() if on]
+
+
+def _restamp_freshness(entry: dict, root: str) -> bool:
+    """Re-stamp each function dependency's `freshness` in a record
+    `entry` against the store as it now stands, so the stamps agree
+    with the settled `dependencies_current`. Whether any stamp moved."""
+    from .spec import _dependency_state, _verified_view
+    verified = _verified_view(root)
+    moved = False
+    for dep in entry.get("dependencies") or []:
+        state = _dependency_state(dep, verified, root)
+        if state is not None and dep.get("freshness") != state:
+            dep["freshness"] = state
+            moved = True
+    return moved
+
+
 def _library_version_moved(merged_entry: dict,
                            verified_entry: dict) -> "tuple | None":
     """Intent:
@@ -1650,7 +1771,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .conjecture import InvalidConjecture, _resolve_func_ref
-    from .inventory import function_dependencies
+    from .inventory import chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
                        record as write_record, write_yaml)
@@ -1674,6 +1795,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"own package, so the file is ignored; its claims are the "
             f"project's own, stated in its ordinary claims files")
     integrity_warned: set = set()
+    # the functions this sweep found changed since their record
+    invalidated_keys: set = set()
     from .auth import acceptance_policy_problems, load_policy
     from .locks import load_locks, lock_state
     policy = load_policy(root)
@@ -2034,7 +2157,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             lock_messages[key] = msg
             stored = verified_entry.get("claims") or []
             pending.append((key, "locked-changed", stored, None, None,
-                            _accepted_risk(verified_entry), (),
+                            _risk_state(verified_entry), (),
                             verified_info))
             continue
         if state in ("removed-outside", "moved-outside"):
@@ -2061,7 +2184,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             lock_messages[key] = msg
             pending.append((key, "lock-" + state,
                             verified_entry.get("claims") or [], None, None,
-                            _accepted_risk(verified_entry), (),
+                            _risk_state(verified_entry), (),
                             verified_info))
             continue
         from .compendium import premise_state as _premise_state
@@ -2092,7 +2215,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
         dependency_changed = is_fresh and any(
-            _dependency_state(d, verified) in ("stale", "invalidated")
+            _dependency_state(d, verified) == "invalidated"
             for d in deps_now or [])
         if is_fresh and not dependency_changed:
             # a callee's form stored when this record was adjudicated
@@ -2106,6 +2229,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 d.get("key") in stored_forms and d.get("form")
                 and not same_form(d.get("form"), stored_forms[d.get("key")])
                 for d in deps_now or [] if d.get("kind") == "function")
+        if is_fresh and not dependency_changed:
+            dependency_changed = chain_moved(
+                verified_entry.get("dependencies") or [], deps_now or [])
         if is_fresh and not dependency_changed:
             # a callee's body provenance stored when this record was
             # adjudicated against the callee's live one: a body that
@@ -2133,7 +2259,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   or any(stored_deps[n].get("value")
                                          != live_consts[n].get("value")
                                          for n in stored_deps))
-        accepted = _accepted_risk(verified_entry)
+        risk = _risk_state(verified_entry)
 
         # a key the user NAMED is always re-adjudicated: freshness is
         # an optimisation for a whole-store sweep, and silently
@@ -2169,7 +2295,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                header=f"machine record; binds to form "
                                       f"{(entry_now.get('identity') or {}).get('form')}")
             stored = verified_entry.get("claims") or []
-            pending.append((key, "fresh", stored, None, deps_now, accepted,
+            pending.append((key, "fresh", stored, None, deps_now, risk,
                             (), verified_info))
             continue
 
@@ -2225,6 +2351,27 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),
                     "mathema.premise_state": premise_now}
+        if recorded_form:
+            triggers = _fired_triggers(
+                form=not same_form(facts_now.form, recorded_form),
+                claims=recorded_fp != current_fp, defaults=defaults_moved,
+                pseudo_infinity=pinf_moved, definitions=definitions_moved,
+                provenance=body_moved, library_version=version_moved,
+                premises=premise_now != (recorded_premises or {})
+                if premise_now or recorded_premises else False,
+                dependency=dependency_changed)
+            rec.meta["mathema.invalidated_by"] = triggers
+            if triggers:
+                invalidated_keys.add(key)
+            roots = chain_moved(verified_entry.get("dependencies") or [],
+                                deps_now or []) if dependency_changed else []
+            if roots:
+                rec.meta["mathema.chain_moved"] = roots
+        else:
+            # a first record is current by construction, and says so,
+            # so a later run that finds nothing changed rewrites it
+            # unmoved
+            rec.meta["mathema.invalidated_by"] = []
         if definitions_now:
             rec.meta["mathema.definition_rows"] = definitions_now
         written = write_record(rec, key=key, root=root,
@@ -2235,21 +2382,23 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # the record just written carries each acceptance forward or
         # marks it stale (a changed form), so the gate reads the
         # accepted risk from it, never from the record it replaced
-        accepted = _accepted_risk(_entry_at(written, key))
+        risk = _risk_state(_entry_at(written, key))
         out.adjudicated += 1
         if key in library or key in prerequisite_keys:
             # this key's rows now resolve premises at their local verdict
             stub_premises = _external_premises(
                 root, library_claims=library_claims)
         pending.append((key, why, list(rec.probes), rec, rec.dependencies,
-                        accepted, rec.facts.unresolved, verified_info))
+                        risk, rec.facts.unresolved, verified_info))
 
     # phase 2: every record is on disk, settle each key's
     # dependencies_current against the completed store, patching the
     # record where the verdict moved (the memoization rung's verdict
     # depends on the STORE, never on this function's own form)
     settled = load_verified(root)
-    from .spec import integrity_checksum
+    from .spec import integrity_checksum, resettle_history
+    import datetime
+    today = datetime.date.today().isoformat()
     for key, why, claims_for_gate, rec, deps, _accepted, _unres, vinfo in pending:
         if deps is None:
             continue
@@ -2260,14 +2409,26 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             continue
         dc_now = dependencies_current_probe(deps, root=root)
         _, old_verdict, _, _ = _claim_fields(stored_dc)
-        if dc_now.verdict == old_verdict:
+        target = (vinfo["entry"] if isinstance(stored_dc, dict) and vinfo
+                  else (settled.get(key) or {}).get("entry"))
+        stamps_moved = target is not None and _restamp_freshness(target, root)
+        if dc_now.verdict == old_verdict and not stamps_moved:
             continue
         if isinstance(stored_dc, dict):
+            entry = vinfo["entry"] if vinfo else None
+            if dc_now.verdict != old_verdict:
+                # a function the sweep left as it was, whose rung moved
+                # with the store: the move is from its stored verdict
+                resettle_history(
+                    stored_dc, dc_now.verdict, ["dependency"],
+                    before=old_verdict,
+                    commit=((entry or {}).get("lineage") or {}).get("commit"),
+                    at=today)
             stored_dc["verdict"] = dc_now.verdict
             stored_dc["note"] = dc_now.note
             stored_dc["sketch"] = dc_now.sketch
             stored_dc["counterexample"] = dc_now.counterexample
-            entry = vinfo["entry"] if vinfo else None
+            stored_dc["meta"] = {**(stored_dc.get("meta") or {}), **(dc_now.meta or {})}
             if entry is not None:
                 recorded_form = (entry.get("identity") or {}).get("form")
                 if key not in integrity_warned:
@@ -2287,10 +2448,29 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if entry is not None:
                 for c in entry["entry"].get("claims") or []:
                     if c.get("name") == "dependencies_current":
+                        if dc_now.verdict != old_verdict:
+                            # the record this sweep wrote holds the
+                            # rung's provisional move; the move is
+                            # from the verdict before the run
+                            resettle_history(
+                                c, dc_now.verdict,
+                                (rec.meta or {}).get("mathema.invalidated_by"),
+                                chain_moved=(rec.meta or {}).get("mathema.chain_moved"),
+                                before=(c.get("meta") or {}).get(
+                                    "mathema.previous_verdict") or old_verdict,
+                                commit=(entry["entry"].get("lineage") or {}).get("commit"),
+                                at=today)
+                            stored_dc.meta = {**(stored_dc.meta or {}), **{
+                                k: v for k, v in (c.get("meta") or {}).items()
+                                if k in ("mathema.previous_verdict",
+                                         "mathema.transitions")}}
+                            if "mathema.transitions" not in (c.get("meta") or {}):
+                                (stored_dc.meta or {}).pop("mathema.transitions", None)
                         c["verdict"] = dc_now.verdict
                         c["note"] = dc_now.note
                         c["sketch"] = dc_now.sketch
                         c["counterexample"] = dc_now.counterexample
+                        c["meta"] = {**(c.get("meta") or {}), **(dc_now.meta or {})}
                 recorded_form = (entry["entry"].get("identity") or {}).get("form")
                 entry["entry"].setdefault("identity", {})["integrity"] = \
                     integrity_checksum(entry["entry"])
@@ -2300,7 +2480,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   f"{recorded_form}")
 
     # phase 3: gate every key through the one policy and render lines
-    for key, why, claims_for_gate, rec, deps, accepted, unres, _vinfo in pending:
+    from .transitions import load_actions
+    transition_actions = load_actions(root)
+    for key, why, claims_for_gate, rec, deps, risk, unres, _vinfo in pending:
+        accepted, lapsed_risk = risk
         is_library = key in library
         if is_library:
             # a library's missing-value posture is its compendium's own
@@ -2316,8 +2499,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         # that check reads the analysed body of the project's own
         # function, and a library's body is not what its rows are about
         report = gate(claims_for_gate, strict=strict,
-                      accepted_risk=accepted,
-                      unresolved=() if is_library else unres, key=key)
+                      accepted_risk=accepted, lapsed_risk=lapsed_risk,
+                      unresolved=() if is_library else unres, key=key,
+                      transition_actions=transition_actions)
+        report.invalidated = int(key in invalidated_keys)
         hints = (_unsettled_library_hints(key, claims_for_gate)
                  if is_library and report.problems else [])
         standing = [
@@ -2342,6 +2527,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if is_library:
                 line += f"; library claims from {library[key]}"
             line += _unaccounted_text(report)
+            if report.warnings:
+                line += "; " + "; ".join(f"warning: {w}" for w in report.warnings)
             if report.problems:
                 line += "; " + "; ".join(report.problems + hints)
         else:
@@ -2356,6 +2543,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                    for p in report.foreign})
                 line += (f", {len(report.foreign)} not this grammar "
                          f"({', '.join(grammars)})")
+            standing += [f"warning: {w}" for w in report.warnings]
             if standing:
                 line += "; " + "; ".join(standing)
             if report.problems:
@@ -2388,11 +2576,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                          else []) + key_problems.get(key, [])
                         + list(report.problems),
             "integrity_mismatch": key in integrity_warned,
+            "warnings": list(report.warnings),
             **({"library_claims": library[key]} if is_library else {}),
             "counts": {"proven": report.proven, "holds": report.holds,
                        "refuted": report.refuted,
                        "falsified": report.falsified,
                        "invalidated": report.invalidated,
+                       "transitions": report.transitions,
                        "unknown": report.unknown,
                        "accepted_risk": report.owned,
                        "skipped": report.skipped,

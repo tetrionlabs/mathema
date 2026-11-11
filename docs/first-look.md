@@ -271,7 +271,7 @@ keeps instead of trusting the code alone (trimmed):
 ```yaml
 # machine record; binds to form py:0f61bbd9aa20
 ema:
-  schema_version: "0.2.0"
+  schema_version: "0.3.0"
   name: "ema"
   signature: "(x: list[float], alpha: float) -> float"
   intent: "Exponentially weighted moving average."
@@ -341,7 +341,7 @@ ema:
       basis: "deterministic concept tagging"
   lineage:
     generated_by: "mathema 0.6.4"
-    CDD_spec_version: "0.2.0"
+    CDD_spec_version: "0.3.0"
 ```
 
 The record keeps each line as a row of its own: the computation line
