@@ -2091,6 +2091,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
+    if pseudo_infinity is not None \
+            and not isinstance(pseudo_infinity, (tuple, list)):
+        # the keyword magnitude is read as `let |inf| be` reads its own
+        from .records import _checked_magnitude
+        pseudo_infinity = _checked_magnitude(pseudo_infinity)
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None

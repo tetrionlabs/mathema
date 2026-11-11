@@ -374,10 +374,16 @@ def resolve_pseudo_infinity(claim_value,
         and every consumer keeps its default.
 
     Raises:
-        InvalidDomain: a function-level or environment value `let
-            |inf| be` would refuse.
+        InvalidDomain: a claim, function-level or environment magnitude
+            `let |inf| be` would refuse.
+
+    Notes:
+        A claim value that is a `(lo, hi)` pair states both sides and
+        passes through as written.
     """
     if claim_value is not None:
+        if not isinstance(claim_value, (tuple, list)):
+            claim_value = _checked_magnitude(claim_value)
         return PseudoInfinity(claim_value, "claim")
     if function_value is not None:
         return PseudoInfinity(_checked_magnitude(function_value), "function")
