@@ -4556,8 +4556,12 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
     from .compendium import library_key_of
     key = library_key_of(fn)
     # a pin written in the call (`f(a, axis=1)`) is a pin as `let axis
-    # be 1` is
-    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
+    # be 1` is, except for a name the claim binds with `for`: that name
+    # is drawn from its domain, and the literal is only the call's
+    # argument
+    bound = cj.domain or {}
+    pins = {**{p: v for p, v in _pins_in_calls(cj).items() if p not in bound},
+            **dict(getattr(cj, "param_pins", None) or {})}
     if key is None and not pins and not any(
             _single_point((cj.domain or {}).get(n)) is not None
             for n in (cj.free_vars or ())):
