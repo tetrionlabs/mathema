@@ -50,7 +50,9 @@ and `--transition` acknowledges a claim's move since an earlier run.
   the project's policy sets `accepted_risk_lifetime_days`, the
   acceptance records the date it `expires`; from that date verify fails
   the claim again and names the command that accepts it again (see
-  [project policy](pin.md#project-policy)).
+  [project policy](pin.md#project-policy)). Accepting a risk again
+  keeps the acceptance it replaces in the claim's
+  `acceptance_history`, as a `superseded` event.
 - **`--as discovery`**: a falsification that was right about the code
   and wrong about the claim: the function's actual behavior is the
   interesting fact. Accepting it retires the claim into the record's
@@ -160,7 +162,8 @@ record while the claim is below the level it fell from, and closes as
 recovered when the claim is back there. Under a policy lifetime
 (`accepted_risk_lifetime_days`) the sign-off also records `expires`;
 from that date the transition is open again, its line names the date,
-and the same command accepts it again.
+and the same command accepts it again, keeping the lapsed sign-off in
+the claim's `acceptance_history` as a `superseded` event.
 
 <!-- illustration -->
 ```text

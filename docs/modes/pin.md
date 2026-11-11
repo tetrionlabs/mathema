@@ -117,10 +117,16 @@ changes. With the key set, every risk acceptance written from then on
 records `expires`, the date that many days after it was written. From
 that date `mathema verify` treats the acceptance as lapsed: the claim
 fails again in both modes, and its line names the date and the command
-that accepts it again, which is running the same acceptance again. The
-lifetime is time only; nothing else makes an acceptance lapse. An
-acceptance written before the key was set carries no `expires` and
-never lapses, and evidence acceptances (`--as evidence`) never expire.
+that accepts it again, which is running the same acceptance again.
+The acceptance it replaces stays in the claim's `acceptance_history`
+as a `superseded` event, with its `at`, `by`, `note`, `level` and
+`expires`. The lifetime is time only; nothing else makes an acceptance
+lapse. An acceptance written before the key was set carries no
+`expires` and never lapses, and evidence acceptances (`--as evidence`)
+never expire. A value that is not a positive whole number is refused:
+`mathema verify` and `mathema accept` stop with exit 2, naming the key
+and the value as an unreadable policy, as they do for a `transitions:`
+entry they cannot read.
 
 The same file sets what the gate does with an unacknowledged
 [transition](../verdicts.md#transitions-and-what-invalidated-names) of
