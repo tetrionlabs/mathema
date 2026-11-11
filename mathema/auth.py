@@ -223,17 +223,31 @@ def load_policy(root: str = ".") -> dict:
     return section if isinstance(section, dict) else {}
 
 
-def accepted_risk_expiry(policy: dict, today: str) -> "str | None":
-    """The date a risk acceptance written on `today` (ISO) expires,
-    `accepted_risk_lifetime_days` after it, or None when the policy
-    sets no lifetime (a positive whole number of days):
+def accepted_risk_lifetime(policy: dict) -> "int | None":
+    """The policy's lifetime for a risk acceptance in days, or None
+    when the key is absent:
 
         acceptance:
           accepted_risk_lifetime_days: 90
-    """
-    import datetime
-    days = (policy or {}).get("accepted_risk_lifetime_days")
+
+    A value that is not a positive whole number is refused."""
+    key = "accepted_risk_lifetime_days"
+    if key not in (policy or {}):
+        return None
+    days = policy[key]
     if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+        raise ValueError(f"policy.yaml acceptance.{key}: {days!r} (a "
+                         f"lifetime is a positive whole number of days)")
+    return days
+
+
+def accepted_risk_expiry(policy: dict, today: str) -> "str | None":
+    """The date a risk acceptance written on `today` (ISO) expires,
+    `accepted_risk_lifetime` days after it, or None when the policy
+    sets no lifetime."""
+    import datetime
+    days = accepted_risk_lifetime(policy)
+    if days is None:
         return None
     start = datetime.date.fromisoformat(str(today))
     return (start + datetime.timedelta(days=days)).isoformat()

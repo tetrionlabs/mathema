@@ -225,3 +225,93 @@ def test_accepting_a_lapsed_risk_again_writes_a_fresh_one(tmp_path):
     apply_acceptance(plan_acceptance(root, "t.f", "nonneg", "risk", by="aaron"))
     assert _claim(root)["accepted"]["expires"] == _in(30)
     assert _lapsed_risk(_stored(root)) == {}
+
+
+# --- a lifetime that is not a positive whole number ------------------------
+
+def test_a_lifetime_that_is_not_a_positive_whole_number_is_refused():
+    import pytest
+    for bad in (0, -5, 2.5, "90", True, None):
+        with pytest.raises(ValueError,
+                           match=r"accepted_risk_lifetime_days: " + repr(bad)):
+            accepted_risk_expiry({"accepted_risk_lifetime_days": bad},
+                                 "2026-11-11")
+
+
+def _main(argv, capsys):
+    from mathema.cli import main
+    try:
+        code = main(argv)
+    except SystemExit as e:
+        code = e.code
+    return code, capsys.readouterr().err
+
+
+def test_verify_and_accept_report_a_bad_lifetime_as_an_unreadable_policy(
+        tmp_path, capsys):
+    root = str(tmp_path)
+    _record(root, "unknown")
+    _policy(root, "acceptance:\n  accepted_risk_lifetime_days: soon\n")
+    for argv in (["verify", "--root", root],
+                 ["accept", "t.f", "nonneg", "--as", "risk", "--by", "aaron",
+                  "--yes", "--root", root]):
+        code, err = _main(argv, capsys)
+        assert code == 2, err
+        assert "unreadable policy" in err
+        assert "accepted_risk_lifetime_days: 'soon'" in err
+    assert "accepted" not in _claim(root)
+
+
+def test_verify_reports_a_bad_transitions_entry_as_an_unreadable_policy(
+        tmp_path, capsys):
+    root = str(tmp_path)
+    _record(root, "unknown")
+    _policy(root, "transitions:\n  weakened: ignore\n")
+    code, err = _main(["verify", "--root", root], capsys)
+    assert code == 2 and "unreadable policy" in err and "weakened" in err
+
+
+# --- the acceptance a fresh one supersedes stays in the history -------------
+
+def test_accepting_a_risk_again_keeps_the_superseded_one_in_the_history(
+        tmp_path):
+    from mathema.acceptance import apply_acceptance, plan_acceptance
+    root = str(tmp_path)
+    _record(root, "unknown")
+    _policy(root, "acceptance:\n  accepted_risk_lifetime_days: 30\n")
+    apply_acceptance(plan_acceptance(root, "t.f", "nonneg", "risk", by="ada",
+                                     note="first look"))
+    first = dict(_claim(root)["accepted"])
+    apply_acceptance(plan_acceptance(root, "t.f", "nonneg", "risk",
+                                     by="aaron", note="second look"))
+    claim = _claim(root)
+    assert claim["accepted"]["by"] == "aaron"
+    (event,) = [e for e in claim["acceptance_history"]
+                if e.get("event") == "superseded"]
+    assert event["as"] == "risk"
+    assert event["superseded"] == {k: first[k] for k in
+                                   ("at", "by", "note", "expires")}
+
+
+def test_signing_off_a_lapsed_fall_again_keeps_the_old_sign_off_in_the_history(
+        tmp_path):
+    from mathema.acceptance import (apply_transition_acknowledgement,
+                                    plan_transition_acknowledgement)
+    root = str(tmp_path)
+    _record(root, "proven")
+    _record(root, "unknown")
+    old = {"at": "2026-01-01", "by": "ada", "note": "no solver",
+           "as": "risk", "level": "proven", "expires": "2026-02-01"}
+    path = Path(root) / ".mathema" / "verified" / "t.f.yaml"
+    doc = yaml.safe_load(path.read_text())
+    (t,) = doc["t.f"]["claims"][0]["meta"]["mathema.transitions"]
+    t["acknowledged"] = dict(old)
+    path.write_text(yaml.safe_dump(doc))
+    apply_transition_acknowledgement(
+        plan_transition_acknowledgement(root, "t.f", ["nonneg"], by="aaron"))
+    claim = _claim(root)
+    (event,) = [e for e in claim["acceptance_history"]
+                if e.get("event") == "superseded"]
+    assert event["as"] == "risk" and event["transition"] == "proven to unknown"
+    assert event["superseded"] == {k: old[k] for k in
+                                   ("at", "by", "note", "level", "expires")}

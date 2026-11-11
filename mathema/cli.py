@@ -47,6 +47,23 @@ from .targets import TargetError, resolve, resolve_function
 from ._signatures import callable_signature
 
 
+def _require_readable_policy(verb: str, root: str) -> None:
+    """Intent:
+        Stop `verb` with exit 2 when `.mathema/meta/policy.yaml` under
+        `root` sets a value the gate cannot read: a `transitions:`
+        entry outside the kinds, modes and actions, or an
+        `accepted_risk_lifetime_days` that is not a positive whole
+        number. The line names the entry and its value."""
+    from .auth import accepted_risk_lifetime, load_policy
+    from .transitions import load_actions
+    try:
+        load_actions(root)
+        accepted_risk_lifetime(load_policy(root))
+    except ValueError as e:
+        _bad_argument(f"mathema {verb}: unreadable policy "
+                      f".mathema/meta/policy.yaml: {e}")
+
+
 def _bad_argument(message: str) -> NoReturn:
     """Intent:
         Stop the command on a bad argument: `message` goes to stderr as
@@ -411,6 +428,7 @@ def cmd_verify(args) -> int:
     root = os.path.abspath(args.root)
     if root not in sys.path:
         sys.path.insert(0, root)
+    _require_readable_policy("verify", root)
     if args.status is not None:
         # the fresh/stale report, adjudicating nothing (the old
         # `mathema status` verb): a TARGET value imports first, so a
@@ -2929,6 +2947,7 @@ def cmd_accept(args) -> int:
                              describe_acceptance, plan_acceptance,
                              plan_acceptances, suggest_acceptance)
 
+    _require_readable_policy("accept", args.root)
     by = args.by or default_identity()
     args.claims = list(getattr(args, "claims", None) or [])
     args.claim = args.claims[0] if args.claims else None

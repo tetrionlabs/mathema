@@ -525,6 +525,18 @@ def apply_acceptances(plans: list) -> list:
     return [_apply_attested(plan, attestation) for plan in plans]
 
 
+def _superseded(prior: dict, **extra) -> dict:
+    """Intent:
+        The history event for a risk acceptance a fresh one replaces:
+        the date it was replaced, and the replaced acceptance's `at`,
+        `by`, `note`, `level` and `expires`, those it carries.
+    """
+    kept = {k: prior[k] for k in ("at", "by", "note", "level", "expires")
+            if prior.get(k) is not None}
+    return {"at": datetime.date.today().isoformat(), "event": "superseded",
+            "as": "risk", **extra, "superseded": kept}
+
+
 def _event(as_: str, by: str | None, verdict: str, note: str | None) -> dict:
     event = {"at": datetime.date.today().isoformat(), "as": as_,
              "verdict": verdict}
@@ -1289,7 +1301,11 @@ def _apply_attested(plan: dict, attestation) -> str:
                    header=f"machine record; historical acceptance of "
                           f"{target.get('name')}")
         return f"accepted historical: {target.get('name')}"
-    target.setdefault("acceptance_history", []).append(event)
+    history = target.setdefault("acceptance_history", [])
+    prior = target.get("accepted")
+    if plan["as"] == "risk" and (prior or {}).get("as") == "risk":
+        history.append(_superseded(prior))
+    history.append(event)
     target["accepted"] = plan["accepted"]
     if plan.get("new_verdict"):
         meta = dict(target.get("meta") or {})
@@ -2304,7 +2320,9 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
     """Intent:
         Write an acknowledgement planned by
         `plan_transition_acknowledgement`, through the same human gate
-        (PIN, the `acceptance:` policy) as every acceptance. Returns the
+        (PIN, the `acceptance:` policy) as every acceptance. A lapsed
+        risk sign-off it replaces goes to the claim's
+        `acceptance_history` as a `superseded` event. Returns the
         claims written.
     """
     from . import auth
@@ -2326,6 +2344,10 @@ def apply_transition_acknowledgement(plan: dict) -> list[str]:
         if claim.get("name") not in plan["claims"]:
             continue
         for t in open_transitions(claim.get("meta") or {}, stamp["at"]):
+            if (t.get("acknowledged") or {}).get("as") == "risk":
+                claim.setdefault("acceptance_history", []).append(
+                    _superseded(t["acknowledged"], transition=(
+                        f"{t.get('from')} to {t.get('to')}")))
             t["acknowledged"] = dict(stamp)
             if needs_risk_signoff(t):
                 t["acknowledged"].update({"as": "risk", "level": t.get("from")})
