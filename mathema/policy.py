@@ -507,8 +507,10 @@ def _run_floor(fn, facts, points: list, domain: "dict | None" = None) -> list:
                 return _call_by_name(call, point), None
         except Exception as exc:
             return None, type(exc).__name__
-    fills = ({p: fill for p in facts.params
-              if (fill := _fill_value((domain or {}).get(p))) is not None}
+    from ._missing_policy import record_fills
+    fills = ({**{p: fill for p in facts.params
+                 if (fill := _fill_value((domain or {}).get(p))) is not None},
+              **record_fills(fn, [p for p in facts.params if not domain.get(p)])}
              if domain is not None else {})
     presence = _presence(fn, facts, domain)
     out = []

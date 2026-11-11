@@ -12700,10 +12700,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             exact_readings.append((f_exact, bound_exact))
         return exact_readings[0]
     executed_record.refill_at = _refill_caller(fn_call, call_pins)
+    from ._missing_policy import record_fills
     executed_record.fills = {
-        p: fill for p in kinds
-        if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
-                                )) is not None}
+        **{p: fill for p in kinds
+           if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
+                                   )) is not None},
+        **record_fills(fn, [p for p in kinds if not ((ctx.record_domain or {}).get(p)
+                                                      or cj_domain.get(p))])}
     from ._missing_policy import Presence
     executed_record.presence = Presence(
         {p: k for p, k in sampled_kinds.items() if p not in literal_args},

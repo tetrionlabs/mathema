@@ -573,6 +573,158 @@ def present_value(value):
     return None
 
 
+
+def _is_record(v) -> bool:
+    """Whether a slot's value is a record: a dict that is not a table, a
+    dataclass instance or a pydantic model."""
+    return v is not None and not isinstance(v, type) and _hole_word(v) is None \
+        and record_fields(v) is not None
+
+
+def hole_fill(value, fill):
+    """Intent:
+        The value a hole among `value`'s slots is refilled with, a value
+        of the kind its elements have: a record another slot holds (a
+        copy of it), else `fill` when it is a record and `value` a
+        container, else a number another slot holds, else `fill` when it
+        is not a record. None when nothing fits.
+    """
+    import copy
+    cells = _cells(value)
+    found = next((c for c in cells or () if _is_record(c)), None)
+    if found is not None:
+        return copy.copy(found)
+    if _is_record(fill):
+        return copy.copy(fill) if cells is not None else present_value(value)
+    number = present_value(value)
+    return number if number is not None else fill
+
+
+def _record_of(cls):
+    """One instance of `cls`, a dict for `dict` or a mapping type and a
+    dataclass built field by field (1 for an int field, 1.0 for a float,
+    True for a bool, '' for a str, the field's default or None for any
+    other); None for any other class, or a dataclass that refuses those
+    values."""
+    import collections.abc as abc
+    import dataclasses
+    import typing
+    origin = typing.get_origin(cls) or cls
+    if origin in (dict, abc.Mapping, abc.MutableMapping):
+        return {}
+    if not (isinstance(cls, type) and dataclasses.is_dataclass(cls)):
+        return None
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        hints = {}
+    plain = {int: 1, float: 1.0, bool: True, str: ""}
+    values = {}
+    for f in dataclasses.fields(cls):
+        if not f.init:
+            continue
+        t = hints.get(f.name, f.type)
+        if t in plain:
+            values[f.name] = plain[t]
+        elif f.default is not dataclasses.MISSING:
+            values[f.name] = f.default
+        elif f.default_factory is not dataclasses.MISSING:
+            values[f.name] = f.default_factory()
+        else:
+            values[f.name] = None
+    try:
+        return cls(**values)
+    except Exception:
+        return None
+
+
+def _annotated_record(fn, param: str):
+    """The record class the elements of `param` are, as its annotation
+    states (`list[dict]`, `Sequence[Move]`, `Optional[list[dict]]`), or
+    None."""
+    import collections.abc as abc
+    import inspect
+    import typing
+
+    from .types import _optional_parts
+    try:
+        hint = typing.get_type_hints(inspect.unwrap(fn)).get(param)
+    except Exception:
+        return None
+    if hint is None:
+        return None
+    inner = _optional_parts(hint)[1]
+    if typing.get_origin(inner) not in (list, tuple, set, frozenset, abc.Sequence,
+                                        abc.MutableSequence, abc.Collection,
+                                        abc.Iterable):
+        return None
+    args = [a for a in typing.get_args(inner) if a is not Ellipsis]
+    if len(args) != 1:
+        return None
+    element = _optional_parts(args[0])[1]
+    return element if _record_of(element) is not None else None
+
+
+def _checked_record(fn, param: str):
+    """The record class the body checks the elements of `param` against:
+    `isinstance(t, cls)` on a name `t` a `for` loop or a comprehension
+    binds by iterating `param` (`for t in xs`, `for t in xs or []`), the
+    first such class that is `dict` or a dataclass. None when there is
+    none or the source cannot be read."""
+    import ast
+    import builtins
+    import inspect
+    import textwrap
+    try:
+        fn = inspect.unwrap(fn)
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except Exception:
+        return None
+
+    def iterates(node) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id == param
+        if isinstance(node, ast.BoolOp):
+            return any(iterates(v) for v in node.values)
+        return False
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.comprehension)) and iterates(node.iter) \
+                and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    if not names:
+        return None
+    scope = {**vars(builtins), **getattr(fn, "__globals__", {})}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "isinstance" and len(node.args) == 2
+                and isinstance(node.args[0], ast.Name) and node.args[0].id in names):
+            continue
+        kinds = node.args[1].elts if isinstance(node.args[1], ast.Tuple) else [node.args[1]]
+        for k in kinds:
+            cls = scope.get(k.id) if isinstance(k, ast.Name) else None
+            if cls is not None and _record_of(cls) is not None:
+                return cls
+    return None
+
+
+def record_fills(fn, params) -> dict:
+    """Intent:
+        `{param: record}` for each of `params` whose elements are records,
+        as its annotation states or an `isinstance` check in the body of
+        `fn` says: a dict, or an instance of the dataclass, for refilling
+        a hole among those elements (`hole_fill`). The callers pass only
+        the parameters the claim does not bind, so a bound parameter is
+        refilled from inside its binding.
+    """
+    out = {}
+    for p in params:
+        cls = _annotated_record(fn, p) or _checked_record(fn, p)
+        if cls is not None:
+            out[p] = _record_of(cls)
+    return out
+
+
 def refill(call_at, point: dict, output, raised: "str | None",
            fills: dict) -> "list | None":
     """Intent:
@@ -610,8 +762,7 @@ def refill(call_at, point: dict, output, raised: "str | None",
     if not keys or any(k != MISSING or is_path(q) for q, k, _m in keys):
         return None
     holding = list(dict.fromkeys(q for q, _k, _m in keys))
-    fill_of = {q: (present_value(point[q]) if present_value(point[q]) is not None
-                   else fills.get(q)) for q in holding}
+    fill_of = {q: hole_fill(point[q], fills.get(q)) for q in holding}
     if any(v is None for v in fill_of.values()):
         return None
     members = list(dict.fromkeys(m for _q, _k, m in keys))
@@ -782,8 +933,7 @@ def _present_at(point: dict, params, holes: dict, fills: dict,
     out = dict(point)
     for q in params:
         if q in holes:
-            fill = present_value(point[q])
-            fill = fill if fill is not None else fills.get(q)
+            fill = hole_fill(point[q], fills.get(q))
             if fill is None:
                 return None
             out[q] = filled(point[q], holes[q], fill)
@@ -981,8 +1131,24 @@ def read_call(call_at, point: dict, output, raised: "str | None", fills: dict,
 
 
 def _scaled(v, scale: float):
-    """A fill `v` scaled: `2v` is 1 where `v` is 0."""
+    """A fill `v` scaled: `2v` is 1 where `v` is 0; a record with each of
+    its number fields scaled, its other fields as they are."""
     if scale == 1.0:
+        return v
+    if _is_record(v):
+        import dataclasses
+
+        def number(x) -> bool:
+            return isinstance(x, (int, float)) and not isinstance(x, bool)
+        if isinstance(v, dict):
+            return {k: _scaled(x, scale) if number(x) else x for k, x in v.items()}
+        if dataclasses.is_dataclass(v):
+            fields = {f.name: getattr(v, f.name) for f in dataclasses.fields(v) if f.init}
+            try:
+                return dataclasses.replace(v, **{k: _scaled(x, scale)
+                                                 for k, x in fields.items() if number(x)})
+            except Exception:
+                return v
         return v
     if scale == 2.0 and v == 0:
         return 1
