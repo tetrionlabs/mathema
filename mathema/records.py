@@ -354,13 +354,14 @@ def _checked_magnitude(value) -> float:
 def _checked_range(value) -> tuple:
     """Intent:
         A claim's `(lo, hi)` pseudo-infinity pair, the two sides of the
-        operational range stated separately: two finite real numbers
-        with `lo < hi`, returned as floats.
+        operational range stated separately: `lo` stands for -oo and `hi`
+        for +oo, so both are finite real numbers with `lo < 0 < hi`,
+        returned as floats.
 
     Raises:
         InvalidDomain: not a pair, a part that is not a finite real
             number (a nan, an infinity, a bool, a string), or `lo` not
-            below `hi`.
+            below zero or `hi` not above it.
     """
     import math
     import numbers
@@ -370,11 +371,11 @@ def _checked_range(value) -> tuple:
     finite = len(parts) == 2 and all(
         isinstance(v, numbers.Real) and not isinstance(v, bool)
         and math.isfinite(v) for v in parts)
-    if not finite or not parts[0] < parts[1]:
+    if not finite or not parts[0] < 0 < parts[1]:
         raise InvalidDomain(
-            f"a pseudo_infinity pair (lo, hi) must be two finite numbers "
-            f"with lo below hi (pseudo_infinity=(-1e6, 1e6)); got "
-            f"{value!r}")
+            f"a pseudo_infinity pair (lo, hi) must be two finite numbers, "
+            f"lo below zero standing for -oo and hi above zero for +oo "
+            f"(pseudo_infinity=(-1e6, 1e6)); got {value!r}")
     return float(parts[0]), float(parts[1])
 
 
@@ -420,7 +421,7 @@ def resolve_pseudo_infinity(claim_value,
     Raises:
         InvalidDomain: a claim, function-level or environment magnitude
             `let |inf| be` would refuse, or a claim pair that is not two
-            finite numbers with lo below hi.
+            finite numbers with lo below zero and hi above it.
 
     Notes:
         A claim value that is a `(lo, hi)` pair states both sides of

@@ -2098,7 +2098,7 @@ def _claim(law: str, name: str | None, source: str, route: str,
         grammar = f"{GRAMMAR}/language"
     if pseudo_infinity is not None:
         # the keyword magnitude is read as `let |inf| be` reads its own,
-        # a (lo, hi) pair as two finite numbers with lo below hi
+        # a (lo, hi) pair as two finite numbers with lo < 0 < hi
         from .records import checked_pseudo_infinity
         pseudo_infinity = checked_pseudo_infinity(pseudo_infinity)
     if let_pseudo_inf is not None:

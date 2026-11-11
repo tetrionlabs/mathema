@@ -118,14 +118,14 @@ def test_an_invalid_claim_pair_refuses(pair):
 def test_a_nan_pair_never_turns_a_falsified_claim_unknown():
     def shrinking(x):
         return 10.0 - x
-    with pytest.raises(InvalidDomain, match="lo below hi"):
+    with pytest.raises(InvalidDomain, match="lo below zero"):
         check_conjectures(shrinking, [claim(
             "for x in [0, oo), f(x) >= 0",
             pseudo_infinity=(float("nan"), float("nan")), route="probe")])
 
 
-@pytest.mark.parametrize("pair", [(-1e6, 1e6), (0.0, 1e6), [-30, 30]])
-def test_a_finite_increasing_pair_is_the_range_as_written(pair):
+@pytest.mark.parametrize("pair", [(-1e6, 1e6), (-0.5, 1e6), [-30, 30]])
+def test_a_finite_pair_straddling_zero_is_the_range_as_written(pair):
     from mathema.records import pseudo_infinity_range, resolve_pseudo_infinity
     resolved = resolve_pseudo_infinity(pair, None)
     assert pseudo_infinity_range(resolved.value) == (float(pair[0]),
@@ -421,3 +421,14 @@ def test_verify_and_check_warn_loudly_on_a_small_project_value(tmp_path):
         assert "is below 1e100" not in quiet.stderr, (args, quiet.stderr)
         unset = _cli(tmp_path, *args, pseudo_infinity=None)
         assert "is below 1e100" not in unset.stderr, (args, unset.stderr)
+
+
+def test_a_pseudo_infinity_pair_must_straddle_zero():
+    import pytest
+    from mathema.domain import InvalidDomain
+    from mathema.records import _checked_range
+    assert _checked_range((-1e6, 1e6)) == (-1e6, 1e6)
+    assert _checked_range((-5, 7)) == (-5.0, 7.0)
+    for pair in ((-1e6, -1), (1, 1e6), (0, 1e6), (-1e6, 0)):
+        with pytest.raises(InvalidDomain, match="below zero"):
+            _checked_range(pair)
