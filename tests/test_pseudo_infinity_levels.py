@@ -103,6 +103,44 @@ def test_a_nan_claim_value_never_reaches_the_probe_domain():
             route="probe")])
 
 
+@pytest.mark.parametrize("pair", [
+    (float("nan"), float("nan")), (1e6, -1e6), (5.0, 5.0),
+    (-math.inf, math.inf), (0.0, float("nan")), ("lo", 1e6),
+    (True, 1e6), (1.0, 2.0, 3.0), (1e6,), [3.0, -3.0]])
+def test_an_invalid_claim_pair_refuses(pair):
+    from mathema.records import resolve_pseudo_infinity
+    with pytest.raises(InvalidDomain, match="two finite numbers"):
+        resolve_pseudo_infinity(pair, None)
+    with pytest.raises(InvalidDomain, match="two finite numbers"):
+        claim("for x in [0, oo), f(x) >= 0", pseudo_infinity=pair)
+
+
+def test_a_nan_pair_never_turns_a_falsified_claim_unknown():
+    def shrinking(x):
+        return 10.0 - x
+    with pytest.raises(InvalidDomain, match="lo below hi"):
+        check_conjectures(shrinking, [claim(
+            "for x in [0, oo), f(x) >= 0",
+            pseudo_infinity=(float("nan"), float("nan")), route="probe")])
+
+
+@pytest.mark.parametrize("pair", [(-1e6, 1e6), (0.0, 1e6), [-30, 30]])
+def test_a_finite_increasing_pair_is_the_range_as_written(pair):
+    from mathema.records import pseudo_infinity_range, resolve_pseudo_infinity
+    resolved = resolve_pseudo_infinity(pair, None)
+    assert pseudo_infinity_range(resolved.value) == (float(pair[0]),
+                                                     float(pair[1]))
+    cj = claim("for x in [0, oo), f(x) >= 0", pseudo_infinity=pair)
+    assert pseudo_infinity_range(cj.pseudo_infinity) == (float(pair[0]),
+                                                         float(pair[1]))
+
+
+def test_the_let_form_states_a_magnitude_never_a_pair():
+    from mathema.conjecture import InvalidConjecture
+    with pytest.raises(InvalidConjecture, match="positive magnitude"):
+        claim("let |inf| be (-1e6, 1e6), for x in [0, oo), f(x) >= 0")
+
+
 def test_an_invalid_entry_field_is_refused_by_the_claims_file_check():
     from mathema.spec import ClaimsFileError, validate_claims_file
     with pytest.raises(ClaimsFileError, match="pseudo_infinity"):

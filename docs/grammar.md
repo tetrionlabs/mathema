@@ -799,7 +799,12 @@ the `oo` endpoint at `1e12` and the proof keeps `oo`, so the proof's
 own row quantifies over `[0, oo]` and the bound appears only beside the
 executed evidence. Nothing in the claim refers to `|inf|` by name, so it
 is not an ordinary binding, and in Python the same setting is
-`claim(..., pseudo_infinity=1e100)`. A binding that can bound nothing,
+`claim(..., pseudo_infinity=1e100)`. Python can also state the two
+sides separately as a pair, `claim(..., pseudo_infinity=(-1e6, 1e12))`,
+which must be two finite numbers with the first below the second; a
+pair such as `(nan, nan)` or `(1e6, -1e6)` is refused with that reason,
+as `let |inf| be` refuses a magnitude that is not finite and positive.
+The `let |inf| be` form states one magnitude, never a pair. A binding that can bound nothing,
 because every name the claim reads already has a bounded domain, is
 dropped from the claim's text and so from its identity.
 

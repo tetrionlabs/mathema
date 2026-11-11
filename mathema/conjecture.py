@@ -577,7 +577,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         A predicate statement (`is_pole_safe(x)`, `is_symmetric(f(A))`)
         matches the family of the same name. The derivative-sign
         families match `d(f(<params>), p) >= 0` and its siblings, with
-        `p` the bracketed parameter. `is_numerically_stable` matches
+        `p` the bracketed parameter and a keyword-only parameter passed
+        by keyword. `is_numerically_stable` matches
         `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
         `is_state_safe` match `f(<params>) == f(<params>)`, a keyword-only
         parameter passed by keyword (`analysis.call_text`). `is_defined` states a region under its name (the
@@ -593,7 +594,6 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         return cj.relation == base
     if region_row_kind(base):
         return True
-    call = f"f({', '.join(facts.params)})"
     if base in _DERIVATIVE_FAMILY_FORMS:
         param = cj.name[len(base):]
         if not (param.startswith("[") and param.endswith("]")):
@@ -621,10 +621,12 @@ def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
         `base` adjudicates in `param`: `d(f(<params>), param) >= 0` for
         `monotonic_increasing`, `d(f(<params>), param, param) == 0` for
         `affine`, and the rest of `_DERIVATIVE_FAMILY_FORMS`, with the
-        call naming every parameter of f in order.
+        call naming every parameter of f in order, a keyword-only one by
+        keyword (`analysis.call_text`).
     """
+    from .analysis import call_text
     order, relation = _DERIVATIVE_FAMILY_FORMS[base]
-    call = f"f({', '.join(facts.params)})"
+    call = call_text(facts)
     expected = f"d({call}, {', '.join([param] * order)})"
     return (cj.relation == relation and _squash(cj.rhs) == "0"
             and _squash(cj.lhs) == _squash(expected))
@@ -2094,11 +2096,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
-    if pseudo_infinity is not None \
-            and not isinstance(pseudo_infinity, (tuple, list)):
-        # the keyword magnitude is read as `let |inf| be` reads its own
-        from .records import _checked_magnitude
-        pseudo_infinity = _checked_magnitude(pseudo_infinity)
+    if pseudo_infinity is not None:
+        # the keyword magnitude is read as `let |inf| be` reads its own,
+        # a (lo, hi) pair as two finite numbers with lo below hi
+        from .records import checked_pseudo_infinity
+        pseudo_infinity = checked_pseudo_infinity(pseudo_infinity)
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None

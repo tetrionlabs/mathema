@@ -351,6 +351,50 @@ def _checked_magnitude(value) -> float:
     return _parse_pseudo_infinity("bars", str(value))
 
 
+def _checked_range(value) -> tuple:
+    """Intent:
+        A claim's `(lo, hi)` pseudo-infinity pair, the two sides of the
+        operational range stated separately: two finite real numbers
+        with `lo < hi`, returned as floats.
+
+    Raises:
+        InvalidDomain: not a pair, a part that is not a finite real
+            number (a nan, an infinity, a bool, a string), or `lo` not
+            below `hi`.
+    """
+    import math
+    import numbers
+
+    from .domain import InvalidDomain
+    parts = tuple(value)
+    finite = len(parts) == 2 and all(
+        isinstance(v, numbers.Real) and not isinstance(v, bool)
+        and math.isfinite(v) for v in parts)
+    if not finite or not parts[0] < parts[1]:
+        raise InvalidDomain(
+            f"a pseudo_infinity pair (lo, hi) must be two finite numbers "
+            f"with lo below hi (pseudo_infinity=(-1e6, 1e6)); got "
+            f"{value!r}")
+    return float(parts[0]), float(parts[1])
+
+
+def checked_pseudo_infinity(value):
+    """Intent:
+        A claim's `pseudo_infinity` value as the operational range reads
+        it: a magnitude read as `let |inf| be` reads its own, a pair
+        checked by `_checked_range`. None stays None.
+
+    Raises:
+        InvalidDomain: a magnitude `let |inf| be` would refuse, or a
+            pair `_checked_range` refuses.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (tuple, list)):
+        return _checked_range(value)
+    return _checked_magnitude(value)
+
+
 def environment_pseudo_infinity() -> "float | None":
     """Intent:
         The project-level pseudo-infinity, `MATHEMA_PSEUDO_INFINITY`,
@@ -375,16 +419,15 @@ def resolve_pseudo_infinity(claim_value,
 
     Raises:
         InvalidDomain: a claim, function-level or environment magnitude
-            `let |inf| be` would refuse.
+            `let |inf| be` would refuse, or a claim pair that is not two
+            finite numbers with lo below hi.
 
     Notes:
-        A claim value that is a `(lo, hi)` pair states both sides and
-        passes through as written.
+        A claim value that is a `(lo, hi)` pair states both sides of
+        the range (`checked_pseudo_infinity`).
     """
     if claim_value is not None:
-        if not isinstance(claim_value, (tuple, list)):
-            claim_value = _checked_magnitude(claim_value)
-        return PseudoInfinity(claim_value, "claim")
+        return PseudoInfinity(checked_pseudo_infinity(claim_value), "claim")
     if function_value is not None:
         return PseudoInfinity(_checked_magnitude(function_value), "function")
     env = environment_pseudo_infinity()
