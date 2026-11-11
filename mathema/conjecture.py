@@ -6092,7 +6092,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     # no evidence for a policy row: computation is outside its remit
     outer_remit = _outside_remit.get()
     from ._called_text import forget_realised
+    function_facts, function_kinds = facts, kinds
     for cj in ordered:
+        facts, kinds = function_facts, function_kinds
         _policy_claim.set(cj.name)
         forget_realised()
         _outside_remit.set(outer_remit or cj.route == MATH_ONLY_ROUTE)
@@ -6377,6 +6379,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(_stamped(validated, cj, canonical=_renders(cj)))
             continue
         ctx = validated
+        ctx.bound_as_values = tuple(_bound_as_values(fn, facts, ctx.cj_domain))
+        if ctx.bound_as_values:
+            # every route that runs the code calls f with these values
+            facts = _dc_replace(facts, param_kinds={
+                **facts.param_kinds,
+                **{p: "unknown" for p in ctx.bound_as_values}})
+            kinds = {**kinds, **{p: "unknown" for p in ctx.bound_as_values}}
         written_domain = {p: b for p, b in (ctx.record_domain or {}).items()
                           if p not in ctx.implied}
         cj_record = _dc_replace(cj, domain=written_domain) if written_domain else cj
@@ -8185,6 +8194,9 @@ class _ClaimContext:
     # instances of its class the routes that run the code draw it as,
     # kept apart from `cj_domain`, which the mathematics reads
     receiver: dict = field(default_factory=dict)
+    # the parameters the body reads as sequences whose values the claim
+    # binds (`_bound_as_values`)
+    bound_as_values: tuple = ()
     guard_refused: int = 0
     # draws a path binding rejected because the path reached no value
     # (an index past the end, a field holding None) the bound does not
@@ -10931,7 +10943,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {refused}",
             meta={"mathema.derive_status": "undecided"})
         return None
-    as_values = _bound_as_values(fn, facts, cj_domain)
+    as_values = ctx.bound_as_values or _bound_as_values(fn, facts, cj_domain)
     if as_values:
         # the body's lift reads each of these as a sequence, while the
         # claim draws its value
