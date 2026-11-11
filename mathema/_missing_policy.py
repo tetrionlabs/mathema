@@ -1142,7 +1142,7 @@ def _scaled(v, scale: float):
             return isinstance(x, (int, float)) and not isinstance(x, bool)
         if isinstance(v, dict):
             return {k: _scaled(x, scale) if number(x) else x for k, x in v.items()}
-        if dataclasses.is_dataclass(v):
+        if dataclasses.is_dataclass(v) and not isinstance(v, type):
             fields = {f.name: getattr(v, f.name) for f in dataclasses.fields(v) if f.init}
             try:
                 return dataclasses.replace(v, **{k: _scaled(x, scale)
