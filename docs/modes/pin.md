@@ -130,7 +130,9 @@ too.
 A risk acceptance on a transition (`mathema accept KEY CLAIM
 --transition` on a claim that fell to `unknown` or `skipped`) is an
 acceptance under the `acceptance:` section, held to the same required
-verification, methods and keys at write time and at verify time.
+verification, methods and keys at write time and at verify time. It
+stays on the record while the claim is below the level it fell from,
+so every run checks it.
 
 Enforced twice. At **write time**, an acceptance the policy forbids is
 refused: no credential when one is required, a static PIN where only

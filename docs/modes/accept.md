@@ -149,7 +149,11 @@ longer supported at the level it fell from. It is recorded as
 verdict it fell from, and goes through the project's
 [acceptance policy](pin.md#project-policy) like every other
 acceptance, so a required PIN applies when it is written and
-`mathema verify` checks it afterwards.
+`mathema verify` checks it on every run. The claim is then accepted
+risk at that level, as `--as risk` makes it: `--lenient` passes it,
+strict refuses it. Unlike a plain acknowledgement, the sign-off stays
+on the record while the claim is below the level it fell from, and
+closes as recovered when the claim is back there.
 
 <!-- illustration -->
 ```text

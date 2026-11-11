@@ -45,6 +45,7 @@ bare-name key fails as a clear per-key problem line.
 | open transition, `regressed` (a supported claim fell to `falsified`) | fails | fails |
 | open transition, `weakened` `proven` to `holds` | fails | warns, named in the row |
 | open transition, `weakened` to `unknown` or `skipped` (a supported claim no longer supported), until the risk is accepted | fails | fails |
+| `unknown` or `skipped` claim whose fall carries a risk sign-off | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `unknown` claim, not accepted | fails | fails |
 | `unknown` claim, accepted as risk | fails (`N accepted-risk claim(s)`) | passes, named in the row |
 | `skipped` (unverifiable) claim | fails | passes, informational |
