@@ -43,9 +43,9 @@ and `--transition` acknowledges a claim's move since an earlier run.
   for your purposes. The record keeps the acceptance alongside the
   verdict; a later run with weaker evidence warns.
 - **`--as risk`**: you own an `unknown` or `skipped` gap. The claim
-  reclassifies to an accepted state that `verify --lenient` proceeds
-  past (named in the row as accepted risk) while strict mode still
-  refuses it. This is the only way an unknown claim stops failing the
+  reclassifies to an accepted state that `verify` passes in both
+  strict and lenient mode, named in the row as accepted risk; a
+  `falsified` claim is never accepted as risk. This is the only way an unknown claim stops failing the
   gate, see [what fails the run](verify.md#what-fails-the-run).
 - **`--as discovery`**: a falsification that was right about the code
   and wrong about the claim: the function's actual behavior is the
@@ -249,7 +249,7 @@ write and asks `write this acceptance? [y/N]`; `--yes` answers it here:
 $ mathema accept balances.running_total never_overshoots_much --as risk --note "the premise only holds empirically; monitored" --by "Charles Babbage" --yes
 accept balances.running_total :: never_overshoots_much as a risk, by Charles Babbage
   verdict unknown
-  its verdict becomes skipped:unknown_but_accepted; strict mode still refuses it, lenient mode proceeds
+  its verdict becomes skipped:unknown_but_accepted; verify passes it in every mode, named as accepted risk
 written.
 ```
 
