@@ -12,9 +12,9 @@ mathema.transitions.drop_move:
     tier: 2
     source_available: true
     pure: true
-    claims_fingerprint: "3ff1336badf9"
+    claims_fingerprint: "5cbc8ebfe798"
     pin: "none"
-    integrity: "v2:877d96297852a228"
+    integrity: "v2:af60d7c80ded9e9f"
   math: null
   claims:
     - name: "dependencies_current"
@@ -26,6 +26,24 @@ mathema.transitions.drop_move:
         surface: "builtin"
       meta:
         mathema.surface: "builtin"
+    - name: "drops_a_missing_entry"
+      statement: "missing(f, transitions) drops"
+      verdict: "holds"
+      n: 224
+      note: "stated; confirmed on the 224 draws of skips_an_entry_that_is_not_a_move"
+      route: "probe:counterfactual"
+      authored:
+        surface: "claims-file"
+        route: "best"
+      meta:
+        mathema.policy:
+          kind: "missing"
+          parameter: "transitions"
+          behaviour: "drops"
+          source: "stated"
+          evidence: "confirmed on the 224 draws of skips_an_entry_that_is_not_a_move"
+          reason: "stated; confirmed on the 224 draws of skips_an_entry_that_is_not_a_move"
+        mathema.surface: "declared"
     - name: "keeps_a_move_from_another_run"
       statement: "for at in {\"\", \"t2\", \"u\"}, f([{\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}], \"proven\", \"unknown\", at=at) = [{\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}]"
       verdict: "holds"
@@ -138,25 +156,6 @@ mathema.transitions.drop_move:
           mathema.transitions.drop_move:
             at: "'t' (pinned)"
         mathema.surface: "declared"
-    - name: "missing[transitions]"
-      statement: "missing(f, transitions) propagates"
-      verdict: "falsified"
-      n: 224
-      counterexample: "f(transitions=[null, {'from': 'holds', 'to': 'proven', 'at...], frm=\"unknown\", to=\"falsified\", at=\"t\") returns [{'from': 'holds', 'to': 'proven', 'at...]"
-      note: "mathema's default word for a list slot that may be null or nan, not a claim of yours; f drops instead: a null slot in, [{'from': 'holds', 'to': 'proven', 'at...] out. (i) if [{'from': 'holds', 'to': 'proven', 'at...] is the answer f should give when a slot is null, state: missing(f, transitions) drops\n(ii) if not, make f raise or give a hole back\n(iii) to accept it as a discovery, run: mathema accept mathema.transitions.drop_move missing[transitions] --as discovery --corrected \"missing(f, transitions) drops\""
-      route: "probe:counterfactual"
-      authored:
-        surface: "suggested"
-      meta:
-        mathema.policy:
-          kind: "missing"
-          parameter: "transitions"
-          evidence: "confirmed on the 224 draws of skips_an_entry_that_is_not_a_move"
-          behaviour: "propagates"
-          source: "default"
-          reason: "mathema's default word for a list slot that may be null or nan, not a claim of yours; f drops instead: a null slot in, [{'from': 'holds', 'to': 'proven', 'at...] out"
-          next: "(i) if [{'from': 'holds', 'to': 'proven', 'at...] is the answer f should give when a slot is null, state: missing(f, transitions) drops\n(ii) if not, make f raise or give a hole back\n(iii) to accept it as a discovery, run: mathema accept mathema.transitions.drop_move missing[transitions] --as discovery --corrected \"missing(f, transitions) drops\""
-        mathema.surface: "mathema"
     - name: "removes_at_most_one"
       statement: "for frm in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, to in {\"falsified\", \"holds\", \"proven\", \"skipped\", \"unknown\"}, len(f([{\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}, {\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}, {\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}], frm, to, at=\"t\")) >= 2"
       verdict: "holds"
@@ -333,9 +332,9 @@ mathema.transitions.drop_move:
     - step: "evidence"
       claim: "for at in {\"\", \"t2\", \"u\"}, f([{\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}], \"proven\", \"unknown\", at=at) = [{\"from\": \"proven\", \"to\": \"unknown\", \"at\": \"t\"}]"
       basis: "probed, n=224"
-    - step: "refutation"
-      claim: "NOT (missing(f, transitions) propagates)"
-      basis: "counterexample f(transitions=[null, {'from': 'holds', 'to': 'proven', 'at...], frm=\"unknown\", to=\"falsified\", at=\"t\") returns [{'from': 'holds', 'to': 'proven', 'at...]"
+    - step: "evidence"
+      claim: "missing(f, transitions) drops"
+      basis: "probed, n=224"
     - step: "derivation"
       claim: ""
       basis: "no function dependencies, vacuously current"
@@ -345,8 +344,8 @@ mathema.transitions.drop_move:
   lineage:
     generated_by: "mathema 0.6.4"
     CDD_spec_version: "0.3.0"
-    date: "2026-11-11"
-    commit: "38614cd6e519cf1c419330cc9c214305e53ec2ad"
+    date: "2026-11-16"
+    commit: "b66c11e1df4f37fd0296e964e35dd1f4a7146768"
   meta:
     mathema.concept_sources:
       mechanism:
@@ -358,5 +357,6 @@ mathema.transitions.drop_move:
       sites: []
       writes: []
     mathema.premise_state: {}
-    mathema.invalidated_by: []
+    mathema.invalidated_by:
+      - "claims"
     mathema.intent_provenance: "declared"

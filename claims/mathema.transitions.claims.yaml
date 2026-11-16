@@ -60,6 +60,8 @@ mathema.transitions.open_transitions:
 
 mathema.transitions.drop_move:
   claims:
+    - name: drops_a_missing_entry
+      statement: 'missing(f, transitions) drops'
     - name: skips_an_entry_that_is_not_a_move
       statement: 'for frm in {"proven", "holds", "unknown", "skipped", "falsified"}, to in {"proven", "holds", "unknown", "skipped", "falsified"}, f([None, {"from": "holds", "to": "proven", "at": "u"}], frm, to, at="t") == [{"from": "holds", "to": "proven", "at": "u"}]'
     - name: removes_at_most_one
