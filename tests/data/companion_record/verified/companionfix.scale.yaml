@@ -1,0 +1,238 @@
+# machine record; binds to form py:d201b59da92d
+companionfix.scale:
+  schema_version: "0.3.0"
+  name: "scale"
+  signature: "(x: float) -> float"
+  intent: "Twice x."
+  grammar: "mathema"
+  tolerance: 1.0e-09
+  identity:
+    form: "py:d201b59da92d"
+    sig: "e479356e3031"
+    tier: 2
+    source_available: true
+    pure: true
+    claims_fingerprint: "54700bd9f595"
+    pin: "none"
+    integrity: "v2:4cbe0168e15be157"
+  math:
+    unicode: "2*x"
+    latex: "2 x"
+    srepr: "Mul(Integer(2), Symbol('x', real=True))"
+  claims:
+    - name: "doubles"
+      statement: "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x"
+      verdict: "proven"
+      sketch: "2*x and 2*x simplify identically"
+      condition: "∀ x ∈ [-10.0, 10.0] ⊂ ℝ"
+      route: "derive"
+      authored:
+        surface: "docstring"
+        ref: "companionfix.scale:docstring:L12"
+        route: "derive"
+      domain:
+        x:
+          base_type: "R"
+          pieces:
+            - lo: -10.0
+              hi: 10.0
+              closed_lo: true
+              closed_hi: true
+            - set:
+                - sentinel: "missing"
+          excluded:
+            - sentinel: "None"
+          explicit_type: false
+          members:
+            - "nan"
+      meta:
+        mathema.authored:
+          surface: "docstring"
+          ref: "companionfix.scale:docstring:L12"
+        mathema.float_companion: "doubles[float]"
+        mathema.missing:
+          admitted:
+            x:
+              absent: false
+              missing:
+                - "nan"
+          means: "missing for x (float) means nan"
+          origin:
+            x:
+              missing: "type"
+        mathema.surface: "docstring"
+    - name: "doubles[float]"
+      statement: "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x"
+      verdict: "skipped:unknown_but_accepted"
+      note: "the float64 computation was not settled"
+      route: "probe"
+      authored:
+        surface: "docstring"
+        ref: "companionfix.scale:docstring:L12"
+      domain:
+        x:
+          base_type: "R"
+          pieces:
+            - lo: -10.0
+              hi: 10.0
+              closed_lo: true
+              closed_hi: true
+            - set:
+                - sentinel: "missing"
+          excluded:
+            - sentinel: "None"
+          explicit_type: false
+          members:
+            - "nan"
+      meta:
+        mathema.authored:
+          surface: "docstring"
+          ref: "companionfix.scale:docstring:L12"
+        mathema.missing:
+          admitted:
+            x:
+              absent: false
+              missing:
+                - "nan"
+          tried:
+            x:
+              - "nan"
+          executed:
+            x:
+              nan: "nan in, nan out (propagates)"
+          behaviour:
+            x:
+              nan: "propagates"
+          said:
+            x:
+              nan: "at x = nan f gave nan back"
+          means: "missing for x (float) means nan"
+          origin:
+            x:
+              missing: "type"
+        mathema.surface: "docstring"
+        mathema.companion_of: "doubles"
+        mathema.family: "is_numerically_stable"
+        mathema.previous_verdict: "unknown"
+      acceptance_history:
+        - at: "2026-11-16"
+          as: "risk"
+          verdict: "unknown"
+          by: "fixture"
+      accepted:
+        as: "risk"
+        at: "2026-11-16"
+        form: "py:d201b59da92d"
+        by: "fixture"
+    - name: "missing[x]"
+      statement: "missing(f, x) propagates"
+      verdict: "holds"
+      n: 5
+      note: "default for a float, which may be nan; confirmed on the draws of odd[float], scale_equivariant[float] and doubles[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims companionfix.scale --write"
+      route: "probe:counterfactual"
+      authored:
+        surface: "suggested"
+      meta:
+        mathema.policy:
+          kind: "missing"
+          parameter: "x"
+          evidence: "confirmed on the draws of odd[float], scale_equivariant[float] and doubles[float]"
+          behaviour: "propagates"
+          source: "default"
+          reason: "default for a float, which may be nan; confirmed on the draws of odd[float], scale_equivariant[float] and doubles[float]. Change the word to raises or drops if f should do otherwise; to keep it, run: mathema claims companionfix.scale --write"
+        mathema.surface: "mathema"
+  concepts:
+    - "differentiation"
+    - "monotonicity"
+    - "affine"
+    - "convexity"
+    - "symmetry"
+  references: {}
+  reasoning:
+    - step: "intent"
+      claim: "Twice x."
+      basis: "documented; the author's stated purpose"
+    - step: "formalization"
+      claim: "2*x"
+      basis: "symbolic lift of the body"
+    - step: "derivation"
+      claim: "d(f(x), x) >= 0"
+      basis: "interval evaluation over the declared domain: 2 ∈ 2, never negative"
+    - step: "refutation"
+      claim: "NOT (d(f(x), x) <= 0)"
+      basis: "counterexample x = -8.767334983247743 -> -17.534669966495485, x = -2.7255878198803085 -> -5.451175639760617 (not decreasing)"
+    - step: "derivation"
+      claim: "d(f(x), x, x) = 0"
+      basis: "0 and 0 simplify identically"
+    - step: "derivation"
+      claim: "d(f(x), x, x) >= 0"
+      basis: "interval evaluation over the declared domain: 0 ∈ 0, never negative"
+    - step: "derivation"
+      claim: "d(f(x), x, x) <= 0"
+      basis: "interval evaluation over the declared domain: 0 ∈ 0, never negative"
+    - step: "refutation"
+      claim: "NOT (f(-x) = f(x))"
+      basis: "counterexample x = -8.767334983247743"
+    - step: "derivation"
+      claim: "f(-x) = -f(x)"
+      basis: "-2*x and -2*x simplify identically"
+    - step: "evidence"
+      claim: "f(-x) = -f(x)"
+      basis: "probed, n=42"
+    - step: "refutation"
+      claim: "NOT (f(f(x)) = f(x))"
+      basis: "counterexample x = -8.767334983247743"
+    - step: "derivation"
+      claim: "let c be [0.1, 10.0], f(c*x) = c*f(x)"
+      basis: "2*c*x and 2*c*x simplify identically"
+    - step: "refutation"
+      claim: "NOT (let c be [0.1, 10.0], f(c*x) = c*f(x))"
+      basis: "counterexample x = -1.7976931348623157e+308, c = 0.1"
+    - step: "derivation"
+      claim: "f(x) = f(x)"
+      basis: "examined from its source: the function reads nothing its arguments do not carry"
+    - step: "derivation"
+      claim: "f(x) = f(x)"
+      basis: "examined from its source: the function writes nothing outside the call"
+    - step: "evidence"
+      claim: "let g = mathema.f.accurate, g(f, x) = 1"
+      basis: "probed, n=32"
+    - step: "evidence"
+      claim: "is_representation_safe(x)"
+      basis: "probed, n=12"
+    - step: "derivation"
+      claim: "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x"
+      basis: "2*x and 2*x simplify identically"
+    - step: "evidence"
+      claim: "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x"
+      basis: "probed, n=43"
+    - step: "evidence"
+      claim: "missing(f, x) propagates"
+      basis: "probed, n=5"
+    - step: "situating"
+      claim: "instantiates: differentiation, monotonicity, affine, convexity, symmetry"
+      basis: "deterministic concept tagging"
+  lineage:
+    generated_by: "mathema 0.6.4"
+    CDD_spec_version: "0.3.0"
+    date: "2026-11-16"
+    commit: null
+  meta:
+    mathema.concept_sources:
+      mechanism:
+        - "differentiation"
+        - "monotonicity"
+        - "affine"
+        - "convexity"
+        - "symmetry"
+    concepts:
+      - "affine"
+      - "convexity"
+      - "differentiation"
+      - "monotonicity"
+      - "symmetry"
+    mathema.effects:
+      line: "no side effects"
+      sites: []
+      writes: []
+    mathema.intent_provenance: "declared"
