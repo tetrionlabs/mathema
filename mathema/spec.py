@@ -28,7 +28,7 @@ from .routes import examine_predicates, is_proof_route
 # The CDD spec version this module's writer/reader conforms to: see the
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
 # CHANGELOG.md. Stamped into every record's lineage.CDD_spec_version field.
-SPEC_VERSION = "0.2.0"
+SPEC_VERSION = "0.3.0"
 
 
 def reasoning_chain(ex) -> list[dict]:
@@ -1130,7 +1130,6 @@ def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
                       header=f"machine record; binds to form {form}")
 
 
-_REGRESSABLE = ("falsified", "unknown", "skipped")
 
 
 def _installed_outside(path: "str | None", root: str) -> bool:
@@ -1171,19 +1170,24 @@ def _dependency_file(dep: dict, root: str) -> "str | None":
 def _dependency_state(dep: dict, verified: dict,
                       root: "str | None" = None) -> str | None:
     """One function-kind dependency's freshness against the verified
-    store: `current` / `stale` / `invalidated` / `unverified`, or
-    `None` for a dependency that carries no form (modules, classes,
-    signature callables); those have no verification to be fresh
-    against. Given the project `root`, a callee installed outside it
-    (the standard library, a third-party package) with no record is
-    `None` too: the project's store records it only when a claims file
-    states claims about it, and then it is compared like any other.
-    A callee whose body arrived as KOINE is also `stale` when its body
-    provenance (`provenance`, its `koine_hash` and frontend) differs
-    from its record's, even under the same form."""
+    store: `current` (its record's form and body provenance match its
+    live ones), `invalidated` (the function changed since its record:
+    its form, or under the same form its body provenance), or
+    `unverified` (no record). Freshness only: a callee whose claim
+    regressed while its code did not change is `current`, the
+    regression showing on the callee's own record.
+
+    `None` for a dependency that carries no form (modules, signature
+    callables) or is not a function: a class has no record of its own,
+    its form and reach are compared against the ones this function's
+    record stored when it was adjudicated. Given the project `root`, a
+    callee installed outside it (the standard library, a third-party
+    package) with no record is `None` too: the project's store records
+    it only when a claims file states claims about it, and then it is
+    compared like any other."""
     form = dep.get("form")
     key = dep.get("key")
-    if not form or not key:
+    if not form or not key or dep.get("kind", "function") != "function":
         return None
     stored = verified.get(key)
     if stored is None:
@@ -1192,83 +1196,124 @@ def _dependency_state(dep: dict, verified: dict,
             return None
         return "unverified"
     entry = stored.get("entry") or {}
-    if any(classify_verdict(c.get("verdict") or "") == "invalidated"
-           for c in entry.get("claims") or []):
-        return "invalidated"
     stored_form = (entry.get("identity") or {}).get("form")
     from .identity import same_form
     if not same_form(stored_form, form):
-        return "stale"
+        return "invalidated"
     from .koine.facts import provenance_change
     moved = provenance_change(dep.get("provenance"),
                               (entry.get("meta") or {}).get("mathema.provenance"))
-    return "current" if moved is None else "stale"
+    return "current" if moved is None else "invalidated"
+
+
+def _chain_functions(dependencies: list) -> dict:
+    """Every function along the chains of `dependencies`, direct and
+    reached, keyed by dotted key, each as a dependency entry carrying
+    its live form."""
+    out: dict = {}
+    for dep in dependencies or []:
+        if dep.get("kind", "function") == "function" and dep.get("key") and dep.get("form"):
+            out[dep["key"]] = dep
+        for r in dep.get("reaches") or []:
+            if r.get("kind") == "function" and r.get("key") and r.get("form"):
+                out.setdefault(r["key"], r)
+    return out
+
+
+def _chain_roots(changed: list[str], reaches: "dict[str, list[dict]]") -> list[str]:
+    """The roots of a broken chain: each changed function whose own
+    chain reaches no other changed function, the deepest place a
+    change sits and so where reverifying starts."""
+    moved = set(changed)
+    return sorted(k for k in changed
+                  if not moved & {r.get("key") for r in reaches.get(k) or []} - {k})
+
+
+def _live_reach(key: str, known: dict) -> list[dict]:
+    if known.get(key, {}).get("reaches") is not None:
+        return known[key]["reaches"]
+    from .conjecture import _resolve_func_ref
+    from .inventory import dependency_reach
+    try:
+        obj = _resolve_func_ref(key)
+    except Exception:
+        return []
+    return dependency_reach(obj) if obj is not None else []
 
 
 def dependencies_current_probe(dependencies: list, root: str = "."):
     """Adjudicate the `dependencies_current` fact for one function: a
-    machine-generated derive-route claim stating that every direct
-    function dependency's form hash matches its own verified record
-    (and none of those records is invalidated). This is the
-    memoization rung of the freshness design, a caller trusts its
-    callee's `dependencies_current` instead of walking deeper, so
-    transitive freshness stays one comparison per level.
+    machine-generated derive-route claim that every function along its
+    dependency chain, the functions it calls and transitively the ones
+    they and the classes it reads call, is current against its own
+    verified record.
 
-    Verdicts: `proven` when every function dependency is current
-    (vacuously, when there are none); `falsified` when any is stale or
-    invalidated (they are the counterexample); `unknown` when none
-    regressed but at least one has no verified record yet, the fact
-    can't be established either way until the callee is verified."""
+    Verdicts: `proven` when every one is current (vacuously, when there
+    are none); `falsified` when any changed since its record, the
+    counterexample naming the chain's roots (the deepest functions that
+    changed, `mathema.chain_roots`), where reverifying starts;
+    `unknown` when none changed but a function it calls directly has no
+    record. A function reached only further down with no record is
+    listed as not checked (`mathema.chain_unrecorded`) and leaves the
+    verdict as it is: it has no claims to go out of date, and a change
+    to it is caught through the chain the caller's record stores.
+    Freshness only: a callee's regression without a change does not
+    break the chain."""
     from .records import Probe
 
     verified = _verified_view(root)
-    states = [(dep, _dependency_state(dep, verified, root))
-              for dep in dependencies or []]
-    checked = [(dep, st) for dep, st in states if st is not None]
+    chain = _chain_functions(dependencies)
+    states = {key: _dependency_state(dep, verified, root) for key, dep in chain.items()}
+    checked = {k: st for k, st in states.items() if st is not None}
     note = "generated by mathema verify; checked against the verified store"
+    meta = {"mathema.surface": "builtin"}
     if not checked:
         return Probe("dependencies_current", "", "proven",
-                     route="derive", note=note,
-                     meta={"mathema.surface": "builtin"},
-                     sketch="no direct function dependencies, vacuously current")
-    bad = [(dep, st) for dep, st in checked if st in ("stale", "invalidated")]
-    if bad:
-        cx = ", ".join(f"{dep['key']} is {st}" for dep, st in bad)
+                     route="derive", note=note, meta=meta,
+                     sketch="no function dependencies, vacuously current")
+    changed = sorted(k for k, st in checked.items() if st == "invalidated")
+    if changed:
+        roots = _chain_roots(changed, {k: _live_reach(k, chain) for k in changed})
+        rest = [k for k in changed if k not in roots]
+        cx = "chain broken at " + ", ".join(roots) + ": changed since its record"
+        if rest:
+            cx += "; above it, also changed: " + ", ".join(rest)
         return Probe("dependencies_current", "", "falsified",
                      route="derive", note=note,
-                     meta={"mathema.surface": "builtin"}, counterexample=cx,
-                     sketch="a direct dependency's verified record no longer "
-                            "matches its live form")
-    unverified = [dep for dep, st in checked if st == "unverified"]
-    if unverified:
-        names = ", ".join(dep["key"] for dep in unverified)
+                     meta={**meta, "mathema.chain_roots": roots,
+                           "mathema.chain_invalidated": changed},
+                     counterexample=cx,
+                     sketch="a function this one rests on changed since its "
+                            "verified record")
+    direct = {d.get("key") for d in dependencies or []}
+    unrecorded = sorted(k for k, st in checked.items() if st == "unverified")
+    if unrecorded:
+        meta["mathema.chain_unrecorded"] = unrecorded
+    names = ", ".join(unrecorded)
+    if any(k in direct for k in unrecorded):
         return Probe("dependencies_current", "", "unknown",
                      route="derive",
-                     note=(f"no verified record yet for {names}; state "
-                           f"claims about it and run mathema verify"),
-                     meta={"mathema.surface": "builtin"},
-                     sketch=f"no verified record yet for: {names}")
+                     note=(f"not checked, no record: {names}; state claims "
+                           f"about it and run mathema verify"),
+                     meta=meta, sketch=f"not checked, no record: {names}")
+    sketch = ("every function along the dependency chain matches its "
+              "verified record")
+    if unrecorded:
+        sketch += (f"; not checked, no record: {names} (their changes are "
+                   f"still caught through the chain this record stores)")
     return Probe("dependencies_current", "", "proven",
-                 route="derive", note=note,
-                     meta={"mathema.surface": "builtin"},
-                 sketch="every direct function dependency's form matches its "
-                        "verified record")
+                 route="derive", note=note, meta=meta, sketch=sketch)
 
 
 def _annotate_dependency_freshness(spec: dict, root: str) -> None:
     """Intent:
-        Stamp each of the record's one-deep dependencies with its
-        freshness against the store: `current` (the callee's verified
-        record exists and its recorded form matches the callee's live
-        form), `stale` (recorded form differs, the callee changed
-        since its claims were verified, so this function's claims about
-        it can't be trusted either), `invalidated` (the callee's own
-        record carries an invalidated claim, the regression
-        propagates one level up as a freshness state, exactly the
-        composition that makes one-deep dependencies enough), or
-        `unverified` (no record at all). Non-function dependencies
-        (modules, classes, signature callables) carry no form and get
-        no freshness verdict.
+        Stamp each of the record's function dependencies with its
+        freshness against the store (`_dependency_state`): `current`
+        when its verified record matches its live form, `invalidated`
+        when it changed since that record, `unverified` when it has
+        none. A callee's regression without a change leaves it
+        `current`. Classes carry no stamp: they have no record, and
+        their chain is compared against the one this record stored.
     """
     deps = spec.get("dependencies") or []
     if not any(d.get("form") for d in deps):
@@ -1280,26 +1325,48 @@ def _annotate_dependency_freshness(spec: dict, root: str) -> None:
             dep["freshness"] = state
 
 
+def _triggers(spec: dict, prior_entry: dict) -> list[str]:
+    """What changed between the prior record and this one, for a
+    transition's cause: the triggers verify found
+    (`meta["mathema.invalidated_by"]`), else the function's own form and
+    its dependencies' chains as the two records store them."""
+    stated = (spec.get("meta") or {}).get("mathema.invalidated_by")
+    if stated is not None:
+        return list(stated)
+    from .identity import same_form
+    out = []
+    if not same_form((spec.get("identity") or {}).get("form"),
+                     (prior_entry.get("identity") or {}).get("form")):
+        out.append("form")
+
+    def chains(entry):
+        return {d.get("key"): d.get("chain") or d.get("form")
+                for d in entry.get("dependencies") or [] if d.get("key")}
+    if chains(spec) != chains(prior_entry):
+        out.append("dependency")
+    return out
+
+
 def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
     """Intent:
         The record layer's memory: compare each claim's fresh verdict
-        against the prior record at `path` and (a) stamp
-        `meta["mathema.previous_verdict"]` whenever the verdict
-        changed, (b) turn a supported->unsupported transition into the
-        `invalidated` error state; a claim that was `proven`/`holds`
-        and can no longer be established is a regression, categorically
-        different from a claim that was never supported. The raw fresh
-        outcome is kept in `meta["mathema.regressed_to"]`, and an
-        already-`invalidated` claim that still fails stays
-        `invalidated` (the error stands until the claim is re-
-        supported).
+        against the prior record at `path`, stamp
+        `meta["mathema.previous_verdict"]` whenever the verdict changed,
+        and keep the move as a transition beside the claim
+        (`meta["mathema.transitions"]`, see `mathema.transitions`): its
+        kind, its cause, the date and commit. The claim's verdict is
+        always the fresh one. Open transitions carry forward until a
+        person acknowledges them or the claim is back at the level it
+        fell from. A claim whose statement changed is a different claim,
+        and starts with no history.
 
     Notes:
         Runs at write time, in `record()`, because this is the one
         place that holds both the fresh adjudication and the history.
-        The reasoning chain reflects the raw adjudication (built before
-        this pass); the claim's own `verdict` reflects the state.
-        Degrades to a plain write when the prior record can't be read.
+        A prior record written before 0.6.5 with the verdict
+        `invalidated` is read as the verdict it fell to plus its
+        regression (`transitions.read_invalidated_verdict`). Degrades
+        to a plain write when the prior record can't be read.
     """
     if not os.path.exists(path):
         return
@@ -1309,43 +1376,86 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
             prior_doc = yaml.safe_load(fh) or {}
         prior_entry = prior_doc.get(key) or {}
         prior_claims = prior_entry.get("claims") or []
-        prior = {c.get("name"): c.get("verdict") for c in prior_claims
-                if c.get("name") and c.get("verdict")}
         prior_commit = (prior_entry.get("lineage") or {}).get("commit")
-        prior_meta = {c.get("name"): c.get("meta") or {}
-                      for c in prior_claims if c.get("name")}
     except Exception:
         return
+    import datetime
+    from .transitions import carry, read_invalidated_verdict, transition
+    prior, prior_meta, prior_statement = {}, {}, {}
+    for pc in prior_claims:
+        name = pc.get("name")
+        if not name:
+            continue
+        verdict, meta = read_invalidated_verdict(pc.get("verdict") or "",
+                                                 pc.get("meta") or {})
+        prior[name], prior_meta[name] = verdict, meta
+        prior_statement[name] = pc.get("statement") or pc.get("law")
+    triggers = _triggers(spec, prior_entry)
+    roots = (spec.get("meta") or {}).get("mathema.chain_moved")
+    commit = (spec.get("lineage") or {}).get("commit")
+    today = datetime.date.today().isoformat()
     for c in spec.get("claims") or []:
+        name = c.get("name")
+        if name not in prior or prior_statement.get(name) != (
+                c.get("statement") or c.get("law")):
+            continue
+        meta = dict(c.get("meta") or {})
         # the last-supported pointer survives every rewrite: set when a
         # supported verdict is left behind, carried forward otherwise,
         # what a historical acceptance points at ("the commit when the
         # previous version of this truth held")
-        carried = prior_meta.get(c.get("name"), {}).get(
-            "mathema.last_supported_commit")
+        carried = prior_meta[name].get("mathema.last_supported_commit")
         if carried:
-            meta0 = dict(c.get("meta") or {})
-            meta0.setdefault("mathema.last_supported_commit", carried)
-            c["meta"] = meta0
-        prev = prior.get(c.get("name"))
-        if prev is None or prev == c.get("verdict"):
-            continue
-        meta = dict(c.get("meta") or {})
-        meta["mathema.previous_verdict"] = prev
-        if classify_verdict(prev) in SUPPORTED_VERDICTS and prior_commit:
-            meta["mathema.last_supported_commit"] = prior_commit
-        base_prev = classify_verdict(prev)
-        base_new = classify_verdict(c["verdict"] or "")
-        if base_prev in SUPPORTED_VERDICTS and base_new in _REGRESSABLE:
-            meta["mathema.regressed_to"] = c["verdict"]
-            c["verdict"] = "invalidated"
-        elif base_prev == "invalidated" and base_new in _REGRESSABLE:
-            # the standing error persists until the claim is genuinely
-            # re-supported; a still-failing re-run never launders an
-            # invalidation back into an ordinary failure.
-            meta["mathema.regressed_to"] = c["verdict"]
-            c["verdict"] = "invalidated"
+            meta.setdefault("mathema.last_supported_commit", carried)
+        prev, now = prior[name], c.get("verdict") or ""
+        new = None
+        if prev and prev != now:
+            meta["mathema.previous_verdict"] = prev
+            if classify_verdict(prev) in SUPPORTED_VERDICTS and prior_commit:
+                meta["mathema.last_supported_commit"] = prior_commit
+            new = transition(prev, now, triggers, commit=commit, at=today,
+                             chain_moved=roots)
+        kept = carry(prior_meta[name].get("mathema.transitions") or [], new,
+                     now, commit=commit, at=today)
+        if kept:
+            meta["mathema.transitions"] = kept
+        else:
+            meta.pop("mathema.transitions", None)
+        meta.pop("mathema.regressed_to", None)
         c["meta"] = meta
+
+
+def resettle_history(claim: dict, verdict: str, triggers, *, before: str,
+                     commit: "str | None", at: str,
+                     chain_moved=None) -> None:
+    """Re-derive one claim's history when its verdict is settled again
+    after the record was written: `dependencies_current` is adjudicated
+    against the completed store once the sweep is over. The move this
+    run recorded from `before` is replaced by the move from `before` to
+    `verdict`, and the transitions carried from earlier runs are read
+    against `verdict` again. `chain_moved` is the run's moved chain
+    roots, kept on the new move as `transitions.transition` keeps them."""
+    from .transitions import carry, drop_move, transition
+    meta = dict(claim.get("meta") or {})
+    first = claim.get("verdict") or ""
+    older = drop_move(meta.get("mathema.transitions") or [], before, first, at=at)
+    for t in older:
+        if isinstance(t.get("recovered"), dict) and t["recovered"].get("at") == at:
+            t.pop("recovered")
+    new = None
+    if before != verdict:
+        meta["mathema.previous_verdict"] = before
+        new = transition(before, verdict, triggers, commit=commit, at=at,
+                         chain_moved=chain_moved)
+    else:
+        meta.pop("mathema.previous_verdict", None)
+    kept = carry(older, new, verdict, commit=commit, at=at)
+    if kept:
+        meta["mathema.transitions"] = kept
+    else:
+        meta.pop("mathema.transitions", None)
+    claim["meta"] = meta
+    claim["verdict"] = verdict
 
 
 #: directories a claims-file scan never enters: tool, environment, build

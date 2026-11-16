@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from ._signatures import module_scope
 import ast
+import functools
 import inspect
 import os
 import re
@@ -938,8 +939,299 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
         callee_facts = quiet_facts(obj)
         if callee_facts is not None:
             dep["form"] = callee_facts.form
+            dep["reaches"] = dependency_reach(obj)
+            dep["chain"] = chain_summary(dep)
         out.append(dep)
     return out
+
+
+def class_form(cls: type) -> "str | None":
+    """The form hash of a class defined in the project (see
+    `identity.class_form_hash`), or None for a class with no readable
+    source or one defined in the standard library or an installed
+    package, whose freshness is its library's version, not a form."""
+    import textwrap
+    from .analysis import _installed_code, foreign_body
+    from .identity import class_form_hash
+    if not inspect.isclass(cls) or foreign_body(cls) or _installed_code(cls):
+        return None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    except (OSError, TypeError, SyntaxError):
+        return None
+    cdef = next((n for n in tree.body if isinstance(n, ast.ClassDef)), None)
+    return class_form_hash(cdef) if cdef is not None else None
+
+
+def _annotation_classes(ann) -> list[type]:
+    """The classes named in a type annotation, through generic
+    arguments (`list[Money]`, `Optional[Money]`, `dict[str, Money]`)."""
+    import typing as t
+    found: list[type] = []
+    stack = [ann]
+    while stack:
+        a = stack.pop()
+        if inspect.isclass(a) and not t.get_args(a):
+            found.append(a)
+        stack.extend(t.get_args(a))
+    return found
+
+
+def _class_rests_on(cls: type) -> list[object]:
+    """What a class's definition rests on one level down: its bases,
+    the classes its fields are annotated with, and the classes and
+    functions its body names (decorators, validators, helpers its
+    methods call), each resolved against the class's module."""
+    import sys
+    import textwrap
+    import typing as t
+    out: list[object] = list(cls.__bases__)
+    try:
+        hints = t.get_type_hints(cls)
+    except Exception:
+        hints = {}
+    for ann in hints.values():
+        out.extend(_annotation_classes(ann))
+    g = vars(sys.modules.get(cls.__module__) or object())
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    except (OSError, TypeError, SyntaxError):
+        return out
+    out.extend(_names_resolved(tree, g))
+    return out
+
+
+def _names_resolved(tree: ast.AST, g: dict) -> list[object]:
+    """The classes and functions a piece of source names, each bare name
+    and each dotted name through a module (`dataclasses.dataclass`)
+    resolved against the namespace `g`."""
+    found: list[object] = []
+    for node in ast.walk(tree):
+        path: list[str] = []
+        cur: ast.expr = node
+        while isinstance(cur, ast.Attribute):
+            path.append(cur.attr)
+            cur = cur.value
+        if not (isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Load)):
+            continue
+        if path and not inspect.ismodule(g.get(cur.id)):
+            continue
+        obj = g.get(cur.id)
+        for attr in reversed(path):
+            obj = getattr(obj, attr, None)
+        if inspect.isclass(obj) or inspect.isfunction(obj):
+            found.append(obj)
+    return found
+
+
+#: modules whose code is the language itself, read as part of every
+#: program rather than as a library a definition builds on
+_LANGUAGE_MODULES = frozenset({"builtins", "typing", "types", "abc",
+                               "collections.abc", "typing_extensions"})
+
+
+def _release_line(version: str) -> str:
+    """`major.minor` of a version string (`2.9.2` -> `2.9`), the
+    granularity a library's behaviour is tracked at, as compendium rows
+    are (`compendium:pandas-2.2`)."""
+    import re as _re
+    parts = _re.findall(r"\d+", version)[:2]
+    return ".".join(parts) if parts else version
+
+
+@functools.lru_cache(maxsize=1)
+def _distributions_by_module() -> dict:
+    import importlib.metadata
+    return dict(importlib.metadata.packages_distributions())
+
+
+@functools.lru_cache(maxsize=None)
+def _installed_version(dist: str) -> "str | None":
+    import importlib.metadata
+    try:
+        return importlib.metadata.version(dist)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def library_entry(obj: object) -> "dict | None":
+    """The chain entry for a class or function from an installed package
+    or the standard library. A package is `{key: lib:<dist>, kind:
+    library, form: lib:<dist>==<major.minor>}`, its release line
+    standing in for a form because what a library does changes with
+    its release, not with the project's code. The standard library is
+    `{key: lib:python, kind: interpreter, form: lib:python==<major.minor>}`:
+    the environment a claim was established under, reported when it
+    differs but not a change to the code. None for the language's own
+    modules (`_LANGUAGE_MODULES`) and for a module no installed
+    distribution provides."""
+    import platform
+    import sys
+    module = getattr(obj, "__module__", None) or ""
+    if not module or module in _LANGUAGE_MODULES:
+        return None
+    top = module.split(".")[0]
+    if top in sys.stdlib_module_names:
+        line = _release_line(platform.python_version())
+        return {"key": "lib:python", "kind": "interpreter",
+                "form": f"lib:python=={line}"}
+    dists = _distributions_by_module().get(top) or []
+    if not dists:
+        return None
+    dist = sorted(dists)[0]
+    version = _installed_version(dist)
+    if version is None:
+        return None
+    dist = dist.lower()
+    return {"key": f"lib:{dist}", "kind": "library",
+            "form": f"lib:{dist}=={_release_line(version)}"}
+
+
+#: the partitions of a dependency chain, by entry kind: project code,
+#: installed libraries, and the interpreter
+CHAIN_PARTITIONS = {"class": "code", "function": "code",
+                    "library": "library", "interpreter": "interpreter"}
+
+
+def chain_summary(dep: dict) -> str:
+    """The chain of a dependency as one string per partition,
+    `code:<h>|library:<h>|interpreter:<h>`, each `<h>` a 12-hex-char
+    hash over the sorted `key=form` pairs in that partition (the
+    dependency itself counted as code). Two summaries that differ show
+    which partition moved; the entries name which key."""
+    import hashlib
+    parts: dict[str, list[str]] = {"code": [], "library": [], "interpreter": []}
+    entries = [{"key": dep.get("key"), "kind": dep.get("kind"),
+                "form": dep.get("form")}, *(dep.get("reaches") or [])]
+    for e in entries:
+        part = CHAIN_PARTITIONS.get(e.get("kind") or "")
+        if part:
+            parts[part].append(f"{e.get('key')}={e.get('form')}")
+    return "|".join(
+        f"{name}:{hashlib.sha256(chr(10).join(sorted(v)).encode()).hexdigest()[:12]}"
+        for name, v in parts.items())
+
+
+def _form_entry(obj: object) -> "dict | None":
+    from .analysis import _installed_code
+    if (inspect.isclass(obj) or inspect.isfunction(obj)) and (
+            _installed_code(obj)
+            or getattr(obj, "__module__", None) in _LANGUAGE_MODULES):
+        return library_entry(obj)
+    if inspect.isclass(obj):
+        form = class_form(obj)
+        kind = "class"
+    elif inspect.isfunction(obj):
+        from .analysis import _installed_code
+        facts = None if _installed_code(obj) else quiet_facts(obj)
+        form = facts.form if facts is not None else None
+        kind = "function"
+    else:
+        return None
+    if not form:
+        return None
+    return {"key": f"{obj.__module__}.{obj.__qualname__}", "kind": kind,
+            "form": form}
+
+
+def _function_rests_on(fn) -> list[object]:
+    """What a function rests on one level down: the classes and
+    functions its definition names (callees, classes it reads, those
+    reached through a module it references, and those in its
+    annotations), resolved against its module."""
+    from .analysis import foreign_body, get_tree
+    g = module_scope(fn)
+    if foreign_body(fn):
+        facts = quiet_facts(fn)
+        names = facts.global_funcs if facts is not None else []
+        return [o for o in (g.get(n) for n in names)
+                if inspect.isclass(o) or inspect.isfunction(o)]
+    try:
+        _src, fdef = get_tree(fn)
+    except Exception:
+        return []
+    return _names_resolved(fdef, g)
+
+
+def dependency_reach(obj: object) -> list[dict]:
+    """Every class, function and library a function's or class's
+    definition rests on, transitively through project classes and
+    functions, each as `{key, kind, form}` (a library's form is its
+    version, see `library_entry`), sorted by key and excluding `obj`
+    itself. This is the chain a record's freshness is checked along: a
+    change to any entry re-adjudicates the claims that rest on it."""
+    own = f"{getattr(obj, '__module__', '')}.{getattr(obj, '__qualname__', '')}"
+    seen: dict[str, dict] = {}
+    stack = [obj]
+    while stack:
+        current = stack.pop()
+        rests = (_class_rests_on(current) if inspect.isclass(current)
+                 else _function_rests_on(current))
+        for dep in rests:
+            entry = _form_entry(dep)
+            if entry is None or entry["key"] == own or entry["key"] in seen:
+                continue
+            seen[entry["key"]] = entry
+            if entry["kind"] in ("class", "function"):
+                stack.append(dep)
+    return [seen[k] for k in sorted(seen)]
+
+
+def class_reach(cls: type) -> list[dict]:
+    """`dependency_reach` of a class: its bases, field classes and what
+    its body names, transitively."""
+    return dependency_reach(cls)
+
+
+def _class_chain(dep: dict, partitions: tuple) -> dict:
+    chain = {dep.get("key"): dep.get("form")}
+    chain.update({r.get("key"): r.get("form") for r in dep.get("reaches") or []
+                  if CHAIN_PARTITIONS.get(r.get("kind") or "") in partitions})
+    return chain
+
+
+def chain_moved(stored: list, live: list,
+                partitions: tuple = ("code", "library")) -> "list[str]":
+    """The keys along a class or function dependency's chain whose form
+    differs between the dependencies a record `stored` and the `live`
+    ones: the dependency itself and every entry of its reach, a key that appeared or
+    disappeared counting as moved, so a class the record stored without
+    a form, or a dependency stored without its reach (a record written
+    before chains were stored), is moved once, and re-adjudicating
+    writes them. Empty when every class
+    this record read is as it was, or one it did not list at all."""
+    from .identity import same_form
+    kinds = ("class", "function")
+    before = {d.get("key"): d for d in stored if d.get("kind") in kinds}
+    moved: list[str] = []
+    for dep in live:
+        old = before.get(dep.get("key"))
+        if dep.get("kind") not in kinds or not dep.get("form") or old is None:
+            continue
+        a, b = _class_chain(old, partitions), _class_chain(dep, partitions)
+        moved.extend(k for k in sorted(set(a) | set(b))
+                     if not same_form(a.get(k), b.get(k)) and k not in moved)
+    return moved
+
+
+def _class_dependency(name: str, cls: type) -> dict:
+    """A dependency entry for a class, with its form and reach when the
+    class is the project's own."""
+    dep: dict = {"name": name, "kind": "class",
+                 "key": f"{cls.__module__}.{cls.__qualname__}"}
+    try:
+        src = inspect.getsourcefile(cls)
+        if src:
+            dep["file"] = src
+        dep["line"] = inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        pass
+    form = class_form(cls)
+    if form:
+        dep["form"] = form
+        dep["reaches"] = class_reach(cls)
+        dep["chain"] = chain_summary(dep)
+    return dep
 
 
 def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
@@ -1006,10 +1298,18 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
                 line = None
         if line is not None:
             dep["line"] = line
+        if kind == "class":
+            form = class_form(obj)
+            if form:
+                dep["form"] = form
+                dep["reaches"] = class_reach(obj)
+                dep["chain"] = chain_summary(dep)
         if kind == "function":
             callee_facts = quiet_facts(obj)
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
+                dep["reaches"] = dependency_reach(obj)
+                dep["chain"] = chain_summary(dep)
                 from .koine.facts import provenance
                 body = provenance(callee_facts)
                 if body:
@@ -1023,6 +1323,18 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
         return out
     import collections.abc
     import typing as t
+    listed = {d.get("key") for d in out}
+    annotated = [(p.name, p.annotation) for p in sig.parameters.values()]
+    annotated.append(("return", sig.return_annotation))
+    for name, ann in annotated:
+        if ann is inspect.Parameter.empty or ann is inspect.Signature.empty:
+            continue
+        for cls in _annotation_classes(ann):
+            key = f"{cls.__module__}.{cls.__qualname__}"
+            if key in listed or class_form(cls) is None:
+                continue
+            listed.add(key)
+            out.append(_class_dependency(name, cls))
     for p in sig.parameters.values():
         ann = p.annotation
         if ann is inspect.Parameter.empty:

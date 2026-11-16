@@ -17,14 +17,15 @@ Three orthogonal measures of a codebase, each 0-100:
 The two per-function-quality scores (intent, clarity) roll up to the
 repo by a CENTRALITY-WEIGHTED mean (`centrality.centrality_weights`): a
 function the rest of the codebase depends on counts for more than a leaf.
-The overall/health number is the AREA of the radar triangle the three
-scores span.
+The overall/health number is the AREA of the triangle the three scores
+span on spokes 120 degrees apart, `(ab + bc + ca) / 3` on 0-1 fractions.
 """
 from __future__ import annotations
 
 import contextlib
 import os
 from dataclasses import dataclass, field
+from datetime import date
 
 # The clarity ALGORITHM is versioned like a route: an open string, so a
 # score is only ever compared against one computed the same way. A
@@ -32,6 +33,13 @@ from dataclasses import dataclass, field
 # structural change (a dimension added or removed, an entailment changed)
 # bumps the major (@2). ci_snapshot records it beside the score.
 CLARITY_ALGO = "entropy-dimensions@1.4"
+
+#: The date by which repo clarity is pooled bits, `1 - sum(w * left) /
+#: sum(w * bits)` over every source of every function, the rule
+#: `repo_clarity_aspects` rolls each aspect up by. Until then repo
+#: clarity is a centrality-weighted mean of function scores, so the five
+#: rolled-up aspects do not roll up exactly into it.
+POOLED_REPO_CLARITY_BY = date(2026, 11, 30)
 
 # The @1 constants, one labelled set so a recalibration is a new set plus a
 # version bump and past scores stay reproducible. Every number is the a-
@@ -902,18 +910,38 @@ def clarity_bits(fn=None, verified_claims=None, root: str = ".",
                f"{getattr(fn, '__qualname__', '')}")
         verified_claims = (((store.get(key) or {}).get("entry") or {})
                            .get("claims") or []) if fn is not None else []
+    rows = _clarity_rows(fn, verified_claims, root, facts, store,
+                         library_keys)
+    if rows is None:
+        return None
+    h0 = h_rem = 0.0
+    for _dim, bits, left in rows:
+        h0 += bits
+        h_rem += left
+    return h0, min(h0, max(0.0, h_rem))
+
+
+def _clarity_rows(fn, verified_claims, root: str, facts,
+                  store: dict, library_keys: "frozenset | None"
+                  ) -> "list[tuple[str, float, float]] | None":
+    """Intent:
+        Each entropy source of `fn` (`_clarity_sources`) as `(dimension,
+        bits, bits left)`: its a-priori bits, and the share of them its
+        reducer leaves after the verified claims (`_reductions`) and the
+        callees' recorded evidence. None when the source is unavailable.
+    """
     profile = _clarity_profile(fn, facts, root, store, library_keys)
     if profile is None:
         return None
     reductions = _reductions(verified_claims, profile.pure, profile)
     reductions.update({f"callee:{key}": evidence
                        for key, evidence in profile.callees})
-    h0 = h_rem = 0.0
-    for _dim, bits, reducer in _clarity_sources(profile):
+    rows = []
+    for dim, bits, reducer in _clarity_sources(profile):
         bits = max(0.0, bits)
-        h0 += bits
-        h_rem += bits * (1.0 - _unit(reductions.get(reducer, 0.0)))
-    return h0, min(h0, max(0.0, h_rem))
+        rows.append((dim, bits,
+                     bits * (1.0 - _unit(reductions.get(reducer, 0.0)))))
+    return rows
 
 
 def _unit(value: float) -> float:
@@ -958,17 +986,172 @@ def clarity_score(fn=None, verified_claims=None, root: str = ".",
     h0, h_rem = bits
     if h0 <= 0:
         return 0
+    return _entropy_score(h0, h_rem)
+
+
+def _entropy_score(h0: float, h_rem: float) -> int:
+    """Intent:
+        `1 - h_rem / h0` as a whole percent, 0 to 100, for `h0` above 0.
+        100 means every source is settled by proof: anything left,
+        however small, reads 99 at most.
+    """
     score = min(100, max(0, round(100 * (1.0 - h_rem / h0))))
-    # 100 means every source is settled by proof: anything left, however
-    # small, reads below it
     return 99 if score == 100 and h_rem > 0 else score
+
+
+#: The five clarity aspects in order: `(id, dimension in
+#: `_clarity_sources`, label)`.
+_ASPECTS = (
+    ("computes", "identity", "what it computes"),
+    ("accepts", "domain", "what it accepts"),
+    ("shape", "form", "bounds and shape"),
+    ("safety", "safety", "how safely it runs"),
+    ("failure", "failure", "where it can go wrong"),
+)
+
+
+@dataclass(frozen=True)
+class Aspect:
+    """One clarity aspect. `bits` are the a-priori bits of its sources and
+    `left` the bits its verified claims, and its callees' recorded
+    evidence, leave. An aspect with no bits cannot apply: `applies` is
+    False, `score` None and `weight` 0. Otherwise `score` is `1 - left /
+    bits` as a whole percent (99 at most while anything is left) and
+    `weight` is its share of all the bits, so the weights of the aspects
+    that apply sum to 1."""
+    id: str
+    label: str
+    bits: float
+    left: float
+    applies: bool
+    score: int | None
+    weight: float
+
+
+@dataclass(frozen=True)
+class ClarityAspects:
+    """A function's clarity by aspect: the five `aspects` in `_ASPECTS`
+    order, the function's a-priori bits `h0` and bits `left`, its
+    `clarity_score`, and the clarity algorithm version `algo`. `score`
+    is the `weight`-weighted mean of the aspects' unrounded scores,
+    rounded."""
+    aspects: tuple[Aspect, ...]
+    h0: float
+    left: float
+    score: int | None
+    algo: str
+
+
+def _aspects_of(bits_left: dict) -> tuple[Aspect, ...]:
+    """The five `Aspect`s from `{dimension: (bits, left)}`, each weighted
+    by its share of the total bits."""
+    total = sum(b for b, _l in bits_left.values())
+    out = []
+    for ident, dim, label in _ASPECTS:
+        bits, left = bits_left.get(dim, (0.0, 0.0))
+        applies = bits > 0
+        out.append(Aspect(ident, label, bits, left, applies,
+                          _entropy_score(bits, left) if applies else None,
+                          bits / total if applies else 0.0))
+    return tuple(out)
+
+
+def clarity_aspects(fn=None, verified_claims=None, root: str = ".",
+                    facts=None, store: "dict | None" = None,
+                    library_keys: "frozenset | None" = None
+                    ) -> ClarityAspects | None:
+    """Intent:
+        `clarity_score` for one function split into its five aspects:
+        each aspect gathers the entropy sources of one dimension
+        (`_clarity_sources`), with their a-priori bits and the bits the
+        verified claims leave, read exactly as `clarity_bits` reads them.
+        None when the source is unavailable.
+    Notes:
+        The function's score is the mean of its aspect scores weighted by
+        each aspect's share of the a-priori bits, `1 - left / h0`, so an
+        aspect that cannot apply (no sources, no bits) has weight 0 and
+        no score, and adds nothing to the score.
+    """
+    if store is None:
+        from .spec import load_verified
+        store = load_verified(root)
+    if verified_claims is None:
+        key = (f"{getattr(fn, '__module__', '')}."
+               f"{getattr(fn, '__qualname__', '')}")
+        verified_claims = (((store.get(key) or {}).get("entry") or {})
+                           .get("claims") or []) if fn is not None else []
+    rows = _clarity_rows(fn, verified_claims, root, facts, store,
+                         library_keys)
+    if rows is None:
+        return None
+    per: dict = {}
+    for dim, bits, left in rows:
+        b, rem = per.get(dim, (0.0, 0.0))
+        per[dim] = (b + bits, rem + left)
+    h0 = sum(b for b, _l in per.values())
+    left = min(h0, max(0.0, sum(rem for _b, rem in per.values())))
+    return ClarityAspects(_aspects_of(per), h0, left,
+                          _entropy_score(h0, left) if h0 > 0 else 0,
+                          CLARITY_ALGO)
+
+
+def _pool_aspects(weighted) -> dict[str, Aspect]:
+    """Intent:
+        The five aspects rolled up over `[(w, ClarityAspects), ...]` by
+        pooled bits: each aspect's `bits` and `left` are `sum(w * bits)`
+        and `sum(w * left)` over the functions where it applies, its
+        score `1 - left / bits`, and its weight its share of the pooled
+        bits of all five.
+    """
+    per: dict = {}
+    for w, ca in weighted:
+        for (_ident, dim, _label), a in zip(_ASPECTS, ca.aspects):
+            if a.applies:
+                b, rem = per.get(dim, (0.0, 0.0))
+                per[dim] = (b + w * a.bits, rem + w * a.left)
+    return {a.id: a for a in _aspects_of(per)}
+
+
+def repo_clarity_aspects(root: str = ".", targets=None) -> dict[str, Aspect]:
+    """Intent:
+        The five clarity aspects rolled up across the population
+        `repo_badges` scores, by pooled bits: for each aspect, `1 -
+        sum(w * left) / sum(w * bits)` with `w` each function's
+        centrality weight (`centrality.centrality_weights`), over the
+        functions where it applies; keyed by aspect id in `_ASPECTS`
+        order. A function whose source is unavailable drops out.
+    Notes:
+        Repo clarity is still a centrality-weighted mean of function
+        scores, so the five do not yet roll up exactly into it; it
+        becomes pooled bits by `POOLED_REPO_CLARITY_BY`.
+    """
+    from ._run_scope import run_scope
+    from .centrality import centrality_weights
+    from .compendium import load_library_claims
+    from .spec import load_verified
+    root = os.path.abspath(root)
+    with run_scope():
+        functions = _population(targets, root)
+        weights = centrality_weights(functions)
+        store = load_verified(root)
+        library_keys = frozenset(load_library_claims(root))
+        weighted = []
+        for key, fn in functions.items():
+            claims = ((store.get(key) or {}).get("entry", {})
+                      .get("claims") or [])
+            ca = clarity_aspects(fn, claims, root, store=store,
+                                 library_keys=library_keys)
+            if ca is not None:
+                weighted.append((weights.get(key, 1.0), ca))
+    return _pool_aspects(weighted)
 
 
 @dataclass(frozen=True)
 class BadgeScores:
     """The four repo numbers plus the per-function rows behind them.
     `implementation`/`intent`/`clarity` are 0-100; `overall` is the
-    radar-triangle area (0-100), the single health number CI diffs across
+    area of the triangle the three span on spokes 120 degrees apart
+    (`triangle_area`, 0-100), the single health number CI diffs across
     commits. `per_function` maps each key to its own three scores (a
     clarity None means the function posed no question). `capped` maps
     each key whose step outran the wall-clock cap to the scores that
@@ -1020,15 +1203,18 @@ def _weighted_mean(pairs: list[tuple[float, float]]) -> int:
 
 def triangle_area(a: float, b: float, c: float) -> int:
     """Intent:
-        The overall/health number, 0-100: the fraction of the frame the
-        drawn triangle SHADES, so half the triangle shaded reads 50. With
-        clarity (c) the apex height and implementation (a) and intent (b)
-        the base, that area is `clarity * (implementation + intent) / 2`
-        on the 0-1 fractions: 100 when all three are 100, and 0 whenever
-        clarity is 0 (a flat, zero-height shape) or both base scores are.
+        The overall/health number, 0-100, for implementation a, intent b
+        and clarity c: the share of the full frame shaded by the triangle
+        whose three spokes, of lengths a, b and c, sit 120 degrees apart.
+        Two spokes x and y at angle t enclose a wedge of area
+        `x * y * sin(t) / 2`, so with equal angles each pair counts the
+        same and the share is `(a*b + b*c + c*a) / 3` on the 0-1
+        fractions. It is 100 when all three are 100, s squared when all
+        three are s, and a single zero leaves the one remaining wedge:
+        `(100, 100, 0)` reads 33.
     """
     fa, fb, fc = a / 100.0, b / 100.0, c / 100.0
-    return round(100 * fc * (fa + fb) / 2.0)
+    return round(100 * (fa * fb + fb * fc + fc * fa) / 3.0)
 
 
 class _Capped(Exception):
@@ -1097,7 +1283,7 @@ def repo_badges(targets=None, root: str = ".",
         repo line ratio of the test-union-probe-union-derive coverage (no
         averaging, no centrality); intent and clarity are
         centrality-weighted means of their per-function scores. `overall`
-        is the triangle area. `implementation=False` SKIPS the coverage
+        is `triangle_area` of the three. `implementation=False` SKIPS the coverage
         pass entirely: the implementation score and `overall` come back
         None (nothing is output for them), it does not fall back to a
         cheaper, different number. `progress`, when given, is called as
@@ -1445,50 +1631,84 @@ def _repo_badges(targets, root: str, implementation: bool,
 
 
 # --- the radar triangle -----------------------------------------------
-# A fixed integer canvas so the same scores always render the same bytes
-# (clean git diffs). The frame is the sharp full 100/100/100 triangle,
-# CLARITY at the top apex, IMPL and INTENT the two bottom nodes, with
-# exact 45-degree edges so each side is one dot per row (no doubling).
-# Each score grows from the bottom centre (all-zero) out to its corner,
-# and the triangle those three dots span is filled with dots: the filled
-# area is the state, the gap to the frame the room to grow.
-_TRI_SIZE = 14
+# Three spokes from a common centre, 120 degrees apart: CLARITY straight
+# up (90 degrees), IMPL down-left (210) and INTENT down-right (330),
+# angles counter-clockwise from the positive x axis. The frame joins the
+# three spokes' tips; each score is the point at its fraction of its
+# spoke, and the triangle those points span is the current state. Two
+# spokes of lengths x and y at 120 degrees enclose a wedge of
+# x * y * sin(120) / 2, so the score triangle's share of the frame is
+# (ab + bc + ca) / 3, which is `triangle_area`; the SVG fills it exactly
+# and the ASCII draws its outline. The ASCII grid is a fixed integer canvas, so the same
+# scores always render the same bytes (clean git diffs). A terminal cell
+# is about twice as tall as it is wide, so columns are scaled by sqrt(3),
+# about 1.73 to 1, which puts each slanted edge at one column per row.
 _ORDER = ("CLARITY", "IMPL", "INTENT")
-_DOT, _CORNER, _CENTRE, _MARK = "·", "◆", "+", "●"
+_SPOKE_DEG = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
+_DOT, _CORNER, _CENTRE, _MARK, _EDGE = "·", "◆", "+", "●", "•"
+_ASCII_RADIUS = 10                    # rows from the centre to a tip
+_ASCII_XSCALE = 3 ** 0.5              # columns per row of height
+_ASCII_CENTRE = (15, 10)              # (column, row)
 
 
-def _corner_xy(size: int) -> dict:
-    """The three frame corners on a `2*size+1` by `size+1` grid: CLARITY
-    at the top apex, IMPL bottom-left, INTENT bottom-right."""
-    return {"CLARITY": (size, 0), "IMPL": (0, size), "INTENT": (2 * size, size)}
+#: A score below this counts as empty for drawing the triangle.
+TRIANGLE_HIDE_BELOW = 5
+#: The triangle is not drawn when at least this many scores are empty
+#: (or unknown): two empty scores leave only a line or a point, while a
+#: single one still leaves the wedge between the other two.
+TRIANGLE_HIDE_WHEN_COUNT = 2
 
 
-def _inside(x: float, y: float, tri) -> bool:
-    (ax, ay), (bx, by), (cx, cy) = tri
+def _triangle_hidden(a, b, c) -> bool:
+    """Whether the triangle for scores a, b, c is too degenerate to draw:
+    at least `TRIANGLE_HIDE_WHEN_COUNT` of them unknown (None) or below
+    `TRIANGLE_HIDE_BELOW`."""
+    empty = sum(1 for v in (a, b, c) if v is None or v < TRIANGLE_HIDE_BELOW)
+    return empty >= TRIANGLE_HIDE_WHEN_COUNT
 
-    def sign(px, py, qx, qy, rx, ry):
-        return (px - rx) * (qy - ry) - (qx - rx) * (py - ry)
 
-    d1 = sign(x, y, ax, ay, bx, by)
-    d2 = sign(x, y, bx, by, cx, cy)
-    d3 = sign(x, y, cx, cy, ax, ay)
-    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-    return not (has_neg and has_pos)
+def _spoke_xy(name: str, fraction: float, centre, radius: float,
+              xscale: float = 1.0) -> tuple:
+    """The point at `fraction` (0 to 1) of spoke `name`, from `centre`
+    with tip at `radius`, on a canvas whose y grows downwards and whose
+    x is stretched by `xscale`."""
+    import math
+    t = math.radians(_SPOKE_DEG[name])
+    return (centre[0] + xscale * radius * fraction * math.cos(t),
+            centre[1] - radius * fraction * math.sin(t))
+
+
+def _line_cells(x0: int, y0: int, x1: int, y1: int) -> list:
+    """The grid cells of the segment between two cells: one cell per step
+    along the longer axis, the other coordinate the nearest to the true
+    line, a half rounded up."""
+    dx, dy = x1 - x0, y1 - y0
+    n = max(abs(dx), abs(dy))
+    if n == 0:
+        return [(x0, y0)]
+
+    def near(d, k):
+        return (2 * d * k + n) // (2 * n)
+
+    return [(x0 + near(dx, k), y0 + near(dy, k)) for k in range(n + 1)]
 
 
 def render_triangle(a: int, b: int, c: int) -> str:
     """Intent:
         The radar for scores (implementation a, intent b, clarity c), each
-        0-100: the sharp dotted outer triangle is the full 100/100/100
-        frame, CLARITY at the apex and IMPL/INTENT the bottom nodes; each
-        score is a dot on its spoke from the bottom centre (all-zero) out
-        to its corner, and the triangle those three dots span is filled
-        with dots, so the filled area is the current state and the gap to
-        the frame is the room to grow. The three scores label the corners
-        and the overall area sits below. If any score is under 5 the shape
-        is degenerate and is not drawn, only the numbers are shown, and so
-        is a score that is unknown (None), shown as `unknown`.
+        0-100, on three spokes 120 degrees apart from a common centre
+        (`+`): CLARITY up, IMPL down-left, INTENT down-right. The dotted
+        outer triangle with its `◆` tips is the full 100/100/100 frame;
+        each score is a `●` at its fraction of its spoke, and the triangle
+        those three points span is outlined in `•`, edges that run along
+        the frame keeping its dots. The outline shows the shape; its
+        share of the frame, the overall number (`triangle_area`), is
+        drawn exactly by `render_svg`. The scores label the frame from
+        outside, with CLARITY above, IMPL and INTENT below and the
+        overall under them.
+        When `_triangle_hidden` (two or more scores under 5) the shape is
+        degenerate and is not drawn, only the numbers are shown; so too
+        when a score is unknown (None), shown as `unknown`.
     """
     if None in (a, b, c):
         def said(v):
@@ -1497,49 +1717,50 @@ def render_triangle(a: int, b: int, c: int) -> str:
                 f"overall unknown\n(no triangle: a dimension is unknown)")
     overall = triangle_area(a, b, c)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
-    if min(a, b, c) < 5:
+    if _triangle_hidden(a, b, c):
         return (f"IMPL {a}   INTENT {b}   CLARITY {c}   overall {overall}\n"
-                "(no triangle: a dimension is below 5%)")
-    size = _TRI_SIZE
-    w, h = 2 * size + 1, size + 1
+                f"(no triangle: {TRIANGLE_HIDE_WHEN_COUNT} or more dimensions "
+                f"are below {TRIANGLE_HIDE_BELOW}%)")
+    r, xs, centre = _ASCII_RADIUS, _ASCII_XSCALE, _ASCII_CENTRE
+    tips = {n: _spoke_xy(n, 1.0, centre, r, xs) for n in _ORDER}
+    w = round(tips["INTENT"][0]) + 1
+    h = round(tips["IMPL"][1]) + 1
     grid = [[" "] * w for _ in range(h)]
 
     def put(x, y, ch, over=False):
         if 0 <= y < h and 0 <= x < w and (over or grid[y][x] == " "):
             grid[y][x] = ch
 
-    corners = _corner_xy(size)
-    for y in range(h):                              # the two sharp 45-deg edges
-        put(size - y, y, _DOT)
-        put(size + y, y, _DOT)
-    for x in range(w):                              # the dotted base
-        put(x, size, _DOT)
-    for name, (x, y) in corners.items():
-        put(x, y, _CORNER, over=True)
-    origin = (size, size)                           # all-zero sits at the base
-    put(origin[0], origin[1], _CENTRE, over=True)
+    top, left, right = tips["CLARITY"], tips["IMPL"], tips["INTENT"]
+    for y in range(h):                              # the two slanted edges
+        k = (y - top[1]) / (left[1] - top[1])
+        put(round(top[0] + k * (left[0] - top[0])), y, _DOT)
+        put(round(top[0] + k * (right[0] - top[0])), y, _DOT)
+    for x in range(round(left[0]), round(right[0]) + 1):   # the base
+        put(x, round(left[1]), _DOT)
+    for x, y in tips.values():
+        put(round(x), round(y), _CORNER, over=True)
+    put(centre[0], centre[1], _CENTRE, over=True)
     inner = {}
-    for name in _ORDER:
-        f = max(0.0, min(1.0, scores[name] / 100.0))
-        cx, cy = corners[name]
-        inner[name] = (origin[0] + f * (cx - origin[0]),
-                       origin[1] + f * (cy - origin[1]))
-    tri = [inner[n] for n in _ORDER]
-    for y in range(h):                              # fill the score triangle
-        for x in range(w):
-            if grid[y][x] == " " and _inside(x, y, tri):
-                put(x, y, _DOT)
-    for name in _ORDER:                             # the score vertices on top
-        put(round(inner[name][0]), round(inner[name][1]), _MARK, over=True)
-    rows = ["".join(row).rstrip() for row in grid]
-    while rows and not rows[0].strip():
-        rows.pop(0)
-    while rows and not rows[-1].strip():
-        rows.pop()
-    body = "\n".join(rows)
-    return (f"        CLARITY {c}\n{body}\n"
-            f"  IMPL {a}{' ' * 11}INTENT {b}\n"
-            f"        overall {overall}")
+    for n in _ORDER:
+        x, y = _spoke_xy(n, max(0.0, min(1.0, scores[n] / 100.0)),
+                         centre, r, xs)
+        inner[n] = (round(x), round(y))
+    for i, n in enumerate(_ORDER):                  # the score outline
+        for x, y in _line_cells(*inner[n], *inner[_ORDER[i - 1]]):
+            put(x, y, _EDGE)
+    for name in _ORDER:                             # the score points on top
+        put(*inner[name], _MARK, over=True)
+    body = "\n".join("".join(row).rstrip() for row in grid)
+
+    def centred(text):
+        return " " * max(0, centre[0] - len(text) // 2) + text
+
+    impl, intent = f"IMPL {a}", f"INTENT {b}"
+    gap = max(3, w - len(impl) - len(intent))
+    return (f"{centred(f'CLARITY {c}')}\n{body}\n"
+            f"{impl}{' ' * gap}{intent}\n"
+            f"{centred(f'overall {overall}')}")
 
 
 # --- emission ---------------------------------------------------------
@@ -1588,83 +1809,113 @@ def shields_payloads(scores: BadgeScores) -> dict:
     return out
 
 
-def _svg_score_point(origin, corner, score):
-    """A score's point on its spoke from `origin` (all-zero) out to its
-    frame `corner`, the SVG twin of the ASCII spoke placement; an
-    unknown score (None) sits at the origin."""
+# The SVG card's geometry, in the card's own coordinates: the spokes
+# (`_SPOKE_DEG`, through `_spoke_xy`) leave `_SVG_CENTRE` and their tips
+# sit at `_SVG_RADIUS`, so the frame is (100, 20), (169.3, 140) and
+# (30.7, 140). Rings mark 25, 50 and 75 percent of the radius. CLARITY's
+# label is centred `_SVG_LABEL_ABOVE` above its tip, the other two are
+# centred `_SVG_LABEL_BELOW` below theirs, and the overall number is a
+# caption under the figure. The figure occupies x -30 to 230 and y -4 to
+# 168; the card adds a header above and the caption below, and is drawn
+# at `_SVG_SCALE` times the viewBox size.
+_SVG_CENTRE = (100.0, 100.0)
+_SVG_RADIUS = 80.0
+_SVG_RINGS = (0.25, 0.5, 0.75)
+_SVG_LABEL_ABOVE = 10.0
+_SVG_LABEL_BELOW = 18.0
+_SVG_VIEWBOX = (-30.0, -30.0, 260.0, 242.0)
+_SVG_SCALE = 1.4
+_SVG_CAPTION_Y = 196.0
+
+
+def _svg_point(name: str, score) -> tuple:
+    """Score `score` (0-100) on spoke `name` of the SVG card; an unknown
+    score (None) sits at the centre."""
     f = 0.0 if score is None else max(0.0, min(1.0, score / 100.0))
-    return (origin[0] + f * (corner[0] - origin[0]),
-            origin[1] + f * (corner[1] - origin[1]))
+    return _spoke_xy(name, f, _SVG_CENTRE, _SVG_RADIUS)
+
+
+def _svg_points(pts) -> str:
+    return " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+
+
+def _svg_label_xy(name: str) -> tuple:
+    """Where spoke `name`'s label is centred: above the CLARITY tip,
+    below the other two."""
+    x, y = _spoke_xy(name, 1.0, _SVG_CENTRE, _SVG_RADIUS)
+    if name == "CLARITY":
+        return x, y - _SVG_LABEL_ABOVE
+    return x, y + _SVG_LABEL_BELOW
+
+
+def _svg_shape(scores: BadgeScores) -> str:
+    """The scored triangle: its fill, stroke and round joins."""
+    pts = [_svg_point("CLARITY", scores.clarity),
+           _svg_point("INTENT", scores.intent),
+           _svg_point("IMPL", scores.implementation)]
+    return (f'<polygon class="head" points="{_svg_points(pts)}" '
+            f'fill="{_ACCENT}" fill-opacity="0.16" stroke="{_ACCENT}" '
+            'stroke-width="2" stroke-linejoin="round"/>')
 
 
 def render_svg(scores: BadgeScores) -> str:
-    """A dark-card twin of the ASCII triangle, same layout so the two read
-    alike: CLARITY at the apex, IMPL and INTENT the bottom nodes, the full
-    100/100/100 triangle as a faint dashed frame, and each score a vertex
-    on its spoke from the bottom centre (all-zero) out to its corner, with
-    the triangle they span filled in the accent. The overall number sits
-    top right. Self-contained (no external CSS or fonts), so it reads
-    the same on a light or a dark README."""
-    w, h = 360, 300
-    apex = (180.0, 72.0)          # CLARITY, top
-    left = (56.0, 240.0)          # IMPL, bottom-left
-    right = (304.0, 240.0)        # INTENT, bottom-right
-    origin = (180.0, 240.0)       # all-zero sits at the base centre
-    frame = {"CLARITY": apex, "IMPL": left, "INTENT": right}
-    dims = (("CLARITY", scores.clarity),
-            ("IMPL", scores.implementation),
-            ("INTENT", scores.intent))
-    ghost = " ".join(f"{p[0]:.1f},{p[1]:.1f}" for p in (apex, left, right))
-    pts = {name: _svg_score_point(origin, frame[name], sc)
-           for name, sc in dims}
-    cur = " ".join(f"{pts[n][0]:.1f},{pts[n][1]:.1f}"
-                   for n in ("CLARITY", "IMPL", "INTENT"))
+    """A dark-card twin of the ASCII triangle, on the same three spokes
+    from a common centre, 120 degrees apart: CLARITY up, INTENT
+    down-right, IMPL down-left. Rings at a quarter, a half and three
+    quarters of the radius, the spokes, the full 100/100/100 frame and the
+    scored triangle, its share of the frame exactly the overall number
+    (`triangle_area`), which is the caption under the figure. The scored
+    triangle is left out when `_triangle_hidden`. The layers
+    are drawn in order, so a further shape (an earlier snapshot's) goes in
+    before the scored one. Self-contained (no external CSS, fonts or
+    script), so it reads the same on a light or a dark README."""
+    vx, vy, vw, vh = _SVG_VIEWBOX
+    cx, cy = _SVG_CENTRE
+    tips = {n: _spoke_xy(n, 1.0, _SVG_CENTRE, _SVG_RADIUS)
+            for n in ("CLARITY", "INTENT", "IMPL")}
+    frame = [tips["CLARITY"], tips["INTENT"], tips["IMPL"]]
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="{_MONO_FONT}">',
-        f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="10" '
-        f'fill="{_INK}" stroke="{_LINE}"/>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{vw * _SVG_SCALE:.0f}" height="{vh * _SVG_SCALE:.0f}" '
+        f'viewBox="{vx:.0f} {vy:.0f} {vw:.0f} {vh:.0f}" '
+        f'font-family="{_MONO_FONT}">',
+        f'<rect x="{vx + 0.5:.1f}" y="{vy + 0.5:.1f}" width="{vw - 1:.0f}" '
+        f'height="{vh - 1:.0f}" rx="8" fill="{_INK}" stroke="{_LINE}"/>',
         # the header: the product name in the bracket-label motif
-        f'<text x="20" y="28" fill="{_DMUTE}" font-size="11" '
-        f'letter-spacing="1.2">[ mathema ]</text>',
-        # the full 100/100/100 frame: a faint dashed triangle with open
-        # corner pips, the room to grow
-        f'<polygon points="{ghost}" fill="none" stroke="{_GRAPHITE}" '
-        'stroke-dasharray="2 5" stroke-width="1.25"/>',
+        f'<text x="{vx + 12:.0f}" y="{vy + 18:.0f}" fill="{_DMUTE}" '
+        'font-size="9" letter-spacing="1.2">[ mathema ]</text>',
     ]
-    for name in ("CLARITY", "IMPL", "INTENT"):
-        parts.append(f'<line x1="{origin[0]:.0f}" y1="{origin[1]:.0f}" '
-                     f'x2="{frame[name][0]:.1f}" y2="{frame[name][1]:.1f}" '
-                     f'stroke="{_LINE}" stroke-width="1"/>')
-    for p in (apex, left, right):
-        parts.append(f'<circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="3" '
-                     f'fill="{_INK}" stroke="{_GRAPHITE}" stroke-width="1.25"/>')
-    parts.append(f'<polygon points="{cur}" fill="{_ACCENT}" '
-                 f'fill-opacity="0.16" stroke="{_ACCENT}" stroke-width="1.5" '
-                 'stroke-linejoin="round"/>')
-    label_pos = {"CLARITY": (apex[0], apex[1] - 16, "middle"),
-                 "IMPL": (left[0] - 8, left[1] + 30, "start"),
-                 "INTENT": (right[0] + 8, right[1] + 30, "end")}
-    for name, sc in dims:
-        vx, vy = pts[name]
-        parts.append(f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="4.5" '
-                     f'fill="{_ACCENT}" stroke="{_INK}" stroke-width="2"/>')
-        lx, ly, anchor = label_pos[name]
-        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" '
-                     f'letter-spacing="1.2" text-anchor="{anchor}">'
+    for f in _SVG_RINGS:
+        ring = [(cx + f * (x - cx), cy + f * (y - cy)) for x, y in frame]
+        parts.append(f'<polygon class="ring" points="{_svg_points(ring)}" '
+                     f'fill="none" stroke="{_LINE}" stroke-width="1"/>')
+    parts.append(f'<polygon class="frame" points="{_svg_points(frame)}" '
+                 f'fill="none" stroke="{_GRAPHITE}" stroke-width="1.5"/>')
+    for x, y in frame:
+        parts.append(f'<line x1="{cx:.0f}" y1="{cy:.0f}" x2="{x:.1f}" '
+                     f'y2="{y:.1f}" stroke="{_GRAPHITE}" stroke-width="1"/>')
+    if not _triangle_hidden(scores.implementation, scores.intent,
+                            scores.clarity):
+        parts.append(_svg_shape(scores))
+    for name, sc in (("CLARITY", scores.clarity), ("INTENT", scores.intent),
+                     ("IMPL", scores.implementation)):
+        lx, ly = _svg_label_xy(name)
+        parts.append(f'<text class="label" x="{lx:.1f}" y="{ly:.1f}" '
+                     'font-size="11" letter-spacing="1.2" '
+                     'text-anchor="middle">'
                      f'<tspan fill="{_DMUTE}">{name}</tspan> '
                      f'<tspan fill="{_PAPER}" font-weight="600">'
                      f'{"unknown" if sc is None else f"{sc}%"}</tspan>'
                      '</text>')
-    # the overall (shaded-area) number, top right, clear of the shape at
-    # every score
-    parts.append(f'<text x="{w - 20}" y="37" fill="{_PAPER}" '
-                 f'font-family="{_DISPLAY_FONT}" font-size="20" '
-                 f'font-weight="600" text-anchor="end">'
-                 f'{"unknown" if scores.overall is None else f"{scores.overall}%"}'
-                 '</text>')
-    parts.append(f'<text x="{w - 20}" y="51" fill="{_DMUTE}" font-size="10" '
-                 'letter-spacing="1.2" text-anchor="end">overall</text>')
+    # the caption: the overall number, then its name
+    overall = "unknown" if scores.overall is None else f"{scores.overall}%"
+    parts.append(f'<text class="caption" x="{cx - 4:.0f}" '
+                 f'y="{_SVG_CAPTION_Y:.0f}" fill="{_PAPER}" '
+                 f'font-family="{_DISPLAY_FONT}" font-size="26" '
+                 f'font-weight="600" text-anchor="end">{overall}</text>')
+    parts.append(f'<text class="caption" x="{cx + 4:.0f}" '
+                 f'y="{_SVG_CAPTION_Y:.0f}" fill="{_DMUTE}" font-size="11" '
+                 'letter-spacing="1.2" text-anchor="start">overall</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -1770,8 +2021,9 @@ _MEANINGS = (
                "specified", "#the-three-badges"),
     ("clarity", "how much of each function's knowable behaviour its "
                 "verified claims have pinned down", "#how-clarity-is-scored"),
-    ("overall", "the area the three span, so it falls toward zero when any "
-                "one of them is empty", "#the-triangle"),
+    ("overall", "the area the three span, where each pair of scores counts "
+                "equally, so a low score pulls it down without zeroing it",
+     "#the-triangle"),
 )
 
 

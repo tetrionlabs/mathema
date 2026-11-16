@@ -335,7 +335,10 @@ def test_a_committed_store_survives_its_second_run(tmp_path):
     r2 = _verify_all(tmp_path, env)
     assert r2.returncode == 0, r2.stdout + r2.stderr
     assert "re-authored" not in r2.stdout
-    assert "invalidated" not in rec.read_text()
+    second = yaml.safe_load(rec.read_text())["spkg.mod.scale_law"]
+    assert second["meta"]["mathema.invalidated_by"] == []
+    assert not any("mathema.transitions" in (c.get("meta") or {})
+                   for c in second["claims"])
     assert _claims_block(rec.read_text()) == _claims_block(first)
 
 

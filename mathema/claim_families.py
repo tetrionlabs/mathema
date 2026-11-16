@@ -6342,8 +6342,9 @@ def _repeatable_children(fn, facts, cj, domain: dict) -> list:
     the function takes a seed or a generator (`seed_parameter`), else
     `is_deterministic` (same input, same answer), and `is_state_safe`
     always."""
+    from .analysis import call_text
     from .conjecture import claim
-    call = f"f({', '.join(facts.params)})"
+    call = call_text(facts)
     first = ("is_reproducible" if seed_parameter(fn, facts) is not None
              else "is_deterministic")
     out = [claim(f"{call} == {call}", name=name, route="best")

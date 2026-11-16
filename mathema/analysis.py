@@ -1325,6 +1325,26 @@ def _python_facts(fn: Callable[..., Any]) -> Facts:
     )
 
 
+def call_text(facts: Facts, name: str = "f") -> str:
+    """Intent:
+        `name` called with every parameter of the function `facts`
+        describes, each passed the way the signature accepts it: a
+        keyword-only parameter by keyword (`b=b`), every other one
+        positionally, in order. `f(a, b=b)` for `def g(a, *, b=1)`.
+
+    Notes:
+        A function with no readable source (`facts.tree` is None) has
+        no keyword-only parameters on record, so every parameter goes
+        positionally.
+    """
+    tree = getattr(facts, "tree", None)
+    kwonly = ({a.arg for a in tree.args.kwonlyargs}
+              if isinstance(tree, (ast.FunctionDef, ast.AsyncFunctionDef))
+              else set())
+    args = [f"{p}={p}" if p in kwonly else p for p in facts.params]
+    return f"{name}({', '.join(args)})"
+
+
 def effective_facts(fn: Callable[..., Any]) -> Facts:
     """Intent:
         The facts mathema reads `fn` by: the `Facts` it carries as

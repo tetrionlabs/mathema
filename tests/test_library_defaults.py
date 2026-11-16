@@ -163,8 +163,13 @@ def test_verify_readjudicates_when_a_library_default_moves(
     assert row["meta"]["mathema.defaults"] == \
         {"extlib.scaled": {"k": "-2.0"}}
     assert "defaults changed" in line, line
-    # the claim held at the old default and fails at the new one
-    assert row["verdict"] == "invalidated"
+    # the claim held at the old default and fails at the new one: the
+    # fresh verdict, the move from its old level kept beside it
+    assert row["verdict"] == "falsified"
+    (t,) = row["meta"]["mathema.transitions"]
+    assert t["from"] == row["meta"]["mathema.previous_verdict"]
+    assert (t["to"], t["kind"], t["cause"]) == (
+        "falsified", "regressed", "this function changed")
 
 
 def test_a_numeric_pin_of_a_parameter_the_function_lacks_is_misspecified():

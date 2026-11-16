@@ -706,8 +706,9 @@ def badges(targets: list[str] | None = None, root: str = ".",
     counts as knowledge). Intent and clarity roll up to
     the repo CENTRALITY-weighted (a core function the rest depends on
     counts more than a leaf); implementation is the raw ratio. `overall`
-    is the area of the radar triangle the three span, the single health
-    number to diff across commits. Per-function rows are `[key,
+    is the area the three span on spokes 120 degrees apart,
+    `(ab + bc + ca) / 3` on 0-1 fractions, the single health number to
+    diff across commits. Per-function rows are `[key,
     implementation, intent, clarity]`; a null clarity means the source
     is unavailable. `ascii` is the git-diffable triangle. Reads the
     verified store, so clarity reflects only declared-and-verified

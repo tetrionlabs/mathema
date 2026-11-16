@@ -23,8 +23,8 @@ mathema review [<ref>] [--root .] [--format text|json] [--output FILE]
 
 Keyed by function (`module.qualname`), and within each, by claim name:
 
-- **verdict flips** (`old -> new`), with newly `falsified` or
-  `invalidated` claims marked `!!`,
+- **verdict flips** (`old -> new`), with a flip into `falsified`
+  marked `!!`,
 - **claims added** and **claims removed** between the two states,
 - **newly falsified** claims (a flip into `falsified`, or an added claim
   that lands `falsified`),
@@ -139,21 +139,21 @@ mathema review HEAD
 
 <!-- example: delta output -->
 ```text
-FAIL functions.softmax: form changed; 1 proven, 5 holds, 0 falsified, 1 invalidated  <- 1 invalidated claim(s)
-1 unchanged since the last run (not run again), 1 checked, 1 problem(s)
+FAIL functions.softmax: form changed; 1 proven, 5 holds, 1 falsified  <- sums_to_one regressed holds to falsified (this function changed); to acknowledge it, run: mathema accept functions.softmax sums_to_one --transition; 1 falsified claim(s)
+1 unchanged since the last run (not run again), 1 checked, 2 problem(s)
 grammars detected: mathema; verified by this run: mathema
 1 intent to accept (1 function): mathema accept --intent
-Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 0 newly falsified, 0 reconciled.
+Claim changes since HEAD: 1 function(s), 1 verdict flip(s), 1 added, 0 removed, 1 newly falsified, 0 reconciled.
 
 functions.softmax
-    sums_to_one: holds -> invalidated  !!
+    sums_to_one: holds -> falsified  !!
     + bounded
 ```
 
 `sums_to_one` regressed and a new `bounded` claim was declared; the
 reviewer sees exactly that, and nothing else. A claim that held at the
-base and now has a counterexample is `invalidated`, not newly
-falsified, so the falsified count stays at 0.
+base and now has a counterexample is newly falsified, and the record it
+came from keeps the move from `holds` beside the verdict.
 
 ## The record shape it reads
 

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """What a `mathema verify` sweep prints for one function must agree with
-what the sweep wrote to that function's record: a regression the record
-stores as `invalidated` is reported as invalidated, a tripped lock is
+what the sweep wrote to that function's record: a regression keeps the
+fresh verdict and is reported with the move the record stores beside
+it, a tripped lock is
 one failing row rather than a failing row and a passing one, and a risk
 a person accepted is reported as accepted risk whether or not the
 function was re-adjudicated.
@@ -43,17 +44,24 @@ def _rows_for(stdout, key):
             if ln[:5].strip() in ("ok", "FAIL") and f" {key}:" in ln[:60]]
 
 
-def test_a_regression_is_reported_as_invalidated_not_falsified(tmp_path):
+def test_a_regression_keeps_the_fresh_verdict_and_reports_the_move(tmp_path):
+    import yaml
     root = _project(tmp_path)
     (root / "funcs.py").write_text(_SETTLE_BROKEN)
     r = _run(root)
     assert r.returncode == 1, r.stdout
-    stored = (root / ".mathema" / "verified" / "funcs.settle.yaml").read_text()
-    assert 'verdict: "invalidated"' in stored
+    stored = yaml.safe_load(
+        (root / ".mathema" / "verified" / "funcs.settle.yaml").read_text())
+    (c,) = [c for c in stored["funcs.settle"]["claims"] if c["name"] == "nonneg"]
+    assert c["verdict"] == "falsified"
+    (t,) = c["meta"]["mathema.transitions"]
+    assert (t["from"], t["to"], t["kind"], t["cause"]) == (
+        "holds", "falsified", "regressed", "this function changed")
     (row,) = [ln for ln in _rows_for(r.stdout, "funcs.settle")
               if "form changed" in ln]
-    assert "1 invalidated" in row and "1 invalidated claim(s)" in row
-    assert "falsified claim" not in row
+    assert "1 falsified" in row and "invalidated" not in row
+    assert "nonneg regressed holds to falsified (this function changed)" in row
+    assert "mathema accept funcs.settle nonneg --transition" in row
 
 
 def test_a_tripped_lock_is_one_failing_row(tmp_path):

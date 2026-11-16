@@ -254,8 +254,9 @@ def enforce_policy(attestation: dict | None, root: str = ".") -> None:
 def acceptance_policy_problems(key: str, entry: dict,
                                policy: dict) -> list[str]:
     """The verify-time check (the CI gate): every non-stale acceptance
-    on a live claim, every acceptance on a retirement row (`discoveries`,
-    `historical`, `superseded`), and the intent acceptance must carry a
+    on a live claim, every risk sign-off on a transition, every
+    acceptance on a retirement row (`discoveries`, `historical`,
+    `superseded`), and the intent acceptance must carry a
     `verified_by` the policy accepts. Returns problem strings; empty
     without a policy."""
     if not policy or not policy.get("require_verification"):
@@ -289,6 +290,11 @@ def acceptance_policy_problems(key: str, entry: dict,
     for c in entry.get("claims") or []:
         if c.get("accepted"):
             _check(f"claim {c.get('name')!r}", c["accepted"])
+        # a risk sign-off on a transition is an acceptance like any other
+        for t in (c.get("meta") or {}).get("mathema.transitions") or []:
+            ack = t.get("acknowledged") if isinstance(t, dict) else None
+            if isinstance(ack, dict) and ack.get("as") == "risk":
+                _check(f"claim {c.get('name')!r} transition risk", ack)
     # a retirement row takes its claim out of the gate, so its
     # acceptance is held to the same policy; a row carrying no
     # acceptance at all retires nothing, and the sweep reports it apart

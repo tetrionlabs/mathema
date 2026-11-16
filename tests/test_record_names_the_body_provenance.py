@@ -152,11 +152,11 @@ def _callee(koine_hash_: str, version: str = "0") -> tuple:
     return dep, verified
 
 
-def test_a_callee_whose_body_moved_under_the_same_form_is_stale():
+def test_a_callee_whose_body_moved_under_the_same_form_is_invalidated():
     from mathema.spec import _dependency_state
     assert _dependency_state(*_callee("a")) == "current"
-    assert _dependency_state(*_callee("b")) == "stale"
-    assert _dependency_state(*_callee("a", version="1")) == "stale"
+    assert _dependency_state(*_callee("b")) == "invalidated"
+    assert _dependency_state(*_callee("a", version="1")) == "invalidated"
 
 
 def test_a_python_callee_carries_no_provenance_and_stays_current():

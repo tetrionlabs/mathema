@@ -88,7 +88,7 @@ mathema verify --root .
 $ mathema describe funcs:midpoint
 funcs.midpoint(a: float, b: float) -> float
   sig_hash:  6e64b8a7a1f0
-  form_hash: py:54265556347f
+  form_hash: py:fc59a558f9d7
 
 Domains:
   (none inferred)

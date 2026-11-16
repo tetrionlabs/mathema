@@ -51,7 +51,7 @@ print(record)
 
 <!-- example: pandas output wrap=80 -->
 ```text
-mathema.Record(average_return) · source, no side effects · form py:cb973acd88fd
+mathema.Record(average_return) · source, no side effects · form py:b38d4613a6c4
   min_returns_le_f_returns_le_max_returns  for returns in [-0.1, 0.1]^n : float,
       min(returns) <= f(returns) <= max(returns)   falsified at returns = []
     proven     mathematics  for returns in [-0.1, 0.1]^n ⊂ ℝ, min(returns) <=
@@ -124,7 +124,7 @@ print(record)
 
 <!-- example: pandas output wrap=80 -->
 ```text
-mathema.Record(sharpe) · source, no side effects · form py:099872a2a5ee
+mathema.Record(sharpe) · source, no side effects · form py:7f6096e11ff8
   leverage_invariant  let s = mathema.f.scale_seq, let c be [0.1, 10.0], for
       returns in [-0.1, 0.1]^n : float, f(s(returns, c)) ~= f(returns)
       falsified at returns = pandas.Series([0.0],
@@ -174,7 +174,7 @@ print(record)
 
 <!-- example: pandas output wrap=80 -->
 ```text
-mathema.Record(sharpe) · source, no side effects · form py:099872a2a5ee
+mathema.Record(sharpe) · source, no side effects · form py:7f6096e11ff8
   leverage_invariant  assuming std(returns, ddof=1) > 0, let s =
       mathema.f.scale_seq, let c be [0.1, 10.0], for returns in [-0.1, 0.1]^n :
       float, f(s(returns, c)) ~= f(returns)   falsified at returns =

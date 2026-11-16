@@ -175,23 +175,107 @@ def _literal_call_args(text: str, sig_params: list,
     return {p: v for p, v in fixed.items() if p not in moving}
 
 
+def _passed_whole(text: str, sig_params: list, name: str) -> bool:
+    """Whether some `f(...)` call in `text` passes the bare name `name`
+    as f's own parameter of that name, by position or by keyword."""
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        for p, arg in zip(sig_params, node.args):
+            if p == name and isinstance(arg, ast.Name) and arg.id == name:
+                return True
+        for k in node.keywords:
+            if k.arg == name and isinstance(k.value, ast.Name) \
+                    and k.value.id == name:
+                return True
+    return False
+
+
+def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
+    """Intent:
+        The kind each parameter of a claim is drawn as. A parameter the
+        claim binds to a finite set, an interval or a number set takes
+        values from that binding, drawn as values rather than as f's
+        mapping or container kind, where f's kind cannot hold the
+        binding's members: a mapping bound to numbers, or a sequence
+        whose name the claim never passes whole to f (`f([triggers,
+        "dependency"])` passes it as one element). A sequence passed
+        whole keeps its kind, its binding read as its element domain;
+        a language binding or a space (`[0, 1]^n`) keeps the kind it
+        names.
+    """
+    from .probing import _classify_bound
+    from .runtime_types import SEQUENCE_KINDS
+    out = dict(kinds)
+    sides = [cj.lhs, cj.rhs, *[t for link in (cj.links or ())
+                               for t in (link[0], link[2])]]
+    for p, k in kinds.items():
+        bound = (cj.domain or {}).get(p)
+        if bound is None or getattr(bound, "dims", ()) \
+                or _classify_bound(bound) in ("language", "instances", "none"):
+            continue
+        if k == "dict":
+            out[p] = "unknown"
+        elif k in SEQUENCE_KINDS and not any(
+                _passed_whole(t, sig_params, p) for t in sides if t):
+            out[p] = "unknown"
+    return out
+
+
 def _yaml_safe_args(args) -> list:
     """Intent:
         A falsifying argument tuple as YAML-safe values a later run can
         replay exactly: numbers pass through, a complex value becomes
-        its coordinate spelling, sequences recurse.
+        its coordinate spelling, a set or frozenset becomes its members
+        under a `set` or `frozenset` tag, and sequences and mapping
+        values recurse.
     """
-    out = []
-    for v in args:
-        if isinstance(v, complex) and not isinstance(v, (int, float)):
-            # tagged, so a string witness that reads as a complex
-            # number (`"j"`) can never be mistaken for one
-            out.append({"complex": f"{v.real:g}{v.imag:+g}j"})
-        elif isinstance(v, (list, tuple)):
-            out.append(_yaml_safe_args(v))
-        else:
-            out.append(v)
-    return out
+    return [_yaml_safe_value(v) for v in args]
+
+
+def _yaml_safe_value(v):
+    """One argument value in the spelling `_yaml_safe_args` stores."""
+    if isinstance(v, complex) and not isinstance(v, (int, float)):
+        # tagged, so a string witness that reads as a complex
+        # number (`"j"`) can never be mistaken for one
+        return {"complex": f"{v.real:g}{v.imag:+g}j"}
+    if isinstance(v, (set, frozenset)):
+        # members in a fixed order, so the same set is stored the same
+        # way in every process whatever its iteration order
+        members = sorted((_yaml_safe_value(m) for m in v),
+                         key=lambda m: (type(m).__name__, repr(m)))
+        return {"frozenset" if isinstance(v, frozenset) else "set": members}
+    if isinstance(v, (list, tuple)):
+        return _yaml_safe_args(v)
+    if isinstance(v, dict):
+        return {k: _yaml_safe_value(x) for k, x in v.items()}
+    return v
+
+
+def _restored_value(v):
+    """A stored argument value read back: a tagged complex number or
+    set becomes the value it spells, and lists and mapping values
+    recurse."""
+    if isinstance(v, dict) and len(v) == 1:
+        (tag, inner), = v.items()
+        if tag == "complex" and isinstance(inner, str):
+            return complex(inner)
+        if tag in ("set", "frozenset") and isinstance(inner, list):
+            members = [_restored_value(m) for m in inner]
+            try:
+                return set(members) if tag == "set" else frozenset(members)
+            except TypeError:
+                return v
+    if isinstance(v, list):
+        return [_restored_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _restored_value(x) for k, x in v.items()}
+    return v
 
 
 _MAX_CORNERS = 64
@@ -472,8 +556,9 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         than misapplied.
 
     Notes:
-        A complex witness is stored tagged, `{"complex": "1+2j"}`. An
-        older record stored it as a bare string, which is read as a
+        A complex witness is stored tagged, `{"complex": "1+2j"}`, and a
+        set as `{"set": [...]}` or `{"frozenset": [...]}`. An
+        older record stored a complex witness as a bare string, which is read as a
         complex number only where the parameter's kind can hold one:
         a string parameter's `"j"` stays the string it was.
     """
@@ -485,8 +570,8 @@ def _pinned_arg_sets(cj, arity: int, kinds: "list | None" = None) -> list:
         restored = []
         for i, v in enumerate(stored):
             kind = kinds[i] if kinds is not None and i < len(kinds) else None
-            if isinstance(v, dict) and set(v) == {"complex"}:
-                restored.append(complex(v["complex"]))
+            if isinstance(v, (dict, list)):
+                restored.append(_restored_value(v))
                 continue
             if (isinstance(v, str) and ("j" in v or "J" in v)
                     and kind not in ("string", "dict", "bool", "table")
@@ -579,7 +664,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         families match `d(f(<params>), p) >= 0` and its siblings, with
         `p` the bracketed parameter. `is_numerically_stable` matches
         `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
-        `is_state_safe` match `f(<params>) == f(<params>)`. `is_defined` states a region under its name (the
+        `is_state_safe` match `f(<params>) == f(<params>)`, a keyword-only
+        parameter passed by keyword (`analysis.call_text`). `is_defined` states a region under its name (the
         restriction form in docs/conditional-claims.md) and so accepts
         any comparison. A family that dispatches on the function's
         shape and reads the claim's own text (the dot-product, sum and
@@ -599,6 +685,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
             return False
         return _states_derivative_form(cj, base, param[1:-1], facts)
     if base in _SELF_AGREEMENT_FAMILIES:
+        from .analysis import call_text
+        call = call_text(facts)
         return (cj.relation == "==" and _squash(cj.lhs) == _squash(call)
                 and _squash(cj.rhs) == _squash(call))
     if base == "is_numerically_stable":
@@ -2091,6 +2179,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
+    if pseudo_infinity is not None \
+            and not isinstance(pseudo_infinity, (tuple, list)):
+        # the keyword magnitude is read as `let |inf| be` reads its own
+        from .records import _checked_magnitude
+        pseudo_infinity = _checked_magnitude(pseudo_infinity)
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None
@@ -4463,8 +4556,12 @@ def call_defaults(fn, cj) -> "tuple[dict, dict, str | None]":
     from .compendium import library_key_of
     key = library_key_of(fn)
     # a pin written in the call (`f(a, axis=1)`) is a pin as `let axis
-    # be 1` is
-    pins = {**_pins_in_calls(cj), **dict(getattr(cj, "param_pins", None) or {})}
+    # be 1` is, except for a name the claim binds with `for`: that name
+    # is drawn from its domain, and the literal is only the call's
+    # argument
+    bound = cj.domain or {}
+    pins = {**{p: v for p, v in _pins_in_calls(cj).items() if p not in bound},
+            **dict(getattr(cj, "param_pins", None) or {})}
     if key is None and not pins and not any(
             _single_point((cj.domain or {}).get(n)) is not None
             for n in (cj.free_vars or ())):
@@ -6380,7 +6477,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(stamp(_adjudicate_examined(ctx, fn, facts),
                              _cap=verdict_cap))
             continue
-        grounded = (None if call_pins or ctx.family is not None
+        # a pin the claim writes in every call to f is part of the call
+        # derive reads; only a pin no call writes (`let p be v`) is not
+        written = _pins_in_calls(cj)
+        unread_pins = {p: v for p, v in call_pins.items() if p not in written}
+        grounded = (None if unread_pins or ctx.family is not None
                     or ctx.assumption else _ground_proof_of(ctx, fn, facts))
         if grounded is not None and (grounded.status == "disproven"
                                      or cj.route == "probe"):
@@ -6391,14 +6492,14 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             continue
         from .probing import LanguageDrawFailed
         try:
-            if call_pins:
+            if unread_pins:
                 # the derive route reads the call the claim writes, never a
                 # pinned parameter it does not pass, so a pinned claim is
                 # adjudicated by execution
                 ctx.derive_undecided = Probe(
                     cj.name, statement, "unknown", route="derive",
                     note=f"{ctx.note}; the derive route does not model the "
-                         f"pinned parameter(s) {', '.join(sorted(call_pins))}",
+                         f"pinned parameter(s) {', '.join(sorted(unread_pins))}",
                     meta={"mathema.derive_status": "unsupported"})
             elif cj.route in ("derive", "best", "examine"):
                 # route="best" IS the cascade: its derive attempt engages
@@ -11747,13 +11848,68 @@ def _call_arity_mismatch(src: str, fn, param_set: set,
             sig.bind(*([None] * len(node.args)), **given_kw,
                      **{p: None for p in pinned
                         if p not in bound.arguments and p in sig.parameters})
-        except TypeError:
-            params = list(sig.parameters)
-            given = len(node.args) + len(node.keywords)
-            return (f"f is called here with {given} argument(s), but its "
-                    f"signature takes {len(params)} ({', '.join(params)}), "
-                    f"so any TypeError is raised by the malformed call "
-                    f"itself; call f with its own parameters")
+        except TypeError as e:
+            what = _arity_misfit(sig, len(node.args), list(given_kw),
+                                 pinned) or str(e)
+            return (f"{what}, so any TypeError is raised by the malformed "
+                    f"call itself; call f with its own parameters")
+    return None
+
+
+def _arity_misfit(sig, n_positional: int, keywords: list,
+                  pinned: frozenset = frozenset()) -> str | None:
+    """Intent:
+        What a call with `n_positional` positional arguments and the
+        named `keywords` gets wrong against `sig`: too many positional
+        arguments (naming the keyword-only parameters they ran into),
+        a keyword the signature does not have, one parameter given
+        twice, or a required parameter left out. None when none of
+        these applies.
+
+    Notes:
+        A `pinned` parameter counts as passed, though not toward the
+        argument count the text reports. The signature is shown
+        as its parameter names, `(a, b, flag)`.
+    """
+    P = inspect.Parameter
+    params = sig.parameters
+    shown = f"({', '.join(params)})"
+    positional = [n for n, p in params.items()
+                  if p.kind in (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)]
+    kinds = {p.kind for p in params.values()}
+    if P.VAR_POSITIONAL not in kinds and n_positional > len(positional):
+        kwonly = [n for n, p in params.items() if p.kind is P.KEYWORD_ONLY]
+        tail = (f"; {', '.join(kwonly)} "
+                f"{'is' if len(kwonly) == 1 else 'are'} keyword-only, "
+                f"passed as {kwonly[0]}=..." if kwonly else "")
+        return (f"f is called here with {n_positional} positional "
+                f"argument(s), but its signature {shown} takes at most "
+                f"{len(positional)} by position{tail}")
+    for k in keywords:
+        if k not in params and P.VAR_KEYWORD not in kinds:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} does not have")
+        if k in params and params[k].kind is P.POSITIONAL_ONLY:
+            return (f"f is called here with keyword {k}, which its "
+                    f"signature {shown} takes only by position")
+    by_position = set(positional[:n_positional])
+    for k in keywords:
+        if k in by_position:
+            return (f"f is called here with {k} both by position and by "
+                    f"keyword")
+    covered = by_position | set(keywords) | set(pinned)
+    missing = [n for n, p in params.items()
+               if p.default is P.empty
+               and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)
+               and n not in covered]
+    if missing:
+        required = [n for n, p in params.items()
+                    if p.default is P.empty
+                    and p.kind not in (P.VAR_POSITIONAL, P.VAR_KEYWORD)]
+        return (f"f is called here with {n_positional + len(keywords)} "
+                f"argument(s), but its signature {shown} requires "
+                f"{len(required)}: {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} missing")
     return None
 
 
@@ -12059,6 +12215,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     cj_domain, extra, family = ctx.cj_domain, ctx.extra, ctx.family
+    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params))
+    # the parameters drawn as plain values from their binding
+    as_values = {p for p, k in drawn_kinds.items() if k != kinds.get(p)}
+    kinds = drawn_kinds
     bundles = _instance_bundles(fn, facts)
     from .domain import unbounded_directions
     from .records import operational_infinity, operational_range
@@ -12700,13 +12860,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             exact_readings.append((f_exact, bound_exact))
         return exact_readings[0]
     executed_record.refill_at = _refill_caller(fn_call, call_pins)
+    from ._missing_policy import record_fills
     executed_record.fills = {
-        p: fill for p in kinds
-        if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
-                                )) is not None}
+        **{p: fill for p in kinds
+           if (fill := _fill_value((ctx.record_domain or {}).get(p) or cj_domain.get(p)
+                                   )) is not None},
+        **record_fills(fn, [p for p in kinds if not ((ctx.record_domain or {}).get(p)
+                                                      or cj_domain.get(p))])}
     from ._missing_policy import Presence
+    # a parameter the call fixes to a missing input (`commit=None`) is
+    # drawn present too, so an absence f gives with it present is read as
+    # another argument's, not as this parameter's
+    from .probing import inputs_missing
     executed_record.presence = Presence(
-        {p: k for p, k in sampled_kinds.items() if p not in literal_args},
+        {p: k for p, k in kinds.items()
+         if (p in sampled_kinds and p not in literal_args)
+         or (p in literal_args and inputs_missing([literal_args[p]]))},
         {p: (ctx.record_domain or {}).get(p) or cj_domain.get(p) for p in kinds})
     from .domain import path_bindings_verdict
     path_bound = {p for p in kinds
@@ -12969,7 +13138,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     key = resolver.key(p, 0)
                     n = trial_sizes.get(key) or rng.randint(1, 5)
                     v = _mtx.synth_for(param_structures[p], n, rng)
-                elif shape is not None and (
+                elif shape is not None and p not in as_values and (
                         shape.ndim >= 2
                         or (shape.ndim == 1 and k not in SEQUENCE_KINDS)):
                     # a matrix-shaped (marker-declared) parameter, or a

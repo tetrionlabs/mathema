@@ -84,7 +84,7 @@ mathema verify
 <!-- example: tripped session -->
 ```
 $ mathema lock funcs.settle --note "settled implementation"
-locked funcs.settle at form py:3eb01e1d9919
+locked funcs.settle at form py:00e53f2b3d0a
 the body can no longer change under a CDD loop; docstring edits are unaffected. A human unlocks with: mathema unlock funcs.settle
 ```
 
@@ -105,7 +105,7 @@ def midpoint(a: float, b: float) -> float:
 <!-- example: tripped session -->
 ```
 $ mathema verify; echo $?
-FAIL funcs.settle: locked at form py:3eb01e1d9919 but the code is now py:1ce1c0e16be4; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
+FAIL funcs.settle: locked at form py:00e53f2b3d0a but the code is now py:f9e7630d83cd; the record is unchanged. Restore the function, or a human runs: mathema unlock funcs.settle
 1 unchanged since the last run (not run again), 0 checked, 1 problem(s)
 grammars detected: mathema; verified by this run: mathema
 2 intents to accept (2 functions): mathema accept --intent
@@ -116,7 +116,7 @@ Three things, deliberately together: the run fails (exit 1, so a CI
 gate or an agent loop stops), the message names both hashes and the two
 ways forward, and **the record is byte-identical to before the edit**.
 The verified baseline never moves onto code a human did not sanction,
-so a failing loop cannot accumulate `invalidated` noise against an
+so a failing loop cannot pile up regressions against an
 implementation that was never supposed to change.
 
 A function can be locked before it has any record or declared claim.
@@ -160,7 +160,7 @@ pinned form hash for machines.
 funcs.settle:
   at: '2026-09-24'
   by: Alan Turing
-  form: py:3eb01e1d9919
+  form: py:00e53f2b3d0a
   note: settled implementation
 ```
 

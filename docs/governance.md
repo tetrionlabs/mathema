@@ -51,8 +51,9 @@ including one written into the YAML by hand.
 A claim that was believed and turns out wrong is not removed. It moves
 to the record's `discoveries`, `historical` or `superseded` section with
 the commit of its last supported run, and a claim that stops holding on
-changed code becomes `invalidated` until it holds again or a person
-records why it no longer should. A year later the record still says
+changed code keeps the verdict it fell to, with the move recorded
+beside it, until it holds again or a person records why it no longer
+should. A year later the record still says
 someone believed the opposite, and why they stopped. See
 [the CDD loop](tutorial.md) for the whole sequence on a real function.
 
@@ -91,7 +92,8 @@ named approver in front of every change to it.
 ## The gate
 
 `mathema verify` in CI re-adjudicates everything whose code has changed
-and fails the run on a falsified, invalidated or unknown claim, on a
+and fails the run on a falsified or unknown claim, on a regression no
+one has acknowledged, on a
 changed body behind a lock, on a lock removed outside `mathema unlock`,
 and on an acceptance the policy rejects. In its default strict mode it
 also fails on skipped claims and on accepted risk, so relaxing the gate

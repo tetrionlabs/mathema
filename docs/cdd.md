@@ -80,7 +80,7 @@ codes](verdicts.md); the method's own account of them follows.
 | `falsified` | either | A counterexample exists and is kept, permanently. |
 | `unknown` | either | Adjudication ran but couldn't decide (an undecided proof, inconclusive sampling). |
 | `skipped` | either | Couldn't be adjudicated at all (unliftable body, foreign grammar, an unresolvable key). |
-| `invalidated` | either | A previously supported claim regressed: re-adjudication no longer supports it, and the record says what it was before. |
+| `regressed`, `weakened` | either | Not verdicts but transitions: a supported claim that no longer is keeps the verdict it fell to, and the record keeps the move beside it until a person acknowledges it (see [verdicts](verdicts.md#transitions-and-what-invalidated-names)). |
 | `documented` | none | Of intent, not a claim: stated intent a person has accepted with `mathema accept --intent`. |
 | `declared` | none | Of a claim: authored and stored, awaiting adjudication. Of intent: stated, not yet accepted by a person (the lowest rung of [the evidence ladder](evidence-ladder.md)). |
 
@@ -214,7 +214,7 @@ page is [Verdicts and exit codes](verdicts.md#exit-codes)):
 | Code | Meaning |
 |---|---|
 | 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
-| 1 | ran, and the gate failed: a claim is falsified, invalidated or unknown, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
+| 1 | ran, and the gate failed: a claim is falsified or unknown, a transition is open and the mode fails it, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
 | 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional extra |
 | 130 | interrupted (Ctrl-C or EOF) |
 

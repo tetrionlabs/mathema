@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""`verify --format json` gives an invalidated claim's reason,
-evidence and counterexample.
+"""`verify --format json` gives a regressed claim's reason, evidence
+and counterexample.
 
 A claim the record held as proven, which a code edit broke, is
-invalidated. Its record says why: the note or the derivation sketch,
-the verdict it had and the one it fell to, and the counterexample. The
-JSON row is what a pipeline reads instead of the record, so it carries
-the same explanation, on the run that finds the regression and on
-every later run that reads it back from the record."""
+falsified, and the record keeps the move beside it: the note or the
+derivation sketch, the verdict it fell from and the open transition,
+and the counterexample. The JSON row is what a pipeline reads instead
+of the record, so it carries the same explanation, on the run that
+finds the regression and on every later run that reads it back from
+the record."""
 import json
 import os
 import subprocess
@@ -76,17 +77,21 @@ def _record_row(tmp_path, name):
     return row
 
 
-def test_an_invalidated_row_carries_what_the_record_says(tmp_path):
+def test_a_regressed_row_carries_what_the_record_says(tmp_path):
     env = _project(tmp_path)
     assert _verify_json(tmp_path, env)["passed"]
     (tmp_path / "rpkg" / "mod.py").write_text(textwrap.dedent(_AFTER))
-    for _ in range(2):
+    for run in range(2):
         row = _json_row(_verify_json(tmp_path, env), "doubles")
         stored = _record_row(tmp_path, "doubles")
-        assert row["verdict"] == stored["verdict"] == "invalidated"
+        assert row["verdict"] == stored["verdict"] == "falsified"
         assert row["reason"] == (stored.get("note") or stored["sketch"])
-        assert row["evidence"]["previous_verdict"] == "proven"
-        assert row["evidence"]["regressed_to"] == "falsified"
+        (t,) = row["evidence"]["transitions"]
+        assert (t["from"], t["to"], t["kind"], t["cause"]) == (
+            "proven", "falsified", "regressed", "this function changed")
+        assert "regressed_to" not in row["evidence"]
+        if run == 0:
+            assert row["evidence"]["previous_verdict"] == "proven"
         assert row["evidence"]["sketch"] == stored["sketch"]
         assert row["counterexample"] == stored["counterexample"]
 

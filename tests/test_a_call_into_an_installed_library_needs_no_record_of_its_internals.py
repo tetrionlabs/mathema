@@ -68,7 +68,7 @@ def test_an_installed_callee_with_a_record_is_still_compared(tmp_path):
            "file": statistics.__file__}
     verified = {"statistics.fmean": {"entry": {"identity": {"form": "xyz"},
                                                "claims": []}}}
-    assert _dependency_state(dep, verified, root=str(tmp_path)) == "stale"
+    assert _dependency_state(dep, verified, root=str(tmp_path)) == "invalidated"
     assert _dependency_state(dep, {}, root=str(tmp_path)) is None
 
 
