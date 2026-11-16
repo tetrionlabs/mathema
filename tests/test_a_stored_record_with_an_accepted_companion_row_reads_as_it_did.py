@@ -7,6 +7,10 @@ acceptance on that row, written by the code of the day
 its claims fingerprint, its integrity checksum and its acceptance key
 are what they were when it was written.
 
+The records were written by mathema 0.6.5 (the release tag v0.6.5; the
+code of that tag and of the base this branch is on differ only in the
+version string), schema 0.3.0; each carries `generated_by: "mathema 0.6.5"`.
+
 `companionfix.scale` accepts `doubles[float]` as a risk and
 `companionfix.scale_checked` accepts it as evidence.
 """

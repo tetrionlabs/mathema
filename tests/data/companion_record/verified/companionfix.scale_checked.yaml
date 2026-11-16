@@ -215,7 +215,7 @@ companionfix.scale_checked:
       claim: "instantiates: differentiation, monotonicity, affine, convexity, symmetry"
       basis: "deterministic concept tagging"
   lineage:
-    generated_by: "mathema 0.6.4"
+    generated_by: "mathema 0.6.5"
     CDD_spec_version: "0.3.0"
     date: "2026-11-16"
     commit: null
