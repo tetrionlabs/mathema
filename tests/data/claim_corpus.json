@@ -6701,9 +6701,9 @@
   "identity": "f(x) >= 0",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_claims_identity_is_what_it_was_pinned_to.py",
    "tests:tests/test_a_witness_names_only_the_arguments_its_call_passed.py",
-   "tests:tests/test_an_export_ranges_over_the_installed_minor_version.py",
-   "tests:tests/test_an_unbound_value_claim_reads_the_working_domain.py"
+   "tests:tests/test_an_export_ranges_over_the_installed_minor_version.py"
   ],
   "unicode": "f(x) ≥ 0"
  },
@@ -14782,7 +14782,8 @@
   "error": "InvalidConjecture: 'for c in L[ascii], c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for c in L[ascii], f(c) in L[unicode]": {
@@ -14797,7 +14798,8 @@
   "identity": "for c in L[ascii], f(c) in L[unicode]",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ],
   "unicode": "∀ c ∈ L[ascii], f(c) ∈ L[unicode]"
  },
@@ -16679,7 +16681,8 @@
   "identity": "for k in {1, 2}, f(k) in {1, 2, 3}",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ],
   "unicode": "∀ k ∈ {1, 2}, f(k) ∈ {1, 2, 3}"
  },
@@ -16687,7 +16690,8 @@
   "error": "InvalidConjecture: 'for k in {1, 2}, k in {1, 2, 3}': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for len1 in [0,10000], f(len1,0) == len1": {
@@ -17443,7 +17447,8 @@
   "error": "InvalidConjecture: 'for n in Z, n in Z': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for n in [-1, 50] subset Z, f(P, r, n) == P*(1+r)**(n+1)": {
@@ -20394,6 +20399,22 @@
   ],
   "unicode": "∀ n ∈ ℝ ∪ {absent, ∅}, f(x) ≤ 1"
  },
+ "for name in L[claim_name], len(f(name)) == 0": {
+  "ascii": "for name in L[claim_name], len(f(name)) = 0",
+  "domains": {
+   "name": [
+    "L[claim_name]",
+    "L[claim_name]"
+   ]
+  },
+  "fingerprint": "edab28198969",
+  "identity": "for name in L[claim_name], len(f(name)) = 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
+  ],
+  "unicode": "∀ name ∈ L[claim_name], len(f(name)) = 0"
+ },
  "for name in L[nosuch.grammar], len(f(name)) == len(name)": {
   "ascii": "for name in L[nosuch.grammar], len(f(name)) = len(name)",
   "domains": {
@@ -20956,7 +20977,8 @@
   "identity": "for order in L[ascii], f(order) in L[unicode]",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ],
   "unicode": "∀ order ∈ L[ascii], f(order) ∈ L[unicode]"
  },
@@ -21045,6 +21067,38 @@
    "tests:tests/test_enforce_domain_judges_a_language_member_whole.py"
   ],
   "unicode": "∀ pair ∈ L[pairs], f(pair) ≥ 0"
+ },
+ "for parent_name in L[claim_name], f(parent_name) == parent_name + \"[float]\"": {
+  "ascii": "for parent_name in L[claim_name], f(parent_name) = parent_name + \"[float]\"",
+  "domains": {
+   "parent_name": [
+    "L[claim_name]",
+    "L[claim_name]"
+   ]
+  },
+  "fingerprint": "5659a6d03ad0",
+  "identity": "for parent_name in L[claim_name], f(parent_name) = parent_name + \"[float]\"",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
+  ],
+  "unicode": "let x = parent_name, ∀ x ∈ L[claim_name], f(x) = x + \"[float]\""
+ },
+ "for parent_name in L[claim_name], len(f(parent_name)) == len(parent_name) + 7": {
+  "ascii": "for parent_name in L[claim_name], len(f(parent_name)) = len(parent_name) + 7",
+  "domains": {
+   "parent_name": [
+    "L[claim_name]",
+    "L[claim_name]"
+   ]
+  },
+  "fingerprint": "bfacfc18f07c",
+  "identity": "for parent_name in L[claim_name], len(f(parent_name)) = len(parent_name) + 7",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
+  ],
+  "unicode": "let x = parent_name, ∀ x ∈ L[claim_name], len(f(x)) = len(x) + 7"
  },
  "for partial in [0.1,5], sigma in [0.1,2], f(partial,sigma) == f(-partial,sigma)": {
   "ascii": "for partial in [0.1, 5.0] : float|absent|missing, sigma in [0.1, 2.0] : float|absent|missing, f(partial, sigma) = f(-partial, sigma)",
@@ -23603,7 +23657,8 @@
   "error": "InvalidConjecture: 'for s in L[ascii], s in L[ascii]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for s in L[ascii_digits], is_language_defined(s)": {
@@ -25980,6 +26035,38 @@
    "tests:tests/test_language_derive_gate.py"
   ],
   "unicode": "∀ text ∈ L[letters], f(text) ≥ 0"
+ },
+ "for text in L[stable_claim_text], f(f(text)) == f(text)": {
+  "ascii": "for text in L[stable_claim_text], f(f(text)) = f(text)",
+  "domains": {
+   "text": [
+    "L[stable_claim_text]",
+    "L[stable_claim_text]"
+   ]
+  },
+  "fingerprint": "2d82a355d3dd",
+  "identity": "for text in L[stable_claim_text], f(f(text)) = f(text)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
+  ],
+  "unicode": "∀ text ∈ L[stable_claim_text], f(f(text)) = f(text)"
+ },
+ "for text in L[stable_claim_text], f(text) == True": {
+  "ascii": "for text in L[stable_claim_text], f(text) = True",
+  "domains": {
+   "text": [
+    "L[stable_claim_text]",
+    "L[stable_claim_text]"
+   ]
+  },
+  "fingerprint": "7266b4c6b7b8",
+  "identity": "for text in L[stable_claim_text], f(text) = True",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
+  ],
+  "unicode": "∀ text ∈ L[stable_claim_text], f(text) = True"
  },
  "for text in {\"a\", \"abcdef\"}, output_is_short(f(text))": {
   "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'output_is_short(f(text))'",
@@ -30939,7 +31026,8 @@
   "identity": "for x in [-10.0, 10.0] : float|absent|missing, f(x) = 2*x",
   "parses": true,
   "sources": [
-   "other:scripts/release_smoke.py"
+   "other:scripts/release_smoke.py",
+   "tests:tests/test_a_stored_record_with_an_accepted_companion_row_reads_as_it_did.py"
   ],
   "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = 2*x"
  },
@@ -30957,9 +31045,26 @@
   "sources": [
    "tests:tests/test_a_derive_route_claim_is_decided_by_derive_alone.py",
    "tests:tests/test_cdd_loop_e2e.py",
-   "tests:tests/test_float_companion.py"
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py"
   ],
   "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = 2*x"
+ },
+ "for x in [-10, 10], f(x) == 3*x": {
+  "ascii": "for x in [-10.0, 10.0] : float|absent|missing, f(x) = 3*x",
+  "domains": {
+   "x": [
+    "[-10.0, 10.0] : float|absent|missing",
+    "[-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "a37d7eab0c72",
+  "identity": "for x in [-10.0, 10.0] : float|absent|missing, f(x) = 3*x",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py",
+   "tests:tests/test_the_float_companion_row_is_named_and_spawned_as_it_is_today.py"
+  ],
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = 3*x"
  },
  "for x in [-10, 10], f(x) == log(x)": {
   "ascii": "for x in [-10.0, 10.0] : float|absent|missing, f(x) = log(x)",
@@ -30992,6 +31097,22 @@
    "tests:tests/test_check_reads_big_integers_series_and_decimals.py"
   ],
   "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ -10"
+ },
+ "for x in [-10, 10], f(x) >= -20": {
+  "ascii": "for x in [-10.0, 10.0] : float|absent|missing, f(x) >= -20",
+  "domains": {
+   "x": [
+    "[-10.0, 10.0] : float|absent|missing",
+    "[-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "b66473edd3ff",
+  "identity": "for x in [-10.0, 10.0] : float|absent|missing, f(x) >= -20",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py"
+  ],
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ -20"
  },
  "for x in [-10, 10], f(x) >= 1": {
   "ascii": "for x in [-10.0, 10.0] : float|absent|missing, f(x) >= 1",
@@ -31098,6 +31219,55 @@
    "tests:tests/test_smt_rung.py"
   ],
   "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [-10.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, y) ≥ 0"
+ },
+ "for x in [-10.0, 10.0] : float, f(x) = 2*x": {
+  "ascii": "for x in [-10.0, 10.0] : float, f(x) = 2*x",
+  "domains": {
+   "x": [
+    "[-10.0, 10.0] : float",
+    "[-10.0, 10.0] ⊂ ℝ"
+   ]
+  },
+  "fingerprint": "9ab33d88fb0c",
+  "identity": "for x in [-10.0, 10.0] : float, f(x) = 2*x",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py"
+  ],
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ, f(x) = 2*x"
+ },
+ "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x": {
+  "ascii": "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x",
+  "domains": {
+   "x": [
+    "[-10.0, 10.0] : float|missing",
+    "[-10.0, 10.0] ⊂ ℝ ∪ {∅}"
+   ]
+  },
+  "fingerprint": "5a4010907cef",
+  "identity": "for x in [-10.0, 10.0] : float|missing, f(x) = 2*x",
+  "parses": true,
+  "sources": [
+   "other:tests/data/companion_record/verified/companionfix.scale.yaml",
+   "other:tests/data/companion_record/verified/companionfix.scale_checked.yaml"
+  ],
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, f(x) = 2*x"
+ },
+ "for x in [-10.0, 10.0] ⊂ ℝ, f(x) = 2*x": {
+  "ascii": "for x in [-10.0, 10.0] : float, f(x) = 2*x",
+  "domains": {
+   "x": [
+    "[-10.0, 10.0] : float",
+    "[-10.0, 10.0] ⊂ ℝ"
+   ]
+  },
+  "fingerprint": "9ab33d88fb0c",
+  "identity": "for x in [-10.0, 10.0] : float, f(x) = 2*x",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py"
+  ],
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ, f(x) = 2*x"
  },
  "for x in [-100, -0.1], f(x) == |x|": {
   "ascii": "for x in [-100.0, -0.1] : float|absent|missing, f(x) = |x|",
@@ -34205,13 +34375,6 @@
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ, f(x) ≥ 0"
  },
- "for x in [0, 1] : float as f32, f(x) >= 0": {
-  "error": "InvalidConjecture: 'x in [0, 1] : float as f32': '[0, 1] as f32' isn't a recognized interval, discrete set, or named set (R/Z/N) for 'x'",
-  "parses": false,
-  "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
-  ]
- },
  "for x in [0, 1] : float, f(x) >= 0": {
   "ascii": "for x in [0.0, 1.0] : float, f(x) >= 0",
   "domains": {
@@ -34447,13 +34610,6 @@
    "tests:tests/test_unset_is_a_key_left_out.py"
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] \\ {unset} ⊂ ℝ ∪ {absent, ∅}, f(1.0, x) ≥ 0"
- },
- "for x in [0, 1] as f32, f(x) >= 0": {
-  "error": "InvalidConjecture: 'x in [0, 1] as f32': '[0, 1] as f32' isn't a recognized interval, discrete set, or named set (R/Z/N) for 'x'",
-  "parses": false,
-  "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
-  ]
  },
  "for x in [0, 1] | {missing} \\ {nan}, f(x) >= 0": {
   "error": "InvalidConjecture: 'x in [0, 1] | {missing} \\\\ {nan}': `missing` admits every member of the class, so one cannot be excluded from it; name the members you admit, `|nan` or `| {null, nan}`, for 'x'",
@@ -36333,21 +36489,24 @@
   "error": "InvalidConjecture: 'for x in [0, 1], x in R': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for x in [0, 1], x in [0, 2]": {
   "error": "InvalidConjecture: 'for x in [0, 1], x in [0, 2]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for x in [0, 1], x in [0, 2], f(x) >= 0": {
   "error": "ConflictingDomainBinding: 'x' is bound twice in one quantifier; give it one domain",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "for x in [0, 1], x ~= x": {
@@ -36831,6 +36990,7 @@
   "identity": "for x in [0.0, 1e+300] : float|absent|missing, f(x) = 1",
   "parses": true,
   "sources": [
+   "tests:tests/test_each_row_names_its_stratum_as_it_does_today.py",
    "tests:tests/test_float_companion.py"
   ],
   "unicode": "∀ x ∈ [0.0, 1e+300] ⊂ ℝ ∪ {absent, ∅}, f(x) = 1"
@@ -36900,13 +37060,6 @@
    "tests:tests/test_is_library_safe.py"
   ],
   "unicode": "∀ x ∈ [0.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}, numpy is library safe"
- },
- "for x in [0, 1e8] subset f32, f(x) >= 0": {
-  "error": "InvalidConjecture: 'x in [0, 1e8] subset f32': '[0, 1e8] subset f32' isn't a recognized interval, discrete set, or named set (R/Z/N) for 'x'",
-  "parses": false,
-  "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
-  ]
  },
  "for x in [0, 2*pi], f(x) >= 0": {
   "ascii": "for x in [0.0, 6.283185307179586] : float|absent|missing, f(x) >= 0",
@@ -37065,9 +37218,9 @@
   "identity": "for x in [0.0, 2.0] : float|absent|missing, f(x) >= 0",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_claims_identity_is_what_it_was_pinned_to.py",
    "tests:tests/test_an_overflow_anywhere_is_a_computation_failure.py",
-   "tests:tests/test_math_functions_have_no_value_where_their_real_domain_ends.py",
-   "tests:tests/test_spec_domain.py"
+   "tests:tests/test_math_functions_have_no_value_where_their_real_domain_ends.py"
   ],
   "unicode": "∀ x ∈ [0.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
  },
@@ -37944,7 +38097,8 @@
   "identity": "for x in [0.0, 10.0] : float|absent|missing, lo in [0.0, 3.0] : float|absent|missing, hi in [7.0, 10.0] : float|absent|missing, f(x, lo, hi) = not (lo < x and x < hi)",
   "parses": true,
   "sources": [
-   "tests:tests/test_boolean_returns.py"
+   "tests:tests/test_boolean_returns.py",
+   "tests:tests/test_the_shipped_claim_corpus_reads_as_pinned.py"
   ],
   "unicode": "∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, lo ∈ [0.0, 3.0] ⊂ ℝ ∪ {absent, ∅}, hi ∈ [7.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, lo, hi) = not (lo < x and x < hi)"
  },
@@ -38192,6 +38346,7 @@
   "identity": "for x in [0.0, 1.0] : float, f(x) >= 0",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_claims_identity_is_what_it_was_pinned_to.py",
    "tests:tests/test_annotations_complete_the_domain.py"
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ, f(x) ≥ 0"
@@ -39559,7 +39714,8 @@
   "identity": "for x in [1.0, 2.0] : float|absent|missing, f(x) <= 1.0e+309*x",
   "parses": true,
   "sources": [
-   "tests:tests/test_float_companion.py"
+   "tests:tests/test_float_companion.py",
+   "tests:tests/test_the_shipped_claim_corpus_reads_as_pinned.py"
   ],
   "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≤ 1.0e+309*x"
  },
@@ -45561,7 +45717,8 @@
   "identity": "for z in C|absent|missing, f(z) = 2*z",
   "parses": true,
   "sources": [
-   "tests:tests/test_matrices_are_real_only.py"
+   "tests:tests/test_matrices_are_real_only.py",
+   "tests:tests/test_the_float_companion_row_is_named_and_spawned_as_it_is_today.py"
   ],
   "unicode": "∀ z ∈ ℂ ∪ {absent, ∅}, f(z) = 2*z"
  },
@@ -47159,6 +47316,38 @@
   ],
   "unicode": "let c be -3.5, f(c) ≥ 0"
  },
+ "let c be 2, f(c) >= 0": {
+  "ascii": "let c be 2, f(c) >= 0",
+  "domains": {
+   "c": [
+    "[2.0, 2.0] : float|absent|missing",
+    "[2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "4fe093116186",
+  "identity": "let c be 2, f(c) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let c be 2, f(c) ≥ 0"
+ },
+ "let c be 2, f(c) ≥ 0": {
+  "ascii": "let c be 2, f(c) >= 0",
+  "domains": {
+   "c": [
+    "[2.0, 2.0] : float|absent|missing",
+    "[2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "4fe093116186",
+  "identity": "let c be 2, f(c) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let c be 2, f(c) ≥ 0"
+ },
  "let c be 2, for x in [0, 1], f(x) <= c": {
   "ascii": "let c be 2, for x in [0.0, 1.0] : float|absent|missing, f(x) <= c",
   "domains": {
@@ -47285,6 +47474,46 @@
   ],
   "unicode": "let c be [-1000.0, -900.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0"
  },
+ "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0": {
+  "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+  "domains": {
+   "c": [
+    "[-1000000.0, 1000000.0] : float|absent|missing",
+    "[-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "x": [
+    "[0.0, 10.0] : float|absent|missing",
+    "[0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "11e12e72bb5b",
+  "identity": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0"
+ },
+ "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0": {
+  "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+  "domains": {
+   "c": [
+    "[-1000000.0, 1000000.0] : float|absent|missing",
+    "[-1000000.0, 1000000.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "x": [
+    "[0.0, 10.0] : float|absent|missing",
+    "[0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "11e12e72bb5b",
+  "identity": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0"
+ },
  "let c be [-1e6, 1e6], for x in [0, 10], f(x) + c >= 0": {
   "ascii": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
   "domains": {
@@ -47301,7 +47530,8 @@
   "identity": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
   ],
   "unicode": "let c be [-1000000.0, 1000000.0], ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, c + f(x) ≥ 0"
  },
@@ -47635,7 +47865,8 @@
   "identity": "let compute_square_root = numpy.sqrt, for acceleration in [0.0, 10.0] : float|absent|missing, deceleration in [0.0, 10.0] : float|absent|missing, deceleration + compute_square_root(acceleration) >= 0",
   "parses": true,
   "sources": [
-   "tests:tests/test_render_claim_text.py"
+   "tests:tests/test_render_claim_text.py",
+   "tests:tests/test_the_shipped_claim_corpus_reads_as_pinned.py"
   ],
   "unicode": "let compute_square_root = numpy.sqrt, let x = acceleration, let y = deceleration, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, y + compute_square_root(x) ≥ 0"
  },
@@ -47811,6 +48042,24 @@
   "sources": [
    "tests:tests/test_claim_text_soundness.py"
   ]
+ },
+ "let f be 2, f(x) >= 0": {
+  "error": "InvalidConjecture: `f` always names the function under test and cannot be rebound; bind another name (`let g = pkg.mod.func`) and use that",
+  "parses": false,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ]
+ },
+ "let flag be True, f(flag) == 1": {
+  "ascii": "let flag be True, f(flag) = 1",
+  "domains": {},
+  "fingerprint": "af27551f8213",
+  "identity": "let flag be True, f(flag) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let flag be True, f(flag) = 1"
  },
  "let g = budget_line, let I be [10, 1000], let px be [0.5, 20], let py be [0.5, 20], d(g(x, I, px, py), x) == -px/py": {
   "ascii": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], d(budget_line(x, I, px, py), x) = -px/py",
@@ -48003,6 +48252,22 @@
   ],
   "unicode": "let g = math.sqrt, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 0"
  },
+ "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0": {
+  "ascii": "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0",
+  "domains": {
+   "x": [
+    "(0.0, 100.0] : float|absent|missing",
+    "(0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "f8087126241a",
+  "identity": "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let g = math.sqrt, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 0"
+ },
  "let g = math.sqrt, for x in [0, 1], g(x) >= 0": {
   "ascii": "let g = math.sqrt, for x in [0.0, 1.0] : float|absent|missing, g(x) >= 0",
   "domains": {
@@ -48065,6 +48330,22 @@
    "tests:tests/test_claim_text_soundness.py"
   ],
   "unicode": "let g = math.sqrt, r == g(q)"
+ },
+ "let g = math.sqrt, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 0": {
+  "ascii": "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0",
+  "domains": {
+   "x": [
+    "(0.0, 100.0] : float|absent|missing",
+    "(0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "f8087126241a",
+  "identity": "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let g = math.sqrt, ∀ x ∈ (0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, g(x) ≥ 0"
  },
  "let g = mathema.f.finite_no_error, for x in [-1, 1], g(f, x) == 1": {
   "ascii": "let g = mathema.f.finite_no_error, for x in [-1.0, 1.0] : float|absent|missing, g(f, x) = 1",
@@ -48833,7 +49114,48 @@
   "identity": "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let k be 3, ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, k + f(x) ≥ 0"
+ },
+ "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0": {
+  "ascii": "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0",
+  "domains": {
+   "k": [
+    "[3.0, 3.0] : float|absent|missing",
+    "[3.0, 3.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "664651ad40e3",
+  "identity": "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let k be 3, ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, k + f(x) ≥ 0"
+ },
+ "let k be 3, ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, k + f(x) ≥ 0": {
+  "ascii": "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0",
+  "domains": {
+   "k": [
+    "[3.0, 3.0] : float|absent|missing",
+    "[3.0, 3.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "664651ad40e3",
+  "identity": "let k be 3, for x in [0.0, 1.0] : float|absent|missing, k + f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
   ],
   "unicode": "let k be 3, ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, k + f(x) ≥ 0"
  },
@@ -49600,6 +49922,22 @@
   ],
   "unicode": "let |∞| be 100, x is overflow safe"
  },
+ "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0": {
+  "ascii": "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
+  "domains": {
+   "x": [
+    "[0.0, inf) : float|absent|missing",
+    "[0.0, inf) ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "c43c8b3f572f",
+  "identity": "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let |∞| be 1e+06, ∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
+ },
  "let |inf| be 1e100, f(x) >= 0": {
   "ascii": "let |inf| be 1e+100, f(x) >= 0",
   "domains": {},
@@ -49791,7 +50129,8 @@
   "identity": "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
   "parses": true,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
   ],
   "unicode": "let |∞| be 1e+06, ∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
  },
@@ -49936,6 +50275,22 @@
    "tests:tests/test_pseudo_infinity_levels.py"
   ],
   "unicode": "let |∞| be 30, ∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) > 0"
+ },
+ "let |∞| be 1e+06, ∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0": {
+  "ascii": "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
+  "domains": {
+   "x": [
+    "[0.0, inf) : float|absent|missing",
+    "[0.0, inf) ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "c43c8b3f572f",
+  "identity": "let |inf| be 1e+06, for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_let_and_binding_forms_read_as_they_do_today.py"
+  ],
+  "unicode": "let |∞| be 1e+06, ∀ x ∈ [0.0, ∞) ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
  },
  "let |∞| be 1e6, f(x) >= 0": {
   "ascii": "let |inf| be 1e+06, f(x) >= 0",
@@ -50193,8 +50548,8 @@
   "parses": true,
   "sources": [
    "claims-file:mathema/compendium/math.claims.yaml",
-   "tests:tests/test_policy_claims_say_what_f_does_with_no_value.py",
-   "tests:tests/test_the_missing_values_audit_cases.py"
+   "other:tests/data/companion_record/verified/companionfix.scale.yaml",
+   "other:tests/data/companion_record/verified/companionfix.scale_checked.yaml"
   ],
   "unicode": "missing(f, x) propagates"
  },
@@ -50703,6 +51058,38 @@
    "tests:tests/test_linalg.py"
   ],
   "unicode": "|x| ≥ 0"
+ },
+ "∀ x ∈ [0, 1] ⊂ ℝ, f(x) ≥ 0": {
+  "ascii": "for x in [0.0, 1.0] : float, f(x) >= 0",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float",
+    "[0.0, 1.0] ⊂ ℝ"
+   ]
+  },
+  "fingerprint": "22691e7b91d5",
+  "identity": "for x in [0.0, 1.0] : float, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_claims_identity_is_what_it_was_pinned_to.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ, f(x) ≥ 0"
+ },
+ "∀ x ∈ [0, 1], f(x) ≥ 0": {
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "bc746253295f",
+  "identity": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_claims_identity_is_what_it_was_pinned_to.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
  },
  "∀x ∈ [0, 1], f(x) <= 1": {
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) <= 1",
