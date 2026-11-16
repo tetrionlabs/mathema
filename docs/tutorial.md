@@ -304,8 +304,8 @@ than being guessed at. Accepting one as **risk** reclassifies it to
 mathema accept funcs.settle some_unknown_claim --as risk --note "monitored"
 ```
 
-Lenient verification proceeds past it, named in the row as accepted
-risk. Strict mode still refuses it. Accepted risk stays visible either
+Verification proceeds past it in both strict and lenient mode, named in
+the row as accepted risk. Accepted risk stays visible either
 way, which is the difference between owning a gap and hiding one.
 
 ## 7. Where the loop ends
