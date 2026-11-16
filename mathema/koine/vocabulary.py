@@ -18,6 +18,10 @@ The tree:
                                           remainder families, power
     operator::comparison::...             the six relations
     operator::logic::...                  and, or (short-circuit), not
+    operator::truth::ambiguous            the truth value of an operand
+                                          where what makes it true is not
+                                          known yet; a leaf with no
+                                          evaluation rule
     operator::membership::...             in, not_in a literal set
     function::<family>::...               the closed set of named functions
     call::...                             another function, a library
@@ -239,6 +243,7 @@ def _expression_signatures() -> dict[str, Signature]:
     out["operator::logic::and"] = _sig(rest=EXPR, rest_min=2)
     out["operator::logic::or"] = _sig(rest=EXPR, rest_min=2)
     out["operator::logic::not"] = _sig(EXPR)
+    out["operator::truth::ambiguous"] = _sig(EXPR)
     out["operator::membership::in"] = _sig(EXPR, LITERALS)
     out["operator::membership::not_in"] = _sig(EXPR, LITERALS)
     for head, arity in FUNCTIONS.items():
