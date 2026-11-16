@@ -167,6 +167,9 @@ class Facts:
                                       # runtime types the signature names (runtime_types.
                                       # detect_parameters), the first one sampled; a param
                                       # whose first is not a list has kind vec/mat/table
+    declared_runtime_types: dict = field(default_factory=dict)  # param -> name: a claims-file
+                                      # entry's `runtime_types:` as written, kept whether or
+                                      # not the named library is installed
     runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
@@ -1500,6 +1503,8 @@ def with_declared_runtime_types(facts, fn, declared: "dict | None"):
     undrawable = {p: c for p, c in (facts.undrawable or {}).items()
                   if p not in detected}
     return replace(facts, param_kinds=kinds, runtime_types=detected,
+                   declared_runtime_types={str(k): str(v)
+                                           for k, v in declared.items()},
                    runtime_hints=hints, undrawable=undrawable)
 
 

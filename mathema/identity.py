@@ -112,8 +112,17 @@ def normalized(fdef: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
     so no name in the source can be mistaken for one: a free `v0` or a
     global `f` keeps its own spelling. The function's name means the
     function only where no local binds it, as in Python's scoping, so a
-    parameter named like its function is renamed like any other local."""
+    parameter named like its function is renamed like any other local.
+
+    A `u` prefix on a string joined into an f-string (`f"{x}" u"c"`)
+    means nothing and cannot be written inside the f-string, so it is
+    dropped: the form is the one the printed source has."""
     f = copy.deepcopy(fdef)
+    for node in ast.walk(f):
+        if isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.Constant):
+                    part.kind = None
     body = f.body
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
             and isinstance(body[0].value.value, str):

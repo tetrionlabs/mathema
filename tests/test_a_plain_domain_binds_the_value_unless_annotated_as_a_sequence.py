@@ -80,6 +80,7 @@ def test_a_parameter_annotated_as_a_sequence_reads_the_domain_per_element(fn):
 
 
 def test_a_declared_runtime_type_lifts_an_unannotated_parameter():
+    pytest.importorskip("pandas")
     row = _row(_total_unannotated, "for xs in [0, 10] : float, f(xs) >= 0",
                runtime_types={"xs": "pandas.Series"})
     assert row.verdict in ("holds", "proven"), (row.verdict, row.counterexample,

@@ -205,7 +205,7 @@ def _stated_sequences(fn, facts) -> frozenset:
         merely iterates or indexes is not among them.
     """
     from .analysis import signature_kinds
-    from .runtime_types import SEQUENCE_KINDS
+    from .runtime_types import SEQUENCE_KINDS, adapter
     from .types import shapes_from_signature
     params = list(getattr(facts, "params", None) or ())
     out = set()
@@ -223,7 +223,41 @@ def _stated_sequences(fn, facts) -> frozenset:
         if found and (found[0].kind in SEQUENCE_KINDS
                       or found[0].adapter == "list"):
             out.add(p)
+    # a declared runtime type states a sequence even where its library is
+    # not installed, so the claim still reads the domain per element
+    for p, name in (getattr(facts, "declared_runtime_types", None)
+                    or {}).items():
+        named = adapter(name)
+        if named is not None and named.kinds != frozenset({"table"}):
+            out.add(p)
     return frozenset(out)
+
+
+def _unavailable_runtime_types(facts, cj_domain: dict) -> list:
+    """Intent:
+        The runtime types, sorted, that a claims-file entry declares for
+        parameters the claim binds and whose library is not installed
+        here. The mathematics of such a claim is decided; any route that
+        would run the code on these parameters is skipped, since nothing
+        here can build the declared value.
+    """
+    from .runtime_types import adapter, installed
+    out = set()
+    for p, name in (getattr(facts, "declared_runtime_types", None)
+                    or {}).items():
+        named = adapter(name)
+        if p in (cj_domain or {}) and named is not None \
+                and not installed(named):
+            out.add(named.name)
+    return sorted(out)
+
+
+def _not_run_words(names: list) -> str:
+    """The note for a route not run because a declared runtime type's
+    library is not installed."""
+    shown = ", ".join(names)
+    return (f"{shown} is not installed here, so the code is not run on it "
+            f"and the computation is not decided")
 
 
 def _bound_as_values(fn, facts, cj_domain: dict) -> list:
@@ -5077,6 +5111,13 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
         raise
     except Exception:
         return probe, []
+    unavailable = _unavailable_runtime_types(facts, ctx.cj_domain)
+    if unavailable:
+        return probe, [_dc_replace(
+            line, verdict="skipped", counterexample=None,
+            note=_not_run_words(unavailable),
+            meta={**(line.meta or {}), "mathema.probe_gap": "input-synthesis"})
+            for line in lines]
     broken = next((line for line in lines if line.verdict == "falsified"),
                   None)
     if broken is None or probe.verdict == "falsified":
@@ -6593,6 +6634,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         derived, ctx, fn, facts, float_companions,
                         conjectures)
                     out.append(stamp(derived, _cap=verdict_cap))
+                    unavailable = _unavailable_runtime_types(facts,
+                                                             ctx.cj_domain)
+                    if ctx.companion is not None and unavailable:
+                        ctx.companion = _dc_replace(
+                            ctx.companion, verdict="skipped",
+                            counterexample=None,
+                            note=_not_run_words(unavailable),
+                            meta={**(ctx.companion.meta or {}),
+                                  "mathema.probe_gap": "input-synthesis"})
                     if ctx.companion is not None:
                         _emit_companion(out, _stamped(ctx.companion, cj_record,
                                                       written=cj.domain or {}),
@@ -6605,6 +6655,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # "derive" the probe is a falsifier only: its executed
             # counterexample falsifies, and anything else leaves the
             # claim unknown with derive's reason (`_derive_alone`).
+            unavailable = _unavailable_runtime_types(facts, ctx.cj_domain)
+            if unavailable:
+                undecided = ctx.derive_undecided
+                reason = (undecided.note if undecided is not None
+                          else ctx.note) or ""
+                out.append(stamp(Probe(
+                    cj.name, ctx.statement, "skipped", route=None,
+                    note=f"{reason}; {_not_run_words(unavailable)}".lstrip("; "),
+                    meta={"mathema.probe_gap": "input-synthesis"}),
+                    _cap=verdict_cap))
+                continue
             from .runtime_types._receivers import ReceiverRefused
             import copy
             stashed = copy.deepcopy(ctx.derive_undecided)
