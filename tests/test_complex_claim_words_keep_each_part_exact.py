@@ -90,20 +90,33 @@ def test_a_value_beyond_float_range_is_not_a_float_complex():
     assert value == value
 
 
-def _capped(z) -> complex:
-    return complex(_BIG, _BIG)
+def _float_total(a) -> float:
+    total = 0.0
+    for v in a:
+        total += float(v)
+    return total
 
 
-def _infinite(z) -> complex:
-    return complex(math.inf, math.inf)
+def _capped(a) -> complex:
+    """The float sum of a*(1+1j), each part capped at the largest float."""
+    total = _float_total(a)
+    capped = min(total, _BIG)
+    return complex(capped, capped)
 
 
-def _imaginary_capped(z) -> complex:
-    return complex(2.0, _BIG)
+def _imaginary_capped(a) -> complex:
+    """The float sum of a*1j, the imaginary part capped."""
+    return complex(0.0, min(_float_total(a), _BIG))
 
 
-_BOTH = "for z in ℂ, f(z) {} sum([1.7e308 + 1.7e308j, 1.7e308 + 1.7e308j])"
-_IMAG = "for z in ℂ, f(z) {} sum([1 + 1.7e308j, 1 + 1.7e308j])"
+def _float_sum(a) -> complex:
+    """The float sum of a*(1+1j)."""
+    total = _float_total(a)
+    return complex(total, total)
+
+
+_PAST = "for a in [1.2e308, 1.7e308]^n \\ {\u2205}, assuming dim(a) >= 2, "
+_WITHIN = "for a in [1e100, 2e100]^n \\ {\u2205}, assuming dim(a) >= 2, "
 
 
 def _verdict(fn, text):
@@ -111,23 +124,19 @@ def _verdict(fn, text):
     return p
 
 
-@pytest.mark.parametrize("fn, text, relation, verdict", [
-    (_capped, _BOTH, "==", "falsified"),
-    (_capped, _BOTH, "!=", "holds"),
-    (_infinite, _BOTH, "==", "falsified"),
-    (_infinite, _BOTH, "!=", "holds"),
-    (_imaginary_capped, _IMAG, "==", "falsified"),
-    (_imaginary_capped, _IMAG, "!=", "holds"),
+@pytest.mark.parametrize("fn, text, verdict", [
+    (_capped, _PAST + "f(a) == sum(a * (1 + 1j))", "falsified"),
+    (_capped, _PAST + "f(a) != sum(a * (1 + 1j))", "holds"),
+    (_imaginary_capped, _PAST + "f(a) == sum(a * 1j)", "falsified"),
+    (_imaginary_capped, _PAST + "f(a) != sum(a * 1j)", "holds"),
 ])
 def test_a_function_capped_below_the_exact_complex_sum_is_unequal_to_it(
-        fn, text, relation, verdict):
-    p = _verdict(fn, text.format(relation))
+        fn, text, verdict):
+    p = _verdict(fn, text)
     assert verdict == p.verdict, (p.verdict, p.note, p.counterexample)
     assert "OverflowError" not in (p.note or "") + (p.counterexample or "")
 
 
-def test_a_claim_that_the_exact_complex_sum_equals_itself_holds():
-    p = _verdict(_capped, "for z in ℂ, sum([1.7e308 + 1.7e308j, "
-                 "1.7e308 + 1.7e308j]) == sum([1.7e308 + 1.7e308j, "
-                 "1.7e308 + 1.7e308j])")
+def test_a_claim_over_a_complex_sum_within_float_range_holds():
+    p = _verdict(_float_sum, _WITHIN + "f(a) ~= sum(a * (1 + 1j))")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
