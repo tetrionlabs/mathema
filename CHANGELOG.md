@@ -2,6 +2,11 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## Unreleased
+
+### Fixes
+- A raise guard is certified only where the raising branch can run, given the exponents a claim fixes to integers and the range a loop index takes.
+
 ## 0.6.5
 
 ### Highlights
