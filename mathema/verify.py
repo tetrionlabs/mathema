@@ -2543,6 +2543,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             if is_library:
                 line += f"; library claims from {library[key]}"
             line += _unaccounted_text(report)
+            if report.owned:
+                # accepted risk passes in every mode and is named in the row
+                line += f"; {report.owned} accepted-risk claim(s)"
             if report.warnings:
                 line += "; " + "; ".join(f"warning: {w}" for w in report.warnings)
             if report.problems:
@@ -2581,7 +2584,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"mathema; its grammar is now {grammar!r}, so mathema no "
             f"longer checks it"
             for name, grammar in grammar_changes.get(key, {}).items())
-        if why == "fresh" and state == "ok" and key not in lock_messages:
+        if (why == "fresh" and state == "ok" and key not in lock_messages
+                and not report.owned):
             out.quiet.update(range(first_line, len(out.lines)))
         out.keys.append({
             "key": key,
