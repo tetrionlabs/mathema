@@ -292,9 +292,10 @@ def gate(claims, *, strict: bool,
     date when None) accepts nothing: a claim named in `lapsed_risk`
     (name to expiry date), or a stored claim dict whose own acceptance
     has lapsed, is as if it had never been accepted, its line naming
-    the date and the command that accepts it again. An unknown one
-    fails in every mode; a skipped one fails strict and, in lenient
-    mode, passes with the line as a warning. A lapsed risk
+    the date and the command that accepts it again. An unknown one,
+    and one stored as `skipped:unknown_but_accepted`, fails in every
+    mode; a skipped one fails strict and, in lenient mode, passes with
+    the line as a warning. A lapsed risk
     sign-off is an open transition again. Each open
     transition fails, warns or passes by its kind and the mode
     (`transition_actions`, `transitions.DEFAULT_ACTIONS` when None), a
@@ -376,7 +377,8 @@ def gate(claims, *, strict: bool,
             line = (f"{name} accepted risk expired on {expired}; to accept "
                     f"it again, run: mathema accept {key or 'KEY'} {name} "
                     f"--as risk")
-            if kind == "skipped" and not strict:
+            if (kind == "skipped" and not strict
+                    and verdict != "skipped:unknown_but_accepted"):
                 r.warnings.append(line)
                 r.skipped += 1
                 continue
