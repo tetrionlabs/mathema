@@ -210,6 +210,7 @@ def load_policy(root: str = ".") -> dict:
           require_verification: true   # every acceptance carries verified_by
           methods: [totp]              # omitting pin disables the static PIN
           keys: [a3f2c1]               # optional allowlist of key ids
+          accepted_risk_lifetime_days: 90   # a risk acceptance expires
     """
     import yaml
     path = os.path.join(root, ".mathema", "meta", "policy.yaml")
@@ -220,6 +221,36 @@ def load_policy(root: str = ".") -> dict:
         return {}
     section = data.get("acceptance")
     return section if isinstance(section, dict) else {}
+
+
+def accepted_risk_lifetime(policy: dict) -> "int | None":
+    """The policy's lifetime for a risk acceptance in days, or None
+    when the key is absent:
+
+        acceptance:
+          accepted_risk_lifetime_days: 90
+
+    A value that is not a positive whole number is refused."""
+    key = "accepted_risk_lifetime_days"
+    if key not in (policy or {}):
+        return None
+    days = policy[key]
+    if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+        raise ValueError(f"policy.yaml acceptance.{key}: {days!r} (a "
+                         f"lifetime is a positive whole number of days)")
+    return days
+
+
+def accepted_risk_expiry(policy: dict, today: str) -> "str | None":
+    """The date a risk acceptance written on `today` (ISO) expires,
+    `accepted_risk_lifetime` days after it, or None when the policy
+    sets no lifetime."""
+    import datetime
+    days = accepted_risk_lifetime(policy)
+    if days is None:
+        return None
+    start = datetime.date.fromisoformat(str(today))
+    return (start + datetime.timedelta(days=days)).isoformat()
 
 
 def enforce_policy(attestation: dict | None, root: str = ".") -> None:

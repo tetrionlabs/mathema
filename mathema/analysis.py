@@ -167,6 +167,9 @@ class Facts:
                                       # runtime types the signature names (runtime_types.
                                       # detect_parameters), the first one sampled; a param
                                       # whose first is not a list has kind vec/mat/table
+    declared_runtime_types: dict = field(default_factory=dict)  # param -> name: a claims-file
+                                      # entry's `runtime_types:` as written, kept whether or
+                                      # not the named library is installed
     runtime_hints: dict = field(default_factory=dict)         # param -> {"usage", "strong",
                                       # "type", "text"}: a body use as a vector, matrix or
                                       # table with no runtime type named (usage_hints)
@@ -1337,12 +1340,23 @@ def call_text(facts: Facts, name: str = "f") -> str:
         no keyword-only parameters on record, so every parameter goes
         positionally.
     """
-    tree = getattr(facts, "tree", None)
-    kwonly = ({a.arg for a in tree.args.kwonlyargs}
-              if isinstance(tree, (ast.FunctionDef, ast.AsyncFunctionDef))
-              else set())
+    kwonly = keyword_only_params(facts)
     args = [f"{p}={p}" if p in kwonly else p for p in facts.params]
     return f"{name}({', '.join(args)})"
+
+
+def keyword_only_params(facts: Facts) -> dict:
+    """Intent:
+        The keyword-only parameters of the function `facts` describes,
+        each mapped to its default's expression node, or None for one
+        a call must supply. `{"b": <Constant 1>}` for `def g(a, *,
+        b=1)`; empty for a function with no readable source.
+    """
+    tree = getattr(facts, "tree", None)
+    if not isinstance(tree, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return {}
+    return {a.arg: default for a, default
+            in zip(tree.args.kwonlyargs, tree.args.kw_defaults)}
 
 
 def effective_facts(fn: Callable[..., Any]) -> Facts:
@@ -1489,6 +1503,8 @@ def with_declared_runtime_types(facts, fn, declared: "dict | None"):
     undrawable = {p: c for p, c in (facts.undrawable or {}).items()
                   if p not in detected}
     return replace(facts, param_kinds=kinds, runtime_types=detected,
+                   declared_runtime_types={str(k): str(v)
+                                           for k, v in declared.items()},
                    runtime_hints=hints, undrawable=undrawable)
 
 

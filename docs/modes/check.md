@@ -17,7 +17,7 @@ mathema check path/to/file.py:fn [--claim "..."]
 | `--root` | project root to import dotted targets relative to (default `.`) |
 | `--claim LAW` | ad-hoc claim to adjudicate, e.g. `"f(-x) == -f(x)"` (repeatable) |
 | `--domain name=lo:hi` | declared parameter range (repeatable) |
-| `--strict` / `--lenient` | one strictness pair shared with `verify`; lenient is the default here (the authoring loop iterates while claims are still being written); strict additionally counts skipped (unverifiable) claims and accepted risk as failures, a reporting filter over already-computed verdicts, never an adjudication mode |
+| `--strict` / `--lenient` | one strictness pair shared with `verify`; lenient is the default here (the authoring loop iterates while claims are still being written); strict additionally counts skipped (unverifiable) claims nobody accepted as failures, a reporting filter over already-computed verdicts, never an adjudication mode |
 | `--trials-downscale FACTOR` | shrink the trial budget by `FACTOR` (FACTOR > 0) for a faster dev loop; a value above 1 is clamped to 1, so it never scales upward |
 | `--format` | `text` (default), `json`, `compact`, `junit`, `github`, `md` |
 | `--output FILE` | write the report to a file instead of stdout |

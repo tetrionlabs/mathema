@@ -531,6 +531,18 @@ opt in: `check(fn, claims=["defined", "excluding", "stable",
 "stateless"])`, each expands to the structurally relevant members
 (see the notebook's safety-family section).
 
+A suggestion calls `fn` the way its signature accepts, a keyword-only
+parameter by keyword: `d(f(a, k=k), a) >= 0` and
+`f(a, k=k) == f(a, k=k)` for `def fn(a, *, k=2.0)`. The suggestions that swap, scale or
+transform arguments (`commutative`, `associative`, `scale_equivariant`,
+`even`, `odd`, `idempotent` and the sequence transforms such as
+`permutation_invariant`) move only the parameters passed by position,
+and call `fn` with every keyword-only parameter at its default: `def
+fn(a, b, *, s=1.0)` gets `f(a, b) == f(b, a)`. A function whose
+operands are keyword-only, or with a keyword-only parameter that has no
+default, gets none of them, and `is_numerically_stable` is not
+suggested for a function with a keyword-only parameter.
+
 ```python
 mathema.check(fn, claims=mathema.suggest_claims(fn))   # use directly
 mathema.suggest_claims(fn, write=True)                 # or persist as declared
