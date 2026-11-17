@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """The one adjudication-outcome gate (verify.gate): provenance
-population, accepted-risk exemption, strict/lenient split, and colon
-subroutes classified through classify_verdict; one policy for check,
-both verify paths, and any programmatic caller."""
+population, accepted-risk exemption in every mode, strict/lenient split
+over unaccepted skips, and colon subroutes classified through
+classify_verdict; one policy for check, both verify paths, and any
+programmatic caller."""
 from mathema.records import Probe
-from mathema.verify import gate
+from mathema.verify import gate, summary_counts
 
 
 def _probe(name, verdict, meta=None, note=""):
@@ -37,12 +38,40 @@ def test_unknown_gates_unless_risk_accepted():
     assert r.problems == [] and r.owned == 1
 
 
-def test_strict_refuses_owned_risk_and_skips():
+def test_strict_refuses_skips_and_passes_owned_risk():
     claims = [_probe("a", "unknown"), _probe("b", "skipped")]
     r = gate(claims, strict=True, accepted_risk=frozenset({"a"}))
-    assert r.problems == ["b unknown", "1 accepted-risk claim(s)"]
+    assert r.problems == ["b unknown"] and r.owned == 1
     r = gate(claims, strict=False, accepted_risk=frozenset({"a"}))
     assert r.problems == []
+
+
+def test_an_accepted_risk_passes_in_both_modes_and_is_named():
+    for strict in (True, False):
+        r = gate([_probe("p", "proven"), _probe("a", "unknown")],
+                 strict=strict, accepted_risk=frozenset({"a"}))
+        assert r.problems == [] and r.owned == 1
+        assert summary_counts(r) == ("1 proven, 0 holds, 0 falsified, "
+                                     "1 accepted risk")
+
+
+def test_a_skipped_claim_accepted_as_risk_passes_strict():
+    r = gate([_probe("b", "skipped")], strict=True,
+             accepted_risk=frozenset({"b"}))
+    assert r.problems == [] and r.owned == 1 and r.skipped == 0
+
+
+def test_a_falsified_claim_named_as_accepted_risk_still_fails():
+    for strict in (True, False):
+        r = gate([_probe("law", "falsified")], strict=strict,
+                 accepted_risk=frozenset({"law"}))
+        assert r.problems == ["1 falsified claim(s)"] and r.owned == 0
+
+
+def test_lenient_lets_an_unaccepted_skip_through_and_strict_refuses_it():
+    assert gate([_probe("b", "skipped")], strict=False).problems == []
+    assert gate([_probe("b", "skipped")], strict=True).problems == [
+        "b unknown"]
 
 
 def test_suggestions_never_gate_by_provenance():

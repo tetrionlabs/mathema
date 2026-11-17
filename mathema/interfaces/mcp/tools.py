@@ -92,7 +92,8 @@ def adjudicate_target(target: str, claims: list | None = None,
     from mathema.authoring import retrieve
     from mathema.spec import load_declared, load_verified
     from mathema.targets import resolve_function
-    from mathema.verify import (_accepted_risk, gate, split_unparseable_entry,
+    from mathema.verify import (_accepted_risk, _lapsed_risk, gate,
+                                split_unparseable_entry,
                                 unparseable_claim_message)
 
     key, fn = resolve_function(target, root)
@@ -110,8 +111,10 @@ def adjudicate_target(target: str, claims: list | None = None,
         retrieve(fn, root, store=declared_store))
     rec = check(fn, claims=passed_claims, declared=entry,
                 known_premises=_stub_premise_names(root))
-    accepted = _accepted_risk((load_verified(root).get(key) or {}).get("entry"))
+    stored_entry = (load_verified(root).get(key) or {}).get("entry")
+    accepted = _accepted_risk(stored_entry)
     report = gate(rec.probes, strict=strict, accepted_risk=accepted,
+                  lapsed_risk=_lapsed_risk(stored_entry),
                   unresolved=rec.facts.unresolved)
     from mathema.records import claim_row
     rows = [claim_row(p, accepted_risk=accepted) for p in rec.probes]
@@ -169,7 +172,8 @@ def adjudicate_targets(targets: list[str], root: str = ".",
     from mathema.records import claim_row
     from mathema.spec import load_declared, load_verified
     from mathema.targets import resolve_function
-    from mathema.verify import (_accepted_risk, gate, split_unparseable_entry,
+    from mathema.verify import (_accepted_risk, _lapsed_risk, gate,
+                                split_unparseable_entry,
                                 unparseable_claim_message)
 
     if include not in ("declared", "suggested", "all"):
@@ -205,9 +209,10 @@ def adjudicate_targets(targets: list[str], root: str = ".",
         rec = check(fn, claims=passed_claims,
                     known_premises=stub_premises,
                     declared=entry)
-        accepted = _accepted_risk(
-            (verified_store.get(key) or {}).get("entry"))
+        stored_entry = (verified_store.get(key) or {}).get("entry")
+        accepted = _accepted_risk(stored_entry)
         report = gate(rec.probes, strict=strict, accepted_risk=accepted,
+                      lapsed_risk=_lapsed_risk(stored_entry),
                       unresolved=rec.facts.unresolved)
         problems.extend(f"{key}: {p}" for p in report.problems)
         for r in (claim_row(p, accepted_risk=accepted) for p in rec.probes):

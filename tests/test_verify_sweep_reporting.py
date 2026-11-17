@@ -88,7 +88,7 @@ def test_accepted_risk_on_a_fresh_record_is_reported_as_accepted_risk():
               {"name": "owned", "verdict": "skipped:unknown_but_accepted"}]
     strict = gate(stored, strict=True)
     assert strict.owned == 1 and strict.skipped == 0
-    assert strict.problems == ["1 accepted-risk claim(s)"]
+    assert strict.problems == []
     lenient = gate(stored, strict=False)
     assert lenient.problems == []
     # a fresh adjudication of the same claim reaches the same count

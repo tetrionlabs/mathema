@@ -196,18 +196,107 @@ def _passed_whole(text: str, sig_params: list, name: str) -> bool:
     return False
 
 
-def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
+def _stated_sequences(fn, facts) -> frozenset:
+    """Intent:
+        The parameters of `fn` stated to be sequences: by an annotation
+        (`list`, `tuple`, `Sequence[float]`, `np.ndarray`, `pd.Series`,
+        a `Vec`/`Mat` marker) or by a runtime type, the signature's own
+        or a claims-file entry's `runtime_types:`. A parameter the body
+        merely iterates or indexes is not among them.
+    """
+    from .analysis import signature_kinds
+    from .runtime_types import SEQUENCE_KINDS, adapter
+    from .types import shapes_from_signature
+    params = list(getattr(facts, "params", None) or ())
+    out = set()
+    if fn is not None:
+        try:
+            kinds = signature_kinds(fn, params)[0]
+        except Exception:
+            kinds = {}
+        out |= {p for p, k in kinds.items() if k in SEQUENCE_KINDS}
+        try:
+            out |= set(shapes_from_signature(fn) or {})
+        except Exception:
+            pass
+    for p, found in (getattr(facts, "runtime_types", None) or {}).items():
+        if found and (found[0].kind in SEQUENCE_KINDS
+                      or found[0].adapter == "list"):
+            out.add(p)
+    # a declared runtime type states a sequence even where its library is
+    # not installed, so the claim still reads the domain per element
+    for p, name in (getattr(facts, "declared_runtime_types", None)
+                    or {}).items():
+        named = adapter(name)
+        if named is not None and named.kinds != frozenset({"table"}):
+            out.add(p)
+    return frozenset(out)
+
+
+def _unavailable_runtime_types(facts, cj_domain: dict) -> list:
+    """Intent:
+        The runtime types, sorted, that a claims-file entry declares for
+        parameters the claim binds and whose library is not installed
+        here. The mathematics of such a claim is decided; any route that
+        would run the code on these parameters is skipped, since nothing
+        here can build the declared value.
+    """
+    from .runtime_types import adapter, installed
+    out = set()
+    for p, name in (getattr(facts, "declared_runtime_types", None)
+                    or {}).items():
+        named = adapter(name)
+        if p in (cj_domain or {}) and named is not None \
+                and not installed(named):
+            out.add(named.name)
+    return sorted(out)
+
+
+def _not_run_words(names: list) -> str:
+    """The note for a route not run because a declared runtime type's
+    library is not installed."""
+    shown = ", ".join(names)
+    return (f"{shown} is not installed here, so the code is not run on it "
+            f"and the computation is not decided")
+
+
+def _bound_as_values(fn, facts, cj_domain: dict) -> list:
+    """Intent:
+        The parameters, sorted, that the body reads as sequences but
+        whose sequence kind no annotation or runtime type states, and
+        that the claim binds to a plain domain (a finite set or an
+        interval, no `^n`, no language): the claim binds their values.
+    """
+    from .probing import _classify_bound
+    stated = _stated_sequences(fn, facts)
+    out = []
+    for p, k in (getattr(facts, "param_kinds", None) or {}).items():
+        bound = (cj_domain or {}).get(p)
+        if (k not in SEQUENCE_KINDS or p in stated or bound is None
+                or getattr(bound, "dims", ())
+                or _classify_bound(bound) in ("language", "instances", "none")):
+            continue
+        out.append(p)
+    return sorted(out)
+
+
+def _bound_kinds(cj, kinds: dict, sig_params: list,
+                 stated: "frozenset | None" = None) -> dict:
     """Intent:
         The kind each parameter of a claim is drawn as. A parameter the
         claim binds to a finite set, an interval or a number set takes
         values from that binding, drawn as values rather than as f's
         mapping or container kind, where f's kind cannot hold the
-        binding's members: a mapping bound to numbers, or a sequence
-        whose name the claim never passes whole to f (`f([triggers,
-        "dependency"])` passes it as one element). A sequence passed
-        whole keeps its kind, its binding read as its element domain;
-        a language binding or a space (`[0, 1]^n`) keeps the kind it
-        names.
+        binding's members: a mapping bound to numbers, a sequence the
+        signature does not state to be one (`stated`, from
+        `_stated_sequences`; a body that iterates or indexes a
+        parameter makes it a sequence only by inference), or a stated
+        sequence whose name the claim never passes whole to f
+        (`f([triggers, "dependency"])` passes it as one element). A
+        stated sequence passed whole keeps its kind, its binding read
+        as its element domain; a language binding or a space (`[0,
+        1]^n`) keeps the kind it names. `stated=None` reads every
+        sequence kind as stated.
     """
     from .probing import _classify_bound
     from .runtime_types import SEQUENCE_KINDS
@@ -221,8 +310,10 @@ def _bound_kinds(cj, kinds: dict, sig_params: list) -> dict:
             continue
         if k == "dict":
             out[p] = "unknown"
-        elif k in SEQUENCE_KINDS and not any(
-                _passed_whole(t, sig_params, p) for t in sides if t):
+        elif k in SEQUENCE_KINDS and (
+                (stated is not None and p not in stated)
+                or not any(_passed_whole(t, sig_params, p)
+                           for t in sides if t)):
             out[p] = "unknown"
     return out
 
@@ -662,7 +753,8 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         A predicate statement (`is_pole_safe(x)`, `is_symmetric(f(A))`)
         matches the family of the same name. The derivative-sign
         families match `d(f(<params>), p) >= 0` and its siblings, with
-        `p` the bracketed parameter. `is_numerically_stable` matches
+        `p` the bracketed parameter and a keyword-only parameter passed
+        by keyword. `is_numerically_stable` matches
         `g(f, <params>) == 1` with `g` bound to `mathema.f.accurate`. `is_deterministic`, `is_reproducible` and
         `is_state_safe` match `f(<params>) == f(<params>)`, a keyword-only
         parameter passed by keyword (`analysis.call_text`). `is_defined` states a region under its name (the
@@ -678,7 +770,6 @@ def _statement_is_family_claim(cj, base: str, family, facts) -> bool:
         return cj.relation == base
     if region_row_kind(base):
         return True
-    call = f"f({', '.join(facts.params)})"
     if base in _DERIVATIVE_FAMILY_FORMS:
         param = cj.name[len(base):]
         if not (param.startswith("[") and param.endswith("]")):
@@ -706,10 +797,12 @@ def _states_derivative_form(cj, base: str, param: str, facts) -> bool:
         `base` adjudicates in `param`: `d(f(<params>), param) >= 0` for
         `monotonic_increasing`, `d(f(<params>), param, param) == 0` for
         `affine`, and the rest of `_DERIVATIVE_FAMILY_FORMS`, with the
-        call naming every parameter of f in order.
+        call naming every parameter of f in order, a keyword-only one by
+        keyword (`analysis.call_text`).
     """
+    from .analysis import call_text
     order, relation = _DERIVATIVE_FAMILY_FORMS[base]
-    call = f"f({', '.join(facts.params)})"
+    call = call_text(facts)
     expected = f"d({call}, {', '.join([param] * order)})"
     return (cj.relation == relation and _squash(cj.rhs) == "0"
             and _squash(cj.lhs) == _squash(expected))
@@ -2179,11 +2272,11 @@ def _claim(law: str, name: str | None, source: str, route: str,
         # vocabulary; a finite-set domain stays
         # the base grammar, and the matrix dialect wins when both apply
         grammar = f"{GRAMMAR}/language"
-    if pseudo_infinity is not None \
-            and not isinstance(pseudo_infinity, (tuple, list)):
-        # the keyword magnitude is read as `let |inf| be` reads its own
-        from .records import _checked_magnitude
-        pseudo_infinity = _checked_magnitude(pseudo_infinity)
+    if pseudo_infinity is not None:
+        # the keyword magnitude is read as `let |inf| be` reads its own,
+        # a (lo, hi) pair as two finite numbers with lo < 0 < hi
+        from .records import checked_pseudo_infinity
+        pseudo_infinity = checked_pseudo_infinity(pseudo_infinity)
     if let_pseudo_inf is not None:
         from .records import pseudo_infinity_range
         if (pseudo_infinity is not None
@@ -5018,6 +5111,13 @@ def _with_empty_input_lines(probe: "Probe", ctx, fn, facts,
         raise
     except Exception:
         return probe, []
+    unavailable = _unavailable_runtime_types(facts, ctx.cj_domain)
+    if unavailable:
+        return probe, [_dc_replace(
+            line, verdict="skipped", counterexample=None,
+            note=_not_run_words(unavailable),
+            meta={**(line.meta or {}), "mathema.probe_gap": "input-synthesis"})
+            for line in lines]
     broken = next((line for line in lines if line.verdict == "falsified"),
                   None)
     if broken is None or probe.verdict == "falsified":
@@ -6035,7 +6135,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
     # no evidence for a policy row: computation is outside its remit
     outer_remit = _outside_remit.get()
     from ._called_text import forget_realised
+    function_facts, function_kinds = facts, kinds
     for cj in ordered:
+        facts, kinds = function_facts, function_kinds
         _policy_claim.set(cj.name)
         forget_realised()
         _outside_remit.set(outer_remit or cj.route == MATH_ONLY_ROUTE)
@@ -6320,6 +6422,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             out.append(_stamped(validated, cj, canonical=_renders(cj)))
             continue
         ctx = validated
+        ctx.bound_as_values = tuple(_bound_as_values(fn, facts, ctx.cj_domain))
+        if ctx.bound_as_values:
+            # every route that runs the code calls f with these values
+            facts = _dc_replace(facts, param_kinds={
+                **facts.param_kinds,
+                **{p: "unknown" for p in ctx.bound_as_values}})
+            kinds = {**kinds, **{p: "unknown" for p in ctx.bound_as_values}}
         written_domain = {p: b for p, b in (ctx.record_domain or {}).items()
                           if p not in ctx.implied}
         cj_record = _dc_replace(cj, domain=written_domain) if written_domain else cj
@@ -6525,6 +6634,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                         derived, ctx, fn, facts, float_companions,
                         conjectures)
                     out.append(stamp(derived, _cap=verdict_cap))
+                    unavailable = _unavailable_runtime_types(facts,
+                                                             ctx.cj_domain)
+                    if ctx.companion is not None and unavailable:
+                        ctx.companion = _dc_replace(
+                            ctx.companion, verdict="skipped",
+                            counterexample=None,
+                            note=_not_run_words(unavailable),
+                            meta={**(ctx.companion.meta or {}),
+                                  "mathema.probe_gap": "input-synthesis"})
                     if ctx.companion is not None:
                         _emit_companion(out, _stamped(ctx.companion, cj_record,
                                                       written=cj.domain or {}),
@@ -6537,6 +6655,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # "derive" the probe is a falsifier only: its executed
             # counterexample falsifies, and anything else leaves the
             # claim unknown with derive's reason (`_derive_alone`).
+            unavailable = _unavailable_runtime_types(facts, ctx.cj_domain)
+            if unavailable:
+                undecided = ctx.derive_undecided
+                reason = (undecided.note if undecided is not None
+                          else ctx.note) or ""
+                out.append(stamp(Probe(
+                    cj.name, ctx.statement, "skipped", route=None,
+                    note=f"{reason}; {_not_run_words(unavailable)}".lstrip("; "),
+                    meta={"mathema.probe_gap": "input-synthesis"}),
+                    _cap=verdict_cap))
+                continue
             from .runtime_types._receivers import ReceiverRefused
             import copy
             stashed = copy.deepcopy(ctx.derive_undecided)
@@ -8128,6 +8257,9 @@ class _ClaimContext:
     # instances of its class the routes that run the code draw it as,
     # kept apart from `cj_domain`, which the mathematics reads
     receiver: dict = field(default_factory=dict)
+    # the parameters the body reads as sequences whose values the claim
+    # binds (`_bound_as_values`)
+    bound_as_values: tuple = ()
     guard_refused: int = 0
     # draws a path binding rejected because the path reached no value
     # (an index past the end, a field holding None) the bound does not
@@ -10874,6 +11006,17 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             note=f"{note}; {refused}",
             meta={"mathema.derive_status": "undecided"})
         return None
+    as_values = ctx.bound_as_values or _bound_as_values(fn, facts, cj_domain)
+    if as_values:
+        # the body's lift reads each of these as a sequence, while the
+        # claim draws its value
+        names = ", ".join(as_values)
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=(f"{note}; the claim binds the value of {names}, which "
+                  f"the body reads as a sequence").lstrip("; "),
+            meta={"mathema.derive_status": "undecided"})
+        return None
     family_derive = family.routes().get("derive") if family is not None else None
     # literals a double does not read exactly reach only the ordinary
     # prover exactly (`exact_literal_text`); every other derive route
@@ -12042,28 +12185,25 @@ def _adjudicate_probe(ctx: "_ClaimContext", fn, facts, kinds: dict,
         verdict and witness are the same in every process.
     """
     from .probing import _pinned_float_env
-    kinds = _kinds_as_bound(fn, kinds, ctx.cj_domain)
+    kinds = _kinds_as_bound(fn, kinds, ctx.cj_domain,
+                            _stated_sequences(fn, facts))
     with _pinned_float_env():
         return _probe_stage(ctx, fn, facts, kinds, sampling)
 
 
-def _kinds_as_bound(fn, kinds: dict, cj_domain: dict) -> dict:
+def _kinds_as_bound(fn, kinds: dict, cj_domain: dict,
+                    stated: frozenset = frozenset()) -> dict:
     """Intent:
-        The kinds the probe draws with: an unannotated parameter the
-        body could read as a sequence, but which the claim binds to a
-        scalar real domain (`q in [0, 1]`, no `^n`), is drawn as the
-        scalar the claim states.
+        The kinds the probe draws with: a parameter the body could read
+        as a sequence, but which is not stated to be one (`stated`, from
+        `_stated_sequences`) and which the claim binds to a scalar real
+        domain (`q in [0, 1]`, no `^n`), is drawn as the scalar the
+        claim states.
     """
-    try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return kinds
     out = dict(kinds)
     for p, kind in kinds.items():
         bound = (cj_domain or {}).get(p)
-        param = params.get(p)
-        if (kind not in SEQUENCE_KINDS or bound is None or param is None
-                or param.annotation is not inspect.Parameter.empty):
+        if kind not in SEQUENCE_KINDS or bound is None or p in stated:
             continue
         if getattr(bound, "dims", ()) or getattr(bound, "base_type", "R") not in ("R", "Z", "N"):
             continue
@@ -12215,7 +12355,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     """
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     cj_domain, extra, family = ctx.cj_domain, ctx.extra, ctx.family
-    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params))
+    drawn_kinds = _bound_kinds(cj, kinds, list(facts.params),
+                               _stated_sequences(fn, facts))
     # the parameters drawn as plain values from their binding
     as_values = {p for p, k in drawn_kinds.items() if k != kinds.get(p)}
     kinds = drawn_kinds

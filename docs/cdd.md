@@ -114,8 +114,9 @@ claim was wrong, record the discovery with
 corrected claim (or adopting a verified mechanical inverse), each
 adjudicated before it is written. An `unknown` claim
 also fails until it is resolved or a human owns the gap with
-`accept --as risk`. Only `skipped` and accepted risk are mode-dependent
-(strict refuses them, lenient reports them). See
+`accept --as risk`. An accepted risk passes in both modes, named in
+the row. Only a `skipped` claim nobody accepted is mode-dependent
+(strict refuses it, lenient reports it). See
 [mathema verify](modes/verify.md).
 
 ## Identity hashes
@@ -214,7 +215,7 @@ page is [Verdicts and exit codes](verdicts.md#exit-codes)):
 | Code | Meaning |
 |---|---|
 | 0 | ran, and nothing gated: claims adjudicated as stated, or the verb only reports |
-| 1 | ran, and the gate failed: a claim is falsified or unknown, a transition is open and the mode fails it, a claim is skipped or accepted as risk in strict mode, or a conflict is unresolved |
+| 1 | ran, and the gate failed: a claim is falsified or unknown, a transition is open and the mode fails it, a claim nobody accepted as risk is skipped in strict mode, or a conflict is unresolved |
 | 2 | could not run: a target that does not resolve, an unreadable or malformed file, a bad argument, a missing optional extra |
 | 130 | interrupted (Ctrl-C or EOF) |
 
