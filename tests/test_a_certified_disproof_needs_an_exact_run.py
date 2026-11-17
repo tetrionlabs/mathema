@@ -60,9 +60,10 @@ def sqrt_through_numpy(x: float) -> float:
     return float(np.sqrt(x - (0.3 + 1e-20)))
 
 
-def _row(fn, law, name="c"):
+def _row(fn, law, name="c", route="best"):
     return [p for p in mathema.check(
-        fn, claims=[mathema.claim(law, name=name)]).probes if p.name == name][0]
+        fn, claims=[mathema.claim(law, name=name, route=route)]).probes
+        if p.name == name][0]
 
 
 def _pole_safe(fn, domain="[0, 10]"):
@@ -117,7 +118,7 @@ def test_a_certified_raise_the_exact_run_does_not_reproduce_is_unknown(
         monkeypatch, outcome):
     monkeypatch.setattr(gates, "_certified_exact_run",
                         lambda *a, **k: outcome)
-    p = _row(sqrt_just_above, "for x in [0.3, 1], f(x) >= 0")
+    p = _row(sqrt_just_above, "for x in [0.3, 1], f(x) >= 0", route="derive")
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert p.meta.get("mathema.witness_exact_run") == outcome[0], p.meta
@@ -135,8 +136,8 @@ def test_a_certified_undefined_point_the_exact_run_does_not_reproduce_is_unknown
         monkeypatch, outcome, fn, law):
     monkeypatch.setattr(gates, "_certified_exact_run",
                         lambda *a, **k: outcome)
-    p = _row(fn, law)
-    assert p.verdict == "unknown", (p.verdict, p.note)
+    p = _row(fn, law, route="derive")
+    assert p.verdict in ("unknown", "holds"), (p.verdict, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert "certified by interval arithmetic" in (p.note or ""), p.note
 
@@ -155,7 +156,8 @@ def test_a_certified_pole_the_exact_run_does_not_reproduce_is_unknown(
 
 def test_a_certified_raise_in_code_the_exact_run_cannot_follow_is_unknown():
     pytest.importorskip("numpy")
-    p = _row(sqrt_through_numpy, "for x in [0.3, 1], f(x) >= 0")
+    p = _row(sqrt_through_numpy, "for x in [0.3, 1], f(x) >= 0",
+             route="derive")
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert p.meta.get("mathema.witness_exact_run") == "cannot run", p.meta

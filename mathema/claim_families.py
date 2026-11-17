@@ -977,7 +977,9 @@ def _certified_pole(fn, facts, domain: dict, param: str, pole_text: str):
                 sketch=f"{param} = {pole_text} is a pole inside the "
                        f"declared domain; {text}",
                 counterexample=f"{param} = {pole_text}",
-                meta={"mathema.witness_certified": text})
+                meta={"mathema.witness_certified": text,
+                      "mathema.witness_point": {param: pole_text},
+                      "mathema.witness_raises": "no value"})
     return None
 
 
@@ -3740,9 +3742,10 @@ def _holds_on_open_interval(rel, domain: dict) -> bool:
 
 
 def _certified_undefined_point(computed_rels: list, facts,
-                               domain) -> "tuple[str, str] | None":
+                               domain) -> "tuple[str, str, dict] | None":
     """Intent:
-        `(witness text, certificate)` when some condition f needs in
+        `(witness text, certificate, point)`, `point` the witness as
+        `{parameter: exact value as text}`, when some condition f needs in
         order to return provably fails somewhere in the domain, by
         certified interval arithmetic (`symbolic._prove._certified_guard`)
         around a solution of its boundary; None otherwise. Only a
@@ -3781,7 +3784,7 @@ def _certified_undefined_point(computed_rels: list, facts,
             text = _certified_guard(build(gap, 0), {sym: root}, {name: sym},
                                     domain)
             if text is not None:
-                return f"{name} = {root}", text
+                return f"{name} = {root}", text, {name: str(root)}
     return None
 
 
@@ -4111,11 +4114,12 @@ def _is_defined_derive(fn, facts, lhs_src: str, rhs_src: str,
             certified = _certified_undefined_point(computed_rels, facts,
                                                    domain)
             if certified is not None:
-                where, text = certified
+                where, text, point = certified
                 return ProofResult(
                     "disproven", sketch=f"{sketch}; {text}",
                     counterexample=where,
-                    meta={"mathema.witness_certified": text})
+                    meta={"mathema.witness_certified": text,
+                          "mathema.witness_point": point})
         return result
 
     stated_l, stated_r = to_expr(lhs_src), to_expr(rhs_src or "0")
