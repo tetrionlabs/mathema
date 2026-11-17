@@ -16,6 +16,9 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A plain domain on a parameter (a finite set, or an interval with no `^n`) binds the value itself. It is read as the domain of each element only for a parameter whose annotation or runtime type states a sequence (`list`, `tuple`, `Sequence[float]`, `np.ndarray`, `pd.Series`, a `Vec` marker, a claims-file `runtime_types:` entry). A body that iterates or indexes an unannotated parameter leaves its binding the domain of the value: `for value in {1, 2.5, 1e300}, f(value) == (-value, value)` on `pseudo_infinity_range(value)` draws the three numbers. For a parameter that takes a sequence, annotate it as one (`xs: list`).
 - The bundled `numpy.quantile` definition row is stated over `[-1e150, 1e150]^n`, as its range row already was: beyond that magnitude numpy's linear interpolation can overflow to inf where the exact quantile is finite.
 
+### Fixes
+- A raise guard is certified only where the raising branch can run, given the exponents a claim fixes to integers and the range a loop index takes.
+
 ## 0.6.5
 
 ### Highlights
