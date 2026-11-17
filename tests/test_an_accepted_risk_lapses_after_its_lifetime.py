@@ -140,7 +140,7 @@ def test_an_acceptance_lapses_on_its_expiry_date_and_one_without_never_does():
 
 def test_a_lapsed_accepted_risk_fails_in_both_modes_naming_date_and_command():
     for strict in (True, False):
-        for claims in ([Probe("gone", "s", "unknown")], _ENTRY["claims"][2:]):
+        for claims in ([Probe("gone", "s", "unknown")],):
             r = gate(claims, strict=strict, key="t.f",
                      accepted_risk=_accepted_risk(_ENTRY, today="2026-11-11"),
                      lapsed_risk=_lapsed_risk(_ENTRY, today="2026-11-11"),
@@ -149,6 +149,20 @@ def test_a_lapsed_accepted_risk_fails_in_both_modes_naming_date_and_command():
             assert r.problems == [
                 "gone accepted risk expired on 2026-11-01; to accept it "
                 "again, run: mathema accept t.f gone --as risk"]
+
+
+def test_a_lapsed_accepted_risk_on_a_skipped_claim_fails_strict_and_warns_lenient():
+    line = ("gone accepted risk expired on 2026-11-01; to accept it "
+            "again, run: mathema accept t.f gone --as risk")
+    for claims in ([Probe("gone", "s", "skipped")], _ENTRY["claims"][2:]):
+        kw = dict(key="t.f", today="2026-11-11",
+                  accepted_risk=_accepted_risk(_ENTRY, today="2026-11-11"),
+                  lapsed_risk=_lapsed_risk(_ENTRY, today="2026-11-11"))
+        strict = gate(claims, strict=True, **kw)
+        assert strict.owned == 0 and strict.problems == [line]
+        lenient = gate(claims, strict=False, **kw)
+        assert lenient.owned == 0
+        assert lenient.problems == [] and lenient.warnings == [line]
 
 
 def test_a_current_and_an_unexpiring_accepted_risk_pass():
