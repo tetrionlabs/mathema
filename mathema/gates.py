@@ -1840,6 +1840,118 @@ def _exact_witness_found(falsified, deps, fn, facts, point, record,
     return record
 
 
+def _exact_argument(text: str):
+    """A witness coordinate given as text (`3/10`, `sqrt(2)`, `pi/2`) as
+    the exact number an exact run takes: a `Fraction` for a rational, a
+    sympy number otherwise. Raises `ValueError` for a text that is not
+    a real number."""
+    from fractions import Fraction
+
+    import sympy
+    value = sympy.sympify(text)
+    if value.is_Rational:
+        return Fraction(int(value.p), int(value.q))
+    if value.is_number and value.is_real and value.is_finite:
+        return value
+    raise ValueError(f"{text} is not a real number")
+
+
+#: the named exceptions an exact run may raise as a divisor or a
+#: domain failure when the certificate names no function of its own
+_NO_VALUE_FAILURES = ("ZeroDivisionError", "ValueError", "ArithmeticError",
+                      "OverflowError")
+
+
+def _exact_run_outcome(fn, facts, values: dict, expected) -> tuple:
+    """Intent:
+        `(outcome, words)` for one run of `fn` on the exact `values`
+        (`_exact_body.exact_run`): `reproduced` when it raises the
+        failure `expected` names (a class name, `no value`, or None for
+        any), or has no value there; `not reproduced` when it returns,
+        or raises another exception; `cannot run` when the body cannot
+        be read exactly or the run does not finish in time.
+    """
+    from ._exact_body import NoExactValue, NotExact, exact_run
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .probing import call_arguments
+    from .symbolic._partiality import NO_VALUE
+    args, kwargs = call_arguments(fn, facts.params, values)
+    no_value = expected in (None, NO_VALUE)
+    try:
+        value = _with_timeout(lambda: exact_run(fn, *args, **kwargs),
+                              FAST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return "cannot run", "the exact run did not finish in time"
+    except NoExactValue as exc:
+        if no_value or expected in _NO_VALUE_FAILURES:
+            return "reproduced", f"the function has no value there ({exc})"
+        return "not reproduced", f"the function has no value there ({exc})"
+    except NotExact as exc:
+        return "cannot run", f"the function cannot be run exactly: {exc}"
+    except (Exception, SystemExit) as exc:
+        named = {c.__name__ for c in type(exc).__mro__}
+        if no_value or expected in named:
+            return "reproduced", f"the function raises {type(exc).__name__}"
+        return "not reproduced", (f"the function raises {type(exc).__name__} "
+                                  f"where the certificate names {expected}")
+    shown = repr(value)
+    if len(shown) > 60:
+        shown = shown[:57] + "..."
+    return "not reproduced", f"the function returns {shown}"
+
+
+def _certified_exact_run(proof, fn, facts, cj_domain) -> tuple:
+    """Intent:
+        `(outcome, words)`: whether the function, run on the exact
+        values of the witness a certified disproof names, fails as its
+        certificate says. The witness is `mathema.witness_point`
+        (`{parameter: exact value as text}`) and the failure
+        `mathema.witness_raises` (a class name, `no value`, or absent
+        for any failure). `outcome` is `reproduced`, `not reproduced`
+        or `cannot run`, `words` says what the run did.
+
+    Notes:
+        A parameter the witness leaves out is drawn inside its declared
+        bound from a fixed seed, up to eight draws, each read as the
+        exact binary value of the float drawn; the disproof is
+        reproduced when any draw fails as named. The function's own body
+        is read exactly (`_exact_body`): literals as written, `math`
+        functions exact, every decision on the exact values.
+    """
+    import random
+    from fractions import Fraction
+    point = proof.meta.get("mathema.witness_point")
+    if not point:
+        return "cannot run", "the certified witness names no exact point"
+    try:
+        exact = {name: _exact_argument(text) for name, text in point.items()}
+    except Exception as exc:
+        return "cannot run", f"the witness cannot be read exactly: {exc}"
+    expected = proof.meta.get("mathema.witness_raises")
+    missing = [p for p in facts.params if p not in exact]
+    rng = random.Random(0)
+    results: list = []
+    for _ in range(8 if missing else 1):
+        values = dict(exact)
+        if missing:
+            from .claim_families import _synth_other_params
+            drawn = _synth_other_params(fn, facts, next(iter(exact)),
+                                        cj_domain or {}, rng)
+            for name, value in zip(facts.params, drawn):
+                if name not in exact:
+                    values[name] = (Fraction(value)
+                                    if isinstance(value, float) else value)
+        result = _exact_run_outcome(fn, facts, values, expected)
+        if result[0] == "reproduced":
+            return result
+        results.append(result)
+    for wanted in ("not reproduced", "cannot run"):
+        for result in results:
+            if result[0] == wanted:
+                return result
+    return "cannot run", "no run was made"
+
+
 def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
                         bound_funcs, assum=()):
     """Intent:
@@ -1869,17 +1981,44 @@ def _corroboration_gate(falsified, proof, cj, fn, facts, cj_domain,
         sides exactly and as computed, and whether the float
         computation holds there within its allowance.
     """
+    certificate = proof.meta.get("mathema.witness_certified")
+    if certificate and falsified.counterexample:
+        # the guard holds in the domain by certified interval arithmetic
+        # while every float call returns: the mathematics is false, the
+        # computation holds, and it stands once the function run on the
+        # witness's exact values fails there too
+        outcome, words = _certified_exact_run(proof, fn, facts, cj_domain)
+        if outcome == "reproduced":
+            falsified.meta = {**(falsified.meta or {}),
+                              "mathema.corroboration": "certified",
+                              "mathema.witness_exact_run": outcome}
+            falsified.note = (
+                f"{falsified.note}; {certificate}, while every float call "
+                f"there returns a value, and on the exact values {words}"
+            ).lstrip("; ")
+            return falsified
+        result = _corroborate_by_execution(
+            falsified, proof, cj, fn, facts, cj_domain, bound_funcs, assum)
+        result.meta = {**(result.meta or {}),
+                       "mathema.witness_exact_run": outcome}
+        if result.verdict == "unknown":
+            result.note = (f"{result.note}; {certificate}, but a run of the "
+                           f"function on the exact values does not "
+                           f"reproduce it: {words}").lstrip("; ")
+        return result
+    return _corroborate_by_execution(
+        falsified, proof, cj, fn, facts, cj_domain, bound_funcs, assum)
+
+
+def _corroborate_by_execution(falsified, proof, cj, fn, facts, cj_domain,
+                              bound_funcs, assum=()):
+    """Intent:
+        The rest of `_corroboration_gate`: a disproof with no certified
+        witness stands as `falsified` when an executed counterexample, or
+        an exact comparison at derive's witness, reproduces it; else its
+        verdict is `unknown` with the uncorroborated flag.
+    """
     from . import corroboration as C
-    if proof.meta.get("mathema.witness_certified") and falsified.counterexample:
-        # the raise guard holds in the domain by certified interval
-        # arithmetic while every float call returns: the mathematics is
-        # false, the computation holds
-        falsified.meta = {**(falsified.meta or {}),
-                          "mathema.corroboration": "certified"}
-        falsified.note = (
-            f"{falsified.note}; {proof.meta['mathema.witness_certified']}, "
-            f"while every float call there returns a value").lstrip("; ")
-        return falsified
     if proof.meta.get("mathema.witness_executed") and falsified.counterexample:
         # no stratum: a raise at the witness is the contract or the
         # mathematics talking, which the probe route leaves unclassified

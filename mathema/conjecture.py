@@ -9885,13 +9885,17 @@ def _receiver_witness_held(gated: "Probe", proof, fn) -> "Probe":
         build the class refuses, or an instance whose fields differ from
         the witness (a constructor that transforms its argument), means
         the witness is no instance of the class: the disproof is not
-        reproduced and the verdict is unknown with the reason. Any other
-        verdict or witness is returned as it is.
+        reproduced and the verdict is unknown with the reason. A
+        certified disproof whose exact run did not reproduce it (verdict
+        unknown) is given the same reason. Any other verdict or witness
+        is returned as it is.
     """
     import dataclasses
 
     from .runtime_types._receivers import _own_init, constructor_kinds, method_receiver
-    if gated.verdict != "falsified":
+    if gated.verdict != "falsified" and not (
+            gated.verdict == "unknown"
+            and "mathema.witness_exact_run" in (gated.meta or {})):
         return gated
     receiver = method_receiver(fn)
     witness = getattr(proof, "witness", None) or {}
@@ -10128,7 +10132,8 @@ def _provenance_meta(proof) -> dict:
                 "mathema.matrix_lemmas",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
-                "mathema.exact_witness", "mathema.sweep_inexact",
+                "mathema.exact_witness", "mathema.witness_exact_run",
+                "mathema.sweep_inexact",
                 "mathema.sweep_precision"):
         if key in proof.meta:
             meta[key] = proof.meta[key]
@@ -11137,6 +11142,26 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # other name is, by the ordinary derive route and its
         # corroboration
         family_proof = None
+    certificate = (family_proof.meta.get("mathema.witness_certified")
+                   if family_proof is not None
+                   and family_proof.status == "disproven" else None)
+    if certificate:
+        from .gates import _certified_exact_run
+        outcome, words = _certified_exact_run(family_proof, fn, facts,
+                                              cj_domain)
+        family_proof.meta["mathema.witness_exact_run"] = outcome
+        if outcome != "reproduced":
+            ctx.derive_undecided = Probe(
+                cj.name, statement, "unknown", route="derive",
+                sketch=family_proof.sketch,
+                note=(f"{note}; derive found this claim false, {certificate}, "
+                      f"but a run of the function on the exact values does "
+                      f"not reproduce it: {words}; the verdict stays "
+                      f"unknown").lstrip("; "),
+                meta={"mathema.derive_status": "undecided",
+                      "mathema.corroboration": "uncorroborated",
+                      **_provenance_meta(family_proof)})
+            return None
     if family_proof is not None and family_proof.status == "disproven":
         return Probe(cj.name, statement, "falsified", route="derive",
                      sketch=family_proof.sketch,

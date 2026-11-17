@@ -1933,7 +1933,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
-                meta=({"mathema.witness_certified": certified}
+                meta=({"mathema.witness_certified": certified,
+                       "mathema.witness_point": {
+                           name: _witness_exact_text(at_witness[sym])
+                           for name, sym in ext_params.items()
+                           if sym in at_witness},
+                       "mathema.witness_raises": exc or NO_VALUE}
                       if certified else {"mathema.witness_executed": True}))
         undecided = True
     if undecided:
@@ -2265,6 +2270,16 @@ def _witness_numbers(point: dict) -> "dict | None":
         except (TypeError, ValueError):
             return None
     return out
+
+
+def _witness_exact_text(value) -> str:
+    """A witness coordinate as the exact number it is, as text: a sympy
+    float as its binary fraction (`3/10`-style `p/q`), anything else as
+    sympy prints it."""
+    if isinstance(value, sympy.Float):
+        exact = sympy.Rational(value)
+        return f"{exact.p}/{exact.q}"
+    return str(value)
 
 
 def _witness_value_text(value) -> str:
