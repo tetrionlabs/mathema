@@ -18,6 +18,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Fixes
 - A raise guard is certified only where the raising branch can run, given the exponents a claim fixes to integers and the range a loop index takes.
+- A disproof certified by interval arithmetic is reported as falsified only when a run of the function on the witness's exact values reproduces it; otherwise the claim is not falsified, and the certificate stays in the note.
 
 ## 0.6.5
 
