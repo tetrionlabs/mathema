@@ -5476,6 +5476,13 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     store path, asks for companions; the default here keeps the
     adjudicator at one probe per claim.
 
+    An object with `__call__` that wraps a function (a decorator written
+    as a class) is adjudicated as the wrapped function only when its
+    `__call__` is read (`_instance_callable.read_through`) and is shown to
+    pass its parameters on and return the result unchanged. Any other use
+    of the wrapped function in `__call__` is declined: every claim comes
+    back `skipped` with the reason, and nothing is adjudicated.
+
     Returns one Probe per conjecture (plus any float companions): holds
     (n=…) / falsified (with the counterexample) / skipped (invalid law,
     nothing evaluable, or a different grammar entirely, see the
@@ -5504,6 +5511,13 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     """
     from .probing import resolve_trials_downscale
     trials_scale = resolve_trials_downscale(trials_downscale, trials_scale)
+    from ._instance_callable import read_through
+    fn, not_read = read_through(fn)
+    if not_read is not None:
+        return [Probe(c.name, statement_text(c.relation, c.lhs, c.rhs),
+                      "skipped", route=None, note=not_read)
+                for c in (claim(c) if isinstance(c, str) else c
+                          for c in conjectures)]
     from .types import matrix_param_names
     try:
         fn_mats = matrix_param_names(fn)

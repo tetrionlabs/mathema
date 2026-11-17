@@ -90,3 +90,17 @@ def test_a_class_decorator_that_sets_wrapped_is_adjudicated_as_the_wrapped_funct
 def test_a_callable_object_with_its_own_body_is_still_adjudicated():
     (p,) = mathema.check_conjectures(Doubler(), [mathema.claim(NONNEG)])
     assert p.verdict == "holds"
+
+
+@pytest.mark.needs_full_proof_budget
+def test_check_reads_a_pass_through_class_decorator_as_the_wrapped_function():
+    record = mathema.check(logged_double, claims=[NONNEG])
+    (p,) = [p for p in record.probes if p.name == "f_x_ge_0"]
+    assert p.verdict == "proven"
+
+
+def test_check_declines_a_decorator_that_changes_the_result():
+    record = mathema.check(shifted_double, claims=[NONNEG])
+    (p,) = [p for p in record.probes if p.name == "f_x_ge_0"]
+    assert p.verdict == "skipped"
+    assert "not read through" in p.note

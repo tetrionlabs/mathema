@@ -790,6 +790,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     from .types import _TYPE_PROBE_TRIALS, domain_from_signature, type_probes
 
     ensure_bundled()
+    from ._instance_callable import read_through
+    read, not_read = read_through(fn)
+    if not_read is None:
+        fn = read
     facts = analyze(fn)
     if runtime_types is None and declared is not None:
         runtime_types = declared.get("runtime_types")
