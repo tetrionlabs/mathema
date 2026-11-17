@@ -1949,7 +1949,7 @@ DEFAULT_BADGE_DIR = ".mathema/badges"
 # MATHEMA_BADGES is off.
 MOVED_NOTICE = ("badges now come from `mathema-ci measure --out` "
                 "(pip install mathema-ci); set MATHEMA_BADGES=on for the "
-                "built-in writer, which 0.6.5 removes")
+                "built-in writer, which a later release removes")
 
 
 def core_badges_enabled() -> bool:
@@ -2016,14 +2016,12 @@ _DOCS = _DOCS_HOME + "modes/badges/"
 _MEANINGS = (
     ("implementation", "the share of statements reached by a test, a probe "
                        "or a derive proof, taken together",
-     "#the-three-badges"),
+     "#the-three-scores"),
     ("intent", "how much of what the code is meant to do is explicitly "
-               "specified", "#the-three-badges"),
+               "specified", "#the-three-scores"),
     ("clarity", "how much of each function's knowable behaviour its "
                 "verified claims have pinned down", "#how-clarity-is-scored"),
-    ("overall", "the area the three span, where each pair of scores counts "
-                "equally, so a low score pulls it down without zeroing it",
-     "#the-triangle"),
+    ("overall", "the area spanned by all three scores", "#the-triangle"),
 )
 
 

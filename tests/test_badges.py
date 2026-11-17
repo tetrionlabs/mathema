@@ -333,12 +333,11 @@ def test_readme_snippet_states_the_meanings_and_links(tmp_path):
     assert "reached by a test, a probe or a derive proof" in text
     assert "explicitly specified" in text
     assert "pinned down" in text
-    assert "the area the three span" in text
-    assert "each pair of scores counts equally" in text
+    assert "the area spanned by all three scores" in text
     assert "toward zero when any one of them is empty" not in text
     assert "know what your code actually does" in text
     # links resolve on the public docs site, never a private repository
-    assert "https://mathema.tetrionlabs.com/modes/badges/#the-three-badges" in text
+    assert "https://mathema.tetrionlabs.com/modes/badges/#the-three-scores" in text
     assert "github.com/tetrionlabs/mathema/blob" not in text
     assert ".mathema/badges/triangle.svg" in text
     assert "OWNER/REPO" in text                 # the paste-and-substitute hint
@@ -546,7 +545,7 @@ def test_the_moved_notice_is_one_line_naming_the_replacement():
     assert MOVED_NOTICE == (
         "badges now come from `mathema-ci measure --out` "
         "(pip install mathema-ci); set MATHEMA_BADGES=on for the built-in "
-        "writer, which 0.6.5 removes")
+        "writer, which a later release removes")
 
 
 def test_the_cli_prints_only_the_notice_by_default(tmp_path, monkeypatch,
