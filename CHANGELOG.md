@@ -17,6 +17,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - The bundled `numpy.quantile` definition row is stated over `[-1e150, 1e150]^n`, as its range row already was: beyond that magnitude numpy's linear interpolation can overflow to inf where the exact quantile is finite.
 
 ### Fixes
+- A function wrapped by a decorator written as a class is adjudicated as the wrapped function when the instance's `__call__` passes its arguments on and returns the result unchanged; a class whose `__call__` does anything else with the wrapped function has every claim `skipped` with that reason.
 - A raise guard is certified only where the raising branch can run, given the exponents a claim fixes to integers and the range a loop index takes.
 - A disproof certified by interval arithmetic is reported as falsified only when a run of the function on the witness's exact values reproduces it; otherwise the claim is not falsified, and the certificate stays in the note.
 - A claim word (`sum`, `prod`, `dot`) over complex numbers keeps the exact value of a real or imaginary part beyond float range, as it does for real values, and the claim is judged against it.
