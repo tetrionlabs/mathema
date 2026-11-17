@@ -8,7 +8,7 @@ strength in one can't hide a gap in another.
 
 | Layer | The question | Measured by |
 |---|---|---|
-| **Implementation** | How much of the code has anything actually exercised? | the share of statements reached by a test, a probe or a derive proof, taken together |
+| **Implementation coverage** | How much of the code has anything actually exercised? | the share of statements reached by a test, a probe or a derive proof, taken together |
 | **Intent** | How much of what the code is meant to do is stated? | how much of what each function is meant to do is explicitly specified and up to date |
 | **Clarity** (behaviour) | Of everything knowable about a function's behaviour, how much has been pinned down? | an information score over five dimensions: what it computes, what it accepts, its bounds and shape, how safely it runs, and where it can go wrong |
 
@@ -26,12 +26,7 @@ whether that break is acceptable to the verdicts themselves.
 (`pip install mathema-ci`), computes the three scores for a project
 and draws them as a triangle on three spokes 120 degrees apart, clarity at
 the top and implementation and intent at the lower corners, so a lopsided
-profile has a lopsided shape. The overall number is the share of the full
-frame that shape shades, `(implementation * intent + intent * clarity +
-clarity * implementation) / 3` on the fractions. Every
-pair of layers counts the same, so a weak layer pulls the number down further
-than a plain average would, and an empty one leaves only the wedge between the
-other two.
+profile has a lopsided shape. Overall is the area spanned by all three scores.
 mathema's built-in writer, [`mathema badges`](modes/badges.md), draws the same
 triangle but is off by default and only runs with `MATHEMA_BADGES=on` set.
 With it on, the `billing` module that [Add claims to an existing
