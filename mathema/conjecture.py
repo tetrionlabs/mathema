@@ -8169,6 +8169,18 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
                                            "skipped:misspecified")
               or (probed.meta or {}).get("mathema.missing_unknown")
               else fallback)
+    capped = ((fallback.meta or {}).get("mathema.witness_exact_run") in (
+        "not reproduced", "cannot run") and probed.verdict == "holds")
+    if capped:
+        # a certified disproof no exact run reproduced and a sample with
+        # no failure disagree: the claim stays unknown, the draws in the note
+        drawn = probed.n or 0
+        fallback.note = (f"{fallback.note}; the probe's {drawn} "
+                         f"draw{'s' if drawn != 1 else ''} found no "
+                         f"counterexample, which disagrees with the "
+                         f"certificate and does not settle the claim"
+                         ).lstrip("; ")
+        winner = fallback
     # the note leads with the deciding route's own sentence; the route
     # log is kept on the record's meta
     if winner is probed and probed.verdict in ("proven", "holds", "falsified"):
@@ -8199,7 +8211,7 @@ def _arbitrate_empirical_fallback(probed: "Probe", ctx: "_ClaimContext") -> "Pro
             # the next step, condition first and command last, goes on
             # a line of its own after the whole note (see _check_built)
             winner.meta = {**(winner.meta or {}), "mathema.next_steps": then}
-    elif winner is fallback:
+    elif winner is fallback and not capped:
         # derive's own report stands; the note says why the probe could
         # not settle it either
         winner.note = f"{winner.note}; {_probe_said(probed)}".lstrip("; ")

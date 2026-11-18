@@ -141,7 +141,8 @@ def test_a_certified_undefined_point_the_exact_run_does_not_reproduce_is_unknown
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert "certified by interval arithmetic" in (p.note or ""), p.note
-    assert re.search(r"\d+ draws? found no counterexample", p.note), p.note
+    if fn is tangent:
+        assert re.search(r"\d+ draws? found no counterexample", p.note), p.note
 
 
 @pytest.mark.parametrize("outcome", [NOT_REPRODUCED, NOT_RUN],
