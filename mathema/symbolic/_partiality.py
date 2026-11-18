@@ -106,9 +106,10 @@ def _power_negative_base(base, exponent):
     if _integer_valued(exponent):
         return sympy.false
     # a negative base with an exponent that may be fractional: the
-    # region holds the points with an integral exponent too, where the
-    # power has a value, so only an executed witness falsifies there
-    return sympy.Lt(base, 0)
+    # region is the negative base together with a non-integral exponent,
+    # so a call that pins the exponent to an integer leaves it empty
+    return sympy.And(sympy.Lt(base, 0),
+                     sympy.Ne(exponent, sympy.floor(exponent)))
 
 
 def _log_with_base(*args):
@@ -1042,6 +1043,25 @@ def _range_index(stmt: ast.For, env: dict) -> dict:
     return {name: sympy.Dummy(name, integer=True, nonnegative=True)}
 
 
+def _range_index_bounds(stmt: ast.For, env: dict, index: dict):
+    """Intent:
+        The condition that the loop variable of `for i in range(n)` or
+        `range(k, n)` lies where the loop visits it: `i < n`, and
+        `i >= k` for a start k. `True` when the stop does not read.
+    """
+    (symbol,) = index.values()
+    args = stmt.iter.args
+    try:
+        stop = _expr_to_sympy(args[-1], dict(env))
+        start = (_expr_to_sympy(args[0], dict(env)) if len(args) == 2
+                 else sympy.Integer(0))
+    except NotSymbolic:
+        return sympy.true
+    if isinstance(stop, tuple) or isinstance(start, tuple):
+        return sympy.true
+    return sympy.And(sympy.Ge(symbol, start), sympy.Lt(symbol, stop))
+
+
 def _integer_bound(bound) -> bool:
     """Whether a declared bound admits only integers (`subset Z`): a
     parameter there is called with an int, whatever its annotation."""
@@ -1417,7 +1437,11 @@ def partiality_walk(fn, facts, domain: "dict | None" = None,
                     # a name the body assigns changes from trip to trip,
                     # so it does not lift inside the body; a range
                     # index reads as a nonnegative integer symbol
-                    body_env = {**env, **_range_index(stmt, env)}
+                    index = _range_index(stmt, env)
+                    body_env = {**env, **index}
+                    if index:
+                        body_cond = sympy.And(
+                            body_cond, _range_index_bounds(stmt, env, index))
                     walked: set = set()
                     for node in ast.walk(stmt):
                         if isinstance(node, (ast.Assign, ast.AugAssign)):

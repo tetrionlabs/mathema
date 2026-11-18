@@ -1500,7 +1500,9 @@ def _find_guard_witness(cond, points: list, base: dict, ext_params: dict,
     """Intent:
         An exact in-domain, assumption-admitted point where the guard
         condition holds, candidate points first, then a solved
-        one-symbol region intersected with that symbol's own bound.
+        one-symbol region intersected with that symbol's own bound, then
+        for a conjunction over several symbols each conjunct over one
+        symbol solved the same way on top of the base point.
     """
     for at in points:
         if not assumptions.admits_point(at) \
@@ -1525,6 +1527,34 @@ def _find_guard_witness(cond, points: list, base: dict, ext_params: dict,
             if assumptions.admits_point(candidate) \
                     and _point_in_domain(candidate, ext_params, domain):
                 return candidate
+    if isinstance(cond, sympy.And) and len(cond.free_symbols) > 1:
+        candidate = dict(base)
+        for part in cond.args:
+            if len(part.free_symbols) != 1:
+                continue
+            (sym,) = part.free_symbols
+            try:
+                holds = sympy.simplify(part.subs(candidate)) is sympy.true
+            except TimeoutError:
+                raise
+            except Exception:
+                continue
+            if holds:
+                continue
+            name = next((n for n, s in ext_params.items() if s == sym), None)
+            point = _solved_witness(part, sym,
+                                    domain.get(name) if name else None)
+            if point is not None:
+                candidate[sym] = point
+        try:
+            hit = sympy.simplify(cond.subs(candidate)) is sympy.true
+        except TimeoutError:
+            raise
+        except Exception:
+            hit = False
+        if hit and assumptions.admits_point(candidate) \
+                and _point_in_domain(candidate, ext_params, domain):
+            return candidate
     return None
 
 
@@ -1746,6 +1776,56 @@ def _returned_words(callable_target, arg_exprs: list, witness: dict) -> str:
     return ""
 
 
+def _guard_part_excluded(part, domain: dict, ext_params: dict,
+                         assumptions: "_AssumptionContext") -> bool:
+    """Intent:
+        Whether the relational raise-guard `part` holds nowhere in the
+        domain: by the relational-truth hull, roots outside the domain,
+        the assumption context, then the one-signedness certificates. A
+        conjunction of guards is empty as soon as one conjunct is.
+    """
+    from ._proof_support import (_nonneg_certificate,
+                                 _relational_truth_over_domain)
+    truth = _relational_truth_over_domain(part, domain, ext_params)
+    if truth is False:
+        return True
+    if isinstance(part, sympy.Eq) and _roots_outside_domain(part, domain):
+        # every point where the guard holds is excluded from the
+        # domain (`z == 0` over `C \ {0}`)
+        return True
+    if assumptions.excludes_guard(part, domain, ext_params):
+        return True
+    if isinstance(part, sympy.Lt):
+        try:
+            certified = _nonneg_certificate(
+                sympy.expand(part.lhs - part.rhs), domain, ext_params)
+        except TimeoutError:
+            raise
+        except Exception:
+            certified = None
+        if certified is not None:
+            return True
+    if isinstance(part, (sympy.Eq, sympy.Le)):
+        # an equality (or `G <= 0`) guard is provably empty when G
+        # is STRICTLY one-signed; the strict certificate sees a
+        # denominator like (k - m*w^2)^2 + (c*w)^2 with c bounded
+        # away from zero, which the hull straddles
+        from ._proof_support import _positive_certificate
+        big_g = sympy.expand(part.lhs - part.rhs)
+        try:
+            certified = (_positive_certificate(big_g, domain, ext_params)
+                         or (_positive_certificate(-big_g, domain,
+                                                   ext_params)
+                             if isinstance(part, sympy.Eq) else None))
+        except TimeoutError:
+            raise
+        except Exception:
+            certified = None
+        if certified is not None:
+            return True
+    return False
+
+
 def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                           guards: list, domain: dict,
                           bound_funcs: dict | None = None,
@@ -1772,9 +1852,6 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
         caller wall-clocks this whole function; every internal broad
         except re-raises TimeoutError so the alarm is never swallowed.
     """
-    from ._proof_support import (_nonneg_certificate,
-                                 _relational_truth_over_domain)
-
     sub_conds = _call_guard_conditions(lhs_src, rhs_src, lifted, guards,
                                        bound_funcs, aux_guards)
     if sub_conds is None:
@@ -1803,43 +1880,11 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
         # note: three exclusion tiers, cheapest first, domain hull,
         # assumed region, then the PSD certificate for sqrt-style
         # `G < 0` guards the hull straddles
-        truth = _relational_truth_over_domain(cond, domain, ext_params)
-        if truth is False:
+        parts = ((cond, *cond.args) if isinstance(cond, sympy.And)
+                 else (cond,))
+        if any(_guard_part_excluded(part, domain, ext_params, assumptions)
+               for part in parts):
             continue
-        if isinstance(cond, sympy.Eq) and _roots_outside_domain(cond, domain):
-            # every point where the guard holds is excluded from the
-            # domain (`z == 0` over `C \ {0}`)
-            continue
-        if assumptions.excludes_guard(cond, domain, ext_params):
-            continue
-        if isinstance(cond, sympy.Lt):
-            try:
-                certified = _nonneg_certificate(
-                    sympy.expand(cond.lhs - cond.rhs), domain, ext_params)
-            except TimeoutError:
-                raise
-            except Exception:
-                certified = None
-            if certified is not None:
-                continue
-        if isinstance(cond, (sympy.Eq, sympy.Le)):
-            # an equality (or `G <= 0`) guard is provably empty when G
-            # is STRICTLY one-signed; the strict certificate sees a
-            # denominator like (k - m*w^2)^2 + (c*w)^2 with c bounded
-            # away from zero, which the hull straddles
-            from ._proof_support import _positive_certificate
-            big_g = sympy.expand(cond.lhs - cond.rhs)
-            try:
-                certified = (_positive_certificate(big_g, domain, ext_params)
-                             or (_positive_certificate(-big_g, domain,
-                                                       ext_params)
-                                 if isinstance(cond, sympy.Eq) else None))
-            except TimeoutError:
-                raise
-            except Exception:
-                certified = None
-            if certified is not None:
-                continue
         witness = _find_guard_witness(cond, points, base, ext_params,
                                       domain, assumptions)
         if witness is not None:
@@ -1888,7 +1933,12 @@ def _raise_region_verdict(lhs_src: str, rhs_src: str, lifted,
                 witness=_witness_numbers(
                     {name: at_witness[sym] for name, sym in ext_params.items()
                      if sym in at_witness}),
-                meta=({"mathema.witness_certified": certified}
+                meta=({"mathema.witness_certified": certified,
+                       "mathema.witness_point": {
+                           name: _witness_exact_text(at_witness[sym])
+                           for name, sym in ext_params.items()
+                           if sym in at_witness},
+                       "mathema.witness_raises": exc or NO_VALUE}
                       if certified else {"mathema.witness_executed": True}))
         undecided = True
     if undecided:
@@ -2220,6 +2270,16 @@ def _witness_numbers(point: dict) -> "dict | None":
         except (TypeError, ValueError):
             return None
     return out
+
+
+def _witness_exact_text(value) -> str:
+    """A witness coordinate as the exact number it is, as text: a sympy
+    float as its binary fraction (`3/10`-style `p/q`), anything else as
+    sympy prints it."""
+    if isinstance(value, sympy.Float):
+        exact = sympy.Rational(value)
+        return f"{exact.p}/{exact.q}"
+    return str(value)
 
 
 def _witness_value_text(value) -> str:

@@ -71,9 +71,9 @@ and rewrites the cache. Deleting the directory clears the cache too.
 From Python, `repo_badges(cache="refresh")` does the same, and
 `repo_badges(cache=False)` neither reads nor writes the cache.
 
-## The three badges
+## The three scores
 
-- **implementation** (code layer): the raw line ratio from `mathema
+- **implementation coverage** (code layer): the raw line ratio from `mathema
   coverage`, how many statements a test, a probe, or a derive proof
   exercises (their union). A physical ratio, so it is neither averaged
   nor weighted.
@@ -387,15 +387,7 @@ leaves the wedge between the other two, with a corner at the centre, so
 the shape is left out, and only the numbers shown, when two or more
 scores are under 5% (a line or a point).
 
-The filled share of the frame is the **overall** number. Two spokes of
-lengths x and y at 120 degrees enclose a wedge of area
-`x * y * sin(120°) / 2`, and the frame is three such wedges at full
-length, so the share is `(implementation * intent + intent * clarity +
-clarity * implementation) / 3` on the 0 to 1 fractions, rounded to a
-whole percent. Every pair of scores counts the same. It is 100 when all
-three are 100 and s squared when all three are s (60/60/60 reads 36),
-and a single zero leaves the one wedge between the other two, so
-100/100/0 reads 33 rather than 0. Comparing two commits' overall numbers
+The filled share of the frame is the **overall** number. Overall is the area spanned by all three scores. Comparing two commits' overall numbers
 shows the change in overall characterisation; to hold a line on one
 score, gate on that score itself. The SVG card's shaded share of its
 frame is exactly the overall number. The ASCII triangle is drawn on a

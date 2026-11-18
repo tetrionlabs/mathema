@@ -12,7 +12,9 @@ size.
 The pool is `$TETRION_TEST_POOL` (else `~/.cache/tetrion-check/slots`)
 with `$TETRION_TEST_SLOTS` slots (else one per CPU): one file per slot,
 each held by an exclusive `flock` that names its holder. A run takes all
-the slots it asks for at once or none, and the kernel drops a dead
+the slots it asks for at once or none, and runs wait in the order they
+arrived (a ticket file per waiter under `queue/`, locked while it waits), so
+slots that come free are kept for the oldest waiter. The kernel drops a dead
 holder's locks, so a crashed run never keeps its slots.
 
 Usage, from the repository root::
@@ -27,6 +29,7 @@ slots held; every other argument is passed to pytest unchanged.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import fcntl
 import os
 import pathlib
@@ -35,6 +38,13 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from typing import IO
+
+
+@dataclasses.dataclass(frozen=True)
+class Ticket:
+    """A waiting run's place in the queue: its file and the open, locked handle."""
+    path: pathlib.Path
+    handle: IO[str]
 
 
 class SlotPool:
@@ -104,19 +114,72 @@ class SlotPool:
                     fcntl.flock(handle, fcntl.LOCK_UN)
         return found
 
+    @property
+    def queue(self) -> pathlib.Path:
+        """The directory of the waiting runs' tickets."""
+        return self.root / "queue"
+
+    def enqueue(self, holder: str) -> "Ticket":
+        """A ticket for a run that starts waiting now: a file named by its
+        arrival time, locked by the open handle returned until the run
+        stops waiting. The file appears under its final name already
+        locked, so no other run ever sees a live ticket as unlocked."""
+        self.queue.mkdir(parents=True, exist_ok=True)
+        draft = self.queue / f".draft-{os.getpid()}-{time.monotonic_ns()}"
+        handle = open(draft, "w")
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.write(holder)
+        handle.flush()
+        final = self.queue / f"{time.time_ns():020d}-{os.getpid()}-{draft.name.rsplit('-', 1)[1]}"
+        os.rename(draft, final)
+        return Ticket(final, handle)
+
+    def leave(self, ticket: "Ticket") -> None:
+        """Remove `ticket` and unlock it."""
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(ticket.path)
+        ticket.handle.close()
+
+    def ahead_of(self, ticket: "Ticket") -> bool:
+        """Whether a run that arrived before `ticket` is still waiting. A
+        ticket whose run died holds no lock and is removed."""
+        mine = ticket.path.name
+        for path in sorted(self.queue.iterdir()):
+            if path.name.startswith(".") or path.name >= mine:
+                continue
+            try:
+                handle = open(path)
+            except FileNotFoundError:
+                continue
+            with handle:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(path)
+        return False
+
     @contextlib.contextmanager
     def held(self, n: int, holder: str, *, say: Callable[[str], None] = print,
              sleep: Callable[[float], None] = time.sleep,
              poll: float = 5.0) -> Iterator[list[IO[str]]]:
-        """Hold `wanted(n)` slots for the body, waiting until they are free
-        and saying once who holds them meanwhile."""
-        taken = self.try_take(n, holder)
-        if taken is None:
-            say(f"waiting for {self.wanted(n)} of {self.size} test slots, held by: "
-                + "; ".join(sorted(set(self.holders()))))
-            while taken is None:
-                sleep(poll)
-                taken = self.try_take(n, holder)
+        """Hold `wanted(n)` slots for the body, waiting until they are
+        free and saying once who holds them meanwhile. Waiting runs are
+        served in the order they arrived: slots that come free are kept
+        for the oldest waiter, and a later, smaller request does not take
+        them first."""
+        ticket = self.enqueue(holder)
+        try:
+            taken = None if self.ahead_of(ticket) else self.try_take(n, holder)
+            if taken is None:
+                say(f"waiting for {self.wanted(n)} of {self.size} test slots, held by: "
+                    + "; ".join(sorted(set(self.holders()))))
+                while taken is None:
+                    sleep(poll)
+                    taken = None if self.ahead_of(ticket) else self.try_take(n, holder)
+        finally:
+            self.leave(ticket)
         try:
             yield taken
         finally:

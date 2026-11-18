@@ -96,8 +96,10 @@ and fails the run on a falsified or unknown claim, on a regression no
 one has acknowledged, on a
 changed body behind a lock, on a lock removed outside `mathema unlock`,
 and on an acceptance the policy rejects. In its default strict mode it
-also fails on skipped claims and on accepted risk, so relaxing the gate
-is itself a visible flag rather than a quiet default. The full table is
+also fails on skipped claims nobody accepted, so relaxing the gate is
+itself a visible flag rather than a quiet default. A risk a person has
+accepted passes in both modes, named in the row, and its acceptance is
+held to the policy like any other. The full table is
 in [`mathema verify`](modes/verify.md#what-fails-the-run).
 
 A pipeline that holds this together:

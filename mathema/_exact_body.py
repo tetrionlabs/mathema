@@ -240,6 +240,12 @@ class NotExact(Exception):
     finite number, a callee the reading cannot follow."""
 
 
+class NoExactValue(NotExact):
+    """A step of the exact reading has no value at all: a function of
+    exact numbers that is not defined where it is evaluated (`tan` at
+    `pi/2`, a pole), as against a value the reading cannot represent."""
+
+
 class _State(threading.local):
     """The exact reading's state on this thread: `depth`, the calls of
     other functions' twins currently nested; `taint`, the reason of the
@@ -345,9 +351,10 @@ class _Reference:
     """The decisions of a float run (`log`, `(site, outcome)` in the
     order taken), with `at`, the next one the exact run must take."""
 
-    def __init__(self, log: list):
+    def __init__(self, log: list, free: bool = False):
         self.log = log
         self.at = 0
+        self.free = free
 
 
 class _Computed:
@@ -460,6 +467,47 @@ def _without_decimal_rounding(twin, args: tuple, kwargs: dict):
         context.traps[decimal.Inexact] = True
         context.traps[decimal.Rounded] = True
         return twin(*args, **kwargs)
+
+
+def exact_run(fn, *args, **kwargs):
+    """Intent:
+        `fn` run once on the exact `args` and `kwargs`, its body read
+        exactly (`exact_twin`), every decision it takes decided on the
+        exact values, with no float run beside it: the function as
+        mathematics evaluates it at that point. Returns its value, or
+        raises what the exact run raises (`ZeroDivisionError` at an
+        exact zero divisor, `ValueError` outside a `math` function's
+        domain).
+
+    Raises:
+        NoExactValue: a step has no value at the point (`tan(pi/2)`).
+        NotExact: `fn` has no faithful twin, or a step of the reading
+            has no exact value, even where the body catches it.
+    """
+    twin, reason = _reading(fn)
+    if twin is None:
+        raise NotExact(reason)
+    saved = (_STATE.mode, _STATE.log, _STATE.reference, _STATE.taint,
+             _STATE.memo)
+    _STATE.mode, _STATE.log, _STATE.reference, _STATE.taint, _STATE.memo = (
+        "exact", None, _Reference([], free=True), None, {})
+    try:
+        try:
+            out = _without_decimal_rounding(twin, args, kwargs)
+        except NotExact:
+            raise
+        except Exception:
+            if _STATE.taint is not None:
+                raise NotExact(_STATE.taint) from None
+            raise
+        if _STATE.taint is not None:
+            raise NotExact(_STATE.taint)
+        return out
+    finally:
+        taint = _STATE.taint
+        _STATE.mode, _STATE.log, _STATE.reference = saved[:3]
+        _STATE.taint = saved[3] if saved[3] is not None else taint
+        _STATE.memo = saved[4]
 
 
 def _against(twin, computation: _Computed, args: tuple, kwargs: dict):
@@ -688,6 +736,8 @@ def _event(site, outcome) -> None:
     if mode != "exact":
         return
     reference = _STATE.reference
+    if reference.free:
+        return
     if reference.at >= len(reference.log):
         _not_exact(f"the exact reading takes a decision at line "
                    f"{_line(site)} the computation does not reach")
@@ -2987,6 +3037,10 @@ def _settled(value):
         NotExact: the result is not a finite number, or holds a float.
     """
     if not _symbolic_number(value):
+        if _sympy().zoo == value or value is _sympy().nan:
+            if _STATE.taint is None:
+                _STATE.taint = f"{value} has no exact value"
+            raise NoExactValue(f"{value} has no exact value")
         _not_exact(f"{value} has no exact value")
     if value.is_Rational:
         return Fraction(int(value.p), int(value.q))
