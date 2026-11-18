@@ -2,7 +2,7 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
-## Unreleased
+## 0.6.6
 
 ### Highlights
 - KOINE has `operator::truth::ambiguous(x)`, a truth value not yet decided. The interpreter and the renderers stop on it with "the truth of x is ambiguous".
