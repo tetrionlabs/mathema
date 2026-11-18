@@ -467,6 +467,16 @@ stronger than you mean. The `for` clause narrows it:
 | `for s in L[unicode], f(f(s)) == f(s)` | every string, the empty string included: a language |
 | `for s in L[unicode] \ {""}, len(f(s)) >= 1` | a language with the empty string excluded |
 
+A plain domain, a finite set or an interval with no `^n`, binds the
+value of the parameter itself. On a parameter annotated as a sequence
+(`list`, `tuple`, `Sequence[float]`, `np.ndarray`, `pd.Series` and the
+like) or given a sequence runtime type, it is the domain of each
+element instead: on `def total(xs: list)`, `for xs in [0, 10]` draws
+lists whose elements lie in `[0, 10]`. A body that iterates or indexes
+an unannotated parameter does not make it a sequence, so on an
+unannotated `xs` the same binding draws numbers. For a parameter that
+takes a sequence, annotate it as one.
+
 A matrix space is written `R^(m,n)`, the order of a numpy shape. The
 spellings `R^{m,n}`, `R^(m×n)`, `R^{m×n}`, `R^(m*n)` and the superscript
 `ℝᵐˣⁿ` are the same space, as are `ℝ³ˣ³` and `ℝ^{3×3}` for a fixed size,
@@ -799,7 +809,13 @@ the `oo` endpoint at `1e12` and the proof keeps `oo`, so the proof's
 own row quantifies over `[0, oo]` and the bound appears only beside the
 executed evidence. Nothing in the claim refers to `|inf|` by name, so it
 is not an ordinary binding, and in Python the same setting is
-`claim(..., pseudo_infinity=1e100)`. A binding that can bound nothing,
+`claim(..., pseudo_infinity=1e100)`. Python can also state the two
+sides separately as a pair, `claim(..., pseudo_infinity=(-1e6, 1e12))`,
+which must be two finite numbers, the first below zero standing for
+-oo and the second above zero for +oo; a pair such as `(nan, nan)`,
+`(1e6, -1e6)` or `(0, 1e6)` is refused with that reason,
+as `let |inf| be` refuses a magnitude that is not finite and positive.
+The `let |inf| be` form states one magnitude, never a pair. A binding that can bound nothing,
 because every name the claim reads already has a bounded domain, is
 dropped from the claim's text and so from its identity.
 

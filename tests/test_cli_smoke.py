@@ -435,8 +435,8 @@ def test_verify_lenient_downgrades_unverifiable_to_exit_0(tmp_path):
     lenient = _run("verify", "--root", str(tmp_path), "--lenient", cwd=tmp_path)
     assert lenient.returncode == 1, lenient.stdout
 
-    # accepting the risk reclassifies it; lenient then proceeds, strict
-    # still refuses the accepted skip (visible, never laundered)
+    # accepting the risk reclassifies it; both modes then proceed, and
+    # the row names the claim as accepted risk
     accept = _run("accept", "funcs.neg", "unliftable", "--as", "risk",
                   "--by", "test", "--yes", "--root", str(tmp_path),
                   cwd=tmp_path)
@@ -444,8 +444,10 @@ def test_verify_lenient_downgrades_unverifiable_to_exit_0(tmp_path):
     lenient = _run("verify", "--root", str(tmp_path), "--lenient", "--all",
                    cwd=tmp_path)
     assert lenient.returncode == 0, lenient.stdout
+    assert "1 accepted risk" in lenient.stdout, lenient.stdout
     strict = _run("verify", "--root", str(tmp_path), "--all", cwd=tmp_path)
-    assert strict.returncode == 1, strict.stdout
+    assert strict.returncode == 0, strict.stdout
+    assert "1 accepted risk" in strict.stdout, strict.stdout
 
 
 def test_verify_unresolvable_key_reported_not_crashed(tmp_path):

@@ -62,10 +62,12 @@ def test_a_regression_an_old_record_stored_as_invalidated_reads_as_what_it_fell_
         "1 falsified claim(s)"]
 
 
-def test_strict_names_skipped_and_accepted_risk_separately():
+def test_strict_names_skipped_and_counts_accepted_risk_separately():
     report = gate([Probe("a", "s", "skipped"), Probe("b", "s", "unknown")],
                   strict=True, accepted_risk=frozenset({"b"}))
-    assert report.problems == ["a unknown", "1 accepted-risk claim(s)"]
+    assert report.problems == ["a unknown"]
+    assert summary_counts(report) == ("0 proven, 0 holds, 0 falsified, "
+                                      "1 unknown, 1 accepted risk")
 
 
 def test_verify_and_check_share_one_summary():

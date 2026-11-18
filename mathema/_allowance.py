@@ -58,11 +58,17 @@ def _magnitude(value):
     value that is not a real number."""
     if isinstance(value, decimal.Decimal):
         return abs(Fraction(value)) if value.is_finite() else None
+    from ._linalg_eval import ExactComplex, _exact
+    if isinstance(value, ExactComplex):
+        return max(abs(_exact(value.real)), abs(_exact(value.imag)))
     if isinstance(value, bool) or not isinstance(value, (int, float, Fraction,
                                                           complex)):
         return None
     if isinstance(value, complex):
-        return abs(value)
+        try:
+            return abs(value)
+        except OverflowError:
+            return max(abs(value.real), abs(value.imag))
     if isinstance(value, Fraction):
         return abs(value)
     if isinstance(value, int):
@@ -191,6 +197,7 @@ def _reference_of(u, v, side) -> object:
 
 def _scalar(u, v, relation: str, declared, input_scaled, side,
             exact_inequality: bool, scale=None):
+    from ._linalg_eval import ExactComplex
     from .probing import _exact_pair, holds_inf, holds_nan, same_infinity
     if holds_nan(u) or holds_nan(v):
         return False
@@ -220,6 +227,9 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
         # where that is larger
         from .conjecture import DEFAULT_TOLERANCE
         tol = max(tol, DEFAULT_TOLERANCE)
+    if isinstance(u, ExactComplex) or isinstance(v, ExactComplex):
+        return _exact_complex(u, v, relation, declared, input_scaled, side,
+                              exact_inequality)
     if isinstance(u, complex) or isinstance(v, complex):
         if relation not in ("==", "~=", "!="):
             return None
@@ -255,6 +265,30 @@ def _scalar(u, v, relation: str, declared, input_scaled, side,
     if relation == ">":
         return u > v
     return None
+
+
+def _exact_complex(u, v, relation, declared, input_scaled, side,
+                   exact_inequality):
+    """Intent:
+        `u <relation> v` where a side is an `ExactComplex`: the real
+        parts and the imaginary parts are each compared as real numbers,
+        and `==`/`~=` hold when both parts agree. A complex number has no
+        order, so an ordering is None.
+    """
+    from ._linalg_eval import ExactComplex
+    if relation not in ("==", "~=", "!="):
+        return None
+
+    def parts(x):
+        return (x.real, x.imag) if isinstance(
+            x, (ExactComplex, complex)) else (x, 0)
+
+    agree = [_scalar(a, b, "==" if relation == "!=" else relation, declared,
+                     input_scaled, side, exact_inequality)
+             for a, b in zip(parts(u), parts(v))]
+    if None in agree:
+        return None
+    return not all(agree) if relation == "!=" else all(agree)
 
 
 def _within_kind(u, v, relation: str, kind) -> "bool | None":

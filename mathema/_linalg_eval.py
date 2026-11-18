@@ -847,14 +847,47 @@ def _parts(values: list):
     return re, im
 
 
-def _complex_result(re, im) -> complex:
-    """A complex value from exact parts, each rounded once.
+class ExactComplex:
+    """A complex number with a part beyond float range, each part held
+    as `_rounded` holds a real: a float within float range, an exact
+    rational beyond it. A complex float cannot hold such a part, so
+    `complex(z)` raises `OverflowError`; a complex number within float
+    range is an ordinary `complex` instead."""
+    __slots__ = ("real", "imag")
 
-    Raises:
-        OverflowError: a part lies beyond float range, which a complex
-            float cannot hold.
-    """
-    return complex(float(re), float(im))
+    def __init__(self, real, imag):
+        self.real = real
+        self.imag = imag
+
+    def __eq__(self, other):
+        import numbers
+        if isinstance(other, ExactComplex) or (
+                isinstance(other, numbers.Complex)):
+            return self.real == other.real and self.imag == other.imag
+        return NotImplemented
+
+    def __hash__(self):
+        return hash((self.real, self.imag))
+
+    def __repr__(self):
+        return f"ExactComplex({self.real!r}, {self.imag!r})"
+
+    def __complex__(self):
+        raise OverflowError("a part of the value lies beyond float range")
+
+    def __abs__(self):
+        a, b = _exact(self.real), _exact(self.imag)
+        return _exact_sqrt(a * a + b * b)
+
+
+def _complex_result(re, im):
+    """A complex value from exact parts, each rounded once; a part
+    beyond float range stays exact, and the value is then an
+    `ExactComplex`."""
+    real, imag = _rounded(re), _rounded(im)
+    if isinstance(real, float) and isinstance(imag, float):
+        return complex(real, imag)
+    return ExactComplex(real, imag)
 
 
 def _exact_sum(values: list):

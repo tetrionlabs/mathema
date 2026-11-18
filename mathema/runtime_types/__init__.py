@@ -494,11 +494,19 @@ def identity_entries(facts) -> dict:
 def descriptor_names(facts) -> list:
     """The runtime types a computation descriptor names after its
     number representation, distinct, in parameter order: `["pandas.Series"]`
-    for a Series parameter, empty when every sequence is a list."""
+    for a Series parameter, empty when every sequence is a list. A
+    runtime type a claims file declares is named whether or not its
+    library is installed here, so the companion keeps one name."""
     seen: list = []
     for d in realised_parameters(facts).values():
         if d.adapter not in seen:
             seen.append(d.adapter)
+    for name in (getattr(facts, "declared_runtime_types", None)
+                 or {}).values():
+        named = adapter(name)
+        if named is not None and named.name not in seen \
+                and named.kinds != frozenset({"table"}):
+            seen.append(named.name)
     return seen
 
 

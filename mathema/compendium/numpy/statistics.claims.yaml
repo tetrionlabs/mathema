@@ -56,8 +56,8 @@ numpy.quantile:
     - name: within_range
       statement: "for a in [-1e150, 1e150]^n, q in [0, 1], min(a) <= f(a, q) <= max(a)"
     - name: definition
-      statement: "for a in R^n, q in [0, 1], f(a, q) == quantile(a, q)"
-      note: "Stated for one q; q outside [0, 1] raises ValueError."
+      statement: "for a in [-1e150, 1e150]^n, q in [0, 1], f(a, q) == quantile(a, q)"
+      note: "Stated for one q; q outside [0, 1] raises ValueError. Beyond 1e150 in magnitude the linear interpolation a + (b - a) * q can overflow to inf where the exact quantile is finite."
 
 numpy.diff:
   claims:

@@ -28,7 +28,7 @@ from typing import Any, Callable
 from .._representation_words import PYTHON_CARRIED
 from .document import Document
 from .functions import IMPLEMENTATIONS
-from .syntax import Bool, Int, Name, Real, Str, Term
+from .syntax import Bool, Int, Name, Real, Str, Term, inline
 
 
 @dataclass(frozen=True)
@@ -270,6 +270,8 @@ class _Machine:
             return _compare(h.rpartition("::")[2], self.expr(a[0], env), self.expr(a[1], env))
         if h == "operator::logic::not":
             return not _truth(self.expr(a[0], env))
+        if h == "operator::truth::ambiguous":
+            raise InterpretError(f"the truth of {inline(a[0])} is ambiguous")
         if h in ("operator::logic::and", "operator::logic::or"):
             stop_on = h.endswith("::or")
             for operand in a:

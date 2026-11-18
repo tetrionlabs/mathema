@@ -41,7 +41,7 @@ from typing import Callable
 from .aliases import alias_of
 from .document import Document
 from .functions import HELPER_FUNCTIONS, helpers
-from .syntax import Bool, Int, Name, Real, Str, Term
+from .syntax import Bool, Int, Name, Real, Str, Term, inline
 
 
 class RenderError(ValueError):
@@ -325,6 +325,8 @@ class _Ctx:
             return ast.UnaryOp(op=ast.UAdd(), operand=self.expr(a[0]))
         if h == "operator::logic::not":
             return ast.UnaryOp(op=ast.Not(), operand=self.expr(a[0]))
+        if h == "operator::truth::ambiguous":
+            raise RenderError(f"the truth of {inline(a[0])} is ambiguous")
         if h in ("operator::logic::and", "operator::logic::or"):
             op = ast.And() if h.endswith("::and") else ast.Or()
             return ast.BoolOp(op=op, values=[self.expr(x) for x in a])
