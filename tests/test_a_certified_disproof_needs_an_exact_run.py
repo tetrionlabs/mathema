@@ -6,6 +6,7 @@ the failure the certificate names. Where that run does not reproduce it,
 or cannot be carried out, the verdict is unknown with the uncorroborated
 flag, and the certificate stays in the note."""
 import math
+import re
 
 import pytest
 
@@ -137,9 +138,10 @@ def test_a_certified_undefined_point_the_exact_run_does_not_reproduce_is_unknown
     monkeypatch.setattr(gates, "_certified_exact_run",
                         lambda *a, **k: outcome)
     p = _row(fn, law, route="derive")
-    assert p.verdict in ("unknown", "holds"), (p.verdict, p.note)
+    assert p.verdict == "unknown", (p.verdict, p.note)
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert "certified by interval arithmetic" in (p.note or ""), p.note
+    assert re.search(r"\d+ draws? found no counterexample", p.note), p.note
 
 
 @pytest.mark.parametrize("outcome", [NOT_REPRODUCED, NOT_RUN],
@@ -162,3 +164,72 @@ def test_a_certified_raise_in_code_the_exact_run_cannot_follow_is_unknown():
     assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
     assert p.meta.get("mathema.witness_exact_run") == "cannot run", p.meta
     assert "certified by interval arithmetic" in p.note, p.note
+
+
+TANGENT_LAW = "for x in [0, 2], is_defined(f)"
+
+
+@pytest.mark.parametrize("outcome", [NOT_REPRODUCED, NOT_RUN],
+                         ids=["not_reproduced", "cannot_run"])
+@pytest.mark.parametrize("route", ["best", "derive", "examine"])
+def test_a_passing_sample_does_not_make_an_unreproduced_disproof_holds(
+        monkeypatch, outcome, route):
+    monkeypatch.setattr(gates, "_certified_exact_run",
+                        lambda *a, **k: outcome)
+    p = _row(tangent, TANGENT_LAW, route=route)
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
+    assert "certified by interval arithmetic" in p.note, p.note
+    assert outcome[1] in p.note, p.note
+    assert re.search(r"\d+ draws? found no counterexample", p.note), p.note
+
+
+@pytest.mark.parametrize("outcome", [NOT_REPRODUCED, NOT_RUN],
+                         ids=["not_reproduced", "cannot_run"])
+@pytest.mark.parametrize("route", ["best", "derive", "examine"])
+def test_a_passing_sample_does_not_make_an_unreproduced_raise_holds(
+        monkeypatch, outcome, route):
+    monkeypatch.setattr(gates, "_certified_exact_run",
+                        lambda *a, **k: outcome)
+    p = _row(sqrt_just_above, "for x in [0.3, 1], f(x) >= 0", route=route)
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
+    assert "certified by interval arithmetic" in p.note, p.note
+
+
+@pytest.mark.parametrize("outcome", [NOT_REPRODUCED, NOT_RUN],
+                         ids=["not_reproduced", "cannot_run"])
+@pytest.mark.parametrize("route", ["best", "derive"])
+def test_a_passing_sample_does_not_make_an_unreproduced_pole_holds(
+        monkeypatch, outcome, route):
+    monkeypatch.setattr(gates, "_certified_exact_run",
+                        lambda *a, **k: outcome)
+    (p,) = check_conjectures(
+        reciprocal_irrational_pole,
+        [claim("for x in [0, 10], is_pole_safe(x)",
+               name="is_pole_safe[x]", route=route)])
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") == "uncorroborated", p.meta
+    assert "certified by interval arithmetic" in (p.note or ""), p.note
+
+
+def test_an_unreproduced_disproof_fails_the_gate_and_names_the_certificate(
+        monkeypatch):
+    from mathema.verify import gate
+    monkeypatch.setattr(gates, "_certified_exact_run",
+                        lambda *a, **k: NOT_REPRODUCED)
+    p = _row(tangent, TANGENT_LAW)
+    for strict in (True, False):
+        report = gate([p], strict=strict)
+        assert report.problems, strict
+        assert report.unknown == 1, strict
+        assert any("certified by interval arithmetic" in line
+                   for line in report.problems), report.problems
+
+
+def test_an_undecided_derive_result_is_still_superseded_by_a_passing_sample():
+    def f(x: float) -> float:
+        return math.sin(x) ** 2 + math.cos(x) ** 2 + 0.0 * math.sinh(x)
+    p = _row(f, "for x in [0, 1], f(x) >= 0.5", route="best")
+    assert p.verdict in ("holds", "proven"), (p.verdict, p.note)
+    assert p.meta.get("mathema.corroboration") != "uncorroborated"
