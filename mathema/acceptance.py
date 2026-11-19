@@ -44,7 +44,7 @@ import subprocess
 from .grammar import split_relation
 from .identity import namespaced_form, same_form
 from .routes import safety_predicates
-from .spec import classify_verdict, write_yaml
+from .spec import _SAFE_LOADER, classify_verdict, write_yaml
 
 ACCEPT_AS = ("evidence", "risk", "discovery", "historical", "superseded",
              "trusted", "reconciled")
@@ -1658,7 +1658,7 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
     try:
         import yaml
         with open(path) as fh:
-            prior_doc = yaml.safe_load(fh) or {}
+            prior_doc = yaml.load(fh, Loader=_SAFE_LOADER) or {}
         prior_entry = prior_doc.get(key) or {}
     except Exception:
         return
@@ -1831,7 +1831,8 @@ def carry_intent_acceptance(spec: dict, key: str, path: str) -> None:
         return
     try:
         with open(path) as fh:
-            prior = (yaml.safe_load(fh) or {}).get(key) or {}
+            prior = (yaml.load(fh, Loader=_SAFE_LOADER)
+                     or {}).get(key) or {}
     except Exception:
         return
     # concepts_accepted rides the same carry (tags are curation, not
