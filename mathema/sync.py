@@ -347,6 +347,7 @@ def claim_conflicts(fn, file_entry: dict,
                 # way as a release move of the canonical text
                 seen.add((name, "supersession"))
                 out.append({"kind": "release-move", "claim": name,
+                            "moved": "literal-quoting",
                             "surface": surface,
                             "authored": _display_claim(c),
                             "verified": v.get("statement")})

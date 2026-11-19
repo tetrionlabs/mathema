@@ -137,3 +137,14 @@ def test_docsync_reads_a_record_with_the_old_quoting(tmp_path):
                                / f"{KEY}.yaml").read_text())[KEY]
     statements = {c["name"]: c["statement"] for c in declared["claims"]}
     assert 't="s")' in statements["two_literals"], statements
+
+
+def test_verify_says_the_stored_text_of_a_literal_was_corrected(tmp_path):
+    env = _project(tmp_path, ("two_literals", "plain"))
+    _old_and_current(tmp_path, env)
+    run = _run(tmp_path, env, "verify")
+    assert run.returncode == 0, run.stdout + run.stderr
+    notes = [ln for ln in run.stdout.splitlines() if ln.startswith("note:")]
+    assert any("string literal" in ln and "corrected" in ln and "1 claim " in ln
+               for ln in notes), run.stdout
+    assert not any("rendered domain" in ln for ln in notes), run.stdout

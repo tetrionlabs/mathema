@@ -1803,6 +1803,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
+    # claims whose record differs only in how an earlier release quoted
+    # a string literal in the stored text, reported once for the run
+    quoting_moved: list = []
     # per key, the claims whose record row stores a statement that does
     # not parse: each is adjudicated again and its row rewritten
     stale_rows: dict = {}
@@ -2093,7 +2096,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "release-move":
-                    release_moved.append((key, conflict["claim"]))
+                    (quoting_moved if conflict.get("moved") == "literal-quoting"
+                     else release_moved).append((key, conflict["claim"]))
                     continue
                 if conflict.get("kind") == "unreadable-record":
                     stale_rows.setdefault(key, []).append(conflict["claim"])
@@ -2648,6 +2652,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
             f"re-recorded under the new text; nothing the author wrote "
             f"changed")
+    if quoting_moved:
+        out.lines.append(
+            f"note: the stored text of a string literal is corrected in "
+            f"{len(quoting_moved)} claim{'s' if len(quoting_moved) != 1 else ''} "
+            f"recorded by an earlier release, which quoted it so that it "
+            f"read as another value; {'each is' if len(quoting_moved) != 1 else 'it is'} "
+            f"checked again and re-recorded under the corrected text; "
+            f"nothing the author wrote changed")
     return out
 
 
