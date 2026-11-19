@@ -597,8 +597,10 @@ def sync(targets: list, root: str = ".",
             if fn is not None:
                 functions[key] = fn
 
+    resolved: dict = {}
     for key, fn in sorted(functions.items()):
         key = _fn_key(fn) if key is None else key
+        resolved[key] = fn
         file_entry = (declared_store.get(key) or {}).get("entry", {})
         v_entry = (verified_store.get(key) or {}).get("entry")
         report.conflicts.extend(
@@ -620,7 +622,10 @@ def sync(targets: list, root: str = ".",
 
     from .audit import write_index
     try:
-        report.index_path = write_index(list(targets), root=root)
+        # a named target indexes the functions it resolved to; with no
+        # target the index keeps `write_index`'s own discovery
+        report.index_path = write_index(list(targets), root=root,
+                                        functions=resolved if targets else None)
     except Exception as exc:
         report.index_path = None
         report.index_error = f"{type(exc).__name__}: {exc}"

@@ -33,7 +33,7 @@ def project(tmp_path, monkeypatch):
         "      statement: 'for x in [0, 9], f(x) == 2*x'\n")
     monkeypatch.syspath_prepend(str(tmp_path))
 
-    def write_index(targets, root="."):
+    def write_index(targets, root=".", functions=None):
         raise PermissionError("index.yaml is read only")
     import mathema.audit
     monkeypatch.setattr(mathema.audit, "write_index", write_index)
