@@ -1362,14 +1362,34 @@ def _test_reading(fn, ctx: dict) -> "tuple[set, set, bool]":
     return stmts, test_cov, fresh
 
 
-def _warning_rows(caught) -> list:
+def _warning_rows(caught, root: str = ".") -> list:
     """Intent:
         Recorded warnings as plain rows, `[category module, category
-        name, text, filename, line]`.
+        name, text, filename, line]`, a file under `root` named relative
+        to it and any other by its base name, so a row carries no
+        absolute local path.
     """
     return [[w.category.__module__, w.category.__qualname__,
-             str(w.message), str(w.filename), int(w.lineno or 0)]
+             str(w.message), _relative_name(str(w.filename), root),
+             int(w.lineno or 0)]
             for w in caught]
+
+
+def _relative_name(filename: str, root: str) -> str:
+    """Intent:
+        `filename` relative to `root` (with `/` separators) when it lies
+        under it, else its base name.
+    """
+    base = os.path.realpath(root)
+    path = os.path.realpath(filename) if os.path.isabs(filename) else filename
+    if os.path.isabs(path):
+        try:
+            inside = os.path.commonpath([path, base]) == base
+        except ValueError:
+            inside = False
+        return (os.path.relpath(path, base) if inside
+                else os.path.basename(path)).replace(os.sep, "/")
+    return filename.replace(os.sep, "/")
 
 
 def _reissue(rows, shown: set) -> None:
@@ -1454,7 +1474,7 @@ def _score_one(key: str, fn, ctx: dict) -> dict:
             stopped.append("clarity")
             out["clarity"] = None
     out["capped"] = stopped
-    out["warnings"] = _warning_rows(caught)
+    out["warnings"] = _warning_rows(caught, root)
     out["timed_out"] = bool(stopped or recorded_timeout
                             or _timeout._WallClockExpired.fired != fired)
     return out

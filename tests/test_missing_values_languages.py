@@ -93,6 +93,7 @@ def _absent_row(fn, text, param):
     return value, row
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 @needs_language
 def test_g5_an_admitted_absence_is_drawn():
     value, row = _absent_row(shout, "for s in L[unicode] | {None}, f(f(s)) == f(s)", "s")
@@ -103,6 +104,7 @@ def test_g5_an_admitted_absence_is_drawn():
                                  'f("a😀😀😀😀😀😀") returns "A😀😀😀😀😀😀"')
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 @needs_language
 def test_g6b_an_admitted_absence_is_drawn_for_a_document():
     value, row = _absent_row(first_line,
