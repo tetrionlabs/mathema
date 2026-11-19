@@ -10208,7 +10208,7 @@ def _provenance_meta(proof) -> dict:
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.missing", "mathema.path_no_value",
-                "mathema.matrix_lemmas",
+                "mathema.matrix_lemmas", "mathema.smt",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
                 "mathema.exact_witness", "mathema.witness_exact_run",
@@ -10643,12 +10643,221 @@ def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
         return ProofResult("proven", sketch=result.sketch, quantifier=result.quantifier,
                            meta=meta)
     if result.status == "disproven":
+        executed = _strategy_witness_fails(cj, fn, cj_domain, bound_funcs, param,
+                                           result.witness)
+        if executed is not None:
+            return ProofResult(
+                "disproven", sketch=result.sketch, witness=dict(result.witness),
+                counterexample=result.counterexample or executed,
+                meta={**meta, "mathema.witness_executed": True})
         return ProofResult("undecided",
                            sketch=f"the language's strategy claimed a disproof it did not "
                                   f"execute ({result.sketch}), so the probe decides")
     if result.status in ("undecided", "unliftable"):
         return ProofResult(result.status, sketch=result.sketch)
     return None
+
+
+def _strategy_witness_fails(cj, fn, cj_domain, bound_funcs, param,
+                            witness) -> "str | None":
+    """Intent:
+        The executed counterexample behind a language strategy's
+        disproof: the witness it names for `param`, when that value is
+        a member of the claim's domain and the claim, run on the real
+        function there, fails. Returns the witness as text
+        (`s = 'a\\n'`), or None when the strategy named no witness, the
+        value is outside the domain, or the claim holds or cannot be
+        evaluated there.
+    """
+    from .domain import domain_contains
+    from .gates import _point_evaluator
+    if not isinstance(witness, dict) or set(witness) != {param}:
+        return None
+    try:
+        if not domain_contains(witness[param], cj_domain[param]):
+            return None
+        from . import analyze as _analyze
+        deps = _point_evaluator(cj, fn, _analyze(fn), cj_domain, bound_funcs)
+        if deps is None or deps["evaluate"](dict(witness)) is not False:
+            return None
+    except Exception:
+        return None
+    return f"{param} = {witness[param]!r}"
+
+
+def _concatenation(expr, param: str) -> "tuple | None":
+    """`(prefix, suffix)` when the parsed expression is the bare name
+    `param` with string literals added before and after it (`"a" + s +
+    "\\n"`), else None."""
+    import ast
+    if isinstance(expr, ast.Name) and expr.id == param:
+        return "", ""
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        left, right = expr.left, expr.right
+        if isinstance(right, ast.Constant) and isinstance(right.value, str):
+            inner = _concatenation(left, param)
+            return None if inner is None else (inner[0], inner[1] + right.value)
+        if isinstance(left, ast.Constant) and isinstance(left.value, str):
+            inner = _concatenation(right, param)
+            return None if inner is None else (left.value + inner[0], inner[1])
+    return None
+
+
+def _validator_question(cj, fn, validator, param: str) -> "tuple | str":
+    """Intent:
+        What a claim asks of a function read as a pattern validator, as
+        `(prefix, suffix, accepted)`: the claim holds exactly when
+        every text `prefix + s + suffix`, `s` in the domain, is one the
+        pattern accepts (`accepted` True) or one it does not (False).
+        A string when the claim asks something else, saying what.
+
+    Notes:
+        Read: `raises(f(<text>), E)` for a refusing validator raising
+        `E` or a subclass of it; `f(s) == s` for a refusing validator,
+        which returns its argument where it does not raise; and `f(s)
+        == True` or `== False` for a predicate.
+    """
+    import ast
+    import builtins
+    names = {"f", getattr(fn, "__name__", "f")}
+    try:
+        call = ast.parse(cj.lhs.strip(), mode="eval").body
+    except SyntaxError:
+        return "the claim's left side is not a call of the function"
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id in names and len(call.args) == 1 and not call.keywords):
+        return "the claim's left side is not one call of the function"
+    around = _concatenation(call.args[0], param)
+    if around is None:
+        return (f"the function is called on {ast.unparse(call.args[0])}, which is more "
+                f"than {param} with text added before or after it")
+    if cj.relation == "raises":
+        claimed = getattr(builtins, (cj.rhs or "").strip(), None)
+        if validator.raises is None:
+            return "the function returns the truth of the match and raises nothing"
+        if not (isinstance(claimed, type) and issubclass(validator.raises, claimed)):
+            return (f"the function raises {validator.raises.__name__}, which is not "
+                    f"{cj.rhs.strip() or 'the exception claimed'}")
+        return (*around, False)
+    if cj.relation != "==":
+        return f"the relation {cj.relation} is not one a pattern validator decides"
+    right = cj.rhs.strip()
+    if validator.raises is not None:
+        if around == ("", "") and right == param:
+            return ("", "", True)
+        return "the claim compares the validator's value with something other than its argument"
+    if right in ("True", "False") and not cj.tolerance:
+        return (*around, (right == "True") != validator.negated)
+    return "the claim compares the predicate's value with something other than True or False"
+
+
+def _validator_breaks(cj, fn, text: str) -> bool:
+    """Whether the real function, called on `text`, breaks a claim a
+    validator decides: for `raises(f(...), E)` it raises no `E`; for
+    `f(...) == value` it raises, or returns something other than the
+    value claimed (the text itself, `True` or `False`)."""
+    import builtins
+    try:
+        returned = fn(text)
+    except Exception as e:
+        if cj.relation == "raises":
+            return not isinstance(e, getattr(builtins, cj.rhs.strip(), ()))
+        return True
+    if cj.relation == "raises":
+        return True
+    right = cj.rhs.strip()
+    if right in ("True", "False"):
+        return returned is not (right == "True")
+    return returned != text
+
+
+def _validator_proof(cj, fn, cj_domain):
+    """Intent:
+        The derive verdict for a claim over one text parameter of a
+        function read as a pattern validator, or None when the function
+        is not one or the claim asks something a validator does not
+        decide. The claim becomes a question about two languages, the
+        texts the claim calls the function on and the texts the pattern
+        accepts, asked of the solver over their regular-language
+        definitions: no separating text is a proof, and a text the
+        solver finds is run through the real function before it
+        falsifies. An undecided answer says why in its sketch.
+    """
+    from . import domain_relations, regular
+    from ._validators import read_validator
+    from .domain import domain_contains
+    from .languages import adapt_object
+    from .symbolic._proof_support import ProofResult
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    validator = read_validator(fn)
+    if isinstance(validator, str) or validator.param != param:
+        return None
+    question = _validator_question(cj, fn, validator, param)
+    if isinstance(question, str):
+        return None
+    prefix, suffix, accepted = question
+    path = f"smt: membership, validator pattern {validator.described()}"
+
+    def undecided(why: str):
+        return ProofResult("undecided", sketch=f"{path}: {why}")
+    domain = domain_relations.defined_bound(bound)
+    if domain is None:
+        return undecided(f"the domain of {param} states no regular-language definition")
+    adapted = adapt_object(validator.accepts)
+    document = adapted[0].to_json().get("definition") if adapted is not None else None
+    if not regular.is_definition(document):
+        return undecided("definition-unread(re.Pattern): no installed language adaptor "
+                         "states a regular-language definition for the pattern")
+    at_most, at_least = regular.bounds(document)
+    alphabet = domain.alphabet + regular.alphabet_of(document)
+
+    def called_on(node: dict) -> dict:
+        return {"op": "concat", "args": [{"op": "literal", "text": prefix}, node,
+                                         {"op": "literal", "text": suffix}]}
+    # a text that breaks the claim is one the claim calls the function
+    # on and the pattern refuses (when the claim says all are accepted)
+    # or accepts (when it says none is)
+    wide = (([called_on(domain.at_least)], [at_most]) if accepted
+            else ([called_on(domain.at_least), at_least], []))
+    narrow = (([called_on(domain.at_most)], [at_least]) if accepted
+              else ([called_on(domain.at_most), at_most], []))
+    meta = {"mathema.derive_route": "smt",
+            "mathema.smt": {"path": "membership, validator pattern",
+                            "pattern": validator.described(),
+                            "definitions": {**domain.hashes,
+                                            validator.described(): regular.term_hash(document)}}}
+    why = ""
+    for inside, outside in (wide, narrow):
+        found = regular.find_member(alphabet, inside, outside)
+        if found.status == "none" and (inside, outside) == wide:
+            return ProofResult(
+                "proven", meta=meta,
+                sketch=(f"{path}: no text {param} in the domain makes "
+                        f"{cj.lhs.strip()} a text the pattern "
+                        f"{'refuses' if accepted else 'accepts'}"))
+        if found.status == "unknown":
+            why = why or found.reason
+        if found.status != "member":
+            continue
+        text = found.member
+        value = text[len(prefix):len(text) - len(suffix)]
+        try:
+            matched = validator.accepts(text) is not None
+            in_domain = domain_contains(value, bound)
+        except Exception:
+            continue
+        if in_domain and matched != accepted and _validator_breaks(cj, fn, text):
+            return ProofResult(
+                "disproven", witness={param: value},
+                counterexample=f"{param} = {value!r}",
+                sketch=(f"{path}: the solver found {param} = {value!r}, where "
+                        f"the pattern {'accepts' if matched else 'refuses'} "
+                        f"{text!r}, and the function run there breaks the claim"),
+                meta={**meta, "mathema.witness_executed": True})
+        why = why or domain_relations.UNCONFIRMED
+    return undecided(why or domain_relations.UNCONFIRMED)
 
 
 #: set while a claim runs again under a `let |inf| be B` it was offered,
@@ -11474,8 +11683,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # is still swept point by point by the brute-force fallback
         # below, which is the one derive mechanism it admits
         from .symbolic._proof_support import ProofResult
-        proof = _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
-                                         extensive) or ProofResult(
+        proof = _validator_proof(cj, fn, cj_domain) \
+            or _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
+                                        extensive) or ProofResult(
             "unliftable",
             sketch=(row_reason if row_reason.startswith("derive cannot read the function") else
                     "derive cannot read " + ", ".join(language_params)
@@ -11615,7 +11825,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 note = f"{note}; {proof.sketch}".lstrip("; ")
         else:
             route = ("derive:extensive"
-                    if mechanism is not None and mechanism != "domain_split"
+                    if mechanism is not None and mechanism not in ("domain_split", "smt")
                     else "derive")
         meta = _provenance_meta(proof)
         derive_lines = _derive_line_coverage(fn, facts, cj_domain)

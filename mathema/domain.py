@@ -759,6 +759,35 @@ def _as_words(word: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip().lower()
 
 
+def read_call(text: str) -> "tuple | None":
+    """Intent:
+        `(function, first, words)` for an argument written as a call
+        whose first argument is a quoted literal or a dotted object and
+        whose other arguments are bare words, `re(r"[a-z]+", python,
+        ignore case)`: the function's name in its matching form
+        (`predicate_key`), the first argument as written, and each
+        further argument as lower-case words (`ignoreCase`,
+        `ignore_case` and `Ignore Case` are `ignore case`). None when
+        `text` is not such a call. The word that owns the function
+        orders the words, fills its defaults and writes the canonical
+        text.
+    """
+    call = _PREDICATE_CALL.match(text.strip())
+    if call is None or not _balanced_call(call.group("args")):
+        return None
+    parts = [p.strip() for p in _split_commas(call.group("args"))]
+    if not parts or not parts[0]:
+        return None
+    masked, _ = mask_strings(parts[0])
+    if not (re.fullmatch(r"_mathema_str_\d+_", masked) or _DOTTED_OBJECT.match(parts[0])
+            or re.fullmatch(r"[A-Za-z_]\w*", parts[0])):
+        return None
+    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z_ ]*", p) for p in parts[1:]):
+        return None
+    return (predicate_key(call.group("word")), parts[0],
+            tuple(_as_words(p) for p in parts[1:]))
+
+
 def _argument_text(arg: str) -> str:
     """One argument as written, with the space around it and the runs
     of space outside its quoted text removed."""

@@ -47,21 +47,24 @@ def _opens_string(s: str, i: int) -> bool:
 
 def _raw_string_end(s: str, i: int) -> "int | None":
     """Intent:
-        The index just past a raw single-quoted literal whose `r` prefix
-        is `s[i]` (`r'[a-z]+'`), or None when `s[i]` does not start one.
+        The index just past a raw literal whose `r` prefix is `s[i]`
+        (`r'[a-z]+'`, `r"[a-z]+"`), or None when `s[i]` does not start
+        one. The prefix must stand alone as a name.
 
     Notes:
         After a name a single quote is otherwise a derivative prime, so
-        `r'(x)` is the derivative of a function named `r`. The prefix
-        reads as a raw string when the `r` stands alone as a name, the
-        quote is closed, and what follows the closing quote is not a
-        name or an opening bracket (as it is in `r'(x) + r'(y)`).
+        `r'(x)` is the derivative of a function named `r`. A single
+        quoted raw string is read only when the quote is closed and
+        what follows the closing quote is not a name or an opening
+        bracket (as it is in `r'(x) + r'(y)`).
     """
-    if s[i] not in "rR" or i + 1 >= len(s) or s[i + 1] != "'":
+    if s[i] not in "rR" or i + 1 >= len(s) or s[i + 1] not in _QUOTES:
         return None
     if i > 0 and (s[i - 1].isalnum() or s[i - 1] in "_'.)"):
         return None
     end = _string_end(s, i + 1)
+    if s[i + 1] == '"':
+        return end
     if end < i + 3 or s[end - 1] != "'" or (end == i + 3 and s[i + 2] == "\\"):
         return None
     if end < len(s) and (s[end].isalnum() or s[end] in "_('"):

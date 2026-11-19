@@ -537,8 +537,12 @@ def _literals(values) -> "dict | None":
 
 
 def _defined(term: Term) -> "_Defined | None":
+    return defined_bound(term.bound)
+
+
+def defined_bound(bound) -> "_Defined | None":
     """Intent:
-        The domain of `term` as regular-language nodes, or None when a
+        The domain `bound` as regular-language nodes, or None when a
         piece states no definition: a language piece gives the
         definition its persisted form carries, a finite set of strings
         the union of its members, a union of pieces their union, and an
@@ -546,7 +550,10 @@ def _defined(term: Term) -> "_Defined | None":
     """
     from . import regular
     from .languages import resolve_language
-    bound = term.bound
+    if isinstance(bound, LanguageRef):
+        bound = Domain(base_type="L", pieces=(bound,))
+    if not isinstance(bound, (frozenset, Domain)):
+        return None
     pieces = (bound,) if isinstance(bound, frozenset) else tuple(bound.pieces)
     excluded = frozenset() if isinstance(bound, frozenset) else bound.excluded
     most, least, alphabet, hashes = [], [], [], {}

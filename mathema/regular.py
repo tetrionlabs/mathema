@@ -402,7 +402,16 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
         solver.add(z3.InRe(x, lowering.regex(node)))
     for node in outside:
         solver.add(z3.Not(z3.InRe(x, lowering.regex(node))))
-    outcome = solver.check()
+    # the solver's own timeout is not always honoured inside one long
+    # step, so the wall clock also interrupts it from outside
+    import threading
+    watchdog = threading.Timer(timeout_ms / 1000.0 + 1.0, solver.ctx.interrupt)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        outcome = solver.check()
+    finally:
+        watchdog.cancel()
     if outcome == z3.unsat:
         return Found("none")
     if outcome != z3.sat:

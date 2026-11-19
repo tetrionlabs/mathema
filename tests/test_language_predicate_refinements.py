@@ -303,3 +303,53 @@ def test_every_suggestion_and_example_an_error_prints_renders_back_to_itself(cou
     for text in printed:
         assert repr(_ref(text)) == text
         resolve_language(_ref(text))
+
+
+_DIALECTS = {"py": "python", "python": "python", "js": "ecma", "ecma": "ecma"}
+
+
+def _shaped_arguments(args, sugar):
+    """Writes `shape(<pattern>, <dialect>, <flags sorted>)`, the dialect
+    always stated."""
+    from mathema.domain import read_call
+    read = read_call(args[0])
+    if read is None or read[0] != "shape":
+        return args
+    _, pattern, words = read
+    dialects = [_DIALECTS[w] for w in words if w in _DIALECTS] or ["python"]
+    flags = sorted(w for w in words if w not in _DIALECTS)
+    return (f"shape({', '.join([pattern, dialects[0], *flags])})",)
+
+
+_SHAPED = PredicateWord("shaped like", lambda language, args, negated: language,
+                        arguments=_shaped_arguments)
+
+
+@pytest.mark.parametrize("written,canonical", [
+    ('shape(r"[a-z]+")', 'shape(r"[a-z]+", python)'),
+    ('shape(r"[a-z]+", py)', 'shape(r"[a-z]+", python)'),
+    ('Shape(r"[a-z]+", js, ignoreCase)', 'shape(r"[a-z]+", ecma, ignore case)'),
+    ('shape(r"a,b|c", Multi_Line, Ignore Case)', 'shape(r"a,b|c", python, ignore case, multi line)'),
+    ('shape(app.text.SLUG, dot_all)', 'shape(app.text.SLUG, python, dot all)'),
+    ('shape(r"[a-z]+", python, ignore case)', 'shape(r"[a-z]+", python, ignore case)'),
+])
+def test_a_call_inside_an_argument_is_written_by_the_word_that_owns_it(written, canonical):
+    register_predicate(_SHAPED)
+    try:
+        ref = _ref(f"L[words, shaped like ({written})]")
+        assert repr(ref) == f"L[words, shaped like ({canonical})]"
+        assert repr(_ref(repr(ref))) == repr(ref)
+        rendered = render_claim_text(claim(f"for s in L[words, shapedLike({written})], f(s) == s"),
+                                     unicode=False)
+        assert rendered == f"for s in L[words, shaped like ({canonical})], f(s) = s"
+    finally:
+        unregister_predicate(_SHAPED.word)
+
+
+def test_a_call_with_anything_but_a_first_argument_and_words_is_not_read():
+    from mathema.domain import read_call
+    assert read_call('shape(r"a", flags=2)') is None
+    assert read_call('shape(1 + 2)') is None
+    assert read_call('shape(r"a", other("b"))') is None
+    assert read_call('re(r"[a-z]+", python, ignoreCase)') == (
+        "re", 'r"[a-z]+"', ("python", "ignore case"))

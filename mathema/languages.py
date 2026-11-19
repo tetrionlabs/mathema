@@ -1109,6 +1109,25 @@ def resolve(ref) -> tuple:
     raise UnknownLanguage(name, language_vocabulary(), detail)
 
 
+def adapt_object(obj) -> "tuple | None":
+    """Intent:
+        `(language, adaptor name)` for an object an installed language
+        adaptor accepts, the adaptors asked in their order, or None
+        when none accepts it. An adaptor that raises is skipped with a
+        warning.
+    """
+    for adaptor_name, adapt in _loaded_adaptors():
+        try:
+            adapted = adapt(obj)
+        except Exception as e:
+            warnings.warn(f"mathema: language adaptor {adaptor_name!r} failed on "
+                          f"{obj!r} ({e!r}), skipping it", stacklevel=2)
+            continue
+        if adapted is not None and not language_problems(adapted):
+            return adapted, adaptor_name
+    return None
+
+
 def adapt_annotation(hint) -> "tuple | None":
     """Intent:
         `(language, adaptor_name)` for the first `mathema.language_adaptors`
@@ -1198,7 +1217,7 @@ __all__ = [
     "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
     "MeaninglessPredicate", "PredicateWord", "UnknownPredicate", "predicate_word",
     "predicate_words", "register_predicate", "unregister_predicate",
-    "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
+    "adapt_annotation", "adapt_object", "describe_language", "language_adaptors", "language_problems",
     "derive_strategy", "refinement_keys", "register_refinement", "unregister_refinement",
     "language_vocabulary", "register_language", "resolve",
     "resolve_language", "resolves", "unregister_language",
