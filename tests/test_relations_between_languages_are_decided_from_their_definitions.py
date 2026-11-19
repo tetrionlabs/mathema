@@ -168,3 +168,37 @@ def test_the_row_records_the_hash_of_each_definition_it_read():
     assert row.meta["mathema.domain_relation"]["definitions"] == {
         "L[slug]": regular.term_hash(_exact(SLUG)),
         "L[slug_dollar]": regular.term_hash(_exact(SLUG_DOLLAR))}
+
+
+AB_ONLY = {"kind": "regular_language", "version": 1, "alphabet": [[97, 98]], "exact": True,
+           "language": {"op": "repeat", "arg": {"op": "chars", "ranges": [[97, 98]]},
+                        "min": 0, "max": None}}
+NO_CHARACTER = {"kind": "regular_language", "version": 1, "alphabet": [], "exact": True,
+                "language": {"op": "epsilon"}}
+
+
+@pytest.fixture
+def narrow():
+    languages = (Defined("fab", r"[ab]*", AB_ONLY), Defined("onlyempty", r"", NO_CHARACTER))
+    for language in languages:
+        register_language(language.name, language)
+    try:
+        yield
+    finally:
+        for language in languages:
+            unregister_language(language.name)
+
+
+def test_a_listed_string_outside_a_definitions_alphabet_is_still_a_member(narrow):
+    row = _row('L[fab] | {"c"} subset L[fab]')
+    assert row.verdict == "falsified", (row.verdict, row.sketch)
+    assert row.meta["mathema.domain_relation"]["witness"]["member"] == "c"
+    assert _row('L[fab] \\ {"a"} subset L[fab]').verdict == "proven"
+    assert _row('{"c"} disjoint L[fab]').verdict == "proven"
+    assert _row('{"c", "ab"} subset L[fab]').verdict == "falsified"
+
+
+def test_a_definition_over_no_character_gives_a_verdict(narrow):
+    assert _row("L[onlyempty] subset L[fab]").verdict == "proven"
+    assert _row('L[onlyempty] = {""}').verdict == "proven"
+    assert _row("L[fab] subset L[onlyempty]").verdict == "falsified"

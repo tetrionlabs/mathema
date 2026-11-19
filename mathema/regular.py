@@ -402,9 +402,14 @@ class _Lowering:
         self.alphabet = alphabet
         self.starts, self.atom_of, self.members = _atoms(alphabet, sets)
         self.sort = z3.ReSort(z3.StringSort())
-        count = max(len(self.members), 1)
-        self.sigma = z3.Range(chr(_SYMBOL_BASE), chr(_SYMBOL_BASE + count - 1))
-        self.everything = z3.Star(self.sigma)
+        if self.members:
+            self.sigma = z3.Range(chr(_SYMBOL_BASE),
+                                  chr(_SYMBOL_BASE + len(self.members) - 1))
+            self.everything = z3.Star(self.sigma)
+        else:
+            # over no character at all the one string is the empty one
+            self.sigma = z3.Empty(self.sort)
+            self.everything = z3.Re(z3.StringVal(""))
         self._seen: dict = {}
 
     def _symbol(self, atom: int) -> str:

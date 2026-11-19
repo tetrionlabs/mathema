@@ -284,3 +284,18 @@ def test_a_claim_stating_more_than_one_relation_about_the_call_is_left_alone(cha
     assert _validator_proof(plain, check_slug_fixed, plain.domain).status == "proven"
     more = dataclasses.replace(plain, **change)
     assert _validator_proof(more, check_slug_fixed, more.domain).status == "undecided"
+
+
+def test_text_the_claim_adds_outside_the_base_alphabet_is_still_called_on():
+    narrow = {"kind": "regular_language", "version": 1,
+              "alphabet": [[45, 45], [48, 57], [97, 122]], "exact": True, "language": SLUG}
+    language = Defined("narrowslugs", lambda s: _SLUG_FIXED.match(s), narrow)
+    register_language(language.name, language)
+    try:
+        # the `$` validator returns on a slug with a newline added, so the claim is false
+        row = _row(check_slug, 'for text in L[narrowslugs], raises(f(text + "\\n"), ValueError)',
+                   route="best")
+        assert row.verdict != "proven", (row.verdict, row.sketch)
+        assert check_slug("a\n") == "a\n"
+    finally:
+        unregister_language(language.name)

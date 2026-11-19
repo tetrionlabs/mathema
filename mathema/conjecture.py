@@ -5678,7 +5678,7 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
     if stated is None:
         return Probe(cj.name, statement, "skipped:misspecified", route=None, note=why,
                      meta={**meta, "mathema.invalid_conjecture": True})
-    decision = domain_relations.decide(stated)
+    decision = domain_relations.decide(stated, cj.written or None)
     detail = {"relations": [[r.left.text, r.word, r.right.text] for r in stated.relations]}
     if decision.witness is not None:
         detail["witness"] = decision.witness
@@ -10981,7 +10981,10 @@ def _validator_proof(cj, fn, cj_domain):
         return undecided(f"definition-unread({stated!r}): the language states no "
                          f"regular-language definition")
     at_most, at_least = regular.bounds(document)
-    alphabet = domain.alphabet + regular.alphabet_of(document)
+    # the text the claim adds is part of every text the function is
+    # called on, so its characters are in the question's alphabet
+    alphabet = (domain.alphabet + regular.alphabet_of(document)
+                + [[ord(c), ord(c)] for c in prefix + suffix])
 
     def called_on(node: dict) -> dict:
         return {"op": "concat", "args": [

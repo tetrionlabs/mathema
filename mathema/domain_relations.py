@@ -189,6 +189,49 @@ def _states_more_than_values(bound) -> "str | None":
     return "a missing value" if sentinels else None
 
 
+_NUMBER = re.compile(r"(?<![\w.])[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])")
+_STATEMENT_SYNTAX = re.compile(
+    r"\b(?:inf|subset|supset|not|disjoint|and|R|Z|N)\b|:\s*(?:int|integer|real|float)\b"
+    r"|==|!=|[=⊆⊇⊈⊊≠ℝℤℕ∅∪∞\[\](){},|\\\s+-]")
+
+
+def not_as_written(statement: str) -> "str | None":
+    """Intent:
+        Why the numbers in a relation between number domains, as its
+        author wrote it, are not the numbers the domains hold, or None
+        when they are. A decimal or a magnitude that is not exactly a
+        double is kept by an interval as the nearest double, and so is
+        a whole number past 2**53 written as an interval's endpoint; an
+        endpoint written as an expression (`1/3`, `pi`) is evaluated in
+        floating point. A whole number listed in a finite set is kept
+        exactly.
+    """
+    masked, _ = mask_strings(statement)
+    braces = [m.span() for m in re.finditer(r"\{[^{}]*\}", masked)]
+
+    def exact_in_a_set(m) -> bool:
+        return any(lo <= m.start() < hi for lo, hi in braces) \
+            and re.fullmatch(r"[-+]?\d+", m.group(0)) is not None
+    for m in _NUMBER.finditer(masked):
+        token = m.group(0)
+        if exact_in_a_set(m):
+            continue
+        try:
+            written = Fraction(token)
+            held = float(token)
+        except (ValueError, ZeroDivisionError):
+            return f"`{token}` is not read as a number"
+        if held in (float("inf"), float("-inf")) or Fraction(held) != written:
+            return (f"`{token}` is not held exactly by the domain (it is kept as the "
+                    f"nearest double), so the relation is not decided on it")
+    rest = _STATEMENT_SYNTAX.sub("", _NUMBER.sub("", masked))
+    if rest:
+        return (f"an endpoint in `{statement.strip()}` is written as an expression, which "
+                f"the domain evaluates in floating point, so the relation is not decided "
+                f"on it")
+    return None
+
+
 def _term(text: str) -> "Term | None":
     """Intent:
         `text` as one side of a relation, or None when it is not a
@@ -622,6 +665,9 @@ def defined_bound(bound) -> "_Defined | None":
                 return None
             most.append(node)
             least.append(node)
+            # a listed string is a member whatever alphabet a language
+            # beside it states, so its characters join the question's
+            alphabet.extend([ord(c), ord(c)] for v in piece for c in v)
             continue
         if not isinstance(piece, LanguageRef):
             return None
@@ -637,14 +683,14 @@ def defined_bound(bound) -> "_Defined | None":
     removed = _literals(excluded)
     if removed is None or not pieces:
         return None
+    alphabet.extend([ord(c), ord(c)] for v in excluded for c in v)
 
     def joined(nodes):
         node = {"op": "union", "args": nodes + [{"op": "empty"}]}
         if excluded:
             node = {"op": "inter", "args": [node, {"op": "complement", "arg": removed}]}
         return node
-    return _Defined(joined(most), joined(least),
-                    alphabet or [[0, regular.MAX_CODE_POINT]], hashes)
+    return _Defined(joined(most), joined(least), alphabet, hashes)
 
 
 def _decide_languages(rel: Relation) -> Decision:
@@ -709,11 +755,52 @@ def decide_relation(rel: Relation) -> Decision:
         domains or two finite sets, `unknown` with the reason for a
         relation over a language.
     """
-    import sympy
+    if LANGUAGE in (rel.left.kind, rel.right.kind):
+        if _finite(rel.left) is not None and _finite(rel.right) is not None:
+            return _decide_finite(rel)
+        return _decide_languages(rel)
     if _finite(rel.left) is not None and _finite(rel.right) is not None:
         return _decide_finite(rel)
-    if LANGUAGE in (rel.left.kind, rel.right.kind):
-        return _decide_languages(rel)
+    try:
+        decided = _decide_number_sets(rel)
+    except Exception as e:
+        return Decision("unknown", f"{_UNSETTLED} ({type(e).__name__})")
+    # a member found among the finite numbers settles the relation
+    # whatever an infinity does; only the answer "no finite number
+    # separates them" is put in doubt by an infinity that does
+    none_found = decided.witness is None and decided.verdict in ("proven", "falsified")
+    apart = _infinity_apart(rel) if none_found else None
+    return Decision("unknown", apart) if apart is not None else decided
+
+
+def _infinity_apart(rel: Relation) -> "str | None":
+    """Intent:
+        Why a relation between number domains is not decided on the
+        sets they denote, or None: an infinity is a member of one side
+        by the domain's own membership test in a way that bears on the
+        relation (in the left and not the right, in both for a
+        disjointness, in exactly one for an equality), while the sets
+        compared hold only finite numbers.
+    """
+    for value, said in ((float("inf"), "inf"), (float("-inf"), "-inf")):
+        try:
+            left = domain_contains(value, rel.left.bound)
+            right = domain_contains(value, rel.right.bound)
+        except Exception:
+            continue
+        bears = {"subset": left and not right, "not subset": left and not right,
+                 "disjoint": left and right, "=": left != right, "!=": left != right}
+        if bears[rel.word]:
+            return (f"the infinity {said} is a member of "
+                    f"{rel.left.text if left else rel.right.text} by its membership test, "
+                    f"which the comparison of the sets of finite numbers does not hold")
+    return None
+
+
+def _decide_number_sets(rel: Relation) -> Decision:
+    """The decision of a relation between two number domains on the
+    exact sets they denote."""
+    import sympy
     a, b = _value_set(rel.left.bound), _value_set(rel.right.bound)
     if a is None or b is None:
         return Decision("unknown", _UNSETTLED)
@@ -739,12 +826,19 @@ def decide_relation(rel: Relation) -> Decision:
     return _from_counter_set(rel, True if all(e is True for e in empties) else None, None)
 
 
-def decide(statement: Statement) -> Decision:
+def decide(statement: Statement, written: "str | None" = None) -> Decision:
     """Intent:
         Decide a statement: its one relation, or, for a proper subset,
         both of its relations (falsified when either is, proven when
-        both are, the witness of the inequality kept).
+        both are, the witness of the inequality kept). `written` is the
+        statement as its author wrote it; a relation between number
+        domains whose written numbers the domains do not hold exactly
+        (`not_as_written`) is not decided.
     """
+    numbers = any(NUMBERS in (r.left.kind, r.right.kind) for r in statement.relations)
+    inexact = not_as_written(written) if written and numbers else None
+    if inexact is not None:
+        return Decision("unknown", inexact)
     decisions = [decide_relation(r) for r in statement.relations]
     for d in decisions:
         if d.verdict == "falsified":
@@ -786,5 +880,5 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
-           "RELATION", "Relation", "Statement", "Term", "WORDS", "decide",
+           "RELATION", "Relation", "Statement", "Term", "WORDS", "decide", "not_as_written",
            "decide_relation", "parse"]
