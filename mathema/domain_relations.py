@@ -19,9 +19,11 @@ counterexample is empty, and falsified by a member of that set. A
 negative one (`not subset`, `!=`) is proven by such a member. Every
 member reported is first executed against both domains' own membership
 test. Two finite sets of any values are compared member by member. A
-relation over a language is not decided here.
-
-Stdlib and sympy only; the claim parser and the checker call in.
+relation over a language is decided from the regular-language
+definitions the two sides state (`mathema.regular`): no string
+separating them is a proof, and a string the solver finds is executed
+against both sides before it counts. A language stating no definition
+leaves the relation undecided.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from ._scan import mask_strings, unmask_strings
-from .domain import (Domain, InvalidDomain, _Sentinel,
+from .domain import (Domain, InvalidDomain, LanguageRef, _Sentinel,
                      _sentinel_piece, bound_to_sympy_set, domain_contains,
                      parse_binding, render_domain)
 
@@ -113,6 +115,12 @@ class Decision:
     verdict: str
     reason: str
     witness: "dict | None" = None
+    #: how it was decided: `domain_sets` (exact set arithmetic, or two
+    #: finite sets member by member) or `smt` (the languages'
+    #: definitions, asked of the solver)
+    route: str = "domain_sets"
+    #: the hash of each regular-language definition read, by domain text
+    definitions: "dict | None" = None
 
 
 # ---- reading ----------------------------------------------------------
@@ -501,6 +509,135 @@ def _from_counter_set(rel: Relation, empty: "bool | None",
     return Decision("unknown", _UNSETTLED)
 
 
+UNCONFIRMED = ("the solver found a string the languages' own membership does "
+               "not confirm, so their definitions decide nothing here")
+
+
+@dataclass(frozen=True)
+class _Defined:
+    """A language domain read from its regular-language definitions:
+    `at_most` (a node holding only members), `at_least` (a node holding
+    every member), the alphabet they are over, and the hash of each
+    definition read, by the text of the piece stating it."""
+    at_most: dict
+    at_least: dict
+    alphabet: list
+    hashes: dict
+
+
+def _literals(values) -> "dict | None":
+    """The node holding exactly the strings in `values`, or None when a
+    value is not a string."""
+    if not all(isinstance(v, str) for v in values):
+        return None
+    if not values:
+        return {"op": "empty"}
+    return {"op": "union", "args": [{"op": "literal", "text": v}
+                                    for v in sorted(values)] + [{"op": "empty"}]}
+
+
+def _defined(term: Term) -> "_Defined | None":
+    """Intent:
+        The domain of `term` as regular-language nodes, or None when a
+        piece states no definition: a language piece gives the
+        definition its persisted form carries, a finite set of strings
+        the union of its members, a union of pieces their union, and an
+        exclusion the strings it removes.
+    """
+    from . import regular
+    from .languages import resolve_language
+    bound = term.bound
+    pieces = (bound,) if isinstance(bound, frozenset) else tuple(bound.pieces)
+    excluded = frozenset() if isinstance(bound, frozenset) else bound.excluded
+    most, least, alphabet, hashes = [], [], [], {}
+    for piece in pieces:
+        if isinstance(piece, frozenset):
+            node = _literals(piece)
+            if node is None:
+                return None
+            most.append(node)
+            least.append(node)
+            continue
+        if not isinstance(piece, LanguageRef):
+            return None
+        try:
+            document = resolve_language(piece).to_json().get("definition")
+            piece_most, piece_least = regular.bounds(document)
+            alphabet.extend(regular.alphabet_of(document))
+            hashes[repr(piece)] = regular.term_hash(document)
+        except Exception:
+            return None
+        most.append(piece_most)
+        least.append(piece_least)
+    removed = _literals(excluded)
+    if removed is None or not pieces:
+        return None
+
+    def joined(nodes):
+        node = {"op": "union", "args": nodes + [{"op": "empty"}]}
+        if excluded:
+            node = {"op": "inter", "args": [node, {"op": "complement", "arg": removed}]}
+        return node
+    return _Defined(joined(most), joined(least),
+                    alphabet or [[0, regular.MAX_CODE_POINT]], hashes)
+
+
+def _decide_languages(rel: Relation) -> Decision:
+    """Intent:
+        Decide a relation where a side is a language, from the
+        regular-language definitions the two sides state. No string in
+        the separating set of the wider bounds is a proof. A string the
+        solver finds counts only once both domains' own membership
+        confirms it. `unknown` when a side states no definition, the
+        bounds are too wide to decide, or the solver gives no answer.
+    """
+    from . import regular
+    left, right = _defined(rel.left), _defined(rel.right)
+    if left is None or right is None:
+        return Decision("unknown", NO_LOWERING)
+    definitions = {**left.hashes, **right.hashes}
+    alphabet = left.alphabet + right.alphabet
+
+    def separating(a: _Defined, b: _Defined, a_term: Term, b_term: Term):
+        # (inside, outside) over the wider bounds, then over the narrower
+        return ((([a.at_least], [b.at_most]), ([a.at_most], [b.at_least])),
+                (a_term,), (b_term,))
+    if rel.word in ("subset", "not subset"):
+        parts = [separating(left, right, rel.left, rel.right)]
+    elif rel.word == "disjoint":
+        parts = [((([left.at_least, right.at_least], []), ([left.at_most, right.at_most], [])),
+                  (rel.left, rel.right), ())]
+    else:
+        parts = [separating(left, right, rel.left, rel.right),
+                 separating(right, left, rel.right, rel.left)]
+    empty, why = True, ""
+    for (wide, narrow), inside, outside in parts:
+        found = regular.find_member(alphabet, *wide)
+        if found.status == "none":
+            continue
+        empty = None
+        for question in (wide, narrow):
+            if question is narrow:
+                found = regular.find_member(alphabet, *narrow)
+            if found.status == "unknown":
+                why = why or found.reason
+            if found.status != "member":
+                continue
+            member = found.member
+            if all(domain_contains(member, t.bound) for t in inside) and \
+                    not any(domain_contains(member, t.bound) for t in outside):
+                witness = {"value": repr(member), "member": member,
+                           "in": [t.text for t in inside],
+                           "not in": [t.text for t in outside], "executed": True}
+                decided = _from_counter_set(rel, False, witness)
+                return Decision(decided.verdict, decided.reason, witness, "smt", definitions)
+            why = why or UNCONFIRMED
+    if empty is True:
+        decided = _from_counter_set(rel, True, None)
+        return Decision(decided.verdict, decided.reason, None, "smt", definitions)
+    return Decision("unknown", why or UNCONFIRMED, None, "smt", definitions)
+
+
 def decide_relation(rel: Relation) -> Decision:
     """Intent:
         Decide one relation between two domains: exactly for two number
@@ -511,7 +648,7 @@ def decide_relation(rel: Relation) -> Decision:
     if _finite(rel.left) is not None and _finite(rel.right) is not None:
         return _decide_finite(rel)
     if LANGUAGE in (rel.left.kind, rel.right.kind):
-        return Decision("unknown", NO_LOWERING)
+        return _decide_languages(rel)
     a, b = _value_set(rel.left.bound), _value_set(rel.right.bound)
     if a is None or b is None:
         return Decision("unknown", _UNSETTLED)
@@ -553,7 +690,9 @@ def decide(statement: Statement) -> Decision:
     if len(decisions) == 1:
         return decisions[0]
     witness = next((d.witness for d in decisions if d.witness), None)
-    return Decision("proven", "; ".join(d.reason for d in decisions), witness)
+    definitions = {k: v for d in decisions for k, v in (d.definitions or {}).items()}
+    return Decision("proven", "; ".join(d.reason for d in decisions), witness,
+                    decisions[0].route, definitions or None)
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",

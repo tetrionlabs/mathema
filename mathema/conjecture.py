@@ -5609,14 +5609,18 @@ def _adjudicate_domain_relation(cj) -> "Probe":
     detail = {"relations": [[r.left.text, r.word, r.right.text] for r in stated.relations]}
     if decision.witness is not None:
         detail["witness"] = decision.witness
+    if decision.definitions:
+        detail["definitions"] = decision.definitions
     meta["mathema.domain_relation"] = detail
     if decision.verdict == "unknown":
         return Probe(cj.name, statement, "unknown", route="derive",
                      note=decision.reason, meta=meta, grammar=cj.grammar)
-    meta["mathema.derive_route"] = "domain_sets"
+    meta["mathema.derive_route"] = decision.route
+    path = ("smt: membership, regular language" if decision.route == "smt"
+            else "domain sets")
     if decision.verdict == "proven":
         return Probe(cj.name, statement, "proven", route="derive",
-                     sketch=f"domain sets: {decision.reason}", meta=meta,
+                     sketch=f"{path}: {decision.reason}", meta=meta,
                      grammar=cj.grammar)
     return Probe(cj.name, statement, "falsified", route="derive",
                  counterexample=decision.reason, note=decision.reason,
