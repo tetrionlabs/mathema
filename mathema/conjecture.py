@@ -5582,9 +5582,61 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                            fn_mats, runtime_mats, domain, trials,
                            trials_scale, facts, extensive, known_premises,
                            float_companions, pseudo_infinity)
-        return out + [_adjudicate_domain_relation(c, fn) for c in between]
+        return _stamp_language_definitions(
+            out + [_adjudicate_domain_relation(c, fn) for c in between], built)
     finally:
         STATED.reset(stated_token)
+
+
+def language_definition_stamp(cj) -> dict:
+    """Intent:
+        The hash of the regular-language definition each language a
+        claim names states now, by the language's text (`L[slug]`): the
+        languages its bindings range over, the one on the right of
+        `in`, and both sides of a relation between domains. A language
+        that does not resolve, or states no definition this core reads,
+        is left out. The map is what a row is stamped with
+        (`mathema.language_definitions`) and what verify compares a
+        record against.
+    """
+    from . import domain_relations, regular
+    from .domain import Domain, LanguageRef
+    from .languages import resolve_language
+    bounds = [*(getattr(cj, "domain", None) or {}).values(), getattr(cj, "rhs_bound", None)]
+    if getattr(cj, "relation", None) == domain_relations.RELATION:
+        try:
+            stated = domain_relations.parse(f"{cj.lhs} {cj.rhs}")
+        except domain_relations.InvalidDomainRelation:
+            stated = None
+        for rel in (stated.relations if stated is not None else ()):
+            bounds.extend((rel.left.bound, rel.right.bound))
+    named: list = []
+    for bound in bounds:
+        if isinstance(bound, LanguageRef):
+            named.append(bound)
+        elif isinstance(bound, Domain):
+            named.extend(p for p in bound.pieces if isinstance(p, LanguageRef))
+    stamp: dict = {}
+    for ref in named:
+        try:
+            document = resolve_language(ref).to_json().get("definition")
+            if regular.is_definition(document):
+                stamp[repr(ref)] = regular.term_hash(document)
+        except Exception:
+            continue
+    return stamp
+
+
+def _stamp_language_definitions(rows: list, claims: list) -> list:
+    """Each row of a claim that names a defined language, its companion
+    rows included, stamped with `language_definition_stamp`."""
+    stamps = {c.name: language_definition_stamp(c) for c in claims}
+    for row in rows:
+        meta = getattr(row, "meta", None) or {}
+        stamp = stamps.get(meta.get("mathema.companion_of") or row.name)
+        if stamp:
+            row.meta = {**meta, "mathema.language_definitions": stamp}
+    return rows
 
 
 def _adjudicate_domain_relation(cj, fn=None) -> "Probe":

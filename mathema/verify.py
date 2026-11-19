@@ -1289,8 +1289,44 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _language_definition_moved(merged_entry: dict, verified_entry: dict) -> "str | None":
+    """Intent:
+        The language whose regular-language definition differs from the
+        one a record was written against (`mathema.language_definitions`
+        on each row), as its text (`L[slug]`), or None when none moved.
+        A language that was stamped and now states no definition, or
+        does not resolve, has moved. A language the record never
+        stamped has not: the record made no statement about it.
+    """
+    from .conjecture import language_definition_stamp
+    from .spec import entry_claims
+    recorded: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        meta = c.get("meta") or {}
+        stamp = meta.get("mathema.language_definitions")
+        if stamp:
+            recorded.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
+                                {}).update(stamp)
+    if not recorded:
+        return None
+    try:
+        current = entry_claims(merged_entry or {})
+    except Exception:
+        return None
+    for cj in current:
+        was = recorded.get(cj.name)
+        if not was:
+            continue
+        now = language_definition_stamp(cj)
+        for language, digest in sorted(was.items()):
+            if now.get(language) != digest:
+                return language
+    return None
+
+
 def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
-                    provenance, library_version, premises, dependency) -> list[str]:
+                    provenance, library_version, premises, dependency,
+                    language_definition=None) -> list[str]:
     """The triggers that make a function invalidated, changed since its
     record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
     each one that fired."""
@@ -1298,6 +1334,7 @@ def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
              "claims": claims, "pseudo-infinity": pseudo_infinity,
              "library-version": library_version is not None and library_version is not False,
              "definition-rows": definitions, "premises": premises,
+             "language-definition": language_definition is not None,
              "dependency": dependency}
     return [name for name, on in fired.items() if on]
 
@@ -2216,9 +2253,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
         body_moved = _provenance_moved(facts_now, verified_entry)
+        language_moved = _language_definition_moved(merged_entry, verified_entry)
         is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None
+                    and language_moved is None
                     and not pinf_moved and not definitions_moved
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
@@ -2356,6 +2395,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else f"{body_moved} changed" if body_moved
                and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
+               else f"the definition of {language_moved} moved" if language_moved
+               and same_form(facts_now.form, recorded_form)
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -2375,7 +2417,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 provenance=body_moved, library_version=version_moved,
                 premises=premise_now != (recorded_premises or {})
                 if premise_now or recorded_premises else False,
-                dependency=dependency_changed)
+                dependency=dependency_changed,
+                language_definition=language_moved)
             rec.meta["mathema.invalidated_by"] = triggers
             if triggers:
                 invalidated_keys.add(key)
