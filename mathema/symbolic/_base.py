@@ -1398,7 +1398,7 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
                                     "message": str(e), "category": e.category}
             return "value", result, None
         elif allow_raise and isinstance(stmt, ast.Raise):
-            return "raises", _exc_name(stmt), None
+            return "raises", _exc_name(stmt, set(env)), None
         else:
             kind = type(stmt).__name__
             allowed = "a single-name assignment or a final return" + \
@@ -1489,10 +1489,70 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
 
 
 
-def _exc_name(stmt: ast.Raise) -> str | None:
+class UnreadRaise:
+    """A `raise` whose exception could not be read as one named class:
+    `reason` says which expression stopped the reading."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+def _cannot_fail(node: ast.AST, bound) -> bool:
+    """Whether evaluating an exception's argument cannot itself raise:
+    a literal, a name that is bound on this path, `repr` or `str` of
+    such a name, or an f-string of literals and such names with no
+    format specification."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return bound is not None and node.id in bound
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ("repr", "str") and len(node.args) == 1 \
+            and not node.keywords and (bound is None or node.func.id not in bound):
+        return isinstance(node.args[0], ast.Name) and _cannot_fail(node.args[0], bound)
+    if isinstance(node, ast.JoinedStr):
+        return all(isinstance(part, ast.Constant)
+                   or (isinstance(part, ast.FormattedValue) and part.format_spec is None
+                       and isinstance(part.value, ast.Name)
+                       and _cannot_fail(part.value, bound))
+                   for part in node.values)
+    return False
+
+
+def read_raise(stmt: ast.Raise, bound=None) -> "str | UnreadRaise":
+    """Intent:
+        The name of the exception class a `raise` statement raises, or
+        an `UnreadRaise` saying why it is not read as raising one named
+        class. The statement is read as `raise E` only when `E` is a
+        bare name, there is no `from` clause other than `from None`,
+        and every argument is one whose evaluation cannot itself raise
+        (`_cannot_fail`): building the exception then cannot raise
+        something else first. `bound` is the set of names known to be
+        bound where the statement runs (the parameters and the names
+        assigned before it); with None no name is taken as bound.
+
+    Notes:
+        Whether the name `E` is the class a claim means is not decided
+        here: the statement holds a name, and `try_prove_raises` checks
+        what the function binds it to.
+    """
     exc = stmt.exc
-    if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
-        return exc.func.id
-    if isinstance(exc, ast.Name):
-        return exc.id
-    return None
+    if exc is None:
+        return UnreadRaise("a bare `raise` re-raises whatever is being handled")
+    if stmt.cause is not None and not (isinstance(stmt.cause, ast.Constant)
+                                       and stmt.cause.value is None):
+        return UnreadRaise(f"the cause `{ast.unparse(stmt.cause)}` is evaluated before "
+                           f"the raise")
+    called = exc.func if isinstance(exc, ast.Call) else exc
+    if not isinstance(called, ast.Name):
+        return UnreadRaise(f"`{ast.unparse(called)}` is not a bare exception name")
+    if isinstance(exc, ast.Call):
+        for arg in [*exc.args, *(k.value for k in exc.keywords)]:
+            if not _cannot_fail(arg, bound):
+                return UnreadRaise(f"the exception's argument `{ast.unparse(arg)}` is "
+                                   f"evaluated before the raise and may itself raise")
+    return called.id
+
+
+def _exc_name(stmt: ast.Raise, bound=None) -> "str | UnreadRaise":
+    return read_raise(stmt, bound)
