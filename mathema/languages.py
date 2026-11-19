@@ -590,7 +590,14 @@ class PredicateWord:
     arguments)`, the text of the language the author probably meant, or
     None. `base` is None when an object was named as a language by
     itself (`L[app.SLUG]`) and the word reading the `in` operator is
-    asked what was meant."""
+    asked what was meant.
+
+    `reads_call(callable_object)` says whether the truth of a call in
+    code is this predicate of the text passed to it: given the object a
+    function calls (the bound method `PAT.fullmatch` of a compiled
+    pattern, say), it returns the canonical argument texts under which
+    `word (arguments)` holds of a text exactly when the call succeeds
+    on it, or None when the word does not read that call."""
     word: str
     refine: Callable
     sugar: tuple = ()
@@ -600,6 +607,7 @@ class PredicateWord:
     kinds: tuple = ()
     examples: dict = field(default_factory=dict)
     suggest: "Callable | None" = None
+    reads_call: "Callable | None" = None
 
 
 @dataclass(frozen=True)
@@ -705,6 +713,25 @@ def predicate_word(word: str) -> "PredicateWord | None":
     from .domain import predicate_key
     key = predicate_key(word)
     return _PREDICATES.get(key) or _discovered_predicates().get(key)
+
+
+def word_reading_call(callee) -> "tuple | None":
+    """Intent:
+        `(word, arguments)` for the registered predicate word that
+        reads a call of the object `callee`, the arguments as the word
+        gives them, or None when no word reads it. A word whose hook
+        raises is skipped.
+    """
+    for word in predicate_words():
+        if word.reads_call is None:
+            continue
+        try:
+            arguments = word.reads_call(callee)
+        except Exception:
+            continue
+        if arguments is not None:
+            return word, tuple(str(a) for a in arguments)
+    return None
 
 
 def word_for_sugar(operator: str) -> "PredicateWord | None":
@@ -1160,25 +1187,6 @@ def resolve(ref) -> tuple:
     raise UnknownLanguage(name, language_vocabulary(), detail)
 
 
-def adapt_object(obj) -> "tuple | None":
-    """Intent:
-        `(language, adaptor name)` for an object an installed language
-        adaptor accepts, the adaptors asked in their order, or None
-        when none accepts it. An adaptor that raises is skipped with a
-        warning.
-    """
-    for adaptor_name, adapt in _loaded_adaptors():
-        try:
-            adapted = adapt(obj)
-        except Exception as e:
-            warnings.warn(f"mathema: language adaptor {adaptor_name!r} failed on "
-                          f"{obj!r} ({e!r}), skipping it", stacklevel=2)
-            continue
-        if adapted is not None and not language_problems(adapted):
-            return adapted, adaptor_name
-    return None
-
-
 def adapt_annotation(hint) -> "tuple | None":
     """Intent:
         `(language, adaptor_name)` for the first `mathema.language_adaptors`
@@ -1269,8 +1277,8 @@ __all__ = [
     "AlphabetConstructor", "alphabet_constructor", "register_alphabet_constructor",
     "unregister_alphabet_constructor",
     "MeaninglessPredicate", "PredicateWord", "UnknownPredicate", "predicate_word",
-    "predicate_words", "register_predicate", "unregister_predicate",
-    "adapt_annotation", "adapt_object", "describe_language", "language_adaptors", "language_problems",
+    "predicate_words", "register_predicate", "unregister_predicate", "word_reading_call",
+    "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
     "derive_strategy", "refinement_keys", "register_refinement", "unregister_refinement",
     "language_vocabulary", "register_language", "resolve",
     "resolve_language", "resolves", "unregister_language",

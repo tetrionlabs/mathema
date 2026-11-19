@@ -8,17 +8,18 @@ it, breaks the claim.
 
 The validators are the slug check with `$`, which under `match` admits
 one final newline, and with `\\Z`, which does not. The definitions are
-written by hand and served by an adaptor made for these tests, which
-reads the bound method of a compiled pattern (`PAT.match`); no pattern
-dialect is compiled here."""
+written by hand and served by a predicate word made for these tests,
+`begins as`, which reads the bound method `PAT.match` of a compiled
+pattern; no pattern dialect is compiled here."""
+import json
 import re
 import warnings
 
 import pytest
 
-import mathema.languages as languages
 from mathema.conjecture import check_conjectures, claim
-from mathema.languages import StringLanguage, register_language, unregister_language
+from mathema.languages import (PredicateWord, StringLanguage, register_language,
+                               register_predicate, unregister_language, unregister_predicate)
 
 pytest.importorskip("z3")
 
@@ -95,24 +96,33 @@ _DEFINITIONS = {
     (_SLUG.pattern, "match"): SLUG_THEN_NEWLINE,
     (_SLUG_FIXED.pattern, "match"): SLUG,
 }
+_COMPILED = {_SLUG.pattern: _SLUG, _SLUG_FIXED.pattern: _SLUG_FIXED, _UNDEFINED.pattern: _UNDEFINED}
 
 
-def adapt(obj):
-    """The language of texts a compiled pattern's bound method accepts,
-    for the two patterns these tests define."""
-    pattern = getattr(obj, "__self__", None)
-    node = _DEFINITIONS.get((getattr(pattern, "pattern", None), getattr(obj, "__name__", "")))
-    if not isinstance(pattern, re.Pattern) or node is None:
+def _reads_match(callee):
+    """The argument under which `begins as (...)` is the truth of a
+    call of `PAT.match`: the pattern's text, quoted."""
+    pattern = getattr(callee, "__self__", None)
+    if not isinstance(pattern, re.Pattern) or getattr(callee, "__name__", "") != "match":
         return None
-    return Defined(f"pattern {pattern.pattern}", obj, _exact(node))
+    return (json.dumps(pattern.pattern),)
 
 
-class _Entry:
-    name, value = "test_patterns", "tests:adapt"
+def _begins_as(language, arguments, negated):
+    """The members of `language` a pattern's `match` accepts, with the
+    definition of that set where these tests define the pattern's."""
+    pattern = _COMPILED[json.loads(arguments[0])]
+    node = _DEFINITIONS.get((pattern.pattern, "match"))
+    base = language.to_json().get("definition")
+    definition = None
+    if node is not None and base is not None:
+        definition = _exact({"op": "inter", "args": [base["language"], node]})
+    return Defined(f"{language.name}, begins as ({arguments[0]})",
+                   lambda s: language.contains(s) and (pattern.match(s) is not None) != negated,
+                   definition)
 
-    @staticmethod
-    def load():
-        return adapt
+
+BEGINS_AS = PredicateWord("begins as", _begins_as, reads_call=_reads_match)
 
 
 ANYTEXT = Defined("anytext", lambda s: True, _exact(ANY))
@@ -123,9 +133,8 @@ PLAIN = StringLanguage("plain", char_ok=lambda c: True, pool="ab")
 
 
 @pytest.fixture(autouse=True)
-def served(monkeypatch):
-    monkeypatch.setattr(languages, "_discovered_adaptors", lambda: (_Entry,))
-    languages._loaded_adaptors.cache_clear()
+def served():
+    register_predicate(BEGINS_AS)
     for language in (ANYTEXT, LINES, SLUGS, PLAIN):
         register_language(language.name, language)
     try:
@@ -133,7 +142,7 @@ def served(monkeypatch):
     finally:
         for language in (ANYTEXT, LINES, SLUGS, PLAIN):
             unregister_language(language.name)
-        languages._loaded_adaptors.cache_clear()
+        unregister_predicate(BEGINS_AS.word)
 
 
 def _row(fn, text, route="derive"):
@@ -151,8 +160,11 @@ def test_the_fixed_validator_refuses_every_text_ending_in_a_newline():
     assert row.verdict == "proven", (row.verdict, row.note, row.sketch)
     assert row.route == "derive"
     assert row.meta["mathema.derive_route"] == "smt"
-    assert row.sketch.startswith("smt: membership, validator pattern "
-                                 "re.compile('[a-z0-9][a-z0-9-]*\\\\Z').match: ")
+    assert row.sketch.startswith(
+        'smt: membership, text in L[anytext, begins as ("[a-z0-9][a-z0-9-]*\\\\Z")], '
+        "read from re.compile('[a-z0-9][a-z0-9-]*\\\\Z').match: ")
+    assert row.meta["mathema.smt"]["statement"] == (
+        'text in L[anytext, begins as ("[a-z0-9][a-z0-9-]*\\\\Z")]')
 
 
 def test_the_dollar_validator_is_falsified_by_a_text_the_solver_finds():
@@ -181,7 +193,6 @@ def test_the_solver_alone_finds_the_trailing_newline():
     (is_slug, "for text in L[lines], f(text) == False", "proven"),
     (is_slug, "for text in L[anytext], f(text) == True", "falsified"),
     (is_slug, 'for text in L[slugs], f("x-" + text) == True', "proven"),
-    (is_slug, 'for text in L[slugs], f("-" + text) == True', "falsified"),
 ])
 def test_the_claims_a_validator_decides(fn, text, verdict):
     row = _row(fn, text)
@@ -189,16 +200,25 @@ def test_the_claims_a_validator_decides(fn, text, verdict):
     assert row.meta["mathema.derive_route"] == "smt"
 
 
+def test_a_call_on_text_outside_the_parameters_language_is_left_to_the_other_routes():
+    row = _row(is_slug, 'for text in L[slugs], f("-" + text) == True', route="best")
+    assert row.verdict == "falsified"
+    assert (row.meta or {}).get("mathema.derive_route") != "smt"
+    assert ('are not all shown to be members of L[slugs], which the membership '
+            'statement speaks of') in row.note
+
+
 def test_the_record_carries_the_hash_of_each_definition_read():
     from mathema import regular
     row = _row(check_slug_fixed, _BENCHMARK)
     assert row.meta["mathema.smt"]["definitions"] == {
         "L[anytext]": regular.term_hash(_exact(ANY)),
-        "re.compile('[a-z0-9][a-z0-9-]*\\\\Z').match": regular.term_hash(_exact(SLUG))}
+        'L[anytext, begins as ("[a-z0-9][a-z0-9-]*\\\\Z")]': regular.term_hash(
+            _exact({"op": "inter", "args": [ANY, SLUG]}))}
 
 
 @pytest.mark.parametrize("fn,text,said", [
-    (check_undefined, _BENCHMARK, "definition-unread(re.Pattern)"),
+    (check_undefined, _BENCHMARK, 'definition-unread(L[anytext, begins as ("(?=a)a")])'),
     (check_slug_fixed, 'for text in L[plain], raises(f(text + "\\n"), ValueError)',
      "the domain of text states no regular-language definition"),
 ])

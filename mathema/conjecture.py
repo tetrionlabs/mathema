@@ -10786,17 +10786,28 @@ def _validator_proof(cj, fn, cj_domain):
         The derive verdict for a claim over one text parameter of a
         function read as a pattern validator, or None when the function
         is not one or the claim asks something a validator does not
-        decide. The claim becomes a question about two languages, the
-        texts the claim calls the function on and the texts the pattern
-        accepts, asked of the solver over their regular-language
-        definitions: no separating text is a proof, and a text the
-        solver finds is run through the real function before it
-        falsifies. An undecided answer says why in its sketch.
+        decide. The registered predicate word that reads the function's
+        match call turns the validator's truth into a membership
+        statement, `s in L[<the parameter's language>, <word>
+        (<pattern>)]`, which is resolved as a claim written in that
+        text would be. The claim then asks whether the texts it calls
+        the function on are all, or are none, members of that language,
+        and the solver answers over the regular-language definitions:
+        no separating text is a proof, and a text the solver finds is
+        run through the real function before it falsifies. An undecided
+        answer says why in its sketch.
+
+    Notes:
+        The membership statement refines the parameter's own language,
+        so it speaks only of texts in that language. Where the claim
+        calls the function on the parameter with text added (`f(s +
+        "x")`), those texts must all lie in the parameter's language
+        for the statement to cover them, which is asked first.
     """
     from . import domain_relations, regular
     from ._validators import read_validator
-    from .domain import domain_contains
-    from .languages import adapt_object
+    from .domain import Domain, LanguageRef, Predicate, domain_contains
+    from .languages import resolve_language, word_reading_call
     from .symbolic._proof_support import ProofResult
     if len(cj_domain) != 1:
         return None
@@ -10808,18 +10819,34 @@ def _validator_proof(cj, fn, cj_domain):
     if isinstance(question, str):
         return None
     prefix, suffix, accepted = question
-    path = f"smt: membership, validator pattern {validator.described()}"
+    path = f"smt: membership, validator {validator.described()}"
 
     def undecided(why: str):
         return ProofResult("undecided", sketch=f"{path}: {why}")
+    reading = word_reading_call(validator.accepts)
+    if reading is None:
+        return undecided(f"definition-unread(re.Pattern.{validator.mode}): no registered "
+                         f"predicate word reads the call")
+    word, arguments = reading
+    base = bound if isinstance(bound, LanguageRef) else (
+        bound.pieces[0] if isinstance(bound, Domain) and len(bound.pieces) == 1
+        and not bound.excluded and isinstance(bound.pieces[0], LanguageRef) else None)
+    if base is None:
+        return undecided(f"the domain of {param} is not one language, so the validator "
+                         f"has no membership statement over it")
+    stated = LanguageRef(base.name, base.refinements, tuple(sorted(
+        {*base.predicates, Predicate(word.word, arguments)})))
+    path = f"smt: membership, {param} in {stated!r}"
     domain = domain_relations.defined_bound(bound)
     if domain is None:
         return undecided(f"the domain of {param} states no regular-language definition")
-    adapted = adapt_object(validator.accepts)
-    document = adapted[0].to_json().get("definition") if adapted is not None else None
+    try:
+        document = resolve_language(stated).to_json().get("definition")
+    except Exception as e:
+        return undecided(f"{stated!r} does not resolve ({e})")
     if not regular.is_definition(document):
-        return undecided("definition-unread(re.Pattern): no installed language adaptor "
-                         "states a regular-language definition for the pattern")
+        return undecided(f"definition-unread({stated!r}): the language states no "
+                         f"regular-language definition")
     at_most, at_least = regular.bounds(document)
     alphabet = domain.alphabet + regular.alphabet_of(document)
 
@@ -10827,27 +10854,35 @@ def _validator_proof(cj, fn, cj_domain):
         return {"op": "concat", "args": [
             {"op": "literal", "codes": [ord(c) for c in prefix]}, node,
             {"op": "literal", "codes": [ord(c) for c in suffix]}]}
+    if prefix or suffix:
+        beyond = regular.find_member(alphabet, [called_on(domain.at_least)], [domain.at_most])
+        if beyond.status != "none":
+            return undecided(
+                f"the texts {cj.lhs.strip()} is called on are not all shown to be members "
+                f"of {base!r}, which the membership statement speaks of"
+                + (f" ({beyond.reason})" if beyond.reason else ""))
     # a text that breaks the claim is one the claim calls the function
-    # on and the pattern refuses (when the claim says all are accepted)
-    # or accepts (when it says none is)
+    # on that is outside the stated language (when the claim says all
+    # are accepted) or inside it (when it says none is)
     wide = (([called_on(domain.at_least)], [at_most]) if accepted
             else ([called_on(domain.at_least), at_least], []))
     narrow = (([called_on(domain.at_most)], [at_least]) if accepted
               else ([called_on(domain.at_most), at_most], []))
     meta = {"mathema.derive_route": "smt",
-            "mathema.smt": {"path": "membership, validator pattern",
-                            "pattern": validator.described(),
+            "mathema.smt": {"path": "membership, validator",
+                            "statement": f"{param} in {stated!r}",
+                            "call": validator.described(),
                             "definitions": {**domain.hashes,
-                                            validator.described(): regular.term_hash(document)}}}
+                                            repr(stated): regular.term_hash(document)}}}
     why = ""
     for inside, outside in (wide, narrow):
         found = regular.find_member(alphabet, inside, outside)
         if found.status == "none" and (inside, outside) == wide:
             return ProofResult(
                 "proven", meta=meta,
-                sketch=(f"{path}: no text {param} in the domain makes "
-                        f"{cj.lhs.strip()} a text the pattern "
-                        f"{'refuses' if accepted else 'accepts'}"))
+                sketch=(f"{path}, read from {validator.described()}: no text {param} "
+                        f"in the domain makes {cj.lhs.strip()} a text "
+                        f"{'outside' if accepted else 'in'} that language"))
         if found.status == "unknown":
             why = why or found.reason
         if found.status != "member":
@@ -10863,9 +10898,10 @@ def _validator_proof(cj, fn, cj_domain):
             return ProofResult(
                 "disproven", witness={param: value},
                 counterexample=f"{param} = {value!r}",
-                sketch=(f"{path}: the solver found {param} = {value!r}, where "
-                        f"the pattern {'accepts' if matched else 'refuses'} "
-                        f"{text!r}, and the function run there breaks the claim"),
+                sketch=(f"{path}, read from {validator.described()}: the solver found "
+                        f"{param} = {value!r}, where the call "
+                        f"{'accepts' if matched else 'refuses'} {text!r}, and the "
+                        f"function run there breaks the claim"),
                 meta={**meta, "mathema.witness_executed": True})
         why = why or domain_relations.UNCONFIRMED
     return undecided(why or domain_relations.UNCONFIRMED)

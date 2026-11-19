@@ -3,7 +3,8 @@
 """The slug validators decided end to end with the installed
 `mathema-language` compiling the pattern: skipped, with the reason,
 unless the installed package states a regular-language definition for
-`L[unicode]` and for the bound method of a compiled pattern."""
+`L[unicode]` and registers a predicate word that reads the bound method
+`match` of a compiled pattern."""
 import re
 
 import pytest
@@ -14,7 +15,7 @@ pytest.importorskip("mathema_language",
 
 from mathema import regular  # noqa: E402
 from mathema.conjecture import check_conjectures, claim  # noqa: E402
-from mathema.languages import adapt_object, resolve_language  # noqa: E402
+from mathema.languages import resolve_language, word_reading_call  # noqa: E402
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]*$")
 _SLUG_FIXED = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
@@ -40,10 +41,8 @@ def _missing() -> "str | None":
         return f"L[unicode] does not resolve ({e})"
     if not regular.is_definition(unicode):
         return "the installed mathema-language states no regular-language definition for L[unicode]"
-    adapted = adapt_object(_SLUG.match)
-    if adapted is None or not regular.is_definition(adapted[0].to_json().get("definition")):
-        return ("the installed mathema-language has no adaptor stating a regular-language "
-                "definition for the bound method of a compiled pattern")
+    if word_reading_call(_SLUG.match) is None:
+        return "no registered word reads re.Pattern.match"
     return None
 
 
