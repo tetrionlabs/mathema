@@ -1883,10 +1883,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
 
     Inside a run scope (`_run_scope.run_scope`) a claim stated again with
     the same text and arguments is parsed once for the run; each call
-    gets its own copy of the parse."""
+    gets its own copy of the parse, except under
+    `_scan.legacy_domain_escapes`, which reads the same text another way."""
     from . import _run_scope
+    from ._scan import uses_legacy_domain_escapes
     kept = _run_scope.kept("claims")
-    if kept is not None:
+    if kept is not None and not uses_legacy_domain_escapes():
         key = _claim_cache_key(law, name, source, route, grammar, funcs,
                                tolerance, pseudo_infinity, meta,
                                matrix_names, trials)

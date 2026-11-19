@@ -1812,6 +1812,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # per key, the claims whose record row stores a statement that does
     # not parse: each is adjudicated again and its row rewritten
     stale_rows: dict = {}
+    # per key, the claims recorded when a domain value's escapes were read
+    # as their characters undecoded: each is adjudicated again
+    escapes_moved: dict = {}
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -2100,6 +2103,19 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             for conflict in _conflicts:
                 if conflict.get("kind") == "release-move":
                     moved = conflict.get("moved") or ()
+                    if "domain-escapes" in moved:
+                        escapes_moved.setdefault(key, []).append(conflict["claim"])
+                        read_now = ", ".join(
+                            f"{written} now reads as {value!r}"
+                            for written, value in conflict.get("escapes") or ())
+                        out.lines.append(
+                            f"note {key}: claim {conflict['claim']!r}: a backslash "
+                            f"escape in a domain value is now read as the "
+                            f"character it names, as in an expression "
+                            f"({read_now}); to mean the backslash itself, write "
+                            f"it doubled (\"\\\\t\" is a backslash and a t); "
+                            f"the claim is checked again on the values it now "
+                            f"names")
                     if "literal-quoting" in moved:
                         quoting_moved.append((key, conflict["claim"]))
                     if "not-parentheses" in moved:
@@ -2251,7 +2267,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
-                    and not stale_rows.get(key)
+                    and not stale_rows.get(key) and not escapes_moved.get(key)
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2391,6 +2407,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
+               else "domain escapes now decoded" if escapes_moved.get(key)
+               and same_form(facts_now.form, recorded_form)
+               and recorded_fp == current_fp
                else "stored text unreadable" if stale_rows.get(key)
                and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp

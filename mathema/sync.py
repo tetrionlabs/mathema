@@ -219,9 +219,69 @@ def _legacy_renderings() -> dict:
         `{move name: context manager}` for each earlier rendering of
         stored claim text this release can reproduce.
     """
-    from ._scan import legacy_not_parentheses, legacy_quoting
+    from ._scan import (legacy_domain_escapes, legacy_not_parentheses,
+                        legacy_quoting)
     return {"literal-quoting": legacy_quoting,
-            "not-parentheses": legacy_not_parentheses}
+            "not-parentheses": legacy_not_parentheses,
+            "domain-escapes": legacy_domain_escapes}
+
+
+def _set_strings(domain: dict) -> dict:
+    """Intent:
+        `{name: sorted string members}` of each domain binding that has a
+        string member in a discrete set.
+    """
+    from .domain import _as_domain
+    out = {}
+    for name, bound in (domain or {}).items():
+        try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            continue
+        found = sorted(v for p in pieces if isinstance(p, frozenset)
+                       for v in p if isinstance(v, str))
+        if found:
+            out[name] = found
+    return out
+
+
+def _domain_escapes_move(c: dict, row: dict) -> "list | None":
+    """Intent:
+        The domain values whose reading changed, as `(written, value
+        now)` pairs, when the authored claim `c` has a domain set string
+        member with a backslash escape and the verified row records the
+        value releases up to 0.6.6.1 read for it (the text between the
+        quotes, undecoded); None otherwise. `written` is the member as
+        the author wrote it.
+    """
+    from ._scan import legacy_domain_escapes
+    from .domain import _string_member
+    from .grammar import domain_bound_from_json
+    from .spec import _declared_conjecture
+    statement = c.get("statement") or c.get("law") or ""
+    if "\\" not in statement or not isinstance(row.get("domain"), dict):
+        return None
+    try:
+        now = _set_strings(_declared_conjecture(c).domain)
+        with legacy_domain_escapes():
+            before = _set_strings(_declared_conjecture(c).domain)
+        recorded = _set_strings({n: domain_bound_from_json(b)
+                                 for n, b in row["domain"].items()})
+    except Exception:
+        return None
+    if now == before:
+        return None
+    if any(recorded.get(n) != before[n] for n in before if before[n] != now.get(n)):
+        return None
+    pairs = []
+    for name in sorted(before):
+        for old in sorted(set(before[name]) - set(now.get(name) or [])):
+            written = f'"{old}"'
+            try:
+                pairs.append((written, _string_member(written)))
+            except ValueError:
+                continue
+    return pairs or None
 
 
 def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
@@ -360,6 +420,18 @@ def claim_conflicts(fn, file_entry: dict,
                 # a claim skipped as another grammar's established
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
+                continue
+            escapes = _domain_escapes_move(c, v)
+            if escapes and not _checked_differently(c, v):
+                # the row records the values an earlier release read for
+                # this claim's domain: adjudicated on the values it names
+                seen.add((name, "supersession"))
+                out.append({"kind": "release-move", "claim": name,
+                            "moved": ("domain-escapes",),
+                            "escapes": escapes,
+                            "surface": surface,
+                            "authored": _display_claim(c),
+                            "verified": v.get("statement")})
                 continue
             moved = _legacy_move(c, v, fn)
             if moved and not _checked_differently(c, v):

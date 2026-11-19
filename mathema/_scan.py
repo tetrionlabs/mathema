@@ -166,11 +166,66 @@ def uses_legacy_not_parentheses() -> bool:
     return _LEGACY_NOT_PARENTHESES.get()
 
 
+#: whether a string member of a domain set is read as the text between
+#: its quotes with no escape decoded, as releases up to 0.6.6.1 read it,
+#: for reading a record those releases wrote
+_LEGACY_DOMAIN_ESCAPES: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_domain_escapes", default=False)
+
+
+@contextlib.contextmanager
+def legacy_domain_escapes():
+    """Intent:
+        Within the block, a string member of a domain set is read and
+        written as the text between its quotes, escapes left undecoded
+        (`{"\\t"}` is a backslash and a t), as releases up to 0.6.6.1
+        read it, so a record those releases wrote can be compared with
+        the claim it records.
+    """
+    token = _LEGACY_DOMAIN_ESCAPES.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_DOMAIN_ESCAPES.reset(token)
+
+
+def uses_legacy_domain_escapes() -> bool:
+    """Intent:
+        Whether `legacy_domain_escapes` is in force.
+    """
+    return _LEGACY_DOMAIN_ESCAPES.get()
+
+
+#: one backslash escape a Python string literal decodes
+_VALID_ESCAPE = re.compile(
+    r"""\\(?:[\\'"abfnrtv\n]|[0-7]{1,3}|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}"""
+    r"""|U[0-9A-Fa-f]{8}|N\{[^}]+\})""")
+
+
+def invalid_escape(literal: str) -> "str | None":
+    """Intent:
+        The first backslash escape in the quoted `literal` that names no
+        character in a Python string literal (`\\q`, a short `\\x4`),
+        or None when every escape names one.
+    """
+    i = 1
+    while i < len(literal) - 1:
+        if literal[i] == "\\":
+            m = _VALID_ESCAPE.match(literal, i)
+            if m is None:
+                return literal[i:i + 2]
+            i = m.end()
+            continue
+        i += 1
+    return None
+
+
 def uses_legacy_rendering() -> bool:
     """Intent:
         Whether any rendering of an earlier release is in force.
     """
-    return _LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+    return (_LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+            or _LEGACY_DOMAIN_ESCAPES.get())
 
 
 def string_literal(value: str) -> str:
