@@ -327,7 +327,7 @@ def _shaped_arguments(args, sugar):
     read = read_call(args[0])
     if read is None or read[0] != "shape":
         return args
-    _, pattern, words = read
+    _, pattern, words, _ = read
     dialects = [_DIALECTS[w] for w in words if w in _DIALECTS] or ["python"]
     flags = sorted(w for w in words if w not in _DIALECTS)
     return (f"shape({', '.join([pattern, dialects[0], *flags])})",)
@@ -364,4 +364,4 @@ def test_a_call_with_anything_but_a_first_argument_and_words_is_not_read():
     assert read_call('shape(1 + 2)') is None
     assert read_call('shape(r"a", other("b"))') is None
     assert read_call('re(r"[a-z]+", python, ignoreCase)') == (
-        "re", 'r"[a-z]+"', ("python", "ignore case"))
+        "re", 'r"[a-z]+"', ("python", "ignore case"), ())

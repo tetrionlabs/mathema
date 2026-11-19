@@ -734,6 +734,7 @@ def _parse_refinement(text: str, whole: str) -> tuple:
     return key, interval
 
 
+_STRING_PLACEHOLDER = re.compile(r"[rR]?_mathema_str_\d+_")
 _PREDICATE_CALL = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s*\((?P<args>.*)\)$", re.DOTALL)
 _PREDICATE_KEYWORD = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s+(?P<arg>_mathema_str_\d+_)$")
 # the claim grammar writes a caret as `**` before a domain is read, so
@@ -759,15 +760,78 @@ def _as_words(word: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip().lower()
 
 
+_ALPHABET_NAME = re.compile(r"^[A-Za-z_][\w-]*$")
+
+
+def alphabet_pieces(text: str, single: bool = False) -> "tuple | None":
+    """Intent:
+        The pieces of an alphabet expression, named alphabets and
+        quoted characters joined by `+` (`lower + digit + "_"`), as
+        `("name", name)` and `("char", character)` pairs in written
+        order, a quoted string of several characters giving one piece
+        per character. None when `text` is not such an expression: a
+        single name is a language name, not an expression, unless
+        `single` is set.
+    """
+    import ast
+    masked, literals = mask_strings(text.strip())
+    parts = [p.strip() for p in masked.split("+")]
+    if len(parts) == 1 and not single and _ALPHABET_NAME.match(parts[0]) \
+            and not _STRING_PLACEHOLDER.fullmatch(parts[0]):
+        return None
+    pieces: list = []
+    for part in parts:
+        if _STRING_PLACEHOLDER.fullmatch(part):
+            try:
+                value = ast.literal_eval(unmask_strings(part, literals))
+            except (ValueError, SyntaxError):
+                return None
+            if not isinstance(value, str) or not value:
+                return None
+            pieces.extend(("char", ch) for ch in value)
+        elif _ALPHABET_NAME.match(part):
+            pieces.append(("name", part))
+        else:
+            return None
+    return tuple(pieces)
+
+
+def render_alphabet(pieces) -> str:
+    """An alphabet expression as text: each name bare, each character
+    in double quotes, joined by ` + `."""
+    import json
+    return " + ".join(value if kind == "name" else json.dumps(value, ensure_ascii=False)
+                      for kind, value in pieces)
+
+
+def _canonical_alphabet(pieces: tuple) -> tuple:
+    """The pieces once each, in the order the registered alphabet
+    constructor writes them, or in written order when none is
+    registered."""
+    from .languages import alphabet_constructor
+    kept = tuple(dict.fromkeys(pieces))
+    constructor = alphabet_constructor()
+    if constructor is not None and constructor.order is not None:
+        try:
+            ordered = tuple(constructor.order(kept))
+        except Exception:
+            return kept
+        if set(ordered) == set(kept):
+            return ordered
+    return kept
+
+
 def read_call(text: str) -> "tuple | None":
     """Intent:
-        `(function, first, words)` for an argument written as a call
-        whose first argument is a quoted literal or a dotted object and
-        whose other arguments are bare words, `re(r"[a-z]+", python,
-        ignore case)`: the function's name in its matching form
-        (`predicate_key`), the first argument as written, and each
-        further argument as lower-case words (`ignoreCase`,
-        `ignore_case` and `Ignore Case` are `ignore case`). None when
+        `(function, first, words, bindings)` for an argument written as
+        a call whose first argument is a quoted literal or a dotted
+        object and whose other arguments are bare words or bindings,
+        `re(r"[a-z]+", python, ignore case)`, `shape("AW{0+}", W =
+        alnum + "_")`: the function's name in its matching form
+        (`predicate_key`), the first argument as written, each word as
+        lower-case words (`ignoreCase`, `ignore_case` and `Ignore Case`
+        are `ignore case`), and each binding `NAME = alphabet
+        expression` as `(NAME, pieces)` (`alphabet_pieces`). None when
         `text` is not such a call. The word that owns the function
         orders the words, fills its defaults and writes the canonical
         text.
@@ -779,13 +843,24 @@ def read_call(text: str) -> "tuple | None":
     if not parts or not parts[0]:
         return None
     masked, _ = mask_strings(parts[0])
-    if not (re.fullmatch(r"_mathema_str_\d+_", masked) or _DOTTED_OBJECT.match(parts[0])
+    if not (_STRING_PLACEHOLDER.fullmatch(masked) or _DOTTED_OBJECT.match(parts[0])
             or re.fullmatch(r"[A-Za-z_]\w*", parts[0])):
         return None
-    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z_ ]*", p) for p in parts[1:]):
-        return None
-    return (predicate_key(call.group("word")), parts[0],
-            tuple(_as_words(p) for p in parts[1:]))
+    words: list = []
+    bindings: list = []
+    for part in parts[1:]:
+        bound = re.fullmatch(r"([A-Za-z_]\w*)\s*=(?!=)\s*(.+)", mask_strings(part)[0],
+                             flags=re.DOTALL)
+        if bound is not None:
+            pieces = alphabet_pieces(part.split("=", 1)[1], single=True)
+            if pieces is None:
+                return None
+            bindings.append((bound.group(1), pieces))
+        elif re.fullmatch(r"[A-Za-z_][A-Za-z_ ]*", part):
+            words.append(_as_words(part))
+        else:
+            return None
+    return predicate_key(call.group("word")), parts[0], tuple(words), tuple(bindings)
 
 
 def _argument_text(arg: str) -> str:
@@ -884,6 +959,27 @@ def _parse_refinements(text: str, whole: str) -> tuple:
             raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
         found[key] = interval
     return tuple(sorted(found.items())), tuple(sorted(predicates))
+
+
+def _language_piece(text: str) -> "LanguageRef | None":
+    """Intent:
+        The `LanguageRef` a piece `L[...]` spells, or None when `text`
+        is not one. The head is a language name, a dotted path, or an
+        alphabet expression (`lower + digit + "_"`), which is kept as
+        its canonical text.
+    """
+    m = _PIECE_LANGUAGE.match(text)
+    if m is not None:
+        return _language_ref(m.group("name"), m.group("refine"), text)
+    opened = re.match(r"^(?:L|\U0001d543)\[(?P<inside>.*)\]$", text.strip(), flags=re.DOTALL)
+    if opened is None or not _balanced_call(opened.group("inside")):
+        return None
+    head, *rest = _split_commas(opened.group("inside"))
+    pieces = alphabet_pieces(head)
+    if pieces is None:
+        return None
+    refine = ",".join(rest).strip() or None
+    return _language_ref(render_alphabet(_canonical_alphabet(pieces)), refine, text)
 
 
 def _language_ref(name: str, refine: "str | None", whole: str) -> "LanguageRef":
@@ -1058,10 +1154,7 @@ def path_bindings_hold(value, root: str, bindings: dict) -> bool:
 def language_ref(text: str) -> "LanguageRef | None":
     """The `LanguageRef` the inside of `L[...]` spells (`unicode`,
     `unicode, len <= 80`), or None when it spells none."""
-    m = _PIECE_LANGUAGE.match(f"L[{text}]")
-    if m is None:
-        return None
-    return _language_ref(m.group("name"), m.group("refine"), text)
+    return _language_piece(f"L[{text}]")
 
 
 @dataclass(frozen=True)
@@ -2506,9 +2599,9 @@ def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False)
                              for v in _split_commas(m.group(1)) if v.strip())
         except ValueError:
             return None
-    m = _PIECE_LANGUAGE.match(text)
-    if m is not None:
-        return _language_ref(m.group("name"), m.group("refine"), text)
+    spelled = _language_piece(text)
+    if spelled is not None:
+        return spelled
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))

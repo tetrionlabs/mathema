@@ -602,6 +602,53 @@ class PredicateWord:
     suggest: "Callable | None" = None
 
 
+@dataclass(frozen=True)
+class AlphabetConstructor:
+    """What builds the language an alphabet expression heads (`L[lower
+    + digit + "_"]`, every string over the combined alphabet).
+    `build(pieces)` returns the language for `("name", name)` and
+    `("char", character)` pieces, or raises `ValueError` saying which
+    piece it refuses; `order(pieces)` returns the same pieces in the
+    order the expression is written in (written order when None)."""
+    build: Callable
+    order: "Callable | None" = None
+
+
+_ALPHABETS: list = []
+
+
+def register_alphabet_constructor(constructor: AlphabetConstructor) -> None:
+    """Serve alphabet expressions in this process with `constructor`.
+    An in-process registration wins over an entry point; a package
+    registers an `AlphabetConstructor` under the
+    `mathema.language_refinements` entry-point group."""
+    _ALPHABETS[:] = [constructor]
+    _changed()
+
+
+def unregister_alphabet_constructor() -> None:
+    """Remove the in-process alphabet constructor."""
+    _ALPHABETS.clear()
+    _changed()
+
+
+@functools.lru_cache(maxsize=1)
+def _discovered_alphabet_constructor() -> "AlphabetConstructor | None":
+    for name, ep in sorted(_discovered_refinements().items()):
+        try:
+            loaded = ep.load()
+        except Exception:
+            continue
+        if isinstance(loaded, AlphabetConstructor):
+            return loaded
+    return None
+
+
+def alphabet_constructor() -> "AlphabetConstructor | None":
+    """The alphabet constructor serving this process, or None."""
+    return _ALPHABETS[0] if _ALPHABETS else _discovered_alphabet_constructor()
+
+
 #: predicate words registered in this process, by matching key
 _PREDICATES: dict = {}
 
@@ -1064,6 +1111,21 @@ def resolve(ref) -> tuple:
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
     if name in _REGISTRY:
         return _REGISTRY[name], "registered"
+    from .domain import alphabet_pieces
+    pieces = alphabet_pieces(name)
+    if pieces is not None:
+        constructor = alphabet_constructor()
+        if constructor is None:
+            raise UnknownLanguage(name, language_vocabulary(),
+                                  "no alphabet constructor is registered")
+        try:
+            built = constructor.build(pieces)
+        except ValueError as e:
+            raise UnknownLanguage(name, language_vocabulary(), str(e)) from e
+        problems = language_problems(built)
+        if problems:
+            raise UnknownLanguage(name, language_vocabulary(), "; ".join(problems))
+        return built, "alphabet constructor"
     loaded = _load_language(name)
     if loaded is not None:
         return loaded, f"entry point {_discovered_languages()[name].value}"
@@ -1204,6 +1266,8 @@ __all__ = [
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
     "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
+    "AlphabetConstructor", "alphabet_constructor", "register_alphabet_constructor",
+    "unregister_alphabet_constructor",
     "MeaninglessPredicate", "PredicateWord", "UnknownPredicate", "predicate_word",
     "predicate_words", "register_predicate", "unregister_predicate",
     "adapt_annotation", "adapt_object", "describe_language", "language_adaptors", "language_problems",
