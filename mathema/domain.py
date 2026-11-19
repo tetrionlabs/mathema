@@ -2376,6 +2376,13 @@ def _merge_exclude_keyword_parts(parts: list[str]) -> list[str]:
     return out
 
 
+def _union_parts(text: str) -> list:
+    """The pieces of a union, split at each `|` or `∪` outside quotes:
+    a bar inside a quoted member is that member's text."""
+    masked, literals = mask_strings(text)
+    return [unmask_strings(piece, literals) for piece in _UNION_SPLIT.split(masked)]
+
+
 def parse_binding(part: str):
     """One comma-separated quantifier binding -> `(name, domain_value)`,
     or `None` when `part` isn't a recognized binding at all (including
@@ -2525,10 +2532,13 @@ def _parse_binding(part: str):
     tail_words = more + tail_words
 
     excluded_text = None
-    m = _EXCLUDE_SUFFIX.search(text)
+    # the exclusion is looked for outside quotes: a `\{` inside a quoted
+    # member is that member's text
+    masked, literals = mask_strings(text)
+    m = _EXCLUDE_SUFFIX.search(masked)
     if m is not None:
-        excluded_text = m.group("set")
-        text = text[:m.start()].rstrip()
+        excluded_text = unmask_strings(m.group("set"), literals)
+        text = unmask_strings(masked[:m.start()], literals).rstrip()
         text, more = _peel_trailing_sentinels(text)
         tail_words = more + tail_words
 
@@ -2562,7 +2572,7 @@ def _parse_binding(part: str):
             if inner is not None:
                 rest, in_element = inner, True
     pieces = []
-    for pt in (_UNION_SPLIT.split(rest) if rest else []):
+    for pt in (_union_parts(rest) if rest else []):
         # a type clause alone (`s in : str`) is the whole type
         piece = (_parse_piece(pt, in_element=in_element or element_path,
                               on_field=on_field) if pt else None)
