@@ -11913,8 +11913,8 @@ def _binding_failure(name: str, ref: str, called: bool) -> str:
 def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
     """Intent:
         The note for a claim whose bound or called function names
-        resolve to nothing: a one-line summary (the clause a summary
-        row keeps), then a diagnostic block naming the claim, the
+        resolve to nothing: a one-line summary naming the problem (the clause a
+        summary row keeps, where the row already names the claim), then a diagnostic block naming the claim, the
         function under test, and one explanation with the fix.
     """
     module = getattr(fn, "__module__", None) or "the function's module"
@@ -11927,7 +11927,6 @@ def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
                 and (cj.funcs or {}).get(n) != n}
     undefined = [n for n in unresolved if n not in explicit]
     name = None if generated else cj.name
-    who = cj.name if name else f"claim {statement}"
     sentences, short = [], []
     if undefined:
         many = len(undefined) > 1
@@ -11948,7 +11947,7 @@ def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
     else:
         title = ("claim calls undefined functions" if len(undefined) > 1
                  else "claim calls an undefined function")
-    one = f"{who} is misspecified: {'; '.join(short)}."
+    one = f"{'; '.join(short)}."
     return f"{one} \n" + _diagnostic(title, name, key, statement,
                                      "\n".join(sentences))
 

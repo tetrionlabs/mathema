@@ -37,7 +37,7 @@ def test_a_called_unbound_name(form):
     p = _row(form.format("g(1)"), name="uses_g")
     assert p.verdict == "skipped:misspecified"
     assert claim_reason_code(p) == ClaimReasonCode.INVALID_CONJECTURE
-    assert _first(p.note) == "uses_g is misspecified: g is not defined."
+    assert _first(p.note) == "g is not defined."
     assert _block(p.note) == (
         "Error: claim calls an undefined function\n\n"
         "  claim uses_g of " + KEY + "\n\n"
@@ -53,8 +53,7 @@ def test_both_forms_give_the_same_title_and_explanation():
 
 def test_an_ad_hoc_claim_is_named_by_its_statement():
     p = _row(SINGLE.format("g(1)"))
-    assert _first(p.note) == ("claim f(100.0, 0.25) == g(1) is "
-                              "misspecified: g is not defined.")
+    assert _first(p.note) == "g is not defined."
     assert "  claim f(100.0, 0.25) == g(1)\n" in _block(p.note)
     assert "f_100_0_0_25_eq_g_1" not in p.note
 
@@ -64,8 +63,8 @@ def test_an_unused_stale_binding(form):
     law = form.format("100.0" if form is SINGLE else "4 * a")
     p = _row(law, name="uses_h", funcs={"h": "no.such.h"})
     assert p.verdict == "skipped:misspecified"
-    assert _first(p.note) == ("uses_h is misspecified: h is bound to "
-                              "no.such.h, which does not resolve.")
+    assert _first(p.note) == ("h is bound to no.such.h, "
+                              "which does not resolve.")
     assert _block(p.note) == (
         "Error: claim has a binding that does not resolve\n\n"
         "  claim uses_h of " + KEY + "\n\n"
@@ -76,8 +75,8 @@ def test_an_unused_stale_binding(form):
 def test_a_dotted_path_whose_module_imports_but_lacks_the_attribute():
     p = _row(SINGLE.format("100.0"), name="uses_h",
              funcs={"h": "json.nothere"})
-    assert _first(p.note) == ("uses_h is misspecified: h is bound to "
-                              "json.nothere, which does not resolve.")
+    assert _first(p.note) == ("h is bound to json.nothere, "
+                              "which does not resolve.")
     assert _block(p.note).endswith(
         "h is bound to json.nothere, and json has no attribute nothere. "
         "Fix the path, or remove the binding (the statement does not use h).")
@@ -93,7 +92,7 @@ def test_a_called_name_with_a_dotted_path_that_does_not_import():
 
 def test_two_undefined_names_at_once():
     p = _row(SINGLE.format("g(1) + k(2)"), name="uses_two")
-    assert _first(p.note) == "uses_two is misspecified: g and k are not defined."
+    assert _first(p.note) == "g and k are not defined."
     assert _block(p.note) == (
         "Error: claim calls undefined functions\n\n"
         "  claim uses_two of " + KEY + "\n\n"
