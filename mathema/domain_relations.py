@@ -590,7 +590,7 @@ def _literals(values) -> "dict | None":
         return None
     if not values:
         return {"op": "empty"}
-    return {"op": "union", "args": [{"op": "literal", "text": v}
+    return {"op": "union", "args": [{"op": "literal", "codes": [ord(c) for c in v]}
                                     for v in sorted(values)] + [{"op": "empty"}]}
 
 

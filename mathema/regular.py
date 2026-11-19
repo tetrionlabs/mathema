@@ -9,7 +9,7 @@ exact definition carries its language under `language`; one that is not
 exact carries two bounds in its place, `at_least` (a language holding
 every member) and `at_most` (a language holding only members). A
 language is a node keyed by `op`: `empty`, `epsilon`, `literal` (one
-string), `chars` (one character from inclusive code point ranges),
+string, as its code points), `chars` (one character from inclusive code point ranges),
 `concat`, `union`, `inter`, `complement` (every string over the
 alphabet outside the argument) and `repeat` (`min` to `max` copies,
 `max` null for no upper end). Whatever compiled the definition, a
@@ -63,17 +63,36 @@ class Found:
 
 # ---- the canonical form and the hash ----------------------------------
 
+#: the keys each operation's node holds beside `op`, and no others
+_NODE_KEYS = {"empty": (), "epsilon": (), "literal": ("codes",), "chars": ("ranges",),
+              "concat": ("args",), "union": ("args",), "inter": ("args",),
+              "complement": ("arg",), "repeat": ("arg", "min", "max")}
+#: the language of every string, which an intersection drops
+_EVERY_STRING = {"op": "repeat", "arg": {"op": "chars", "ranges": [[0, MAX_CODE_POINT]]},
+                 "min": 0, "max": None}
+
+
+def _code_point(value, where: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) \
+            or not 0 <= value <= MAX_CODE_POINT:
+        raise InvalidTerm(f"{where}: {value!r} is not a code point (a whole number "
+                          f"from 0 to {MAX_CODE_POINT})")
+    return value
+
+
 def _ranges(raw, where: str) -> list:
-    """Inclusive code point ranges, checked, sorted and merged."""
+    """Inclusive code point ranges, checked, sorted and merged with
+    their overlapping and adjacent neighbours."""
     if not isinstance(raw, list):
         raise InvalidTerm(f"{where}: ranges must be a list of [lo, hi] pairs")
     pairs = []
     for pair in raw:
-        if (not isinstance(pair, (list, tuple)) or len(pair) != 2
-                or not all(isinstance(v, int) and not isinstance(v, bool) for v in pair)
-                or not 0 <= pair[0] <= pair[1] <= MAX_CODE_POINT):
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
             raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
-        pairs.append((pair[0], pair[1]))
+        lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
+        if lo > hi:
+            raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
+        pairs.append((lo, hi))
     merged: list = []
     for lo, hi in sorted(pairs):
         if merged and lo <= merged[-1][1] + 1:
@@ -83,60 +102,113 @@ def _ranges(raw, where: str) -> list:
     return merged
 
 
+def _serial(value) -> str:
+    """The one serialisation of a canonical value: JSON with sorted
+    keys, no white space, ASCII only."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+
+
+def _once_sorted(args: list) -> list:
+    """Arguments kept once each, in the order of their serialisation."""
+    return [json.loads(text) for text in sorted({_serial(a) for a in args})]
+
+
 def canonical(node) -> dict:
     """Intent:
-        The canonical form of a node: ranges sorted and merged, a
-        `concat`, `union` or `inter` never nesting its own kind, no
-        `epsilon` inside a `concat`, a `concat` holding `empty` reduced
-        to `empty`, repeated arguments of a `union` or `inter` kept
-        once in first-seen order, and a one-argument `concat`, `union`
-        or `inter` reduced to that argument.
+        The canonical form of a node, its arguments made canonical
+        first, by these rules and no others.
+
+        1. `chars`: ranges sorted, overlapping and adjacent ones
+           merged; no range is `empty`; one range of one code point is
+           the `literal` of that code point.
+        2. `literal`: no code point is `epsilon`.
+        3. `concat`: nested concatenations flattened; `epsilon`
+           arguments dropped; any `empty` argument makes `empty`;
+           neighbouring literals joined; none left is `epsilon`; one
+           left is that argument.
+        4. `union`: nested unions flattened; `empty` arguments dropped;
+           equal arguments kept once; sorted by their serialisation;
+           none left is `empty`; one left is that argument.
+        5. `inter`: nested intersections flattened; any `empty`
+           argument makes `empty`; the every-string node dropped; equal
+           arguments kept once; sorted as a union's; none left is the
+           every-string node; one left is that argument.
+        6. `repeat`: `max` 0 is `epsilon`; of `epsilon` is `epsilon`;
+           of `empty` is `epsilon` when `min` is 0, else `empty`;
+           `min` and `max` both 1 is the argument.
+        7. `complement`, `epsilon` and `empty` are unchanged.
 
     Raises:
-        InvalidTerm: the node is not of the schema.
+        InvalidTerm: the node is not of the schema: an unknown
+            operation, a key the operation does not hold, a code point
+            that is not a whole number from 0 to 1114111, a range out
+            of order, or a count that is not a whole number.
     """
     if not isinstance(node, dict) or not isinstance(node.get("op"), str):
         raise InvalidTerm(f"{node!r} is not a node (an object with an 'op')")
     op = node["op"]
+    if op not in _NODE_KEYS:
+        raise InvalidTerm(f"{op!r} is not a regular-language operation")
+    if set(node) != {"op", *_NODE_KEYS[op]}:
+        raise InvalidTerm(f"{op}: a node holds exactly the keys "
+                          f"{sorted(('op', *_NODE_KEYS[op]))}, not {sorted(node)}")
     if op in _LEAVES:
         return {"op": op}
     if op == "literal":
-        text = node.get("text")
-        if not isinstance(text, str):
-            raise InvalidTerm("literal: 'text' must be a string")
-        return {"op": "literal", "text": text} if text else {"op": "epsilon"}
+        codes = node["codes"]
+        if not isinstance(codes, list):
+            raise InvalidTerm("literal: 'codes' must be a list of code points")
+        codes = [_code_point(c, "literal") for c in codes]
+        return {"op": "literal", "codes": codes} if codes else {"op": "epsilon"}
     if op == "chars":
-        ranges = _ranges(node.get("ranges"), "chars")
-        return {"op": "chars", "ranges": ranges} if ranges else {"op": "empty"}
+        ranges = _ranges(node["ranges"], "chars")
+        if not ranges:
+            return {"op": "empty"}
+        if len(ranges) == 1 and ranges[0][0] == ranges[0][1]:
+            return {"op": "literal", "codes": [ranges[0][0]]}
+        return {"op": "chars", "ranges": ranges}
     if op == "complement":
-        return {"op": "complement", "arg": canonical(node.get("arg"))}
+        return {"op": "complement", "arg": canonical(node["arg"])}
     if op == "repeat":
-        lo, hi = node.get("min", 0), node.get("max")
+        lo, hi = node["min"], node["max"]
         if not isinstance(lo, int) or isinstance(lo, bool) or lo < 0 or not (
                 hi is None or (isinstance(hi, int) and not isinstance(hi, bool) and hi >= lo)):
             raise InvalidTerm(f"repeat: min {lo!r} and max {hi!r} are not a count range")
-        return {"op": "repeat", "arg": canonical(node.get("arg")), "min": lo, "max": hi}
-    if op in _MANY:
-        raw = node.get("args")
-        if not isinstance(raw, list) or not raw:
-            raise InvalidTerm(f"{op}: 'args' must be a list of nodes")
-        args: list = []
-        for arg in (canonical(a) for a in raw):
-            args.extend(arg["args"] if arg["op"] == op else [arg])
-        if op == "concat":
-            if any(a["op"] == "empty" for a in args):
-                return {"op": "empty"}
-            args = [a for a in args if a["op"] != "epsilon"]
-            if not args:
-                return {"op": "epsilon"}
-        else:
-            kept: list = []
-            for a in args:
-                if a not in kept:
-                    kept.append(a)
-            args = kept
-        return args[0] if len(args) == 1 else {"op": op, "args": args}
-    raise InvalidTerm(f"{op!r} is not a regular-language operation")
+        arg = canonical(node["arg"])
+        if hi == 0 or arg["op"] == "epsilon":
+            return {"op": "epsilon"}
+        if arg["op"] == "empty":
+            return {"op": "epsilon"} if lo == 0 else {"op": "empty"}
+        if lo == 1 and hi == 1:
+            return arg
+        return {"op": "repeat", "arg": arg, "min": lo, "max": hi}
+    raw = node["args"]
+    if not isinstance(raw, list):
+        raise InvalidTerm(f"{op}: 'args' must be a list of nodes")
+    args: list = []
+    for arg in (canonical(a) for a in raw):
+        args.extend(arg["args"] if arg["op"] == op else [arg])
+    if op == "concat":
+        if any(a["op"] == "empty" for a in args):
+            return {"op": "empty"}
+        joined: list = []
+        for a in args:
+            if a["op"] == "epsilon":
+                continue
+            if a["op"] == "literal" and joined and joined[-1]["op"] == "literal":
+                joined[-1] = {"op": "literal", "codes": joined[-1]["codes"] + a["codes"]}
+            else:
+                joined.append(a)
+        args, nothing = joined, {"op": "epsilon"}
+    elif op == "union":
+        args, nothing = _once_sorted([a for a in args if a["op"] != "empty"]), {"op": "empty"}
+    else:
+        if any(a["op"] == "empty" for a in args):
+            return {"op": "empty"}
+        args, nothing = _once_sorted([a for a in args if a != _EVERY_STRING]), _EVERY_STRING
+    if not args:
+        return json.loads(_serial(nothing))
+    return args[0] if len(args) == 1 else {"op": op, "args": args}
 
 
 def _closed(node: dict, alphabet: list) -> dict:
@@ -157,13 +229,22 @@ def _closed(node: dict, alphabet: list) -> dict:
 
 
 def _read(document) -> tuple:
-    """`(alphabet, exact, at_most, at_least)` of a checked document,
-    the nodes canonical."""
+    """`(alphabet, exact, at_most, at_least)` of a definition this
+    module decides questions about: of this kind and version, the
+    nodes canonical."""
     if not isinstance(document, dict) or document.get("kind") != KIND:
         raise InvalidTerm(f"not a {KIND} definition")
-    if document.get("version") != VERSION:
+    if document.get("version") != VERSION or isinstance(document.get("version"), bool):
         raise InvalidTerm(f"{KIND} version {document.get('version')!r} is not read; "
                           f"this reads version {VERSION}")
+    return _meaning(document)
+
+
+def _meaning(document) -> tuple:
+    """`(alphabet, exact, at_most, at_least)` of a document's meaning,
+    whatever kind and version it states, the nodes canonical."""
+    if not isinstance(document, dict):
+        raise InvalidTerm("a definition is an object")
     alphabet = _ranges(document.get("alphabet"), "alphabet")
     exact = document.get("exact")
     if exact is True and "language" in document:
@@ -178,16 +259,22 @@ def _read(document) -> tuple:
 
 def bounds(document) -> tuple:
     """Intent:
-        `(at_most, at_least)` for a definition, as canonical nodes that
-        read the same over any alphabet holding the definition's own:
-        a language holding only members, and one holding every member.
-        They are one node when the definition is exact.
+        `(at_most, at_least)` for a definition, as nodes that read the
+        same over any alphabet holding the definition's own: a language
+        holding only members, and one holding every member. They are
+        one node when the definition is exact. A node may name code
+        points outside the alphabet; the language is the node met with
+        every string over the alphabet.
 
     Raises:
         InvalidTerm: the document is not of the schema.
     """
     alphabet, _, at_most, at_least = _read(document)
-    return _closed(at_most, alphabet), _closed(at_least, alphabet)
+    if alphabet == [[0, MAX_CODE_POINT]]:
+        return at_most, at_least
+    over = {"op": "repeat", "arg": {"op": "chars", "ranges": alphabet}, "min": 0, "max": None}
+    return ({"op": "inter", "args": [_closed(at_most, alphabet), over]},
+            {"op": "inter", "args": [_closed(at_least, alphabet), over]})
 
 
 def alphabet_of(document) -> list:
@@ -205,24 +292,41 @@ def is_definition(document) -> bool:
     return True
 
 
+def canonical_text(document) -> str:
+    """Intent:
+        The text a definition's hash is taken of: the serialisation
+        (JSON, sorted keys, no white space, ASCII only) of its version,
+        its alphabet with the ranges sorted and merged, its exact flag
+        and its canonical node or two bounds. `kind`, `source` and any
+        other key are not in it, so a document of another kind or a
+        later version has a text and a hash too; only `bounds` and the
+        questions asked of a definition require this kind and version.
+
+    Raises:
+        InvalidTerm: the document is not of the schema.
+    """
+    alphabet, exact, at_most, at_least = _meaning(document)
+    version = document.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise InvalidTerm(f"the version {version!r} is not a whole number")
+    meaning: dict = {"version": version, "alphabet": alphabet, "exact": exact}
+    if exact:
+        meaning["language"] = at_most
+    else:
+        meaning["at_least"], meaning["at_most"] = at_least, at_most
+    return _serial(meaning)
+
+
 def term_hash(document) -> str:
     """Intent:
-        The identity of a definition's meaning, a sha256 hex digest of
-        its alphabet, its exact flag and its canonical nodes; `source`
-        and any other key are not read, so the same language compiled
+        The identity of a definition's meaning: the SHA-256, in lower
+        case hex, of its `canonical_text`. The same language compiled
         from another spelling or on another runtime hashes the same.
 
     Raises:
         InvalidTerm: the document is not of the schema.
     """
-    alphabet, exact, at_most, at_least = _read(document)
-    meaning: dict = {"kind": KIND, "version": VERSION, "alphabet": alphabet, "exact": exact}
-    if exact:
-        meaning["language"] = at_most
-    else:
-        meaning["at_least"], meaning["at_most"] = at_least, at_most
-    text = json.dumps(meaning, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("ascii")).hexdigest()
+    return hashlib.sha256(canonical_text(document).encode("ascii")).hexdigest()
 
 
 # ---- atoms ------------------------------------------------------------
@@ -235,8 +339,8 @@ def _char_sets(node: dict, into: list) -> None:
         if node["ranges"] not in into:
             into.append(node["ranges"])
     elif op == "literal":
-        for ch in node["text"]:
-            one = [[ord(ch), ord(ch)]]
+        for code in node["codes"]:
+            one = [[code, code]]
             if one not in into:
                 into.append(one)
     elif op in ("complement", "repeat"):
@@ -333,7 +437,7 @@ class _Lowering:
         if op == "epsilon":
             return z3.Re(z3.StringVal(""))
         if op == "literal":
-            atoms = [self._atom_at(ord(ch)) for ch in node["text"]]
+            atoms = [self._atom_at(code) for code in node["codes"]]
             if any(a is None for a in atoms):
                 return z3.Empty(self.sort)
             return z3.Re(z3.StringVal("".join(self._symbol(a) for a in atoms)))
@@ -422,4 +526,5 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
 
 
 __all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "bounds", "canonical",
+           "canonical_text",
            "find_member", "is_definition", "term_hash"]

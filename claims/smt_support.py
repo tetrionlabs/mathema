@@ -54,7 +54,8 @@ def literal_hash(text: str, note: str) -> str:
     """The hash of the definition holding exactly `text`, compiled from
     a source described by `note`."""
     return _load("regular").term_hash(
-        _document({"op": "literal", "text": text}, {"dialect": "by hand", "pattern": note}))
+        _document({"op": "literal", "codes": [ord(c) for c in text]},
+                  {"dialect": "by hand", "pattern": note}))
 
 
 def canonical_twice_is_canonical(a: int, b: int, shape: int) -> bool:
@@ -64,7 +65,7 @@ def canonical_twice_is_canonical(a: int, b: int, shape: int) -> bool:
     regular = _load("regular")
     lo, hi = sorted((int(a), int(b)))
     chars = {"op": "chars", "ranges": [[hi, hi], [lo, hi]]}
-    letter = {"op": "literal", "text": chr(lo)}
+    letter = {"op": "literal", "codes": [lo]}
     nodes = [
         {"op": "concat", "args": [letter, {"op": "concat", "args": [chars, {"op": "epsilon"}]}]},
         {"op": "union", "args": [chars, {"op": "union", "args": [letter, chars]}]},

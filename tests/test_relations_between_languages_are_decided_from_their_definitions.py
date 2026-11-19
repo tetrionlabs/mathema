@@ -19,7 +19,7 @@ pytest.importorskip("z3")
 ALL = [[0, 0x10FFFF]]
 LOWER = {"op": "chars", "ranges": [[97, 122]]}
 DIGIT = {"op": "chars", "ranges": [[48, 57]]}
-DASH = {"op": "literal", "text": "-"}
+DASH = {"op": "literal", "codes": [45]}
 
 
 def _plus(node):
@@ -28,7 +28,7 @@ def _plus(node):
 
 SLUG = _plus({"op": "union", "args": [LOWER, DIGIT, DASH]})
 SLUG_DOLLAR = {"op": "concat", "args": [
-    SLUG, {"op": "repeat", "arg": {"op": "literal", "text": "\n"}, "min": 0, "max": 1}]}
+    SLUG, {"op": "repeat", "arg": {"op": "literal", "codes": [10]}, "min": 0, "max": 1}]}
 ANY = {"op": "repeat", "arg": {"op": "chars", "ranges": ALL}, "min": 0, "max": None}
 
 

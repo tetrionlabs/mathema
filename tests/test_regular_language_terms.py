@@ -22,7 +22,7 @@ def chars(*ranges):
 
 
 def lit(text):
-    return {"op": "literal", "text": text}
+    return {"op": "literal", "codes": [ord(c) for c in text]}
 
 
 def cat(*args):
@@ -81,11 +81,13 @@ def test_an_inexact_definition_hashes_both_bounds():
     doc({"op": "lookahead", "arg": SLUG}),
     doc(chars((122, 97))),
     doc(rep(LOWER, 3, 1)),
+    doc({"op": "literal", "text": "a"}),
     {"kind": "regular_language", "version": 1, "alphabet": ALL, "exact": True},
 ])
-def test_a_document_outside_the_schema_is_refused(bad):
+def test_a_document_outside_the_schema_is_not_a_definition_questions_are_asked_of(bad):
     with pytest.raises(regular.InvalidTerm):
-        regular.term_hash(bad)
+        regular.bounds(bad)
+    assert not regular.is_definition(bad)
 
 
 def test_no_string_is_in_the_slug_and_outside_the_slug_with_a_final_newline():

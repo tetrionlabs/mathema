@@ -1,0 +1,5334 @@
+{
+ "schema": "regular_language",
+ "version": 1,
+ "hash": "sha256 of canonical",
+ "vectors": [
+  {
+   "name": "the empty language",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "the empty string",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "epsilon"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "a literal",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      97,
+      98
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97,98],\"op\":\"literal\"},\"version\":1}",
+   "hash": "86163d63ca7680d36f6755788d6f8aff26f77f45bf447e2784b7ffe9c86a521f"
+  },
+  {
+   "name": "an empty literal is epsilon",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": []
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "a one-character set is a literal",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       97,
+       97
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "ranges sorted and merged",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       100,
+       120
+      ],
+      [
+       97,
+       99
+      ],
+      [
+       110,
+       130
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[97,130]]},\"version\":1}",
+   "hash": "1cb97bcc90a7b3d6b23f3a74222379e4d3a75caba5eaacdd596c5a727aba7323"
+  },
+  {
+   "name": "adjacent ranges merged",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       97,
+       98
+      ],
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[97,100]]},\"version\":1}",
+   "hash": "31ca86cf3a1376a3d1bc31edf0e4b189dab625b5d402f41abaaac2a1bef74706"
+  },
+  {
+   "name": "no ranges is empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": []
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "neighbouring literals join",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      },
+      {
+       "op": "chars",
+       "ranges": [
+        [
+         99,
+         99
+        ]
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97,98,99],\"op\":\"literal\"},\"version\":1}",
+   "hash": "e760aa4155f8f6855e729bfaf30cc8830dde3e0546b06d43e597c88909b40e00"
+  },
+  {
+   "name": "literals apart stay apart",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "chars",
+       "ranges": [
+        [
+         48,
+         57
+        ]
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"op\":\"chars\",\"ranges\":[[48,57]]},{\"codes\":[98],\"op\":\"literal\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "b8b36f9782bcda02e9bb05848d3412e7d32a6dfe3d9a841fdc84a47ec4b63de6"
+  },
+  {
+   "name": "nested concat flattens",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "concat",
+       "args": [
+        {
+         "op": "chars",
+         "ranges": [
+          [
+           48,
+           57
+          ]
+         ]
+        },
+        {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            98
+           ]
+          },
+          {
+           "op": "literal",
+           "codes": [
+            99
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"op\":\"chars\",\"ranges\":[[48,57]]},{\"codes\":[98,99],\"op\":\"literal\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "c9bc6c3bb357408eabb884792d0f8fc8dd1da9289f575dfebe1f0bb2858e5574"
+  },
+  {
+   "name": "epsilon drops from concat",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "epsilon"
+      },
+      {
+       "op": "chars",
+       "ranges": [
+        [
+         48,
+         57
+        ]
+       ]
+      },
+      {
+       "op": "epsilon"
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[48,57]]},\"version\":1}",
+   "hash": "3bdbf4f94391e44eceaa823a2d2e23a9639db2476dc167d725201cc3c0028777"
+  },
+  {
+   "name": "empty in concat is empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "empty"
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "concat of nothing is epsilon",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": []
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "concat of one is that one",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "chars",
+       "ranges": [
+        [
+         48,
+         57
+        ]
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[48,57]]},\"version\":1}",
+   "hash": "3bdbf4f94391e44eceaa823a2d2e23a9639db2476dc167d725201cc3c0028777"
+  },
+  {
+   "name": "union sorted",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"codes\":[98],\"op\":\"literal\"}],\"op\":\"union\"},\"version\":1}",
+   "hash": "9e63845d92a56c15b20e2270386f0beda449488212a0cf2f2a9783085cf6a477"
+  },
+  {
+   "name": "union sorted the other way",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"codes\":[98],\"op\":\"literal\"}],\"op\":\"union\"},\"version\":1}",
+   "hash": "9e63845d92a56c15b20e2270386f0beda449488212a0cf2f2a9783085cf6a477"
+  },
+  {
+   "name": "union deduplicated",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "chars",
+       "ranges": [
+        [
+         97,
+         97
+        ]
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "nested union flattens",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        99
+       ]
+      },
+      {
+       "op": "union",
+       "args": [
+        {
+         "op": "literal",
+         "codes": [
+          97
+         ]
+        },
+        {
+         "op": "union",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            98
+           ]
+          },
+          {
+           "op": "epsilon"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"codes\":[98],\"op\":\"literal\"},{\"codes\":[99],\"op\":\"literal\"},{\"op\":\"epsilon\"}],\"op\":\"union\"},\"version\":1}",
+   "hash": "956833fec76267ffe3ae323e5dfcfca7051b7b5ce5764e4a98be6537d1b0dbb8"
+  },
+  {
+   "name": "empty drops from union",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "empty"
+      },
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "empty"
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "union of nothing is empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": []
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "nested inter flattens",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          97,
+          122
+         ]
+        ]
+       },
+       "min": 1,
+       "max": null
+      },
+      {
+       "op": "inter",
+       "args": [
+        {
+         "op": "complement",
+         "arg": {
+          "op": "concat",
+          "args": [
+           {
+            "op": "repeat",
+            "arg": {
+             "op": "chars",
+             "ranges": [
+              [
+               0,
+               1114111
+              ]
+             ]
+            },
+            "min": 0,
+            "max": null
+           },
+           {
+            "op": "literal",
+            "codes": [
+             120
+            ]
+           },
+           {
+            "op": "repeat",
+            "arg": {
+             "op": "chars",
+             "ranges": [
+              [
+               0,
+               1114111
+              ]
+             ]
+            },
+            "min": 0,
+            "max": null
+           }
+          ]
+         }
+        },
+        {
+         "op": "inter",
+         "args": [
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              0,
+              1114111
+             ]
+            ]
+           },
+           "min": 0,
+           "max": 5
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              97,
+              122
+             ]
+            ]
+           },
+           "min": 1,
+           "max": null
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},{\"codes\":[120],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"complement\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":5,\"min\":0,\"op\":\"repeat\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "f363febba12f5dd3d250e7520b66387bb9451179ed10d01b14cd6a5f75c42ad4"
+  },
+  {
+   "name": "inter drops every string",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          0,
+          1114111
+         ]
+        ]
+       },
+       "min": 0,
+       "max": null
+      },
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          97,
+          122
+         ]
+        ]
+       },
+       "min": 1,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "270482f9172ce10a90606894f2975d2c22ea08981db4d203360a9c7036aead54"
+  },
+  {
+   "name": "inter of every string alone",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          0,
+          1114111
+         ]
+        ]
+       },
+       "min": 0,
+       "max": null
+      },
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          0,
+          1114111
+         ]
+        ]
+       },
+       "min": 0,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "58dbbd588979e551905e19b2b6530645792ca1bdd4c15c7e572630e90e4f2978"
+  },
+  {
+   "name": "inter with empty is empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "empty"
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "inter of nothing is every string",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": []
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "58dbbd588979e551905e19b2b6530645792ca1bdd4c15c7e572630e90e4f2978"
+  },
+  {
+   "name": "complement kept",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "complement",
+      "arg": {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      }
+     }
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"arg\":{\"codes\":[97],\"op\":\"literal\"},\"op\":\"complement\"},\"op\":\"complement\"},\"version\":1}",
+   "hash": "38710445613862c7d3c20e16b0aa6ee204256243311d77fb0f87a5fcb4dbf9c0"
+  },
+  {
+   "name": "complement of empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"empty\"},\"op\":\"complement\"},\"version\":1}",
+   "hash": "431dcce90e0349b8ef5dee7e7f4c48385b898c3eb0d7b2fabe0ac4964d79a734"
+  },
+  {
+   "name": "repeat kept",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "chars",
+      "ranges": [
+       [
+        97,
+        122
+       ]
+      ]
+     },
+     "min": 2,
+     "max": 5
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[97,122]]},\"max\":5,\"min\":2,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "396cdbfc0c5e1171a795d289277ea4fc2a9907efe47e3c804f2777cfc50f5b04"
+  },
+  {
+   "name": "unbounded repeat",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97,
+       98
+      ]
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"codes\":[97,98],\"op\":\"literal\"},\"max\":null,\"min\":0,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "ab24543eea93373516161e832691a30d6361cf8e1418d6a3b3986177d81f6c55"
+  },
+  {
+   "name": "repeat to zero is epsilon",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": 0,
+     "max": 0
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "repeat once is the argument",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "chars",
+      "ranges": [
+       [
+        48,
+        57
+       ]
+      ]
+     },
+     "min": 1,
+     "max": 1
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[48,57]]},\"version\":1}",
+   "hash": "3bdbf4f94391e44eceaa823a2d2e23a9639db2476dc167d725201cc3c0028777"
+  },
+  {
+   "name": "repeat of epsilon is epsilon",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "epsilon"
+     },
+     "min": 3,
+     "max": null
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "repeat of empty from zero is epsilon",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "empty"
+     },
+     "min": 0,
+     "max": 4
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"epsilon\"},\"version\":1}",
+   "hash": "1650bd4d337f609708fc9eae8fdf12f60f12dc571bd27bce919518e942f8aeab"
+  },
+  {
+   "name": "repeat of empty from one is empty",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "empty"
+     },
+     "min": 1,
+     "max": 4
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "37bde904e8c4ff7a25068fac8f29612d61d15357849e4a6f71790a7cb7fbf6ac"
+  },
+  {
+   "name": "a surrogate pair as two code points",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      55357,
+      56832
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[55357,56832],\"op\":\"literal\"},\"version\":1}",
+   "hash": "813f05ccf73350c1e124fd79bc7a5435487fb3156998f97608efaf1693594b1d"
+  },
+  {
+   "name": "the character the pair encodes",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      128512
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[128512],\"op\":\"literal\"},\"version\":1}",
+   "hash": "7da75116fa3fec90ac750337db35f53b356fa446422791849516426c3b419416"
+  },
+  {
+   "name": "a lone surrogate in a set",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       55296,
+       57343
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[55296,57343]]},\"version\":1}",
+   "hash": "e9ecb82434a484be43bf0790c1cc97c63083841dd3142bbe0855ef695a038546"
+  },
+  {
+   "name": "the alphabet of code units",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      65535
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "chars",
+      "ranges": [
+       [
+        0,
+        65535
+       ]
+      ]
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,65535]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,65535]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "e4cd06dbfbc8cdd4f31918544d04111364d72e684431174431da2e95920c8007"
+  },
+  {
+   "name": "an alphabet given in pieces",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      128,
+      1114111
+     ],
+     [
+      0,
+      127
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      97
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "version is hashed",
+   "document": {
+    "kind": "regular_language",
+    "version": 2,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      97
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":2}",
+   "hash": "2dfbe2bd5fa54314b3a5c33c1c815e75a70ef8d08b2931cba4e2409888336f44"
+  },
+  {
+   "name": "kind and source are not hashed",
+   "document": {
+    "kind": "other",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      97
+     ]
+    },
+    "source": {
+     "dialect": "python",
+     "pattern": "a"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "a bounded pair",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": false,
+    "at_least": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": 2,
+     "max": null
+    },
+    "at_most": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"at_least\":{\"arg\":{\"codes\":[97],\"op\":\"literal\"},\"max\":null,\"min\":2,\"op\":\"repeat\"},\"at_most\":{\"op\":\"empty\"},\"exact\":false,\"version\":1}",
+   "hash": "79738940fbe579d64c9ca04d41763fbe654c7605c5c9f0c075ae2cf9710f6809"
+  },
+  {
+   "name": "a bounded pair with a non-empty lower bound",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": false,
+    "at_least": {
+     "op": "union",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      }
+     ]
+    },
+    "at_most": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "epsilon"
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"at_least\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"codes\":[98],\"op\":\"literal\"}],\"op\":\"union\"},\"at_most\":{\"codes\":[97],\"op\":\"literal\"},\"exact\":false,\"version\":1}",
+   "hash": "b5cb5fdf15cb1ca5ca9bf62f9884aea3c756c0ced804063c2caa6ada993334e4"
+  },
+  {
+   "name": "python a$ contains",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "a$",
+     "flags": [],
+     "predicate": "contains",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          0,
+          1114111
+         ]
+        ]
+       },
+       "min": 0,
+       "max": null
+      },
+      {
+       "op": "literal",
+       "codes": [
+        97
+       ]
+      },
+      {
+       "op": "union",
+       "args": [
+        {
+         "op": "literal",
+         "codes": [
+          10
+         ]
+        },
+        {
+         "op": "epsilon"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},{\"codes\":[97],\"op\":\"literal\"},{\"args\":[{\"codes\":[10],\"op\":\"literal\"},{\"op\":\"epsilon\"}],\"op\":\"union\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "a9b6e84d69a29357ea07ee2f1d7ad93c9b45842e5a72a41a8ec844a480949935"
+  },
+  {
+   "name": "python \\Aa\\Z matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "\\Aa\\Z",
+     "flags": [],
+     "predicate": "matches",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "literal",
+     "codes": [
+      97
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"codes\":[97],\"op\":\"literal\"},\"version\":1}",
+   "hash": "36cb977645954e983dd2cc86064c09657b46b232e162d88d1e9fe2417fafc232"
+  },
+  {
+   "name": "python [a-z0-9]+(?:-[a-z0-9]+)* matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "[a-z0-9]+(?:-[a-z0-9]+)*",
+     "flags": [],
+     "predicate": "matches",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          48,
+          57
+         ],
+         [
+          97,
+          122
+         ]
+        ]
+       },
+       "min": 1,
+       "max": null
+      },
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "concat",
+        "args": [
+         {
+          "op": "literal",
+          "codes": [
+           45
+          ]
+         },
+         {
+          "op": "repeat",
+          "arg": {
+           "op": "chars",
+           "ranges": [
+            [
+             48,
+             57
+            ],
+            [
+             97,
+             122
+            ]
+           ]
+          },
+          "min": 1,
+          "max": null
+         }
+        ]
+       },
+       "min": 0,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"},{\"arg\":{\"args\":[{\"codes\":[45],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "5babca7af0527a674d83e819b06afdedcba20e6431f5aad4343563d64a1fd40f"
+  },
+  {
+   "name": "python (?i)k matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "(?i)k",
+     "flags": [
+      "ignore case"
+     ],
+     "predicate": "matches",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       75,
+       75
+      ],
+      [
+       107,
+       107
+      ],
+      [
+       8490,
+       8490
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[75,75],[107,107],[8490,8490]]},\"version\":1}",
+   "hash": "106a6b61d76e94e3b029195e01e6110492ce400725276c451ad5f21777d25de7"
+  },
+  {
+   "name": "python \\bx contains",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "\\bx",
+     "flags": [],
+     "predicate": "contains",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "union",
+       "args": [
+        {
+         "op": "concat",
+         "args": [
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              0,
+              1114111
+             ]
+            ]
+           },
+           "min": 0,
+           "max": null
+          },
+          {
+           "op": "chars",
+           "ranges": [
+            [
+             0,
+             47
+            ],
+            [
+             58,
+             64
+            ],
+            [
+             91,
+             94
+            ],
+            [
+             96,
+             96
+            ],
+            [
+             123,
+             169
+            ],
+            [
+             171,
+             177
+            ],
+            [
+             180,
+             180
+            ],
+            [
+             182,
+             184
+            ],
+            [
+             187,
+             187
+            ],
+            [
+             191,
+             191
+            ],
+            [
+             215,
+             215
+            ],
+            [
+             247,
+             247
+            ],
+            [
+             706,
+             709
+            ],
+            [
+             722,
+             735
+            ],
+            [
+             741,
+             747
+            ],
+            [
+             749,
+             749
+            ],
+            [
+             751,
+             879
+            ],
+            [
+             885,
+             885
+            ],
+            [
+             888,
+             889
+            ],
+            [
+             894,
+             894
+            ],
+            [
+             896,
+             901
+            ],
+            [
+             903,
+             903
+            ],
+            [
+             907,
+             907
+            ],
+            [
+             909,
+             909
+            ],
+            [
+             930,
+             930
+            ],
+            [
+             1014,
+             1014
+            ],
+            [
+             1154,
+             1161
+            ],
+            [
+             1328,
+             1328
+            ],
+            [
+             1367,
+             1368
+            ],
+            [
+             1370,
+             1375
+            ],
+            [
+             1417,
+             1487
+            ],
+            [
+             1515,
+             1518
+            ],
+            [
+             1523,
+             1567
+            ],
+            [
+             1611,
+             1631
+            ],
+            [
+             1642,
+             1645
+            ],
+            [
+             1648,
+             1648
+            ],
+            [
+             1748,
+             1748
+            ],
+            [
+             1750,
+             1764
+            ],
+            [
+             1767,
+             1773
+            ],
+            [
+             1789,
+             1790
+            ],
+            [
+             1792,
+             1807
+            ],
+            [
+             1809,
+             1809
+            ],
+            [
+             1840,
+             1868
+            ],
+            [
+             1958,
+             1968
+            ],
+            [
+             1970,
+             1983
+            ],
+            [
+             2027,
+             2035
+            ],
+            [
+             2038,
+             2041
+            ],
+            [
+             2043,
+             2047
+            ],
+            [
+             2070,
+             2073
+            ],
+            [
+             2075,
+             2083
+            ],
+            [
+             2085,
+             2087
+            ],
+            [
+             2089,
+             2111
+            ],
+            [
+             2137,
+             2143
+            ],
+            [
+             2155,
+             2159
+            ],
+            [
+             2184,
+             2184
+            ],
+            [
+             2191,
+             2207
+            ],
+            [
+             2250,
+             2307
+            ],
+            [
+             2362,
+             2364
+            ],
+            [
+             2366,
+             2383
+            ],
+            [
+             2385,
+             2391
+            ],
+            [
+             2402,
+             2405
+            ],
+            [
+             2416,
+             2416
+            ],
+            [
+             2433,
+             2436
+            ],
+            [
+             2445,
+             2446
+            ],
+            [
+             2449,
+             2450
+            ],
+            [
+             2473,
+             2473
+            ],
+            [
+             2481,
+             2481
+            ],
+            [
+             2483,
+             2485
+            ],
+            [
+             2490,
+             2492
+            ],
+            [
+             2494,
+             2509
+            ],
+            [
+             2511,
+             2523
+            ],
+            [
+             2526,
+             2526
+            ],
+            [
+             2530,
+             2533
+            ],
+            [
+             2546,
+             2547
+            ],
+            [
+             2554,
+             2555
+            ],
+            [
+             2557,
+             2564
+            ],
+            [
+             2571,
+             2574
+            ],
+            [
+             2577,
+             2578
+            ],
+            [
+             2601,
+             2601
+            ],
+            [
+             2609,
+             2609
+            ],
+            [
+             2612,
+             2612
+            ],
+            [
+             2615,
+             2615
+            ],
+            [
+             2618,
+             2648
+            ],
+            [
+             2653,
+             2653
+            ],
+            [
+             2655,
+             2661
+            ],
+            [
+             2672,
+             2673
+            ],
+            [
+             2677,
+             2692
+            ],
+            [
+             2702,
+             2702
+            ],
+            [
+             2706,
+             2706
+            ],
+            [
+             2729,
+             2729
+            ],
+            [
+             2737,
+             2737
+            ],
+            [
+             2740,
+             2740
+            ],
+            [
+             2746,
+             2748
+            ],
+            [
+             2750,
+             2767
+            ],
+            [
+             2769,
+             2783
+            ],
+            [
+             2786,
+             2789
+            ],
+            [
+             2800,
+             2808
+            ],
+            [
+             2810,
+             2820
+            ],
+            [
+             2829,
+             2830
+            ],
+            [
+             2833,
+             2834
+            ],
+            [
+             2857,
+             2857
+            ],
+            [
+             2865,
+             2865
+            ],
+            [
+             2868,
+             2868
+            ],
+            [
+             2874,
+             2876
+            ],
+            [
+             2878,
+             2907
+            ],
+            [
+             2910,
+             2910
+            ],
+            [
+             2914,
+             2917
+            ],
+            [
+             2928,
+             2928
+            ],
+            [
+             2936,
+             2946
+            ],
+            [
+             2948,
+             2948
+            ],
+            [
+             2955,
+             2957
+            ],
+            [
+             2961,
+             2961
+            ],
+            [
+             2966,
+             2968
+            ],
+            [
+             2971,
+             2971
+            ],
+            [
+             2973,
+             2973
+            ],
+            [
+             2976,
+             2978
+            ],
+            [
+             2981,
+             2983
+            ],
+            [
+             2987,
+             2989
+            ],
+            [
+             3002,
+             3023
+            ],
+            [
+             3025,
+             3045
+            ],
+            [
+             3059,
+             3076
+            ],
+            [
+             3085,
+             3085
+            ],
+            [
+             3089,
+             3089
+            ],
+            [
+             3113,
+             3113
+            ],
+            [
+             3130,
+             3132
+            ],
+            [
+             3134,
+             3159
+            ],
+            [
+             3163,
+             3164
+            ],
+            [
+             3166,
+             3167
+            ],
+            [
+             3170,
+             3173
+            ],
+            [
+             3184,
+             3191
+            ],
+            [
+             3199,
+             3199
+            ],
+            [
+             3201,
+             3204
+            ],
+            [
+             3213,
+             3213
+            ],
+            [
+             3217,
+             3217
+            ],
+            [
+             3241,
+             3241
+            ],
+            [
+             3252,
+             3252
+            ],
+            [
+             3258,
+             3260
+            ],
+            [
+             3262,
+             3292
+            ],
+            [
+             3295,
+             3295
+            ],
+            [
+             3298,
+             3301
+            ],
+            [
+             3312,
+             3312
+            ],
+            [
+             3315,
+             3331
+            ],
+            [
+             3341,
+             3341
+            ],
+            [
+             3345,
+             3345
+            ],
+            [
+             3387,
+             3388
+            ],
+            [
+             3390,
+             3405
+            ],
+            [
+             3407,
+             3411
+            ],
+            [
+             3415,
+             3415
+            ],
+            [
+             3426,
+             3429
+            ],
+            [
+             3449,
+             3449
+            ],
+            [
+             3456,
+             3460
+            ],
+            [
+             3479,
+             3481
+            ],
+            [
+             3506,
+             3506
+            ],
+            [
+             3516,
+             3516
+            ],
+            [
+             3518,
+             3519
+            ],
+            [
+             3527,
+             3557
+            ],
+            [
+             3568,
+             3584
+            ],
+            [
+             3633,
+             3633
+            ],
+            [
+             3636,
+             3647
+            ],
+            [
+             3655,
+             3663
+            ],
+            [
+             3674,
+             3712
+            ],
+            [
+             3715,
+             3715
+            ],
+            [
+             3717,
+             3717
+            ],
+            [
+             3723,
+             3723
+            ],
+            [
+             3748,
+             3748
+            ],
+            [
+             3750,
+             3750
+            ],
+            [
+             3761,
+             3761
+            ],
+            [
+             3764,
+             3772
+            ],
+            [
+             3774,
+             3775
+            ],
+            [
+             3781,
+             3781
+            ],
+            [
+             3783,
+             3791
+            ],
+            [
+             3802,
+             3803
+            ],
+            [
+             3808,
+             3839
+            ],
+            [
+             3841,
+             3871
+            ],
+            [
+             3892,
+             3903
+            ],
+            [
+             3912,
+             3912
+            ],
+            [
+             3949,
+             3975
+            ],
+            [
+             3981,
+             4095
+            ],
+            [
+             4139,
+             4158
+            ],
+            [
+             4170,
+             4175
+            ],
+            [
+             4182,
+             4185
+            ],
+            [
+             4190,
+             4192
+            ],
+            [
+             4194,
+             4196
+            ],
+            [
+             4199,
+             4205
+            ],
+            [
+             4209,
+             4212
+            ],
+            [
+             4226,
+             4237
+            ],
+            [
+             4239,
+             4239
+            ],
+            [
+             4250,
+             4255
+            ],
+            [
+             4294,
+             4294
+            ],
+            [
+             4296,
+             4300
+            ],
+            [
+             4302,
+             4303
+            ],
+            [
+             4347,
+             4347
+            ],
+            [
+             4681,
+             4681
+            ],
+            [
+             4686,
+             4687
+            ],
+            [
+             4695,
+             4695
+            ],
+            [
+             4697,
+             4697
+            ],
+            [
+             4702,
+             4703
+            ],
+            [
+             4745,
+             4745
+            ],
+            [
+             4750,
+             4751
+            ],
+            [
+             4785,
+             4785
+            ],
+            [
+             4790,
+             4791
+            ],
+            [
+             4799,
+             4799
+            ],
+            [
+             4801,
+             4801
+            ],
+            [
+             4806,
+             4807
+            ],
+            [
+             4823,
+             4823
+            ],
+            [
+             4881,
+             4881
+            ],
+            [
+             4886,
+             4887
+            ],
+            [
+             4955,
+             4968
+            ],
+            [
+             4989,
+             4991
+            ],
+            [
+             5008,
+             5023
+            ],
+            [
+             5110,
+             5111
+            ],
+            [
+             5118,
+             5120
+            ],
+            [
+             5741,
+             5742
+            ],
+            [
+             5760,
+             5760
+            ],
+            [
+             5787,
+             5791
+            ],
+            [
+             5867,
+             5869
+            ],
+            [
+             5881,
+             5887
+            ],
+            [
+             5906,
+             5918
+            ],
+            [
+             5938,
+             5951
+            ],
+            [
+             5970,
+             5983
+            ],
+            [
+             5997,
+             5997
+            ],
+            [
+             6001,
+             6015
+            ],
+            [
+             6068,
+             6102
+            ],
+            [
+             6104,
+             6107
+            ],
+            [
+             6109,
+             6111
+            ],
+            [
+             6122,
+             6127
+            ],
+            [
+             6138,
+             6159
+            ],
+            [
+             6170,
+             6175
+            ],
+            [
+             6265,
+             6271
+            ],
+            [
+             6277,
+             6278
+            ],
+            [
+             6313,
+             6313
+            ],
+            [
+             6315,
+             6319
+            ],
+            [
+             6390,
+             6399
+            ],
+            [
+             6431,
+             6469
+            ],
+            [
+             6510,
+             6511
+            ],
+            [
+             6517,
+             6527
+            ],
+            [
+             6572,
+             6575
+            ],
+            [
+             6602,
+             6607
+            ],
+            [
+             6619,
+             6655
+            ],
+            [
+             6679,
+             6687
+            ],
+            [
+             6741,
+             6783
+            ],
+            [
+             6794,
+             6799
+            ],
+            [
+             6810,
+             6822
+            ],
+            [
+             6824,
+             6916
+            ],
+            [
+             6964,
+             6980
+            ],
+            [
+             6989,
+             6991
+            ],
+            [
+             7002,
+             7042
+            ],
+            [
+             7073,
+             7085
+            ],
+            [
+             7142,
+             7167
+            ],
+            [
+             7204,
+             7231
+            ],
+            [
+             7242,
+             7244
+            ],
+            [
+             7294,
+             7295
+            ],
+            [
+             7305,
+             7311
+            ],
+            [
+             7355,
+             7356
+            ],
+            [
+             7360,
+             7400
+            ],
+            [
+             7405,
+             7405
+            ],
+            [
+             7412,
+             7412
+            ],
+            [
+             7415,
+             7417
+            ],
+            [
+             7419,
+             7423
+            ],
+            [
+             7616,
+             7679
+            ],
+            [
+             7958,
+             7959
+            ],
+            [
+             7966,
+             7967
+            ],
+            [
+             8006,
+             8007
+            ],
+            [
+             8014,
+             8015
+            ],
+            [
+             8024,
+             8024
+            ],
+            [
+             8026,
+             8026
+            ],
+            [
+             8028,
+             8028
+            ],
+            [
+             8030,
+             8030
+            ],
+            [
+             8062,
+             8063
+            ],
+            [
+             8117,
+             8117
+            ],
+            [
+             8125,
+             8125
+            ],
+            [
+             8127,
+             8129
+            ],
+            [
+             8133,
+             8133
+            ],
+            [
+             8141,
+             8143
+            ],
+            [
+             8148,
+             8149
+            ],
+            [
+             8156,
+             8159
+            ],
+            [
+             8173,
+             8177
+            ],
+            [
+             8181,
+             8181
+            ],
+            [
+             8189,
+             8303
+            ],
+            [
+             8306,
+             8307
+            ],
+            [
+             8314,
+             8318
+            ],
+            [
+             8330,
+             8335
+            ],
+            [
+             8349,
+             8449
+            ],
+            [
+             8451,
+             8454
+            ],
+            [
+             8456,
+             8457
+            ],
+            [
+             8468,
+             8468
+            ],
+            [
+             8470,
+             8472
+            ],
+            [
+             8478,
+             8483
+            ],
+            [
+             8485,
+             8485
+            ],
+            [
+             8487,
+             8487
+            ],
+            [
+             8489,
+             8489
+            ],
+            [
+             8494,
+             8494
+            ],
+            [
+             8506,
+             8507
+            ],
+            [
+             8512,
+             8516
+            ],
+            [
+             8522,
+             8525
+            ],
+            [
+             8527,
+             8527
+            ],
+            [
+             8586,
+             9311
+            ],
+            [
+             9372,
+             9449
+            ],
+            [
+             9472,
+             10101
+            ],
+            [
+             10132,
+             11263
+            ],
+            [
+             11493,
+             11498
+            ],
+            [
+             11503,
+             11505
+            ],
+            [
+             11508,
+             11516
+            ],
+            [
+             11518,
+             11519
+            ],
+            [
+             11558,
+             11558
+            ],
+            [
+             11560,
+             11564
+            ],
+            [
+             11566,
+             11567
+            ],
+            [
+             11624,
+             11630
+            ],
+            [
+             11632,
+             11647
+            ],
+            [
+             11671,
+             11679
+            ],
+            [
+             11687,
+             11687
+            ],
+            [
+             11695,
+             11695
+            ],
+            [
+             11703,
+             11703
+            ],
+            [
+             11711,
+             11711
+            ],
+            [
+             11719,
+             11719
+            ],
+            [
+             11727,
+             11727
+            ],
+            [
+             11735,
+             11735
+            ],
+            [
+             11743,
+             11822
+            ],
+            [
+             11824,
+             12292
+            ],
+            [
+             12296,
+             12320
+            ],
+            [
+             12330,
+             12336
+            ],
+            [
+             12342,
+             12343
+            ],
+            [
+             12349,
+             12352
+            ],
+            [
+             12439,
+             12444
+            ],
+            [
+             12448,
+             12448
+            ],
+            [
+             12539,
+             12539
+            ],
+            [
+             12544,
+             12548
+            ],
+            [
+             12592,
+             12592
+            ],
+            [
+             12687,
+             12689
+            ],
+            [
+             12694,
+             12703
+            ],
+            [
+             12736,
+             12783
+            ],
+            [
+             12800,
+             12831
+            ],
+            [
+             12842,
+             12871
+            ],
+            [
+             12880,
+             12880
+            ],
+            [
+             12896,
+             12927
+            ],
+            [
+             12938,
+             12976
+            ],
+            [
+             12992,
+             13311
+            ],
+            [
+             19904,
+             19967
+            ],
+            [
+             42125,
+             42191
+            ],
+            [
+             42238,
+             42239
+            ],
+            [
+             42509,
+             42511
+            ],
+            [
+             42540,
+             42559
+            ],
+            [
+             42607,
+             42622
+            ],
+            [
+             42654,
+             42655
+            ],
+            [
+             42736,
+             42774
+            ],
+            [
+             42784,
+             42785
+            ],
+            [
+             42889,
+             42890
+            ],
+            [
+             42955,
+             42959
+            ],
+            [
+             42962,
+             42962
+            ],
+            [
+             42964,
+             42964
+            ],
+            [
+             42970,
+             42993
+            ],
+            [
+             43010,
+             43010
+            ],
+            [
+             43014,
+             43014
+            ],
+            [
+             43019,
+             43019
+            ],
+            [
+             43043,
+             43055
+            ],
+            [
+             43062,
+             43071
+            ],
+            [
+             43124,
+             43137
+            ],
+            [
+             43188,
+             43215
+            ],
+            [
+             43226,
+             43249
+            ],
+            [
+             43256,
+             43258
+            ],
+            [
+             43260,
+             43260
+            ],
+            [
+             43263,
+             43263
+            ],
+            [
+             43302,
+             43311
+            ],
+            [
+             43335,
+             43359
+            ],
+            [
+             43389,
+             43395
+            ],
+            [
+             43443,
+             43470
+            ],
+            [
+             43482,
+             43487
+            ],
+            [
+             43493,
+             43493
+            ],
+            [
+             43519,
+             43519
+            ],
+            [
+             43561,
+             43583
+            ],
+            [
+             43587,
+             43587
+            ],
+            [
+             43596,
+             43599
+            ],
+            [
+             43610,
+             43615
+            ],
+            [
+             43639,
+             43641
+            ],
+            [
+             43643,
+             43645
+            ],
+            [
+             43696,
+             43696
+            ],
+            [
+             43698,
+             43700
+            ],
+            [
+             43703,
+             43704
+            ],
+            [
+             43710,
+             43711
+            ],
+            [
+             43713,
+             43713
+            ],
+            [
+             43715,
+             43738
+            ],
+            [
+             43742,
+             43743
+            ],
+            [
+             43755,
+             43761
+            ],
+            [
+             43765,
+             43776
+            ],
+            [
+             43783,
+             43784
+            ],
+            [
+             43791,
+             43792
+            ],
+            [
+             43799,
+             43807
+            ],
+            [
+             43815,
+             43815
+            ],
+            [
+             43823,
+             43823
+            ],
+            [
+             43867,
+             43867
+            ],
+            [
+             43882,
+             43887
+            ],
+            [
+             44003,
+             44015
+            ],
+            [
+             44026,
+             44031
+            ],
+            [
+             55204,
+             55215
+            ],
+            [
+             55239,
+             55242
+            ],
+            [
+             55292,
+             63743
+            ],
+            [
+             64110,
+             64111
+            ],
+            [
+             64218,
+             64255
+            ],
+            [
+             64263,
+             64274
+            ],
+            [
+             64280,
+             64284
+            ],
+            [
+             64286,
+             64286
+            ],
+            [
+             64297,
+             64297
+            ],
+            [
+             64311,
+             64311
+            ],
+            [
+             64317,
+             64317
+            ],
+            [
+             64319,
+             64319
+            ],
+            [
+             64322,
+             64322
+            ],
+            [
+             64325,
+             64325
+            ],
+            [
+             64434,
+             64466
+            ],
+            [
+             64830,
+             64847
+            ],
+            [
+             64912,
+             64913
+            ],
+            [
+             64968,
+             65007
+            ],
+            [
+             65020,
+             65135
+            ],
+            [
+             65141,
+             65141
+            ],
+            [
+             65277,
+             65295
+            ],
+            [
+             65306,
+             65312
+            ],
+            [
+             65339,
+             65344
+            ],
+            [
+             65371,
+             65381
+            ],
+            [
+             65471,
+             65473
+            ],
+            [
+             65480,
+             65481
+            ],
+            [
+             65488,
+             65489
+            ],
+            [
+             65496,
+             65497
+            ],
+            [
+             65501,
+             65535
+            ],
+            [
+             65548,
+             65548
+            ],
+            [
+             65575,
+             65575
+            ],
+            [
+             65595,
+             65595
+            ],
+            [
+             65598,
+             65598
+            ],
+            [
+             65614,
+             65615
+            ],
+            [
+             65630,
+             65663
+            ],
+            [
+             65787,
+             65798
+            ],
+            [
+             65844,
+             65855
+            ],
+            [
+             65913,
+             65929
+            ],
+            [
+             65932,
+             66175
+            ],
+            [
+             66205,
+             66207
+            ],
+            [
+             66257,
+             66272
+            ],
+            [
+             66300,
+             66303
+            ],
+            [
+             66340,
+             66348
+            ],
+            [
+             66379,
+             66383
+            ],
+            [
+             66422,
+             66431
+            ],
+            [
+             66462,
+             66463
+            ],
+            [
+             66500,
+             66503
+            ],
+            [
+             66512,
+             66512
+            ],
+            [
+             66518,
+             66559
+            ],
+            [
+             66718,
+             66719
+            ],
+            [
+             66730,
+             66735
+            ],
+            [
+             66772,
+             66775
+            ],
+            [
+             66812,
+             66815
+            ],
+            [
+             66856,
+             66863
+            ],
+            [
+             66916,
+             66927
+            ],
+            [
+             66939,
+             66939
+            ],
+            [
+             66955,
+             66955
+            ],
+            [
+             66963,
+             66963
+            ],
+            [
+             66966,
+             66966
+            ],
+            [
+             66978,
+             66978
+            ],
+            [
+             66994,
+             66994
+            ],
+            [
+             67002,
+             67002
+            ],
+            [
+             67005,
+             67071
+            ],
+            [
+             67383,
+             67391
+            ],
+            [
+             67414,
+             67423
+            ],
+            [
+             67432,
+             67455
+            ],
+            [
+             67462,
+             67462
+            ],
+            [
+             67505,
+             67505
+            ],
+            [
+             67515,
+             67583
+            ],
+            [
+             67590,
+             67591
+            ],
+            [
+             67593,
+             67593
+            ],
+            [
+             67638,
+             67638
+            ],
+            [
+             67641,
+             67643
+            ],
+            [
+             67645,
+             67646
+            ],
+            [
+             67670,
+             67671
+            ],
+            [
+             67703,
+             67704
+            ],
+            [
+             67743,
+             67750
+            ],
+            [
+             67760,
+             67807
+            ],
+            [
+             67827,
+             67827
+            ],
+            [
+             67830,
+             67834
+            ],
+            [
+             67868,
+             67871
+            ],
+            [
+             67898,
+             67967
+            ],
+            [
+             68024,
+             68027
+            ],
+            [
+             68048,
+             68049
+            ],
+            [
+             68097,
+             68111
+            ],
+            [
+             68116,
+             68116
+            ],
+            [
+             68120,
+             68120
+            ],
+            [
+             68150,
+             68159
+            ],
+            [
+             68169,
+             68191
+            ],
+            [
+             68223,
+             68223
+            ],
+            [
+             68256,
+             68287
+            ],
+            [
+             68296,
+             68296
+            ],
+            [
+             68325,
+             68330
+            ],
+            [
+             68336,
+             68351
+            ],
+            [
+             68406,
+             68415
+            ],
+            [
+             68438,
+             68439
+            ],
+            [
+             68467,
+             68471
+            ],
+            [
+             68498,
+             68520
+            ],
+            [
+             68528,
+             68607
+            ],
+            [
+             68681,
+             68735
+            ],
+            [
+             68787,
+             68799
+            ],
+            [
+             68851,
+             68857
+            ],
+            [
+             68900,
+             68911
+            ],
+            [
+             68922,
+             69215
+            ],
+            [
+             69247,
+             69247
+            ],
+            [
+             69290,
+             69295
+            ],
+            [
+             69298,
+             69375
+            ],
+            [
+             69416,
+             69423
+            ],
+            [
+             69446,
+             69456
+            ],
+            [
+             69461,
+             69487
+            ],
+            [
+             69506,
+             69551
+            ],
+            [
+             69580,
+             69599
+            ],
+            [
+             69623,
+             69634
+            ],
+            [
+             69688,
+             69713
+            ],
+            [
+             69744,
+             69744
+            ],
+            [
+             69747,
+             69748
+            ],
+            [
+             69750,
+             69762
+            ],
+            [
+             69808,
+             69839
+            ],
+            [
+             69865,
+             69871
+            ],
+            [
+             69882,
+             69890
+            ],
+            [
+             69927,
+             69941
+            ],
+            [
+             69952,
+             69955
+            ],
+            [
+             69957,
+             69958
+            ],
+            [
+             69960,
+             69967
+            ],
+            [
+             70003,
+             70005
+            ],
+            [
+             70007,
+             70018
+            ],
+            [
+             70067,
+             70080
+            ],
+            [
+             70085,
+             70095
+            ],
+            [
+             70107,
+             70107
+            ],
+            [
+             70109,
+             70112
+            ],
+            [
+             70133,
+             70143
+            ],
+            [
+             70162,
+             70162
+            ],
+            [
+             70188,
+             70206
+            ],
+            [
+             70209,
+             70271
+            ],
+            [
+             70279,
+             70279
+            ],
+            [
+             70281,
+             70281
+            ],
+            [
+             70286,
+             70286
+            ],
+            [
+             70302,
+             70302
+            ],
+            [
+             70313,
+             70319
+            ],
+            [
+             70367,
+             70383
+            ],
+            [
+             70394,
+             70404
+            ],
+            [
+             70413,
+             70414
+            ],
+            [
+             70417,
+             70418
+            ],
+            [
+             70441,
+             70441
+            ],
+            [
+             70449,
+             70449
+            ],
+            [
+             70452,
+             70452
+            ],
+            [
+             70458,
+             70460
+            ],
+            [
+             70462,
+             70479
+            ],
+            [
+             70481,
+             70492
+            ],
+            [
+             70498,
+             70655
+            ],
+            [
+             70709,
+             70726
+            ],
+            [
+             70731,
+             70735
+            ],
+            [
+             70746,
+             70750
+            ],
+            [
+             70754,
+             70783
+            ],
+            [
+             70832,
+             70851
+            ],
+            [
+             70854,
+             70854
+            ],
+            [
+             70856,
+             70863
+            ],
+            [
+             70874,
+             71039
+            ],
+            [
+             71087,
+             71127
+            ],
+            [
+             71132,
+             71167
+            ],
+            [
+             71216,
+             71235
+            ],
+            [
+             71237,
+             71247
+            ],
+            [
+             71258,
+             71295
+            ],
+            [
+             71339,
+             71351
+            ],
+            [
+             71353,
+             71359
+            ],
+            [
+             71370,
+             71423
+            ],
+            [
+             71451,
+             71471
+            ],
+            [
+             71484,
+             71487
+            ],
+            [
+             71495,
+             71679
+            ],
+            [
+             71724,
+             71839
+            ],
+            [
+             71923,
+             71934
+            ],
+            [
+             71943,
+             71944
+            ],
+            [
+             71946,
+             71947
+            ],
+            [
+             71956,
+             71956
+            ],
+            [
+             71959,
+             71959
+            ],
+            [
+             71984,
+             71998
+            ],
+            [
+             72000,
+             72000
+            ],
+            [
+             72002,
+             72015
+            ],
+            [
+             72026,
+             72095
+            ],
+            [
+             72104,
+             72105
+            ],
+            [
+             72145,
+             72160
+            ],
+            [
+             72162,
+             72162
+            ],
+            [
+             72164,
+             72191
+            ],
+            [
+             72193,
+             72202
+            ],
+            [
+             72243,
+             72249
+            ],
+            [
+             72251,
+             72271
+            ],
+            [
+             72273,
+             72283
+            ],
+            [
+             72330,
+             72348
+            ],
+            [
+             72350,
+             72367
+            ],
+            [
+             72441,
+             72703
+            ],
+            [
+             72713,
+             72713
+            ],
+            [
+             72751,
+             72767
+            ],
+            [
+             72769,
+             72783
+            ],
+            [
+             72813,
+             72817
+            ],
+            [
+             72848,
+             72959
+            ],
+            [
+             72967,
+             72967
+            ],
+            [
+             72970,
+             72970
+            ],
+            [
+             73009,
+             73029
+            ],
+            [
+             73031,
+             73039
+            ],
+            [
+             73050,
+             73055
+            ],
+            [
+             73062,
+             73062
+            ],
+            [
+             73065,
+             73065
+            ],
+            [
+             73098,
+             73111
+            ],
+            [
+             73113,
+             73119
+            ],
+            [
+             73130,
+             73439
+            ],
+            [
+             73459,
+             73473
+            ],
+            [
+             73475,
+             73475
+            ],
+            [
+             73489,
+             73489
+            ],
+            [
+             73524,
+             73551
+            ],
+            [
+             73562,
+             73647
+            ],
+            [
+             73649,
+             73663
+            ],
+            [
+             73685,
+             73727
+            ],
+            [
+             74650,
+             74751
+            ],
+            [
+             74863,
+             74879
+            ],
+            [
+             75076,
+             77711
+            ],
+            [
+             77809,
+             77823
+            ],
+            [
+             78896,
+             78912
+            ],
+            [
+             78919,
+             82943
+            ],
+            [
+             83527,
+             92159
+            ],
+            [
+             92729,
+             92735
+            ],
+            [
+             92767,
+             92767
+            ],
+            [
+             92778,
+             92783
+            ],
+            [
+             92863,
+             92863
+            ],
+            [
+             92874,
+             92879
+            ],
+            [
+             92910,
+             92927
+            ],
+            [
+             92976,
+             92991
+            ],
+            [
+             92996,
+             93007
+            ],
+            [
+             93018,
+             93018
+            ],
+            [
+             93026,
+             93026
+            ],
+            [
+             93048,
+             93052
+            ],
+            [
+             93072,
+             93759
+            ],
+            [
+             93847,
+             93951
+            ],
+            [
+             94027,
+             94031
+            ],
+            [
+             94033,
+             94098
+            ],
+            [
+             94112,
+             94175
+            ],
+            [
+             94178,
+             94178
+            ],
+            [
+             94180,
+             94207
+            ],
+            [
+             100344,
+             100351
+            ],
+            [
+             101590,
+             101631
+            ],
+            [
+             101641,
+             110575
+            ],
+            [
+             110580,
+             110580
+            ],
+            [
+             110588,
+             110588
+            ],
+            [
+             110591,
+             110591
+            ],
+            [
+             110883,
+             110897
+            ],
+            [
+             110899,
+             110927
+            ],
+            [
+             110931,
+             110932
+            ],
+            [
+             110934,
+             110947
+            ],
+            [
+             110952,
+             110959
+            ],
+            [
+             111356,
+             113663
+            ],
+            [
+             113771,
+             113775
+            ],
+            [
+             113789,
+             113791
+            ],
+            [
+             113801,
+             113807
+            ],
+            [
+             113818,
+             119487
+            ],
+            [
+             119508,
+             119519
+            ],
+            [
+             119540,
+             119647
+            ],
+            [
+             119673,
+             119807
+            ],
+            [
+             119893,
+             119893
+            ],
+            [
+             119965,
+             119965
+            ],
+            [
+             119968,
+             119969
+            ],
+            [
+             119971,
+             119972
+            ],
+            [
+             119975,
+             119976
+            ],
+            [
+             119981,
+             119981
+            ],
+            [
+             119994,
+             119994
+            ],
+            [
+             119996,
+             119996
+            ],
+            [
+             120004,
+             120004
+            ],
+            [
+             120070,
+             120070
+            ],
+            [
+             120075,
+             120076
+            ],
+            [
+             120085,
+             120085
+            ],
+            [
+             120093,
+             120093
+            ],
+            [
+             120122,
+             120122
+            ],
+            [
+             120127,
+             120127
+            ],
+            [
+             120133,
+             120133
+            ],
+            [
+             120135,
+             120137
+            ],
+            [
+             120145,
+             120145
+            ],
+            [
+             120486,
+             120487
+            ],
+            [
+             120513,
+             120513
+            ],
+            [
+             120539,
+             120539
+            ],
+            [
+             120571,
+             120571
+            ],
+            [
+             120597,
+             120597
+            ],
+            [
+             120629,
+             120629
+            ],
+            [
+             120655,
+             120655
+            ],
+            [
+             120687,
+             120687
+            ],
+            [
+             120713,
+             120713
+            ],
+            [
+             120745,
+             120745
+            ],
+            [
+             120771,
+             120771
+            ],
+            [
+             120780,
+             120781
+            ],
+            [
+             120832,
+             122623
+            ],
+            [
+             122655,
+             122660
+            ],
+            [
+             122667,
+             122927
+            ],
+            [
+             122990,
+             123135
+            ],
+            [
+             123181,
+             123190
+            ],
+            [
+             123198,
+             123199
+            ],
+            [
+             123210,
+             123213
+            ],
+            [
+             123215,
+             123535
+            ],
+            [
+             123566,
+             123583
+            ],
+            [
+             123628,
+             123631
+            ],
+            [
+             123642,
+             124111
+            ],
+            [
+             124140,
+             124143
+            ],
+            [
+             124154,
+             124895
+            ],
+            [
+             124903,
+             124903
+            ],
+            [
+             124908,
+             124908
+            ],
+            [
+             124911,
+             124911
+            ],
+            [
+             124927,
+             124927
+            ],
+            [
+             125125,
+             125126
+            ],
+            [
+             125136,
+             125183
+            ],
+            [
+             125252,
+             125258
+            ],
+            [
+             125260,
+             125263
+            ],
+            [
+             125274,
+             126064
+            ],
+            [
+             126124,
+             126124
+            ],
+            [
+             126128,
+             126128
+            ],
+            [
+             126133,
+             126208
+            ],
+            [
+             126254,
+             126254
+            ],
+            [
+             126270,
+             126463
+            ],
+            [
+             126468,
+             126468
+            ],
+            [
+             126496,
+             126496
+            ],
+            [
+             126499,
+             126499
+            ],
+            [
+             126501,
+             126502
+            ],
+            [
+             126504,
+             126504
+            ],
+            [
+             126515,
+             126515
+            ],
+            [
+             126520,
+             126520
+            ],
+            [
+             126522,
+             126522
+            ],
+            [
+             126524,
+             126529
+            ],
+            [
+             126531,
+             126534
+            ],
+            [
+             126536,
+             126536
+            ],
+            [
+             126538,
+             126538
+            ],
+            [
+             126540,
+             126540
+            ],
+            [
+             126544,
+             126544
+            ],
+            [
+             126547,
+             126547
+            ],
+            [
+             126549,
+             126550
+            ],
+            [
+             126552,
+             126552
+            ],
+            [
+             126554,
+             126554
+            ],
+            [
+             126556,
+             126556
+            ],
+            [
+             126558,
+             126558
+            ],
+            [
+             126560,
+             126560
+            ],
+            [
+             126563,
+             126563
+            ],
+            [
+             126565,
+             126566
+            ],
+            [
+             126571,
+             126571
+            ],
+            [
+             126579,
+             126579
+            ],
+            [
+             126584,
+             126584
+            ],
+            [
+             126589,
+             126589
+            ],
+            [
+             126591,
+             126591
+            ],
+            [
+             126602,
+             126602
+            ],
+            [
+             126620,
+             126624
+            ],
+            [
+             126628,
+             126628
+            ],
+            [
+             126634,
+             126634
+            ],
+            [
+             126652,
+             127231
+            ],
+            [
+             127245,
+             130031
+            ],
+            [
+             130042,
+             131071
+            ],
+            [
+             173792,
+             173823
+            ],
+            [
+             177978,
+             177983
+            ],
+            [
+             178206,
+             178207
+            ],
+            [
+             183970,
+             183983
+            ],
+            [
+             191457,
+             191471
+            ],
+            [
+             192094,
+             194559
+            ],
+            [
+             195102,
+             196607
+            ],
+            [
+             201547,
+             201551
+            ],
+            [
+             205744,
+             1114111
+            ]
+           ]
+          }
+         ]
+        },
+        {
+         "op": "epsilon"
+        }
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        120
+       ]
+      },
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          0,
+          1114111
+         ]
+        ]
+       },
+       "min": 0,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"args\":[{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},{\"op\":\"chars\",\"ranges\":[[0,47],[58,64],[91,94],[96,96],[123,169],[171,177],[180,180],[182,184],[187,187],[191,191],[215,215],[247,247],[706,709],[722,735],[741,747],[749,749],[751,879],[885,885],[888,889],[894,894],[896,901],[903,903],[907,907],[909,909],[930,930],[1014,1014],[1154,1161],[1328,1328],[1367,1368],[1370,1375],[1417,1487],[1515,1518],[1523,1567],[1611,1631],[1642,1645],[1648,1648],[1748,1748],[1750,1764],[1767,1773],[1789,1790],[1792,1807],[1809,1809],[1840,1868],[1958,1968],[1970,1983],[2027,2035],[2038,2041],[2043,2047],[2070,2073],[2075,2083],[2085,2087],[2089,2111],[2137,2143],[2155,2159],[2184,2184],[2191,2207],[2250,2307],[2362,2364],[2366,2383],[2385,2391],[2402,2405],[2416,2416],[2433,2436],[2445,2446],[2449,2450],[2473,2473],[2481,2481],[2483,2485],[2490,2492],[2494,2509],[2511,2523],[2526,2526],[2530,2533],[2546,2547],[2554,2555],[2557,2564],[2571,2574],[2577,2578],[2601,2601],[2609,2609],[2612,2612],[2615,2615],[2618,2648],[2653,2653],[2655,2661],[2672,2673],[2677,2692],[2702,2702],[2706,2706],[2729,2729],[2737,2737],[2740,2740],[2746,2748],[2750,2767],[2769,2783],[2786,2789],[2800,2808],[2810,2820],[2829,2830],[2833,2834],[2857,2857],[2865,2865],[2868,2868],[2874,2876],[2878,2907],[2910,2910],[2914,2917],[2928,2928],[2936,2946],[2948,2948],[2955,2957],[2961,2961],[2966,2968],[2971,2971],[2973,2973],[2976,2978],[2981,2983],[2987,2989],[3002,3023],[3025,3045],[3059,3076],[3085,3085],[3089,3089],[3113,3113],[3130,3132],[3134,3159],[3163,3164],[3166,3167],[3170,3173],[3184,3191],[3199,3199],[3201,3204],[3213,3213],[3217,3217],[3241,3241],[3252,3252],[3258,3260],[3262,3292],[3295,3295],[3298,3301],[3312,3312],[3315,3331],[3341,3341],[3345,3345],[3387,3388],[3390,3405],[3407,3411],[3415,3415],[3426,3429],[3449,3449],[3456,3460],[3479,3481],[3506,3506],[3516,3516],[3518,3519],[3527,3557],[3568,3584],[3633,3633],[3636,3647],[3655,3663],[3674,3712],[3715,3715],[3717,3717],[3723,3723],[3748,3748],[3750,3750],[3761,3761],[3764,3772],[3774,3775],[3781,3781],[3783,3791],[3802,3803],[3808,3839],[3841,3871],[3892,3903],[3912,3912],[3949,3975],[3981,4095],[4139,4158],[4170,4175],[4182,4185],[4190,4192],[4194,4196],[4199,4205],[4209,4212],[4226,4237],[4239,4239],[4250,4255],[4294,4294],[4296,4300],[4302,4303],[4347,4347],[4681,4681],[4686,4687],[4695,4695],[4697,4697],[4702,4703],[4745,4745],[4750,4751],[4785,4785],[4790,4791],[4799,4799],[4801,4801],[4806,4807],[4823,4823],[4881,4881],[4886,4887],[4955,4968],[4989,4991],[5008,5023],[5110,5111],[5118,5120],[5741,5742],[5760,5760],[5787,5791],[5867,5869],[5881,5887],[5906,5918],[5938,5951],[5970,5983],[5997,5997],[6001,6015],[6068,6102],[6104,6107],[6109,6111],[6122,6127],[6138,6159],[6170,6175],[6265,6271],[6277,6278],[6313,6313],[6315,6319],[6390,6399],[6431,6469],[6510,6511],[6517,6527],[6572,6575],[6602,6607],[6619,6655],[6679,6687],[6741,6783],[6794,6799],[6810,6822],[6824,6916],[6964,6980],[6989,6991],[7002,7042],[7073,7085],[7142,7167],[7204,7231],[7242,7244],[7294,7295],[7305,7311],[7355,7356],[7360,7400],[7405,7405],[7412,7412],[7415,7417],[7419,7423],[7616,7679],[7958,7959],[7966,7967],[8006,8007],[8014,8015],[8024,8024],[8026,8026],[8028,8028],[8030,8030],[8062,8063],[8117,8117],[8125,8125],[8127,8129],[8133,8133],[8141,8143],[8148,8149],[8156,8159],[8173,8177],[8181,8181],[8189,8303],[8306,8307],[8314,8318],[8330,8335],[8349,8449],[8451,8454],[8456,8457],[8468,8468],[8470,8472],[8478,8483],[8485,8485],[8487,8487],[8489,8489],[8494,8494],[8506,8507],[8512,8516],[8522,8525],[8527,8527],[8586,9311],[9372,9449],[9472,10101],[10132,11263],[11493,11498],[11503,11505],[11508,11516],[11518,11519],[11558,11558],[11560,11564],[11566,11567],[11624,11630],[11632,11647],[11671,11679],[11687,11687],[11695,11695],[11703,11703],[11711,11711],[11719,11719],[11727,11727],[11735,11735],[11743,11822],[11824,12292],[12296,12320],[12330,12336],[12342,12343],[12349,12352],[12439,12444],[12448,12448],[12539,12539],[12544,12548],[12592,12592],[12687,12689],[12694,12703],[12736,12783],[12800,12831],[12842,12871],[12880,12880],[12896,12927],[12938,12976],[12992,13311],[19904,19967],[42125,42191],[42238,42239],[42509,42511],[42540,42559],[42607,42622],[42654,42655],[42736,42774],[42784,42785],[42889,42890],[42955,42959],[42962,42962],[42964,42964],[42970,42993],[43010,43010],[43014,43014],[43019,43019],[43043,43055],[43062,43071],[43124,43137],[43188,43215],[43226,43249],[43256,43258],[43260,43260],[43263,43263],[43302,43311],[43335,43359],[43389,43395],[43443,43470],[43482,43487],[43493,43493],[43519,43519],[43561,43583],[43587,43587],[43596,43599],[43610,43615],[43639,43641],[43643,43645],[43696,43696],[43698,43700],[43703,43704],[43710,43711],[43713,43713],[43715,43738],[43742,43743],[43755,43761],[43765,43776],[43783,43784],[43791,43792],[43799,43807],[43815,43815],[43823,43823],[43867,43867],[43882,43887],[44003,44015],[44026,44031],[55204,55215],[55239,55242],[55292,63743],[64110,64111],[64218,64255],[64263,64274],[64280,64284],[64286,64286],[64297,64297],[64311,64311],[64317,64317],[64319,64319],[64322,64322],[64325,64325],[64434,64466],[64830,64847],[64912,64913],[64968,65007],[65020,65135],[65141,65141],[65277,65295],[65306,65312],[65339,65344],[65371,65381],[65471,65473],[65480,65481],[65488,65489],[65496,65497],[65501,65535],[65548,65548],[65575,65575],[65595,65595],[65598,65598],[65614,65615],[65630,65663],[65787,65798],[65844,65855],[65913,65929],[65932,66175],[66205,66207],[66257,66272],[66300,66303],[66340,66348],[66379,66383],[66422,66431],[66462,66463],[66500,66503],[66512,66512],[66518,66559],[66718,66719],[66730,66735],[66772,66775],[66812,66815],[66856,66863],[66916,66927],[66939,66939],[66955,66955],[66963,66963],[66966,66966],[66978,66978],[66994,66994],[67002,67002],[67005,67071],[67383,67391],[67414,67423],[67432,67455],[67462,67462],[67505,67505],[67515,67583],[67590,67591],[67593,67593],[67638,67638],[67641,67643],[67645,67646],[67670,67671],[67703,67704],[67743,67750],[67760,67807],[67827,67827],[67830,67834],[67868,67871],[67898,67967],[68024,68027],[68048,68049],[68097,68111],[68116,68116],[68120,68120],[68150,68159],[68169,68191],[68223,68223],[68256,68287],[68296,68296],[68325,68330],[68336,68351],[68406,68415],[68438,68439],[68467,68471],[68498,68520],[68528,68607],[68681,68735],[68787,68799],[68851,68857],[68900,68911],[68922,69215],[69247,69247],[69290,69295],[69298,69375],[69416,69423],[69446,69456],[69461,69487],[69506,69551],[69580,69599],[69623,69634],[69688,69713],[69744,69744],[69747,69748],[69750,69762],[69808,69839],[69865,69871],[69882,69890],[69927,69941],[69952,69955],[69957,69958],[69960,69967],[70003,70005],[70007,70018],[70067,70080],[70085,70095],[70107,70107],[70109,70112],[70133,70143],[70162,70162],[70188,70206],[70209,70271],[70279,70279],[70281,70281],[70286,70286],[70302,70302],[70313,70319],[70367,70383],[70394,70404],[70413,70414],[70417,70418],[70441,70441],[70449,70449],[70452,70452],[70458,70460],[70462,70479],[70481,70492],[70498,70655],[70709,70726],[70731,70735],[70746,70750],[70754,70783],[70832,70851],[70854,70854],[70856,70863],[70874,71039],[71087,71127],[71132,71167],[71216,71235],[71237,71247],[71258,71295],[71339,71351],[71353,71359],[71370,71423],[71451,71471],[71484,71487],[71495,71679],[71724,71839],[71923,71934],[71943,71944],[71946,71947],[71956,71956],[71959,71959],[71984,71998],[72000,72000],[72002,72015],[72026,72095],[72104,72105],[72145,72160],[72162,72162],[72164,72191],[72193,72202],[72243,72249],[72251,72271],[72273,72283],[72330,72348],[72350,72367],[72441,72703],[72713,72713],[72751,72767],[72769,72783],[72813,72817],[72848,72959],[72967,72967],[72970,72970],[73009,73029],[73031,73039],[73050,73055],[73062,73062],[73065,73065],[73098,73111],[73113,73119],[73130,73439],[73459,73473],[73475,73475],[73489,73489],[73524,73551],[73562,73647],[73649,73663],[73685,73727],[74650,74751],[74863,74879],[75076,77711],[77809,77823],[78896,78912],[78919,82943],[83527,92159],[92729,92735],[92767,92767],[92778,92783],[92863,92863],[92874,92879],[92910,92927],[92976,92991],[92996,93007],[93018,93018],[93026,93026],[93048,93052],[93072,93759],[93847,93951],[94027,94031],[94033,94098],[94112,94175],[94178,94178],[94180,94207],[100344,100351],[101590,101631],[101641,110575],[110580,110580],[110588,110588],[110591,110591],[110883,110897],[110899,110927],[110931,110932],[110934,110947],[110952,110959],[111356,113663],[113771,113775],[113789,113791],[113801,113807],[113818,119487],[119508,119519],[119540,119647],[119673,119807],[119893,119893],[119965,119965],[119968,119969],[119971,119972],[119975,119976],[119981,119981],[119994,119994],[119996,119996],[120004,120004],[120070,120070],[120075,120076],[120085,120085],[120093,120093],[120122,120122],[120127,120127],[120133,120133],[120135,120137],[120145,120145],[120486,120487],[120513,120513],[120539,120539],[120571,120571],[120597,120597],[120629,120629],[120655,120655],[120687,120687],[120713,120713],[120745,120745],[120771,120771],[120780,120781],[120832,122623],[122655,122660],[122667,122927],[122990,123135],[123181,123190],[123198,123199],[123210,123213],[123215,123535],[123566,123583],[123628,123631],[123642,124111],[124140,124143],[124154,124895],[124903,124903],[124908,124908],[124911,124911],[124927,124927],[125125,125126],[125136,125183],[125252,125258],[125260,125263],[125274,126064],[126124,126124],[126128,126128],[126133,126208],[126254,126254],[126270,126463],[126468,126468],[126496,126496],[126499,126499],[126501,126502],[126504,126504],[126515,126515],[126520,126520],[126522,126522],[126524,126529],[126531,126534],[126536,126536],[126538,126538],[126540,126540],[126544,126544],[126547,126547],[126549,126550],[126552,126552],[126554,126554],[126556,126556],[126558,126558],[126560,126560],[126563,126563],[126565,126566],[126571,126571],[126579,126579],[126584,126584],[126589,126589],[126591,126591],[126602,126602],[126620,126624],[126628,126628],[126634,126634],[126652,127231],[127245,130031],[130042,131071],[173792,173823],[177978,177983],[178206,178207],[183970,183983],[191457,191471],[192094,194559],[195102,196607],[201547,201551],[205744,1114111]]}],\"op\":\"concat\"},{\"op\":\"epsilon\"}],\"op\":\"union\"},{\"codes\":[120],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "5a6c03d301c6e6ddb73f481f90b1e818f27d5b763fc11751ef67dcd7dc6babf6"
+  },
+  {
+   "name": "python (a)\\1 matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": false,
+    "source": {
+     "dialect": "python",
+     "pattern": "(a)\\1",
+     "flags": [],
+     "predicate": "matches",
+     "python": "3.13.16",
+     "unicode": "15.1.0",
+     "not_exact": [
+      "a backreference"
+     ]
+    },
+    "at_least": {
+     "op": "literal",
+     "codes": [
+      97,
+      97
+     ]
+    },
+    "at_most": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"at_least\":{\"codes\":[97,97],\"op\":\"literal\"},\"at_most\":{\"op\":\"empty\"},\"exact\":false,\"version\":1}",
+   "hash": "86632acf27ea83a6778a24280e6b0fc37a90fc8917a1fb87e93a347d65749958"
+  },
+  {
+   "name": "python ^\\d{2,4}$ starts with",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "^\\d{2,4}$",
+     "flags": [
+      "ascii only"
+     ],
+     "predicate": "starts with",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "repeat",
+       "arg": {
+        "op": "chars",
+        "ranges": [
+         [
+          48,
+          57
+         ]
+        ]
+       },
+       "min": 2,
+       "max": 4
+      },
+      {
+       "op": "union",
+       "args": [
+        {
+         "op": "literal",
+         "codes": [
+          10
+         ]
+        },
+        {
+         "op": "epsilon"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[48,57]]},\"max\":4,\"min\":2,\"op\":\"repeat\"},{\"args\":[{\"codes\":[10],\"op\":\"literal\"},{\"op\":\"epsilon\"}],\"op\":\"union\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "96451990674821f4737966e186f8238e33a50aba7e2c95e21bf0c1318e786475"
+  },
+  {
+   "name": "python (?m)^b$ ends with",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "python",
+     "pattern": "(?m)^b$",
+     "flags": [
+      "multi line"
+     ],
+     "predicate": "ends with",
+     "python": "3.13.16",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "concat",
+     "args": [
+      {
+       "op": "union",
+       "args": [
+        {
+         "op": "concat",
+         "args": [
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              0,
+              1114111
+             ]
+            ]
+           },
+           "min": 0,
+           "max": null
+          },
+          {
+           "op": "literal",
+           "codes": [
+            10
+           ]
+          }
+         ]
+        },
+        {
+         "op": "epsilon"
+        }
+       ]
+      },
+      {
+       "op": "literal",
+       "codes": [
+        98
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"args\":[{\"args\":[{\"args\":[{\"arg\":{\"op\":\"chars\",\"ranges\":[[0,1114111]]},\"max\":null,\"min\":0,\"op\":\"repeat\"},{\"codes\":[10],\"op\":\"literal\"}],\"op\":\"concat\"},{\"op\":\"epsilon\"}],\"op\":\"union\"},{\"codes\":[98],\"op\":\"literal\"}],\"op\":\"concat\"},\"version\":1}",
+   "hash": "a2e9208527699ec8c1396aa45a5a37f3f1265c9dbdb6e18cd31d36ecfd7a1408"
+  },
+  {
+   "name": "javascript ^\\d+$ contains",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      65535
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "javascript",
+     "pattern": "^\\d+$",
+     "flags": [],
+     "predicate": "contains",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "chars",
+      "ranges": [
+       [
+        48,
+        57
+       ]
+      ]
+     },
+     "min": 1,
+     "max": null
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,65535]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[48,57]]},\"max\":null,\"min\":1,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "2ba27c52b9c370ab4e484828efba6b5b201eb1b4594f983a14dc5bbeec8c8da2"
+  },
+  {
+   "name": "javascript ^[a-z]+$ contains",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "javascript",
+     "pattern": "^[a-z]+$",
+     "flags": [
+      "unicode"
+     ],
+     "predicate": "contains",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "chars",
+      "ranges": [
+       [
+        97,
+        122
+       ]
+      ]
+     },
+     "min": 1,
+     "max": null
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"arg\":{\"op\":\"chars\",\"ranges\":[[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"},\"version\":1}",
+   "hash": "270482f9172ce10a90606894f2975d2c22ea08981db4d203360a9c7036aead54"
+  },
+  {
+   "name": "javascript . matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      65535
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "javascript",
+     "pattern": ".",
+     "flags": [
+      "dot all"
+     ],
+     "predicate": "matches",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       0,
+       65535
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,65535]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[0,65535]]},\"version\":1}",
+   "hash": "5b90e18b9200174474d17457f2cdde5b028dce267667bc08a7744fc6ae5d4ec8"
+  },
+  {
+   "name": "javascript k matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "source": {
+     "dialect": "javascript",
+     "pattern": "k",
+     "flags": [
+      "ignore case",
+      "unicode"
+     ],
+     "predicate": "matches",
+     "unicode": "15.1.0"
+    },
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       75,
+       75
+      ],
+      [
+       107,
+       107
+      ],
+      [
+       8490,
+       8490
+      ]
+     ]
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,1114111]],\"exact\":true,\"language\":{\"op\":\"chars\",\"ranges\":[[75,75],[107,107],[8490,8490]]},\"version\":1}",
+   "hash": "106a6b61d76e94e3b029195e01e6110492ce400725276c451ad5f21777d25de7"
+  },
+  {
+   "name": "javascript (?=a)a matches",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      65535
+     ]
+    ],
+    "exact": false,
+    "source": {
+     "dialect": "javascript",
+     "pattern": "(?=a)a",
+     "flags": [],
+     "predicate": "matches",
+     "unicode": "15.1.0",
+     "not_exact": [
+      "a lookahead"
+     ]
+    },
+    "at_least": {
+     "op": "literal",
+     "codes": [
+      97
+     ]
+    },
+    "at_most": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"alphabet\":[[0,65535]],\"at_least\":{\"codes\":[97],\"op\":\"literal\"},\"at_most\":{\"op\":\"empty\"},\"exact\":false,\"version\":1}",
+   "hash": "6b32212e83aa2c8eb651d2c179e34702e527b21ee344105d233a6c61b9f7cf1f"
+  },
+  {
+   "name": "repeat min above max",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": 2,
+     "max": 1
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "negative repeat",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": -1,
+     "max": null
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "repeat with no minimum",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": null,
+     "max": null
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a fractional count",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "repeat",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     },
+     "min": 1.5,
+     "max": 2
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a range out of order",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       98,
+       97
+      ]
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a code point past the last",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       0,
+       1114112
+      ]
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a boolean code point",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "codes": [
+      true
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "literal text",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "literal",
+     "text": "a"
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "an unknown op",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "star",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "an extra key",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "epsilon",
+     "arg": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a range of three",
+   "document": {
+    "kind": "regular_language",
+    "version": 1,
+    "alphabet": [
+     [
+      0,
+      1114111
+     ]
+    ],
+    "exact": true,
+    "language": {
+     "op": "chars",
+     "ranges": [
+      [
+       1,
+       2,
+       3
+      ]
+     ]
+    }
+   },
+   "invalid": true
+  }
+ ]
+}

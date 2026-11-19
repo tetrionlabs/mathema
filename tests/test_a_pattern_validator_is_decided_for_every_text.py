@@ -61,7 +61,7 @@ ALL = [[0, 0x10FFFF]]
 HEAD = {"op": "chars", "ranges": [[48, 57], [97, 122]]}
 TAIL = {"op": "chars", "ranges": [[45, 45], [48, 57], [97, 122]]}
 SLUG = {"op": "concat", "args": [HEAD, {"op": "repeat", "arg": TAIL, "min": 0, "max": None}]}
-NEWLINE = {"op": "literal", "text": "\n"}
+NEWLINE = {"op": "literal", "codes": [10]}
 SLUG_THEN_NEWLINE = {"op": "concat", "args": [
     SLUG, {"op": "repeat", "arg": NEWLINE, "min": 0, "max": 1}]}
 ANY = {"op": "repeat", "arg": {"op": "chars", "ranges": ALL}, "min": 0, "max": None}

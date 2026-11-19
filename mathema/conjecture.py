@@ -10824,8 +10824,9 @@ def _validator_proof(cj, fn, cj_domain):
     alphabet = domain.alphabet + regular.alphabet_of(document)
 
     def called_on(node: dict) -> dict:
-        return {"op": "concat", "args": [{"op": "literal", "text": prefix}, node,
-                                         {"op": "literal", "text": suffix}]}
+        return {"op": "concat", "args": [
+            {"op": "literal", "codes": [ord(c) for c in prefix]}, node,
+            {"op": "literal", "codes": [ord(c) for c in suffix]}]}
     # a text that breaks the claim is one the claim calls the function
     # on and the pattern refuses (when the claim says all are accepted)
     # or accepts (when it says none is)
