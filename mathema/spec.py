@@ -1606,12 +1606,20 @@ def _is_current_name(path: str, store_dir: str,
 def _held_keys(path: str) -> list:
     """Intent:
         The keys the record file at `path` holds, or an empty list when
-        it does not read as a record. Only a name with a `%` can be
-        ambiguous, so any other file is not opened.
+        it does not read as a record or cannot be read. Only a name
+        whose decoded form still holds a `%` can collide with the
+        encoded name of another key, so any other file is not opened.
     """
-    if "%" not in os.path.basename(path):
+    from urllib.parse import unquote
+    stem = os.path.basename(path)
+    if stem.endswith(_RECORD_SUFFIX):
+        stem = stem[:-len(_RECORD_SUFFIX)]
+    if "%" not in unquote(stem):
         return []
-    data, _reason = read_verified_file(path)
+    try:
+        data, _reason = read_verified_file(path)
+    except (OSError, ValueError):
+        return []
     return list(data) if isinstance(data, dict) else []
 
 

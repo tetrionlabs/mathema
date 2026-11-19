@@ -157,3 +157,67 @@ def test_an_old_percent_name_and_the_encoded_name_of_another_key_coexist(
     loaded = load_verified(root)
     assert set(loaded) == {"a%25", "a%"}
     assert loaded["a%25"]["entry"]["identity"]["form"] == "old"
+
+
+def _bytes_file(store, name, data):
+    os.makedirs(store, exist_ok=True)
+    path = os.path.join(store, name)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path
+
+
+@pytest.mark.parametrize("layer", ["verified", "declared"])
+def test_an_undecodable_percent_file_does_not_stop_a_record_write(
+        tmp_path, layer):
+    from mathema.spec import declared_dir, record_path
+    store = (verified_dir if layer == "verified" else declared_dir)(
+        str(tmp_path))
+    _bytes_file(store, "a%25.yaml", b"a%25:\n  note: caf\xe9\n")
+    path = record_path(store, "pkg.fn")
+    assert os.path.basename(path) == "pkg.fn.yaml"
+
+
+@pytest.mark.parametrize("layer", ["verified", "declared"])
+def test_an_unreadable_percent_file_does_not_stop_a_record_write(
+        tmp_path, layer):
+    from mathema.spec import declared_dir, record_path
+    store = (verified_dir if layer == "verified" else declared_dir)(
+        str(tmp_path))
+    locked = _bytes_file(store, "a%25.yaml", b"a%25: {}\n")
+    os.chmod(locked, 0)
+    try:
+        path = record_path(store, "pkg.fn")
+    finally:
+        os.chmod(locked, 0o600)
+    assert os.path.basename(path) == "pkg.fn.yaml"
+
+
+def test_a_store_of_ordinary_tagged_keys_opens_no_file_for_the_check(
+        tmp_path, monkeypatch):
+    from mathema import spec
+    root = str(tmp_path)
+    for i in range(4):
+        save_verified_entry(f"lang:src/m{i}.src#f{i}", _entry(), root)
+    opened = []
+    real = spec.read_verified_file
+    monkeypatch.setattr(spec, "read_verified_file",
+                        lambda p: opened.append(p) or real(p))
+    spec._MIGRATED_STORES.clear()
+    spec.migrate_record_names(verified_dir(root))
+    assert opened == []
+
+
+def test_the_ambiguous_name_is_still_opened_and_resolved(tmp_path,
+                                                         monkeypatch):
+    from mathema import spec
+    root = str(tmp_path)
+    _legacy(root, "a%25", "old")
+    opened = []
+    real = spec.read_verified_file
+    monkeypatch.setattr(spec, "read_verified_file",
+                        lambda p: opened.append(p) or real(p))
+    moved = spec.migrate_record_names(verified_dir(root))
+    assert len(opened) == 1
+    assert [os.path.basename(n) for _o, n in moved] == [
+        record_file_name("a%25")]
