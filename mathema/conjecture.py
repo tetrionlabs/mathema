@@ -2156,6 +2156,27 @@ def _claim(law: str, name: str | None, source: str, route: str,
     prime_problem = unexpanded_prime_message(text)
     if prime_problem is not None:
         raise InvalidConjecture(prime_problem)
+    from . import domain_relations
+    try:
+        between = domain_relations.parse(text)
+    except domain_relations.InvalidDomainRelation as e:
+        raise InvalidConjecture(str(e)) from e
+    if between is not None:
+        # a relation between two domains (`A subset B`) states nothing
+        # about f, so it binds no variable and takes no premise
+        if dom or assuming or let_funcs or aliases or param_pins:
+            raise InvalidConjecture(
+                f"a relation between domains takes no quantifier, premise "
+                f"or binding; state `{between.text()}` on its own: "
+                f"{law.strip()!r}")
+        stated = between.text()
+        first = between.relations[0].left.text
+        return Conjecture(
+            name=name or re.sub(r"\W+", "_", stated).strip("_"),
+            lhs=first, rhs=stated[len(first):].strip(),
+            relation=domain_relations.RELATION, source=source,
+            route="derive" if route == "best" else route, grammar=grammar,
+            meta=dict(meta or {}), raw=stated)
     r = parse_raises(text)
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
@@ -5545,19 +5566,61 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # the function's gates read every policy row, so they come last
     gates = [c for c in built if _policy_gate(c, fn, facts)]
     scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
+    from . import domain_relations
+    between = [c for c in built
+               if getattr(c, "relation", None) == domain_relations.RELATION]
     values = [c for c in built if getattr(c, "relation", None) != "policy"
-              and c not in gates and c not in scalar_empty]
+              and c not in gates and c not in scalar_empty
+              and c not in between]
     from ._empty_input import STATED
     # the claims checked here state the empty policy their value claims
     # read; a nested check (a chain's links) keeps the outer ones too
     stated_token = STATED.set((*STATED.get(), *built))
     try:
-        return _check_built(fn, built, values, stated, gates, scalar_empty,
-                            fn_mats, runtime_mats, domain, trials,
-                            trials_scale, facts, extensive, known_premises,
-                            float_companions, pseudo_infinity)
+        out = _check_built(fn, built, values, stated, gates, scalar_empty,
+                           fn_mats, runtime_mats, domain, trials,
+                           trials_scale, facts, extensive, known_premises,
+                           float_companions, pseudo_infinity)
+        return out + [_adjudicate_domain_relation(c) for c in between]
     finally:
         STATED.reset(stated_token)
+
+
+def _adjudicate_domain_relation(cj) -> "Probe":
+    """Intent:
+        The row for a claim relating two domains (`A subset B`):
+        `proven` or `falsified` as the sets decide it, with the member
+        a verdict rests on executed against both domains, or `unknown`
+        with the reason.
+    """
+    from . import domain_relations
+    statement = statement_text(cj.relation, cj.lhs, cj.rhs)
+    meta = {**(cj.meta or {}), "mathema.surface": cj.source}
+    try:
+        stated = domain_relations.parse(statement)
+    except domain_relations.InvalidDomainRelation as e:
+        stated, why = None, str(e)
+    else:
+        why = f"{statement!r} is not a relation between two domains"
+    if stated is None:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None, note=why,
+                     meta={**meta, "mathema.invalid_conjecture": True})
+    decision = domain_relations.decide(stated)
+    detail = {"relations": [[r.left.text, r.word, r.right.text] for r in stated.relations]}
+    if decision.witness is not None:
+        detail["witness"] = decision.witness
+    meta["mathema.domain_relation"] = detail
+    if decision.verdict == "unknown":
+        return Probe(cj.name, statement, "unknown", route="derive",
+                     note=decision.reason, meta=meta, grammar=cj.grammar)
+    meta["mathema.derive_route"] = "domain_sets"
+    if decision.verdict == "proven":
+        return Probe(cj.name, statement, "proven", route="derive",
+                     sketch=f"domain sets: {decision.reason}", meta=meta,
+                     grammar=cj.grammar)
+    return Probe(cj.name, statement, "falsified", route="derive",
+                 counterexample=decision.reason, note=decision.reason,
+                 meta=meta, grammar=cj.grammar)
 
 
 def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,

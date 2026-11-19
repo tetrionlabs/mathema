@@ -8,10 +8,9 @@ leave alone: a number range, a named number set or a finite set bound
 twice with nothing left to quantify is refused, `x` bound twice before
 the statement is refused, and a function applied to a bound name on the
 left of `in` reads as a quantified membership claim. The second holds
-the forms such an extension changes: the inclusion `L[A] subset L[B]` and
-a bound name rebound last are refused today. A change to the second
-group is expected and replaces its pins; a change to the first is a
-regression.
+a bound name rebound last, refused, and the inclusion `L[A] subset L[B]`,
+a relation between two domains (`⊂` refused as ambiguous). A change to
+the refusals is a regression.
 """
 import pytest
 
@@ -66,9 +65,15 @@ def test_a_language_or_finite_set_rebound_last_is_refused_today(text):
 @pytest.mark.parametrize("text", [
     "L[ascii] subset L[unicode]",
     "L[ascii] ⊆ L[unicode]",
-    "L[a] ⊂ L[b]",
 ])
-def test_an_inclusion_between_two_languages_is_refused_today(text):
+def test_an_inclusion_between_two_languages_reads_as_subset(text):
+    cj = claim(text)
+    assert cj.relation == "domains"
+    assert render_claim_text(cj, unicode=False) == "L[ascii] subset L[unicode]"
+    assert fingerprint_text(cj) == "L[ascii] subset L[unicode]"
+
+
+def test_the_proper_subset_glyph_between_two_languages_is_refused():
     with pytest.raises(InvalidConjecture) as raised:
-        claim(text)
-    assert str(raised.value) == f"no relation (==, !=, <=, >=, <, >) in {text!r}"
+        claim("L[a] ⊂ L[b]")
+    assert str(raised.value).startswith("`⊂` reads two ways")
