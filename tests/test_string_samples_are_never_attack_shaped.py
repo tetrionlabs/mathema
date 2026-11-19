@@ -25,6 +25,8 @@ def test_the_string_hazards_hold_no_attack_shaped_string():
 
 
 def test_a_text_language_never_draws_an_attack_shaped_string():
+    import pytest
+    pytest.importorskip("mathema_language")
     from mathema.languages import resolve_language
     lang = resolve_language("unicode")
     rng = random.Random(0)
