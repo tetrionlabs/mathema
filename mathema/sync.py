@@ -580,6 +580,8 @@ def write_claims_into_docstring(fn, names_with_statements: list) -> bool:
     all_lines[insert_at:insert_at] = additions
     with open(src_file, "w") as fh:
         fh.writelines(all_lines)
+    from ._run_scope import wrote
+    wrote(src_file)
     return True
 
 

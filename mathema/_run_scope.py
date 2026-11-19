@@ -53,9 +53,10 @@ def wrote(path: str) -> None:
         Forget what the run kept from the file at `path`, just
         written: its verified record and parsed curation file; for a
         file inside a project's verified layer, that project's record
-        listing and the merged store view built from it; and, for a
-        claims file, the claims-file scan and every read built from
-        claims files.
+        listing and the merged store view built from it; for a claims
+        file, the claims-file scan and every read built from claims
+        files; and, for a Python source file, every form and name the
+        dependency walk read from source.
 
     Notes:
         Outside a run this does nothing. The listing and view of a
@@ -77,6 +78,8 @@ def wrote(path: str) -> None:
     if _is_claim_file(os.path.dirname(real), os.path.basename(real)):
         for kind in ("claims_paths", "library_claims", "claims_valid"):
             _STATE.pop(kind, None)
+    if real.endswith((".py", ".pyw", ".pyi")):
+        _STATE.pop("dependency_walk", None)
 
 
 def _in_verified_layer(real: str, where: str) -> bool:
