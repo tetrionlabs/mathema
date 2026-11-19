@@ -212,6 +212,32 @@ def release_moved(c: dict, row: dict) -> bool:
         return False
 
 
+def _recorded_with_legacy_quoting(c: dict, row: dict, fn=None) -> bool:
+    """Intent:
+        Whether a verified row's statement is the text releases up to
+        0.6.6.1 wrote for the authored claim `c` (string literals quoted
+        by `grammar._legacy_double_quoted`), and that text is not the
+        canonical text written now: the row records `c`, whether or not
+        its old text reads back as `c`.
+    """
+    from ._annotation_text import complex_parameters
+    from ._scan import legacy_quoting
+    from .grammar import complex_in_view
+    from .spec import _declared_conjecture, canonical_claim_text
+    statement = row.get("statement") or ""
+    if not statement or ("'" not in statement and '"' not in statement):
+        return False
+    try:
+        with complex_in_view(complex_parameters(fn) if fn is not None else ()):
+            cj = _completed(_declared_conjecture(c), fn)
+            if canonical_claim_text(cj) == statement:
+                return False
+            with legacy_quoting():
+                return canonical_claim_text(cj) == statement
+    except Exception:
+        return False
+
+
 def _checked_differently(c: dict, row: dict) -> bool:
     """Intent:
         Whether an authored claim asks to be checked differently from
@@ -307,6 +333,17 @@ def claim_conflicts(fn, file_entry: dict,
                 # a claim skipped as another grammar's established
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
+                continue
+            if _recorded_with_legacy_quoting(c, v, fn) \
+                    and not _checked_differently(c, v):
+                # the row records this claim in the text the old literal
+                # quoting wrote for it: adjudicated as written, the same
+                # way as a release move of the canonical text
+                seen.add((name, "supersession"))
+                out.append({"kind": "release-move", "claim": name,
+                            "surface": surface,
+                            "authored": _display_claim(c),
+                            "verified": v.get("statement")})
                 continue
             fp_a, fp_v = _claim_identity(c, fn), _row_identity(v, fn)
             if fp_a and fp_v and fp_a != fp_v \
