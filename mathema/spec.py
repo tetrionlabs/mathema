@@ -3095,7 +3095,9 @@ def _strip_pinned_regions(assuming: str) -> str:
         The assuming clause with every `--> <region>` pin removed, per
         conjunct: `assuming f is defined --> b != 0 and lemma --> x > 0`
         becomes `assuming f is defined and lemma`. A conjunct with no
-        arrow (a plain relation premise) passes through whole.
+        arrow (a plain relation premise) passes through whole. An arrow
+        or an ` and ` inside a string literal (as `_scan.mask_strings`
+        reads them) is part of the literal and never cuts or splits.
 
     Notes:
         The pinned region is resolved evidence, recomputed at
@@ -3105,11 +3107,13 @@ def _strip_pinned_regions(assuming: str) -> str:
     """
     import re as _re
 
+    from ._scan import mask_strings, unmask_strings
     from .conjecture import _split_top_and
     text = _re.sub(r"^assuming\s+", "", assuming.strip())
+    masked, literals = mask_strings(text)
     kept = [_re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
-            for part in _split_top_and(text)]
-    return "assuming " + " and ".join(k for k in kept if k)
+            for part in _split_top_and(masked)]
+    return "assuming " + unmask_strings(" and ".join(k for k in kept if k), literals)
 
 
 def fingerprint_text(cj) -> str:
