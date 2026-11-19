@@ -21,15 +21,18 @@ _NO_STATEMENT = ("{!r}: every segment after 'for' parses as a binding, the "
                  "quantifier has no statement left to quantify")
 
 
-@pytest.mark.parametrize("text", [
-    "for x in [0, 1], x in [0, 2]",
-    "for n in Z, n in Z",
-    "for x in [0, 1], x in R",
+@pytest.mark.parametrize("text,first,last", [
+    ("for x in [0, 1], x in [0, 2]", "[0, 1]", "[0, 2]"),
+    ("for n in Z, n in Z", "Z", "Z"),
+    ("for x in [0, 1], x in R", "[0, 1]", "R"),
 ])
-def test_a_number_domain_bound_twice_with_nothing_left_is_refused(text):
+def test_a_number_domain_bound_twice_with_nothing_left_is_refused(text, first, last):
     with pytest.raises(InvalidConjecture) as raised:
         claim(text)
-    assert str(raised.value) == _NO_STATEMENT.format(text)
+    assert str(raised.value) == _NO_STATEMENT.format(text) + (
+        f". To state that every member of {first} is in {last}, "
+        f"write: {first} subset {last}")
+    assert claim(f"{first} subset {last}").relation == "domains"
 
 
 def test_a_name_bound_twice_before_the_statement_is_refused():
@@ -51,15 +54,18 @@ def test_a_function_of_the_bound_name_on_the_left_of_in_keeps_its_form(text, ren
     assert render_claim_text(claim(rendered), unicode=False) == rendered
 
 
-@pytest.mark.parametrize("text", [
-    "for s in L[ascii], s in L[ascii]",
-    "for c in L[ascii], c in L[unicode]",
-    "for k in {1, 2}, k in {1, 2, 3}",
+@pytest.mark.parametrize("text,first,last", [
+    ("for s in L[ascii], s in L[ascii]", "L[ascii]", "L[ascii]"),
+    ("for c in L[ascii], c in L[unicode]", "L[ascii]", "L[unicode]"),
+    ("for k in {1, 2}, k in {1, 2, 3}", "{1, 2}", "{1, 2, 3}"),
 ])
-def test_a_language_or_finite_set_rebound_last_is_refused_today(text):
+def test_a_language_or_finite_set_rebound_last_is_refused_today(text, first, last):
     with pytest.raises(InvalidConjecture) as raised:
         claim(text)
-    assert str(raised.value) == _NO_STATEMENT.format(text)
+    assert str(raised.value) == _NO_STATEMENT.format(text) + (
+        f". To state that every member of {first} is in {last}, "
+        f"write: {first} subset {last}")
+    assert claim(f"{first} subset {last}").relation == "domains"
 
 
 @pytest.mark.parametrize("text", [

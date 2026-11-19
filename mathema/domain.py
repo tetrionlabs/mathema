@@ -3020,6 +3020,29 @@ def _exclude_point(bound, value: float):
     return bound
 
 
+_REBOUND = re.compile(r"^\s*(?P<name>[A-Za-z_]\w*)\s*(?:\bin\b|∈)\s*(?P<domain>.+?)\s*$",
+                      re.DOTALL)
+
+
+def _inclusion_meant(segments: list) -> str:
+    """Intent:
+        The sentence added to the refusal of a quantifier whose last
+        segment binds again a name an earlier one bound (`for c in
+        L[A], c in L[B]`, `for x in [0, 1], x in [0, 2]`): the spelling
+        of the inclusion it reads like, the two domains as written.
+        Empty for any other quantifier.
+    """
+    last = _REBOUND.match(segments[-1])
+    if last is None:
+        return ""
+    for seg in segments[:-1]:
+        first = _REBOUND.match(seg)
+        if first is not None and first.group("name") == last.group("name"):
+            a, b = first.group("domain"), last.group("domain")
+            return f". To state that every member of {a} is in {b}, write: {a} subset {b}"
+    return ""
+
+
 def split_quantifier(text: str) -> tuple[dict, str]:
     """Peel a leading quantifier off a normalized law, lifting it into
     domain structure: `for x in [0, ..., 1], y in [-1, ..., 1], f(x, y) <= 1`
@@ -3109,7 +3132,8 @@ def split_quantifier(text: str) -> tuple[dict, str]:
     if n_bindings == len(segments):
         raise InvalidDomain(
             f"{text!r}: every segment after 'for' parses as a binding, "
-            "the quantifier has no statement left to quantify")
+            "the quantifier has no statement left to quantify"
+            + _inclusion_meant(segments))
     domain = {}
     ne_pending: list = []
     # the exclude-keyword splice rewrites binding text, so merged parts

@@ -13962,6 +13962,50 @@
   ],
   "unicode": "let θ = theta, ∀ a ∈ [2.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, b ∈ [0.1, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(a, b) = ∫(1/(a + b*cos(θ)), θ, 0, 2*π)"
  },
+ "for a in [32, 126] subset Z, b in [32, 126] subset Z, shape in {0, 1, 2, 3}, f(a, b, shape) == True": {
+  "ascii": "for a in [32, 126] : int, b in [32, 126] : int, shape in {0, 1, 2, 3}, f(a, b, shape) = True",
+  "domains": {
+   "a": [
+    "[32, 126] : int",
+    "[32, 126] ⊂ ℤ"
+   ],
+   "b": [
+    "[32, 126] : int",
+    "[32, 126] ⊂ ℤ"
+   ],
+   "shape": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ]
+  },
+  "fingerprint": "6a6adb5cddc6",
+  "identity": "for a in [32, 126] : int, b in [32, 126] : int, shape in {0, 1, 2, 3}, f(a, b, shape) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ a ∈ [32, 126] ⊂ ℤ, b ∈ [32, 126] ⊂ ℤ, shape ∈ {0, 1, 2, 3}, f(a, b, shape) = True"
+ },
+ "for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == True": {
+  "ascii": "for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = True",
+  "domains": {
+   "a": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ],
+   "b": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "8bb164454922",
+  "identity": "for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ a ∈ [48, 68] ⊂ ℤ, b ∈ [48, 68] ⊂ ℤ, f(a, b) = True"
+ },
  "for a in [5, 10], b in [1, 2], f(a, b) == 1.0": {
   "ascii": "for a in [5.0, 10.0] : float|absent|missing, b in [1.0, 2.0] : float|absent|missing, f(a, b) = 1.00000000000000",
   "domains": {
@@ -14890,14 +14934,14 @@
   "unicode": "∀ c ∈ (0.0, 1.0) ⊂ ℝ ∪ {absent, ∅}, n ∈ [1.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(c, n) > 0"
  },
  "for c in L[ascii] | {\"\"}, c in L[unicode]": {
-  "error": "InvalidConjecture: 'for c in L[ascii] | {\"\"}, c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for c in L[ascii] | {\"\"}, c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] | {\"\"} is in L[unicode], write: L[ascii] | {\"\"} subset L[unicode]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py"
   ]
  },
  "for c in L[ascii], c in L[unicode]": {
-  "error": "InvalidConjecture: 'for c in L[ascii], c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for c in L[ascii], c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] is in L[unicode], write: L[ascii] subset L[unicode]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -16805,7 +16849,7 @@
   "unicode": "∀ k ∈ {1, 2}, f(k) ∈ {1, 2, 3}"
  },
  "for k in {1, 2}, k in {1, 2, 3}": {
-  "error": "InvalidConjecture: 'for k in {1, 2}, k in {1, 2, 3}': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for k in {1, 2}, k in {1, 2, 3}': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of {1, 2} is in {1, 2, 3}, write: {1, 2} subset {1, 2, 3}",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -17562,7 +17606,7 @@
   "unicode": "∀ n ∈ ℤ ∪ {absent, ∅}, f(n) ≥ 0"
  },
  "for n in Z, n in Z": {
-  "error": "InvalidConjecture: 'for n in Z, n in Z': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for n in Z, n in Z': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of Z is in Z, write: Z subset Z",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -22921,6 +22965,38 @@
   ],
   "unicode": "∀ ratio ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, ratio is number set safe"
  },
+ "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == True": {
+  "ascii": "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = True",
+  "domains": {
+   "a": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "b": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "c": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "d": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "relation": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "f747bafcbe74",
+  "identity": "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt_relations.claims.yaml"
+  ],
+  "unicode": "∀ relation ∈ {0, 1, 2, 3, 4}, a ∈ {0, 1, 2, 3}, b ∈ {0, 1, 2, 3}, c ∈ {0, 1, 2, 3}, d ∈ {0, 1, 2, 3}, f(relation, a, b, c, d) = True"
+ },
  "for returns in R^n, 0 <= f(returns) <= 1": {
   "ascii": "for returns in (R | {missing})^n|absent, 0 <= f(returns) <= 1",
   "domains": {
@@ -23852,7 +23928,7 @@
   "unicode": "∀ s ∈ L[ascii], len(f(s)) ≤ len(s)"
  },
  "for s in L[ascii], s in L[ascii]": {
-  "error": "InvalidConjecture: 'for s in L[ascii], s in L[ascii]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for s in L[ascii], s in L[ascii]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] is in L[ascii], write: L[ascii] subset L[ascii]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -24424,7 +24500,7 @@
   "unicode": "∀ s ∈ L[letters], len(f(s)) = 8"
  },
  "for s in L[letters], s in L[letters]": {
-  "error": "InvalidConjecture: 'for s in L[letters], s in L[letters]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for s in L[letters], s in L[letters]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[letters] is in L[letters], write: L[letters] subset L[letters]",
   "parses": false,
   "sources": [
    "tests:tests/test_membership_relation.py"
@@ -26394,6 +26470,26 @@
   ],
   "unicode": "∀ text ∈ L[anytext], raises(f(text.upper()), ValueError)"
  },
+ "for text in L[ascii], note in L[ascii], f(text, note) == f(text, \"\")": {
+  "ascii": "for text in L[ascii], note in L[ascii], f(text, note) = f(text, \"\")",
+  "domains": {
+   "note": [
+    "L[ascii]",
+    "L[ascii]"
+   ],
+   "text": [
+    "L[ascii]",
+    "L[ascii]"
+   ]
+  },
+  "fingerprint": "76178e647df6",
+  "identity": "for text in L[ascii], note in L[ascii], f(text, note) = f(text, \"\")",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ text ∈ L[ascii], note ∈ L[ascii], f(text, note) = f(text, \"\")"
+ },
  "for text in L[letters], f(text) >= 0": {
   "ascii": "for text in L[letters], f(text) >= 0",
   "domains": {
@@ -27416,6 +27512,42 @@
    "tests:tests/test_witnesses_stay_in_the_parameter_type.py"
   ],
   "unicode": "∀ weights ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, cov ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿˣⁿ ⊂ ℝ ∪ {absent}, f is defined"
+ },
+ "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) == True": {
+  "ascii": "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) = True",
+  "domains": {
+   "text_index": [
+    "{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}",
+    "{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}"
+   ],
+   "which": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "13d99741bfc0",
+  "identity": "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "let x = text_index, ∀ which ∈ {0, 1, 2, 3, 4}, x ∈ {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, x) = True"
+ },
+ "for which in {0, 1, 2, 3}, f(which) == True": {
+  "ascii": "for which in {0, 1, 2, 3}, f(which) = True",
+  "domains": {
+   "which": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ]
+  },
+  "fingerprint": "061254d731ec",
+  "identity": "for which in {0, 1, 2, 3}, f(which) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ which ∈ {0, 1, 2, 3}, f(which) = True"
  },
  "for x in (-1, 0], is_number_set_safe(x)": {
   "ascii": "for x in (-1.0, 0.0] : float|absent|missing, is_number_set_safe(x)",
@@ -37056,7 +37188,7 @@
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x = [0, 1]"
  },
  "for x in [0, 1], x in R": {
-  "error": "InvalidConjecture: 'for x in [0, 1], x in R': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for x in [0, 1], x in R': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of [0, 1] is in R, write: [0, 1] subset R",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -37064,7 +37196,7 @@
   ]
  },
  "for x in [0, 1], x in [0, 2]": {
-  "error": "InvalidConjecture: 'for x in [0, 1], x in [0, 2]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for x in [0, 1], x in [0, 2]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of [0, 1] is in [0, 2], write: [0, 1] subset [0, 2]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -49775,6 +49907,26 @@
   ],
   "unicode": "let h = numpy.linalg.norm, h(x + y)^2 = h(x)^2 + h(y)^2"
  },
+ "let inside = claims.smt_support.span_inside, for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == inside(a, b)": {
+  "ascii": "let inside = claims.smt_support.span_inside, for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = inside(a, b)",
+  "domains": {
+   "a": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ],
+   "b": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "0d57ec0d5f39",
+  "identity": "let inside = claims.smt_support.span_inside, for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = inside(a, b)",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "let inside = claims.smt_support.span_inside, ∀ a ∈ [48, 68] ⊂ ℤ, b ∈ [48, 68] ⊂ ℤ, f(a, b) = inside(a, b)"
+ },
  "let k be 2.5, f(k) >= 0": {
   "ascii": "let k be 2.5, f(k) >= 0",
   "domains": {
@@ -50192,6 +50344,26 @@
   ],
   "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(price, rate) ≤ price"
  },
+ "let other be {\"\", \"a\", \"b\", \"ab\", \"ba\"}, for text in {\"\", \"a\", \"b\", \"ab\", \"ba\"}, assuming text != other, f(text, \"\") != f(other, \"\")": {
+  "ascii": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, for text in {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") != f(other, \"\")",
+  "domains": {
+   "other": [
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}",
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}"
+   ],
+   "text": [
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}",
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}"
+   ]
+  },
+  "fingerprint": "321e3900a1c4",
+  "identity": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, for text in {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") != f(other, \"\")",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, ∀ text ∈ {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") ≠ f(other, \"\")"
+ },
  "let phi be [0, 1], for x in [0, 10], f(x) + phi >= 0": {
   "ascii": "let phi be [0.0, 1.0], for x in [0.0, 10.0] : float|absent|missing, phi + f(x) >= 0",
   "domains": {
@@ -50412,6 +50584,38 @@
    "tests:tests/test_library_defaults.py"
   ],
   "unicode": "let strict be True, ∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
+ },
+ "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == truth(relation, a, b, c, d)": {
+  "ascii": "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)",
+  "domains": {
+   "a": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "b": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "c": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "d": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "relation": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "caa4a8695490",
+  "identity": "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt_relations.claims.yaml"
+  ],
+  "unicode": "let truth = claims.smt_support.interval_truth, ∀ relation ∈ {0, 1, 2, 3, 4}, a ∈ {0, 1, 2, 3}, b ∈ {0, 1, 2, 3}, c ∈ {0, 1, 2, 3}, d ∈ {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)"
  },
  "let two = 2, for x in [0,10], f(x) <= two": {
   "ascii": "for x in [0.0, 10.0] : float|absent|missing, f(x) <= 2",
