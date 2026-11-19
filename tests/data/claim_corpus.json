@@ -24004,6 +24004,38 @@
   ],
   "unicode": "∀ s ∈ L[crowded], f(s) = 0"
  },
+ "for s in L[digit + lower + \"_\"], f(s) = s": {
+  "ascii": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[digit + lower + \"_\"]",
+    "L[digit + lower + \"_\"]"
+   ]
+  },
+  "fingerprint": "46537e4c1b04",
+  "identity": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[digit + lower + \"_\"], f(s) = s"
+ },
+ "for s in L[digit+lower+\"_\"], f(s) == s": {
+  "ascii": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[digit + lower + \"_\"]",
+    "L[digit + lower + \"_\"]"
+   ]
+  },
+  "fingerprint": "46537e4c1b04",
+  "identity": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[digit + lower + \"_\"], f(s) = s"
+ },
  "for s in L[digit] \\ {\"\"}, f(\"0\" + s) == f(s)": {
   "ascii": "for s in L[digit] \\ {\"\"}, f(\"0\" + s) = f(s)",
   "domains": {
@@ -24397,6 +24429,22 @@
   "sources": [
    "tests:tests/test_membership_relation.py"
   ]
+ },
+ "for s in L[lower + digit + \"_\"], f(s) == s": {
+  "ascii": "for s in L[lower + digit + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[lower + digit + \"_\"]",
+    "L[lower + digit + \"_\"]"
+   ]
+  },
+  "fingerprint": "6aa92dc96e89",
+  "identity": "for s in L[lower + digit + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[lower + digit + \"_\"], f(s) = s"
  },
  "for s in L[nope], f(s) == s": {
   "ascii": "for s in L[nope], f(s) = s",
