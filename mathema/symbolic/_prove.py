@@ -4744,6 +4744,44 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
 
 
+def _raised_name_is_not_the_claimed_class(fn, name: str) -> "str | None":
+    """Intent:
+        Why the name a function raises under is not shown to be the
+        exception class a claim means by that name, or None when it is:
+        in a Python function the name must not be a local or enclosed
+        variable, what the function's globals (then the builtins) bind
+        it to must be the very class the claim's name resolves to, and
+        building an instance must run no constructor written outside
+        the builtins. A callable with no Python namespace is not
+        checked.
+    """
+    import builtins
+    code = getattr(fn, "__code__", None)
+    namespace = getattr(fn, "__globals__", None)
+    if code is None or namespace is None:
+        return None
+    if name in code.co_varnames or name in code.co_cellvars or name in code.co_freevars:
+        return (f"`{name}` is a variable of the function or of an enclosing one, not "
+                f"shown to be the exception class the claim names")
+    missing = object()
+    bound = namespace.get(name, getattr(builtins, name, missing))
+    from ..conjecture import _resolve_exception_type
+    try:
+        claimed = _resolve_exception_type(name, fn)
+    except Exception:
+        claimed = None
+    if bound is missing or claimed is None or bound is not claimed:
+        return (f"`{name}` where the function is defined is not the exception class the "
+                f"claim names")
+    if type(claimed) is not type or any(
+            klass.__module__ != "builtins" and ("__init__" in vars(klass)
+                                                or "__new__" in vars(klass))
+            for klass in claimed.__mro__):
+        return (f"building a `{name}` runs a constructor written outside the builtins, "
+                f"which may itself raise")
+    return None
+
+
 def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
                      domain: dict | None = None, max_callee_depth: int = 3) -> ProofResult:
     """A raises(...) claim on the derive route, only ever reachable via
@@ -4783,11 +4821,19 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if conditioned.kind == "value":
         return ProofResult("disproven", sketch="the function returns a value "
                            "under this domain rather than raising")
-    if exc_name is None or conditioned.exc_type == exc_name:
+    if exc_name is None:
         return ProofResult("proven", sketch=f"raises {conditioned.exc_type or '(unknown type)'} "
                            "under this domain")
     if conditioned.exc_type is None:
+        why = getattr(conditioned, "exc_unread", None)
         return ProofResult("undecided", sketch="raises under this domain, but the "
-                           "exception type couldn't be determined")
+                           "exception type couldn't be determined"
+                           + (f": {why}" if why else ""))
+    if conditioned.exc_type == exc_name:
+        other = _raised_name_is_not_the_claimed_class(fn, exc_name)
+        if other is not None:
+            return ProofResult("undecided", sketch=f"raises under this domain, but {other}")
+        return ProofResult("proven", sketch=f"raises {conditioned.exc_type} "
+                           "under this domain")
     return ProofResult("disproven", sketch=f"raises {conditioned.exc_type}, "
                        f"not the claimed {exc_name}")
