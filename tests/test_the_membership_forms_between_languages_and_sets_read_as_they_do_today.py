@@ -82,4 +82,7 @@ def test_an_inclusion_between_two_languages_reads_as_subset(text):
 def test_the_proper_subset_glyph_between_two_languages_is_refused():
     with pytest.raises(InvalidConjecture) as raised:
         claim("L[a] ⊂ L[b]")
-    assert str(raised.value).startswith("`⊂` reads two ways")
+    assert str(raised.value) == (
+        "`⊂` reads two ways: write `L[a] subset L[b]` for every member of "
+        "L[a] is in L[b], equality included, or `L[a] subset L[b] and "
+        "L[a] != L[b]` for a proper subset")
