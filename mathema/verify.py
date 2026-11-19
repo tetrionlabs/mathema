@@ -1289,13 +1289,16 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
-def _language_definition_moved(merged_entry: dict, verified_entry: dict) -> "str | None":
+def _language_definition_moved(fn, merged_entry: dict,
+                               verified_entry: dict) -> "str | None":
     """Intent:
         The language whose regular-language definition differs from the
         one a record was written against (`mathema.language_definitions`
         on each row), as its text (`L[slug]`), or None when none moved.
         A language that was stamped and now states no definition, or
-        does not resolve, has moved. A language the record never
+        does not resolve, has moved, and so has the language of a
+        validator's membership statement once the pattern the function
+        reads is another one. A language the record never
         stamped has not: the record made no statement about it.
     """
     from .conjecture import language_definition_stamp
@@ -1317,7 +1320,7 @@ def _language_definition_moved(merged_entry: dict, verified_entry: dict) -> "str
         was = recorded.get(cj.name)
         if not was:
             continue
-        now = language_definition_stamp(cj)
+        now = language_definition_stamp(cj, fn)
         for language, digest in sorted(was.items()):
             if now.get(language) != digest:
                 return language
@@ -2253,7 +2256,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
         body_moved = _provenance_moved(facts_now, verified_entry)
-        language_moved = _language_definition_moved(merged_entry, verified_entry)
+        language_moved = _language_definition_moved(fn, merged_entry, verified_entry)
         is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None

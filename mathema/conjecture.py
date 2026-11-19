@@ -5583,19 +5583,23 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                            trials_scale, facts, extensive, known_premises,
                            float_companions, pseudo_infinity)
         return _stamp_language_definitions(
-            out + [_adjudicate_domain_relation(c, fn) for c in between], built)
+            out + [_adjudicate_domain_relation(c, fn) for c in between], built, fn)
     finally:
         STATED.reset(stated_token)
 
 
-def language_definition_stamp(cj) -> dict:
+def language_definition_stamp(cj, fn=None) -> dict:
     """Intent:
         The hash of the regular-language definition each language a
         claim names states now, by the language's text (`L[slug]`): the
         languages its bindings range over, the one on the right of
         `in`, and both sides of a relation between domains. A language
         that does not resolve, or states no definition this core reads,
-        is left out. The map is what a row is stamped with
+        is left out. With `fn`, a pattern validator a registered word
+        reads, the language of its membership statement (`L[<base>,
+        <word> (<pattern>)]`) is in the map too, so the pattern the
+        function reads is part of what the record rests on. The map is
+        what a row is stamped with
         (`mathema.language_definitions`) and what verify compares a
         record against.
     """
@@ -5616,6 +5620,13 @@ def language_definition_stamp(cj) -> dict:
             named.append(bound)
         elif isinstance(bound, Domain):
             named.extend(p for p in bound.pieces if isinstance(p, LanguageRef))
+    if fn is not None:
+        try:
+            statement = _validator_statement(fn, getattr(cj, "domain", None) or {})
+        except Exception:
+            statement = None
+        if isinstance(statement, tuple):
+            named.append(statement[3])
     stamp: dict = {}
     for ref in named:
         try:
@@ -5627,10 +5638,10 @@ def language_definition_stamp(cj) -> dict:
     return stamp
 
 
-def _stamp_language_definitions(rows: list, claims: list) -> list:
+def _stamp_language_definitions(rows: list, claims: list, fn=None) -> list:
     """Each row of a claim that names a defined language, its companion
     rows included, stamped with `language_definition_stamp`."""
-    stamps = {c.name: language_definition_stamp(c) for c in claims}
+    stamps = {c.name: language_definition_stamp(c, fn) for c in claims}
     for row in rows:
         meta = getattr(row, "meta", None) or {}
         stamp = stamps.get(meta.get("mathema.companion_of") or row.name)
@@ -10833,6 +10844,42 @@ def _validator_breaks(cj, fn, text: str) -> bool:
     return returned != text
 
 
+def _validator_statement(fn, cj_domain) -> "tuple | str | None":
+    """Intent:
+        `(validator, param, base, stated)` when `fn` is a pattern
+        validator of the one parameter `cj_domain` binds over one
+        language and a registered predicate word reads its match call:
+        the validator, the parameter, the parameter's language and the
+        language of the membership statement, `L[<base>, <word>
+        (<pattern>)]`. None when `fn` is no validator of that
+        parameter; a string saying why there is no statement when it
+        is one.
+    """
+    from ._validators import read_validator
+    from .domain import Domain, LanguageRef, Predicate
+    from .languages import word_reading_call
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    validator = read_validator(fn)
+    if isinstance(validator, str) or validator.param != param:
+        return None
+    reading = word_reading_call(validator.accepts)
+    if reading is None:
+        return (f"definition-unread(re.Pattern.{validator.mode}): no registered "
+                f"predicate word reads the call")
+    word, arguments = reading
+    base = bound if isinstance(bound, LanguageRef) else (
+        bound.pieces[0] if isinstance(bound, Domain) and len(bound.pieces) == 1
+        and not bound.excluded and isinstance(bound.pieces[0], LanguageRef) else None)
+    if base is None:
+        return (f"the domain of {param} is not one language, so the validator "
+                f"has no membership statement over it")
+    stated = LanguageRef(base.name, base.refinements, tuple(sorted(
+        {*base.predicates, Predicate(word.word, arguments)})))
+    return validator, param, base, stated
+
+
 def _validator_proof(cj, fn, cj_domain):
     """Intent:
         The derive verdict for a claim over one text parameter of a
@@ -10858,8 +10905,8 @@ def _validator_proof(cj, fn, cj_domain):
     """
     from . import domain_relations, regular
     from ._validators import read_validator
-    from .domain import Domain, LanguageRef, Predicate, domain_contains
-    from .languages import resolve_language, word_reading_call
+    from .domain import domain_contains
+    from .languages import resolve_language
     from .symbolic._proof_support import ProofResult
     if len(cj_domain) != 1:
         return None
@@ -10875,19 +10922,10 @@ def _validator_proof(cj, fn, cj_domain):
 
     def undecided(why: str):
         return ProofResult("undecided", sketch=f"{path}: {why}")
-    reading = word_reading_call(validator.accepts)
-    if reading is None:
-        return undecided(f"definition-unread(re.Pattern.{validator.mode}): no registered "
-                         f"predicate word reads the call")
-    word, arguments = reading
-    base = bound if isinstance(bound, LanguageRef) else (
-        bound.pieces[0] if isinstance(bound, Domain) and len(bound.pieces) == 1
-        and not bound.excluded and isinstance(bound.pieces[0], LanguageRef) else None)
-    if base is None:
-        return undecided(f"the domain of {param} is not one language, so the validator "
-                         f"has no membership statement over it")
-    stated = LanguageRef(base.name, base.refinements, tuple(sorted(
-        {*base.predicates, Predicate(word.word, arguments)})))
+    statement = _validator_statement(fn, cj_domain)
+    if not isinstance(statement, tuple):
+        return undecided(statement) if statement else None
+    _, _, base, stated = statement
     path = f"smt: membership, {param} in {stated!r}"
     domain = domain_relations.defined_bound(bound)
     if domain is None:
