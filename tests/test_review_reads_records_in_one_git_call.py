@@ -133,3 +133,51 @@ def test_git_is_called_a_fixed_number_of_times(tmp_path, monkeypatch):
     many = _git_calls(monkeypatch, lambda: _records_at_ref(large, "HEAD"))
     assert few == many
     assert many <= 3
+
+
+@pytest.mark.parametrize("name", ["a.yaml", "a b.yaml", "a b c d.yaml"])
+def test_a_missing_path_with_spaces_is_left_out(tmp_path, name):
+    root = _repo(tmp_path, 1)
+    present = ".mathema/verified/pkg.fn0.yaml"
+    got = review._blobs_at_ref(root, "HEAD", [f".mathema/verified/{name}",
+                                              present])
+    assert list(got) == [present]
+
+
+def test_an_ambiguous_answer_is_left_out(monkeypatch):
+    class Done:
+        returncode = 0
+        stdout = (b"HEAD:x ambiguous\n"
+                  b"0123456789012345678901234567890123456789 blob 3\nabc\n")
+    monkeypatch.setattr(review.subprocess, "run", lambda *a, **k: Done())
+    got = review._blobs_at_ref(".", "HEAD", ["x", "y"])
+    assert got == {"y": "abc"}
+
+
+def test_a_failed_batch_falls_back_to_the_per_file_reading(tmp_path,
+                                                          monkeypatch):
+    root = _repo(tmp_path, 4)
+    expected = _records_at_ref_per_file(root, "HEAD")
+    real = subprocess.run
+
+    def run(cmd, *a, **kw):
+        if cmd[:3] == ["git", "cat-file", "--batch"]:
+            raise subprocess.TimeoutExpired(cmd, 1)
+        return real(cmd, *a, **kw)
+    monkeypatch.setattr(review.subprocess, "run", run)
+    assert expected and _records_at_ref(root, "HEAD") == expected
+
+
+def test_a_crlf_blob_and_a_non_utf8_blob(tmp_path):
+    root = _repo(tmp_path, 1)
+    d = os.path.join(root, ".mathema", "verified")
+    with open(os.path.join(d, "crlf.yaml"), "wb") as fh:
+        fh.write(b"crlf.key:\r\n  claims:\r\n  - {name: c, verdict: holds}\r\n")
+    with open(os.path.join(d, "latin.yaml"), "wb") as fh:
+        fh.write(b"latin.key:\n  note: caf\xe9\n")
+    _run(root, "add", "-A")
+    _run(root, "commit", "-q", "-m", "three")
+    got = _records_at_ref(root, "HEAD")
+    assert got == _records_at_ref_per_file(root, "HEAD")
+    assert got["crlf.key"]["claims"][0]["verdict"] == "holds"
+    assert "latin.key" not in got
