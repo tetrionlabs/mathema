@@ -10,6 +10,8 @@ case derive does not decide a `raises(f(x), E)` claim, and the probe
 decides it by running the function. A literal message, an f-string
 over parameters and a parameter passed as the argument are read as
 before."""
+from typing import Optional
+
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
@@ -224,3 +226,101 @@ def test_a_claim_that_names_no_exception_is_proven_whatever_the_argument_does():
     (row,) = check_conjectures(division, [claim("for x in [-5, -1], raises(f(x))",
                                                 route="derive")])
     assert row.verdict == "proven", (row.verdict, row.sketch)
+
+
+# ---- a guard read for a missing-value policy -----------------------------
+
+def guard_divides(x: Optional[float], y: float) -> float:
+    if x is None:
+        raise TypeError(1 / y)
+    return x * y
+
+
+def guard_with_a_literal(x: Optional[float], y: float) -> float:
+    if x is None:
+        raise TypeError("x is required")
+    return x * y
+
+
+def _policy_row(fn):
+    rows = check_conjectures(fn, [claim("for x in [0, 1], y in [-1, 1], f(x, y) == x * y"),
+                                  claim("absent(f, x) raises(TypeError)")])
+    return rows[-1]
+
+
+def test_a_policy_is_not_proven_from_a_guard_whose_raise_may_raise_something_else():
+    with pytest.raises(ZeroDivisionError):
+        guard_divides(None, 0.0)
+    row = _policy_row(guard_divides)
+    assert row.verdict != "proven", (row.verdict, row.note)
+
+
+def test_a_policy_from_a_guard_with_a_literal_message_is_proven_as_before():
+    row = _policy_row(guard_with_a_literal)
+    assert row.verdict == "proven", (row.verdict, row.note)
+
+
+# ---- a raise that sits in a function the body calls ------------------------
+
+_HELPER_MODULE = """
+class _Other(Exception):
+    pass
+
+
+ValueError = _Other
+
+
+def check(x: float) -> float:
+    if x < 0:
+        raise ValueError("negative")
+    return x
+"""
+
+_CALLER_MODULE = """
+import raise_helper
+from raise_helper import check
+
+
+def through_module(x: float) -> float:
+    return raise_helper.check(x) + 1
+
+
+def through_name(x: float) -> float:
+    return check(x) + 1
+
+
+def own_raise_then_module(x: float) -> float:
+    if x > 100:
+        raise ValueError("big")
+    return raise_helper.check(x) + 1
+
+
+def own_raise_then_name(x: float) -> float:
+    if x > 100:
+        raise ValueError("big")
+    return check(x) + 1
+"""
+
+
+@pytest.mark.parametrize("name", ["through_module", "through_name", "own_raise_then_module",
+                                  "own_raise_then_name"])
+def test_a_raise_in_a_called_function_is_not_read_under_the_callers_names(
+        tmp_path, monkeypatch, name):
+    import importlib
+    import sys
+    monkeypatch.syspath_prepend(str(tmp_path))
+    (tmp_path / "raise_helper.py").write_text(_HELPER_MODULE)
+    (tmp_path / "raise_caller.py").write_text(_CALLER_MODULE)
+    for module in ("raise_helper", "raise_caller"):
+        sys.modules.pop(module, None)
+    try:
+        fn = getattr(importlib.import_module("raise_caller"), name)
+        with pytest.raises(Exception) as raised:
+            fn(-2.0)
+        assert not isinstance(raised.value, ValueError)
+        for route in ("derive", "best"):
+            (row,) = check_conjectures(fn, [claim(_CLAIM, route=route)])
+            assert row.verdict != "proven", (route, row.verdict, row.sketch)
+    finally:
+        for module in ("raise_helper", "raise_caller"):
+            sys.modules.pop(module, None)
