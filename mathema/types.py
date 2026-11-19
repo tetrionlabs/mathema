@@ -263,6 +263,20 @@ def _markers(hint) -> tuple:
     return tuple(out)
 
 
+def has_markers(fn) -> bool:
+    """Intent:
+        Whether any parameter or the return of `fn` carries a mathema
+        type marker (`Probability`, `InRange(lo, hi)`, `Shape`, `Mat`,
+        `Vec`, ...), each of which states a claim in the signature.
+    """
+    import typing
+    try:
+        hints = typing.get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = getattr(fn, "__annotations__", {}) or {}
+    return any(_markers(h) for h in hints.values())
+
+
 def domain_from_signature(fn, guards: bool = True) -> dict:
     """Per-parameter domain implied by a bound marker (Probability,
     Positive, InRange, UnitBall, ...) on that parameter, ready to merge

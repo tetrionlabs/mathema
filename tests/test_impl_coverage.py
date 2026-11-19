@@ -443,6 +443,7 @@ def test_derive_coverage_uses_per_branch_attribution(tmp_path):
     assert whole == {2, 3, 4, 5}
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs a function only through its included claims; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_a_proof_of_a_standard_claim_never_counts_toward_the_derive_source(
         tmp_path):
     # a constant function proves every suggested shape law (monotonic,

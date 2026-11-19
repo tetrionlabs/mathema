@@ -129,13 +129,15 @@ def _external_lines(fn, coverage_data: dict | None) -> set:
     return {ln for ln in executed if start <= ln <= end}
 
 
-def _trace_check(fn, declared: dict | None = None):
-    """Run `check(fn, declared=declared)` under a standard-library `sys.settrace` line
-    tracer and return `(statements, executed, record)` in fn's own line
-    range: its executable statements (the denominator, from the AST), the
-    lines the probing actually ran, and the check record (for the derive
-    source). No third-party tracer is needed. Returns `(None, None,
-    None)` only when the source cannot be located (a builtin/C
+def _trace_check(fn, included: list | None = None):
+    """Run the claims included for fn (`included`) under a standard-library
+    `sys.settrace` line tracer and return `(statements, executed,
+    record)` in fn's own line range: its executable statements (the
+    denominator, from the AST), the lines those claims' probing actually
+    ran, and the record of their rows (for the derive source). With no
+    included claim fn is not called, so nothing is executed and the
+    record is None. No third-party tracer is needed. Returns `(None,
+    None, None)` only when the source cannot be located (a builtin/C
     function)."""
     rng = _line_range(fn)
     if rng is None:
@@ -156,31 +158,84 @@ def _trace_check(fn, declared: dict | None = None):
         # to the function under measurement.
         return _local if frame.f_code.co_filename == path else None
 
-    from . import check
-
+    statements = _statement_lines(fn)
+    if not included:
+        return statements, set(), None
     previous = sys.gettrace()
     sys.settrace(_global)
     record = None
     try:
-        record = check(fn, declared=declared)
+        record = _run_included(fn, included)
     except Exception:
         record = None
     finally:
         sys.settrace(previous)
-    statements = _statement_lines(fn)
     return statements, executed & statements, record
 
 
-def _plain_check(fn, declared: dict | None = None):
-    """Run `check(fn, declared=declared)` WITHOUT tracing, for its record only. Used in the
-    no-`coverage`-extra fallback so the derive source (read off the
-    record) still works even though the probe source, which needs the
-    line tracer, does not."""
+def _plain_check(fn, included: list | None = None):
+    """Run the claims included for fn WITHOUT tracing, for their record
+    only; None when there are none. Used when fn's source cannot be
+    traced, so the derive source (read off the record) still works even
+    though the probe source, which needs the line tracer, does not."""
+    if not included:
+        return None
     try:
-        from . import check
-        return check(fn, declared=declared)
+        return _run_included(fn, included)
     except Exception:
         return None
+
+
+def _included_claims(fn, key: str, declared: "dict | None", root: str,
+                     verified_store: "dict | None" = None) -> list:
+    """Intent:
+        The claims included for fn, as Conjectures: those its retrieved
+        entry declares (a claims file, its docstring, its decorator), else
+        the ones on the function object itself, and the suggestions a
+        person accepted as evidence in its verified record. The built-in
+        battery, type probes and suggestions nobody included are not
+        among them.
+    """
+    from .authoring import declared_from_function
+    from .spec import entry_claims
+    entry = declared if declared is not None else {"claims": declared_from_function(fn)}
+    try:
+        claims = list(entry_claims(entry))
+    except Exception:
+        claims = []
+    names = {getattr(c, "name", None) for c in claims}
+    try:
+        if verified_store is None:
+            from .spec import load_verified
+            verified_store = load_verified(root)
+        rows = ((verified_store.get(key) or {}).get("entry") or {}).get("claims") or []
+    except Exception:
+        rows = []
+    accepted = [{k: v for k, v in row.items() if k != "verdict"} for row in rows
+                if (row.get("accepted") or {}).get("as") == "evidence"
+                and row.get("name") not in names]
+    if accepted:
+        try:
+            claims += entry_claims({"claims": accepted,
+                                    "grammar": entry.get("grammar", "mathema")})
+        except Exception:
+            pass
+    return claims
+
+
+def _run_included(fn, included: list):
+    """Intent:
+        Adjudicate only the claims in `included` on fn, over the domain
+        its signature declares, and return their rows as a record (an
+        object with `probes`).
+    """
+    import types as _types
+
+    from .conjecture import check_conjectures
+    from .types import domain_from_signature
+    domain = domain_from_signature(fn) or None
+    rows = check_conjectures(fn, included, domain=domain, float_companions=True)
+    return _types.SimpleNamespace(probes=rows)
 
 
 _INCLUDED_SURFACES = frozenset({"docstring", "decorator", "types", "ad_hoc"})
@@ -280,7 +335,8 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
         declared = copy.deepcopy(retrieve(fn, root, store=declared_store))
     except Exception:
         declared = None
-    statements, probe_executed, record = _trace_check(fn, declared)
+    included = _included_claims(fn, key, declared, root, verified_store)
+    statements, probe_executed, record = _trace_check(fn, included)
     traced = statements is not None
     if statements is None:
         # no coverage extra (or no traceable source): the PROBE source
@@ -290,7 +346,7 @@ def function_coverage(fn, key: str | None = None, root: str = ".",
         # statement-line denominator.
         statements = _statement_lines(fn)
         probe_executed = set()
-        record = _plain_check(fn, declared)
+        record = _plain_check(fn, included)
 
     test_stale = False
     rng = _line_range(fn)

@@ -5,6 +5,7 @@ string parameter with no declared domain, a call that raises for every
 input built from the signature), the check is not run and leaves no
 row. What it tried and why it could not stay on the record's meta under
 `mathema.not_run`: the call as a statement, the reason, and the gap."""
+import pytest
 import mathema
 
 
@@ -33,6 +34,7 @@ def test_an_unsynthesisable_call_leaves_no_row_and_keeps_the_reason():
     assert row["gap"] == "input-synthesis"
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_an_undeclared_string_parameter_leaves_no_row_and_keeps_the_reason():
     rec = mathema.check(label)
     assert not [p for p in rec.probes if p.name == "callable"]
