@@ -51,8 +51,9 @@ def wrote(path: str) -> None:
     """Intent:
         Forget what the run kept from the file at `path`, just
         written: its verified record, the merged store view built from
-        it, and, for a claims file, the claims-file scan and every read
-        built from claims files.
+        it, for a claims file, the claims-file scan and every read
+        built from claims files, and, for a Python source file, every
+        form and name the dependency walk read from source.
 
     Notes:
         Outside a run this does nothing.
@@ -68,3 +69,5 @@ def wrote(path: str) -> None:
     if _is_claim_file(os.path.dirname(real), os.path.basename(real)):
         for kind in ("claims_paths", "library_claims", "claims_valid"):
             _STATE.pop(kind, None)
+    if real.endswith((".py", ".pyw", ".pyi")):
+        _STATE.pop("dependency_walk", None)
