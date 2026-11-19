@@ -2158,7 +2158,8 @@ def _claim(law: str, name: str | None, source: str, route: str,
         raise InvalidConjecture(prime_problem)
     from . import domain_relations
     try:
-        between = domain_relations.parse(text)
+        between = domain_relations.parse(
+            text, frozenset({*dom, *let_funcs, *aliases, *param_pins}))
     except domain_relations.InvalidDomainRelation as e:
         raise InvalidConjecture(str(e)) from e
     if between is not None:
@@ -2176,7 +2177,7 @@ def _claim(law: str, name: str | None, source: str, route: str,
             lhs=first, rhs=stated[len(first):].strip(),
             relation=domain_relations.RELATION, source=source,
             route="derive" if route == "best" else route, grammar=grammar,
-            meta=dict(meta or {}), raw=stated)
+            meta=dict(meta or {}), raw=stated, written=law.strip())
     r = parse_raises(text)
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
@@ -5581,12 +5582,12 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                            fn_mats, runtime_mats, domain, trials,
                            trials_scale, facts, extensive, known_premises,
                            float_companions, pseudo_infinity)
-        return out + [_adjudicate_domain_relation(c) for c in between]
+        return out + [_adjudicate_domain_relation(c, fn) for c in between]
     finally:
         STATED.reset(stated_token)
 
 
-def _adjudicate_domain_relation(cj) -> "Probe":
+def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
     """Intent:
         The row for a claim relating two domains (`A subset B`):
         `proven` or `falsified` as the sets decide it, with the member
@@ -5602,6 +5603,15 @@ def _adjudicate_domain_relation(cj) -> "Probe":
         stated, why = None, str(e)
     else:
         why = f"{statement!r} is not a relation between two domains"
+    if stated is not None and fn is not None:
+        try:
+            parameters = set(inspect.signature(fn).parameters)
+        except (TypeError, ValueError):
+            parameters = set()
+        clash = domain_relations.parameter_named_as_a_set(
+            stated, cj.written or statement, parameters)
+        if clash is not None:
+            stated, why = None, clash
     if stated is None:
         return Probe(cj.name, statement, "skipped:misspecified", route=None, note=why,
                      meta={**meta, "mathema.invalid_conjecture": True})

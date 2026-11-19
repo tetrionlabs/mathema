@@ -30,8 +30,15 @@ def _verdict(text):
     ("R ⊇ Z", "Z subset R", "ℤ ⊆ ℝ"),
     ("{1, 2} == {2, 1}", "{1, 2} = {1, 2}", "{1, 2} = {1, 2}"),
     ("{1, 2} = {1, 2}", "{1, 2} = {1, 2}", "{1, 2} = {1, 2}"),
-    ("[0, 1] != [0, 2]", "[0.0, 1.0] != [0.0, 2.0]", "[0.0, 1.0] ≠ [0.0, 2.0]"),
-    ("[0, 1] ≠ [0, 2]", "[0.0, 1.0] != [0.0, 2.0]", "[0.0, 1.0] ≠ [0.0, 2.0]"),
+    ("[0, 1] : real != [0, 2] : real", "[0.0, 1.0] : real != [0.0, 2.0] : real",
+     "[0.0, 1.0] : real ≠ [0.0, 2.0] : real"),
+    ("[0, 1] : real ≠ [0, 2]", "[0.0, 1.0] : real != [0.0, 2.0] : real",
+     "[0.0, 1.0] : real ≠ [0.0, 2.0] : real"),
+    ("[0, 1) == [0, 1]", "[0.0, 1.0) : real = [0.0, 1.0] : real",
+     "[0.0, 1.0) : real = [0.0, 1.0] : real"),
+    ("Z != R", "Z != R", "ℤ ≠ ℝ"),
+    ("N == Z", "N = Z", "ℕ = ℤ"),
+    ("{1, 2} == [1, 2]", "{1, 2} = [1.0, 2.0] : real", "{1, 2} = [1.0, 2.0] : real"),
     ("[0, 2] not subset [0, 1]", "[0.0, 2.0] not subset [0.0, 1.0]",
      "[0.0, 2.0] ⊈ [0.0, 1.0]"),
     ("[0, 2] ⊈ [0, 1]", "[0.0, 2.0] not subset [0.0, 1.0]", "[0.0, 2.0] ⊈ [0.0, 1.0]"),
@@ -39,8 +46,10 @@ def _verdict(text):
      "[0.0, 2.0] ⊈ [0.0, 1.0]"),
     ("[0, 1] disjoint [2, 3]", "[0.0, 1.0] disjoint [2.0, 3.0]",
      "[0.0, 1.0] disjoint [2.0, 3.0]"),
-    ("[1, 0] == {}", "[1.0, 0.0] = {}", "[1.0, 0.0] = {}"),
-    ("[1, 0] = ∅", "[1.0, 0.0] = {}", "[1.0, 0.0] = {}"),
+    ("[1, 0] : real == {}", "[1.0, 0.0] : real = {}", "[1.0, 0.0] : real = {}"),
+    ("[1, 0] : real = ∅", "[1.0, 0.0] : real = {}", "[1.0, 0.0] : real = {}"),
+    ("[0, 1] ⊊ [0, 2]", "[0.0, 1.0] subset [0.0, 2.0] and [0.0, 1.0] : real != [0.0, 2.0] : real",
+     "[0.0, 1.0] ⊆ [0.0, 2.0] and [0.0, 1.0] : real ≠ [0.0, 2.0] : real"),
     ("Z ⊊ R", "Z subset R and Z != R", "ℤ ⊆ ℝ and ℤ ≠ ℝ"),
     ("Z subset R and Z != R", "Z subset R and Z != R", "ℤ ⊆ ℝ and ℤ ≠ ℝ"),
     ("[0, 10] : int subset Z", "[0, 10] : int subset Z", "[0, 10] : int ⊆ ℤ"),
@@ -133,9 +142,59 @@ def test_a_relation_between_domains_takes_no_quantifier_or_premise(text):
         claim(text)
 
 
-@pytest.mark.parametrize("text", ["N == Z", "Z != R"])
-def test_two_bare_names_under_equality_stay_a_comparison_of_values(text):
-    assert claim(text).relation in ("==", "!=")
+@pytest.mark.parametrize("text,meant", [
+    ("[0, 1] == [0, 1]", "[0.0, 1.0] : real == [0.0, 1.0] : real"),
+    ("(0, 1) != [0, 1]", "(0.0, 1.0) : real != [0.0, 1.0] : real"),
+    ("[1, 0] == {}", "[1.0, 0.0] : real == {}"),
+])
+def test_two_bracket_pairs_alone_under_equality_are_refused_with_the_marked_spelling(
+        text, meant):
+    with pytest.raises(InvalidConjecture) as raised:
+        claim(text)
+    assert str(raised.value) == (
+        f"`{text}` reads two ways: two lists of two numbers, or two intervals. Did you "
+        f"mean the intervals, `{meant}`? A bracket pair is an interval where it carries "
+        f"a type clause (`: real`, `: int`) and a list of values where the claim binds "
+        f"or calls beside it")
+    assert claim(meant).relation == "domains"
+
+
+@pytest.mark.parametrize("text,relation,lhs,rhs", [
+    ("f(x) == [0, 1]", "==", "f(x)", "[0, 1]"),
+    ("[0, 1] == f(x)", "==", "[0, 1]", "f(x)"),
+    ("f(x) in [0, 1]", "<=", "0", "f(x)"),
+    ("[1, 2, 3] == [1, 2, 3]", "==", "[1, 2, 3]", "[1, 2, 3]"),
+    ("x == Z", "==", "x", "Z"),
+    ("for Z in [0, 1], R in [0, 1], Z != R", "!=", "Z", "R"),
+    ("assuming Z != R, f(Z) == R", "==", "f(Z)", "R"),
+    ("for x in [0, 1], x == [0, 1]", "==", "x", "[0, 1]"),
+    ("let a be [0, 1], a != [0, 1]", "!=", "a", "[0, 1]"),
+])
+def test_a_side_that_is_a_value_keeps_the_claim_a_comparison_of_values(
+        text, relation, lhs, rhs):
+    cj = claim(text)
+    assert (cj.relation, cj.lhs, cj.rhs) == (relation, lhs, rhs)
+
+
+def test_a_premise_over_bound_set_names_is_a_premise_about_the_values():
+    assert claim("assuming Z != R, f(Z) == R").assuming == "assuming Z != R"
+
+
+def _two_inputs(Z, R):  # noqa: N803
+    return Z
+
+
+def test_a_set_name_that_is_also_a_parameter_is_refused_with_both_spellings():
+    (row,) = check_conjectures(_two_inputs, [claim("Z != R")])
+    assert row.verdict == "skipped:misspecified"
+    assert row.note == (
+        "`Z != R`: Z is a parameter of the function and also names a set. To compare "
+        "the inputs, bind them, `for Z in ..., Z != R`; to relate the sets, write the "
+        "glyphs, `ℤ ≠ ℝ`")
+    (glyphs,) = check_conjectures(_two_inputs, [claim("ℤ ≠ ℝ")])
+    assert glyphs.verdict == "proven"
+    (plain,) = check_conjectures(_f, [claim("Z != R")])
+    assert plain.verdict == "proven"
 
 
 @pytest.mark.parametrize("text", [
@@ -149,8 +208,8 @@ def test_two_bare_names_under_equality_stay_a_comparison_of_values(text):
     "[0, 1] | [2, 3] subset [0, 3]",
     "{1, 2} = {2, 1}",
     "[0, 1] | [1, 2] = [0, 2]",
-    "[1, 0] = {}",
-    "(0, 0) = {}",
+    "[1, 0] : real = {}",
+    "(0, 0) : real = {}",
     "[0, 1] disjoint (1, 2]",
     "{0.5} disjoint Z",
     "[0, 1] disjoint {}",
@@ -167,7 +226,7 @@ def test_a_true_relation_between_number_domains_is_proven(text):
 @pytest.mark.parametrize("text,witness", [
     ("[0, 2] not subset [0, 1]", "2"),
     ("R not subset Z", None),
-    ("[0, 1] != [0, 2]", "2"),
+    ("[0, 1] : real != [0, 2]", "2"),
     ("[0, 1) != [0, 1]", "1"),
     ("Z != [0, 1]", None),
     ("{1, 2} != {1, 3}", "2"),
@@ -185,15 +244,15 @@ def test_a_negative_relation_is_proven_by_an_executed_member(text, witness):
 @pytest.mark.parametrize("text,witness", [
     ("[0, 2] subset [0, 1]", "2"),
     ("R subset Z", None),
-    ("[0, 1] = [0, 2]", "2"),
+    ("[0, 1] : real = [0, 2]", "2"),
     ("[0, 1] disjoint [1, 2]", "1"),
-    ("[0, 1] = {}", "1"),
+    ("[0, 1] : real = {}", "1"),
     ("Z disjoint N", "0"),
     ("[0, 1] subset (0, 1]", "0"),
     ("{1, 2} subset {1}", "2"),
-    ("[0, 1] subset [0, 1] and [0, 1] != [0, 1]", None),
+    ("[0, 1] subset [0, 1] and [0, 1] : real != [0, 1]", None),
     ("[0, 1] not subset [0, 2]", None),
-    ("[0, 1] != [0, 1]", None),
+    ("[0, 1] : real != [0, 1] : real", None),
 ])
 def test_a_false_relation_between_number_domains_is_falsified(text, witness):
     row = _verdict(text)

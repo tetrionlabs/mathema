@@ -78,7 +78,7 @@ _REGISTERED = (
     PredicateWord("begins with", _begins, sugar=("^=",)),
     PredicateWord("has", _has, sugar=("*=",)),
     PredicateWord("fits", _fits, sugar=("in", "=="), arguments=_fits_arguments,
-                  bare_object=lambda obj: "words" if type(obj).__name__ == "Shape" else None),
+                  suggest=lambda base, args: f"L[{base or 'words'}, fits ({', '.join(args)})]"),
     PredicateWord("inside", _inside, keyword=True),
 )
 
@@ -176,18 +176,30 @@ def test_the_word_owns_its_argument_text_and_may_refuse_an_operator():
         _ref('L[words, == shape("a")]')
 
 
-def test_an_object_named_bare_reads_as_the_word_that_claims_it():
-    here = f"{_HERE}.SHAPE"
-    canonical = f"L[words, fits ({here})]"
-    assert repr(_ref(f"L[{here}]")) == canonical
-    assert repr(_ref(f"L[words, {here}]")) == canonical
-    assert repr(_ref(canonical)) == canonical
+def test_an_object_alone_as_a_refinement_is_refused_with_the_word_that_reads_in():
+    with pytest.raises(InvalidDomain) as raised:
+        _ref(f"L[words, {_HERE}.SHAPE]")
+    assert str(raised.value) == (
+        f"'L[words, {_HERE}.SHAPE]': the object '{_HERE}.SHAPE' alone is not a "
+        f"refinement. Did you mean `fits ({_HERE}.SHAPE)`?")
+    assert repr(_ref(f"L[words, fits ({_HERE}.SHAPE)]")) == f"L[words, fits ({_HERE}.SHAPE)]"
+    assert repr(_ref(f"L[words, in {_HERE}.SHAPE]")) == f"L[words, fits ({_HERE}.SHAPE)]"
 
 
-def test_an_object_no_word_claims_stays_the_language_it_names():
-    assert repr(_ref(f"L[{_HERE}.WORDS]")) == f"L[{_HERE}.WORDS]"
-    with pytest.raises(InvalidDomain, match="no registered predicate reads"):
-        _ref(f"L[words, {_HERE}.WORDS]")
+def test_an_object_named_as_a_language_parses_as_written_and_imports_nothing():
+    import sys
+    ref = _ref("L[no_such_package_anywhere.text.SLUG]")
+    assert repr(ref) == "L[no_such_package_anywhere.text.SLUG]"
+    assert ref.predicates == ()
+    assert "no_such_package_anywhere" not in sys.modules
+    assert repr(_ref(f"L[{_HERE}.SHAPE]")) == f"L[{_HERE}.SHAPE]"
+
+
+def test_an_object_that_is_no_language_is_refused_at_resolution_with_what_was_meant():
+    with pytest.raises(InvalidDomain) as raised:
+        resolve_language(_ref(f"L[{_HERE}.SHAPE]"))
+    assert str(raised.value).endswith(f"Did you mean L[words, fits ({_HERE}.SHAPE)]?)")
+    assert repr(_ref(f"L[words, fits ({_HERE}.SHAPE)]")) == f"L[words, fits ({_HERE}.SHAPE)]"
 
 
 def test_an_unregistered_word_parses_and_is_refused_at_resolution():

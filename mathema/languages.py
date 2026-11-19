@@ -581,9 +581,6 @@ class PredicateWord:
     "text"`, and `arguments(arguments, sugar)` returns the canonical
     argument texts or raises `ValueError` saying why they are refused
     (`sugar` is the operator the predicate was written with, or None).
-    `bare_object(obj)` names the base language a bare dotted object
-    reads over as this predicate, or None when the object is not one
-    the word claims.
 
     `applies(language)` says whether the word has a meaning over a base
     language (every language when None). Where it has none the claim is
@@ -591,13 +588,14 @@ class PredicateWord:
     (`a path`, `a date`), one of `examples` (a phrase mapped to the
     text of a language using the word there) and `suggest(base,
     arguments)`, the text of the language the author probably meant, or
-    None."""
+    None. `base` is None when an object was named as a language by
+    itself (`L[app.SLUG]`) and the word reading the `in` operator is
+    asked what was meant."""
     word: str
     refine: Callable
     sugar: tuple = ()
     keyword: bool = False
     arguments: "Callable | None" = None
-    bare_object: "Callable | None" = None
     applies: "Callable | None" = None
     kinds: tuple = ()
     examples: dict = field(default_factory=dict)
@@ -667,30 +665,18 @@ def word_for_sugar(operator: str) -> "PredicateWord | None":
     return next((w for w in predicate_words() if operator in w.sugar), None)
 
 
-def word_for_object(name: str) -> "tuple | None":
-    """Intent:
-        `(word, base)` when a registered predicate word claims the
-        object the dotted `name` imports: the word, and the name of the
-        base language the object reads over. None when no word claims
-        objects, the name does not import, or no word claims it.
-    """
-    claiming = [w for w in predicate_words() if w.bare_object is not None]
-    if not claiming:
+def _as_a_predicate(name: str) -> "str | None":
+    """The language an object named as a language was probably meant
+    as: the text the word reading the `in` operator suggests for the
+    object as its argument, or None when no such word offers one."""
+    word = word_for_sugar("in")
+    if word is None or word.suggest is None:
         return None
-    from ._claim_reach import walk_refusal
-    if walk_refusal(name) is not None:
+    try:
+        meant = word.suggest(None, (name,))
+    except Exception:
         return None
-    obj = _import_dotted(name)
-    if obj is None:
-        return None
-    for word in claiming:
-        try:
-            base = word.bare_object(obj)
-        except Exception:
-            continue
-        if isinstance(base, str) and base:
-            return word, base
-    return None
+    return meant if isinstance(meant, str) and meant else None
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -1106,6 +1092,9 @@ def resolve(ref) -> tuple:
             detail = ("the object imports but no adaptor accepts it"
                       if _loaded_adaptors() else
                       "the object imports but no language adaptor is installed")
+            meant = _as_a_predicate(name)
+            if meant is not None:
+                detail += f". Did you mean {meant}?"
     raise UnknownLanguage(name, language_vocabulary(), detail)
 
 

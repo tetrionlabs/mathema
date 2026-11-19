@@ -821,7 +821,7 @@ def _parse_predicate(text: str, whole: str) -> "Predicate | None":
         InvalidDomain: an operator or a bare object no registered word
             reads, or arguments the word refuses.
     """
-    from .languages import predicate_word, word_for_object, word_for_sugar
+    from .languages import predicate_word, word_for_sugar
     t = text.strip()
     negated = False
     sugar = None
@@ -848,12 +848,11 @@ def _parse_predicate(text: str, whole: str) -> "Predicate | None":
                 return None
             word, args = keyword.group("word"), [unmask_strings(keyword.group("arg"), literals)]
         elif _DOTTED_OBJECT.match(t) and not negated:
-            claimed = word_for_object(t)
-            if claimed is None:
-                raise InvalidDomain(
-                    f"{whole!r}: no registered predicate reads the object {t!r}; "
-                    f"state the predicate, `word ({t})`")
-            word, args = claimed[0].word, [t]
+            reads = word_for_sugar("in")
+            meant = (f". Did you mean `{reads.word} ({t})`?" if reads is not None
+                     else f"; state the predicate, `word ({t})`")
+            raise InvalidDomain(
+                f"{whole!r}: the object {t!r} alone is not a refinement{meant}")
         else:
             return None
         registered = predicate_word(word)
@@ -888,20 +887,9 @@ def _parse_refinements(text: str, whole: str) -> tuple:
 
 
 def _language_ref(name: str, refine: "str | None", whole: str) -> "LanguageRef":
-    """Intent:
-        The `LanguageRef` for a piece naming `name` with the refinement
-        text `refine`. A dotted object a registered predicate word
-        claims is that predicate over the base language the word gives
-        (`L[app.SLUG]` is `L[text, matches (app.SLUG)]`).
-    """
+    """The `LanguageRef` for a piece naming `name` with the refinement
+    text `refine`."""
     measures, predicates = _parse_refinements(refine, whole) if refine else ((), ())
-    if "." in name:
-        from .languages import word_for_object
-        claimed = word_for_object(name)
-        if claimed is not None:
-            word, base = claimed
-            implied = _parse_predicate(f"{word.word} ({name})", whole)
-            return LanguageRef(base, measures, tuple(sorted({*predicates, implied})))
     return LanguageRef(name, measures, predicates)
 
 

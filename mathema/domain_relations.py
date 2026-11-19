@@ -90,9 +90,11 @@ class Relation:
     right: Term
 
     def text(self, unicode: bool = False) -> str:
-        if unicode:
-            return f"{self.left.unicode} {WORDS[self.word]} {self.right.unicode}"
-        return f"{self.left.text} {self.word} {self.right.text}"
+        word = WORDS[self.word] if unicode else self.word
+        if self.word in ("=", "!="):
+            return f"{_stated(self.left, unicode)} {word} {_stated(self.right, unicode)}"
+        return (f"{self.left.unicode} {word} {self.right.unicode}" if unicode
+                else f"{self.left.text} {word} {self.right.text}")
 
 
 @dataclass(frozen=True)
@@ -227,21 +229,59 @@ def _term(text: str) -> "Term | None":
     return Term(bound, ascii_text, unicode_text, _kind(bound))
 
 
-def _bare_name(written: str) -> bool:
-    """Whether a side is written as an ascii name (`Z`, `N`), which is
-    also how a parameter is written."""
-    return bool(re.fullmatch(r"[A-Za-z_]\w*", written.strip()))
+_SET_NAMES = ("R", "Z", "N", "Q", "C")
+_TYPE_CLAUSE = re.compile(r":\s*(?:int|integer|real|float)\b")
+_EQUALITY = ("==", "=", "!=", "≠")
 
 
-def _relation(text: str, names: bool = False) -> "Relation | tuple | None":
+def _reading(written: str, term: "Term | None", bound: frozenset) -> str:
+    """Intent:
+        How one side of `==` or `!=` reads: `value`, `domain`, or
+        `open` when its text could be either. A name bound in the claim
+        is a value, and so is anything that is no domain at all (a
+        call, a number, a list of other than two items). A language, a
+        half-open bracket, a type clause, a set glyph, a set name, a
+        brace set with members, a union or an exclusion can only be a
+        domain. A bracket pair alone, `[0, 1]` or `(0, 1)`, is open (a
+        two-item list or tuple, or an interval), and so is `{}`.
+    """
+    written = written.strip()
+    if written in bound or term is None:
+        return "value"
+    if written in _EMPTY:
+        return "open"
+    if isinstance(term.bound, tuple) and not _TYPE_CLAUSE.search(mask_strings(written)[0]):
+        piece = term.bound
+        if getattr(piece, "closed_lo", True) == getattr(piece, "closed_hi", True):
+            return "open"
+    return "domain"
+
+
+def _stated(term: Term, unicode: bool) -> str:
+    """A side of `=` or `!=` as its canonical text there: a bracket
+    pair carries the type clause that marks it a domain."""
+    text = term.unicode if unicode else term.text
+    bound = term.bound
+    brackets = isinstance(bound, tuple) or (
+        isinstance(bound, Domain) and bound.base_type == "R"
+        and any(isinstance(p, tuple) for p in bound.pieces))
+    return f"{text} : real" if brackets else text
+
+
+def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | None":
     """Intent:
         One relation between two domains read from `text`; the pair of
         relations a `⊊` stands for; or None when `text` is not a
         relation between two domains.
 
     Notes:
-        Two ascii names under `=` or `!=` (`N == Z`) are two values
-        compared, not two domains, unless `names` is set.
+        Under `==` and `!=` each side is read first (`_reading`): a
+        side that is a value makes the statement a comparison of
+        values, which is not a relation between domains; a side that
+        can only be a domain decides a bracket pair beside it; and two
+        bracket pairs alone are refused, since the text does not say
+        whether they are lists or intervals. `bound` holds the names
+        the claim binds, which are values.
 
     Raises:
         InvalidDomainRelation: `⊂`, two relations in a row, or two
@@ -258,7 +298,10 @@ def _relation(text: str, names: bool = False) -> "Relation | tuple | None":
     if not found:
         return None
     first = found[0]
-    left = _term(unmask_strings(masked[:first.start()], literals))
+    left_written = unmask_strings(masked[:first.start()], literals)
+    if left_written.strip() in bound:
+        return None
+    left = _term(left_written)
     if left is None:
         return None
     if len(found) > 1:
@@ -269,13 +312,28 @@ def _relation(text: str, names: bool = False) -> "Relation | tuple | None":
         raise InvalidDomainRelation(
             f"{text.strip()!r} holds more than one relation between two domains; "
             f"state one (an integer range is written `[0, 5] : int`)")
-    right = _term(unmask_strings(masked[first.end():], literals))
+    right_written = unmask_strings(masked[first.end():], literals)
+    if right_written.strip() in bound:
+        return None
+    right = _term(right_written)
     if right is None:
         return None
     spelling = re.sub(r"\s+", " ", first.group(0))
-    if not names and spelling in ("==", "=", "!=", "≠") \
-            and _bare_name(masked[:first.start()]) and _bare_name(masked[first.end():]):
-        return None
+    if spelling in _EQUALITY:
+        readings = (_reading(left_written, left, bound), _reading(right_written, right, bound))
+        if "value" in readings:
+            return None
+        if left_written.strip() in _EMPTY and right_written.strip() in _EMPTY:
+            readings = ("domain", "domain")
+        if readings == ("open", "open"):
+            sign = "!=" if spelling in ("!=", "≠") else "=="
+            meant = Relation(left, "!=" if sign == "!=" else "=", right).text()
+            meant = meant.replace(" = ", " == ", 1) if sign == "==" else meant
+            raise InvalidDomainRelation(
+                f"`{text.strip()}` reads two ways: two lists of two numbers, or two "
+                f"intervals. Did you mean the intervals, `{meant}`? A bracket pair is "
+                f"an interval where it carries a type clause (`: real`, `: int`) "
+                f"and a list of values where the claim binds or calls beside it")
     if left.kind is not None and right.kind is not None and left.kind != right.kind:
         raise InvalidDomainRelation(
             f"a relation between domains compares two of one kind: "
@@ -292,7 +350,7 @@ def _relation(text: str, names: bool = False) -> "Relation | tuple | None":
     return Relation(right, word, left) if swapped else Relation(left, word, right)
 
 
-def parse(text: str) -> "Statement | None":
+def parse(text: str, bound: frozenset = frozenset()) -> "Statement | None":
     """Intent:
         The relation between domains a normalized claim statement
         states, or None when it states something else.
@@ -305,7 +363,7 @@ def parse(text: str) -> "Statement | None":
     masked, literals = mask_strings(text.strip())
     cuts = _top_level(masked, re.compile(r"(?<=\s)and(?=\s)"))
     if not cuts:
-        read = _relation(text)
+        read = _relation(text, bound)
         if read is None:
             return None
         return Statement(read if isinstance(read, tuple) else (read,))
@@ -316,7 +374,7 @@ def parse(text: str) -> "Statement | None":
     parts.append(unmask_strings(masked[start:], literals))
     read = []
     for part in parts:
-        one = _relation(part, names=bool(read))
+        one = _relation(part, bound)
         if not isinstance(one, Relation):
             return None
         read.append(one)
@@ -700,6 +758,31 @@ def decide(statement: Statement) -> Decision:
     definitions = {k: v for d in decisions for k, v in (d.definitions or {}).items()}
     return Decision("proven", "; ".join(d.reason for d in decisions), witness,
                     decisions[0].route, definitions or None)
+
+
+def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> "str | None":
+    """Intent:
+        Why a relation under `=` or `!=` cannot be read over a function
+        with these parameters, or None: a side written as a set name
+        (`Z`) is also one of the function's parameters, so the text
+        does not say whether the inputs or the sets are compared. The
+        message offers both spellings. A side written as a glyph (`ℤ`)
+        is the set.
+    """
+    glyphs = {"R": "ℝ", "Z": "ℤ", "N": "ℕ", "Q": "ℚ", "C": "ℂ"}
+    for rel in statement.relations:
+        if rel.word not in ("=", "!="):
+            continue
+        clash = [t.text for t in (rel.left, rel.right)
+                 if t.text in _SET_NAMES and t.text in parameters
+                 and glyphs[t.text] not in written]
+        if clash:
+            name = clash[0]
+            sets = rel.text(unicode=True)
+            return (f"`{rel.text()}`: {name} is a parameter of the function and also "
+                    f"names a set. To compare the inputs, bind them, `for {name} in "
+                    f"..., {rel.text()}`; to relate the sets, write the glyphs, `{sets}`")
+    return None
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
