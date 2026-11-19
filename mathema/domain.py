@@ -621,6 +621,24 @@ def member_of(value) -> "str | None":
 _is_missing = is_missing
 
 
+@dataclass(frozen=True, order=True)
+class Predicate:
+    """One predicate a language piece applies to its members,
+    `starts with ("http://")`: the `word` in its canonical lower-case
+    spelling, the `arguments` as their canonical texts, and whether the
+    predicate is `negated` (`not starts with (...)`). Core reads the
+    shape only; the word's meaning belongs to whatever registers it."""
+    word: str
+    arguments: tuple = ()
+    negated: bool = False
+
+    @property
+    def text(self) -> str:
+        """`word (argument, ...)`, with `not` in front when negated."""
+        said = f"{self.word} ({', '.join(self.arguments)})"
+        return f"not {said}" if self.negated else said
+
+
 @dataclass(frozen=True)
 class LanguageRef:
     """One language piece of a domain, `L[ascii]`: the name a language
@@ -637,6 +655,10 @@ class LanguageRef:
     #: order (`L[json, depth <= 6, nodes <= 200]`); a key is served by
     #: whatever refinement is registered under it
     refinements: tuple = ()
+    #: the predicates the piece applies to its members, each a
+    #: `Predicate`, in sorted order (`L[text, starts with ("a")]`); a
+    #: word is served by whatever predicate is registered under it
+    predicates: tuple = ()
 
     def refinement(self, key: str):
         """The interval refinement `key` states, or None."""
@@ -644,10 +666,13 @@ class LanguageRef:
 
     @property
     def text(self) -> str:
-        """What sits inside the brackets: the name, then each
-        refinement, `json, depth <= 6, nodes <= 200`."""
-        return ", ".join([self.name, *(render_refinement(key, interval)
-                                       for key, interval in self.refinements)])
+        """What sits inside the brackets: the name, each measure
+        refinement, then each predicate, `json, depth <= 6, nodes <=
+        200, has key ("id")`."""
+        return ", ".join([self.name,
+                          *(render_refinement(key, interval)
+                            for key, interval in self.refinements),
+                          *(p.text for p in self.predicates)])
 
     def __repr__(self) -> str:
         return f"L[{self.text}]"
@@ -709,16 +734,146 @@ def _parse_refinement(text: str, whole: str) -> tuple:
     return key, interval
 
 
+_PREDICATE_CALL = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s*\((?P<args>.*)\)$", re.DOTALL)
+_PREDICATE_KEYWORD = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s+(?P<arg>_mathema_str_\d+_)$")
+# the claim grammar writes a caret as `**` before a domain is read, so
+# `**=` is the `^=` operator
+_PREDICATE_SUGAR = re.compile(
+    r"^(?P<op>\^=|\*\*=|\$=|\*=|==|!=|=|not\s+in\b|in\b)\s*(?P<arg>.+)$", re.DOTALL)
+_DOTTED_OBJECT = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
+#: an operator that negates the word its positive form reads as
+_NEGATED_SUGAR = {"!=": "==", "not in": "in"}
+
+
+def predicate_key(word: str) -> str:
+    """The form a predicate word is matched in: its letters in lower
+    case, so `startsWith`, `starts_with` and `Starts With` are one
+    word."""
+    return re.sub(r"[\s_]+", "", word).lower()
+
+
+def _as_words(word: str) -> str:
+    """A word as lower-case words: an underscore or a capital inside it
+    starts a new word (`soundsLike`, `sounds_like` are `sounds like`)."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", word.replace("_", " "))
+    return re.sub(r"\s+", " ", spaced).strip().lower()
+
+
+def _argument_text(arg: str) -> str:
+    """One argument as written, with the space around it and the runs
+    of space outside its quoted text removed."""
+    masked, literals = mask_strings(arg.strip())
+    return unmask_strings(re.sub(r"\s+", " ", masked), literals)
+
+
+def _balanced_call(args: str) -> bool:
+    """Whether `args`, the text between a call's outer brackets, closes
+    no bracket it did not open."""
+    depth = 0
+    for ch in mask_strings(args)[0]:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _parse_predicate(text: str, whole: str) -> "Predicate | None":
+    """Intent:
+        The predicate one refinement spells, or None when it spells
+        none: a call `word (arguments)`, a keyword spelling `word
+        "text"` for a word that allows one, an operator a registered
+        word reads (`^= "a"`), or a bare dotted object a registered
+        word claims; `not` in front negates a call.
+
+    Raises:
+        InvalidDomain: an operator or a bare object no registered word
+            reads, or arguments the word refuses.
+    """
+    from .languages import predicate_word, word_for_object, word_for_sugar
+    t = text.strip()
+    negated = False
+    sugar = None
+    m = _PREDICATE_SUGAR.match(t)
+    if m is not None:
+        op = re.sub(r"\s+", " ", m.group("op"))
+        op = {"=": "==", "**=": "^="}.get(op, op)
+        negated, sugar = op in _NEGATED_SUGAR, _NEGATED_SUGAR.get(op, op)
+        registered = word_for_sugar(sugar)
+        if registered is None:
+            raise InvalidDomain(f"{whole!r}: no registered predicate reads `{op}`")
+        word, args = registered.word, [m.group("arg")]
+    else:
+        if re.match(r"not\b", t):
+            negated, t = True, t[3:].strip()
+        masked, literals = mask_strings(t)
+        call = _PREDICATE_CALL.match(t)
+        keyword = _PREDICATE_KEYWORD.match(masked)
+        if call is not None and _balanced_call(call.group("args")):
+            word, args = call.group("word"), _split_commas(call.group("args"))
+        elif keyword is not None:
+            registered = predicate_word(keyword.group("word"))
+            if registered is None or not registered.keyword:
+                return None
+            word, args = keyword.group("word"), [unmask_strings(keyword.group("arg"), literals)]
+        elif _DOTTED_OBJECT.match(t) and not negated:
+            claimed = word_for_object(t)
+            if claimed is None:
+                raise InvalidDomain(
+                    f"{whole!r}: no registered predicate reads the object {t!r}; "
+                    f"state the predicate, `word ({t})`")
+            word, args = claimed[0].word, [t]
+        else:
+            return None
+        registered = predicate_word(word)
+        word = registered.word if registered is not None else _as_words(word)
+    arguments = tuple(_argument_text(a) for a in args if a.strip())
+    if registered is not None and registered.arguments is not None:
+        try:
+            arguments = tuple(registered.arguments(arguments, sugar))
+        except ValueError as e:
+            raise InvalidDomain(f"{whole!r}: {e}") from e
+    return Predicate(word, arguments, negated)
+
+
 def _parse_refinements(text: str, whole: str) -> tuple:
-    """Every refinement a piece states, in key order; a key stated twice
-    is refused."""
+    """`(measures, predicates)` for the refinements a piece states: the
+    measure comparisons as `(key, Interval)` pairs in key order, a key
+    stated twice refused, and the predicates sorted, one stated twice
+    kept once."""
     found: dict = {}
+    predicates: set = set()
     for part in _split_commas(text):
+        if not (_REFINE_BOUND.match(part.strip()) or _REFINE_INTERVAL.match(part.strip())):
+            predicate = _parse_predicate(part, whole)
+            if predicate is not None:
+                predicates.add(predicate)
+                continue
         key, interval = _parse_refinement(part, whole)
         if key in found:
             raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
         found[key] = interval
-    return tuple(sorted(found.items()))
+    return tuple(sorted(found.items())), tuple(sorted(predicates))
+
+
+def _language_ref(name: str, refine: "str | None", whole: str) -> "LanguageRef":
+    """Intent:
+        The `LanguageRef` for a piece naming `name` with the refinement
+        text `refine`. A dotted object a registered predicate word
+        claims is that predicate over the base language the word gives
+        (`L[app.SLUG]` is `L[text, matches (app.SLUG)]`).
+    """
+    measures, predicates = _parse_refinements(refine, whole) if refine else ((), ())
+    if "." in name:
+        from .languages import word_for_object
+        claimed = word_for_object(name)
+        if claimed is not None:
+            word, base = claimed
+            implied = _parse_predicate(f"{word.word} ({name})", whole)
+            return LanguageRef(base, measures, tuple(sorted({*predicates, implied})))
+    return LanguageRef(name, measures, predicates)
 
 
 _PATH_STEP = re.compile(r"\.(\w+)|\[(\d+|\*)\]")
@@ -889,8 +1044,7 @@ def language_ref(text: str) -> "LanguageRef | None":
     m = _PIECE_LANGUAGE.match(f"L[{text}]")
     if m is None:
         return None
-    refine = m.group("refine")
-    return LanguageRef(m.group("name"), _parse_refinements(refine, text) if refine else ())
+    return _language_ref(m.group("name"), m.group("refine"), text)
 
 
 @dataclass(frozen=True)
@@ -2216,8 +2370,12 @@ def domain_bound_to_json(b) -> str | dict:
             out["clause"] = True
         return out
     if isinstance(b, LanguageRef):
-        return {"language": b.name,
-                **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
+        out = {"language": b.name,
+               **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
+        if b.predicates:
+            out["predicates"] = [{"word": p.word, "arguments": list(p.arguments),
+                                  "negated": p.negated} for p in b.predicates]
+        return out
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -2250,9 +2408,14 @@ def domain_bound_from_json(v: Any) -> Any:
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
     if "language" in v:
-        return LanguageRef(str(v["language"]), tuple(sorted(
-            (key, domain_bound_from_json(interval))
-            for key, interval in v.items() if key != "language")))
+        return LanguageRef(
+            str(v["language"]),
+            tuple(sorted((key, domain_bound_from_json(interval))
+                         for key, interval in v.items()
+                         if key not in ("language", "predicates"))),
+            tuple(sorted(Predicate(str(p["word"]), tuple(p.get("arguments", ())),
+                                   bool(p.get("negated", False)))
+                         for p in v.get("predicates", ()))))
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
@@ -2328,9 +2491,7 @@ def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False)
             return None
     m = _PIECE_LANGUAGE.match(text)
     if m is not None:
-        refine = m.group("refine")
-        return LanguageRef(m.group("name"),
-                           _parse_refinements(refine, text) if refine else ())
+        return _language_ref(m.group("name"), m.group("refine"), text)
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))

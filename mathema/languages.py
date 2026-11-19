@@ -565,6 +565,224 @@ class UnknownRefinement(UnknownLanguage):
         self.vocabulary = refinement_keys()
 
 
+@dataclass(frozen=True)
+class PredicateWord:
+    """One predicate word `L[...]` accepts, `starts with` say, and
+    everything core needs to read, render and refuse it without knowing
+    what it means.
+
+    `word` is the canonical spelling, lower-case words; it is matched
+    regardless of case, spacing and underscores. `refine(language,
+    arguments, negated)` returns the language of the members of
+    `language` the predicate holds of (or, negated, does not), the
+    arguments as their canonical texts; it may read the arguments by
+    the kind of language it is given. `sugar` lists the operators that
+    read as this word (`^=`), `keyword` allows the spelling `word
+    "text"`, and `arguments(arguments, sugar)` returns the canonical
+    argument texts or raises `ValueError` saying why they are refused
+    (`sugar` is the operator the predicate was written with, or None).
+    `bare_object(obj)` names the base language a bare dotted object
+    reads over as this predicate, or None when the object is not one
+    the word claims.
+
+    `applies(language)` says whether the word has a meaning over a base
+    language (every language when None). Where it has none the claim is
+    refused with `kinds`, the phrases naming what the word applies to
+    (`a path`, `a date`), one of `examples` (a phrase mapped to the
+    text of a language using the word there) and `suggest(base,
+    arguments)`, the text of the language the author probably meant, or
+    None."""
+    word: str
+    refine: Callable
+    sugar: tuple = ()
+    keyword: bool = False
+    arguments: "Callable | None" = None
+    bare_object: "Callable | None" = None
+    applies: "Callable | None" = None
+    kinds: tuple = ()
+    examples: dict = field(default_factory=dict)
+    suggest: "Callable | None" = None
+
+
+#: predicate words registered in this process, by matching key
+_PREDICATES: dict = {}
+
+
+def register_predicate(word: PredicateWord) -> None:
+    """Intent:
+        Serve the predicate `word` inside `L[...]` in this process. An
+        in-process registration wins over an entry point of the same
+        word. A package registers a `PredicateWord` under the
+        `mathema.language_refinements` entry-point group, beside the
+        measure refinements.
+    """
+    from .domain import predicate_key
+    _PREDICATES[predicate_key(word.word)] = word
+    _changed()
+
+
+def unregister_predicate(word: str) -> None:
+    """Remove an in-process predicate registration."""
+    from .domain import predicate_key
+    _PREDICATES.pop(predicate_key(word), None)
+    _changed()
+
+
+@functools.lru_cache(maxsize=1)
+def _discovered_predicates() -> dict:
+    """The predicate words the entry points register, by matching key;
+    an entry that fails to load is skipped with a warning."""
+    from .domain import predicate_key
+    found: dict = {}
+    for name, ep in _discovered_refinements().items():
+        try:
+            loaded = ep.load()
+        except Exception as e:
+            warnings.warn(f"mathema: language refinement {ep.value!r} registered "
+                          f"under {name!r} failed to load ({e!r}), skipping it",
+                          stacklevel=2)
+            continue
+        if isinstance(loaded, PredicateWord):
+            found[predicate_key(loaded.word)] = loaded
+    return found
+
+
+def predicate_words() -> tuple:
+    """Every predicate word `L[...]` accepts in this process, sorted by
+    word. mathema itself registers none."""
+    words = {**_discovered_predicates(), **_PREDICATES}
+    return tuple(sorted(words.values(), key=lambda w: w.word))
+
+
+def predicate_word(word: str) -> "PredicateWord | None":
+    """The registered predicate `word` names, however it is cased,
+    spaced or underscored, or None."""
+    from .domain import predicate_key
+    key = predicate_key(word)
+    return _PREDICATES.get(key) or _discovered_predicates().get(key)
+
+
+def word_for_sugar(operator: str) -> "PredicateWord | None":
+    """The registered predicate the operator reads as, or None."""
+    return next((w for w in predicate_words() if operator in w.sugar), None)
+
+
+def word_for_object(name: str) -> "tuple | None":
+    """Intent:
+        `(word, base)` when a registered predicate word claims the
+        object the dotted `name` imports: the word, and the name of the
+        base language the object reads over. None when no word claims
+        objects, the name does not import, or no word claims it.
+    """
+    claiming = [w for w in predicate_words() if w.bare_object is not None]
+    if not claiming:
+        return None
+    from ._claim_reach import walk_refusal
+    if walk_refusal(name) is not None:
+        return None
+    obj = _import_dotted(name)
+    if obj is None:
+        return None
+    for word in claiming:
+        try:
+            base = word.bare_object(obj)
+        except Exception:
+            continue
+        if isinstance(base, str) and base:
+            return word, base
+    return None
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """The number of single-character insertions, deletions and
+    substitutions that turn `a` into `b`."""
+    row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, cb in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (ca != cb))
+    return row[-1]
+
+
+#: how many edits apart an unknown word may be from a registered one
+#: and still be offered as it
+_NEAR_WORD = 2
+
+
+def _listed(phrases) -> str:
+    """`a`, `a or b`, `a, b or c`: alternatives as a sentence lists them."""
+    shown = list(phrases)
+    if len(shown) <= 1:
+        return "".join(shown)
+    return ", ".join(shown[:-1]) + " or " + shown[-1]
+
+
+def _with_predicate(ref, old, new: PredicateWord) -> str:
+    """The text of `ref` with the predicate `old` stated under the
+    registered word `new`, its arguments as that word writes them."""
+    from .domain import Predicate
+    arguments = old.arguments
+    if new.arguments is not None:
+        try:
+            arguments = tuple(new.arguments(arguments, None))
+        except ValueError:
+            pass
+    kept = {p for p in ref.predicates if p != old} | {
+        Predicate(new.word, arguments, old.negated)}
+    return f"L[{LanguageRef(ref.name, ref.refinements, tuple(sorted(kept))).text}]"
+
+
+class UnknownPredicate(UnknownRefinement):
+    """Raised when a piece applies a predicate no registered word
+    serves; a registered word a couple of edits away is offered as the
+    whole language rewritten with it."""
+
+    def __init__(self, ref, predicate):
+        from .domain import predicate_key
+        self.key = predicate.word
+        self.suggestion = None
+        key = predicate_key(predicate.word)
+        near = sorted((_edit_distance(key, predicate_key(w.word)), w.word, w)
+                      for w in predicate_words())
+        said = f"L[{ref.text}]: '{predicate.word}' is not a registered predicate"
+        if near and near[0][0] <= _NEAR_WORD:
+            self.suggestion = _with_predicate(ref, predicate, near[0][2])
+            said += f". Did you mean {self.suggestion}?"
+        else:
+            known = ", ".join(w.word for w in predicate_words()) or "none in this process"
+            said += (f"; known predicates are {known}; a package adds one under "
+                     f"the {REFINEMENT_GROUP!r} entry-point group")
+        InvalidDomain.__init__(self, said)
+        self.name = ref.text
+        self.vocabulary = tuple(w.word for w in predicate_words())
+
+
+class MeaninglessPredicate(InvalidDomain):
+    """Raised when a piece applies a registered predicate to a base
+    language the word has no meaning over. The message names the word
+    and the base, the kinds the word applies to with an example, and,
+    when the word offers one, the language the author probably meant
+    (`suggestion`; `example` is the example shown)."""
+
+    def __init__(self, ref, predicate, word: PredicateWord):
+        self.key = word.word
+        self.example = next(iter(word.examples.values()), None)
+        try:
+            self.suggestion = (word.suggest(ref.name, predicate.arguments)
+                               if word.suggest is not None else None)
+        except Exception:
+            self.suggestion = None
+        said = f"L[{ref.text}]: '{word.word}' has no meaning for L[{ref.name}]"
+        if word.kinds:
+            said += f": it applies to {_listed(word.kinds)}"
+        if self.example:
+            said += f", for example {self.example}"
+        said += "."
+        if self.suggestion:
+            said += f" Did you mean {self.suggestion}?"
+        super().__init__(said)
+
+
 #: how many measures inside (or past) a bound are tried when no member
 #: has the bound's own measure
 _NEAREST = 3
@@ -839,13 +1057,23 @@ def resolve(ref) -> tuple:
     Raises:
         UnknownLanguage: nothing serves the name.
     """
-    if isinstance(ref, LanguageRef) and ref.refinements:
+    if isinstance(ref, LanguageRef) and ref.refinements and not ref.predicates:
         language, source = resolve(LanguageRef(ref.name))
         for key, interval in ref.refinements:
             refine = _refinement(key)
             if refine is None:
                 raise UnknownRefinement(ref, key)
             language = refine(language, interval)
+        return language, source
+    if isinstance(ref, LanguageRef) and ref.predicates:
+        language, source = resolve(LanguageRef(ref.name, ref.refinements))
+        for predicate in ref.predicates:
+            word = predicate_word(predicate.word)
+            if word is None:
+                raise UnknownPredicate(ref, predicate)
+            if word.applies is not None and not word.applies(language):
+                raise MeaninglessPredicate(ref, predicate, word)
+            language = word.refine(language, predicate.arguments, predicate.negated)
         return language, source
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
     if name in _REGISTRY:
@@ -968,6 +1196,8 @@ __all__ = [
     "KINDS", "LANGUAGE_GROUP", "LEVELS", "Language", "Problem",
     "STRING_HAZARDS", "StringLanguage", "UnknownLanguage",
     "REFINEMENT_GROUP", "RefinedLanguage", "UnknownRefinement",
+    "MeaninglessPredicate", "PredicateWord", "UnknownPredicate", "predicate_word",
+    "predicate_words", "register_predicate", "unregister_predicate",
     "adapt_annotation", "describe_language", "language_adaptors", "language_problems",
     "derive_strategy", "refinement_keys", "register_refinement", "unregister_refinement",
     "language_vocabulary", "register_language", "resolve",
