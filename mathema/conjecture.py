@@ -6606,7 +6606,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         unread_pins = {p: v for p, v in call_pins.items() if p not in written}
         unresolved = _unresolved_bound_names(cj)
         if unresolved:
-            out.append(stamp(_unresolved_bound_probe(ctx, unresolved),
+            out.append(stamp(_unresolved_bound_probe(ctx, fn, unresolved),
                              _cap=verdict_cap))
             continue
         grounded = (None if unread_pins or ctx.family is not None
@@ -11354,11 +11354,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         if any(v is None for v in bound_funcs.values()):
             unresolved = sorted(n for n, v in bound_funcs.items() if v is None)
             if cj.route == "derive":
-                return Probe(cj.name, statement, "skipped", route=cj.route,
-                             note=f"{note}; could not resolve bound "
-                                  f"function(s) {unresolved}, define it in "
-                                  f"f's module or the calling scope, or bind "
-                                  f"it explicitly with funcs=")
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=cj.route,
+                             note=_unresolved_bound_note(cj, fn, unresolved,
+                                                         note),
+                             meta={"mathema.invalid_conjecture": True})
             # route == "best": the probe stage reports its own skip
             return None
     language_params = sorted(p for p, b in cj_domain.items()
@@ -11844,17 +11844,105 @@ def _unresolved_bound_names(cj) -> list:
     return sorted(n for n, v in _bound_callables(cj).items() if v is None)
 
 
-def _unresolved_bound_probe(ctx: "_ClaimContext", unresolved: list) -> "Probe":
+def _called_names(cj) -> set:
     """Intent:
-        The refusal for a claim calling names bound nowhere: `skipped`,
-        naming them, in the words every other path uses.
+        The plain names the claim's statement calls, as `g` in `g(1)`.
+    """
+    found: set = set()
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            continue
+        found |= {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    return found
+
+
+def _dotted_ref_failure(ref: str) -> str:
+    """Intent:
+        Why the dotted reference `ref` named no function: its module
+        does not import, or the module imports and lacks the rest.
+    """
+    import importlib
+    parts = ref.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        module = ".".join(parts[:cut])
+        try:
+            importlib.import_module(module)
+        except Exception:
+            continue
+        rest = ".".join(parts[cut:])
+        return (f"the module `{module}` imports but has no function "
+                f"`{rest}`, or it is not one mathema can call")
+    return f"the module `{parts[0]}` could not be imported"
+
+
+def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
+    """Intent:
+        The refusal text for a claim whose bound or called function
+        names resolve to nothing. Its first clause names the names and
+        the fix, short enough for a summary line; the rest names the
+        claim, where each name was looked for, whether the statement
+        calls it or the binding is unused, and the fix for each.
+    """
+    module = getattr(fn, "__module__", None) or "the function's module"
+    called = _called_names(cj)
+    unused = [n for n in unresolved if n not in called]
+    if not unused:
+        fix = (f"define each in the module `{module}` or bind it with "
+               f"funcs={{\"name\": \"pkg.mod.name\"}}")
+    elif len(unused) == len(unresolved):
+        fix = "remove the unused binding from funcs"
+    else:
+        fix = "define, bind or remove each as the detail says"
+    parts = []
+    for name in unresolved:
+        ref = (cj.funcs or {}).get(name)
+        if isinstance(ref, str) and ref != name:
+            looked = (f"the explicit binding funcs={{{name!r}: {ref!r}}} "
+                      f"was tried and failed: {_dotted_ref_failure(ref)}")
+        else:
+            looked = (f"it was looked for in the module `{module}` of the "
+                      f"function under test and in the calling scope, and "
+                      f"neither defines a function called `{name}`")
+        if name in called:
+            use = f"The statement calls `{name}`"
+            todo = (f"define `{name}` in the module `{module}`, or bind it "
+                    f"with funcs={{\"{name}\": \"pkg.mod.{name}\"}}")
+        else:
+            use = f"`{name}` is an unused binding and the statement never calls it"
+            todo = f"remove the unused binding of `{name}` from funcs"
+        parts.append(f"{use}; {looked}; to fix it, {todo}")
+    return (f"could not resolve bound function(s) {unresolved}, {fix}. "
+            f"The claim {cj.name!r} is misspecified. "
+            + ". ".join(parts) + ".")
+
+
+def _unresolved_bound_note(cj, fn, unresolved: list, prior: str) -> str:
+    """Intent:
+        The refusal text followed by whatever the claim's note already
+        said, so a summary line that keeps the first clause shows the
+        refusal.
+    """
+    message = _unresolved_bound_message(cj, fn, unresolved)
+    return f"{message} ({prior})" if prior else message
+
+
+def _unresolved_bound_probe(ctx: "_ClaimContext", fn, unresolved: list) -> "Probe":
+    """Intent:
+        The refusal for a claim calling or binding names that resolve
+        to nothing: `skipped:misspecified`, with the invalid-conjecture
+        reason code, whatever form the claim takes.
     """
     cj = ctx.cj
     route = cj.route if cj.route == "derive" else None
-    return Probe(cj.name, ctx.statement, "skipped", route=route,
-                 note=f"{ctx.note}; could not resolve bound function(s) "
-                      f"{unresolved}, define it in f's module or the "
-                      f"calling scope, or bind it explicitly with funcs=")
+    return Probe(cj.name, ctx.statement, "skipped:misspecified", route=route,
+                 note=_unresolved_bound_note(
+                     cj, fn, unresolved, ctx.note),
+                 meta={"mathema.invalid_conjecture": True})
 
 
 def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
@@ -12669,11 +12757,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         bound_funcs = {}
     if any(v is None for v in bound_funcs.values()):
         unresolved = [name for name, v in bound_funcs.items() if v is None]
-        return Probe(cj.name, statement, "skipped", route=None,
-                     note=note + f"; could not resolve bound function(s) "
-                                 f"{unresolved}, define it in f's module or "
-                                 f"the calling scope, or bind it explicitly "
-                                 f"with funcs=")
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=_unresolved_bound_note(cj, fn, unresolved, note),
+                     meta={"mathema.invalid_conjecture": True})
     from . import _premises
     premise_words = _premises.premise_words()
     assum_eval = None
