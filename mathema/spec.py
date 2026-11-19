@@ -1088,7 +1088,9 @@ def record(ex, key: str | None = None, root: str = ".",
     if os.path.exists(path):
         import yaml
         try:
-            prior = (yaml.safe_load(open(path)) or {}).get(key)
+            with open(path) as fh:
+                prior = (yaml.load(fh, Loader=_SAFE_LOADER)
+                         or {}).get(key)
         except Exception:
             prior = None
     prior_lineage = (prior or {}).get("lineage") or {}
@@ -1373,7 +1375,7 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
     try:
         import yaml
         with open(path) as fh:
-            prior_doc = yaml.safe_load(fh) or {}
+            prior_doc = yaml.load(fh, Loader=_SAFE_LOADER) or {}
         prior_entry = prior_doc.get(key) or {}
         prior_claims = prior_entry.get("claims") or []
         prior_commit = (prior_entry.get("lineage") or {}).get("commit")
@@ -2546,7 +2548,8 @@ def load_claims(path: str) -> dict:
     import yaml
 
 
-    data = yaml.safe_load(open(path)) or {}
+    with open(path) as fh:
+        data = yaml.load(fh, Loader=_SAFE_LOADER) or {}
     if not isinstance(data, dict):
         return {}
     from .compendium import pop_library_fields
