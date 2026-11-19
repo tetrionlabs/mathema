@@ -6604,6 +6604,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # derive reads; only a pin no call writes (`let p be v`) is not
         written = _pins_in_calls(cj)
         unread_pins = {p: v for p, v in call_pins.items() if p not in written}
+        unresolved = _unresolved_bound_names(cj)
+        if unresolved:
+            out.append(stamp(_unresolved_bound_probe(ctx, unresolved),
+                             _cap=verdict_cap))
+            continue
         grounded = (None if unread_pins or ctx.family is not None
                     or ctx.assumption else _ground_proof_of(ctx, fn, facts))
         if grounded is not None and (grounded.status == "disproven"
@@ -11829,6 +11834,27 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe",
     if finding and probed.verdict in ("holds", "proven"):
         fallen.meta["mathema.computation_finding"] = finding
     return fallen
+
+
+def _unresolved_bound_names(cj) -> list:
+    """Intent:
+        The names a claim binds (by `funcs=` or by a call it makes) that
+        resolve to no function, sorted.
+    """
+    return sorted(n for n, v in _bound_callables(cj).items() if v is None)
+
+
+def _unresolved_bound_probe(ctx: "_ClaimContext", unresolved: list) -> "Probe":
+    """Intent:
+        The refusal for a claim calling names bound nowhere: `skipped`,
+        naming them, in the words every other path uses.
+    """
+    cj = ctx.cj
+    route = cj.route if cj.route == "derive" else None
+    return Probe(cj.name, ctx.statement, "skipped", route=route,
+                 note=f"{ctx.note}; could not resolve bound function(s) "
+                      f"{unresolved}, define it in f's module or the "
+                      f"calling scope, or bind it explicitly with funcs=")
 
 
 def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
