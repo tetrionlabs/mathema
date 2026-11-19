@@ -17,6 +17,7 @@ import datetime
 import functools
 import os
 import re
+import sys
 import unicodedata
 
 from . import _run_scope
@@ -486,6 +487,36 @@ def _dump(value, indent: int = 0) -> str:
     return pad + _scalar(value) + "\n"
 
 
+#: the most decimal digits Python converts between an int and text by
+#: default; a longer int's decimal text cannot be read back by a reader
+#: running under that default
+_INT_DECIMAL_DIGITS = getattr(sys.int_info, "default_max_str_digits", 4300)
+
+
+def _int_text(v: int) -> str:
+    """Intent:
+        `v` as a YAML int that reads back as `v`: its decimal text when
+        that has at most `_INT_DECIMAL_DIGITS` digits, else its YAML
+        hexadecimal spelling (`0x...`, signed `-0x...`), which YAML
+        readers convert in base 16, a base Python's int digit limit
+        does not apply to.
+
+    Notes:
+        The digit count is bounded from the bit length, so no decimal
+        conversion past the limit is attempted.
+    """
+    # a b-bit int has at most ceil(b * log10(2)) decimal digits
+    if v.bit_length() * 0.30103 < _INT_DECIMAL_DIGITS - 1:
+        return int.__repr__(v)
+    try:
+        text = int.__repr__(v)
+    except ValueError:
+        text = None
+    if text is not None and len(text.lstrip("-")) <= _INT_DECIMAL_DIGITS:
+        return text
+    return ("-" if v < 0 else "") + "0x" + format(abs(v), "x")
+
+
 def _scalar(v) -> str:
     if v is None:
         return "null"
@@ -502,7 +533,7 @@ def _scalar(v) -> str:
             r = f"{mantissa}.0e{exponent}"
         return r
     if isinstance(v, int):
-        return int.__repr__(v)
+        return _int_text(v)
     try:
         return _quoted(str(v))
     except ValueError as exc:
