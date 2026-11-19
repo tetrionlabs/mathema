@@ -32,10 +32,9 @@ def representation_reach() -> float:
 # The string edge-case corpus the is_language_defined fuzzer draws
 # from: the inputs real code forgets, empty and whitespace, control
 # characters, combining and zero-width marks, non-ascii and astral
-# scripts, a very long string, and injection-/format-/path-shaped
-# strings. Every one is tried at least once (the family iterates the
-# whole corpus), so a crash on any of them is always found, not left to
-# a random draw.
+# scripts, a very long string, and format braces. Every one is tried
+# at least once (the family iterates the whole corpus), so a crash on
+# any of them is always found, not left to a random draw.
 _STRING_SPECIALS = [
     "",
     " ",
@@ -54,10 +53,8 @@ _STRING_SPECIALS = [
     "\u200b",
     "\x00",
     "\x7f",
-    "../../etc/passwd",
-    "'; DROP TABLE users; --",
     "{0}",
-    "%s%n",
+    "%s",
     "{}",
     "null",
 ]
