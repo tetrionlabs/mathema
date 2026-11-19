@@ -3093,9 +3093,9 @@ def canonical_claim_text(cj) -> str:
     literal values (in expressions and in domain sets) as the claim.
     Text that fails raises `CanonicalTextError`, an `InvalidConjecture`
     naming the claim and the text."""
-    from ._scan import uses_legacy_quoting
+    from ._scan import uses_legacy_rendering
     text = render_claim_text(cj, unicode=False, canonical=True)
-    if uses_legacy_quoting() or getattr(cj, "relation", None) == "policy" \
+    if uses_legacy_rendering() or getattr(cj, "relation", None) == "policy" \
             or getattr(cj, "grammar", "mathema") != "mathema":
         return text
     problem = _reads_back_problem(cj, text)

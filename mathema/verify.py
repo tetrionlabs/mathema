@@ -1806,6 +1806,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs only in how an earlier release quoted
     # a string literal in the stored text, reported once for the run
     quoting_moved: list = []
+    # claims whose record differs only in an earlier release writing a
+    # negated relation without its parentheses, reported once for the run
+    negation_moved: list = []
     # per key, the claims whose record row stores a statement that does
     # not parse: each is adjudicated again and its row rewritten
     stale_rows: dict = {}
@@ -2096,8 +2099,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
             for conflict in _conflicts:
                 if conflict.get("kind") == "release-move":
-                    (quoting_moved if conflict.get("moved") == "literal-quoting"
-                     else release_moved).append((key, conflict["claim"]))
+                    moved = conflict.get("moved") or ()
+                    if "literal-quoting" in moved:
+                        quoting_moved.append((key, conflict["claim"]))
+                    if "not-parentheses" in moved:
+                        negation_moved.append((key, conflict["claim"]))
+                    if not moved:
+                        release_moved.append((key, conflict["claim"]))
                     continue
                 if conflict.get("kind") == "unreadable-record":
                     stale_rows.setdefault(key, []).append(conflict["claim"])
@@ -2660,6 +2668,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"read as another value; {'each is' if len(quoting_moved) != 1 else 'it is'} "
             f"checked again and re-recorded under the corrected text; "
             f"nothing the author wrote changed")
+    if negation_moved:
+        out.lines.append(
+            f"note: the stored text of a negated relation is corrected in "
+            f"{len(negation_moved)} claim{'s' if len(negation_moved) != 1 else ''} "
+            f"recorded by an earlier release, which wrote `not (...)` without "
+            f"the parentheses it needs to read back; "
+            f"{'each is' if len(negation_moved) != 1 else 'it is'} checked again "
+            f"and re-recorded under the corrected text; nothing the author "
+            f"wrote changed")
     return out
 
 

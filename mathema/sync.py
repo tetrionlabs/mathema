@@ -214,30 +214,51 @@ def release_moved(c: dict, row: dict) -> bool:
         return False
 
 
-def _recorded_with_legacy_quoting(c: dict, row: dict, fn=None) -> bool:
+def _legacy_renderings() -> dict:
     """Intent:
-        Whether a verified row's statement is the text releases up to
-        0.6.6.1 wrote for the authored claim `c` (string literals quoted
-        by `grammar._legacy_double_quoted`), and that text is not the
-        canonical text written now: the row records `c`, whether or not
-        its old text reads back as `c`.
+        `{move name: context manager}` for each earlier rendering of
+        stored claim text this release can reproduce.
     """
+    from ._scan import legacy_not_parentheses, legacy_quoting
+    return {"literal-quoting": legacy_quoting,
+            "not-parentheses": legacy_not_parentheses}
+
+
+def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
+    """Intent:
+        The earlier renderings, by move name, under which releases up to
+        0.6.6.1 wrote a verified row's statement for the authored claim
+        `c`, or None when the row's statement is the canonical text
+        written now or no earlier rendering (alone or together) gives
+        it. A row a move names records `c`, whether or not its old text
+        reads back as `c`.
+    """
+    import contextlib
+    import itertools
+
     from ._annotation_text import complex_parameters
-    from ._scan import legacy_quoting
     from .grammar import complex_in_view
     from .spec import _declared_conjecture, canonical_claim_text
     statement = row.get("statement") or ""
-    if not statement or ("'" not in statement and '"' not in statement):
-        return False
+    if not statement or ("'" not in statement and '"' not in statement
+                         and "not" not in statement):
+        return None
+    renderings = _legacy_renderings()
     try:
         with complex_in_view(complex_parameters(fn) if fn is not None else ()):
             cj = _completed(_declared_conjecture(c), fn)
             if canonical_claim_text(cj) == statement:
-                return False
-            with legacy_quoting():
-                return canonical_claim_text(cj) == statement
+                return None
+            for size in range(1, len(renderings) + 1):
+                for names in itertools.combinations(sorted(renderings), size):
+                    with contextlib.ExitStack() as stack:
+                        for name in names:
+                            stack.enter_context(renderings[name]())
+                        if canonical_claim_text(cj) == statement:
+                            return names
     except Exception:
-        return False
+        return None
+    return None
 
 
 def _checked_differently(c: dict, row: dict) -> bool:
@@ -340,14 +361,14 @@ def claim_conflicts(fn, file_entry: dict,
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
                 continue
-            if _recorded_with_legacy_quoting(c, v, fn) \
-                    and not _checked_differently(c, v):
-                # the row records this claim in the text the old literal
-                # quoting wrote for it: adjudicated as written, the same
-                # way as a release move of the canonical text
+            moved = _legacy_move(c, v, fn)
+            if moved and not _checked_differently(c, v):
+                # the row records this claim in the text an earlier
+                # rendering wrote for it: adjudicated as written, the
+                # same way as a release move of the canonical text
                 seen.add((name, "supersession"))
                 out.append({"kind": "release-move", "claim": name,
-                            "moved": "literal-quoting",
+                            "moved": moved,
                             "surface": surface,
                             "authored": _display_claim(c),
                             "verified": v.get("statement")})

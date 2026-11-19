@@ -119,7 +119,8 @@ from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
 from ._scan import (_split_commas, blank_strings, mask_strings,
                     outside_strings, requote_literals, sub_outside_strings,
-                    unmask_strings, uses_legacy_quoting)
+                    unmask_strings, uses_legacy_not_parentheses,
+                    uses_legacy_quoting)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
@@ -2782,14 +2783,26 @@ def _verbatim_atom(node: ast.AST):
     its parentheses: `ast.unparse` strips them as redundant, but in
     claim text they are load-bearing, `f(x) = (a <= b)` reparses as one
     relation with a boolean value, `f(x) = a <= b` re-splits at the
-    first relation and means something else."""
+    first relation and means something else. A `not` is truth-valued
+    the same way and keeps its parentheses too: `f(x) = (not (a < x and
+    x < b))`, `f(x) = (not x)`."""
     text = ast.unparse(node)
-    if isinstance(node, (ast.Compare, ast.BoolOp)):
+    if isinstance(node, (ast.Compare, ast.BoolOp)) or (
+            _negates_a_relation(node) and not uses_legacy_not_parentheses()):
         text = f"({text})"
     ordered = _ORDERED_MATRICES.get()
     if ordered and _matrix_valued(node, ordered):
         return sympy.Symbol(text, commutative=False)
     return sympy.Symbol(text, real=True)
+
+
+def _negates_a_relation(node: ast.AST) -> bool:
+    """Intent:
+        Whether `node` is a `not`: over a comparison, a boolean
+        connective, or any other operand, the claim grammar reads a
+        negation inside a claim only in its own parentheses.
+    """
+    return isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
 
 
 def _string_literals(node: ast.AST) -> list:

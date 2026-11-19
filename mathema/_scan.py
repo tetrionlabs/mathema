@@ -136,6 +136,43 @@ def uses_legacy_quoting() -> bool:
     return _LEGACY_QUOTING.get()
 
 
+#: whether stored claim text writes a `not` over a relation without its
+#: parentheses, as releases up to 0.6.6.1 did, for reading a record
+#: those releases wrote
+_LEGACY_NOT_PARENTHESES: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_not_parentheses", default=False)
+
+
+@contextlib.contextmanager
+def legacy_not_parentheses():
+    """Intent:
+        Within the block, a `not` over a comparison or a boolean
+        connective is rendered without its own parentheses, as releases
+        up to 0.6.6.1 wrote it (`f(x) = not (a < x and x < b)`, text that
+        does not read back), so a record those releases wrote can be
+        compared with the claim it records.
+    """
+    token = _LEGACY_NOT_PARENTHESES.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_NOT_PARENTHESES.reset(token)
+
+
+def uses_legacy_not_parentheses() -> bool:
+    """Intent:
+        Whether `legacy_not_parentheses` is in force.
+    """
+    return _LEGACY_NOT_PARENTHESES.get()
+
+
+def uses_legacy_rendering() -> bool:
+    """Intent:
+        Whether any rendering of an earlier release is in force.
+    """
+    return _LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+
+
 def string_literal(value: str) -> str:
     """Intent:
         The one spelling of a string value in stored claim text. A value
