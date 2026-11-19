@@ -115,3 +115,45 @@ def test_the_declared_layer_uses_the_same_names(tmp_path):
     assert os.path.dirname(path) == os.path.join(root, ".mathema",
                                                  "declared")
     assert not os.path.exists(legacy)
+
+
+AWKWARD = ["a%", "a%25", "100%:sure#/x", "a b", "naïve.fn", "x%zz", "%41",
+           "dir/sub/key", "tab\tkey", "q?&=+", "ünï/cødé%e9"]
+
+
+@pytest.mark.parametrize("key", AWKWARD)
+def test_awkward_keys_round_trip_through_save_and_load(tmp_path, key):
+    root = str(tmp_path)
+    path = save_verified_entry(key, _entry(), root)
+    assert os.path.dirname(path) == verified_dir(root)
+    assert record_key(os.path.basename(path)) == key
+    assert set(load_verified(root)) == {key}
+
+
+def test_a_name_the_writer_encodes_still_decodes():
+    assert record_file_name("a%") == "a%25.yaml"
+    assert record_key("a%25.yaml") == "a%"
+    assert record_key("a%2525.yaml") == "a%25"
+
+
+def test_an_old_name_holding_percent_hex_reads_as_itself(tmp_path):
+    assert record_key("a%25.yaml", held=["a%25"]) == "a%25"
+    assert record_key("a%25.yaml", held=["a%"]) == "a%"
+    assert record_key("a%25.yaml", held=[]) == "a%"
+    root = str(tmp_path)
+    old = _legacy(root, "a%25", "f1")
+    assert set(load_verified(root)) == {"a%25"}
+    save_verified_entry("a%25", _entry("f2"), root)
+    assert not os.path.exists(old)
+    assert os.listdir(verified_dir(root)) == [record_file_name("a%25")]
+    assert load_verified(root)["a%25"]["entry"]["identity"]["form"] == "f2"
+
+
+def test_an_old_percent_name_and_the_encoded_name_of_another_key_coexist(
+        tmp_path):
+    root = str(tmp_path)
+    _legacy(root, "a%25", "old")
+    save_verified_entry("a%", _entry("new"), root)
+    loaded = load_verified(root)
+    assert set(loaded) == {"a%25", "a%"}
+    assert loaded["a%25"]["entry"]["identity"]["form"] == "old"
