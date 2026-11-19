@@ -41,3 +41,28 @@ def test_a_bound_name_that_raises_type_error_still_falsifies():
     p = _row("f(100.0, 0.25) == g(1)", "probe", funcs={"g": g})
     assert p.verdict == "falsified"
     assert "TypeError" in (p.counterexample or "") + (p.note or "")
+
+
+def inc(x: float) -> float:
+    return 2 * x + 1
+
+
+def test_pin_an_unused_unresolvable_binding_skips_a_single_point_claim():
+    # On origin/main this row was proven (derive:brute_force) because the
+    # binding is never called; on this branch it is skipped.
+    p = _row("f(100.0, 0.25) == 100.0", "best", funcs={"h": "no.such.h"})
+    assert p.verdict == "skipped"
+    assert "could not resolve bound function(s) ['h']" in p.note
+
+
+@pytest.mark.parametrize("route, verdict", [("best", "skipped"),
+                                            ("derive", "skipped")])
+def test_pin_a_family_claim_with_a_stale_binding_is_skipped(route, verdict):
+    # On origin/main route best gave holds (probe:algorithmic) and route
+    # derive gave skipped; on this branch both are skipped.
+    c = claim("for x in [-10, 10], d(f(x), x) >= 0",
+              name="monotonic_increasing[x]", route=route,
+              funcs={"h": "no.such.h"})
+    p = check_conjectures(inc, [c])[0]
+    assert p.verdict == verdict
+    assert "could not resolve bound function(s) ['h']" in p.note
