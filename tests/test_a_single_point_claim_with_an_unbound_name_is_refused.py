@@ -23,11 +23,11 @@ def test_the_single_point_form_is_refused_like_the_quantified_one(route):
     quantified = _row("for a in [1,5], f(a, 0.25) == g(1)", route)
     assert single.verdict == quantified.verdict == "skipped:misspecified"
     assert single.route == quantified.route
-    marker = "could not resolve bound function(s) ['g']"
-    assert marker in single.note
-    def tail(p):
-        return p.note.replace(repr(p.name), "NAME").split(" (inferred")[0]
-    assert tail(single).split(marker)[1] == tail(quantified).split(marker)[1]
+    assert "g is not defined" in single.note
+    assert "g is not defined" in quantified.note
+    assert single.note.split("\n", 1)[1].replace(
+        "claim f(100.0, 0.25) == g(1)", "X") == quantified.note.split(
+        "\n", 1)[1].replace("claim f(a, 0.25) == g(1)", "X")
 
 
 def test_a_claim_whose_names_are_all_bound_is_unaffected():
@@ -54,7 +54,7 @@ def test_pin_an_unused_unresolvable_binding_skips_a_single_point_claim():
     # binding is never called; on this branch it is skipped.
     p = _row("f(100.0, 0.25) == 100.0", "best", funcs={"h": "no.such.h"})
     assert p.verdict == "skipped:misspecified"
-    assert "could not resolve bound function(s) ['h']" in p.note
+    assert "h is bound to no.such.h" in p.note
 
 
 @pytest.mark.parametrize("route, verdict", [("best", "skipped:misspecified"),
@@ -67,4 +67,4 @@ def test_pin_a_family_claim_with_a_stale_binding_is_skipped(route, verdict):
               funcs={"h": "no.such.h"})
     p = check_conjectures(inc, [c])[0]
     assert p.verdict == verdict
-    assert "could not resolve bound function(s) ['h']" in p.note
+    assert "h is bound to no.such.h" in p.note

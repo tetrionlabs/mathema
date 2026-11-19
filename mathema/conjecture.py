@@ -11861,74 +11861,104 @@ def _called_names(cj) -> set:
     return found
 
 
-def _dotted_ref_failure(ref: str) -> str:
+def _diagnostic(title: str, name: "str | None", key: str, statement: str,
+                explanation: str, location: "dict | None" = None) -> str:
     """Intent:
-        Why the dotted reference `ref` named no function: its module
-        does not import, or the module imports and lacks the rest.
+        A diagnostic as plain text: `Error: <title>`, the claim and
+        where it is, then one explanation with its fix. The claim is
+        `claim <name> of <key>` (`key` the dotted function under test),
+        or `claim <statement>` when it has no authored `name`. A known
+        `location`, `{"file", "line", "text"}`, makes that line
+        `on <file> line <n>, claim ...:` and quotes the source line.
+    """
+    who = f"claim {name} of {key}" if name else f"claim {statement}"
+    lines = [f"Error: {title}", ""]
+    if location is None:
+        lines.append(f"  {who}")
+    else:
+        lines.append(f"  on {location['file']} line {location['line']}, "
+                     f"{who}:")
+        lines.append(f"  {location['line']}:   {location['text']}")
+    lines += ["", explanation]
+    return "\n".join(lines)
+
+
+def _names_in_words(names: list) -> str:
+    """Intent:
+        `names` as `a`, `a and b` or `a, b and c`.
+    """
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _binding_failure(name: str, ref: str, called: bool) -> str:
+    """Intent:
+        The sentence saying why the explicit binding `name = ref` named
+        no function, with its fix.
     """
     import importlib
-    parts = ref.split(".")
-    for cut in range(len(parts) - 1, 0, -1):
-        module = ".".join(parts[:cut])
-        try:
-            importlib.import_module(module)
-        except Exception:
-            continue
-        rest = ".".join(parts[cut:])
-        return (f"the module `{module}` imports but has no function "
-                f"`{rest}`, or it is not one mathema can call")
-    return f"the module `{parts[0]}` could not be imported"
+    module, _, attr = ref.rpartition(".")
+    try:
+        importlib.import_module(module or ref)
+        why = f"{module} has no attribute {attr}"
+    except Exception:
+        why = f"the module {module or ref} does not import"
+    fix = ("Fix the path." if called else
+           f"Fix the path, or remove the binding (the statement does "
+           f"not use {name}).")
+    return f"{name} is bound to {ref}, and {why}. {fix}"
 
 
 def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
     """Intent:
-        The refusal text for a claim whose bound or called function
-        names resolve to nothing. Its first clause names the names and
-        the fix, short enough for a summary line; the rest names the
-        claim, where each name was looked for, whether the statement
-        calls it or the binding is unused, and the fix for each.
+        The note for a claim whose bound or called function names
+        resolve to nothing: a one-line summary (the clause a summary
+        row keeps), then a diagnostic block naming the claim, the
+        function under test, and one explanation with the fix.
     """
     module = getattr(fn, "__module__", None) or "the function's module"
+    key = f"{module}.{getattr(fn, '__qualname__', '')}".rstrip(".")
+    statement = f"{cj.lhs} {cj.relation} {cj.rhs}".strip()
+    generated = cj.name == auto_claim_name(statement.replace("==", "="))
     called = _called_names(cj)
-    unused = [n for n in unresolved if n not in called]
-    if not unused:
-        fix = (f"define each in the module `{module}` or bind it with "
-               f"funcs={{\"name\": \"pkg.mod.name\"}}")
-    elif len(unused) == len(unresolved):
-        fix = "remove the unused binding from funcs"
+    explicit = {n: (cj.funcs or {}).get(n) for n in unresolved
+                if isinstance((cj.funcs or {}).get(n), str)
+                and (cj.funcs or {}).get(n) != n}
+    undefined = [n for n in unresolved if n not in explicit]
+    name = None if generated else cj.name
+    who = cj.name if name else f"claim {statement}"
+    sentences, short = [], []
+    if undefined:
+        many = len(undefined) > 1
+        names = _names_in_words(undefined)
+        binds = (", ".join(f'"{n}": "..."' for n in undefined) if many
+                 else f'"{undefined[0]}": "pkg.mod.{undefined[0]}"')
+        sentences.append(
+            f"{names} {'are' if many else 'is'} not defined in module "
+            f"{module}. Define {'them' if many else 'it'} there, or bind "
+            f"{'them' if many else 'it'}:" + (" " if many else "\n")
+            + f"funcs={{{binds}}}")
+        short.append(f"{names} {'are' if many else 'is'} not defined")
+    for n, ref in explicit.items():
+        sentences.append(_binding_failure(n, ref, n in called))
+        short.append(f"{n} is bound to {ref}, which does not resolve")
+    if explicit:
+        title = "claim has a binding that does not resolve"
     else:
-        fix = "define, bind or remove each as the detail says"
-    parts = []
-    for name in unresolved:
-        ref = (cj.funcs or {}).get(name)
-        if isinstance(ref, str) and ref != name:
-            looked = (f"the explicit binding funcs={{{name!r}: {ref!r}}} "
-                      f"was tried and failed: {_dotted_ref_failure(ref)}")
-        else:
-            looked = (f"it was looked for in the module `{module}` of the "
-                      f"function under test and in the calling scope, and "
-                      f"neither defines a function called `{name}`")
-        if name in called:
-            use = f"The statement calls `{name}`"
-            todo = (f"define `{name}` in the module `{module}`, or bind it "
-                    f"with funcs={{\"{name}\": \"pkg.mod.{name}\"}}")
-        else:
-            use = f"`{name}` is an unused binding and the statement never calls it"
-            todo = f"remove the unused binding of `{name}` from funcs"
-        parts.append(f"{use}; {looked}; to fix it, {todo}")
-    return (f"could not resolve bound function(s) {unresolved}, {fix}. "
-            f"The claim {cj.name!r} is misspecified. "
-            + ". ".join(parts) + ".")
+        title = ("claim calls undefined functions" if len(undefined) > 1
+                 else "claim calls an undefined function")
+    one = f"{who} is misspecified: {'; '.join(short)}."
+    return f"{one} \n" + _diagnostic(title, name, key, statement,
+                                     "\n".join(sentences))
 
 
 def _unresolved_bound_note(cj, fn, unresolved: list, prior: str) -> str:
     """Intent:
-        The refusal text followed by whatever the claim's note already
-        said, so a summary line that keeps the first clause shows the
-        refusal.
+        The note for an unresolved-name refusal; `prior`, what the
+        claim's note already said, is not repeated.
     """
-    message = _unresolved_bound_message(cj, fn, unresolved)
-    return f"{message} ({prior})" if prior else message
+    return _unresolved_bound_message(cj, fn, unresolved)
 
 
 def _unresolved_bound_probe(ctx: "_ClaimContext", fn, unresolved: list) -> "Probe":
@@ -11940,8 +11970,7 @@ def _unresolved_bound_probe(ctx: "_ClaimContext", fn, unresolved: list) -> "Prob
     cj = ctx.cj
     route = cj.route if cj.route == "derive" else None
     return Probe(cj.name, ctx.statement, "skipped:misspecified", route=route,
-                 note=_unresolved_bound_note(
-                     cj, fn, unresolved, ctx.note),
+                 note=_unresolved_bound_note(cj, fn, unresolved, ctx.note),
                  meta={"mathema.invalid_conjecture": True})
 
 
