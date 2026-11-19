@@ -2,6 +2,19 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## 0.6.6.1
+
+### Upgrading from 0.6.6
+- Implementation counts only the lines reached by the probes of claims included for a function (in a claims file, its docstring or a decorator, or a suggestion accepted as evidence). A function with no such claim is not run while it is scored, so code with neither tests nor claims reads lower than in 0.6.6.
+- `check()` and `mathema verify` run the built-in checks (the structural battery, the shape and type probes, and the rows for a value that is not there) only for a function with a written claim or a mathema type marker. A function with neither is not called with values mathema generates. `MATHEMA_BUILTIN_CHECKS=on` runs them for every function, `off` for none.
+- The `language` extra takes mathema-language 0.3.
+
+### Fixes
+- `.mathema/.gitignore` ignores `/cache/`, and `mathema init` adds the lines an existing one lacks. Warnings kept in the scoring cache name files relative to the repository root.
+
+### Known limits
+- A claim someone wrote still runs its function on values drawn from the claim's domain. Until 0.6.7, a function that writes, deletes or sends should not carry claims that are probed.
+
 ## 0.6.6
 
 ### Highlights
