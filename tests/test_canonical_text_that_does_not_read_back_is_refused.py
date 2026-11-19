@@ -106,3 +106,32 @@ def test_verify_reports_the_refused_claim_and_checks_the_rest(tmp_path):
     rows = {r["name"]: r for r in yaml.safe_load(record.read_text())["rbpkg.mod.tag"]["claims"]}
     assert "two_literals" not in rows
     assert rows["plain"]["verdict"] in ("proven", "holds"), rows["plain"]
+
+
+def _verify_with_the_old_quoting(tmp_path):
+    pkg = tmp_path / "rbpkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "mod.py").write_text(textwrap.dedent(_MOD))
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "r.claims.yaml").write_text(textwrap.dedent(_CLAIMS))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([REPO, str(tmp_path)]))
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, env=env, check=True)
+    run = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; from mathema import grammar; "
+         "grammar._double_quoted = grammar._legacy_double_quoted; "
+         "from mathema.cli import main; "
+         f"sys.exit(main(['verify', '--root', {str(tmp_path)!r}]))"],
+        cwd=str(tmp_path), capture_output=True, text=True, env=env)
+    return run
+
+
+def test_verify_says_a_refused_claim_is_a_defect_in_mathema(tmp_path):
+    run = _verify_with_the_old_quoting(tmp_path)
+    lines = [ln for ln in run.stdout.splitlines() if "two_literals" in ln]
+    assert len(lines) == 1, run.stdout
+    assert "defect in mathema's rendering" in lines[0], lines[0]
+    assert "not checked" in lines[0], lines[0]
+    assert "correct it there" not in lines[0], lines[0]
+    assert run.returncode == 1, run.stdout + run.stderr

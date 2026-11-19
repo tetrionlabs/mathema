@@ -597,9 +597,9 @@ def unparseable_claim_message(key: str, name: str, where: "str | None",
     from .conjecture import CanonicalTextError
     where = where or "its docstring or claims file"
     if isinstance(error, CanonicalTextError):
-        # the claim read; the text mathema rendered for it did not
         return (f"{key}: claim {name!r} declared in {where} was not checked: "
-                f"{error}; no record was written for it")
+                f"this is a defect in mathema's rendering of the claim, not in "
+                f"the claim ({error}); no record was written for it")
     return (f"{key}: claim {name!r} declared in {where} does not parse "
             f"({error}); correct it there and re-run {rerun}")
 
@@ -1787,7 +1787,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
-    from .conjecture import InvalidConjecture, _resolve_func_ref
+    from .conjecture import CanonicalTextError, InvalidConjecture, _resolve_func_ref
     from .inventory import chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
@@ -2160,7 +2160,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 msg = unparseable_claim_message(
                     key, claim_name, (declared_info or {}).get("source"),
                     error)
-                out.authoring_errors.append(msg)
+                if not isinstance(error, CanonicalTextError):
+                    # a claim mathema cannot render is mathema's defect,
+                    # not one the author fixes on an authoring surface
+                    out.authoring_errors.append(msg)
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")
             merged_entry = now["entry"]
