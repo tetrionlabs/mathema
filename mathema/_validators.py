@@ -2,31 +2,51 @@
 # Copyright 2026 Tetrion Ltd
 """Reading a function as a pattern validator: a function of one text
 parameter whose whole behaviour is the truth of one regular-expression
-match on that parameter.
+match on that parameter. Where the reading is not certain the function
+is declined, with the reason: a decline loses a proof, a wrong reading
+would give a false one.
 
-Two shapes are read. A refusing validator raises when the match fails
-and returns its argument otherwise (`if not PAT.fullmatch(x): raise
-ValueError(x)` then `return x`, the test also written `is None`). A
-predicate returns the truth of the match (`return bool(PAT.search(x))`,
-`return PAT.match(x) is not None`, or `is None` for its negation).
+A function is read only when all of this holds, each point checked on
+the function object and not assumed from its source text.
 
-The match is `PAT.fullmatch(x)`, `PAT.match(x)` or `PAT.search(x)` on a
-compiled pattern, `re.compile(P[, flags]).fullmatch(x)`, or
-`re.fullmatch(P, x[, flags])` and its two siblings. Nothing is read by
-its name: `PAT` must be bound, in the function's globals, to a compiled
-`re.Pattern`; `re` must be bound there to the standard `re` module; and
-neither name may be a parameter or assigned in the body. A pattern
-written inline is a string literal and its flags are `re` constants
-joined by `|`, compiled here with `re.compile`.
+1. It is a plain function object: not a lambda, a method object, a
+   partial or another callable; not wrapped (`__wrapped__`); with no
+   closure and no free variables; with no default argument values;
+   neither a coroutine nor a generator.
+2. Its source is one undecorated `def` taking exactly one positional
+   parameter, and the code that source compiles to is the code the
+   function runs (same instructions, names, variables and constants).
+3. After an optional docstring its body is one of two shapes. A
+   refusing validator: `if <test>: raise E(...)` with no `else`, then
+   `return <the parameter>`, the test true exactly when the match
+   fails (`not m`, `m is None`). A predicate: `return <test>`, the
+   test being `bool(m)`, `m is not None`, `m is None` or `not m`.
+4. The match `m` is `PAT.fullmatch(x)`, `PAT.match(x)` or
+   `PAT.search(x)` with the bare parameter as its only argument,
+   `re.compile(P[, flags]).fullmatch(x)`, or `re.fullmatch(P, x[,
+   flags])` and its two siblings, with no keyword arguments.
+5. Every name the body reads is resolved in the function's globals or
+   the builtins and checked by identity: `PAT` is an object of the
+   exact type `re.Pattern`; `re` is the standard `re` module and the
+   function called is that module's own; `bool`, `repr` and `str` are
+   the builtins. No such name is a parameter or assigned in the body.
+   An inline pattern is a string literal (or a name bound to a `str`)
+   and its flags are `re` constants joined by `|`.
+6. `E` is a builtin exception class under its own name, raised with no
+   cause, built from no argument or from one that cannot fail on a
+   text: a string literal, the parameter, `repr` or `str` of the
+   parameter, or an f-string of literals and the parameter with no
+   format specification.
 
-A function that does anything else (transforms the text, tests it
-twice, matches something other than the bare parameter) is not read,
+Anything else (text transformed before the match, a second test, a
+`try`, an attribute of an object, a user exception class) is declined,
 and `read_validator` says which part stopped it.
 """
 from __future__ import annotations
 
 import ast
 import builtins
+import dis
 import inspect
 import re
 import textwrap
@@ -149,7 +169,7 @@ class _Reader:
             flags = self._flags(node.args[1]) if len(node.args) == 2 else 0
             return self._compile(self._text(node.args[0]), flags)
         bound = self.value(node)
-        if not isinstance(bound, re.Pattern):
+        if type(bound) is not re.Pattern:
             raise _Declined(f"{ast.unparse(node)} is not a compiled re.Pattern")
         return bound
 
@@ -208,15 +228,108 @@ class _Reader:
             return self.match(node.args[0], param), True
         return self.match(node, param), True
 
-    def raised(self, node: ast.Raise) -> type:
-        """The exception class a `raise` statement raises."""
+    def raised(self, node: ast.Raise, param: str) -> type:
+        """The builtin exception class a `raise` statement raises, when
+        building the exception cannot itself fail."""
         exc = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
         if exc is None or node.cause is not None:
             raise _Declined("the raise is a re-raise or has a cause")
-        bound = self.value(exc)
-        if not (isinstance(bound, type) and issubclass(bound, Exception)):
-            raise _Declined(f"{ast.unparse(exc)} is not an exception class")
+        if not isinstance(exc, ast.Name):
+            raise _Declined(f"{ast.unparse(exc)} is not the name of a builtin exception")
+        bound = self._global(exc.id)
+        if not (isinstance(bound, type) and issubclass(bound, Exception)
+                and getattr(builtins, exc.id, None) is bound):
+            raise _Declined(f"{exc.id} is not the builtin exception class of that name, "
+                            f"so building it may do anything")
+        if isinstance(node.exc, ast.Call):
+            if node.exc.keywords or len(node.exc.args) > 1:
+                raise _Declined("the exception is built from more than one argument")
+            for arg in node.exc.args:
+                self._total(arg, param)
         return bound
+
+    def _total(self, node: ast.AST, param: str) -> None:
+        """Declines unless evaluating `node` cannot raise for a text
+        parameter: a string literal, the bare parameter, `repr` or
+        `str` of the parameter, or an f-string of those."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return
+        if isinstance(node, ast.Name) and node.id == param:
+            return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in ("repr", "str") and len(node.args) == 1 \
+                and not node.keywords \
+                and self._global(node.func.id) is getattr(builtins, node.func.id) \
+                and isinstance(node.args[0], ast.Name) and node.args[0].id == param:
+            return
+        if isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    continue
+                if isinstance(part, ast.FormattedValue) and part.format_spec is None \
+                        and isinstance(part.value, ast.Name) and part.value.id == param:
+                    continue
+                raise _Declined(f"the exception's message {ast.unparse(node)} reads more "
+                                f"than the parameter")
+            return
+        raise _Declined(f"the exception's argument {ast.unparse(node)} is more than a "
+                        f"string, the parameter, or its repr or str")
+
+
+def _same_code(fn, source: str, name: str) -> bool:
+    """Whether the function's running code is the code its source text
+    compiles to: the same instructions on the same names, variables and
+    constants. How a call's callee is pushed differs with what the
+    enclosing module imports (an attribute of an imported module is
+    loaded without the method-call form), so the comparison reads each
+    instruction's name and value and passes over that difference."""
+    def shape(code) -> tuple:
+        steps = []
+        for step in dis.get_instructions(code):
+            if step.opname in ("PUSH_NULL", "CACHE", "NOP"):
+                continue
+            value = step.argval
+            if hasattr(value, "co_code"):
+                value = "<code>"
+            if "JUMP" in step.opname or step.opname.startswith("FOR_"):
+                # a target is an offset, which the pushes passed over move
+                value = "<target>"
+            if step.opname in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_METHOD"):
+                # the name alone: the flag beside it says how a callee
+                # is pushed, not what is loaded
+                value = step.argrepr.split(" + ")[0]
+            steps.append(("LOAD_ATTR" if step.opname == "LOAD_METHOD" else step.opname,
+                          repr(value)))
+        return tuple(steps), code.co_varnames, code.co_freevars
+    try:
+        module = compile(source, "<validator source>", "exec")
+    except (SyntaxError, ValueError):
+        return False
+    read = next((c for c in module.co_consts
+                 if hasattr(c, "co_code") and c.co_name == name), None)
+    return read is not None and shape(read) == shape(fn.__code__)
+
+
+def _require_a_plain_function(fn) -> None:
+    """Declines unless `fn` is a plain module-level-style function whose
+    behaviour its own source and globals fix: a function object, not
+    wrapped, with no closure, no default values, and neither a
+    coroutine nor a generator."""
+    if not inspect.isfunction(fn):
+        raise _Declined("it is not a plain function object")
+    if hasattr(fn, "__wrapped__"):
+        raise _Declined("it wraps another function, whose source is not its own behaviour")
+    code = fn.__code__
+    if fn.__closure__ or code.co_freevars:
+        raise _Declined("it reads names from an enclosing function, which its globals "
+                        "do not hold")
+    if fn.__defaults__ or fn.__kwdefaults__:
+        raise _Declined("it has default argument values")
+    if inspect.iscoroutinefunction(fn) or inspect.isgeneratorfunction(fn) \
+            or inspect.isasyncgenfunction(fn):
+        raise _Declined("it is a coroutine or a generator")
+    if fn.__name__ == "<lambda>":
+        raise _Declined("it is a lambda")
 
 
 def _function_tree(fn) -> ast.FunctionDef:
@@ -225,9 +338,13 @@ def _function_tree(fn) -> ast.FunctionDef:
         tree = ast.parse(source)
     except (OSError, TypeError, SyntaxError):
         raise _Declined("its source is not available") from None
+    _require_a_plain_function(fn)
     found = tree.body[0] if tree.body else None
-    if not isinstance(found, ast.FunctionDef) or found.decorator_list:
+    if not isinstance(found, ast.FunctionDef) or found.decorator_list or len(tree.body) != 1:
         raise _Declined("it is not a plain, undecorated function")
+    if found.name != fn.__code__.co_name or not _same_code(fn, source, found.name):
+        raise _Declined("its source text is not the code it runs (it was redefined, "
+                        "wrapped, or its file changed)")
     return found
 
 
@@ -257,7 +374,7 @@ def _read(fn) -> Validator:
         method, truth = reader.test(body[0].test, param)
         if truth:
             raise _Declined("it raises when the match succeeds")
-        return Validator(param, method, reader.raised(body[0].body[0]))
+        return Validator(param, method, reader.raised(body[0].body[0], param))
     raise _Declined("its body is more than one test of one match on the parameter")
 
 

@@ -10792,7 +10792,9 @@ def _validator_question(cj, fn, validator, param: str) -> "tuple | str":
     """
     import ast
     import builtins
-    names = {"f", getattr(fn, "__name__", "f")}
+    # `f` is the function under check; a claim binding any function is
+    # turned away before this is read
+    names = {"f"}
     try:
         call = ast.parse(cj.lhs.strip(), mode="eval").body
     except SyntaxError:
@@ -10880,6 +10882,44 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     return validator, param, base, stated
 
 
+def _beyond_a_plain_validator_claim(cj, bound) -> "str | None":
+    """Intent:
+        What a claim states that the validator proof does not account
+        for, or None for a plain claim: the proof reads one relation
+        about calls of the function under check on texts of the
+        parameter's language, and nothing else. A premise, an outcome
+        clause, a pin, a tolerance, a chained comparison, a free
+        variable, a function bound in the claim (the name `f` may then
+        be another function) or a missing-value policy stated on the
+        parameter each make the claim more than that, and the claim is
+        left to the other routes.
+    """
+    from .domain import Domain, _Sentinel, _sentinel_piece
+    if getattr(cj, "assuming", ""):
+        return "the claim has a premise"
+    if getattr(cj, "outcome", ""):
+        return "the claim has an outcome clause"
+    if getattr(cj, "pins", None) or getattr(cj, "param_pins", None):
+        return "the claim pins a value"
+    if getattr(cj, "tolerance", None) is not None:
+        return "the claim states a tolerance"
+    if len(getattr(cj, "links", None) or []) > 1:
+        return "the claim is a chain of comparisons"
+    if getattr(cj, "free_vars", None):
+        return "the claim binds a free variable"
+    if getattr(cj, "funcs", None):
+        return "the claim binds a function, so a call in it may be another function"
+    if isinstance(bound, Domain):
+        stated = (bound.absent or bound.members or bound.policy is not None
+                  or any(isinstance(v, _Sentinel) for v in bound.excluded)
+                  or any(_sentinel_piece(p) or (isinstance(p, frozenset) and any(
+                      isinstance(v, _Sentinel) or v is None for v in p))
+                      for p in bound.pieces))
+        if stated:
+            return "the parameter's domain states a missing-value policy"
+    return None
+
+
 def _validator_proof(cj, fn, cj_domain):
     """Intent:
         The derive verdict for a claim over one text parameter of a
@@ -10922,6 +10962,9 @@ def _validator_proof(cj, fn, cj_domain):
 
     def undecided(why: str):
         return ProofResult("undecided", sketch=f"{path}: {why}")
+    beyond = _beyond_a_plain_validator_claim(cj, bound)
+    if beyond is not None:
+        return undecided(f"{beyond}, which this route does not account for")
     statement = _validator_statement(fn, cj_domain)
     if not isinstance(statement, tuple):
         return undecided(statement) if statement else None

@@ -237,3 +237,50 @@ def test_a_function_or_claim_that_does_more_is_not_lowered(fn, text):
     row = _row(fn, text)
     assert (row.meta or {}).get("mathema.derive_route") != "smt"
     assert "smt:" not in (row.sketch or "")
+
+
+def _other(text):
+    return "zzz"
+
+
+def _not_on_the_smt_route(row):
+    return (row.meta or {}).get("mathema.derive_route") != "smt"
+
+
+@pytest.mark.parametrize("text", [
+    "assuming len(text) >= 1, for text in L[slugs], f(text) == text",
+    "assuming len(text) < 1, for text in L[slugs], raises(f(text), ValueError)",
+])
+def test_a_claim_with_a_premise_is_not_decided_on_this_route(text):
+    row = _row(check_slug_fixed, text, route="best")
+    assert _not_on_the_smt_route(row)
+    assert row.verdict != "falsified", (row.verdict, row.counterexample)
+
+
+def test_a_claim_binding_f_to_another_function_is_not_decided_on_this_route():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        (row,) = check_conjectures(check_slug_fixed, [claim(
+            "for text in L[slugs], f(text) == text", route="best", funcs={"f": _other})])
+    assert _not_on_the_smt_route(row)
+    assert row.verdict != "proven", (row.verdict, row.sketch)
+
+
+def test_a_parameter_domain_admitting_a_missing_value_is_not_decided_on_this_route():
+    row = _row(check_slug_fixed, "for text in L[slugs] | {None}, f(text) == text")
+    assert _not_on_the_smt_route(row)
+    assert row.verdict != "proven", (row.verdict, row.sketch)
+
+
+@pytest.mark.parametrize("change", [
+    {"tolerance": 0.5}, {"outcome": "self.other"}, {"pins": ["x"]},
+    {"free_vars": frozenset({"k"})},
+])
+def test_a_claim_stating_more_than_one_relation_about_the_call_is_left_alone(change):
+    import dataclasses
+
+    from mathema.conjecture import _validator_proof
+    plain = claim("for text in L[slugs], f(text) == text", route="derive")
+    assert _validator_proof(plain, check_slug_fixed, plain.domain).status == "proven"
+    more = dataclasses.replace(plain, **change)
+    assert _validator_proof(more, check_slug_fixed, more.domain).status == "undecided"
