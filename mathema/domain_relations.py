@@ -123,6 +123,9 @@ class Decision:
     route: str = "domain_sets"
     #: the hash of each regular-language definition read, by domain text
     definitions: "dict | None" = None
+    #: for a verdict that rests on definitions: one entry per definition
+    #: read, as `check_definition` returns it
+    assumptions: "list | None" = None
 
 
 # ---- reading ----------------------------------------------------------
@@ -624,6 +627,8 @@ class _Defined:
     at_least: dict
     alphabet: list
     hashes: dict
+    #: each language piece read: `(text, language, at_most, at_least)`
+    read: tuple = ()
 
 
 def _literals(values) -> "dict | None":
@@ -657,7 +662,7 @@ def defined_bound(bound) -> "_Defined | None":
         return None
     pieces = (bound,) if isinstance(bound, frozenset) else tuple(bound.pieces)
     excluded = frozenset() if isinstance(bound, frozenset) else bound.excluded
-    most, least, alphabet, hashes = [], [], [], {}
+    most, least, alphabet, hashes, read = [], [], [], {}, []
     for piece in pieces:
         if isinstance(piece, frozenset):
             node = _literals(piece)
@@ -673,9 +678,11 @@ def defined_bound(bound) -> "_Defined | None":
             return None
         try:
             document = resolve_language(piece).to_json().get("definition")
+            language = resolve_language(piece)
             piece_most, piece_least = regular.bounds(document)
             alphabet.extend(regular.alphabet_of(document))
             hashes[repr(piece)] = regular.term_hash(document)
+            read.append((repr(piece), language, piece_most, piece_least))
         except Exception:
             return None
         most.append(piece_most)
@@ -690,7 +697,129 @@ def defined_bound(bound) -> "_Defined | None":
         if excluded:
             node = {"op": "inter", "args": [node, {"op": "complement", "arg": removed}]}
         return node
-    return _Defined(joined(most), joined(least), alphabet, hashes)
+    return _Defined(joined(most), joined(least), alphabet, hashes, tuple(read))
+
+
+#: how many members a guard draws from a language, and how many
+#: strings of a definition it asks the solver for
+GUARD_DRAWS = 48
+GUARD_STRINGS = 4
+
+
+def _guard_seed(text: str) -> int:
+    """The seed a guard draws with for a language: fixed by the
+    language's text, so the same check can be run again."""
+    import hashlib
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def check_definition(text: str, language, at_most: dict, at_least: dict,
+                     alphabet: list) -> dict:
+    """Intent:
+        Check a language's stated definition against the language's own
+        membership, as far as drawing can: members drawn through the
+        language's hazards and `sample` must all lie in `at_least`, and
+        strings the solver takes from `at_most` must all be members by
+        `contains`. Returns the assumption the proof rests on: the
+        `statement` (`<text> == its stated definition`), its `status`
+        (`checked` when at least one member was drawn and nothing
+        disagreed, `assumed` when no member could be drawn, `refuted`
+        with the `disagreement` when a string shows the definition and
+        the membership apart), and the `artefact` to run it again (the
+        seed and the counts).
+    """
+    import random
+
+    from . import regular
+    seed = _guard_seed(text)
+    rng = random.Random(seed)
+    drawn: list = []
+    try:
+        drawn.extend(h.value for h in language.hazards())
+    except Exception:
+        pass
+    for _ in range(GUARD_DRAWS):
+        try:
+            drawn.append(language.sample(rng))
+        except Exception:
+            break
+    members = sorted({v for v in drawn if isinstance(v, str) and _is_member(language, v)})
+    out = {"language": text, "statement": f"{text} == its stated definition",
+           "status": "assumed",
+           "artefact": {"seed": seed, "members drawn": len(members),
+                        "strings of the definition confirmed": 0}}
+    wide = alphabet + [[ord(c), ord(c)] for v in members for c in v]
+    if members:
+        listed = _literals(members)
+        missed = regular.find_member(wide, [listed], [at_least])
+        if missed.status == "member":
+            return {**out, "status": "refuted",
+                    "disagreement": f"{missed.member!r} is a member of {text} and is "
+                                    f"outside its stated definition"}
+        if missed.status == "unknown":
+            return out
+    found: list = []
+    for _ in range(GUARD_STRINGS):
+        other = regular.find_member(wide, [at_most], [_literals(found)] if found else [])
+        if other.status != "member":
+            break
+        if not _is_member(language, other.member):
+            return {**out, "status": "refuted",
+                    "disagreement": f"{other.member!r} is in the stated definition of "
+                                    f"{text} and is not a member"}
+        found.append(other.member)
+    out["artefact"]["strings of the definition confirmed"] = len(found)
+    if members:
+        out["status"] = "checked"
+    return out
+
+
+def _is_member(language, value) -> bool:
+    try:
+        return bool(language.contains(value))
+    except Exception:
+        return False
+
+
+def check_definitions(*defined: "_Defined") -> tuple:
+    """`(assumptions, disagreement)` for every language piece the given
+    domains read, each checked once: the assumptions as
+    `check_definition` returns them, and the first disagreement found
+    (a sentence) or None."""
+    seen: dict = {}
+    for domain in defined:
+        for text, language, most, least in domain.read:
+            if text not in seen:
+                seen[text] = check_definition(text, language, most, least, domain.alphabet)
+    refuted = next((a["disagreement"] for a in seen.values() if a["status"] == "refuted"), None)
+    return list(seen.values()), refuted
+
+
+def standard_assumptions() -> dict:
+    """The assumptions every proof on the solver route rests on, named
+    once with their versions: the solver's answer and the canonical
+    form of a regular-language term."""
+    from . import regular
+    try:
+        import z3
+        solver = z3.get_version_string()
+    except ImportError:
+        solver = None
+    return {"z3": {"statement": "z3 answers 'no string exists' only when none does",
+                   "version": solver, "status": "assumed"},
+            "canonical form": {"statement": "the canonical form of a term holds the "
+                                            "strings the term holds",
+                               "version": f"{regular.KIND} {regular.VERSION}",
+                               "status": "assumed"}}
+
+
+def assuming_text(assumptions: list) -> str:
+    """`proven, assuming A (checked), B (assumed)` for the definitions a
+    proof read; `proven` alone when it read none."""
+    if not assumptions:
+        return "proven"
+    return "proven, assuming " + ", ".join(
+        f"{a['statement']} ({a['status']})" for a in assumptions)
 
 
 def _decide_languages(rel: Relation) -> Decision:
@@ -744,8 +873,15 @@ def _decide_languages(rel: Relation) -> Decision:
                 return Decision(decided.verdict, decided.reason, witness, "smt", definitions)
             why = why or UNCONFIRMED
     if empty is True:
+        # the answer "no string separates them" rests on the definitions,
+        # so each is checked against its language's own membership first
+        assumptions, refuted = check_definitions(left, right)
+        if refuted is not None:
+            return Decision("unknown", f"{refuted}, so the definitions decide nothing here",
+                            None, "smt", definitions)
         decided = _from_counter_set(rel, True, None)
-        return Decision(decided.verdict, decided.reason, None, "smt", definitions)
+        return Decision(decided.verdict, decided.reason, None, "smt", definitions,
+                        assumptions)
     return Decision("unknown", why or UNCONFIRMED, None, "smt", definitions)
 
 
@@ -850,8 +986,9 @@ def decide(statement: Statement, written: "str | None" = None) -> Decision:
         return decisions[0]
     witness = next((d.witness for d in decisions if d.witness), None)
     definitions = {k: v for d in decisions for k, v in (d.definitions or {}).items()}
+    assumptions = [a for d in decisions for a in (d.assumptions or [])]
     return Decision("proven", "; ".join(d.reason for d in decisions), witness,
-                    decisions[0].route, definitions or None)
+                    decisions[0].route, definitions or None, assumptions or None)
 
 
 def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> "str | None":
@@ -880,5 +1017,7 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
-           "RELATION", "Relation", "Statement", "Term", "WORDS", "decide", "not_as_written",
+           "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
+           "check_definition", "check_definitions", "decide", "not_as_written",
+           "standard_assumptions",
            "decide_relation", "parse"]

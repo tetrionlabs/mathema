@@ -5691,9 +5691,16 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
     meta["mathema.derive_route"] = decision.route
     path = ("smt: membership, regular language" if decision.route == "smt"
             else "domain sets")
+    assumed = ""
+    if decision.route == "smt" and decision.assumptions is not None:
+        # a verdict that rests on definitions says which, and how each stands
+        meta["mathema.assumptions"] = {
+            "standard": domain_relations.standard_assumptions(),
+            "definitions": decision.assumptions}
+        assumed = "; " + domain_relations.assuming_text(decision.assumptions)
     if decision.verdict == "proven":
         return Probe(cj.name, statement, "proven", route="derive",
-                     sketch=f"{path}: {decision.reason}", meta=meta,
+                     sketch=f"{path}: {decision.reason}{assumed}", meta=meta,
                      grammar=cj.grammar)
     return Probe(cj.name, statement, "falsified", route="derive",
                  counterexample=decision.reason, note=decision.reason,
@@ -10281,7 +10288,7 @@ def _provenance_meta(proof) -> dict:
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.missing", "mathema.path_no_value",
-                "mathema.matrix_lemmas", "mathema.smt",
+                "mathema.matrix_lemmas", "mathema.smt", "mathema.assumptions",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
                 "mathema.exact_witness", "mathema.witness_exact_run",
@@ -10920,6 +10927,69 @@ def _beyond_a_plain_validator_claim(cj, bound) -> "str | None":
     return None
 
 
+def _validator_reading_check(fn, validator, stated, domain) -> dict:
+    """Intent:
+        Check the reading of a validator against the function itself:
+        members drawn from the parameter's languages are run through
+        the real function, and each must be accepted exactly when it is
+        a member of the stated language (returned unchanged, or True,
+        for an accepted text; the validator's own exception, or False,
+        for a refused one). Returns the assumption the proof rests on,
+        as `domain_relations.check_definition` does: `checked` with the
+        seed and the number of texts run, `assumed` when no member
+        could be drawn, or `refuted` with the `disagreement`.
+    """
+    import random
+
+    from . import domain_relations
+    from .languages import resolve_language
+    text = repr(stated)
+    seed = domain_relations._guard_seed(f"reading of {text}")
+    rng = random.Random(seed)
+    out = {"language": text,
+           "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "
+                        f"is in {text}",
+           "status": "assumed", "artefact": {"seed": seed, "texts run": 0}}
+    try:
+        accepted_language = resolve_language(stated)
+    except Exception:
+        return out
+    drawn: list = []
+    for _, language, _, _ in domain.read:
+        try:
+            drawn.extend(h.value for h in language.hazards())
+        except Exception:
+            pass
+        for _ in range(domain_relations.GUARD_DRAWS):
+            try:
+                drawn.append(language.sample(rng))
+            except Exception:
+                break
+        texts = sorted({v for v in drawn if isinstance(v, str)
+                        and domain_relations._is_member(language, v)})
+        for value in texts:
+            predicted = domain_relations._is_member(accepted_language, value)
+            try:
+                returned = fn(value)
+            except Exception as e:
+                observed = False if (validator.raises is not None
+                                     and type(e) is validator.raises) else None
+            else:
+                if validator.raises is not None:
+                    observed = True if returned == value else None
+                else:
+                    observed = (returned is not validator.negated) \
+                        if isinstance(returned, bool) else None
+            if observed is not predicted:
+                return {**out, "status": "refuted",
+                        "disagreement": f"the function does not behave as the membership "
+                                        f"statement predicts on {value!r}"}
+            out["artefact"]["texts run"] += 1
+    if out["artefact"]["texts run"]:
+        out["status"] = "checked"
+    return out
+
+
 def _validator_proof(cj, fn, cj_domain):
     """Intent:
         The derive verdict for a claim over one text parameter of a
@@ -11014,11 +11084,24 @@ def _validator_proof(cj, fn, cj_domain):
     for inside, outside in (wide, narrow):
         found = regular.find_member(alphabet, inside, outside)
         if found.status == "none" and (inside, outside) == wide:
+            # "no such text" rests on the definitions and on the reading
+            # of the function, so both are checked by drawing first
+            assumptions, refuted = domain_relations.check_definitions(
+                domain, *filter(None, [domain_relations.defined_bound(stated)]))
+            reading = _validator_reading_check(fn, validator, stated, domain)
+            refuted = refuted or reading.get("disagreement")
+            if refuted is not None:
+                return undecided(f"{refuted}, so nothing is proven from it")
+            assumptions.append(reading)
             return ProofResult(
-                "proven", meta=meta,
+                "proven",
+                meta={**meta, "mathema.assumptions": {
+                    "standard": domain_relations.standard_assumptions(),
+                    "definitions": assumptions}},
                 sketch=(f"{path}, read from {validator.described()}: no text {param} "
                         f"in the domain makes {cj.lhs.strip()} a text "
-                        f"{'outside' if accepted else 'in'} that language"))
+                        f"{'outside' if accepted else 'in'} that language; "
+                        f"{domain_relations.assuming_text(assumptions)}"))
         if found.status == "unknown":
             why = why or found.reason
         if found.status != "member":
