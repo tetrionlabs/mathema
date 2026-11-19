@@ -328,8 +328,11 @@ def _shaped_arguments(args, sugar):
     if read is None or read[0] != "shape":
         return args
     _, pattern, words, _ = read
-    dialects = [_DIALECTS[w] for w in words if w in _DIALECTS] or ["python"]
-    flags = sorted(w for w in words if w not in _DIALECTS)
+    def dialect(word):
+        name, _, version = word.partition(" ")
+        return f"{_DIALECTS[name]} {version}".strip() if name in _DIALECTS else None
+    dialects = [dialect(w) for w in words if dialect(w)] or ["python"]
+    flags = sorted(w for w in words if not dialect(w))
     return (f"shape({', '.join([pattern, dialects[0], *flags])})",)
 
 
@@ -365,3 +368,28 @@ def test_a_call_with_anything_but_a_first_argument_and_words_is_not_read():
     assert read_call('shape(r"a", other("b"))') is None
     assert read_call('re(r"[a-z]+", python, ignoreCase)') == (
         "re", 'r"[a-z]+"', ("python", "ignore case"), ())
+
+
+def test_a_word_may_carry_a_version_number():
+    from mathema.domain import read_call
+    expected = ("re", 'r"[a-z]+"', ("python 3.13", "ignore case"), ())
+    assert read_call('re(r"[a-z]+", python 3.13, ignoreCase)') == expected
+    assert read_call('re(r"[a-z]+", Python  3.13, ignore_case)') == expected
+    assert read_call('re(r"[a-z]+", python_3.13, IgnoreCase)') == expected
+    register_predicate(_SHAPED)
+    try:
+        text = 'L[words, shaped like (shape(r"[a-z]+", py 3.13, ignoreCase))]'
+        canonical = 'L[words, shaped like (shape(r"[a-z]+", python 3.13, ignore case))]'
+        assert repr(_ref(text)) == canonical
+        assert repr(_ref(canonical)) == canonical
+        rendered = render_claim_text(claim(f"for s in {text}, f(s) == s"), unicode=False)
+        assert rendered == f"for s in {canonical}, f(s) = s"
+        assert render_claim_text(claim(rendered), unicode=False) == rendered
+    finally:
+        unregister_predicate(_SHAPED.word)
+
+
+@pytest.mark.parametrize("words", ["python 3.10+", "python >= 3.10", "python 3.", "3.13 python"])
+def test_a_version_range_is_not_read(words):
+    from mathema.domain import read_call
+    assert read_call(f're(r"[a-z]+", {words})') is None

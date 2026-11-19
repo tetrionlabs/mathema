@@ -760,6 +760,10 @@ def _as_words(word: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip().lower()
 
 
+#: a bare word in a call's argument list, optionally followed by a
+#: version number (`python 3.13`); nothing follows the number
+_WORD_WITH_VERSION = re.compile(
+    r"(?P<word>[A-Za-z_][A-Za-z_ ]*?)(?:[\s_]+(?P<version>\d+(?:\.\d+)*))?")
 _ALPHABET_NAME = re.compile(r"^[A-Za-z_][\w-]*$")
 
 
@@ -830,7 +834,8 @@ def read_call(text: str) -> "tuple | None":
         alnum + "_")`: the function's name in its matching form
         (`predicate_key`), the first argument as written, each word as
         lower-case words (`ignoreCase`, `ignore_case` and `Ignore Case`
-        are `ignore case`), and each binding `NAME = alphabet
+        are `ignore case`), a version number after a word kept after
+        one space (`python 3.13`), and each binding `NAME = alphabet
         expression` as `(NAME, pieces)` (`alphabet_pieces`). None when
         `text` is not such a call. The word that owns the function
         orders the words, fills its defaults and writes the canonical
@@ -856,8 +861,11 @@ def read_call(text: str) -> "tuple | None":
             if pieces is None:
                 return None
             bindings.append((bound.group(1), pieces))
-        elif re.fullmatch(r"[A-Za-z_][A-Za-z_ ]*", part):
-            words.append(_as_words(part))
+        elif _WORD_WITH_VERSION.fullmatch(part):
+            word = _WORD_WITH_VERSION.fullmatch(part)
+            version = word.group("version")
+            words.append(_as_words(word.group("word"))
+                         + (f" {version}" if version else ""))
         else:
             return None
     return predicate_key(call.group("word")), parts[0], tuple(words), tuple(bindings)
