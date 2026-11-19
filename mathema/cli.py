@@ -1372,6 +1372,7 @@ _MATHEMA_GITIGNORE = (
     "# and config, and are committed.\n"
     "/declared/\n"
     "/issues/\n"
+    "/cache/\n"
 )
 
 
@@ -1380,8 +1381,8 @@ def _scaffold_git_files(root: str) -> list:
     record `linguist-generated` marker into the repo's `.gitattributes`
     (appended if the file exists, created otherwise), and a
     `.mathema/.gitignore` that keeps regenerated/local-only subdirs out of
-    the commit. Returns the paths written or amended; skips whatever is
-    already in place."""
+    the commit, or the lines an existing one lacks. Returns the paths
+    written or amended; skips whatever is already in place."""
     import os
     written = []
     ga = os.path.join(root, ".gitattributes")
@@ -1401,6 +1402,18 @@ def _scaffold_git_files(root: str) -> list:
         with open(gi, "w") as fh:
             fh.write(_MATHEMA_GITIGNORE)
         written.append(gi)
+    else:
+        with open(gi) as fh:
+            current = fh.read()
+        have = {line.strip() for line in current.splitlines()}
+        missing = [line for line in _MATHEMA_GITIGNORE.splitlines()
+                   if line.startswith("/") and line not in have]
+        if missing:
+            with open(gi, "a") as fh:
+                if current and not current.endswith("\n"):
+                    fh.write("\n")
+                fh.write("\n".join(missing) + "\n")
+            written.append(gi)
     return written
 
 
