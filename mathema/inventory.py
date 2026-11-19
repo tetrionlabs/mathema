@@ -880,12 +880,14 @@ def is_test_covered(fn, coverage_data: dict[str, set[int]] | None) -> bool | Non
 
 
 
-def _module_attribute_callees(fn, name: str, module) -> list[dict]:
+def _module_attribute_callees(fn, name: str, module,
+                              chains: bool = True) -> list[dict]:
     """Intent:
         The functions `fn` reaches through a module it references by
         `name`: every `name.attr` (or `name.sub.attr`) read in the body
         that resolves to a plain function, recorded like a directly
-        named callee, with its dotted key, source location and form.
+        named callee, with its dotted key, source location and form
+        (only its name, kind and key when `chains` is False).
 
     Notes:
         Empty when the body cannot be read. An attribute that resolves
@@ -924,6 +926,9 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
         seen.add(dotted)
         dep: dict = {"name": dotted, "kind": "function",
                      "key": f"{obj.__module__}.{obj.__qualname__}"}
+        if not chains:
+            out.append(dep)
+            continue
         foreign = foreign_body(obj)
         try:
             src = None if foreign else inspect.getsourcefile(obj)
@@ -1234,6 +1239,32 @@ def _class_dependency(name: str, cls: type) -> dict:
     return dep
 
 
+def _locate(dep: dict, obj: object, kind: str) -> None:
+    """Intent:
+        Set, in place, the source `file` and first `line` of the
+        dependency `obj` on its entry `dep`, each only when it can be
+        read and `obj` is not a stand-in for a body another frontend
+        wrote (`foreign_body`).
+    """
+    from .analysis import foreign_body
+    foreign = foreign_body(obj)
+    try:
+        src = None if foreign else inspect.getsourcefile(obj)
+        if src:
+            dep["file"] = src
+    except TypeError:
+        pass
+    line = (None if foreign else
+            getattr(getattr(obj, "__code__", None), "co_firstlineno", None))
+    if line is None and kind == "class":
+        try:
+            line = inspect.getsourcelines(obj)[1]
+        except (OSError, TypeError):
+            line = None
+    if line is not None:
+        dep["line"] = line
+
+
 def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
@@ -1249,6 +1280,31 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
     the module. One level deep is enough by
     design: freshness composes, an unchanged callee form means that
     callee's own claims still stand."""
+    return _dependencies(fn, facts, chains=True)
+
+
+def dependency_edges(fn: Callable[..., Any],
+                     facts: Facts | None = None) -> list[tuple]:
+    """Intent:
+        The `(key, kind)` pair of every entry `function_dependencies(fn,
+        facts)` lists, in the same order, with `None` for an entry that
+        has no key: the edges of the call graph, read without working
+        out any dependency's form, reach or chain.
+    """
+    return [(d.get("key"), d.get("kind"))
+            for d in _dependencies(fn, facts, chains=False)]
+
+
+def _dependencies(fn: Callable[..., Any], facts: Facts | None,
+                  chains: bool) -> list[dict]:
+    """Intent:
+        The entries `function_dependencies` lists. With `chains` True
+        each carries its source location, form, reach, chain and
+        provenance as `function_dependencies` describes; with `chains`
+        False each carries only its name, kind and key (and a
+        constant's value), and the same entries are listed in the same
+        order.
+    """
     facts = facts if facts is not None else quiet_facts(fn)
     if facts is None:
         return []
@@ -1281,30 +1337,15 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             dep["key"] = getattr(obj, "__name__", name)
         elif mod and qual:
             dep["key"] = f"{mod}.{qual}"
-        from .analysis import foreign_body
-        foreign = foreign_body(obj)
-        try:
-            src = None if foreign else inspect.getsourcefile(obj)
-            if src:
-                dep["file"] = src
-        except TypeError:
-            pass
-        line = (None if foreign else
-                getattr(getattr(obj, "__code__", None), "co_firstlineno", None))
-        if line is None and kind == "class":
-            try:
-                line = inspect.getsourcelines(obj)[1]
-            except (OSError, TypeError):
-                line = None
-        if line is not None:
-            dep["line"] = line
-        if kind == "class":
+        if chains:
+            _locate(dep, obj, kind)
+        if chains and kind == "class":
             form = class_form(obj)
             if form:
                 dep["form"] = form
                 dep["reaches"] = class_reach(obj)
                 dep["chain"] = chain_summary(dep)
-        if kind == "function":
+        if chains and kind == "function":
             callee_facts = quiet_facts(obj)
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
@@ -1316,7 +1357,7 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
                     dep["provenance"] = body
         out.append(dep)
         if kind == "module":
-            out.extend(_module_attribute_callees(fn, name, obj))
+            out.extend(_module_attribute_callees(fn, name, obj, chains))
     try:
         sig = callable_signature(fn)
     except (TypeError, ValueError):
@@ -1334,7 +1375,8 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             if key in listed or class_form(cls) is None:
                 continue
             listed.add(key)
-            out.append(_class_dependency(name, cls))
+            out.append(_class_dependency(name, cls) if chains else
+                       {"name": name, "kind": "class", "key": key})
     for p in sig.parameters.values():
         ann = p.annotation
         if ann is inspect.Parameter.empty:
