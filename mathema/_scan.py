@@ -5,6 +5,9 @@ sugar expanders and the domain parser. Stdlib-only leaf.
 """
 from __future__ import annotations
 
+import ast
+import contextlib
+import contextvars
 import re
 from typing import Callable
 
@@ -103,6 +106,78 @@ def sub_outside_strings(pattern, repl, s: str, count: int = 0) -> str:
         `re.sub(pattern, repl, s)` that leaves quoted literals untouched.
     """
     return outside_strings(lambda t: re.sub(pattern, repl, t, count=count), s)
+
+
+#: whether stored claim text is written with the literal quoting of
+#: releases up to 0.6.6.1, for reading a record those releases wrote
+_LEGACY_QUOTING: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_quoting", default=False)
+
+
+@contextlib.contextmanager
+def legacy_quoting():
+    """Intent:
+        Within the block, claim text is rendered with the literal
+        quoting releases up to 0.6.6.1 wrote (`grammar._legacy_double_quoted`
+        and a domain set member always in double quotes), so a record
+        those releases wrote can be compared with the claim it records.
+    """
+    token = _LEGACY_QUOTING.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_QUOTING.reset(token)
+
+
+def uses_legacy_quoting() -> bool:
+    """Intent:
+        Whether `legacy_quoting` is in force.
+    """
+    return _LEGACY_QUOTING.get()
+
+
+def string_literal(value: str) -> str:
+    """Intent:
+        The one spelling of a string value in stored claim text. A value
+        holding no double quote is written in double quotes; a value
+        holding one is written as Python writes it (`repr`: single
+        quotes, a single quote inside escaped as `\\'`). Inside the
+        quotes every other character is escaped exactly as `repr`
+        escapes it (`\\\\`, `\\n`, `\\t`, `\\x00`, ...), and every printable
+        character, unicode included, is written as itself.
+
+    Notes:
+        The spelling is a function of the value alone, so one value has
+        one stored spelling however its literal was written.
+    """
+    shown = repr(value)
+    return shown if '"' in value else f'"{shown[1:-1]}"'
+
+
+def _requoted(literal: str) -> str:
+    """Intent:
+        One quoted literal as `string_literal` spells its value, or the
+        literal as written when it is not a complete string literal.
+    """
+    try:
+        value = ast.literal_eval(literal)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return literal
+    return string_literal(value) if isinstance(value, str) else literal
+
+
+def requote_literals(s: str) -> str:
+    """Intent:
+        `s` with each quoted literal (as `mask_strings` reads them, one
+        literal at a time, escapes honoured) written in the spelling
+        `string_literal` gives its value. The text outside the literals
+        is unchanged, and the quotes of one literal never pair with the
+        quotes of another.
+    """
+    masked, literals = mask_strings(s)
+    if not literals:
+        return s
+    return unmask_strings(masked, [_requoted(lit) for lit in literals])
 
 
 def _split_commas(s: str) -> list[str]:

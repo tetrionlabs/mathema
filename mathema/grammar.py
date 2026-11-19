@@ -118,7 +118,8 @@ from ._math_vocab import _BINOPS, _D_AT_SENTINEL, _MATH_ATTRS, _SYMPY_FUNCS, _ca
 from ._render_mode import (get_unicode_output as get_unicode_output,
                            set_unicode_output as set_unicode_output)
 from ._scan import (_split_commas, blank_strings, mask_strings,
-                    outside_strings, sub_outside_strings, unmask_strings)
+                    outside_strings, requote_literals, sub_outside_strings,
+                    unmask_strings, uses_legacy_quoting)
 # The domain model moved wholesale to domain.py (a sympy-free leaf);
 # these re-exports keep every `from .grammar import <name>` consumer
 # working. New code should import from mathema.domain directly.
@@ -3708,11 +3709,34 @@ def render_law_expr(text: str, funcs: frozenset = frozenset(), unicode: bool = T
 _SINGLE_QUOTED = re.compile(r"(?<![\w)\]'])'((?:[^'\\\"]|\\.)*)'(?!')")
 
 
-def _double_quoted(text: str) -> str:
-    """`text` with each single-quoted string literal written in double
-    quotes, the one quote style a statement uses (a set member renders
-    `{"a"}`); a literal holding a double quote keeps its own."""
+def _legacy_double_quoted(text: str) -> str:
+    """Intent:
+        `text` re-quoted the way releases up to 0.6.6.1 wrote stored
+        claim text: every match of `_SINGLE_QUOTED` written in double
+        quotes.
+
+    Notes:
+        The pattern is matched over the whole text, not one literal at
+        a time, so a match can open at the closing quote of one literal
+        and close at the opening quote of the next (`f(x, '}"', 's')`
+        becomes `f(x, '}"", "s')`), or open at an escaped quote inside
+        a literal (`'a"b\\'c'` becomes `'a"b\\"c"`). Read only under
+        `_scan.legacy_quoting`, to match a record those releases wrote.
+    """
     return _SINGLE_QUOTED.sub(lambda m: f'"{m.group(1)}"', text)
+
+
+def _double_quoted(text: str) -> str:
+    """Intent:
+        `text` with each string literal written in its stored spelling
+        (`_scan.string_literal`): double quotes for a value holding no
+        double quote (a set member renders `{"a"}`), Python's own
+        single-quoted spelling for a value holding one. Each literal is
+        read and rewritten on its own, escapes honoured.
+    """
+    if uses_legacy_quoting():
+        return _legacy_double_quoted(text)
+    return requote_literals(text)
 
 
 class InvalidDefinition(ValueError):

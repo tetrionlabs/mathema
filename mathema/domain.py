@@ -30,7 +30,8 @@ import re
 from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
-from ._scan import _split_commas, mask_strings, unmask_strings
+from ._scan import (_split_commas, mask_strings, unmask_strings,
+                    uses_legacy_quoting)
 
 # superscript rendering for a vector/matrix space exponent, so `R^n`
 # reads `ℝⁿ` in unicode the way `x^2` reads `x²` elsewhere. Only
@@ -1921,18 +1922,40 @@ def _ordered_sentinels(absent: bool, holes) -> list:
 def _render_set_member(v, *, ascii_mode: bool, words: bool = False) -> str:
     """One discrete-set member in the spelling the input grammar reads
     back: a sentinel as its word (the class as `∅` in unicode), a string
-    always double-quoted, everything else as its own literal.
+    quoted, everything else as its own literal.
     `_set_value` accepts either quote style on the way in and keeps
-    neither, so one spelling comes back out.
-
-    A member whose own text contains a double quote is outside what a
-    set binding can express: rendered inside double quotes, such a value
-    cannot be read back."""
+    neither, and reads the text between the quotes as written (no
+    escape is decoded), so a string member is written in double quotes
+    when that reads back as the same text, and in single quotes when
+    only that does (a member holding a double quote, `{'a"'}`). A
+    member neither reads back from is written in double quotes."""
     if isinstance(v, _Sentinel):
         return _sentinel_word(v, ascii_mode=ascii_mode, words=words)
     if isinstance(v, str):
+        if not uses_legacy_quoting() and not _reads_back(v, '"') \
+                and _reads_back(v, "'"):
+            return f"'{v}'"
         return f'"{v}"'
     return str(v)
+
+
+def _reads_back(v: str, quote: str) -> bool:
+    """Intent:
+        Whether `v` written between two `quote` characters is one
+        quoted literal whose closing quote is the last one, so
+        `_set_value` reads it back as `v`. A backslash escapes the
+        character after it, as `_scan._string_end` reads it.
+    """
+    text = f"{quote}{v}{quote}"
+    i = 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i == len(text) - 1
+        i += 1
+    return False
 
 
 def _render_piece(piece, *, ascii_mode: bool, as_int: bool = False) -> str:
