@@ -2339,9 +2339,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                                   verified_entry or {},
                                                   library.get(key)))
             _apply_declared_extras(rec, merged_entry)
-            moved = _grammar_changes(rec.probes, verified_entry or {})
-            if moved:
-                grammar_changes[key] = moved
+            grammar_moved = _grammar_changes(rec.probes, verified_entry or {})
+            if grammar_moved:
+                grammar_changes[key] = grammar_moved
             rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                          root=root))
             from .transitions import REVERIFY_CAUSE, predates_form_scheme
