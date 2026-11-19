@@ -5684,6 +5684,10 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
         detail["witness"] = decision.witness
     if decision.definitions:
         detail["definitions"] = decision.definitions
+        if decision.witness is not None:
+            # the verdict rests on a string run through the languages'
+            # own membership, which no definition hash covers
+            meta["mathema.rests_on_membership"] = sorted(decision.definitions)
     meta["mathema.domain_relation"] = detail
     if decision.verdict == "unknown":
         return Probe(cj.name, statement, "unknown", route="derive",
@@ -10289,6 +10293,7 @@ def _provenance_meta(proof) -> dict:
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.missing", "mathema.path_no_value",
                 "mathema.matrix_lemmas", "mathema.smt", "mathema.assumptions",
+                "mathema.rests_on_membership",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
                 "mathema.exact_witness", "mathema.witness_exact_run",
@@ -11121,7 +11126,8 @@ def _validator_proof(cj, fn, cj_domain):
                         f"{param} = {value!r}, where the call "
                         f"{'accepts' if matched else 'refuses'} {text!r}, and the "
                         f"function run there breaks the claim"),
-                meta={**meta, "mathema.witness_executed": True})
+                meta={**meta, "mathema.witness_executed": True,
+                      "mathema.rests_on_membership": sorted(meta["mathema.smt"]["definitions"])})
         why = why or domain_relations.UNCONFIRMED
     return undecided(why or domain_relations.UNCONFIRMED)
 

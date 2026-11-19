@@ -1292,20 +1292,28 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
 def _language_definition_moved(fn, merged_entry: dict,
                                verified_entry: dict) -> "str | None":
     """Intent:
-        The language whose regular-language definition differs from the
-        one a record was written against (`mathema.language_definitions`
-        on each row), as its text (`L[slug]`), or None when none moved.
-        A language that was stamped and now states no definition, or
-        does not resolve, has moved, and so has the language of a
-        validator's membership statement once the pattern the function
-        reads is another one. A language the record never
-        stamped has not: the record made no statement about it.
+        Why a record no longer stands on the languages it read, as the
+        sentence verify reports, or None when it does. A row whose
+        verdict rested on running a language's own membership
+        (`mathema.rests_on_membership`) is never fresh, since no stamp
+        covers what that membership depends on. Otherwise a language
+        whose regular-language definition differs from the one stamped
+        on a row (`mathema.language_definitions`) has moved; so has one
+        that was stamped and now states no definition or does not
+        resolve, and the language of a validator's membership statement
+        once the pattern the function reads is another one. A language
+        the record never stamped has not moved: the record made no
+        statement about it.
     """
     from .conjecture import language_definition_stamp
     from .spec import entry_claims
     recorded: dict = {}
     for c in (verified_entry or {}).get("claims") or []:
         meta = c.get("meta") or {}
+        ran = meta.get("mathema.rests_on_membership")
+        if ran:
+            return (f"the verdict rests on running the membership of {ran[0]}, which "
+                    f"the record does not stamp")
         stamp = meta.get("mathema.language_definitions")
         if stamp:
             recorded.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
@@ -1323,7 +1331,7 @@ def _language_definition_moved(fn, merged_entry: dict,
         now = language_definition_stamp(cj, fn)
         for language, digest in sorted(was.items()):
             if now.get(language) != digest:
-                return language
+                return f"the definition of {language} moved"
     return None
 
 
@@ -2398,7 +2406,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else f"{body_moved} changed" if body_moved
                and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
-               else f"the definition of {language_moved} moved" if language_moved
+               else language_moved if language_moved
                and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh

@@ -120,6 +120,25 @@ def test_a_moved_definition_makes_the_record_stale_and_names_the_language(
     assert gone["why"] == "the definition of L[slugdef] moved"
 
 
+def test_a_verdict_resting_on_a_run_of_membership_is_never_fresh(
+        tmp_path, monkeypatch, slugdef):
+    pytest.importorskip("z3")
+    from mathema.verify import verify_project
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _project(tmp_path)
+    (tmp_path / "claims" / "lmod.claims.yaml").write_text(textwrap.dedent("""
+        lmod.same:
+          claims:
+            - name: wider_than_one_word
+              statement: 'L[slugdef] not subset {"a"}'
+    """))
+    first = _entry(verify_project(str(tmp_path)), "lmod.same")
+    assert first["why"] == "no baseline record"
+    again = _entry(verify_project(str(tmp_path)), "lmod.same")
+    assert again["why"] == ("the verdict rests on running the membership of L[slugdef], "
+                            "which the record does not stamp")
+
+
 def test_a_moved_definition_is_one_of_the_triggers_that_invalidate_a_record():
     from mathema.transitions import OWN_TRIGGERS
     from mathema.verify import _fired_triggers
