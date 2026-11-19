@@ -1867,6 +1867,10 @@ def cmd_docsync(args) -> int:
                      "  (add with --write-docstrings)"))
     for k in report.docstrings_written:
         print(f"wrote missing claim names into {k}'s Claims: block")
+    for u in report.unreadable:
+        which = f"claim {u['claim']!r}" if u["claim"] else "a claim"
+        print(f"UNREADABLE {u['where']} {u['key']}: {which} does not read "
+              f"({u['error']}); this function was not synced")
     if report.index_path:
         print(f"index -> {report.index_path}")
     if args.report or args.write:
@@ -1875,6 +1879,8 @@ def cmd_docsync(args) -> int:
             shim = types.SimpleNamespace(target=t, root=args.root,
                                          write=args.write)
             _docsync_checklist(shim)
+    if report.unreadable:
+        return 2
     return 1 if (report.conflicts and not args.yes) else 0
 
 

@@ -41,6 +41,7 @@ class SyncReport:
     drift: list = field(default_factory=list)          # {key, kind, names}
     docstrings_written: list = field(default_factory=list)
     index_path: str | None = None
+    unreadable: list = field(default_factory=list)     # {key, claim, where, error}
 
 
 def _completed(cj, fn):
@@ -609,6 +610,7 @@ def sync(targets: list, root: str = ".",
         docstring write-back, and regenerate the index.
     """
     from .authoring import _fn_key
+    from .conjecture import InvalidConjecture
     from .spec import load_declared, load_verified
     from .targets import resolve
 
@@ -635,11 +637,15 @@ def sync(targets: list, root: str = ".",
         key = _fn_key(fn) if key is None else key
         file_entry = (declared_store.get(key) or {}).get("entry", {})
         v_entry = (verified_store.get(key) or {}).get("entry")
+        try:
+            conflicts = claim_conflicts(fn, file_entry, v_entry)
+            entry = materialize_entry(fn, key, root)
+        except InvalidConjecture as e:
+            report.unreadable.append(unreadable_claim(
+                key, fn, e, declared_store.get(key), verified_store.get(key), root))
+            continue
         report.conflicts.extend(
-            {"key": key, **c}
-            for c in claim_conflicts(fn, file_entry, v_entry)
-            if c.get("kind") != "release-move")
-        entry = materialize_entry(fn, key, root)
+            {"key": key, **c} for c in conflicts if c.get("kind") != "release-move")
         report.materialized.append(key)
         v_entry = (verified_store.get(key) or {}).get("entry")
         for d in docstring_drift(fn, entry, v_entry):
@@ -658,3 +664,48 @@ def sync(targets: list, root: str = ".",
     except Exception:
         report.index_path = None
     return report
+
+
+def unreadable_claim(key: str, fn, error, declared: "dict | None",
+                     verified: "dict | None", root: str = ".") -> dict:
+    """Intent:
+        The claim of function `key` that docsync could not read, as
+        `{key, claim, where, error}`: `where` is `path:line` of its
+        statement (a verified record, a claims file, or the function's
+        source for a docstring claim), or the path alone when the line
+        is not found. Each claim is read on its own to find the one
+        that fails; when none does, `claim` is None and `where` names
+        the claims file or record.
+    """
+    import os
+
+    from .conjecture import InvalidConjecture
+    from .spec import claim_statement_line, claims_file_paths
+
+    def located(rel, name):
+        line = claim_statement_line(os.path.join(root, rel), key, name)
+        return f"{rel}:{line}" if line else rel
+
+    def fails(read):
+        try:
+            read()
+        except InvalidConjecture as e:
+            return e
+        return None
+
+    for row in ((verified or {}).get("entry") or {}).get("claims") or []:
+        if row.get("name") and row.get("statement") \
+                and fails(lambda: _row_identity(row, fn)):
+            return {"key": key, "claim": row["name"], "error": str(error),
+                    "where": located((verified or {}).get("source") or "", row["name"])}
+    for c in ((declared or {}).get("entry") or {}).get("claims") or []:
+        if c.get("name") and fails(lambda: _claim_identity(c, fn)):
+            for path in reversed(claims_file_paths(root)):
+                rel = os.path.relpath(path, root)
+                if claim_statement_line(path, key, c["name"]):
+                    return {"key": key, "claim": c["name"], "error": str(error),
+                            "where": located(rel, c["name"])}
+            return {"key": key, "claim": c["name"], "error": str(error),
+                    "where": (declared or {}).get("source") or ""}
+    return {"key": key, "claim": None, "error": str(error),
+            "where": (verified or declared or {}).get("source") or ""}

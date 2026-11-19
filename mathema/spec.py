@@ -2356,6 +2356,40 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     return data
 
 
+def claim_statement_line(path: str, key: str, name: str) -> "int | None":
+    """Intent:
+        The 1-based line of the statement of claim `name` under `key`
+        in the claims file or verified record at `path` (the
+        `{key: {claims: [{name, statement}, ...]}}` shape both share),
+        or None when the file does not read or holds no such claim.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            node = yaml.compose(fh, Loader=yaml.SafeLoader)
+    except (OSError, yaml.YAMLError, UnicodeDecodeError):
+        return None
+
+    def value(mapping, word):
+        if not isinstance(mapping, yaml.MappingNode):
+            return None
+        for k, v in mapping.value:
+            if getattr(k, "value", None) == word:
+                return v
+        return None
+
+    claims = value(value(node, key), "claims")
+    if not isinstance(claims, yaml.SequenceNode):
+        return None
+    for row in claims.value:
+        named = value(row, "name")
+        if getattr(named, "value", None) != name:
+            continue
+        stated = value(row, "statement") or value(row, "law") or named
+        return stated.start_mark.line + 1
+    return None
+
+
 def stamp_library_rows(data: dict, tag: str) -> None:
     """Intent:
         Mark every claim row of a library claims file (one declaring
