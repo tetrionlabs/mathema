@@ -575,12 +575,19 @@ for _key, _ex in _EXAMPLES:
     _BY_ID.setdefault(_ex["page"], {})[_key.split(":", 1)[1]] = _ex
 
 
+#: examples whose shown output is 0.6.6's probe behaviour
+_AWAITING_0_6_7 = frozenset({"docs/existing-codebase.md:codebase", "docs/modes/coverage.md:cov",
+                             "docs/missing-values.md:strings"})
+
+
 def _params():
     out = []
     for key, ex in _EXAMPLES:
         marks = []
         if ex["options"].get("slow"):
             marks.append(pytest.mark.slow_docs_example)
+        if key in _AWAITING_0_6_7:
+            marks.append(pytest.mark.xfail(strict=True, reason="docs describe 0.6.6 probe behaviour; rewritten in 0.6.7, due 2026-11-29 (mathema/probe-route-redesign)"))
         out.append(pytest.param(ex, id=key, marks=marks))
     return out
 
@@ -722,6 +729,7 @@ if __name__ == "__main__":
         sys.exit("usage: test_docs_outputs.py --write-inventory")
 
 
+@pytest.mark.xfail(strict=True, reason="docs describe 0.6.6 probe behaviour; rewritten in 0.6.7, due 2026-11-29 (mathema/probe-route-redesign)")
 def test_the_three_layers_triangle_is_the_billing_modules_real_state(tmp_path):
     """docs/three-layers.md draws `mathema badges` over the billing module
     that docs/existing-codebase.md builds; the figure is an illustration

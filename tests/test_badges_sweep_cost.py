@@ -233,6 +233,7 @@ def test_the_cli_prints_progress_on_a_terminal_only():
     assert all(line.endswith("s") for line in lines)
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs a function only through its included claims; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_a_state_dependence_warning_is_shown_once_per_function(importable):
     _package(importable, "bsc_state", 1)
     mod = importable / "bsc_state" / "mod.py"

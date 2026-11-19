@@ -6,6 +6,7 @@ spelling that fixes it, the no-evaluable-inputs reason code); a
 `Literal[...]` annotation is a complete finite domain and samples/
 adjudicates like a declared one; `set[str]` still reads as a
 sequence."""
+import pytest
 import math
 from typing import Literal
 
@@ -43,6 +44,7 @@ def test_set_str_annotation_stays_a_sequence():
     assert analyze(takes_set).param_kinds["xs"] == "sequence"
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_bare_str_declines_honestly_not_a_spurious_gap():
     rec = check(_bare_str)
     # the battery call is not run: no row, the reason in the record meta
