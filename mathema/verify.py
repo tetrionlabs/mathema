@@ -1803,6 +1803,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
+    # per key, the claims whose record row stores a statement that does
+    # not parse: each is adjudicated again and its row rewritten
+    stale_rows: dict = {}
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -2092,6 +2095,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 if conflict.get("kind") == "release-move":
                     release_moved.append((key, conflict["claim"]))
                     continue
+                if conflict.get("kind") == "unreadable-record":
+                    stale_rows.setdefault(key, []).append(conflict["claim"])
+                    out.lines.append(
+                        f"note {key}: the stored text of claim "
+                        f"{conflict['claim']!r} could not be read and was "
+                        f"replaced; the claim is checked again as written "
+                        f"(it read: {conflict['verified']})")
+                    continue
                 if conflict.get("kind") == "supersession":
                     supersessions.setdefault(key, {})[conflict["claim"]] = \
                         conflict["authored"]
@@ -2228,6 +2239,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
+                    and not stale_rows.get(key)
                     and (premise_now == (recorded_premises or {})
                          if premise_now or recorded_premises else True))
         deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2367,6 +2379,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
+               else "stored text unreadable" if stale_rows.get(key)
+               and same_form(facts_now.form, recorded_form)
+               and recorded_fp == current_fp
                else "claims changed" if same_form(facts_now.form, recorded_form)
                else "form changed")
         rec.meta = {**(getattr(rec, "meta", None) or {}),

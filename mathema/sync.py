@@ -42,6 +42,7 @@ class SyncReport:
     docstrings_written: list = field(default_factory=list)
     index_path: str | None = None
     unreadable: list = field(default_factory=list)     # {key, claim, where, error}
+    stale_records: list = field(default_factory=list)  # {key, claim, verified}
 
 
 def _completed(cj, fn):
@@ -296,6 +297,9 @@ def claim_conflicts(fn, file_entry: dict,
         - kind "authoring": the same claim NAME on the docstring and
           the declared file with different statements/regions, and the
           name NOT yet verified, resolvable by choosing a surface.
+        - kind "unreadable-record": the verified row's stored statement
+          does not parse, so the row is stale and the authored claim is
+          adjudicated as written.
         - kind "supersession": an authored surface differs from the
           VERIFIED row. The verified layer is the record and wins
           (materialization adjudicates its version); changing a
@@ -307,6 +311,7 @@ def claim_conflicts(fn, file_entry: dict,
 
     from .analysis import docstring_of
     from .authoring import _fn_key, parse_docstring_claims
+    from .conjecture import InvalidConjecture
     doc_claims = {c.get("name"): c
                   for c in parse_docstring_claims(docstring_of(fn),
                                                   owner=_fn_key(fn))}
@@ -346,7 +351,18 @@ def claim_conflicts(fn, file_entry: dict,
                             "authored": _display_claim(c),
                             "verified": v.get("statement")})
                 continue
-            fp_a, fp_v = _claim_identity(c, fn), _row_identity(v, fn)
+            fp_a = _claim_identity(c, fn)
+            try:
+                fp_v = _row_identity(v, fn)
+            except InvalidConjecture:
+                # the stored statement records nothing: the row is stale
+                # and the authored claim is adjudicated as written
+                seen.add((name, "supersession"))
+                out.append({"kind": "unreadable-record", "claim": name,
+                            "surface": surface,
+                            "authored": _display_claim(c),
+                            "verified": v.get("statement")})
+                continue
             if fp_a and fp_v and fp_a != fp_v \
                     and not _checked_differently(c, v) and release_moved(c, v):
                 # the canonical text moved under the claim, the author
@@ -645,7 +661,10 @@ def sync(targets: list, root: str = ".",
                 key, fn, e, declared_store.get(key), verified_store.get(key), root))
             continue
         report.conflicts.extend(
-            {"key": key, **c} for c in conflicts if c.get("kind") != "release-move")
+            {"key": key, **c} for c in conflicts
+            if c.get("kind") not in ("release-move", "unreadable-record"))
+        report.stale_records.extend(
+            {"key": key, **c} for c in conflicts if c.get("kind") == "unreadable-record")
         report.materialized.append(key)
         v_entry = (verified_store.get(key) or {}).get("entry")
         for d in docstring_drift(fn, entry, v_entry):
