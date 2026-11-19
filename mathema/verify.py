@@ -589,9 +589,17 @@ def unparseable_claim_message(key: str, name: str, where: "str | None",
                               error, rerun: str = "verify") -> str:
     """Intent:
         The one line naming a declared claim that does not parse, with
-        the parser's message and where to correct it.
+        the parser's message and where to correct it; for a claim that
+        parses but whose stored text does not read back as it
+        (`CanonicalTextError`), the line says it was not checked and
+        no record was written.
     """
+    from .conjecture import CanonicalTextError
     where = where or "its docstring or claims file"
+    if isinstance(error, CanonicalTextError):
+        # the claim read; the text mathema rendered for it did not
+        return (f"{key}: claim {name!r} declared in {where} was not checked: "
+                f"{error}; no record was written for it")
     return (f"{key}: claim {name!r} declared in {where} does not parse "
             f"({error}); correct it there and re-run {rerun}")
 

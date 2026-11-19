@@ -1804,6 +1804,13 @@ class InvalidConjecture(ValueError):
     `Conjecture` (bad syntax, an unrecognized relation, ...)."""
 
 
+class CanonicalTextError(InvalidConjecture):
+    """Raised by `spec.canonical_claim_text` when the text it rendered
+    for a claim does not read back as that claim (another string
+    literal value, another statement, or text that does not parse), so
+    the claim has no stored text and no record is written for it."""
+
+
 class ConflictingDomainBinding(InvalidConjecture):
     """Raised by `claim()` when the same name is given a domain both by
     a leading `let name be bounds` and an ordinary `for name in bounds`

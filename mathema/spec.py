@@ -3086,8 +3086,104 @@ def canonical_claim_text(cj) -> str:
     unicode, symbology-renamed) parses to the same Conjecture; this is
     the spelling mathema's own artifacts write back, and the basis
     `claims_fingerprint` hashes. Unicode output stays a display
-    rendering, recomputed from the parse at read time, never stored."""
-    return render_claim_text(cj, unicode=False, canonical=True)
+    rendering, recomputed from the parse at read time, never stored.
+
+    The text is read back before it is returned: it must parse, and
+    state the same relation, the same bound names and the same string
+    literal values (in expressions and in domain sets) as the claim.
+    Text that fails raises `CanonicalTextError`, an `InvalidConjecture`
+    naming the claim and the text."""
+    from ._scan import uses_legacy_quoting
+    text = render_claim_text(cj, unicode=False, canonical=True)
+    if uses_legacy_quoting() or getattr(cj, "relation", None) == "policy" \
+            or getattr(cj, "grammar", "mathema") != "mathema":
+        return text
+    problem = _reads_back_problem(cj, text)
+    if problem is not None:
+        from .conjecture import CanonicalTextError
+        raise CanonicalTextError(
+            f"the stored text of claim {getattr(cj, 'name', None)!r} does "
+            f"not read back as the claim ({problem}): {text}")
+    return text
+
+
+def _string_values(cj) -> list:
+    """Intent:
+        Every string literal value a conjecture states, sorted: those in
+        its expressions (sides, premise, chain links, decoded as Python
+        reads them) and the string members of its domain sets (read as
+        written), each tagged with where it sits.
+    """
+    import ast
+
+    from ._scan import mask_strings
+    values = []
+    texts = [cj.lhs, cj.rhs, cj.assuming]
+    texts += [t for link in (getattr(cj, "links", None) or []) for t in (link[0], link[2])]
+    for t in texts:
+        for literal in mask_strings(t if isinstance(t, str) else "")[1]:
+            try:
+                values.append(("expression", repr(ast.literal_eval(literal))))
+            except (ValueError, SyntaxError, MemoryError, RecursionError):
+                values.append(("expression", literal))
+    from .domain import _as_domain
+    for name, bound in (cj.domain or {}).items():
+        try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            pieces = ()
+        for piece in pieces:
+            if isinstance(piece, frozenset):
+                values.extend(("domain", name, v) for v in piece if isinstance(v, str))
+    return sorted(values)
+
+
+def _read_back_shape(cj) -> tuple:
+    """Intent:
+        What a reading of a claim's stored text has to keep: its
+        relation, its negation, its bound domain names, and its string
+        literal values.
+    """
+    return (cj.relation, bool(getattr(cj, "negated", False)),
+            tuple(sorted(cj.domain or {})), tuple(_string_values(cj)))
+
+
+@functools.lru_cache(maxsize=4096)
+def _reread(text: str, context: tuple) -> tuple:
+    """Intent:
+        `text` read back as a claim: `(None, its read-back shape)`, or
+        `(the reason, None)` when it does not parse. `context` is the
+        render context the reading happens under, part of the cache key
+        only.
+    """
+    from .conjecture import InvalidConjecture
+    from .conjecture import claim as _claim
+    try:
+        back = _claim(text)
+    except InvalidConjecture as e:
+        return (f"it does not parse ({e})", None)
+    return (None, _read_back_shape(back))
+
+
+def _reads_back_problem(cj, text: str) -> "str | None":
+    """Intent:
+        Why `text`, rendered as `cj`'s canonical text, does not read
+        back as `cj`, or None when it does: it parses and keeps the
+        relation, the bound names and the string literal values.
+    """
+    from .grammar import (_BAR_MATRICES, _COMPLEX_NAMES, _ORDERED_MATRICES,
+                          _RENDER_MATRICES)
+    context = (_BAR_MATRICES.get(), _COMPLEX_NAMES.get(),
+               _ORDERED_MATRICES.get(), _RENDER_MATRICES.get())
+    problem, shape = _reread(text, context)
+    if problem is not None:
+        return problem
+    want = _read_back_shape(cj)
+    for i, what in enumerate(("relation", "negation", "bound names",
+                              "string literal values")):
+        if shape[i] != want[i]:
+            return f"it reads back with other {what}"
+    return None
 
 
 def _strip_pinned_regions(assuming: str) -> str:
