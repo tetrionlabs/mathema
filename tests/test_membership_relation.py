@@ -9,7 +9,7 @@ import textwrap
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
-from mathema.domain import Interval
+from mathema.domain import Interval, InvalidDomain
 from mathema.languages import StringLanguage, register_language, unregister_language
 from mathema.spec import render_claim_text
 
@@ -161,14 +161,9 @@ def test_a_number_set_on_the_right_is_membership_too(tmp_path):
     assert q.verdict == "falsified", (q.verdict, q.note)
 
 
-def test_a_bound_name_rebound_last_is_a_membership_statement(letters):
-    cj = claim("for s in L[letters], s in L[letters]")
-    assert cj.relation == "in" and cj.lhs == "s" and cj.rhs_bound is not None
-
-
-def test_a_bound_name_rebound_before_the_statement_is_still_bound_twice():
-    with pytest.raises(Exception, match="bound twice"):
-        claim("for x in [0, 1], x in [0, 2], f(x) >= 0")
+def test_a_bare_name_on_the_left_is_still_a_binding_not_a_law():
+    with pytest.raises((InvalidDomain, Exception)):
+        claim("for s in L[letters], s in L[letters]")
 
 
 def test_a_union_on_the_right_is_a_domain_not_an_unpaired_bar(letters):

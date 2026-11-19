@@ -2810,30 +2810,8 @@ def split_quantifier(text: str) -> tuple[dict, str]:
                or ne_exclusion(seg) is not None
                or parse_binding(seg) is not None)
 
-    def bound_name(seg: str) -> str | None:
-        """The name `seg` binds when its domain is a language or a
-        finite set, the domains a membership statement is read over;
-        a number range bound twice stays a binding, and is refused."""
-        parsed = parse_binding(seg)
-        if not isinstance(parsed, tuple):
-            return None
-        name, value = parsed
-        finite = isinstance(value, frozenset) or (
-            isinstance(value, Domain) and value.pieces
-            and all(isinstance(p, (LanguageRef, frozenset)) for p in value.pieces))
-        return name if finite else None
-
     n_bindings = 0
-    seen: set = set()
-    for i, seg in enumerate(segments):
-        # the last segment naming a variable an earlier segment bound is
-        # a membership statement about it, not a second binding:
-        # `for c in L[A], c in L[B]` states that every c in L[A] is in L[B]
-        name = bound_name(seg) if is_binding(seg) else None
-        if name is not None and name in seen and i == len(segments) - 1:
-            break
-        if name is not None:
-            seen.add(name)
+    for seg in segments:
         if not is_binding(seg):
             bad = _PATH_LIKE_BINDING.match(seg)
             if bad is not None and not re.fullmatch(_PATH, bad.group("path")):

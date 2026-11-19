@@ -3092,39 +3092,6 @@ def fingerprint_text(cj) -> str:
     return canonical_claim_text(cj)
 
 
-def _inclusion_parts(cj) -> "tuple[str, str] | None":
-    """Intent:
-        `(A, B)` when `cj` is the inclusion `L[A] subset L[B]`: every
-        member of one language term is a member of another, bound
-        through the inclusion's own variable, with nothing else bound,
-        assumed or let; None otherwise.
-    """
-    from .domain import Domain, LanguageRef
-
-    def one_term(d) -> "str | None":
-        if not isinstance(d, Domain) or d.base_type != "L" or len(d.pieces) != 1:
-            return None
-        if d.excluded or d.absent or d.members or d.dims:
-            return None
-        piece = d.pieces[0]
-        return repr(piece) if isinstance(piece, LanguageRef) else None
-
-    domain = cj.domain or {}
-    if getattr(cj, "relation", None) != "in" or len(domain) != 1:
-        return None
-    if cj.assuming or getattr(cj, "funcs", None) or getattr(cj, "free_vars", None):
-        return None
-    (var, bound), = domain.items()
-    # the quantified spelling names its variable, which on a function is
-    # a parameter, so only the variable `L[A] subset L[B]` itself binds
-    # renders back as the inclusion
-    from .grammar import INCLUSION_VARIABLE
-    if cj.lhs != var or var != INCLUSION_VARIABLE:
-        return None
-    a, b = one_term(bound), one_term(getattr(cj, "rhs_bound", None))
-    return (a, b) if a is not None and b is not None else None
-
-
 def render_claim_text(cj, *, unicode: bool | None = None,
                       long_param_threshold: int = 8,
                       canonical: bool = False,
@@ -3192,11 +3159,6 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     Bars around a matrix read as its determinant, so the `abs` of a
     matrix the claim's domain declares keeps its call spelling."""
-    inclusion = _inclusion_parts(cj)
-    if inclusion is not None:
-        from .grammar import get_unicode_output
-        glyph = "⊆" if (get_unicode_output() if unicode is None else unicode) else "subset"
-        return f"{inclusion[0]} {glyph} {inclusion[1]}"
     if getattr(cj, "relation", None) == "policy":
         from .policy import parse_policy, policy_text
         body = f"{cj.lhs} {cj.rhs}".strip()
