@@ -1599,6 +1599,11 @@ def migrate_record_names(store_dir: str) -> list:
         subdirectories that leaves empty. A file whose new name is
         already taken stays where it is. Returns the `(old, new)` paths
         renamed.
+
+    Notes:
+        Inside a `_run_scope.run_scope()` each rename drops what the run
+        kept from both paths, as a write through `atomic_write_text`
+        does.
     """
     moved = []
     for path in _record_files(store_dir):
@@ -1609,6 +1614,8 @@ def migrate_record_names(store_dir: str) -> list:
         if os.path.exists(target):
             continue
         os.replace(path, target)
+        _run_scope.wrote(path)
+        _run_scope.wrote(target)
         moved.append((path, target))
     for dirpath, _dirnames, _filenames in os.walk(store_dir,
                                                   topdown=False):

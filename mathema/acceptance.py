@@ -701,6 +701,8 @@ def _apply_rename(plan: dict, attestation: "dict | None") -> str:
     write_yaml(plan["new_path"], {new_key: entry},
                header=f"machine record; reconciled {new_key} from {old_key}")
     os.remove(plan["path"])
+    from . import _run_scope
+    _run_scope.wrote(plan["path"])
     from .locks import _write_locks, load_locks
     locks = load_locks(root)
     if old_key in locks:
