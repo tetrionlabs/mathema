@@ -94,6 +94,7 @@ from .symbolic._sum import _register_sum_family
 from . import conjecture as claims
 from . import spec as registry
 
+import os
 import sys as _sys
 for _alias, _mod in (("claims", claims), ("registry", registry)):
     _sys.modules[f"{__name__}.{_alias}"] = _mod
@@ -671,6 +672,49 @@ def _matrix_names_of(fn) -> frozenset:
         return frozenset()
 
 
+#: the environment variable that turns the built-in checks back on
+BUILTIN_CHECKS_VARIABLE = "MATHEMA_BUILTIN_CHECKS"
+
+
+def builtin_checks_on(written: bool = False) -> bool:
+    """Intent:
+        Whether `check()` runs its built-in checks (the structural
+        battery, the shape and type probes, and the rows for a value
+        that is not there) on a function, `written` saying whether a
+        person wrote a claim for it. Each calls the function with values
+        mathema generates, so by default they run only where a written
+        claim already has it run; `MATHEMA_BUILTIN_CHECKS` set to `on`
+        runs them everywhere and `off` nowhere.
+    """
+    mode = os.environ.get(BUILTIN_CHECKS_VARIABLE, "").strip().lower()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return written
+
+
+def _has_written_claim(fn, claims, declared) -> bool:
+    """Intent:
+        Whether a person wrote a claim for `fn`: one passed at the call
+        site, a mathema type marker in its signature, one in its
+        retrieved entry (`declared`: a claims file, its docstring, its
+        decorator), or, with no entry, one on the function object itself.
+    """
+    if claims:
+        return True
+    from .types import has_markers
+    if has_markers(fn):
+        return True
+    from .authoring import declared_from_function
+    from .spec import entry_claims
+    try:
+        entry = declared if declared is not None else {"claims": declared_from_function(fn)}
+        return bool(entry_claims(entry))
+    except Exception:
+        return False
+
+
 @_quiet_while_probing
 def check(fn, claims: list | None = None, domain: dict | None = None,
          trials: int | None = None,
@@ -826,8 +870,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
             p.meta = meta
         return ps
 
-    battery = probe(fn, facts, domain=battery_domain or None,
-                    trials=trials, trials_scale=trials_scale, extensive=extensive)
+    builtin = builtin_checks_on(_has_written_claim(fn, claims, declared))
+    battery = (probe(fn, facts, domain=battery_domain or None,
+                     trials=trials, trials_scale=trials_scale, extensive=extensive)
+               if builtin else [])
     # a battery call mathema could not build is a check not run: it
     # leaves no row, and what it tried and why stays in the record meta
     not_run = [{"check": p.name, "statement": p.statement, "reason": p.note or "",
@@ -842,9 +888,10 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
     if scale < 1.0:
         type_trials = max(_RISK.min_trials_floor_when_scaled, len(_SPECIALS),
                           round(type_trials * scale))
-    probes = probes + _stamp_surface(
-        type_probes(fn, trials=type_trials, domain=battery_domain or None),
-        "types")
+    if builtin:
+        probes = probes + _stamp_surface(
+            type_probes(fn, trials=type_trials, domain=battery_domain or None),
+            "types")
 
     # whether this list is the caller's or mathema's own matters for
     # precedence below: a call-site claim is the MOST deliberate
@@ -927,7 +974,7 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
                       if not (p.meta or {}).get("mathema.policy")]
         misspecified_only = bool(value_rows) and all(
             p.verdict == "skipped:misspecified" for p in value_rows)
-        if not mathematics_only and not misspecified_only:
+        if builtin and not mathematics_only and not misspecified_only:
             probes = probes + _policy.default_rows(
                 fn, facts, parent_domain or {}, covered, _policy.row_name,
                 optional_only=not written)

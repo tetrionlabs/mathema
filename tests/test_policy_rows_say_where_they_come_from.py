@@ -341,6 +341,7 @@ def _policy_rows(rec) -> list:
             if p.name.startswith(("missing[", "absent["))]
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_a_bare_check_carries_only_the_absence_an_optional_annotation_admits():
     # with no claim written, nothing asks what f does with a missing
     # value; what it does at None is asked for an Optional parameter

@@ -78,6 +78,7 @@ def test_the_rendering_reads_back_as_the_same_domain():
     assert not domain_contains(None, parse_binding("s in : str")[1])
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 @pytest.mark.usefixtures("without_language_package")
 def test_an_optional_str_admits_absence_and_check_judges_it():
     bound = parameter_domains(label)["s"]
