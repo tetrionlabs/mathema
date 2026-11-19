@@ -1133,7 +1133,11 @@ def resolve(ref) -> tuple:
                 raise UnknownPredicate(ref, predicate)
             if word.applies is not None and not word.applies(language):
                 raise MeaninglessPredicate(ref, predicate, word)
-            language = word.refine(language, predicate.arguments, predicate.negated)
+            try:
+                language = word.refine(language, predicate.arguments, predicate.negated)
+            except ValueError as e:
+                # the word's own refusal, after the language it refuses
+                raise InvalidDomain(f"L[{ref.text}]: {e}") from e
         return language, source
     name = ref.name if isinstance(ref, LanguageRef) else str(ref)
     if name in _REGISTRY:

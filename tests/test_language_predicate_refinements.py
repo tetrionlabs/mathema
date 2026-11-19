@@ -393,3 +393,19 @@ def test_a_word_may_carry_a_version_number():
 def test_a_version_range_is_not_read(words):
     from mathema.domain import read_call
     assert read_call(f're(r"[a-z]+", {words})') is None
+
+
+def test_a_refusal_raised_by_a_words_refine_names_the_language():
+    said = ('within ("/root") is not an address block for L[numbers]: it expects a block '
+            'such as "10.0.0.0/8". Did you mean L[words, inside ("/root")]?')
+
+    def refuses(language, arguments, negated):
+        raise ValueError(said)
+    word = PredicateWord("blocked in", refuses)
+    register_predicate(word)
+    try:
+        with pytest.raises(InvalidDomain) as raised:
+            resolve_language(_ref('L[numbers, blocked in ("/root")]'))
+        assert str(raised.value) == f'L[numbers, blocked in ("/root")]: {said}'
+    finally:
+        unregister_predicate(word.word)
