@@ -1245,17 +1245,20 @@ def _hole_kind(fn, param: str, kind: str, member: "str | None"):
     return ANY
 
 
-def _true_at_hole(test, param: str, kind: str, member: "str | None") -> bool:
+def _true_at_hole(test, param: str, kind: str, member: "str | None", fn=None) -> bool:
     """Intent:
         Whether a guard's test is true when `param` holds the hole the
         policy names: `param is None` (or `== None`) at an absence,
         `param != param`, `isnan(param)` at `nan`, `isna(param)` or
-        `isnull(param)` at either, or an `or` with such a part.
+        `isnull(param)` at either, or an `or` with such a part. A call
+        counts only when its callee resolves, where `fn` is defined, to
+        `math.isnan` or `numpy.isnan`, or to `pandas.isna` or
+        `pandas.isnull`, whatever name it is called by.
     """
     import ast
     at_nan = kind == "missing" and member in (None, "nan")
     if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
-        return any(_true_at_hole(v, param, kind, member) for v in test.values)
+        return any(_true_at_hole(v, param, kind, member, fn) for v in test.values)
     if isinstance(test, ast.Compare) and len(test.ops) == 1 \
             and isinstance(test.left, ast.Name) and test.left.id == param:
         op, right = test.ops[0], test.comparators[0]
@@ -1267,11 +1270,18 @@ def _true_at_hole(test, param: str, kind: str, member: "str | None") -> bool:
         return False
     if isinstance(test, ast.Call) and len(test.args) == 1 and not test.keywords \
             and isinstance(test.args[0], ast.Name) and test.args[0].id == param:
-        name = (test.func.attr if isinstance(test.func, ast.Attribute)
-                else getattr(test.func, "id", ""))
-        if name == "isnan":
+        if fn is None:
+            return False
+        import math
+        import sys
+        from ._raise_reading import _Namespace
+        called = _Namespace(fn).resolve(test.func)
+        numpy, pandas = sys.modules.get("numpy"), sys.modules.get("pandas")
+        if called is math.isnan or (numpy is not None
+                                    and called is getattr(numpy, "isnan", None)):
             return at_nan
-        if name in ("isna", "isnull"):
+        if pandas is not None and any(called is getattr(pandas, name, None)
+                                      for name in ("isna", "isnull")):
             return kind == "absent" or at_nan
     return False
 
@@ -1292,13 +1302,12 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
         is not read, or a generator or coroutine function
         (`suspended_call_refusal`).
     """
-    from .symbolic._base import strip_docstring
+    from .symbolic._base import innermost, strip_docstring
     from ._raise_reading import ANY, ReadRaise, read_raise_path
     import ast
-    if fn is None or not _true_at_hole(node.test, param, kind, member):
+    if fn is None or not _true_at_hole(node.test, param, kind, member, innermost(fn)):
         return None
     from .symbolic._prove import suspended_call_refusal
-    from .symbolic._base import innermost
     if suspended_call_refusal(fn) is not None:
         return None
     body_fn = innermost(fn)

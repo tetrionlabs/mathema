@@ -1456,14 +1456,18 @@ def _wrapper_is_read(fn) -> bool:
 
 
 def _wrapper_name(fn) -> str:
-    """The wrapper's own name and place: its code's qualified name, file
-    and first line for a Python function, its type's name otherwise."""
+    """The wrapper's own name and place: its code's qualified name, its
+    module's name and first line for a Python function, its type's
+    qualified name and module otherwise."""
     import types
     if type(fn) is types.FunctionType:
         code = fn.__code__
         name = getattr(code, "co_qualname", code.co_name)
-        return f"`{name}` ({code.co_filename} line {code.co_firstlineno})"
-    return f"a `{type(fn).__name__}` object"
+        module = fn.__globals__.get("__name__") if isinstance(fn.__globals__, dict) else None
+        where = f"module {module} line" if isinstance(module, str) else "line"
+        return f"the function `{name}` ({where} {code.co_firstlineno})"
+    cls = type(fn)
+    return f"an instance of `{cls.__qualname__}` (module {cls.__module__})"
 
 
 def wrapper_refusal(fn) -> "str | None":
@@ -1484,9 +1488,9 @@ def wrapper_refusal(fn) -> "str | None":
         if inner is None:
             return None
         if not _wrapper_is_read(fn):
-            return (f"the name is bound to the wrapper {_wrapper_name(fn)}, which its "
-                    f"decorator made in place of the function, and what the wrapper "
-                    f"does around the call is not read")
+            return (f"the object called is {_wrapper_name(fn)}, which links the "
+                    f"function as `__wrapped__`, and what it does around the call is "
+                    f"not read")
         fn = inner
         seen += 1
     return "the function is wrapped more than 16 times over"

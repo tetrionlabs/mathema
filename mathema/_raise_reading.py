@@ -865,10 +865,11 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
     name = _source(called)
     if isinstance(called, ast.Name) and called.id in ns.locals:
         return UnreadRaise(f"`{name}` is a variable of the function or of an enclosing "
-                           f"one, not shown to be the exception class the claim names")
+                           f"one, so the class it holds when the raise runs is not known")
     if isinstance(called, ast.Name) and called.id in ns.rebound:
-        return UnreadRaise(f"`{name}` is assigned by the function through `global`, so it "
-                           f"is not shown to be the exception class the claim names")
+        return UnreadRaise(f"`{name}` is assigned as a module global by the function or a "
+                           f"function nested in it, so the class it holds when the raise "
+                           f"runs is not known")
     cls = ns.resolve(called)
     if cls is _Namespace._MISSING:
         return UnreadRaise(f"`{name}` does not resolve to an attribute of a module, a "

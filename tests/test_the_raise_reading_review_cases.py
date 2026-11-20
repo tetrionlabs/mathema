@@ -456,7 +456,7 @@ def test_a_policy_behind_a_wrapper_is_not_proven_from_the_inner_guard():
 
 def brace_super_digit(x: float) -> float:
     if x < 0:
-        raise ValueError("{²}".format(x))
+        raise ValueError("{²}".format(x))  # noqa: F523,F524
     return x
 
 
@@ -472,7 +472,7 @@ def test_a_format_field_of_a_digit_that_is_not_decimal_is_not_read():
 
 def import_rebind(x: float) -> float:
     import math as m  # noqa: F401
-    m = 5  # noqa: F841
+    m = 5  # noqa: F811,F841
     raise ValueError(m.isnan(x))
 
 
@@ -536,3 +536,60 @@ def test_an_instance_whose_attribute_read_runs_code_is_not_read_through(wrapper)
     assert wrapper(-2.0) == 0.0
     (row,) = check_conjectures(wrapper, [claim("for x in [-5, -1], raises(f(x), TypeError)")])
     assert row.verdict != "proven", (row.verdict, row.route, row.sketch)
+
+
+# ---- third review: names, places and wording --------------------------------
+
+_ALIASED = """
+from math import isinf as isnan
+
+
+def pol_alias_isnan(x: float, y: float) -> float:
+    if isnan(x):
+        raise ValueError("x is nan")
+    return x * y
+"""
+
+
+def test_a_guard_callee_counts_by_what_it_is_not_by_its_name():
+    import ast
+    from mathema.policy import _true_at_hole
+    space: dict = {}
+    exec(_ALIASED, space)
+    test = ast.parse("isnan(x)", mode="eval").body
+    assert not _true_at_hole(test, "x", "missing", "nan", space["pol_alias_isnan"])
+    assert _true_at_hole(test, "x", "missing", "nan", _a_true_isnan_guard)
+
+
+def _a_true_isnan_guard(x: float) -> float:
+    if math.isnan(x):
+        raise ValueError("nan")
+    return x
+
+
+def test_a_wrapper_is_named_by_its_module_never_a_machine_path():
+    from mathema.symbolic._base import wrapper_refusal
+    function_text = wrapper_refusal(pol_wrap_rare)
+    instance_text = wrapper_refusal(Shadow(_p1))
+    for text in (function_text, instance_text):
+        assert "/" not in text and "decorator" not in text, text
+    assert f"module {__name__} line" in function_text, function_text
+    assert "an instance of `Shadow`" in instance_text, instance_text
+
+
+def _nested_rebinds(x):
+    def inner():
+        global ValueError
+        ValueError = KeyError  # noqa: F841
+    raise ValueError("neg")
+
+
+def test_a_rebound_name_says_what_is_not_known_without_naming_a_claim():
+    import ast
+    import inspect
+    import textwrap
+    from mathema._raise_reading import ANY, UnreadRaise, read_raise_path
+    tree = ast.parse(textwrap.dedent(inspect.getsource(_nested_rebinds))).body[0]
+    reading = read_raise_path(_nested_rebinds, [], tree.body[-1], {"x": ANY})
+    assert isinstance(reading, UnreadRaise), reading
+    assert "nested" in reading.reason and "claim" not in reading.reason, reading.reason
