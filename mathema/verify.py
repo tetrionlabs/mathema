@@ -1306,13 +1306,18 @@ def _language_definition_moved(fn, merged_entry: dict,
         on a row (`mathema.language_definitions`) has moved; so has one
         that was stamped and now states no definition or does not
         resolve, and the language of a validator's membership statement
-        once the pattern the function reads is another one. A language
+        once the pattern the function reads is another one. A row whose
+        verdict rests on a definition checked against the language's
+        membership also stamps that membership's code
+        (`mathema.language_memberships`); the language has moved when
+        that code is another one or no longer resolves. A language
         the record never stamped has not moved: the record made no
         statement about it.
     """
-    from .conjecture import language_definition_stamp
+    from .conjecture import language_definition_stamp, _language_membership_stamp
     from .spec import entry_claims
     recorded: dict = {}
+    memberships: dict = {}
     for c in (verified_entry or {}).get("claims") or []:
         meta = c.get("meta") or {}
         ran = meta.get("mathema.rests_on_membership")
@@ -1323,7 +1328,11 @@ def _language_definition_moved(fn, merged_entry: dict,
         if stamp:
             recorded.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
                                 {}).update(stamp)
-    if not recorded:
+        ran = meta.get("mathema.language_memberships")
+        if ran:
+            memberships.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
+                                   {}).update(ran)
+    if not recorded and not memberships:
         return None
     try:
         current = entry_claims(merged_entry or {})
@@ -1336,6 +1345,14 @@ def _language_definition_moved(fn, merged_entry: dict,
         now = language_definition_stamp(cj, fn)
         for language, digest in sorted(was.items()):
             if now.get(language) != digest:
+                return f"the definition of {language} moved"
+    for cj in current:
+        was = memberships.get(cj.name)
+        if not was:
+            continue
+        now = _language_membership_stamp(cj, fn, set(was))
+        for language, identity in sorted(was.items()):
+            if now.get(language) != identity:
                 return f"the definition of {language} moved"
     return None
 

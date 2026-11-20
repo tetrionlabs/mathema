@@ -5603,9 +5603,24 @@ def language_definition_stamp(cj, fn=None) -> dict:
         (`mathema.language_definitions`) and what verify compares a
         record against.
     """
-    from . import domain_relations, regular
-    from .domain import Domain, LanguageRef
+    from . import regular
     from .languages import resolve_language
+    stamp: dict = {}
+    for ref in _named_languages(cj, fn):
+        try:
+            document = resolve_language(ref).to_json().get("definition")
+            if regular.is_definition(document):
+                stamp[repr(ref)] = regular.term_hash(document)
+        except Exception:
+            continue
+    return stamp
+
+
+def _named_languages(cj, fn=None) -> list:
+    """The languages `language_definition_stamp` reads for a claim, as
+    `LanguageRef`s."""
+    from . import domain_relations
+    from .domain import Domain, LanguageRef
     bounds = [*(getattr(cj, "domain", None) or {}).values(), getattr(cj, "rhs_bound", None)]
     if getattr(cj, "relation", None) == domain_relations.RELATION:
         try:
@@ -5627,12 +5642,29 @@ def language_definition_stamp(cj, fn=None) -> dict:
             statement = None
         if isinstance(statement, tuple):
             named.append(statement[3])
+    return named
+
+
+def _language_membership_stamp(cj, fn=None, languages=None) -> dict:
+    """Intent:
+        The identity of the code behind each named language's
+        `contains()` (`_code_identity.membership_identity`), by the
+        language's text, for the languages `language_definition_stamp`
+        reads, or only those in `languages` when given. A language that
+        does not resolve is left out. A row whose verdict rests on a
+        definition having been checked against the language's
+        membership is stamped with it (`mathema.language_memberships`),
+        so an edit to that membership makes the record stale.
+    """
+    from ._code_identity import membership_identity
+    from .languages import resolve_language
     stamp: dict = {}
-    for ref in named:
+    for ref in _named_languages(cj, fn):
+        text = repr(ref)
+        if languages is not None and text not in languages:
+            continue
         try:
-            document = resolve_language(ref).to_json().get("definition")
-            if regular.is_definition(document):
-                stamp[repr(ref)] = regular.term_hash(document)
+            stamp[text] = membership_identity(resolve_language(ref))
         except Exception:
             continue
     return stamp
@@ -5640,13 +5672,27 @@ def language_definition_stamp(cj, fn=None) -> dict:
 
 def _stamp_language_definitions(rows: list, claims: list, fn=None) -> list:
     """Each row of a claim that names a defined language, its companion
-    rows included, stamped with `language_definition_stamp`."""
+    rows included, stamped with `language_definition_stamp`; a row whose
+    verdict lists the definitions it assumed is also stamped with the
+    membership identity of each of those languages
+    (`_language_membership_stamp`)."""
+    by_name = {c.name: c for c in claims}
     stamps = {c.name: language_definition_stamp(c, fn) for c in claims}
     for row in rows:
         meta = getattr(row, "meta", None) or {}
-        stamp = stamps.get(meta.get("mathema.companion_of") or row.name)
+        name = meta.get("mathema.companion_of") or row.name
+        stamp = stamps.get(name)
         if stamp:
-            row.meta = {**meta, "mathema.language_definitions": stamp}
+            meta = {**meta, "mathema.language_definitions": stamp}
+        assumed = {a.get("language") for a in
+                   (meta.get("mathema.assumptions") or {}).get("definitions") or ()
+                   if isinstance(a, dict)}
+        if assumed and name in by_name:
+            memberships = _language_membership_stamp(by_name[name], fn, assumed)
+            if memberships:
+                meta = {**meta, "mathema.language_memberships": memberships}
+        if meta:
+            row.meta = meta
     return rows
 
 
