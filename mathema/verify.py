@@ -1771,6 +1771,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     """Intent:
         The sweep body of `verify_project`, which shields it from the
         per-key state-dependence warning chatter.
+
+    Notes:
+        Each key is processed under a guard: an `Exception` raised for
+        one key (a `RecursionError` included) fails that key alone, puts
+        back the record it had before the run and drops what the run
+        gathered for it, and the sweep goes on. `MemoryError`,
+        `KeyboardInterrupt`, `SystemExit` and the wall-clock alarm pass
+        through the guard and end the run.
     """
     from . import analyze, check
     from .compendium import external_premises as _external_premises
@@ -1958,6 +1966,17 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.problems.append(msg)
         out.lines.append(f"FAIL {msg}")
         key_problems.setdefault(key, []).append(msg)
+
+    # per key re-adjudicated this run, the record file it writes and
+    # that file's bytes before the run (None when it had none), so a key
+    # whose processing raises after the write gets its prior record back
+    prior_records: dict = {}
+
+    def _drop_key_state(key: str) -> None:
+        invalidated_keys.discard(key)
+        supersessions.pop(key, None)
+        grammar_changes.pop(key, None)
+        release_moved[:] = [m for m in release_moved if m[0] != key]
 
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
@@ -2397,6 +2416,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 rec.meta["mathema.invalidated_by"] = []
             if definitions_now:
                 rec.meta["mathema.definition_rows"] = definitions_now
+            prior_records[key] = _record_before(root, key)
             written = write_record(rec, key=key, root=root,
                                    claims=current_claims,
                                    declared_intent=merged_entry.get("intent"),
@@ -2407,16 +2427,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # marks it stale (a changed form), so the gate reads the
             # accepted risk from it, never from the record it replaced
             risk = _risk_state(_entry_at(written, key))
-            out.adjudicated += 1
             if key in library or key in prerequisite_keys:
                 # this key's rows now resolve premises at their local verdict
                 stub_premises = _external_premises(
                     root, library_claims=library_claims)
             pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                             risk, rec.facts.unresolved, verified_info))
+            out.adjudicated += 1
+        except MemoryError:
+            raise
         except Exception as exc:
+            _drop_key_state(key)
+            restore_error = (_put_back(prior_records[key])
+                             if record_written else None)
             msg = _key_crash_message(key, exc, "verifying it",
-                                     written=record_written)
+                                     written=record_written,
+                                     restore_error=restore_error)
             _fail(key, msg)
             out.keys.append({"key": key, "why": "internal-error",
                              "passed": False,
@@ -2511,9 +2537,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                {key: entry["entry"]},
                                header=f"machine record; binds to form "
                                       f"{recorded_form}")
+        except MemoryError:
+            raise
         except Exception as exc:
+            _drop_key_state(key)
+            restore_error = (_put_back(prior_records[key])
+                             if key in prior_records else None)
             _fail(key, _key_crash_message(key, exc, "settling its dependencies",
-                                          written=True))
+                                          written=key in prior_records,
+                                          restore_error=restore_error))
 
     # phase 3: gate every key through the one policy and render lines
     from .transitions import load_actions
@@ -2648,23 +2680,64 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     return out
 
 
+def _record_before(root: str, key: str) -> tuple:
+    """Intent:
+        `(path, bytes)`: the file the verify sweep writes `key`'s record
+        to, and its bytes now, or None for the bytes when there is no
+        such file.
+    """
+    from .spec import record_path, verified_dir
+    path = record_path(verified_dir(root), key)
+    try:
+        with open(path, "rb") as fh:
+            return path, fh.read()
+    except FileNotFoundError:
+        return path, None
+
+
+def _put_back(before: tuple) -> "str | None":
+    """Intent:
+        Return a record file to the bytes `_record_before` read, or
+        remove it when there was none. None when that worked, else the
+        error that stopped it, as `<type>: <message>`.
+    """
+    path, data = before
+    try:
+        if data is None:
+            if os.path.exists(path):
+                os.remove(path)
+        else:
+            with open(path, "wb") as fh:
+                fh.write(data)
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
 def _key_crash_message(key: str, exc: Exception, doing: str, *,
-                       written: bool) -> str:
+                       written: bool,
+                       restore_error: "str | None" = None) -> str:
     """Intent:
         The problem a sweep reports for a key whose adjudication raised
         `exc` while `doing` (for example "verifying it"): the key, the
         exception's type and message, the innermost frame it was raised
         in, and what became of the key's record. `written` says whether
         this run had already written the key's new record when the
-        exception was raised; otherwise the record on disk (or its
-        absence) is what it was before the run.
+        exception was raised, in which case the sweep put back the
+        record the key had before the run (or removed the new one when
+        it had none) unless `restore_error` says why it could not;
+        otherwise the record on disk (or its absence) is what it was
+        before the run.
     """
     import traceback
     frames = traceback.extract_tb(exc.__traceback__)
     where = (f" (raised at {os.path.basename(frames[-1].filename)}:"
              f"{frames[-1].lineno} in {frames[-1].name})" if frames else "")
-    record = ("its record was written before the error and holds this "
-              "run's verdicts" if written else
+    record = ("its record was written before the error and could not be "
+              f"put back ({restore_error}), so it holds this run's verdicts "
+              "and the run that settles them did not finish; delete it and "
+              "re-run verify" if written and restore_error else
+              "its record was put back as it was before the run" if written else
               "its record was left exactly as it was")
     return (f"{key}: internal error while {doing}: "
             f"{type(exc).__name__}: {exc}{where}; {record}, and the sweep "
