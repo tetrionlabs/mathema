@@ -10916,13 +10916,14 @@ def _validator_breaks(cj, fn, text: str) -> bool:
 def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     """Intent:
         `(validator, param, base, stated)` when `fn` is a pattern
-        validator of the one parameter `cj_domain` binds over one
-        language and a registered predicate word reads its match call:
-        the validator, the parameter, the parameter's language and the
-        language of the membership statement, `L[<base>, <word>
-        (<pattern>)]`. None when `fn` is no validator of that
-        parameter; a string saying why there is no statement when it
-        is one.
+        validator, `cj_domain` binds one variable over one language and
+        a registered predicate word reads the function's match call:
+        the validator, the claim's variable (whatever the function's
+        parameter is named), its language and the language of the
+        membership statement, `L[<base>, <word> (<pattern>)]`. None
+        when `fn` is no validator or the claim binds more than one
+        variable; a string saying why there is no statement when it is
+        one.
     """
     from ._validators import read_validator
     from .domain import Domain, LanguageRef, Predicate
@@ -10931,7 +10932,7 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
         return None
     ((param, bound),) = cj_domain.items()
     validator = read_validator(fn)
-    if isinstance(validator, str) or validator.param != param:
+    if isinstance(validator, str):
         return None
     reading = word_reading_call(validator.accepts)
     if reading is None:
@@ -10966,17 +10967,18 @@ def _premise_is_f_defined(cj) -> bool:
     return re.fullmatch(r"f\s+is\s+defined|is_defined\(\s*f\s*\)", text) is not None
 
 
-def _beyond_a_plain_validator_claim(cj, bound) -> "str | None":
+def _beyond_a_plain_validator_claim(cj, bound, variable: str = "") -> "str | None":
     """Intent:
         What a claim states that the validator proof does not account
         for, or None for a plain claim: the proof reads one relation
         about calls of the function under check on texts of the
-        parameter's language, and nothing else. A premise, an outcome
-        clause, a pin, a tolerance, a chained comparison, a free
-        variable, a function bound in the claim (the name `f` may then
-        be another function) or a missing-value policy stated on the
-        parameter each make the claim more than that, and the claim is
-        left to the other routes.
+        language of the claim's one `variable`, and nothing else. A
+        premise, an outcome clause, a pin, a tolerance, a chained
+        comparison, a free variable other than `variable` (which `let`
+        binds as `for` does), a function bound in the claim (the name
+        `f` may then be another function) or a missing-value policy
+        stated on the variable each make the claim more than that, and
+        the claim is left to the other routes.
     """
     from .domain import Domain, _Sentinel, _sentinel_piece
     if getattr(cj, "assuming", ""):
@@ -10989,7 +10991,7 @@ def _beyond_a_plain_validator_claim(cj, bound) -> "str | None":
         return "the claim states a tolerance"
     if len(getattr(cj, "links", None) or []) > 1:
         return "the claim is a chain of comparisons"
-    if getattr(cj, "free_vars", None):
+    if set(getattr(cj, "free_vars", None) or ()) - {variable}:
         return "the claim binds a free variable"
     if getattr(cj, "funcs", None):
         return "the claim binds a function, so a call in it may be another function"
@@ -11086,9 +11088,11 @@ def _validator_proof(cj, fn, cj_domain):
         The derive verdict for a claim over one text parameter of a
         function read as a pattern validator, or None when the function
         is not one or the claim asks something a validator does not
-        decide. The registered predicate word that reads the function's
+        decide. The claim's one variable, bound by `for` or `let` and
+        named as the claim chooses, is the text the function is called
+        on. The registered predicate word that reads the function's
         match call turns the validator's truth into a membership
-        statement, `s in L[<the parameter's language>, <word>
+        statement, `s in L[<the variable's language>, <word>
         (<pattern>)]`, which is resolved as a claim written in that
         text would be. The claim then asks whether the texts it calls
         the function on are all, or are none, members of that language,
@@ -11120,7 +11124,7 @@ def _validator_proof(cj, fn, cj_domain):
         return None
     ((param, bound),) = cj_domain.items()
     validator = read_validator(fn)
-    if isinstance(validator, str) or validator.param != param:
+    if isinstance(validator, str):
         return None
     question = _validator_question(cj, fn, validator, param)
     if isinstance(question, str):
@@ -11139,7 +11143,7 @@ def _validator_proof(cj, fn, cj_domain):
             return undecided("the premise f is defined is read only for f(s) == s about "
                              "a function that refuses every text outside its language")
         cj = _dc_replace(cj, assuming="")
-    beyond = _beyond_a_plain_validator_claim(cj, bound)
+    beyond = _beyond_a_plain_validator_claim(cj, bound, param)
     if beyond is not None:
         return undecided(f"{beyond}, which this route does not account for")
     statement = _validator_statement(fn, cj_domain)
