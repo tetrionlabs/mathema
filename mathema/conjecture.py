@@ -8266,14 +8266,18 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
     return None
 
 
-def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
+def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r,
+                             outside=None):
     """Intent:
         `(args, counterexample, steps)`: the witness shrunk inside each
         language-bound parameter's language, one of the language's own
         `shrink` candidates at a time, keeping a candidate only when it
-        is in the claim's domain for that parameter and the claim still
-        fails there, within `_WITNESS_SHRINK_EVALUATIONS` evaluations;
-        None when the failure does not reproduce.
+        is in the claim's domain for that parameter, the claim still
+        fails there and the failure is not one `outside` excludes,
+        within `_WITNESS_SHRINK_EVALUATIONS` evaluations; None when the
+        failure does not reproduce. `outside`, called after each
+        evaluation, says whether that evaluation fell outside the
+        claim's premise (a raise of `f` under `f is defined`).
     """
     from .domain import LanguageRef, domain_contains, path_bindings_hold
     from .languages import resolve_language
@@ -8324,6 +8328,8 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                     budget -= 1
                     trial = [*args[:i], candidate, *args[i + 1:]]
                     failure = _failure_at(cj, kinds, env, trial, code_l, code_r, labels)
+                    if outside is not None and outside():
+                        continue
                     if failure is not None:
                         args, current, steps, improved = trial, failure, steps + 1, True
                         break
@@ -15184,8 +15190,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
         # a witness over a language is shrunk inside the language, as
         # the hazard families' witnesses are
+        def outside_premise() -> bool:
+            # a raise of f is outside a claim read where f is defined,
+            # and outside one read over f's working domain
+            raised = call_raised[0] == "f"
+            call_raised[0] = None
+            return raised and (ctx.assume_defined or ctx.exclude_own_guards)
+        call_raised[0] = None
         found = _shrink_language_witness(
-            cj, kinds, cj_domain, env, args, code_l, code_r)
+            cj, kinds, cj_domain, env, args, code_l, code_r, outside_premise)
         if found is not None:
             args, cx, steps = found
             shrunk_meta = {"mathema.witness_shrunk": {"steps": steps}}
