@@ -312,6 +312,10 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                 if v is not None and v != ""}}
         if row_meta:
             row["meta"] = row_meta
+        # a verdict a soundness epoch could decide differently carries
+        # the epoch of the engine that reached it
+        from .soundness_epoch import stamp as _stamp_epoch
+        row = _stamp_epoch(row)
         source = (p.meta or {}).get("mathema.surface")
         if not include_suggestions and not (p.meta or {}).get("mathema.policy") and (
                 source == "mathema"

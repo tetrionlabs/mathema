@@ -122,6 +122,9 @@ def cause_of(triggers) -> str:
         return "this function changed"
     if "dependency" in triggers:
         return "a callee changed"
+    from .soundness_epoch import SOUNDNESS_EPOCH, TRIGGER
+    if TRIGGER in triggers:
+        return f"read more strictly at soundness epoch {SOUNDNESS_EPOCH}"
     return "nothing changed"
 
 

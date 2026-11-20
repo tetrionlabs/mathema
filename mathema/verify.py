@@ -1294,15 +1294,62 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+
+def _epoch_why(entry: dict) -> str:
+    """The reason a sweep re-checks a function whose record holds a
+    verdict from an earlier soundness epoch: `soundness epoch 0 to 1`."""
+    from .soundness_epoch import EPOCH_SCOPES, SOUNDNESS_EPOCH, stamped_epoch
+    written = min((stamped_epoch(row) for row in (entry or {}).get("claims") or []
+                   if isinstance(row, dict)
+                   and any(scope(row) for scope in EPOCH_SCOPES.values())),
+                  default=0)
+    return f"soundness epoch {written} to {SOUNDNESS_EPOCH}"
+
+
+def _epoch_note(key: str, fn, names: list, root: str) -> list:
+    """Intent:
+        The lines a sweep prints once under a function it re-checked
+        because its record holds verdicts from an earlier soundness
+        epoch: a title, where the function is (its file and `def`
+        line, quoted, when known), and one sentence on what happened
+        and what to do.
+    """
+    import inspect
+    from .soundness_epoch import SOUNDNESS_EPOCH
+    claims = ", ".join(n for n in names if n)
+    who = f"claim{'s' if len(names) > 1 else ''} {claims} of {key}"
+    lines = [f"     note: re-checked under soundness epoch {SOUNDNESS_EPOCH}"]
+    try:
+        target = inspect.unwrap(fn)
+        source, line = inspect.getsourcelines(target)
+        path = inspect.getsourcefile(target) or ""
+        shown = os.path.relpath(path, root) if path else ""
+        text = next((t.strip() for t in source if t.strip().startswith(("def ", "async def "))),
+                    source[0].strip())
+        offset = next((i for i, t in enumerate(source)
+                       if t.strip().startswith(("def ", "async def "))), 0)
+        lines.append(f"       on {shown} line {line + offset}, {who}:")
+        lines.append(f"       {line + offset}:   {text}")
+    except (OSError, TypeError):
+        lines.append(f"       {who}")
+    lines.append("     each was proven by an earlier release's reading of `raise` "
+                 "statements, which this release reads more strictly; it was checked "
+                 "again and its record now says so: nothing to do unless its verdict "
+                 "moved.")
+    return lines
+
 def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
-                    provenance, library_version, premises, dependency) -> list[str]:
+                    provenance, library_version, premises, dependency,
+                    soundness_epoch=False) -> list[str]:
     """The triggers that make a function invalidated, changed since its
-    record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
-    each one that fired."""
+    record, in `transitions.OWN_TRIGGERS` order, then `soundness-epoch`
+    (a verdict an earlier engine reached and this one reads more
+    strictly), with `dependency` last: each one that fired."""
     fired = {"form": form, "provenance": provenance, "defaults": defaults,
              "claims": claims, "pseudo-infinity": pseudo_infinity,
              "library-version": library_version is not None and library_version is not False,
              "definition-rows": definitions, "premises": premises,
+             "soundness-epoch": soundness_epoch,
              "dependency": dependency}
     return [name for name, on in fired.items() if on]
 
@@ -1916,6 +1963,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # phase 1: freshness + adjudication + record writes. Gating waits
     # until every record is written (see the docstring note).
     lock_messages: dict = {}   # key -> the tripped-lock failure line
+    epoch_notes: dict = {}     # key -> the lines saying why it was re-checked
     for key in lock_only:
         fn = _resolve_func_ref(key, root=root)
         if fn is None:
@@ -2221,7 +2269,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         version_moved = (_library_version_moved(merged_entry, verified_entry)
                          if key in library else None)
         body_moved = _provenance_moved(facts_now, verified_entry)
+        from .soundness_epoch import stale_rows
+        epoch_stale = stale_rows(verified_entry) if recorded_form else []
         is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
+                    and not epoch_stale
                     and recorded_fp == current_fp and not defaults_moved
                     and version_moved is None and body_moved is None
                     and not pinf_moved and not definitions_moved
@@ -2361,6 +2412,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                else f"{body_moved} changed" if body_moved
                and same_form(facts_now.form, recorded_form)
                and recorded_fp == current_fp
+               else _epoch_why(verified_entry) if epoch_stale
+               and same_form(facts_now.form, recorded_form)
+               and recorded_fp == current_fp
                else "forced (--all)" if all and is_fresh
                else "targeted re-verify" if only and is_fresh
                else "no baseline record" if not recorded_form
@@ -2380,7 +2434,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 provenance=body_moved, library_version=version_moved,
                 premises=premise_now != (recorded_premises or {})
                 if premise_now or recorded_premises else False,
-                dependency=dependency_changed)
+                dependency=dependency_changed, soundness_epoch=bool(epoch_stale))
             rec.meta["mathema.invalidated_by"] = triggers
             if triggers:
                 invalidated_keys.add(key)
@@ -2395,6 +2449,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             rec.meta["mathema.invalidated_by"] = []
         if definitions_now:
             rec.meta["mathema.definition_rows"] = definitions_now
+        if epoch_stale:
+            epoch_notes[key] = _epoch_note(key, fn, epoch_stale, root)
         written = write_record(rec, key=key, root=root,
                                claims=current_claims,
                                declared_intent=merged_entry.get("intent"),
@@ -2576,6 +2632,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.problems.extend(f"{key}: {p}" for p in report.problems)
         first_line = len(out.lines)
         out.lines.append(line)
+        if key in epoch_notes:
+            out.lines.extend(epoch_notes[key])
         # a definition row's corner finding: the library's computation
         # gave no value at a magnitude corner, and the row stands
         out.lines.extend(
