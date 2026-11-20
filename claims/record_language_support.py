@@ -581,6 +581,108 @@ def the_child_is_inside_its_parent() -> bool:
             and includes(PARENT, CHILD)[0] == "falsified")
 
 
+# ---- laws found missing by mutating the module ---------------------------
+
+#: nodes whose canonical text shows the order of keys and the escaping of text
+_WRITTEN = [
+    (choice("b", "a"), '{"exact":true,"language":{"op":"choice","values":["a","b"]},"version":1}'),
+    (choice("\u00e9"), '{"exact":true,"language":{"op":"choice","values":["\\u00e9"]},"version":1}'),
+    (choice("\ud800"), '{"exact":true,"language":{"op":"choice","values":["\\ud800"]},"version":1}'),
+    (record(("b", FLAG, False), ("a", OFF, True)),
+     '{"exact":true,"language":{"fields":[["a",{"op":"choice","values":[false]},true],'
+     '["b",{"op":"choice","values":[false,true]},false]],"op":"record","rest":{"op":"empty"}},'
+     '"version":1}'),
+]
+
+#: documents whose lists are written as tuples, which JSON cannot carry
+_TUPLES = [
+    _exact({"op": "union", "args": (FLAG, OFF)}),
+    _exact({"op": "inter", "args": (FLAG,)}),
+    _exact({"op": "record", "fields": (["x", FLAG, True],), "rest": EMPTY}),
+    _exact({"op": "record", "fields": [("x", FLAG, True)], "rest": EMPTY}),
+    _exact({"op": "choice", "values": (1, 2)}),
+]
+
+
+def canonical_text_is_written_one_way(i: int) -> bool:
+    """Whether the canonical text of written node `i` is, character for
+    character, the text stated for it: keys in sorted order, no white
+    space, every character outside ASCII escaped."""
+    node, written = _WRITTEN[int(i)]
+    return _rl().canonical_text(_exact(node)) == written
+
+
+def a_list_written_as_a_tuple_is_refused(i: int) -> bool:
+    rl = _rl()
+    try:
+        rl.validate(_TUPLES[int(i)])
+    except rl.InvalidTerm:
+        return True
+    return False
+
+
+def one_required_empty_field_empties_a_record_of_several(t: int) -> bool:
+    """Whether a record with a required field of no value and a second,
+    optional field holding term `t` is `empty` in canonical form and has
+    no member in the catalogue."""
+    rl, a = _rl(), TERMS[int(t)]
+    node = record(("gone", EMPTY, True), ("other", a, False))
+    return rl.canonical(node) == EMPTY and not _members(node)
+
+
+def a_bound_is_one_of_the_two_names(d: int) -> bool:
+    """Whether `member` refuses a bound that is neither `at_least` nor
+    `at_most`, for definition `d`, exact or not."""
+    rl = _rl()
+    for bound in ("language", "most", ""):
+        try:
+            rl.member(DOCUMENTS[int(d)], None, bound=bound)
+        except rl.InvalidTerm:
+            continue
+        return False
+    return True
+
+
+def record_of_holds_each_field_under_each_bound(d: int, v: int) -> bool:
+    """Whether, under each bound, the record of one required field built
+    from definition `d` holds the map with value `v` under that key
+    exactly when the definition holds the value under that bound."""
+    rl, document, value = _rl(), DOCUMENTS[int(d)], VALUES[int(v)]
+    built = rl.record_of([("k", document, True)])
+    return all(rl.member(built, {"k": value}, bound=bound) == rl.member(document, value, bound=bound)
+               for bound in ("at_least", "at_most"))
+
+
+def a_text_of_any_character_is_found(i: int) -> bool:
+    """Whether `find_member` finds the one member of a choice of one
+    text, for texts holding the first code point, the last, a lone
+    surrogate and a character outside ASCII."""
+    wanted = ("\x00", "a\x00b", "\U0010ffff", "\ud800", "\u00e9", "")[int(i)]
+    found = _rl().find_member([choice(wanted)], [])
+    return found.status == "member" and found.member == wanted
+
+
+def a_value_member_does_not_place_is_not_returned(i: int) -> bool:
+    """Whether `find_member` answers `unknown`, and returns no member,
+    when the value read from the solver is one `member` does not place
+    inside every node asked and outside every other: case 0 a value in
+    one of two inside nodes only, case 1 a value in one of two outside
+    nodes, case 2 a value in no inside node."""
+    rl = _rl()
+    inside, outside, wrong = [
+        ([FLAG, choice(True, "a")], [], False),
+        ([FLAG], [choice("a"), OFF], False),
+        ([FLAG], [], "a"),
+    ][int(i)]
+    real = rl._Lowering.read
+    rl._Lowering.read = lambda self, model, value=None, path=(): wrong
+    try:
+        found = rl.find_member(inside, outside)
+    finally:
+        rl._Lowering.read = real
+    return found.status == "unknown" and found.member is None
+
+
 # ---- generated terms and values -----------------------------------------
 
 def generated_term(seed: int, depth: int = 0) -> dict:
