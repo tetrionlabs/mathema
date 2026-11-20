@@ -1488,4 +1488,4 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
                   latex=sympy.latex(display), opaque=opaque)
 
 
-from ._raise_reading import ReadRaise, UnreadRaise, read_raise_path  # noqa: E402,F401
+from .._raise_reading import ReadRaise, UnreadRaise, read_raise_path  # noqa: E402,F401

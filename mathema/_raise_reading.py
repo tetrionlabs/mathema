@@ -49,9 +49,11 @@ class ValueKind:
     """What is known of a value where a path runs: `types`, the exact
     Python types it may have (None when it may be any object), and
     `magnitude`, an upper bound on its absolute value when it is a
-    number (`math.inf` when unbounded)."""
+    number (`math.inf` when unbounded), and `least`, a lower bound on
+    that absolute value (0 when the value may be zero)."""
     types: "frozenset | None"
     magnitude: float = math.inf
+    least: float = 0.0
 
 
 ANY = ValueKind(None)
@@ -62,7 +64,8 @@ _STR = ValueKind(frozenset({str}))
 def _union(a: ValueKind, b: ValueKind) -> ValueKind:
     if a.types is None or b.types is None:
         return ANY
-    return ValueKind(a.types | b.types, max(a.magnitude, b.magnitude))
+    return ValueKind(a.types | b.types, max(a.magnitude, b.magnitude),
+                     min(a.least, b.least))
 
 
 def _magnitude(value) -> float:
@@ -77,8 +80,19 @@ def kind_of_value(value) -> ValueKind:
     """The kind of one known value: its exact type, and its magnitude
     when it is a number."""
     if type(value) in _NUMBERS:
-        return ValueKind(frozenset({type(value)}), _magnitude(value))
+        size = _magnitude(value)
+        return ValueKind(frozenset({type(value)}), size, size)
     return ValueKind(frozenset({type(value)}))
+
+
+_EMPTY = ValueKind(frozenset(), 0.0, math.inf)
+
+
+def _interval_kind(lo, hi) -> ValueKind:
+    least = 0.0
+    if type(lo) in _NUMBERS and type(hi) in _NUMBERS and (lo > 0 or hi < 0):
+        least = min(abs(lo), abs(hi))
+    return ValueKind(_NUMBERS, max(_magnitude(lo), _magnitude(hi)), least)
 
 
 def kind_of_bound(bound) -> ValueKind:
@@ -90,27 +104,29 @@ def kind_of_bound(bound) -> ValueKind:
 
     Notes:
         A `ReachInterval` stands in for an unbounded direction, so it
-        is read as unbounded. A `Domain` that admits a missing value or
-        a member beside its pieces is ANY.
+        is read as unbounded. A missing-value sentinel in a finite set,
+        and the missing members and absence a `Domain` admits, are left
+        out: derive proves a claim over the real points of its domain,
+        and the missing points are executed apart.
     """
-    from ..domain import Domain, Interval, ReachInterval
+    from .domain import Domain, Interval, ReachInterval, is_sentinel
     if isinstance(bound, frozenset):
-        found = ValueKind(frozenset())
+        found = _EMPTY
         for value in bound:
-            found = _union(found, kind_of_value(value))
+            if not is_sentinel(value):
+                found = _union(found, kind_of_value(value))
         return found
     if isinstance(bound, ReachInterval):
         return ValueKind(_NUMBERS)
     if isinstance(bound, Interval) or (isinstance(bound, tuple) and len(bound) == 2
                                        and all(type(e) in _NUMBERS for e in bound)):
-        return ValueKind(_NUMBERS, max(_magnitude(bound[0]), _magnitude(bound[1])))
+        return _interval_kind(bound[0], bound[1])
     if isinstance(bound, str) and bound in ("Z", "N", "R"):
         return ValueKind(_NUMBERS)
     if isinstance(bound, Domain):
-        if bound.base_type not in ("R", "Z", "N") or bound.dims or bound.absent \
-                or bound.members or not bound.pieces:
+        if bound.base_type not in ("R", "Z", "N") or bound.dims or not bound.pieces:
             return ANY
-        found = ValueKind(frozenset())
+        found = _EMPTY
         for piece in bound.pieces:
             if not isinstance(piece, (Interval, frozenset)):
                 return ANY
@@ -191,12 +207,18 @@ class _Namespace:
         if found is None and self.ok:
             found = self.globals.get("__builtins__", builtins)
         self.builtins = vars(found) if isinstance(found, types.ModuleType) else (found or {})
+        # locals bound to a known object on the path (a module imported
+        # in the body)
+        self.objects: dict = {}
 
     _MISSING = object()
 
     def lookup(self, name: str):
-        """The object `name` reads outside the function's locals, or
-        `_MISSING`."""
+        """The object `name` reads: a local the path bound to a known
+        object, else a global or builtin outside the function's locals,
+        else `_MISSING`."""
+        if name in self.objects:
+            return self.objects[name]
         if not self.ok or name in self.locals:
             return self._MISSING
         if name in self.globals:
@@ -267,6 +289,11 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
     if isinstance(op, ast.Mult):
         size = 0.0 if 0.0 in (a.magnitude, b.magnitude) else a.magnitude * b.magnitude
         return (HALTS if mixes else TOTAL), ValueKind(out_types, size)
+    if isinstance(op, ast.Div) and b.least > 0 and _converts_to_float(a) \
+            and _converts_to_float(b):
+        return TOTAL, ValueKind(frozenset({float}),
+                                a.magnitude / b.least if math.isfinite(a.magnitude)
+                                else math.inf)
     if isinstance(op, (ast.Div, ast.FloorDiv, ast.Mod)):
         divisor = right.value if isinstance(right, ast.Constant) else None
         if type(divisor) in (int, float) and abs(divisor) >= 1 \
@@ -292,7 +319,8 @@ def _call_level(node: ast.Call, kinds: dict, ns: _Namespace):
     if ns.is_builtin(node.func, "abs"):
         if _is_numeric(kind):
             return level, ValueKind(kind.types - {bool} | ({int} if bool in kind.types
-                                                           else set()), kind.magnitude)
+                                                           else set()), kind.magnitude,
+                                    kind.least)
         return UNKNOWN, ANY
     called = ns.resolve(node.func)
     if any(called is getattr(math, name) for name in _MATH_TESTS):
@@ -379,7 +407,8 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
             return min(level, _truth_level(kind)), _BOOL
         if isinstance(node.op, (ast.USub, ast.UAdd)) and _is_numeric(kind):
             return level, ValueKind((kind.types - {bool}) | ({int} if bool in kind.types
-                                                             else set()), kind.magnitude)
+                                                             else set()), kind.magnitude,
+                                    kind.least)
         return UNKNOWN, ANY
     if isinstance(node, ast.BinOp):
         left, a = read_expression(node.left, kinds, ns)
@@ -393,7 +422,7 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
             return level, _STR
         return UNKNOWN, ANY
     if isinstance(node, ast.BoolOp):
-        level, kind = TOTAL, ValueKind(frozenset())
+        level, kind = TOTAL, _EMPTY
         for value in node.values:
             part, found = read_expression(value, kinds, ns)
             level = min(level, part, _truth_level(found))
@@ -471,6 +500,35 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
     return None
 
 
+def _imported(node: ast.AST) -> "dict | None":
+    """Intent:
+        For an `import` statement every name of which binds a module
+        already in `sys.modules` (or, for `from m import a`, an
+        attribute already in such a module's own namespace), the
+        objects it binds by local name: running it looks them up and
+        cannot fail. None for any other statement.
+    """
+    if isinstance(node, ast.Import):
+        out = {}
+        for alias in node.names:
+            top = alias.name.split(".", 1)[0]
+            if alias.name not in sys.modules or top not in sys.modules:
+                return None
+            out[alias.asname or top] = sys.modules[alias.asname and alias.name or top]
+        return out
+    if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        module = sys.modules.get(node.module)
+        if type(module) is not types.ModuleType:
+            return None
+        out = {}
+        for alias in node.names:
+            if alias.name == "*" or alias.name not in vars(module):
+                return None
+            out[alias.asname or alias.name] = vars(module)[alias.name]
+        return out
+    return None
+
+
 def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise | UnreadRaise":
     """Intent:
         Whether the path `steps` followed by the `raise` statement
@@ -511,6 +569,12 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
             note(min(found, _truth_level(value)),
                  f"the test `{_source(node)}`{_where(node)} is evaluated before the raise "
                  f"and may itself raise")
+            continue
+        imported = _imported(node)
+        if imported is not None:
+            for local, module in imported.items():
+                ns.objects[local] = module
+                kinds[local] = ANY
             continue
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):

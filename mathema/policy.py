@@ -387,6 +387,13 @@ def _exception_type(name: str, scope: "dict | None" = None):
     return found if isinstance(found, type) and issubclass(found, BaseException) else None
 
 
+def guard_is_read(guard) -> bool:
+    """Whether a guard proves what it says: any guard that does not
+    raise, and a raising one whose path was read as raising its class."""
+    return guard is not None and (guard[0] != "raises"
+                                  or (len(guard) > 3 and guard[3] is not None))
+
+
 def _guard_raises_the_claimed(guard, expected: "str | None", fn) -> bool:
     """Whether a guard's behaviour meets a stated `raises(...)`: any
     exception when the statement names none, else the class the guard
@@ -1227,7 +1234,7 @@ def _hole_kind(fn, param: str, kind: str, member: "str | None"):
         names: None for an absence, a float for `nan`, any object for
         anything else.
     """
-    from .symbolic._raise_reading import ANY, ValueKind
+    from ._raise_reading import ANY, ValueKind
     if kind == "absent":
         return ValueKind(frozenset({type(None)}))
     members = [member] if member else (_members_of(fn, param, kind) if fn else [])
@@ -1281,7 +1288,7 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
         must itself raise a subclass of the class this one raises.
     """
     from .symbolic._base import strip_docstring
-    from .symbolic._raise_reading import ANY, ReadRaise, read_raise_path
+    from ._raise_reading import ANY, ReadRaise, read_raise_path
     import ast
     if fn is None or not _true_at_hole(node.test, param, kind, member):
         return None
@@ -1331,10 +1338,12 @@ def guard_policies(facts, fn=None) -> dict:
         other return drops. A raising check on each entry of a sequence
         parameter (`for v in xs: if isnan(v): raise`, `if any(isnan(v)
         for v in xs): raise`) states the policy for the holes in it.
-        A raising guard is kept only when the path from the entry of
-        `fn` (the live function `facts` describes) to its `raise` is
-        read as raising exactly one class (`_guard_raise`); with no
-        `fn`, no raising guard is kept.
+        A raising guard's entry is `("raises", name, line, cls)`: `cls`
+        the class raised when the path from the entry of `fn` (the live
+        function `facts` describes) to the `raise` is read as raising
+        exactly that class (`_guard_raise`), else None, which marks the
+        raise deliberate without proving it; with no `fn`, no raise is
+        read.
     """
     import ast
     tree = getattr(facts, "tree", None)
@@ -1464,13 +1473,24 @@ def guard_policies(facts, fn=None) -> dict:
         for p, kind, member in keys:
             back = returned(node.body, p)
             if raise_stmt is not None:
-                # a guard states a raise only when the path from the
-                # function's entry to it raises exactly one class
+                # the class is kept only when the path from the
+                # function's entry to the raise is read as raising
+                # exactly that class; an unread guard still says the
+                # raise is deliberate, and proves nothing
                 read = _guard_raise(fn, facts, tree, node, raise_stmt, p, kind, member)
-                if read is None:
+                if read is not None:
+                    out.setdefault((p, kind, member),
+                                   ("raises", read.cls.__name__, node.lineno, read.cls))
                     continue
-                out.setdefault((p, kind, member),
-                               ("raises", read.cls.__name__, node.lineno, read.cls))
+                exc = raise_stmt.exc
+                name = None
+                if isinstance(exc, ast.Call):
+                    exc = exc.func
+                if isinstance(exc, ast.Name):
+                    name = exc.id
+                elif isinstance(exc, ast.Attribute):
+                    name = exc.attr
+                out.setdefault((p, kind, member), ("raises", name, node.lineno, None))
             elif back is not None:
                 if back == "itself":
                     # what came in goes back out
@@ -1822,6 +1842,10 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
     accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
     if guard is not None and guard[0] == behaviour \
             and _guard_raised_it(fn, guard, calls):
+        if not guard_is_read(guard):
+            return row("holds", behaviour, exception, "derived",
+                       f"from the guard on line {guard[2]}, whose path to its raise "
+                       f"is not read; {evidence}")
         return row("proven", behaviour, exception, "derived",
                    f"from the guard on line {guard[2]}; {evidence}", route="examine")
     if origin == "type":
@@ -2862,6 +2886,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     witness = witness or _witness(call)
                     continue
                 said.append(f"{m} {did}, from the guard on line {guard[2]}")
+                if not guard_is_read(guard) and weakest == "proven":
+                    weakest = "holds"
                 continue
             if library_here:
                 if all(_follows(pol, c) for pol in library_here for c in calls):

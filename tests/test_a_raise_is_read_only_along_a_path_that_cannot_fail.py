@@ -132,7 +132,7 @@ def test_an_os_error_of_two_arguments_is_not_read_as_raising_os_error_itself():
 
 
 def test_every_builtin_constructor_form_derive_reads_builds_that_class():
-    from mathema.symbolic._raise_reading import BUILTIN_CONSTRUCTORS
+    from mathema._raise_reading import BUILTIN_CONSTRUCTORS
 
     class Unprintable:
         def __str__(self):

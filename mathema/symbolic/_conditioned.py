@@ -1191,7 +1191,7 @@ def _read_the_raise(fn, facts: Facts, domain: dict, trace: list, stmt: ast.Raise
         value of its declared bound (any object for one the domain does
         not bound).
     """
-    from ._raise_reading import ANY, kind_of_bound
+    from .._raise_reading import ANY, kind_of_bound
     steps = []
     for step in trace:
         if step[0] == "stmt" and step[1] is stmt:
