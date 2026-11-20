@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """One run's shared reads: inside `run_scope()`, the claims-file scan,
-the verified store, the library claims and claim parses are each worked
-out once and shared by every caller, instead of once per caller.
+the verified store, the library claims, claim parses and the concept
+curation file are each worked out once and shared by every caller,
+instead of once per caller.
 
 Outside a scope nothing is kept, and every read goes to the disk as it
 always does. A file written inside a scope through
@@ -50,12 +51,17 @@ def kept(kind: str) -> "dict | None":
 def wrote(path: str) -> None:
     """Intent:
         Forget what the run kept from the file at `path`, just
-        written: its verified record, the merged store view built from
-        it, and, for a claims file, the claims-file scan and every read
-        built from claims files.
+        written: its verified record and parsed curation file; for a
+        file inside a project's verified layer, that project's record
+        listing and the merged store view built from it; for a claims
+        file, the claims-file scan and every read built from claims
+        files; and, for a Python source file, every form and name the
+        dependency walk read from source.
 
     Notes:
-        Outside a run this does nothing.
+        Outside a run this does nothing. The listing and view of a
+        project are kept through a write outside its verified layer,
+        which neither of them reads.
     """
     if _STATE is None:
         return
@@ -63,8 +69,24 @@ def wrote(path: str) -> None:
     real = os.path.join(os.path.realpath(os.path.dirname(
         os.path.abspath(path))), os.path.basename(path))
     _STATE.get("verified_file", {}).pop(real, None)
-    _STATE.pop("verified_listing", None)
-    _STATE.pop("verified_view", None)
+    _STATE.get("concept_curation", {}).pop(real, None)
+    for kind in ("verified_listing", "verified_view"):
+        by_root = _STATE.get(kind)
+        if by_root:
+            for where in [w for w in by_root if _in_verified_layer(real, w)]:
+                del by_root[where]
     if _is_claim_file(os.path.dirname(real), os.path.basename(real)):
         for kind in ("claims_paths", "library_claims", "claims_valid"):
             _STATE.pop(kind, None)
+    if real.endswith((".py", ".pyw", ".pyi")):
+        _STATE.pop("dependency_walk", None)
+
+
+def _in_verified_layer(real: str, where: str) -> bool:
+    """Intent:
+        Whether the real path `real` lies inside the verified layer of
+        the project rooted at `where`, at any depth.
+    """
+    from .spec import verified_dir
+    store = os.path.realpath(verified_dir(where))
+    return real.startswith(store + os.sep)
