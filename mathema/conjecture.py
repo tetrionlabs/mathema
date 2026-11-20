@@ -10949,6 +10949,15 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     return validator, param, base, stated
 
 
+def _a_language_of_texts(ref) -> bool:
+    """Whether the language `ref` names is a language of `str` values."""
+    from .languages import resolve_language
+    try:
+        return getattr(resolve_language(ref), "kind", None) == "string"
+    except Exception:
+        return False
+
+
 def _premise_is_f_defined(cj) -> bool:
     """Whether a claim's premise is exactly `f is defined` (or its
     other spelling, `is_defined(f)`), with no region pinned to it and
@@ -11099,7 +11108,8 @@ def _validator_proof(cj, fn, cj_domain):
         about a refusing validator, the function is called only on the
         texts it returns, those of the stated language, so a breaking
         text is one the definitions may place in that language and do
-        not surely place there.
+        not surely place there. A validator matching `s or ''` is read
+        only over a language of texts.
     """
     from . import domain_relations, regular
     from ._validators import read_validator
@@ -11137,6 +11147,9 @@ def _validator_proof(cj, fn, cj_domain):
         return undecided(statement) if statement else None
     _, _, base, stated = statement
     path = f"smt: membership, {param} in {stated!r}"
+    if validator.or_empty and not _a_language_of_texts(base):
+        return undecided(f"the match is on {param} or '', which is {param} only for a "
+                         f"text, and {base!r} is not a language of texts")
     domain = domain_relations.defined_bound(bound)
     if domain is None:
         return undecided(f"the domain of {param} states no regular-language definition")

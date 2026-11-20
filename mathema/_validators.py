@@ -24,7 +24,10 @@ the function object and not assumed from its source text.
 4. The match `m` is `PAT.fullmatch(x)`, `PAT.match(x)` or
    `PAT.search(x)` with the bare parameter as its only argument,
    `re.compile(P[, flags]).fullmatch(x)`, or `re.fullmatch(P, x[,
-   flags])` and its two siblings, with no keyword arguments.
+   flags])` and its two siblings, with no keyword arguments. The text
+   matched may also be `x or ''`, which is `x` for every text `x`;
+   the validator then says so (`or_empty`), and a proof reads it only
+   over a domain of texts.
 5. Every name the body reads is resolved in the function's globals or
    the builtins and checked by identity: `PAT` is an object of the
    exact type `re.Pattern`; `re` is the standard `re` module and the
@@ -32,15 +35,20 @@ the function object and not assumed from its source text.
    the builtins. No such name is a parameter or assigned in the body.
    An inline pattern is a string literal (or a name bound to a `str`)
    and its flags are `re` constants joined by `|`.
-6. `E` is a builtin exception class under its own name, raised with no
-   cause, built from no argument or from one that cannot fail on a
-   text: a string literal, the parameter, `repr` or `str` of the
-   parameter, or an f-string of literals and the parameter with no
-   format specification.
+6. `E` is a builtin exception class under its own name, or a plain
+   exception class of the function's own package: defined in the
+   function's module or in a module of the same top-level package,
+   its only base a builtin exception class under its own name, its
+   type `type`, and holding nothing beyond a plain class's own
+   attributes (its module, its docstring), so building it is building
+   that builtin exception. It is raised with no cause, built from no
+   argument or from one that cannot fail on a text: a string literal,
+   the parameter, `repr` or `str` of the parameter, or an f-string of
+   literals and the parameter with no format specification.
 
 Anything else (text transformed before the match, a second test, a
-`try`, an attribute of an object, a user exception class) is declined,
-and `read_validator` says which part stopped it.
+`try`, an attribute of an object, any other exception class) is
+declined, and `read_validator` says which part stopped it.
 """
 from __future__ import annotations
 
@@ -72,12 +80,14 @@ class Validator:
     `param`; `accepts`, the bound method of the compiled pattern the
     function calls on it (`PAT.fullmatch`), whose truth is acceptance;
     `raises`, the exception class a refusing validator raises (None for
-    a predicate); and `negated`, set for a predicate that returns the
-    match's failure."""
+    a predicate); `negated`, set for a predicate that returns the
+    match's failure; and `or_empty`, set when the text matched is
+    `<param> or ''`, which is the parameter only when it is a text."""
     param: str
     accepts: object
     raises: "type | None" = None
     negated: bool = False
+    or_empty: bool = False
 
     @property
     def pattern(self) -> "re.Pattern":
@@ -122,6 +132,8 @@ class _Reader:
         self.fn = fn
         self.globals = fn.__globals__
         self.local = _stored_names(tree)
+        #: set once a match is read on `<param> or ''`
+        self.or_empty = False
 
     def _global(self, name: str):
         """The object a free name is bound to where the function itself
@@ -211,6 +223,12 @@ class _Reader:
         mode, owner = node.func.attr, node.func.value
 
         def on_param(arg: ast.AST) -> None:
+            if isinstance(arg, ast.BoolOp) and isinstance(arg.op, ast.Or) \
+                    and len(arg.values) == 2 and isinstance(arg.values[1], ast.Constant) \
+                    and type(arg.values[1].value) is str and arg.values[1].value == "" \
+                    and isinstance(arg.values[0], ast.Name) and arg.values[0].id == param:
+                self.or_empty = True
+                return
             if not (isinstance(arg, ast.Name) and arg.id == param):
                 raise _Declined(f"the match is on {ast.unparse(arg)}, not on the "
                                 f"parameter {param!r} as passed")
@@ -259,10 +277,13 @@ class _Reader:
         if not isinstance(exc, ast.Name):
             raise _Declined(f"{ast.unparse(exc)} is not the name of a builtin exception")
         bound = self._global(exc.id)
-        if not (isinstance(bound, type) and issubclass(bound, Exception)
-                and getattr(builtins, exc.id, None) is bound):
-            raise _Declined(f"{exc.id} is not the builtin exception class of that name, "
-                            f"so building it may do anything")
+        builtin = (isinstance(bound, type) and issubclass(bound, Exception)
+                   and getattr(builtins, exc.id, None) is bound)
+        if not builtin:
+            plain = _plain_exception_class(bound, self.fn)
+            if plain is not None:
+                raise _Declined(f"{exc.id} is not the builtin exception class of that name, "
+                                f"and {plain}, so building it may do anything")
         if isinstance(node.exc, ast.Call):
             if node.exc.keywords or len(node.exc.args) > 1:
                 raise _Declined("the exception is built from more than one argument")
@@ -296,6 +317,50 @@ class _Reader:
             return
         raise _Declined(f"the exception's argument {ast.unparse(node)} is more than a "
                         f"string, the parameter, or its repr or str")
+
+
+#: the attributes a class statement with no body beyond a docstring
+#: gives a class, on every supported Python
+_PLAIN_CLASS_ATTRIBUTES = frozenset({"__module__", "__doc__", "__qualname__", "__weakref__",
+                                     "__firstlineno__", "__static_attributes__"})
+
+
+def _same_package(module: str, other: str) -> bool:
+    """Whether two modules are one module, or modules of one top-level
+    package."""
+    if module == other:
+        return True
+    return "." in module and "." in other and module.split(".")[0] == other.split(".")[0]
+
+
+def _plain_exception_class(cls, fn) -> "str | None":
+    """None when `cls` is a plain exception class of `fn`'s own package
+    (point 6), else what stops it, as a phrase."""
+    if not isinstance(cls, type):
+        return "it is not a class"
+    if type(cls) is not type:
+        return "its type is not type"
+    module = dict.get(fn.__globals__, "__name__")
+    if not (isinstance(module, str) and isinstance(cls.__dict__.get("__module__"), str)
+            and _same_package(module, cls.__dict__["__module__"])):
+        return "it is not defined in the function's own package"
+    if len(cls.__bases__) != 1:
+        return "it has more than one base"
+    (base,) = cls.__bases__
+    if not (isinstance(base, type) and issubclass(base, Exception)
+            and getattr(builtins, base.__name__, None) is base):
+        return "its base is not a builtin exception class"
+    extra = sorted(set(cls.__dict__) - _PLAIN_CLASS_ATTRIBUTES)
+    if extra:
+        return f"it holds {', '.join(extra)}"
+    held = cls.__dict__
+    if not (held.get("__doc__") is None or type(held["__doc__"]) is str) \
+            or ("__weakref__" in held
+                and type(held["__weakref__"]) is not types.GetSetDescriptorType) \
+            or held.get("__static_attributes__", ()) != () \
+            or type(held.get("__firstlineno__", 0)) is not int:
+        return "it holds more than a plain class does"
+    return None
 
 
 def _same_code(fn, source: str, name: str) -> bool:
@@ -416,7 +481,7 @@ def _read(fn) -> Validator:
         if bare:
             raise _Declined("it returns the match object, not its truth")
         method, truth = reader.test(value, param)
-        return Validator(param, method, None, negated=not truth)
+        return Validator(param, method, None, negated=not truth, or_empty=reader.or_empty)
     if len(body) == 2 and isinstance(body[0], ast.If) and not body[0].orelse \
             and len(body[0].body) == 1 and isinstance(body[0].body[0], ast.Raise) \
             and isinstance(body[1], ast.Return) \
@@ -424,7 +489,8 @@ def _read(fn) -> Validator:
         method, truth = reader.test(body[0].test, param)
         if truth:
             raise _Declined("it raises when the match succeeds")
-        return Validator(param, method, reader.raised(body[0].body[0], param))
+        return Validator(param, method, reader.raised(body[0].body[0], param),
+                         or_empty=reader.or_empty)
     raise _Declined("its body is more than one test of one match on the parameter")
 
 
