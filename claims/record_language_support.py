@@ -945,6 +945,119 @@ def a_length_is_exact_at_its_bounds(t: int, n: int) -> bool:
     return verdict == "falsified" and len(witness) == 6 and all(rl.member(a, x) for x in witness)
 
 
+_NOT_TRUE = complement(choice(True))
+_TRUE_OR_A = choice(True, "a")
+_AB = choice("a", "b")
+#: questions with several list constraints at once, as (inside, outside): a
+#: list of at most one item that needs an item outside two languages, where
+#: one item can be outside both and where none can; the same with room for
+#: two items; the complement of a bounded list met with another bounded
+#: list; and three and four list terms on one side
+_SEVERAL = [
+    ([lists(ANY, 0, 1), complement(lists(FLAG)), complement(lists(_AB))], []),
+    ([lists(ANY, 0, 1), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], []),
+    ([lists(ANY, 0, 2), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], []),
+    ([lists(ANY, 2, 2), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], [lists(FLAG)]),
+    ([lists(ANY, 0, 1)], [lists(FLAG), lists(_AB)]),
+    ([lists(ANY, 0, 1)], [lists(_TRUE_OR_A), lists(_NOT_TRUE)]),
+    ([lists(ANY, 0, 2)], [lists(_TRUE_OR_A), lists(_NOT_TRUE), lists(ANY, 0, 1)]),
+    ([complement(lists(FLAG, 1, 2)), lists(ANY, 0, 3)], []),
+    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 0, 3)], []),
+    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 1, 2)], []),
+    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 2, 3)], [lists(OFF)]),
+    ([complement(lists(FLAG, 0, 2)), complement(lists(_AB, 0, 2)), lists(ANY, 0, 2)], []),
+    ([complement(lists(FLAG, 0, 2)), complement(lists(_AB, 0, 2)), lists(ANY, 0, 2)], [lists(ANY, 2)]),
+    ([complement(lists(FLAG, 0, 2)), lists(union(FLAG, _AB), 0, 3)], [lists(_AB), lists(ANY, 0, 1)]),
+    ([lists(FLAG), lists(OFF, 1), lists(ANY, 0, 2)], [lists(ANY, 0, 1)]),
+    ([lists(FLAG), lists(OFF, 1), lists(ANY, 0, 2), complement(lists(OFF, 2))], []),
+    ([lists(ANY, 3), complement(lists(FLAG)), complement(lists(_AB)), complement(lists(_X))], []),
+    ([lists(ANY, 0, 2), complement(lists(FLAG)), complement(lists(_AB)), complement(lists(_X))], []),
+    ([lists(ANY, 0, 2), complement(lists(FLAG)), complement(lists(_AB)),
+      complement(lists(complement(_X)))], []),
+    ([lists(lists(ANY, 0, 1)), complement(lists(lists(FLAG))), complement(lists(lists(_AB)))],
+     [lists(ANY, 2)]),
+    ([lists(lists(ANY, 0, 1), 0, 1), complement(lists(lists(_TRUE_OR_A))),
+      complement(lists(lists(_NOT_TRUE)))], []),
+    ([lists(lists(ANY, 0, 2), 0, 1), complement(lists(lists(_TRUE_OR_A))),
+      complement(lists(lists(_NOT_TRUE)))], []),
+]
+
+
+def _wrapped(nodes: list, how: int) -> list:
+    """The nodes as they are, each under a record's one required field,
+    or each as the one item of a list."""
+    if int(how) == 1:
+        return [record(("f", n, True)) for n in nodes]
+    if int(how) == 2:
+        return [lists(n, 1, 1) for n in nodes]
+    return nodes
+
+
+def _wrap_value(value, how: int):
+    return {"f": value} if int(how) == 1 else [value] if int(how) == 2 else value
+
+
+def several_list_constraints_agree_with_enumeration(i: int, how: int) -> bool:
+    """Whether `find_member` on question `i` of several list constraints
+    (as written, under a record's field, or as the one item of a list)
+    finds a value `member` places whenever a small list answers it, and
+    says none only when none does; never unknown. A constraint that is
+    put outside under a field or an item is put outside as the wrapped
+    node, so the question stays the same question one place down, with
+    the wrapping itself asked inside."""
+    rl = _rl()
+    inside, outside = _SEVERAL[int(i)]
+    asked_in = _wrapped(inside, how)
+    asked_out = _wrapped(outside, how)
+    if int(how) and not inside:
+        return True
+    found = rl.find_member(asked_in, asked_out)
+
+    def answers(value) -> bool:
+        return all(rl.member(n, value) for n in asked_in) and not any(rl.member(n, value) for n in asked_out)
+    exists = any(answers(_wrap_value(v, how)) for v in LVALUES)
+    if found.status == "member":
+        return answers(found.member)
+    return found.status == "none" and not exists
+
+
+def the_hard_cases_have_the_answers_stated(how: int) -> bool:
+    """Whether, as written, under a field and inside a list: a list of
+    at most one item with an item outside each of two languages is found
+    when one item can be outside both and is none when no item can; with
+    room for two items it is found, with two items."""
+    rl = _rl()
+
+    def ask(i: int):
+        inside, outside = _SEVERAL[i]
+        return rl.find_member(_wrapped(inside, how), _wrapped(outside, how))
+
+    def unwrapped(value):
+        return value["f"] if int(how) == 1 else value[0] if int(how) == 2 else value
+    shared, never, two = ask(0), ask(1), ask(2)
+    return (shared.status == "member" and len(unwrapped(shared.member)) == 1
+            and never.status == "none"
+            and two.status == "member" and len(unwrapped(two.member)) == 2)
+
+
+def three_list_terms_agree_with_enumeration(t: int, u: int, w: int) -> bool:
+    """Whether, for list terms `t`, `u` and `w`, `find_member` agrees
+    with the small lists on a value in `t` and outside both others, and
+    on a value in `t` and in `u` and outside `w`."""
+    rl, a, b, c = _rl(), LISTS[int(t)], LISTS[int(u)], LISTS[int(w)]
+    for inside, outside in (([a], [b, c]), ([a, b], [c])):
+        found = rl.find_member(inside, outside)
+
+        def answers(value, inside=inside, outside=outside) -> bool:
+            return all(rl.member(n, value) for n in inside) and not any(rl.member(n, value) for n in outside)
+        if found.status == "member":
+            if not answers(found.member):
+                return False
+        elif found.status != "none" or any(answers(v) for v in LVALUES):
+            return False
+    return True
+
+
 def generated_list(seed: int, depth: int = 0) -> dict:
     """A term drawn from `seed` in which lists stand beside the other
     nodes: lists of generated terms, bounded and not, to three deep."""
