@@ -830,6 +830,8 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
             continue
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
+            # the name no longer holds a module the path imported
+            ns.objects.pop(node.targets[0].id, None)
             if isinstance(node.value, ast.Lambda):
                 # building a lambda evaluates its positional and keyword
                 # defaults, and nothing of its body

@@ -466,3 +466,25 @@ def test_a_format_field_of_a_digit_that_is_not_decimal_is_not_read():
     (row,) = check_conjectures(brace_super_digit,
                                [claim("for x in [-5, -1], raises(f(x), ValueError)")])
     assert row.verdict == "falsified", (row.verdict, row.sketch)
+
+
+# ---- third review: a name imported then rebound -----------------------------
+
+def import_rebind(x: float) -> float:
+    import math as m  # noqa: F401
+    m = 5  # noqa: F841
+    raise ValueError(m.isnan(x))
+
+
+def test_a_module_name_rebound_after_its_import_is_not_the_module():
+    import ast
+    import inspect
+    import textwrap
+    from mathema._raise_reading import ReadRaise, ValueKind, read_raise_path
+    with pytest.raises(AttributeError):
+        import_rebind(-3.0)
+    tree = ast.parse(textwrap.dedent(inspect.getsource(import_rebind))).body[0]
+    body = tree.body
+    reading = read_raise_path(import_rebind, [("stmt", s) for s in body[:-1]], body[-1],
+                              {"x": ValueKind(frozenset({float}), 5.0, 1.0)})
+    assert not isinstance(reading, ReadRaise), reading
