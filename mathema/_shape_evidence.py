@@ -464,14 +464,15 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
 
 def _read_only_for_array_attributes(fdef, p: str) -> bool:
     """Intent:
-        Whether every read of `p` in `fdef` reads an array attribute off
-        it (`p.shape`, `p.ndim`, `p.size`, `p.flat`, `p.T`): evidence
+        Whether every read of `p` in `fdef`, apart from a copy of it to a
+        local read through as `p`, reads an array attribute off it (`p.shape`, `p.ndim`, `p.size`, `p.flat`, `p.T`): evidence
         about that attribute, and not that `p` itself is a sequence.
     """
     from .analysis import _ARRAY_ATTRS
     reads = [n for n in ast.walk(fdef)
              if isinstance(n, ast.Name) and n.id == p
-             and isinstance(n.ctx, ast.Load)]
+             and isinstance(n.ctx, ast.Load)
+             and not getattr(n, "_copy_source", False)]
     through = {id(n.value) for n in ast.walk(fdef)
                if isinstance(n, ast.Attribute) and n.attr in _ARRAY_ATTRS
                and isinstance(n.value, ast.Name) and n.value.id == p}

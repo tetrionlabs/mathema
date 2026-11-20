@@ -436,6 +436,11 @@ FNS = '''
         if (t := y0) is not None:
             return t[0]
         return 0.0
+
+
+    def copied_rows(x):
+        a = x
+        return a.shape[0]
 '''
 
 
@@ -797,3 +802,9 @@ def test_a_walrus_copy_is_read_through(mod):
     p = _row(mod.walrus_copy, "f(y0) == f(y0)")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     assert p.meta["mathema.drawn_shapes"]["y0"]["shape"] == "sequence"
+
+
+def test_an_attribute_read_then_indexed_off_a_copy_says_nothing_of_a_sequence(mod):
+    p = _row(mod.copied_rows, "f(x) >= 0")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
