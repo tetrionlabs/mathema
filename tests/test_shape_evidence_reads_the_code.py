@@ -91,6 +91,12 @@ SRC = '''
 
     def below(x):
         return x < 0
+
+
+    def replaced_on_one_line(y0):
+        t = y0
+        t = 2.0; r = t + 1
+        return y0.upper() + str(r)
 '''
 
 
@@ -183,7 +189,6 @@ def test_the_kinds_the_walk_gives_are_unchanged_by_the_extra_uses():
     ("members", {"k": [1.0]}),
     ("stored", {"k": [1.0]}),
     ("fmt", {"x": "a"}),
-    ("shout_at", {"x": 1.0}),
 ])
 def test_a_key_a_subscript_and_any_quoting_of_the_type_name_count(
         mod, name, values):
@@ -204,8 +209,9 @@ def test_a_raise_on_a_local_copy_names_the_parameter(mod):
 
 @pytest.mark.parametrize("name, values", [("times", {"x": 1.0}),
                                           ("below", {"x": [1.0]}),
-                                          ("join", {"s": 1.0})])
-def test_a_raise_naming_a_default_or_a_literal_too_names_nothing(mod, name, values):
+                                          ("join", {"s": 1.0}),
+                                          ("shout_at", {"x": 1.0})])
+def test_a_raise_naming_a_default_a_literal_or_a_local_too_names_nothing(mod, name, values):
     fn = getattr(mod, name)
     with pytest.raises(TypeError) as info:
         fn(*values.values())
@@ -222,3 +228,9 @@ def test_a_disagreement_without_source_says_both_and_names_the_sources():
         "not available): annotated float (a number), but default 'a' (a "
         "string); bind x in the claim, or make its annotation and its "
         "default agree")
+
+
+def test_a_rebinding_on_the_line_of_a_read_ends_the_copy(mod):
+    from mathema._shape_evidence import parameter_shapes
+    found = parameter_shapes(mod.replaced_on_one_line, None, ["y0"], {})["y0"]
+    assert [e.shape for e in found.found] == ["string"], found.found

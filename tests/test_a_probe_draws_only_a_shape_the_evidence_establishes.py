@@ -221,6 +221,23 @@ FNS = '''
 
     def float_repeat(x: float):
         return x * "ab"
+
+
+    def copied_in_a_loop(y0):
+        t = y0
+        acc = 0.0
+        for _ in range(2):
+            acc = acc + t
+            t = "x"
+        return acc
+
+
+    def turned_to_text(x):
+        acc = 0.0
+        for _ in range(2):
+            acc = acc + x
+            acc = str(acc)
+        return acc
 '''
 
 
@@ -334,8 +351,11 @@ def test_a_plain_local_copy_carries_the_parameters_uses(mod):
 
 def test_a_copy_rebound_before_its_use_carries_nothing(mod):
     p = _row(mod.replaced, "f(y0) == 2")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    shape = p.meta["mathema.drawn_shapes"]["y0"]
+    assert shape["source"] == "not read by the body"
+    assert shape["detail"] == ("the body reads it only through a local it may "
+                               "bind to another value first")
 
 
 def test_a_parameter_the_body_never_reads_is_drawn_and_said_so(mod):
@@ -446,3 +466,11 @@ def test_the_family_rows_of_a_float_annotation_draw_floats(mod, monkeypatch):
     rows = {p.name: p.verdict for p in mathema.check(mod.float_repeat_kind).probes}
     assert rows.get("odd") == "falsified", rows
     assert rows.get("idempotent") == "falsified", rows
+
+
+@pytest.mark.parametrize("name, var", [("copied_in_a_loop", "y0"),
+                                       ("turned_to_text", "x")])
+def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod, name, var):
+    p = _row(getattr(mod, name), f"f({var}) == f({var})")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert "mathema.draw_defect" not in (p.meta or {})

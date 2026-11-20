@@ -686,16 +686,21 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
     message = str(exc)
     line = positions[0]
     drawn = set(values) if drawn is None else set(drawn)
+    frame = last.tb_frame
+    runtime = {**frame.f_globals, **dict(frame.f_locals)}
     for node in ast.walk(_with_copies_read_through(fdef, list(values))):
         if not _at(node, positions, offset, fn):
             continue
         operands = _operand_nodes(node)
+        names = [n for o in operands
+                 if (n := _drawn_operand(o, values, drawn, runtime)) is not None]
         held = {t.__name__ for o in operands
-                if (t := _held_type(fn, o, values, drawn)) is not None}
-        for name in [o.id for o in operands if isinstance(o, ast.Name)]:
-            if name not in values or name not in drawn or name in rebound:
+                if _drawn_operand(o, values, drawn, runtime) is None
+                and (t := _held_type(fn, o, values, runtime)) is not None}
+        for name in names:
+            if name in rebound:
                 continue
-            type_name = type(values[name]).__name__
+            type_name = type(runtime[name]).__name__
             if not _names_type(message, type_name):
                 continue
             if any(h != type_name and _names_type(message, h) for h in held):
@@ -804,12 +809,28 @@ _LITERAL_TYPES = {ast.List: list, ast.Tuple: tuple, ast.Dict: dict,
                   ast.SetComp: set, ast.DictComp: dict}
 
 
-def _held_type(fn, operand, values: dict, drawn: set) -> "type | None":
+def _drawn_operand(operand, values: dict, drawn: set, runtime: dict) -> "str | None":
     """Intent:
-        The type of an operand whose value was not drawn: a literal, a
-        parameter given a held value (`values`, not in `drawn`), or a
-        parameter left at its default. None for a drawn value and for
-        any other name.
+        The drawn parameter an operand is, or None: a name (or a local
+        copy read through as the parameter) that the raising call's
+        frame (`runtime`, its globals and locals) binds to the very
+        object the parameter holds there, not to another value.
+    """
+    if not isinstance(operand, ast.Name) or operand.id not in values \
+            or operand.id not in drawn or operand.id not in runtime:
+        return None
+    local = getattr(operand, "_local", operand.id)
+    if local not in runtime or runtime[local] is not runtime[operand.id]:
+        return None
+    return operand.id
+
+
+def _held_type(fn, operand, values: dict, runtime: dict) -> "type | None":
+    """Intent:
+        The type of an operand that is not a drawn value: a literal, a
+        name the raising call's frame binds (`runtime`, its globals and
+        locals), or a parameter left at its default. None for any other
+        name.
     """
     if isinstance(operand, ast.Constant):
         return type(operand.value)
@@ -817,8 +838,11 @@ def _held_type(fn, operand, values: dict, drawn: set) -> "type | None":
         return _LITERAL_TYPES[type(operand)]
     if not isinstance(operand, ast.Name):
         return None
+    local = getattr(operand, "_local", operand.id)
+    if local in runtime:
+        return type(runtime[local])
     if operand.id in values:
-        return None if operand.id in drawn else type(values[operand.id])
+        return type(values[operand.id])
     default = _default_of(fn, operand.id)
     return None if default is inspect.Parameter.empty else type(default)
 
@@ -857,66 +881,169 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
                        receiver=receivers.get(p), body=body.get(p, ()))
            for p in params}
     if fdef is not None:
-        loaded = {n.id for n in ast.walk(fdef)
-                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        loaded = {n.id for n in ast.walk(read)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                  and not getattr(n, "_copy_source", False)}
+        copied = {n.id for n in ast.walk(read)
+                  if getattr(n, "_copy_source", False)}
         for p, shape in out.items():
             if shape.evidence is None and p not in loaded:
                 out[p] = ParameterShape(p, Evidence(
-                    "not read by the body", "any", "the body never reads it"))
+                    "not read by the body", "any",
+                    "the body reads it only through a local it may bind to "
+                    "another value first" if p in copied
+                    else "the body never reads it"))
     return out
 
 
 def _with_copies_read_through(fdef, params: list):
     """Intent:
-        `fdef` with each read of a plain local copy of a parameter (a
-        statement `local = param` in the function's own scope, the only
-        binding of `local` before that read, `param` never rebound) read
-        as the parameter itself, from the line after the copy through
-        the line of the first statement that binds `local` again. Only
-        reads in the function's own scope are read through: a nested
-        function, lambda, class or comprehension has scopes of its own.
-        A local a nested scope declares `nonlocal`, or assigns with
-        `:=`, is never read through, nor is one a nested scope reads or
-        binds when the function binds it again after the copy.
+        `fdef` with each read of a plain local copy of a parameter read
+        as the parameter itself. A copy is a statement in the function's
+        own scope that binds a local to the parameter's value (`local =
+        param`), the only binding of `local` before it, the parameter
+        never rebound. A read of `local` after the copy's line is read
+        through unless another binding of `local` may come before it: a
+        binding on an earlier line, or on the same line in another
+        statement, or one later in a loop around both that gives
+        `local` a value not read from `local` itself (an accumulator,
+        `local = local + v`, keeps the read). Only reads in the
+        function's own scope are read through; a local a nested scope
+        declares `nonlocal`, or assigns with `:=`, is never read
+        through, nor is one a nested scope reads or binds when the
+        function binds it again after the copy. The returned tree marks
+        each copy's own read of the parameter (`_copy_source`), and is
+        `fdef` itself when the body makes no copy.
     """
     import copy
     from .analysis import param_uses
     rebound = param_uses(fdef, params).assigned
-    stores: dict = {}
+    read = copy.deepcopy(fdef)
+    parents = _own_scope_parents(read)
+    bindings: dict = {}
     copies: dict = {}
-    for node in _own_scope(fdef):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
-                and isinstance(node.targets[0], ast.Name) \
-                and isinstance(node.value, ast.Name) \
-                and node.value.id in params and node.value.id not in rebound:
-            copies.setdefault(node.targets[0].id, []).append(node)
+    for node in _own_scope(read):
+        for local, source in _copy_pairs(node, params, rebound):
+            copies.setdefault(local, []).append((node, source))
         for bound in _bound_names(node):
-            stores.setdefault(bound, []).append(node.lineno)
-    mentioned, rebinding = _nested_names(fdef)
+            bindings.setdefault(bound, []).append(node)
+    mentioned, rebinding = _nested_names(read)
     spans: dict = {}
     for local, made in copies.items():
         if len(made) != 1 or local in params or local in rebinding:
             continue
-        line = made[0].lineno
-        if any(at < line for at in stores.get(local, ())):
+        stmt, source = made[0]
+        others = [b for b in bindings.get(local, ())
+                  if _owner(b, parents) is not stmt]
+        if any(b.lineno <= stmt.lineno for b in others):
             continue
-        later = [at for at in stores.get(local, ()) if at > line]
-        if later and local in mentioned:
+        if others and local in mentioned:
             continue
-        spans[local] = (made[0].value.id, line, min(later) if later else None)
+        spans[local] = (source, stmt, others)
     if not spans:
         return fdef
-    read = copy.deepcopy(fdef)
-    for node in _own_scope(read):
+    for local, (source, stmt, others) in spans.items():
+        source._copy_source = True
+    for node in list(_own_scope(read)):
         if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
             continue
         span = spans.get(node.id)
         if span is None:
             continue
-        param, start, end = span
-        if node.lineno > start and (end is None or node.lineno <= end):
-            node.id = param
+        source, stmt, others = span
+        if node.lineno <= stmt.end_lineno \
+                or any(_may_precede(b, node, parents) for b in others):
+            continue
+        node._local = node.id
+        node.id = source.id
     return read
+
+
+def _copy_pairs(node, params: list, rebound) -> list:
+    """Intent:
+        `[(local, param Name node)]` for a plain copy `local = param`
+        one statement makes, else `[]`.
+    """
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+            and isinstance(node.targets[0], ast.Name) \
+            and isinstance(node.value, ast.Name) \
+            and node.value.id in params and node.value.id not in rebound:
+        return [(node.targets[0].id, node.value)]
+    return []
+
+
+def _own_scope_parents(fdef) -> dict:
+    """Intent:
+        `{id(node): parent}` for every node `_own_scope` yields from
+        `fdef`, the parent of a top-level statement being `fdef`.
+    """
+    out: dict = {}
+    body = fdef.body if isinstance(fdef.body, list) else [fdef.body]
+    stack = [(n, fdef) for n in body]
+    while stack:
+        node, parent = stack.pop()
+        out[id(node)] = parent
+        inner = (_enclosing_parts(node) if isinstance(node, _NESTED_SCOPES)
+                 else list(ast.iter_child_nodes(node)))
+        stack.extend((n, node) for n in inner)
+    return out
+
+
+def _ancestors(node, parents: dict) -> list:
+    """The chain of nodes enclosing `node` in its own scope, nearest
+    first, `node` itself included."""
+    chain = [node]
+    while id(chain[-1]) in parents:
+        chain.append(parents[id(chain[-1])])
+    return chain
+
+
+def _owner(binding, parents: dict):
+    """Intent:
+        The node whose execution makes `binding` take effect: the
+        nearest enclosing statement, or the `except` handler or `case`
+        whose name or pattern it is.
+    """
+    for node in _ancestors(binding, parents):
+        if isinstance(node, (ast.stmt, ast.ExceptHandler, ast.match_case)):
+            return node
+    return binding
+
+
+def _may_precede(binding, read, parents: dict) -> bool:
+    """Intent:
+        Whether `binding` may take effect before `read` with a value not
+        read from the bound name itself: it is on an earlier line, or on
+        the read's line in another statement, or it lies in a loop that
+        also holds the read and binds a value that does not read the
+        name (`t = "x"`, unlike `t = t + v`).
+    """
+    owner = _owner(binding, parents)
+    if binding.lineno < read.lineno:
+        return True
+    if binding.lineno == read.lineno:
+        return owner is not _owner(read, parents)
+    loops = [n for n in _ancestors(read, parents)
+             if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
+    if not any(id(n) in {id(a) for a in _ancestors(binding, parents)}
+               for n in loops):
+        return False
+    return not _reads_itself(owner, binding)
+
+
+def _reads_itself(owner, binding) -> bool:
+    """Intent:
+        Whether the statement `owner` binds the name `binding` to a value
+        read from that name: an augmented assignment, or an assignment
+        whose value reads the name.
+    """
+    name = getattr(binding, "id", None)
+    if isinstance(owner, ast.AugAssign):
+        return True
+    if isinstance(owner, ast.Assign) and name is not None:
+        return any(isinstance(n, ast.Name) and n.id == name
+                   and isinstance(n.ctx, ast.Load) for n in ast.walk(owner.value))
+    return False
 
 
 #: the nodes that open a scope of their own inside a function
