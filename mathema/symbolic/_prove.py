@@ -4744,6 +4744,27 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
 
 
+def _listed_missing(domain: dict) -> list:
+    """Intent:
+        `x = nan` for each missing value a parameter's bound lists (a
+        sentinel in a finite set or in a domain's pieces, or the
+        absence a domain admits), in parameter order; empty when the
+        bounds list none.
+    """
+    from ..domain import ABSENT, Domain, _as_domain, _set_sentinels
+    out = []
+    for param, bound in domain.items():
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            continue
+        found = [str(s) for s in _set_sentinels(dom)]
+        if isinstance(dom, Domain) and dom.absent and ABSENT not in _set_sentinels(dom):
+            found.append(str(ABSENT))
+        out += [f"{param} = {s}" for s in found]
+    return out
+
+
 def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
                      domain: dict | None = None, max_callee_depth: int = 3) -> ProofResult:
     """A raises(...) claim on the derive route, only ever reachable via
@@ -4761,6 +4782,12 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
+
+    listed = _listed_missing(domain or {})
+    if listed:
+        return ProofResult("unliftable", sketch=(
+            f"the domain lists the missing value{'s' if len(listed) > 1 else ''} "
+            f"{', '.join(listed)}, and derive reads only the real points of a domain"))
 
     if facts.tree is not None and not any(isinstance(n, ast.Raise) for n in ast.walk(facts.tree)):
         return ProofResult("unliftable", sketch="no explicit raise statement "
