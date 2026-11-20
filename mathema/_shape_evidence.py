@@ -1156,7 +1156,8 @@ def _with_copies_read_through(fdef, params: list):
         `fdef` with each read of a plain local copy of a parameter read
         as the parameter itself. A copy is a statement in the function's
         own scope that binds a local to the parameter's value (`local =
-        param`, or a name of `a, local = x, param` matched by position),
+        param`, `(local := param)`, or a name of `a, local = x, param`
+        matched by position),
         the only binding of `local` before it, the parameter
         never rebound. A read of `local` after the copy's line is read
         through unless another binding of `local` may come before it: a
@@ -1179,8 +1180,8 @@ def _with_copies_read_through(fdef, params: list):
     bindings: dict = {}
     copies: dict = {}
     for node in _own_scope(read):
-        for local, source in _copy_pairs(node, params, rebound):
-            copies.setdefault(local, []).append((node, source))
+        for local, source, target in _copy_pairs(node, params, rebound):
+            copies.setdefault(local, []).append((node, source, target))
         for bound in _bound_names(node):
             bindings.setdefault(bound, []).append(node)
     mentioned, rebinding = _nested_names(read)
@@ -1191,9 +1192,8 @@ def _with_copies_read_through(fdef, params: list):
     for local, made in copies.items():
         if len(made) != 1 or local in params or local in rebinding:
             continue
-        stmt, source = made[0]
-        others = [b for b in bindings.get(local, ())
-                  if _owner(b, parents) is not stmt]
+        stmt, source, target = made[0]
+        others = [b for b in bindings.get(local, ()) if b is not target]
         if any(b.lineno <= stmt.lineno for b in others):
             continue
         if others and local in mentioned:
@@ -1223,12 +1223,17 @@ def _with_copies_read_through(fdef, params: list):
 
 def _copy_pairs(node, params: list, rebound) -> list:
     """Intent:
-        `[(local, param Name node), ...]` for the plain copies one
-        statement makes: `local = param`, and each `local` matched by
+        `[(local, param Name node, local Name node), ...]` for the plain
+        copies one node makes: `local = param`, `(local := param)`, and
+        each `local` matched by
         position to a `param` in `a, local = x, param` (a tuple or list
         of names against a tuple or list of the same length), a name the
         target binds once only.
     """
+    if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name) \
+            and isinstance(node.value, ast.Name) and node.value.id in params \
+            and node.value.id not in rebound:
+        return [(node.target.id, node.value, node.target)]
     if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
         return []
     target, value = node.targets[0], node.value
@@ -1242,7 +1247,7 @@ def _copy_pairs(node, params: list, rebound) -> list:
     else:
         return []
     names = [t.id for t in ast.walk(target) if isinstance(t, ast.Name)]
-    return [(t.id, v) for t, v in pairs
+    return [(t.id, v, t) for t, v in pairs
             if isinstance(t, ast.Name) and isinstance(v, ast.Name)
             and v.id in params and v.id not in rebound
             and names.count(t.id) == 1]
