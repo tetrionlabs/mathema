@@ -88,7 +88,7 @@ def test_unresolvable_dotted_path_is_skipped_naming_the_function():
     law = "let g = nope.not.real, for x in (0,100], g(x) >= 0"
     result = check_conjectures(
         identity, [claim(law, route="probe")], extensive=False)[0]
-    assert result.verdict == "skipped"
+    assert result.verdict == "skipped:misspecified"
     assert "g" in result.note
 
 

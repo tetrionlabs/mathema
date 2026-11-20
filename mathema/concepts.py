@@ -220,18 +220,46 @@ def curation_path(root: str = ".") -> str:
 
 
 def dismissed_concepts(root: str, key: str) -> list:
-    """The dismissed-concept list for one key, [] when none."""
+    """The dismissed-concept list for one key, [] when none.
+
+    Inside a `_run_scope.run_scope()` the curation file is parsed once
+    for the run (again after it is written), and every call returns
+    its own copy of the list."""
+    import copy
+    import os
+
+    from . import _run_scope
+    path = curation_path(root)
+    kept = _run_scope.kept("concept_curation")
+    if kept is None:
+        doc = _read_curation(path)
+    else:
+        real = os.path.join(os.path.realpath(os.path.dirname(
+            os.path.abspath(path))), os.path.basename(path))
+        if real not in kept:
+            kept[real] = _read_curation(path)
+        doc = kept[real]
+    if doc is None:
+        return []
+    return copy.deepcopy(
+        list((doc.get(key) or {}).get("concepts_dismissed") or []))
+
+
+def _read_curation(path: str):
+    """Intent:
+        The parsed concept-curation file at `path` (an empty file reads
+        as `{}`), or None when it does not exist or does not parse.
+    """
     import os
 
     import yaml
-    path = curation_path(root)
     if not os.path.exists(path):
-        return []
+        return None
     try:
-        doc = yaml.safe_load(open(path)) or {}
+        with open(path) as fh:
+            return yaml.safe_load(fh) or {}
     except Exception:
-        return []
-    return list((doc.get(key) or {}).get("concepts_dismissed") or [])
+        return None
 
 def accept_concepts(root: str, key: str, accepted: list,
                     dismissed: list, by: "str | None" = None) -> str:

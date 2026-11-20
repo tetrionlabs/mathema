@@ -115,3 +115,109 @@ def test_the_declared_layer_uses_the_same_names(tmp_path):
     assert os.path.dirname(path) == os.path.join(root, ".mathema",
                                                  "declared")
     assert not os.path.exists(legacy)
+
+
+AWKWARD = ["a%", "a%25", "100%:sure#/x", "a b", "naïve.fn", "x%zz", "%41",
+           "dir/sub/key", "tab\tkey", "q?&=+", "ünï/cødé%e9"]
+
+
+@pytest.mark.parametrize("key", AWKWARD)
+def test_awkward_keys_round_trip_through_save_and_load(tmp_path, key):
+    root = str(tmp_path)
+    path = save_verified_entry(key, _entry(), root)
+    assert os.path.dirname(path) == verified_dir(root)
+    assert record_key(os.path.basename(path)) == key
+    assert set(load_verified(root)) == {key}
+
+
+def test_a_name_the_writer_encodes_still_decodes():
+    assert record_file_name("a%") == "a%25.yaml"
+    assert record_key("a%25.yaml") == "a%"
+    assert record_key("a%2525.yaml") == "a%25"
+
+
+def test_an_old_name_holding_percent_hex_reads_as_itself(tmp_path):
+    assert record_key("a%25.yaml", held=["a%25"]) == "a%25"
+    assert record_key("a%25.yaml", held=["a%"]) == "a%"
+    assert record_key("a%25.yaml", held=[]) == "a%"
+    root = str(tmp_path)
+    old = _legacy(root, "a%25", "f1")
+    assert set(load_verified(root)) == {"a%25"}
+    save_verified_entry("a%25", _entry("f2"), root)
+    assert not os.path.exists(old)
+    assert os.listdir(verified_dir(root)) == [record_file_name("a%25")]
+    assert load_verified(root)["a%25"]["entry"]["identity"]["form"] == "f2"
+
+
+def test_an_old_percent_name_and_the_encoded_name_of_another_key_coexist(
+        tmp_path):
+    root = str(tmp_path)
+    _legacy(root, "a%25", "old")
+    save_verified_entry("a%", _entry("new"), root)
+    loaded = load_verified(root)
+    assert set(loaded) == {"a%25", "a%"}
+    assert loaded["a%25"]["entry"]["identity"]["form"] == "old"
+
+
+def _bytes_file(store, name, data):
+    os.makedirs(store, exist_ok=True)
+    path = os.path.join(store, name)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path
+
+
+@pytest.mark.parametrize("layer", ["verified", "declared"])
+def test_an_undecodable_percent_file_does_not_stop_a_record_write(
+        tmp_path, layer):
+    from mathema.spec import declared_dir, record_path
+    store = (verified_dir if layer == "verified" else declared_dir)(
+        str(tmp_path))
+    _bytes_file(store, "a%25.yaml", b"a%25:\n  note: caf\xe9\n")
+    path = record_path(store, "pkg.fn")
+    assert os.path.basename(path) == "pkg.fn.yaml"
+
+
+@pytest.mark.parametrize("layer", ["verified", "declared"])
+def test_an_unreadable_percent_file_does_not_stop_a_record_write(
+        tmp_path, layer):
+    from mathema.spec import declared_dir, record_path
+    store = (verified_dir if layer == "verified" else declared_dir)(
+        str(tmp_path))
+    locked = _bytes_file(store, "a%25.yaml", b"a%25: {}\n")
+    os.chmod(locked, 0)
+    try:
+        path = record_path(store, "pkg.fn")
+    finally:
+        os.chmod(locked, 0o600)
+    assert os.path.basename(path) == "pkg.fn.yaml"
+
+
+def test_a_store_of_ordinary_tagged_keys_opens_no_file_for_the_check(
+        tmp_path, monkeypatch):
+    from mathema import spec
+    root = str(tmp_path)
+    for i in range(4):
+        save_verified_entry(f"lang:src/m{i}.src#f{i}", _entry(), root)
+    opened = []
+    real = spec.read_verified_file
+    monkeypatch.setattr(spec, "read_verified_file",
+                        lambda p: opened.append(p) or real(p))
+    spec._MIGRATED_STORES.clear()
+    spec.migrate_record_names(verified_dir(root))
+    assert opened == []
+
+
+def test_the_ambiguous_name_is_still_opened_and_resolved(tmp_path,
+                                                         monkeypatch):
+    from mathema import spec
+    root = str(tmp_path)
+    _legacy(root, "a%25", "old")
+    opened = []
+    real = spec.read_verified_file
+    monkeypatch.setattr(spec, "read_verified_file",
+                        lambda p: opened.append(p) or real(p))
+    moved = spec.migrate_record_names(verified_dir(root))
+    assert len(opened) == 1
+    assert [os.path.basename(n) for _o, n in moved] == [
+        record_file_name("a%25")]

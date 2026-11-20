@@ -14,6 +14,7 @@ job can post as a PR comment.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 
 
@@ -32,17 +33,73 @@ def _git(root: str, *args: str) -> "str | None":
     return r.stdout if r.returncode == 0 else None
 
 
+_BATCH_HEADER = re.compile(rb"^[0-9a-f]{40,64} (\w+) (\d+)$")
+
+
+def _blobs_at_ref(root: str, ref: str, paths: list) -> "dict | None":
+    """Intent:
+        `{path: text}` for each of `paths` as it stood at `ref`, read
+        with a single `git cat-file --batch` call. A path absent or
+        ambiguous at the ref, not a blob, or not UTF-8 text is left
+        out. None when the git call fails.
+    """
+    if not paths:
+        return {}
+    request = "".join(f"{ref}:{p}\n" for p in paths).encode()
+    try:
+        r = subprocess.run(["git", "cat-file", "--batch"], cwd=root or ".",
+                           input=request, capture_output=True, timeout=60)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    data, pos, out = r.stdout, 0, {}
+    for path in paths:
+        end = data.find(b"\n", pos)
+        if end < 0:
+            break
+        line = data[pos:end]
+        pos = end + 1
+        found = _BATCH_HEADER.match(line)
+        if found is None:
+            continue
+        size = int(found.group(2))
+        body = data[pos:pos + size]
+        pos += size + 1
+        if found.group(1) != b"blob":
+            continue
+        try:
+            out[path] = body.decode()
+        except UnicodeDecodeError:
+            continue
+    return out
+
+
+def _blobs_one_by_one(root: str, ref: str, paths: list) -> dict:
+    """Intent:
+        `{path: text}` as `_blobs_at_ref` gives, reading each path with
+        its own `git show`.
+    """
+    out = {}
+    for path in paths:
+        blob = _git(root, "show", f"{ref}:{path}")
+        if blob is not None:
+            out[path] = blob
+    return out
+
+
 def _records_at_ref(root: str, ref: str) -> dict:
     """`{key: entry}` for every verified record as it stood at `ref`."""
-    import os
     import yaml
     listing = _git(root, "ls-tree", "-r", "--name-only", ref, "--",
                    ".mathema/verified")
+    paths = [p for p in (listing or "").splitlines() if p.endswith(".yaml")]
+    blobs = _blobs_at_ref(root, ref, paths)
+    if blobs is None:
+        blobs = _blobs_one_by_one(root, ref, paths)
     out: dict = {}
-    for path in (listing or "").splitlines():
-        if not path.endswith(".yaml"):
-            continue
-        blob = _git(root, "show", f"{ref}:{path}")
+    for path in paths:
+        blob = blobs.get(path)
         if blob is None:
             continue
         try:
@@ -51,7 +108,6 @@ def _records_at_ref(root: str, ref: str) -> dict:
             continue
         for key, entry in doc.items():
             out[key] = entry
-    _ = os  # (kept for parity with the working-tree loader)
     return out
 
 

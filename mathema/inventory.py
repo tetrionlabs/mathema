@@ -27,6 +27,7 @@ import functools
 import inspect
 import os
 import re
+import weakref
 from dataclasses import dataclass, field
 
 from .analysis import Facts, quiet_facts
@@ -880,12 +881,14 @@ def is_test_covered(fn, coverage_data: dict[str, set[int]] | None) -> bool | Non
 
 
 
-def _module_attribute_callees(fn, name: str, module) -> list[dict]:
+def _module_attribute_callees(fn, name: str, module,
+                              chains: bool = True) -> list[dict]:
     """Intent:
         The functions `fn` reaches through a module it references by
         `name`: every `name.attr` (or `name.sub.attr`) read in the body
         that resolves to a plain function, recorded like a directly
-        named callee, with its dotted key, source location and form.
+        named callee, with its dotted key, source location and form
+        (only its name, kind and key when `chains` is False).
 
     Notes:
         Empty when the body cannot be read. An attribute that resolves
@@ -924,6 +927,9 @@ def _module_attribute_callees(fn, name: str, module) -> list[dict]:
         seen.add(dotted)
         dep: dict = {"name": dotted, "kind": "function",
                      "key": f"{obj.__module__}.{obj.__qualname__}"}
+        if not chains:
+            out.append(dep)
+            continue
         foreign = foreign_body(obj)
         try:
             src = None if foreign else inspect.getsourcefile(obj)
@@ -983,7 +989,6 @@ def _class_rests_on(cls: type) -> list[object]:
     functions its body names (decorators, validators, helpers its
     methods call), each resolved against the class's module."""
     import sys
-    import textwrap
     import typing as t
     out: list[object] = list(cls.__bases__)
     try:
@@ -993,19 +998,41 @@ def _class_rests_on(cls: type) -> list[object]:
     for ann in hints.values():
         out.extend(_annotation_classes(ann))
     g = vars(sys.modules.get(cls.__module__) or object())
+    paths = _kept_from_source(cls, "class_names", _class_name_paths)
+    if paths is None:
+        return out
+    out.extend(_paths_resolved(paths, g))
+    return out
+
+
+def _class_name_paths(cls: type) -> "list[tuple] | None":
+    """Intent:
+        The `_name_paths` of a class's dedented source, None when the
+        source cannot be read or parsed.
+    """
+    import textwrap
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
     except (OSError, TypeError, SyntaxError):
-        return out
-    out.extend(_names_resolved(tree, g))
-    return out
+        return None
+    return _name_paths(tree)
 
 
 def _names_resolved(tree: ast.AST, g: dict) -> list[object]:
     """The classes and functions a piece of source names, each bare name
     and each dotted name through a module (`dataclasses.dataclass`)
     resolved against the namespace `g`."""
-    found: list[object] = []
+    return _paths_resolved(_name_paths(tree), g)
+
+
+def _name_paths(tree: ast.AST) -> list[tuple]:
+    """Intent:
+        Every name a piece of source reads, in `ast.walk` order, as
+        `(name, attributes)`: a bare name `a` is `("a", ())` and a
+        dotted read `a.b.c` is `("a", ("b", "c"))`, each attribute
+        chain inside it (`a.b`, `a`) listed as well.
+    """
+    found: list[tuple] = []
     for node in ast.walk(tree):
         path: list[str] = []
         cur: ast.expr = node
@@ -1014,10 +1041,23 @@ def _names_resolved(tree: ast.AST, g: dict) -> list[object]:
             cur = cur.value
         if not (isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Load)):
             continue
-        if path and not inspect.ismodule(g.get(cur.id)):
+        found.append((cur.id, tuple(reversed(path))))
+    return found
+
+
+def _paths_resolved(paths: list[tuple], g: dict) -> list[object]:
+    """Intent:
+        The classes and functions the `_name_paths` entries `paths`
+        resolve to in the namespace `g`: a bare name looked up in `g`,
+        a dotted one only through a module bound in `g`, each
+        attribute read with `getattr`.
+    """
+    found: list[object] = []
+    for name, path in paths:
+        if path and not inspect.ismodule(g.get(name)):
             continue
-        obj = g.get(cur.id)
-        for attr in reversed(path):
+        obj = g.get(name)
+        for attr in path:
             obj = getattr(obj, attr, None)
         if inspect.isclass(obj) or inspect.isfunction(obj):
             found.append(obj)
@@ -1112,6 +1152,125 @@ def chain_summary(dep: dict) -> str:
         for name, v in parts.items())
 
 
+#: the run-scope kind holding the dependency walk's memos
+_WALK = "dependency_walk"
+
+
+def _walk_memo(table: str) -> "weakref.WeakKeyDictionary | None":
+    """Intent:
+        The run's memo `table` of the dependency walk, keyed weakly by
+        the function or class read, or None outside a run.
+    """
+    from ._run_scope import kept
+    store = kept(_WALK)
+    if store is None:
+        return None
+    memo = store.get(table)
+    if memo is None:
+        memo = store[table] = weakref.WeakKeyDictionary()
+    return memo
+
+
+def _carries_facts(obj: object) -> bool:
+    """Intent:
+        Whether `obj`, or a function it wraps (`__wrapped__`, followed
+        as `foreign_body` follows it), carries `__mathema_facts__`.
+    """
+    seen = 0
+    while obj is not None and seen < 16:
+        if getattr(obj, "__mathema_facts__", None) is not None:
+            return True
+        obj = getattr(obj, "__wrapped__", None)
+        seen += 1
+    return False
+
+
+def _frontends_registered() -> bool:
+    """Intent:
+        Whether any entry is registered under the `mathema.frontends`
+        group, whose frontends may write a function's body.
+    """
+    from .koine import frontends
+    return bool(frontends._entry_points())
+
+
+def _source_stamp(obj: object) -> "tuple | None":
+    """Intent:
+        What `inspect.getsource(obj)` reads, as a comparable stamp: the
+        object `obj` unwraps to (held weakly), that object's code,
+        qualified name, name and first line, `obj`'s own name, and the
+        path, size and modification time of the source file. None when
+        any part cannot be read, or the file path is not absolute.
+
+    Notes:
+        `linecache`, which `inspect.getsource` reads through, reloads a
+        file only when its size or modification time changes, so the
+        source read for a stamp that compares equal is the same text.
+    """
+    try:
+        inner = inspect.unwrap(obj)
+        path = inspect.getsourcefile(inner)
+        if not path or not os.path.isabs(path):
+            return None
+        stat = os.stat(path)
+        ref = weakref.ref(inner)
+    except (TypeError, ValueError, OSError):
+        return None
+    return (ref, getattr(inner, "__code__", None),
+            getattr(inner, "__qualname__", None),
+            getattr(inner, "__name__", None),
+            getattr(inner, "__firstlineno__", None),
+            getattr(obj, "__name__", None),
+            path, stat.st_size, stat.st_mtime_ns)
+
+
+def _same_stamp(a: tuple, b: tuple) -> bool:
+    """Intent:
+        Whether two `_source_stamp`s name the same unwrapped object and
+        agree on every other part.
+    """
+    inner = a[0]()
+    return inner is not None and inner is b[0]() and a[1:] == b[1:]
+
+
+def _kept_from_source(obj: object, table: str, read):
+    """Intent:
+        `read(obj)`, for a `read` that depends only on the source text
+        of `obj` and the objects in its `_source_stamp`. Inside a run
+        the value is kept in the memo `table` under `obj` with its
+        stamp, and reused while the stamp is unchanged.
+
+    Notes:
+        Read every time outside a run, for an `obj` with no stamp or
+        that takes no weak reference, for an `obj` that carries
+        `__mathema_facts__`, and while any frontend is registered. A
+        `read` that raises keeps nothing.
+    """
+    memo = _walk_memo(table)
+    if memo is None or _carries_facts(obj) or _frontends_registered():
+        return read(obj)
+    stamp = _source_stamp(obj)
+    if stamp is None:
+        return read(obj)
+    try:
+        hit = memo.get(obj)
+    except TypeError:
+        return read(obj)
+    if hit is not None and _same_stamp(hit[0], stamp):
+        return hit[1]
+    value = read(obj)
+    memo[obj] = (stamp, value)
+    return value
+
+
+def _function_form(fn) -> "str | None":
+    """Intent:
+        The form of `fn`'s facts (`quiet_facts`), None when it has none.
+    """
+    facts = quiet_facts(fn)
+    return facts.form if facts is not None else None
+
+
 def _form_entry(obj: object) -> "dict | None":
     from .analysis import _installed_code
     if (inspect.isclass(obj) or inspect.isfunction(obj)) and (
@@ -1119,12 +1278,12 @@ def _form_entry(obj: object) -> "dict | None":
             or getattr(obj, "__module__", None) in _LANGUAGE_MODULES):
         return library_entry(obj)
     if inspect.isclass(obj):
-        form = class_form(obj)
+        form = _kept_from_source(obj, "class_form", class_form)
         kind = "class"
     elif inspect.isfunction(obj):
         from .analysis import _installed_code
-        facts = None if _installed_code(obj) else quiet_facts(obj)
-        form = facts.form if facts is not None else None
+        form = (None if _installed_code(obj) else
+                _kept_from_source(obj, "function_form", _function_form))
         kind = "function"
     else:
         return None
@@ -1139,18 +1298,28 @@ def _function_rests_on(fn) -> list[object]:
     functions its definition names (callees, classes it reads, those
     reached through a module it references, and those in its
     annotations), resolved against its module."""
-    from .analysis import foreign_body, get_tree
+    from .analysis import foreign_body
     g = module_scope(fn)
     if foreign_body(fn):
         facts = quiet_facts(fn)
         names = facts.global_funcs if facts is not None else []
         return [o for o in (g.get(n) for n in names)
                 if inspect.isclass(o) or inspect.isfunction(o)]
+    paths = _kept_from_source(fn, "function_names", _function_name_paths)
+    return _paths_resolved(paths, g)
+
+
+def _function_name_paths(fn) -> list[tuple]:
+    """Intent:
+        The `_name_paths` of `fn`'s definition (`get_tree`), empty when
+        it cannot be read.
+    """
+    from .analysis import get_tree
     try:
         _src, fdef = get_tree(fn)
     except Exception:
         return []
-    return _names_resolved(fdef, g)
+    return _name_paths(fdef)
 
 
 def dependency_reach(obj: object) -> list[dict]:
@@ -1234,6 +1403,32 @@ def _class_dependency(name: str, cls: type) -> dict:
     return dep
 
 
+def _locate(dep: dict, obj: object, kind: str) -> None:
+    """Intent:
+        Set, in place, the source `file` and first `line` of the
+        dependency `obj` on its entry `dep`, each only when it can be
+        read and `obj` is not a stand-in for a body another frontend
+        wrote (`foreign_body`).
+    """
+    from .analysis import foreign_body
+    foreign = foreign_body(obj)
+    try:
+        src = None if foreign else inspect.getsourcefile(obj)
+        if src:
+            dep["file"] = src
+    except TypeError:
+        pass
+    line = (None if foreign else
+            getattr(getattr(obj, "__code__", None), "co_firstlineno", None))
+    if line is None and kind == "class":
+        try:
+            line = inspect.getsourcelines(obj)[1]
+        except (OSError, TypeError):
+            line = None
+    if line is not None:
+        dep["line"] = line
+
+
 def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) -> list[dict]:
     """One-deep dependency records for the verified spec: every callee
     this function references (sibling functions, classes, modules,
@@ -1249,6 +1444,31 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
     the module. One level deep is enough by
     design: freshness composes, an unchanged callee form means that
     callee's own claims still stand."""
+    return _dependencies(fn, facts, chains=True)
+
+
+def dependency_edges(fn: Callable[..., Any],
+                     facts: Facts | None = None) -> list[tuple]:
+    """Intent:
+        The `(key, kind)` pair of every entry `function_dependencies(fn,
+        facts)` lists, in the same order, with `None` for an entry that
+        has no key: the edges of the call graph, read without working
+        out any dependency's form, reach or chain.
+    """
+    return [(d.get("key"), d.get("kind"))
+            for d in _dependencies(fn, facts, chains=False)]
+
+
+def _dependencies(fn: Callable[..., Any], facts: Facts | None,
+                  chains: bool) -> list[dict]:
+    """Intent:
+        The entries `function_dependencies` lists. With `chains` True
+        each carries its source location, form, reach, chain and
+        provenance as `function_dependencies` describes; with `chains`
+        False each carries only its name, kind and key (and a
+        constant's value), and the same entries are listed in the same
+        order.
+    """
     facts = facts if facts is not None else quiet_facts(fn)
     if facts is None:
         return []
@@ -1281,30 +1501,15 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             dep["key"] = getattr(obj, "__name__", name)
         elif mod and qual:
             dep["key"] = f"{mod}.{qual}"
-        from .analysis import foreign_body
-        foreign = foreign_body(obj)
-        try:
-            src = None if foreign else inspect.getsourcefile(obj)
-            if src:
-                dep["file"] = src
-        except TypeError:
-            pass
-        line = (None if foreign else
-                getattr(getattr(obj, "__code__", None), "co_firstlineno", None))
-        if line is None and kind == "class":
-            try:
-                line = inspect.getsourcelines(obj)[1]
-            except (OSError, TypeError):
-                line = None
-        if line is not None:
-            dep["line"] = line
-        if kind == "class":
+        if chains:
+            _locate(dep, obj, kind)
+        if chains and kind == "class":
             form = class_form(obj)
             if form:
                 dep["form"] = form
                 dep["reaches"] = class_reach(obj)
                 dep["chain"] = chain_summary(dep)
-        if kind == "function":
+        if chains and kind == "function":
             callee_facts = quiet_facts(obj)
             if callee_facts is not None:
                 dep["form"] = callee_facts.form
@@ -1316,7 +1521,7 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
                     dep["provenance"] = body
         out.append(dep)
         if kind == "module":
-            out.extend(_module_attribute_callees(fn, name, obj))
+            out.extend(_module_attribute_callees(fn, name, obj, chains))
     try:
         sig = callable_signature(fn)
     except (TypeError, ValueError):
@@ -1334,7 +1539,8 @@ def function_dependencies(fn: Callable[..., Any], facts: Facts | None = None) ->
             if key in listed or class_form(cls) is None:
                 continue
             listed.add(key)
-            out.append(_class_dependency(name, cls))
+            out.append(_class_dependency(name, cls) if chains else
+                       {"name": name, "kind": "class", "key": key})
     for p in sig.parameters.values():
         ann = p.annotation
         if ann is inspect.Parameter.empty:
