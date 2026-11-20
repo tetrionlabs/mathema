@@ -5701,13 +5701,17 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
         meta["mathema.assumptions"] = {
             "standard": domain_relations.standard_assumptions(),
             "definitions": decision.assumptions}
-        assumed = "; " + domain_relations.assuming_text(decision.assumptions)
+        assumed = "; " + domain_relations.assuming_text(decision.assumptions,
+                                                        decision.verdict)
     if decision.verdict == "proven":
         return Probe(cj.name, statement, "proven", route="derive",
                      sketch=f"{path}: {decision.reason}{assumed}", meta=meta,
                      grammar=cj.grammar)
+    # a falsified with no executed string rests on the definitions and
+    # says so, as a proof does
     return Probe(cj.name, statement, "falsified", route="derive",
-                 counterexample=decision.reason, note=decision.reason,
+                 counterexample=decision.reason, note=f"{decision.reason}{assumed}",
+                 sketch=f"{path}: {decision.reason}{assumed}" if assumed else None,
                  meta=meta, grammar=cj.grammar)
 
 

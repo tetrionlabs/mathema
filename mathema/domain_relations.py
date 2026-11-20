@@ -813,12 +813,13 @@ def standard_assumptions() -> dict:
                                "status": "assumed"}}
 
 
-def assuming_text(assumptions: list) -> str:
+def assuming_text(assumptions: list, verdict: str = "proven") -> str:
     """`proven, assuming A (checked), B (assumed)` for the definitions a
-    proof read; `proven` alone when it read none."""
+    verdict rests on (`falsified, assuming ...` for a falsified one);
+    the verdict word alone when it read none."""
     if not assumptions:
-        return "proven"
-    return "proven, assuming " + ", ".join(
+        return verdict
+    return f"{verdict}, assuming " + ", ".join(
         f"{a['statement']} ({a['status']})" for a in assumptions)
 
 

@@ -157,3 +157,20 @@ def test_a_reading_the_function_does_not_bear_out_is_declined(served):
     # proven; the function accepts them
     row = _row(check, "for s in L[onlya, len >= 1], raises(f(s), ValueError)")
     assert row.verdict != "proven", (row.verdict, row.sketch)
+
+
+def test_a_falsified_with_no_executed_string_says_what_it_assumes(served):
+    row = _row(check, "L[onlya] not subset L[right]")
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    ending = ("falsified, assuming L[onlya] == its stated definition (checked), "
+              "L[right] == its stated definition (checked)")
+    assert row.sketch.endswith(ending) and row.note.endswith(ending)
+    assert len(row.meta["mathema.assumptions"]["definitions"]) == 2
+    assert "mathema.rests_on_membership" not in row.meta
+
+
+def test_a_falsified_by_an_executed_string_assumes_nothing(served):
+    row = _row(check, "L[right] subset L[onlya]")
+    assert row.verdict == "falsified", (row.verdict, row.note)
+    assert "assuming" not in (row.note or "") + (row.sketch or "")
+    assert row.meta["mathema.rests_on_membership"] == ["L[onlya]", "L[right]"]
