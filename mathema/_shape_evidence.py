@@ -370,6 +370,9 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
         if shape == "number" and p in uses.text and p not in uses.numeric:
             # every operator use joins it with text
             shape = None
+        if shape == "sequence" and _read_only_for_array_attributes(fdef, p):
+            # `x.shape[0]` indexes the attribute, not `x`
+            shape = None
         if shape is not None:
             how = {"sequence": "the body indexes, iterates or measures it",
                    "mapping": "the body reads it as a mapping",
@@ -401,6 +404,22 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
         for p, ev in _passed_on(fn, fdef, params, depth).items():
             out[p].extend(ev)
     return out
+
+
+def _read_only_for_array_attributes(fdef, p: str) -> bool:
+    """Intent:
+        Whether every read of `p` in `fdef` reads an array attribute off
+        it (`p.shape`, `p.ndim`, `p.size`, `p.flat`, `p.T`): evidence
+        about that attribute, and not that `p` itself is a sequence.
+    """
+    from .analysis import _ARRAY_ATTRS
+    reads = [n for n in ast.walk(fdef)
+             if isinstance(n, ast.Name) and n.id == p
+             and isinstance(n.ctx, ast.Load)]
+    through = {id(n.value) for n in ast.walk(fdef)
+               if isinstance(n, ast.Attribute) and n.attr in _ARRAY_ATTRS
+               and isinstance(n.value, ast.Name) and n.value.id == p}
+    return bool(reads) and all(id(n) in through for n in reads)
 
 
 def _integer_only(form: str, name: str) -> bool:

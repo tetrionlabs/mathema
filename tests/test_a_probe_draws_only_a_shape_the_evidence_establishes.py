@@ -341,6 +341,10 @@ FNS = '''
 
     def tuple_prefixed(xs):
         return len((0,) + xs)
+
+
+    def rows(x):
+        return x.shape[0]
 '''
 
 
@@ -645,3 +649,9 @@ def test_an_index_into_a_literal_is_drawn_as_an_integer(mod):
     p = _row(mod.tenth, "f(x) >= 10")
     assert "TypeError" not in (p.counterexample or ""), (p.verdict, p.counterexample)
     assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"
+
+
+def test_an_attribute_read_then_indexed_says_nothing_of_a_sequence(mod):
+    p = _row(mod.rows, "f(x) >= 0")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
