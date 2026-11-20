@@ -17,7 +17,9 @@ falsified):
 
 A claim never supported that becomes falsified is a finding, not a
 transition. Each transition names its cause: `this function changed`,
-`a callee changed`, or `nothing changed`, a regression with nothing
+`a callee changed`, `read more strictly at soundness epoch N` (both
+named together when a callee changed too), or `nothing changed`, a
+regression with nothing
 changed being a contradiction between two runs (engine, library
 version, seed or timeout). A transition after a code change also keeps
 the triggers that fired (`invalidated_by`) and, when a dependency
@@ -120,11 +122,13 @@ def cause_of(triggers) -> str:
         return REVERIFY_CAUSE
     if any(t in OWN_TRIGGERS for t in triggers):
         return "this function changed"
-    if "dependency" in triggers:
-        return "a callee changed"
     from .soundness_epoch import SOUNDNESS_EPOCH, TRIGGER
+    stricter = f"read more strictly at soundness epoch {SOUNDNESS_EPOCH}"
+    if "dependency" in triggers:
+        return f"a callee changed, and {stricter}" if TRIGGER in triggers \
+            else "a callee changed"
     if TRIGGER in triggers:
-        return f"read more strictly at soundness epoch {SOUNDNESS_EPOCH}"
+        return stricter
     return "nothing changed"
 
 
