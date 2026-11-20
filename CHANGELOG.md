@@ -2,7 +2,18 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
-## 0.6.6.1
+## Unreleased
+
+### Upgrading from 0.6.6.1
+- The probe draws a parameter only in a shape something establishes: the claim's domain, a type marker, the annotation, the default, or how the body uses it (indexed, iterated, measured, read with a key or a mapping method, put under arithmetic with a number, joined with a string, passed whole to a function whose parameter has evidence). A parameter with no such evidence, or with evidence that disagrees and nothing settles, is not drawn, and the claim's probe outcome is `unknown` with `shape of parameter x is not established` and the fix. A function that only returns or passes on its parameter (`def same(x): return x`) is now `unknown` under the probe where it was drawn as a float before. Bind the parameter in the claim (`for x in ...`) or annotate it.
+- An annotation, or a number use in the body (an ordering against a number, arithmetic with one, a `math` or `cmath` argument), settles a disagreement with another use in the body: the parameter is drawn in that shape and a raise at the other use is a finding (`def first(x: float): return x[0]` is falsified).
+- A TypeError or AttributeError raised at an operation on a drawn value whose shape only the code suggested is reported as a draw defect (`unknown`, `the draw for x had the wrong shape`), not a falsification. It is one only when the raising frame holds the drawn value itself and no literal, default, held value or other local of another type named in the message explains the raise, and not when firm evidence fixes the shape and the attribute is missing from every value of it.
+
+### Fixes
+- A tuple default, or a sum with a tuple literal (`(0,) + xs`), draws a tuple.
+- A local copy of a parameter (`t = y0`, `a, t = x, y0`, `(t := y0)`) is read as the parameter only in the function's own scope and where no other binding of the local may come first; a binding anywhere in a loop around the read stops it.
+- Lambdas, `functools.partial` objects and callable instances are read from their source: two lambdas on one line are told apart by position, and when they cannot be the message says so. A wrapper that calls the function it wraps with a value it makes from its own arguments leaves the parameter's shape unread.
+- `x.shape[0]`, on the parameter or on a copy of it, is not read as indexing the parameter.
 
 ### Upgrading from 0.6.6
 - Implementation counts only the lines reached by the probes of claims included for a function (in a claims file, its docstring or a decorator, or a suggestion accepted as evidence). A function with no such claim is not run while it is scored, so code with neither tests nor claims reads lower than in 0.6.6.
