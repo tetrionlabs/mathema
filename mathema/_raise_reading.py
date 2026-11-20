@@ -327,6 +327,70 @@ def _text_level(kind: ValueKind) -> int:
     return UNKNOWN
 
 
+#: the format specifications of a number read as total: a precision of
+#: at most two digits followed by one of the float presentation types
+_NUMBER_SPEC = __import__("re").compile(r"\.[0-9]{1,2}[eEfFgG%]")
+
+
+def _spec_level(kind: ValueKind, spec: str) -> int:
+    """How surely `format(v, spec)` builds its text for a constant
+    `spec`: the empty spec as `str` (`_text_level`); a spec matching
+    `_NUMBER_SPEC` TOTAL for an int, float or bool (an int formatted
+    this way is converted to float first, so only one of magnitude at
+    most the largest float); UNKNOWN for any other spec or value."""
+    if spec == "":
+        return _text_level(kind)
+    if _NUMBER_SPEC.fullmatch(spec) and _is_numeric(kind) and _converts_to_float(kind):
+        return TOTAL
+    return UNKNOWN
+
+
+def _percent_fields(text: str) -> "int | None":
+    """The number of values a `%`-format string takes when its only
+    conversions are `%s`, `%r` and `%a` with no flags, width or
+    precision (and `%%`), else None."""
+    count, at = 0, 0
+    while True:
+        at = text.find("%", at)
+        if at < 0:
+            return count
+        if at + 1 >= len(text):
+            return None
+        if text[at + 1] in "sra":
+            count += 1
+        elif text[at + 1] != "%":
+            return None
+        at += 2
+
+
+def _brace_fields(text: str) -> "list | None":
+    """The positional indexes a `str.format` string reads, in order,
+    when every field is `{}` or `{N}` (not both) with no format
+    specification and a conversion of none, `!s`, `!r` or `!a`; None
+    for any other string or one the parser refuses."""
+    import string
+    try:
+        parsed = list(string.Formatter().parse(text))
+    except ValueError:
+        return None
+    out: list = []
+    automatic = explicit = False
+    for _literal, field, spec, conversion in parsed:
+        if field is None:
+            continue
+        if spec or conversion not in (None, "s", "r", "a"):
+            return None
+        if field == "":
+            automatic = True
+            out.append(len(out))
+        elif field.isdigit():
+            explicit = True
+            out.append(int(field))
+        else:
+            return None
+    return None if automatic and explicit else out
+
+
 def _truth_level(kind: ValueKind) -> int:
     return TOTAL if kind.types is not None and kind.types <= _SCALARS else UNKNOWN
 
@@ -436,6 +500,64 @@ def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
     return level, _BOOL
 
 
+def _percent_level(node: ast.BinOp, kinds: dict, ns: "_Namespace"):
+    """`"..." % values` for a constant string `_percent_fields` reads:
+    TOTAL when the values are a tuple display of exactly that many
+    values, or one value of a type other than tuple and dict for one
+    field, and the text of each is total (`_text_level`)."""
+    count = _percent_fields(node.left.value)
+    if count is None:
+        return UNKNOWN, _STR
+    right = node.right
+    values = right.elts if isinstance(right, ast.Tuple) else [right]
+    if any(isinstance(v, ast.Starred) for v in values) or len(values) != count:
+        return UNKNOWN, _STR
+    level = TOTAL
+    for value in values:
+        found, kind = read_expression(value, kinds, ns)
+        level = min(level, found, _text_level(kind))
+    return level, _STR
+
+
+def _format_call_level(node: ast.Call, kinds: dict, ns: "_Namespace"):
+    """`"...".format(values)` for a constant string `_brace_fields`
+    reads, given positional values only: TOTAL when every index it
+    reads is among the values and the text of every value is total."""
+    fields = _brace_fields(node.func.value.value)
+    if fields is None or node.keywords or any(isinstance(a, ast.Starred) for a in node.args) \
+            or any(i >= len(node.args) for i in fields):
+        return UNKNOWN, _STR
+    level = TOTAL
+    for value in node.args:
+        found, kind = read_expression(value, kinds, ns)
+        level = min(level, found, _text_level(kind))
+    return level, _STR
+
+
+#: types whose own type is `type` itself and whose `__name__` is the
+#: builtin descriptor's, so `type(v).__name__` runs no code of theirs
+_NAMED_TYPES = _SCALARS | {bytes, tuple, list}
+
+
+def _passed(test: ast.AST, falsy: bool) -> "tuple | None":
+    """Intent:
+        `(name, NoneType)` when `test` is `name is None` and the next
+        operand of an `or` runs only when it was false (`falsy`), or it
+        is `name is not None` and the next operand of an `and` runs only
+        when it was true: the next operand sees `name` holding anything
+        but None. None for any other test.
+    """
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
+            and isinstance(test.left, ast.Name) \
+            and isinstance(test.comparators[0], ast.Constant) \
+            and test.comparators[0].value is None:
+        if isinstance(test.ops[0], ast.Is) and falsy:
+            return test.left.id, _NONE
+        if isinstance(test.ops[0], ast.IsNot) and not falsy:
+            return test.left.id, _NONE
+    return None
+
+
 def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
     """Intent:
         `(level, kind)` for evaluating `node` where each name in `kinds`
@@ -486,13 +608,27 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
         if isinstance(node.op, ast.Add) and a.types is not None and b.types is not None \
                 and a.types and b.types and a.types | b.types <= {str}:
             return level, _STR
+        if isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant) \
+                and isinstance(node.left.value, str):
+            return _percent_level(node, kinds, ns)
         return UNKNOWN, ANY
     if isinstance(node, ast.BoolOp):
         level, kind = TOTAL, _EMPTY
+        scope = dict(kinds)
         for value in node.values:
-            part, found = read_expression(value, kinds, ns)
+            part, found = read_expression(value, scope, ns)
             level = min(level, part, _truth_level(found))
             kind = _union(kind, found)
+            narrowed = _passed(value, isinstance(node.op, ast.Or))
+            if narrowed is not None and narrowed[0] in scope:
+                name, drop = narrowed
+                held = scope[name]
+                if held.types is not None:
+                    if held.types <= {drop}:
+                        # the name holds only None: no run reaches the
+                        # operands after this one
+                        break
+                    scope[name] = ValueKind(held.types - {drop}, held.magnitude, held.least)
         return level, kind
     if isinstance(node, ast.Compare):
         return _compare_level(node, kinds, ns)
@@ -501,13 +637,37 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
         for part in node.values:
             if isinstance(part, ast.Constant):
                 continue
-            if not isinstance(part, ast.FormattedValue) or part.format_spec is not None:
+            if not isinstance(part, ast.FormattedValue):
+                return UNKNOWN, _STR
+            spec = part.format_spec
+            if spec is None:
+                text = ""
+            elif isinstance(spec, ast.JoinedStr) and all(
+                    isinstance(v, ast.Constant) and isinstance(v.value, str)
+                    for v in spec.values):
+                text = "".join(v.value for v in spec.values)
+            else:
                 return UNKNOWN, _STR
             inner, kind = read_expression(part.value, kinds, ns)
-            level = min(level, inner, _text_level(kind))
+            if part.conversion != -1:
+                level = min(level, inner, _text_level(kind), TOTAL if text == "" else UNKNOWN)
+                continue
+            level = min(level, inner, _spec_level(kind, text))
         return level, _STR
     if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "format" \
+                and isinstance(node.func.value, ast.Constant) \
+                and isinstance(node.func.value.value, str):
+            return _format_call_level(node, kinds, ns)
         return _call_level(node, kinds, ns)
+    if isinstance(node, ast.Attribute) and node.attr == "__name__" \
+            and isinstance(node.value, ast.Call) and ns.is_builtin(node.value.func, "type") \
+            and len(node.value.args) == 1 and not node.value.keywords \
+            and not isinstance(node.value.args[0], ast.Starred):
+        level, kind = read_expression(node.value.args[0], kinds, ns)
+        if kind.types and kind.types <= _NAMED_TYPES:
+            return level, _STR
+        return UNKNOWN, _STR
     if isinstance(node, (ast.Tuple, ast.List)):
         level = TOTAL
         for element in node.elts:
