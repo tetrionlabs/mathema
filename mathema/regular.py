@@ -335,6 +335,9 @@ _EMPTY_T = ("empty",)
 _EPSILON_T = ("epsilon",)
 #: how many derivative terms one membership question may build
 _MATCH_STEPS = 200_000
+#: how deep the derivative may go into a term before the question is
+#: given up, well inside Python's own recursion limit
+_MATCH_DEPTH = 300
 
 
 class MatchBudget(Exception):
@@ -386,20 +389,27 @@ def _cat(a: tuple, b: tuple) -> tuple:
 
 
 def _alt(parts) -> tuple:
-    kept = tuple(dict.fromkeys(p for p in parts if p != _EMPTY_T))
+    """The union of `parts`, a union among them read as its own parts,
+    so a union of unions stays one level deep."""
+    flat: list = []
+    for p in parts:
+        flat.extend(p[1] if p[0] == "union" else (p,))
+    kept = tuple(dict.fromkeys(p for p in flat if p != _EMPTY_T))
     if not kept:
         return _EMPTY_T
     return kept[0] if len(kept) == 1 else ("union", kept)
 
 
-def _derivative(t: tuple, code: int, seen: dict) -> tuple:
+def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
     """The term holding each string `w` such that the character `code`
-    followed by `w` is in `t`."""
+    followed by `w` is in `t`. `depth` counts the terms it is inside;
+    past `_MATCH_DEPTH` the question is given up with `MatchBudget`."""
     key = (t, code)
     if key in seen:
         return seen[key]
-    if len(seen) > _MATCH_STEPS:
+    if len(seen) > _MATCH_STEPS or depth > _MATCH_DEPTH:
         raise MatchBudget
+    depth += 1
     op = t[0]
     if op in ("empty", "epsilon"):
         out = _EMPTY_T
@@ -412,18 +422,18 @@ def _derivative(t: tuple, code: int, seen: dict) -> tuple:
     elif op == "concat":
         first, rest = t[1][0], t[1][1:]
         tail = _EPSILON_T if not rest else rest[0] if len(rest) == 1 else ("concat", rest)
-        parts = [_cat(_derivative(first, code, seen), tail)]
+        parts = [_cat(_derivative(first, code, seen, depth), tail)]
         if _nullable(first):
-            parts.append(_derivative(tail, code, seen))
+            parts.append(_derivative(tail, code, seen, depth))
         out = _alt(parts)
     elif op == "union":
-        out = _alt(_derivative(a, code, seen) for a in t[1])
+        out = _alt(_derivative(a, code, seen, depth) for a in t[1])
     elif op == "inter":
-        parts = tuple(dict.fromkeys(_derivative(a, code, seen) for a in t[1]))
+        parts = tuple(dict.fromkeys(_derivative(a, code, seen, depth) for a in t[1]))
         out = _EMPTY_T if _EMPTY_T in parts else parts[0] if len(parts) == 1 \
             else ("inter", parts)
     elif op == "complement":
-        out = ("complement", _derivative(t[1], code, seen))
+        out = ("complement", _derivative(t[1], code, seen, depth))
     else:
         arg, lo, hi = t[1], t[2], t[3]
         if hi == 0:
@@ -435,7 +445,7 @@ def _derivative(t: tuple, code: int, seen: dict) -> tuple:
             rest = ("repeat", arg, fewer, None if hi is None else hi - 1)
             if rest[3] == 0:
                 rest = _EPSILON_T
-            out = _cat(_derivative(arg, code, seen), rest)
+            out = _cat(_derivative(arg, code, seen, depth), rest)
     seen[key] = out
     return out
 
@@ -452,15 +462,19 @@ def member(node, text: str, *, _seen: "dict | None" = None) -> bool:
     Raises:
         InvalidTerm: the node is not of the schema.
         MatchBudget: the question built more derivative terms than
-            allowed, which no term of ordinary size does.
+            allowed, or went deeper into the term than `_MATCH_DEPTH`,
+            which no term of ordinary size does.
     """
-    term = _as_term(canonical(node))
-    seen = {} if _seen is None else _seen
-    for ch in text:
-        term = _derivative(term, ord(ch), seen)
-        if term == _EMPTY_T:
-            return False
-    return _nullable(term)
+    try:
+        term = _as_term(canonical(node))
+        seen = {} if _seen is None else _seen
+        for ch in text:
+            term = _derivative(term, ord(ch), seen)
+            if term == _EMPTY_T:
+                return False
+        return _nullable(term)
+    except RecursionError:
+        raise MatchBudget from None
 
 
 def matcher(node):
@@ -473,14 +487,25 @@ def matcher(node):
 
     Raises:
         InvalidTerm: the node is not of the schema.
+        MatchBudget: as `member`, when the node is prepared or when the
+            returned function is called.
     """
-    terms = [_as_term(canonical(node))]
+    try:
+        terms = [_as_term(canonical(node))]
+        accepts = [_nullable(terms[0])]
+    except RecursionError:
+        raise MatchBudget from None
     number_of = {terms[0]: 0}
-    accepts = [_nullable(terms[0])]
     step: dict = {}
     seen: dict = {}
 
     def holds(text: str) -> bool:
+        try:
+            return stepped(text)
+        except RecursionError:
+            raise MatchBudget from None
+
+    def stepped(text: str) -> bool:
         state = 0
         for ch in text:
             key = (state, ch)
