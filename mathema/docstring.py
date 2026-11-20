@@ -866,6 +866,8 @@ def write_docstring(fn, text: str) -> str:
     lines[insert_at:insert_at] = doc_lines
     with open(path, "w") as fh:
         fh.write("\n".join(lines) + ("\n" if module_src.endswith("\n") else ""))
+    from ._run_scope import wrote
+    wrote(path)
     return path
 
 

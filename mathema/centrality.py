@@ -13,7 +13,7 @@ ordinary mean.
 """
 from __future__ import annotations
 
-from .inventory import function_dependencies
+from .inventory import dependency_edges
 
 
 def build_call_graph(functions: dict[str, object]) -> dict[str, set[str]]:
@@ -28,14 +28,15 @@ def build_call_graph(functions: dict[str, object]) -> dict[str, set[str]]:
         Keys are `module.qualname` on both sides (`function_dependencies`
         emits `f"{mod}.{qual}"`, `discover` keys methods
         `module.Class.method`), so they line up without translation.
+        The edges are each function's `dependency_edges`, the pairs
+        `function_dependencies` lists, read without any callee's form
+        or reach.
     """
     keys = set(functions)
     edges: dict[str, set[str]] = {k: set() for k in keys}
     for key, fn in functions.items():
-        for dep in function_dependencies(fn):
-            callee = dep.get("key")
-            if (dep.get("kind") == "function" and callee in keys
-                    and callee != key):
+        for callee, kind in dependency_edges(fn):
+            if kind == "function" and callee in keys and callee != key:
                 edges[key].add(callee)
     return edges
 

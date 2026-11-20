@@ -1931,6 +1931,8 @@ def _accept_docstring_claim(root: str, conflict: dict) -> None:
                 with open(path, "w") as fh:
                     yaml.safe_dump(doc, fh, sort_keys=False,
                                    allow_unicode=True)
+                from ._run_scope import wrote
+                wrote(path)
                 return
 
 
@@ -2151,6 +2153,8 @@ def _write_policies(args, declared_rows: list, policies: list) -> int:
     if written:
         with open(path, "w") as fh:
             yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+        from ._run_scope import wrote
+        wrote(path)
     line = (f"{args.key}: wrote {len(written)} policy row"
             f"{'' if len(written) == 1 else 's'} to {rel}"
             + (f": {', '.join(written)}" if written else ""))
