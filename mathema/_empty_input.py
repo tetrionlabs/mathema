@@ -361,6 +361,47 @@ def _fixes(fn_name: str, call_text: str, target: str, raised,
         f"  {line}" for line in options([first, "guard the empty input at entry"]).splitlines())
 
 
+#: no default to hold a parameter at
+_NO_DEFAULT = object()
+
+
+def _held_default(signature, p: str, cj_domain) -> object:
+    """Intent:
+        A copy of `p`'s default, the value the other parameters of an
+        empty-input call are held at, or `_NO_DEFAULT` when `p` has no
+        default or the claim's domain binds it.
+    """
+    import copy
+    import inspect
+    if signature is None or (cj_domain or {}).get(p) is not None:
+        return _NO_DEFAULT
+    param = signature.parameters.get(p)
+    if param is None or param.default is inspect.Parameter.empty:
+        return _NO_DEFAULT
+    try:
+        return copy.deepcopy(param.default)
+    except Exception:
+        return param.default
+
+
+def _other_kind(fn, facts, p: str, cj_domain) -> str:
+    """Intent:
+        The kind an empty-input call draws another parameter as: the
+        shape its evidence establishes (a string, a sequence, a mapping,
+        a bool), else its kind in `facts`, else a float.
+    """
+    from ._shape_evidence import parameter_shapes
+    from .conjecture import _KIND_OF_SHAPE
+    try:
+        shape = parameter_shapes(fn, facts, [p], cj_domain or {})[p]
+    except Exception:
+        shape = None
+    if shape is not None and shape.established and shape.evidence is not None \
+            and shape.evidence.shape in _KIND_OF_SHAPE:
+        return _KIND_OF_SHAPE[shape.evidence.shape]
+    return facts.param_kinds.get(p, "float")
+
+
 def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
                       siblings=()) -> list:
     """Intent:
@@ -457,8 +498,12 @@ def empty_input_lines(cj, fn, facts, cj_domain: dict, assumption,
                 if p in group:
                     drawn[p] = empty[p]
                     continue
+                held = _held_default(signature, p, cj_domain)
+                if held is not _NO_DEFAULT:
+                    drawn[p] = held
+                    continue
                 try:
-                    drawn[p] = _synth(facts.param_kinds.get(p, "float"), rng,
+                    drawn[p] = _synth(_other_kind(fn, facts, p, cj_domain), rng,
                                       (cj_domain or {}).get(p))
                 except Exception:
                     drawn = None

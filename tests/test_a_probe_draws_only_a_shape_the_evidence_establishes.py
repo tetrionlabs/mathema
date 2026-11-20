@@ -302,6 +302,13 @@ FNS = '''
 
 
     picker = Picker()
+
+
+    def total_into(xs: list, out=None) -> float:
+        s = sum(xs)
+        if out is not None:
+            out.append(s)
+        return s
 '''
 
 
@@ -581,3 +588,12 @@ def test_lambdas_that_cannot_be_told_apart_say_so(mod, monkeypatch):
                          "these parameters, and which one this is cannot be "
                          "told; bind x in the claim (for x in ...), or define "
                          "the function with def")
+
+
+def test_the_empty_input_row_holds_the_other_parameters_at_their_defaults(mod):
+    import mathema
+    rows = [p for p in mathema.check(mod.total_into).probes
+            if p.name.startswith("is_empty_safe")]
+    assert rows, "no is_empty_safe row"
+    for row in rows:
+        assert row.verdict != "falsified", (row.verdict, row.counterexample)
