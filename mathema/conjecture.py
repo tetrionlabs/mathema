@@ -323,14 +323,79 @@ def _yaml_safe_args(args) -> list:
         A falsifying argument tuple as YAML-safe values a later run can
         replay exactly: numbers pass through, a complex value becomes
         its coordinate spelling, a set or frozenset becomes its members
-        under a `set` or `frozenset` tag, and sequences and mapping
-        values recurse.
+        under a `set` or `frozenset` tag, a string holding a lone
+        surrogate becomes its escaped spelling under an `escaped_str`
+        tag, and sequences and mapping values recurse. A mapping with
+        a key holding a lone surrogate, or with `escaped_str` as its
+        only key, is stored under the `escaped_str` tag as the mapping
+        with each string key in its escaped spelling, so no mapping is
+        ever read back as an escaped string.
     """
     return [_yaml_safe_value(v) for v in args]
 
 
+#: a lone surrogate: a code point from U+D800 to U+DFFF, which a Python
+#: string may hold but no YAML text can spell
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+#: one escape in an `escaped_str` spelling: a doubled backslash, or
+#: `\\u` and four hex digits
+_SURROGATE_ESCAPE = re.compile(r"\\(\\|u[0-9A-Fa-f]{4})")
+
+
+def _escaped_str(text: str) -> str:
+    """`text` with each backslash doubled and each lone surrogate
+    written `\\uXXXX`, every other character standing as itself; the
+    result holds no lone surrogate, and `_unescaped_str` reverses it."""
+    return "".join(f"\\u{ord(ch):04X}" if 0xD800 <= ord(ch) <= 0xDFFF
+                   else "\\\\" if ch == "\\" else ch
+                   for ch in text)
+
+
+def _decoded_escapes(text: str) -> "str | None":
+    """Intent:
+        The string `_escaped_str` spelled as `text`, or None when `text`
+        is not such a spelling: a backslash not starting a doubled
+        backslash or a `\\uXXXX` escape, or a `\\uXXXX` escape of a
+        code point that is not a surrogate.
+    """
+    pieces, at = [], 0
+    for m in _SURROGATE_ESCAPE.finditer(text):
+        pieces.append(text[at:m.start()])
+        esc = m.group(1)
+        if esc != "\\" and not 0xD800 <= int(esc[1:], 16) <= 0xDFFF:
+            return None
+        pieces.append("\\" if esc == "\\" else chr(int(esc[1:], 16)))
+        at = m.end()
+    rest = text[at:]
+    if "\\" in "".join(pieces[0::2]) + rest:
+        return None
+    return "".join(pieces) + rest
+
+
+def _unescaped_str(text: str) -> "str | None":
+    """Intent:
+        The string `_escaped_str` spelled as `text` when it holds a lone
+        surrogate (the only strings stored that way), else None.
+    """
+    out = _decoded_escapes(text)
+    return out if out is not None and _LONE_SURROGATE.search(out) else None
+
+
+def _escaped_mapping(v: dict) -> bool:
+    """Intent:
+        Whether a mapping witness is stored under the `escaped_str` tag:
+        a string key holds a lone surrogate, or `escaped_str` is its
+        only key.
+    """
+    return list(v) == ["escaped_str"] or any(
+        isinstance(k, str) and _LONE_SURROGATE.search(k) for k in v)
+
+
 def _yaml_safe_value(v):
     """One argument value in the spelling `_yaml_safe_args` stores."""
+    if isinstance(v, str) and _LONE_SURROGATE.search(v):
+        return {"escaped_str": _escaped_str(v)}
     if isinstance(v, complex) and not isinstance(v, (int, float)):
         # tagged, so a string witness that reads as a complex
         # number (`"j"`) can never be mistaken for one
@@ -343,19 +408,33 @@ def _yaml_safe_value(v):
         return {"frozenset" if isinstance(v, frozenset) else "set": members}
     if isinstance(v, (list, tuple)):
         return _yaml_safe_args(v)
+    if isinstance(v, dict) and _escaped_mapping(v):
+        return {"escaped_str": {_escaped_str(k) if isinstance(k, str) else k:
+                                _yaml_safe_value(x) for k, x in v.items()}}
     if isinstance(v, dict):
         return {k: _yaml_safe_value(x) for k, x in v.items()}
     return v
 
 
 def _restored_value(v):
-    """A stored argument value read back: a tagged complex number or
-    set becomes the value it spells, and lists and mapping values
-    recurse."""
+    """A stored argument value read back: a tagged complex number,
+    set or escaped string becomes the value it spells, a mapping under
+    the `escaped_str` tag becomes the mapping with its keys decoded,
+    and lists and mapping values recurse."""
     if isinstance(v, dict) and len(v) == 1:
         (tag, inner), = v.items()
         if tag == "complex" and isinstance(inner, str):
             return complex(inner)
+        if tag == "escaped_str" and isinstance(inner, str):
+            text = _unescaped_str(inner)
+            if text is not None:
+                return text
+        if tag == "escaped_str" and isinstance(inner, dict):
+            keys = [_decoded_escapes(k) if isinstance(k, str) else k
+                    for k in inner]
+            if None not in keys:
+                return {k: _restored_value(x)
+                        for k, x in zip(keys, inner.values())}
         if tag in ("set", "frozenset") and isinstance(inner, list):
             members = [_restored_value(m) for m in inner]
             try:

@@ -1869,13 +1869,21 @@ def cmd_docsync(args) -> int:
         print(f"wrote missing claim names into {k}'s Claims: block")
     if report.index_path:
         print(f"index -> {report.index_path}")
+    if report.index_error:
+        print(f"Error: the index was not written\n\n"
+              f"  on .mathema/index.yaml\n\n"
+              f"index not written: {report.index_error}. Every function "
+              f"named was synced; make .mathema/index.yaml writable and "
+              f"run mathema docsync again to write the index.",
+              file=sys.stderr)
     if args.report or args.write:
         import types
         for t in args.target:
             shim = types.SimpleNamespace(target=t, root=args.root,
                                          write=args.write)
             _docsync_checklist(shim)
-    return 1 if (report.conflicts and not args.yes) else 0
+    return 1 if ((report.conflicts and not args.yes)
+                 or report.index_error) else 0
 
 
 def _accept_docstring_claim(root: str, conflict: dict) -> None:

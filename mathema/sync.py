@@ -35,12 +35,15 @@ from dataclasses import dataclass, field
 class SyncReport:
     """One docsync pass: what was materialized, every conflict, and
     the docstring drift, the CLI renders this and the verify sweep
-    treats conflicts as gate problems."""
+    treats conflicts as gate problems. `index_error` is the error that
+    stopped the index being written, as `<type>: <message>`, and None
+    when it was written."""
     materialized: list = field(default_factory=list)   # keys written
     conflicts: list = field(default_factory=list)      # {key, claim, docstring, declared}
     drift: list = field(default_factory=list)          # {key, kind, names}
     docstrings_written: list = field(default_factory=list)
     index_path: str | None = None
+    index_error: str | None = None
 
 
 def _completed(cj, fn):
@@ -631,8 +634,10 @@ def _sync(targets: list, root: str, write_docstrings: bool) -> SyncReport:
             if fn is not None:
                 functions[key] = fn
 
+    resolved: dict = {}
     for key, fn in sorted(functions.items()):
         key = _fn_key(fn) if key is None else key
+        resolved[key] = fn
         file_entry = (declared_store.get(key) or {}).get("entry", {})
         v_entry = (verified_store.get(key) or {}).get("entry")
         report.conflicts.extend(
@@ -656,7 +661,11 @@ def _sync(targets: list, root: str, write_docstrings: bool) -> SyncReport:
 
     from .audit import write_index
     try:
-        report.index_path = write_index(list(targets), root=root)
-    except Exception:
+        # a named target indexes the functions it resolved to; with no
+        # target the index keeps `write_index`'s own discovery
+        report.index_path = write_index(list(targets), root=root,
+                                        functions=resolved if targets else None)
+    except Exception as exc:
         report.index_path = None
+        report.index_error = f"{type(exc).__name__}: {exc}"
     return report
