@@ -44,7 +44,9 @@ the function object and not assumed from its source text.
    that builtin exception. It is raised with no cause, built from no
    argument or from one that cannot fail on a text: a string literal,
    the parameter, `repr` or `str` of the parameter, or an f-string of
-   literals and the parameter with no format specification.
+   literals, the parameter and names the function's globals bind to an
+   object of exact type `str` (`constants`), each with no format
+   specification.
 
 Anything else (text transformed before the match, a second test, a
 `try`, an attribute of an object, any other exception class) is
@@ -81,13 +83,16 @@ class Validator:
     function calls on it (`PAT.fullmatch`), whose truth is acceptance;
     `raises`, the exception class a refusing validator raises (None for
     a predicate); `negated`, set for a predicate that returns the
-    match's failure; and `or_empty`, set when the text matched is
-    `<param> or ''`, which is the parameter only when it is a text."""
+    match's failure; `or_empty`, set when the text matched is
+    `<param> or ''`, which is the parameter only when it is a text; and
+    `constants`, the module-level text constants the exception's
+    message reads, by name."""
     param: str
     accepts: object
     raises: "type | None" = None
     negated: bool = False
     or_empty: bool = False
+    constants: tuple = ()
 
     @property
     def pattern(self) -> "re.Pattern":
@@ -134,6 +139,8 @@ class _Reader:
         self.local = _stored_names(tree)
         #: set once a match is read on `<param> or ''`
         self.or_empty = False
+        #: the module-level text constants a message reads, in order
+        self.constants: list = []
 
     def _global(self, name: str):
         """The object a free name is bound to where the function itself
@@ -312,6 +319,12 @@ class _Reader:
                 if isinstance(part, ast.FormattedValue) and part.format_spec is None \
                         and isinstance(part.value, ast.Name) and part.value.id == param:
                     continue
+                if isinstance(part, ast.FormattedValue) and part.format_spec is None \
+                        and isinstance(part.value, ast.Name) \
+                        and type(self._global(part.value.id)) is str:
+                    if part.value.id not in self.constants:
+                        self.constants.append(part.value.id)
+                    continue
                 raise _Declined(f"the exception's message {ast.unparse(node)} reads more "
                                 f"than the parameter")
             return
@@ -489,8 +502,9 @@ def _read(fn) -> Validator:
         method, truth = reader.test(body[0].test, param)
         if truth:
             raise _Declined("it raises when the match succeeds")
-        return Validator(param, method, reader.raised(body[0].body[0], param),
-                         or_empty=reader.or_empty)
+        raises = reader.raised(body[0].body[0], param)
+        return Validator(param, method, raises, or_empty=reader.or_empty,
+                         constants=tuple(reader.constants))
     raise _Declined("its body is more than one test of one match on the parameter")
 
 

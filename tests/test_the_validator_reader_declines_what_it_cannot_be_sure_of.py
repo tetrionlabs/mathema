@@ -17,6 +17,7 @@ from mathema._validators import Validator, read_validator
 
 PAT = re.compile(r"[a-z]+")
 OTHER = "context"
+COUNT = 3
 TEXTS = ("", "a", "abc", "A", "1", "a1", "abc\n", "ab cd", "é")
 
 
@@ -93,6 +94,24 @@ def raise_argument_calls(s):
 def raise_argument_names_another_variable(s):
     if not PAT.fullmatch(s):
         raise ValueError(f"{s} in {OTHER}")
+    return s
+
+
+def raise_argument_names_an_int_constant(s):
+    if not PAT.fullmatch(s):
+        raise ValueError(f"{s} in {COUNT}")
+    return s
+
+
+def raise_argument_calls_a_method_on_a_constant(s):
+    if not PAT.fullmatch(s):
+        raise ValueError(f"{s} in {OTHER.upper()}")
+    return s
+
+
+def raise_argument_formats_a_constant(s):
+    if not PAT.fullmatch(s):
+        raise ValueError(f"{s} in {OTHER:>10}")
     return s
 
 
@@ -218,7 +237,8 @@ code_swapped_after_definition.__code__ = _strips_then_matches.__code__
 DECLINED = [
     _closure_over_a_pattern(), _closure_over_an_exception(), wrapped_without_decorator_syntax,
     decorated, raise_argument_indexes, raise_of_a_user_exception, raise_argument_calls,
-    raise_argument_names_another_variable, raise_argument_has_a_format_specification,
+    raise_argument_names_an_int_constant, raise_argument_calls_a_method_on_a_constant,
+    raise_argument_formats_a_constant, raise_argument_has_a_format_specification,
     raise_with_two_arguments, raise_with_a_cause, raise_through_an_alias, a_lambda,
     default_on_the_parameter, default_capturing_a_pattern, Holder().method, Holder.method,
     Holder.prop, class_attribute_pattern, an_async_function, a_generator,
@@ -285,7 +305,8 @@ def bare_exception_class(s):
 
 
 READ = [pattern_rebound_later_in_the_module, conditionally_defined, message_from_repr,
-        message_is_a_literal, bare_exception_class, _check]
+        message_is_a_literal, bare_exception_class, _check,
+        raise_argument_names_another_variable]
 
 
 def _agrees(read, fn, text):
@@ -336,6 +357,8 @@ _MODULE_CALL = "    return re.fullmatch(r'[a-z]+', s) is not None"
      _MODULE_CALL),
     ("pattern_is_a_lookalike",
      "import types\\nPAT = types.SimpleNamespace(fullmatch=lambda s: None)", _PREDICATE),
+    ("rebinds_the_message_constant", "WHERE = 'context'\\nWHERE = 3",
+     "    if not PAT.fullmatch(s):\\n        raise ValueError(f'{s} in {WHERE}')\\n    return s"),
 ])
 def test_a_module_that_rebinds_a_checked_name_is_declined(tmp_path, monkeypatch, name,
                                                           rebinding, body):

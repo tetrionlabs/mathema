@@ -5650,15 +5650,26 @@ def _language_membership_stamp(cj, fn=None, languages=None) -> dict:
         The identity of the code behind each named language's
         `contains()` (`_code_identity.membership_identity`), by the
         language's text, for the languages `language_definition_stamp`
-        reads, or only those in `languages` when given. A language that
-        does not resolve is left out. A row whose verdict rests on a
+        reads, or only those in `languages` when given; and, for a
+        validator whose exception message reads module-level text
+        constants, the identity of each constant's value, by
+        `<module>.<name>`. A language that does not resolve is left
+        out. A row whose verdict rests on a
         definition having been checked against the language's
         membership is stamped with it (`mathema.language_memberships`),
         so an edit to that membership makes the record stale.
     """
     from ._code_identity import membership_identity
+    from ._validators import read_validator
     from .languages import resolve_language
     stamp: dict = {}
+    # a text constant a validator's message reads is part of what the
+    # reading of the function rests on
+    read = read_validator(fn) if fn is not None else None
+    for name in getattr(read, "constants", ()):
+        value = dict.get(getattr(fn, "__globals__", {}), name)
+        if type(value) is str:
+            stamp[f"{fn.__module__}.{name}"] = membership_identity(value)
     for ref in _named_languages(cj, fn):
         text = repr(ref)
         if languages is not None and text not in languages:
