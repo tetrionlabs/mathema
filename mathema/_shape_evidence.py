@@ -46,10 +46,12 @@ from dataclasses import dataclass
 
 #: the sources, in the order a parameter's shape is read from them
 EVIDENCE_ORDER = ("claim domain", "inferred domain", "type marker",
-                  "annotation", "receiver", "default", "body use")
-#: the sources an author states, rather than ones read from the code
+                  "annotation", "receiver", "generated dataclass method",
+                  "default", "body use", "not read by the body")
+#: the sources an author states, or that a definition fixes, rather than
+#: ones read from the code
 STATED = frozenset({"claim domain", "inferred domain", "type marker",
-                    "annotation", "receiver"})
+                    "annotation", "receiver", "generated dataclass method"})
 
 _KIND_SHAPES = {"scalar": "number", "int": "number", "complex": "number",
                 "bool": "bool", "string": "string", "dict": "mapping",
@@ -451,6 +453,12 @@ def not_established_text(fn, shape: ParameterShape) -> str:
     p = shape.param
     place, line = definition_place(fn)
     quoted = f' "{line}"' if line else ""
+    if place == "<unknown>":
+        name = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", "f")
+        return (f"shape of parameter {p} is not established (the source of "
+                f"{name} is not available): nothing in its signature says "
+                f"what kind of value it takes; bind {p} in the claim (for {p} "
+                f"in ...), or annotate it")
     if shape.disagree:
         first = shape.evidence
         assert first is not None
@@ -578,8 +586,9 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
     fdef, offset = _function_def(fn)
     body: dict = {}
     if fdef is not None:
-        body_kinds = _param_kinds(_without_annotations(fdef), params)
-        body = body_evidence(fn, fdef, params, body_kinds, 1, offset)
+        read = _with_copies_read_through(fdef, params)
+        body_kinds = _param_kinds(_without_annotations(read), params)
+        body = body_evidence(fn, read, params, body_kinds, 1, offset)
     for p, found in (getattr(facts, "runtime_types", None) or {}).items():
         shape = kind_shape(found[0].kind) if found else None
         if p in body and shape is not None and kind_shape(stated.get(p)) is None:
@@ -587,10 +596,97 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
                                        "the body uses it as "
                                        + (found[0].adapter or "an array")))
     receivers = receivers or {}
-    return {p: shape_of(fn, p, bound=cj_domain.get(p), written=p in written,
-                        stated_kind=stated.get(p),
-                        receiver=receivers.get(p), body=body.get(p, ()))
-            for p in params}
+    out = {p: shape_of(fn, p, bound=cj_domain.get(p), written=p in written,
+                       stated_kind=stated.get(p),
+                       receiver=receivers.get(p), body=body.get(p, ()))
+           for p in params}
+    if fdef is not None:
+        loaded = {n.id for n in ast.walk(fdef)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        for p, shape in out.items():
+            if shape.evidence is None and p not in loaded:
+                out[p] = ParameterShape(p, Evidence(
+                    "not read by the body", "any", "the body never reads it"))
+    return out
+
+
+def _with_copies_read_through(fdef, params: list):
+    """Intent:
+        `fdef` with each read of a plain local copy of a parameter (a
+        statement `local = param`, the only binding of `local` before
+        that read, `param` never rebound) read as the parameter itself,
+        from the line after the copy through the line of the first
+        statement that binds `local` again.
+    """
+    import copy
+    from .analysis import param_uses
+    rebound = param_uses(fdef, params).assigned
+    stores: dict = {}
+    copies: dict = {}
+    for node in ast.walk(fdef):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and isinstance(node.value, ast.Name) \
+                and node.value.id in params and node.value.id not in rebound:
+            copies.setdefault(node.targets[0].id, []).append(node)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores.setdefault(node.id, []).append(node.lineno)
+    spans: dict = {}
+    for local, made in copies.items():
+        if len(made) != 1 or local in params:
+            continue
+        line = made[0].lineno
+        if any(at < line for at in stores.get(local, ())):
+            continue
+        later = [at for at in stores.get(local, ()) if at > line]
+        spans[local] = (made[0].value.id, line, min(later) if later else None)
+    if not spans:
+        return fdef
+
+    class _ReadThrough(ast.NodeTransformer):
+        def visit_Name(self, node):
+            span = spans.get(node.id)
+            if span is None or not isinstance(node.ctx, ast.Load):
+                return node
+            param, start, end = span
+            if node.lineno > start and (end is None or node.lineno <= end):
+                return ast.copy_location(ast.Name(id=param, ctx=ast.Load()),
+                                         node)
+            return node
+
+    return _ReadThrough().visit(copy.deepcopy(fdef))
+
+
+def generated_ordering(fn) -> "tuple[str, type] | None":
+    """Intent:
+        `(other, class)` when `fn` is an ordering method (`__lt__`,
+        `__le__`, `__gt__`, `__ge__`) that `dataclasses` generated for a
+        class declared with `order=True`: compiled from generated source
+        (`<string>`) and the very function the class binds under that
+        name. Such a method compares two instances of the class field by
+        field, so its second parameter `other` is an instance of the
+        class. None for any other function, an override included.
+    """
+    name = getattr(fn, "__name__", "")
+    if name not in ("__lt__", "__le__", "__gt__", "__ge__"):
+        return None
+    code = getattr(fn, "__code__", None)
+    if code is None or code.co_filename != "<string>":
+        return None
+    from .runtime_types._receivers import method_receiver
+    receiver = method_receiver(fn)
+    if receiver is None:
+        return None
+    cls = receiver[1]
+    params = getattr(cls, "__dataclass_params__", None)
+    if params is None or not getattr(params, "order", False) \
+            or cls.__dict__.get(name) is not fn:
+        return None
+    try:
+        names = list(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return None
+    return (names[1], cls) if len(names) == 2 else None
 
 
 def definition_line_text(fn, line: int) -> "tuple[str, str]":

@@ -4510,6 +4510,11 @@ def _instance_bundles(fn, facts) -> dict:
         fields = receiver_fields(receiver[1], facts.tree, receiver[0])
         if fields is not None:
             out[receiver[0]] = (receiver[1], list(fields))
+            from ._shape_evidence import generated_ordering
+            ordering = generated_ordering(fn)
+            if ordering is not None and ordering[1] is receiver[1]:
+                # a generated ordering compares two instances of its class
+                out[ordering[0]] = (receiver[1], list(fields))
     if facts.tree is None:
         return out
     try:
@@ -12511,6 +12516,12 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
              and p not in ctx.receiver
              and ctx.cj_domain.get(p) is None
              and any(_passed_whole(t, params, p) for t in sides)]
+    from ._shape_evidence import Evidence, ParameterShape, generated_ordering
+    ordering = generated_ordering(fn)
+    if ordering is not None and ordering[0] in bundles and ordering[0] in named:
+        ctx.drawn_shapes[ordering[0]] = ParameterShape(ordering[0], Evidence(
+            "generated dataclass method", "instance",
+            f"an instance of {ordering[1].__name__}"))
     if not drawn:
         return None, kinds
     shapes = parameter_shapes(fn, facts, drawn, ctx.cj_domain,
@@ -12554,7 +12565,8 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
     except (TypeError, ValueError):
         return None
     found = wrong_shape_use(fn, values, exc)
-    if found is None or found[0] not in ctx.drawn_shapes:
+    if found is None or found[0] not in ctx.drawn_shapes \
+            or ctx.drawn_shapes[found[0]].stated:
         return None
     p, line = found
     place, quoted = definition_line_text(fn, line)
