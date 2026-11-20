@@ -2833,6 +2833,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             for found in ("mathema.computation_finding",
                           "mathema.conditioning_finding")
             if meta.get(found))
+        out.lines.extend(no_longer_applying_risk_notes(claims_for_gate, accepted))
         out.lines.extend(
             f"     warning: claim {name} of {key} was verified under "
             f"mathema; its grammar is now {grammar!r}, so mathema no "
@@ -2884,6 +2885,22 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.append(quoting_moved_note(len(quoting_moved)))
     if negation_moved:
         out.lines.append(negation_moved_note(len(negation_moved)))
+    return out
+
+
+def no_longer_applying_risk_notes(claims: list, accepted: frozenset) -> list:
+    """Intent:
+        One note per claim of `claims` whose accepted risk no longer
+        applies: the claim has a risk acceptance in `accepted`, and its
+        verdict now is proven or holds, so the acceptance stays in the
+        record as history and is not counted as an accepted risk.
+    """
+    out = []
+    for name, verdict, _meta, _n in map(_claim_fields, claims):
+        if name in accepted and classify_verdict(verdict or "") in ("proven", "holds"):
+            now = "holds" if classify_verdict(verdict) == "holds" else "is proven"
+            out.append(f"     note: an earlier accepted risk on {name} no longer "
+                       f"applies: the claim now {now}")
     return out
 
 
