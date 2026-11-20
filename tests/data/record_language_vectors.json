@@ -1653,6 +1653,992 @@
    "hash": "5e05f006cee09d4f22ec9a9fc0d4ac220f5d3a36c2750e1bd49eb256385adee1"
   },
   {
+   "name": "a list of flags",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "0e82ca6082fbe0e286a5aab680e97aa79bc927d72c3d7bf458f999a36ad5f219"
+  },
+  {
+   "name": "a list of one flag or more",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 1,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":1,\"op\":\"list\"},\"version\":1}",
+   "hash": "47d72937f52d79fd825220ba61e6c11dc438609263410f34bf132844c9c8fbc9"
+  },
+  {
+   "name": "a list of at most two flags",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 0,
+     "max": 2
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":2,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "3a34596b591480bf667db088abc05077162da23360246aa6dc1cf61e594d0f69"
+  },
+  {
+   "name": "a list of two to three flags",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 2,
+     "max": 3
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":3,\"min\":2,\"op\":\"list\"},\"version\":1}",
+   "hash": "243f73cff35c5d2f1fc79959475e366eb03f7f97ff23461b036f82719771ff72"
+  },
+  {
+   "name": "a list of at most one false",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       false
+      ]
+     },
+     "min": 0,
+     "max": 1
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[false]},\"max\":1,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "e5e361f4e8bec11125a27d23bc04dfadc927c253e2fda6be15cdfffbbd83b28f"
+  },
+  {
+   "name": "a list of two texts",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       "a",
+       "b"
+      ]
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "33eee0488f1802e9749db6ac4e2b2e6e11706f27a84b9d9dba841ef041dee16f"
+  },
+  {
+   "name": "one to two texts ending at a dollar",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "text",
+      "language": {
+       "op": "concat",
+       "args": [
+        {
+         "op": "literal",
+         "codes": [
+          97
+         ]
+        },
+        {
+         "op": "repeat",
+         "arg": {
+          "op": "literal",
+          "codes": [
+           10
+          ]
+         },
+         "min": 0,
+         "max": 1
+        }
+       ]
+      }
+     },
+     "min": 1,
+     "max": 2
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"max\":2,\"min\":1,\"op\":\"list\"},\"version\":1}",
+   "hash": "1b024322f48bfd04e8909ef047daa3629739c10c90ac8df5fc961bbf11e4a235"
+  },
+  {
+   "name": "every list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "any"
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "52d57064a3413d764f3aafbd039a7516b4b87c6e5187d0acc49b5ac74936d64c"
+  },
+  {
+   "name": "a list of three or more",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "any"
+     },
+     "min": 3,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":3,\"op\":\"list\"},\"version\":1}",
+   "hash": "76d6f84ef185ce0eb1e8d9865086090e4f164ab87b69e3b838a06dbabcfe3a57"
+  },
+  {
+   "name": "the list of nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "any"
+     },
+     "min": 0,
+     "max": 0
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"empty\"},\"max\":0,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "486a05867915cc9b9e56092efc6f5cf0f20afdae2e97b0547bc139da15b62546"
+  },
+  {
+   "name": "a list of no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "empty"
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"op\":\"empty\"},\"max\":0,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "486a05867915cc9b9e56092efc6f5cf0f20afdae2e97b0547bc139da15b62546"
+  },
+  {
+   "name": "one or more of no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "empty"
+     },
+     "min": 1,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "a longest length below the shortest",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 2,
+     "max": 1
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "a list of records",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "record",
+      "fields": [
+       [
+        "x",
+        {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        true
+       ]
+      ],
+      "rest": {
+       "op": "empty"
+      }
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "56cedf660467eeb661e6c527ac1c4c3d5ac3f17b3fbb5db3ce036484962f24e7"
+  },
+  {
+   "name": "one record",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "record",
+      "fields": [
+       [
+        "x",
+        {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        true
+       ]
+      ],
+      "rest": {
+       "op": "empty"
+      }
+     },
+     "min": 1,
+     "max": 1
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"max\":1,\"min\":1,\"op\":\"list\"},\"version\":1}",
+   "hash": "317e0c462ce5654fae054aa7486cc8e9046d20feea35c5de25c10397729d02bb"
+  },
+  {
+   "name": "a list of lists",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "list",
+      "item": {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      "min": 0,
+      "max": null
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "98dd11c062dbe63cba3115a479a32f7ff59c6de546a48f672d11a56c77a90772"
+  },
+  {
+   "name": "at most two lists of one flag or more",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "list",
+      "item": {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      "min": 1,
+      "max": null
+     },
+     "min": 0,
+     "max": 2
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":1,\"op\":\"list\"},\"max\":2,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "e06b3d65a9a9d731a95899daa6aebe44473fc67b0f75f9c6f87e70de34a74160"
+  },
+  {
+   "name": "one or more lists of nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "list",
+      "item": {
+       "op": "any"
+      },
+      "min": 0,
+      "max": 0
+     },
+     "min": 1,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"item\":{\"op\":\"empty\"},\"max\":0,\"min\":0,\"op\":\"list\"},\"max\":null,\"min\":1,\"op\":\"list\"},\"version\":1}",
+   "hash": "fb6df7a44f5df42ff9226dc1e1cbb426bc4fc087150d8e5b0659f89cc8785f94"
+  },
+  {
+   "name": "a record of a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "tools",
+       {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          "a",
+          "b"
+         ]
+        },
+        "min": 0,
+        "max": null
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"tools\",{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":null,\"min\":0,\"op\":\"list\"},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "1b9a0777ae6fb97fce6ad82a00e101e282f99bf530cf128fb825fb72d91d5999"
+  },
+  {
+   "name": "a record of two lists",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "tools",
+       {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          "a"
+         ]
+        },
+        "min": 0,
+        "max": null
+       },
+       true
+      ],
+      [
+       "more",
+       {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        "min": 1,
+        "max": null
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"more\",{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":1,\"op\":\"list\"},false],[\"tools\",{\"item\":{\"op\":\"choice\",\"values\":[\"a\"]},\"max\":null,\"min\":0,\"op\":\"list\"},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "3e6c148f6916a82a37d9759d7acb8acf89f6ab02afd4815b38439ed8964ea9e7"
+  },
+  {
+   "name": "a list of records of a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "record",
+      "fields": [
+       [
+        "tools",
+        {
+         "op": "list",
+         "item": {
+          "op": "choice",
+          "values": [
+           "a",
+           "b"
+          ]
+         },
+         "min": 0,
+         "max": 1
+        },
+        false
+       ]
+      ],
+      "rest": {
+       "op": "empty"
+      }
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"fields\":[[\"tools\",{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":1,\"min\":0,\"op\":\"list\"},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "c41efe09248bd246ea05a479b5b8275719491014bc6cdf897d9d52df32fd1bb8"
+  },
+  {
+   "name": "a union of two lists",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       "min": 0,
+       "max": null
+      },
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         "a",
+         "b"
+        ]
+       },
+       "min": 0,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":null,\"min\":0,\"op\":\"list\"},{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"}],\"op\":\"union\"},\"version\":1}",
+   "hash": "c8120c4992a9651935b02cdce011b4d0e7cbb38b8326db1f28b8ad7c67479441"
+  },
+  {
+   "name": "an intersection of two lists",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       "min": 1,
+       "max": null
+      },
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       "min": 0,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":1,\"op\":\"list\"},{\"item\":{\"op\":\"choice\",\"values\":[false]},\"max\":null,\"min\":0,\"op\":\"list\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "b8d2e19d82d10d522ebd79276891a340a20a1c30604cf209ed97eb81272a2b77"
+  },
+  {
+   "name": "lists meeting on length",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "any"
+       },
+       "min": 2,
+       "max": null
+      },
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       "min": 0,
+       "max": 2
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":2,\"op\":\"list\"},{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":2,\"min\":0,\"op\":\"list\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "3f3869fe2e9eb429412354067bba7ab9aecaae9b15c8a678e27b7beede3ec597"
+  },
+  {
+   "name": "a complement of a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "list",
+      "item": {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      "min": 0,
+      "max": null
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},\"version\":1}",
+   "hash": "80996a45a3faa9a9587e0446bf7e7087f53839118e2738a3e36a1d068c179f97"
+  },
+  {
+   "name": "everything but a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "list",
+      "item": {
+       "op": "any"
+      },
+      "min": 0,
+      "max": null
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"arg\":{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},\"version\":1}",
+   "hash": "4c7b3d942234c44284ba07de8e08171680914d83fea6ce2befc886e08e53d7ee"
+  },
+  {
+   "name": "a list with an item that is no flag",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "any"
+       },
+       "min": 0,
+       "max": null
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":0,\"op\":\"list\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "481f7a1c73a0c7740744fe4219a0b511591da131636eff58d778f58cda15d240"
+  },
+  {
+   "name": "at most two items, one no flag and one no text",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "any"
+       },
+       "min": 0,
+       "max": 2
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          "a",
+          "b"
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"item\":{\"op\":\"any\"},\"max\":2,\"min\":0,\"op\":\"list\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "99b46b2876642ff6adf25ab4717b97815c7c10ff53ad8a194c552ac7c01b3a27"
+  },
+  {
+   "name": "at most one item, no flag and no text",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "list",
+       "item": {
+        "op": "any"
+       },
+       "min": 0,
+       "max": 1
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          "a",
+          "b"
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"arg\":{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"item\":{\"op\":\"any\"},\"max\":1,\"min\":0,\"op\":\"list\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "00d4e3b2a0afb027d83ccb1b35f71d6cbd3d42c51318289f13aa2f8a37152750"
+  },
+  {
+   "name": "a flag or a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      {
+       "op": "list",
+       "item": {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       "min": 1,
+       "max": null
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"item\":{\"op\":\"choice\",\"values\":[false]},\"max\":null,\"min\":1,\"op\":\"list\"},{\"op\":\"choice\",\"values\":[false,true]}],\"op\":\"union\"},\"version\":1}",
+   "hash": "63759190068318a3b7ab8fa09e2550c122b297954f961b0eaa9c20b43af8eb11"
+  },
+  {
+   "name": "neither a list nor a flag",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "complement",
+       "arg": {
+        "op": "list",
+        "item": {
+         "op": "any"
+        },
+        "min": 0,
+        "max": null
+       }
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},{\"arg\":{\"op\":\"choice\",\"values\":[false,true]},\"op\":\"complement\"}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "22c16ad6b864860e70febb5568203533bed3b9c04b60de4c0cc3a5f713ab643f"
+  },
+  {
+   "name": "a list of what is no list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "complement",
+      "arg": {
+       "op": "list",
+       "item": {
+        "op": "any"
+       },
+       "min": 0,
+       "max": null
+      }
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"arg\":{\"item\":{\"op\":\"any\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"op\":\"complement\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "0cf33e6472b82622d632f028f37d77244a937711ca862b08d9e07aad11dd5020"
+  },
+  {
+   "name": "a list of flags and lists of flags",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "union",
+      "args": [
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       {
+        "op": "list",
+        "item": {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      ]
+     },
+     "min": 0,
+     "max": null
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"item\":{\"args\":[{\"item\":{\"op\":\"choice\",\"values\":[false,true]},\"max\":null,\"min\":0,\"op\":\"list\"},{\"op\":\"choice\",\"values\":[false,true]}],\"op\":\"union\"},\"max\":null,\"min\":0,\"op\":\"list\"},\"version\":1}",
+   "hash": "5f941c99c2a2ca2de1ee1d53db07a2864097f4f3688ed9c4b32c6e58e90ebc94"
+  },
+  {
    "name": "null",
    "document": null,
    "invalid": true
@@ -2227,6 +3213,125 @@
        ]
       }
      ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a list with no bounds",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a list with a shortest length below nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": -1,
+     "max": null
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a shortest length that is true",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": true,
+     "max": null
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a longest length that is a text",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 0,
+     "max": "2"
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a list held distinct",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     },
+     "min": 0,
+     "max": null,
+     "distinct": true
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a list whose item is no node",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "list",
+     "item": 1,
+     "min": 0,
+     "max": null
     }
    },
    "invalid": true

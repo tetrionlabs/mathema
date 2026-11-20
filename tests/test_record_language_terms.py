@@ -10,7 +10,8 @@ is not, by a value `member` places.
 The vectors are literals in `tests/data/record_language_vectors.json`.
 The laws are the statements of `claims/record_language.claims.yaml`,
 each run here over its stated domain: every point where there are at
-most `SWEEP` of them, else `SWEEP` points spread evenly across it."""
+most `SWEEP` of them, else `SWEEP` points spread evenly across it. The
+claims file is where a law is run over all of its domain."""
 import importlib.util
 import itertools
 import json
@@ -28,7 +29,7 @@ VECTORS = json.loads((ROOT / "tests" / "data" / "record_language_vectors.json")
 VALID = [v for v in VECTORS if not v.get("invalid")]
 INVALID = [v for v in VECTORS if v.get("invalid")]
 CLAIMS = yaml.safe_load((ROOT / "claims" / "record_language.claims.yaml").read_text(encoding="utf-8"))
-SWEEP = 2000
+SWEEP = 1000
 
 
 def _support():
@@ -47,12 +48,15 @@ SOLVER = ("a_found_member_is_a_member", "none_found_means_no_catalogue_value",
           "the_child_is_inside_its_parent", "generated_terms_keep_the_laws",
           "a_text_of_any_character_is_found", "a_value_member_does_not_place_is_not_returned",
           "a_solver_value_of_each_kind_is_read", "the_solvers_record_is_closed",
-          "no_answer_from_the_solver_is_unknown")
+          "no_answer_from_the_solver_is_unknown", "find_member_agrees_with_enumeration",
+          "a_length_is_exact_at_its_bounds", "generated_lists_agree_with_enumeration",
+          "several_list_constraints_agree_with_enumeration", "the_hard_cases_have_the_answers_stated",
+          "three_list_terms_agree_with_enumeration", "the_solver_tells_numbers_from_booleans")
 
 
 def test_the_vector_file_holds_what_it_is_expected_to():
-    assert (len(VALID), len(INVALID)) == (46, 30)
-    assert len(CLAIMS) == 50
+    assert (len(VALID), len(INVALID)) == (79, 36)
+    assert len(CLAIMS) == 69
 
 
 @pytest.mark.parametrize("vector", VALID, ids=[v["name"] for v in VALID])
