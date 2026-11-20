@@ -1058,6 +1058,37 @@ def three_list_terms_agree_with_enumeration(t: int, u: int, w: int) -> bool:
     return True
 
 
+def numbers_and_booleans_are_told_apart_by_kind(c: int, v: int) -> bool:
+    """Whether the choice of constant `c` alone holds value `v` exactly
+    when the two are the same value of the same kind: a number is the
+    number it equals whether written whole or with a point (`1` and
+    `1.0`, `0`, `0.0` and `-0.0`), and a boolean is never a number
+    (`True` is not `1`, `False` is not `0`), inside a record's field and
+    as a list's item as well."""
+    constants = [0, 1, False, True, 0.0, 1.0, -0.0, None, "0", "1", ""]
+    kinds = ["n0", "n1", "bF", "bT", "n0", "n1", "n0", "null", "t0", "t1", "t"]
+    rl, constant, value = _rl(), constants[int(c)], constants[int(v)]
+    same = kinds[int(c)] == kinds[int(v)]
+    return (rl.member(choice(constant), value) == same
+            and rl.member(record(("k", choice(constant), True)), {"k": value}) == same
+            and rl.member(lists(choice(constant), 1, 1), [value]) == same)
+
+
+def the_solver_tells_numbers_from_booleans(c: int, d: int) -> bool:
+    """Whether `find_member` finds a value in the choice of constant `c`
+    and outside the choice of constant `d` exactly when the two are not
+    the same value of the same kind, and the value found is of the kind
+    of `c`."""
+    constants = [0, 1, False, True, 0.0, 1.0, -0.0, None, "0", "1", ""]
+    kinds = ["n0", "n1", "bF", "bT", "n0", "n1", "n0", "null", "t0", "t1", "t"]
+    rl = _rl()
+    found = rl.find_member([choice(constants[int(c)])], [choice(constants[int(d)])])
+    if kinds[int(c)] == kinds[int(d)]:
+        return found.status == "none"
+    return (found.status == "member" and rl.member(choice(constants[int(c)]), found.member)
+            and isinstance(found.member, bool) == kinds[int(c)].startswith("b"))
+
+
 def generated_list(seed: int, depth: int = 0) -> dict:
     """A term drawn from `seed` in which lists stand beside the other
     nodes: lists of generated terms, bounded and not, to three deep."""

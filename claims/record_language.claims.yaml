@@ -262,3 +262,11 @@ claims.record_language_support.three_list_terms_agree_with_enumeration:
   claims:
     - name: three_list_terms_agree_with_enumeration
       statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, u in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, w in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, f(t, u, w) == True'
+claims.record_language_support.numbers_and_booleans_are_told_apart_by_kind:
+  claims:
+    - name: a_number_is_its_value_and_a_boolean_is_no_number
+      statement: 'for c in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, v in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, f(c, v) == True'
+claims.record_language_support.the_solver_tells_numbers_from_booleans:
+  claims:
+    - name: the_solver_tells_numbers_from_booleans
+      statement: 'for c in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, d in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, f(c, d) == True'
