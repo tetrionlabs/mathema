@@ -42,6 +42,10 @@ _SCALARS = frozenset({int, float, bool, str, _NONE})
 #: types whose `str`, `repr`, `ascii` and `format(v, "")` never raise
 #: (an int only when it has at most 4300 digits, see `_text_level`)
 _TEXT = frozenset({float, bool, str, _NONE})
+#: argument types a builtin constructor that checks its arguments
+#: inspects with no code of the argument's own (no `__iter__`,
+#: `__index__` or `__hash__` written outside the builtins)
+_PLAIN_ARGUMENTS = _SCALARS | {bytes}
 
 
 @dataclass(frozen=True)
@@ -226,9 +230,26 @@ class ReadRaise:
     line: "int | None"
 
 
+def _stored_globals(code) -> frozenset:
+    """The names the code object, or a function or class nested in it,
+    assigns or deletes as module globals (through `global`)."""
+    import dis
+    found: set = set()
+    pending = [code]
+    while pending:
+        current = pending.pop()
+        for instruction in dis.get_instructions(current):
+            if instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL"):
+                found.add(instruction.argval)
+        pending += [c for c in current.co_consts if isinstance(c, types.CodeType)]
+    return frozenset(found)
+
+
 class _Namespace:
     """The names a function's body reads: its own locals (from its code
-    object), its module's globals and its builtins."""
+    object), its module's globals and its builtins. A name the function
+    assigns as a global (`rebound`) holds whatever the function last
+    stored there, so it is not read off the module."""
 
     def __init__(self, fn) -> None:
         code = getattr(fn, "__code__", None)
@@ -237,6 +258,7 @@ class _Namespace:
         self.globals: dict = found_globals if self.ok else {}
         self.locals = (frozenset(code.co_varnames) | frozenset(code.co_cellvars)
                        | frozenset(code.co_freevars)) if code is not None else frozenset()
+        self.rebound = _stored_globals(code) if code is not None else frozenset()
         found = getattr(fn, "__builtins__", None)
         if found is None and self.ok:
             found = self.globals.get("__builtins__", builtins)
@@ -253,7 +275,7 @@ class _Namespace:
         else `_MISSING`."""
         if name in self.objects:
             return self.objects[name]
-        if not self.ok or name in self.locals:
+        if not self.ok or name in self.locals or name in self.rebound:
             return self._MISSING
         if name in self.globals:
             return self.globals[name]
@@ -544,19 +566,45 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
     return None
 
 
-def _imported(node: ast.AST) -> "dict | None":
+def _is_builtin_import(found) -> bool:
+    """Whether `found` is the builtin `__import__` itself."""
+    return type(found) is types.BuiltinFunctionType and getattr(found, "__self__", None) \
+        is builtins and getattr(found, "__name__", None) == "__import__"
+
+
+def _loaded(name: str):
+    """The module `sys.modules` holds under `name` when it is a plain
+    module object, every enclosing package is one too and each is held
+    in its package's own namespace; None otherwise."""
+    parts = name.split(".")
+    parent = None
+    for at in range(1, len(parts) + 1):
+        module = sys.modules.get(".".join(parts[:at]))
+        if type(module) is not types.ModuleType:
+            return None
+        if parent is not None and vars(parent).get(parts[at - 1]) is not module:
+            return None
+        parent = module
+    return parent
+
+
+def _imported(node: ast.AST, ns: "_Namespace") -> "dict | None":
     """Intent:
         For an `import` statement every name of which binds a module
         already in `sys.modules` (or, for `from m import a`, an
         attribute already in such a module's own namespace), the
         objects it binds by local name: running it looks them up and
-        cannot fail. None for any other statement.
+        cannot fail. None for any other statement, and for any import
+        where the function's `__import__` is not the builtin one.
     """
+    if isinstance(node, (ast.Import, ast.ImportFrom)) \
+            and not _is_builtin_import(ns.builtins.get("__import__")):
+        return None
     if isinstance(node, ast.Import):
         out = {}
         for alias in node.names:
             top = alias.name.split(".", 1)[0]
-            if alias.name not in sys.modules or top not in sys.modules:
+            if _loaded(alias.name) is None:
                 return None
             out[alias.asname or top] = sys.modules[alias.asname and alias.name or top]
         return out
@@ -614,7 +662,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
                  f"the test `{_source(node)}`{_where(node)} is evaluated before the raise "
                  f"and may itself raise")
             continue
-        imported = _imported(node)
+        imported = _imported(node, ns)
         if imported is not None:
             for local, module in imported.items():
                 ns.objects[local] = module
@@ -648,6 +696,9 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
     if isinstance(called, ast.Name) and called.id in ns.locals:
         return UnreadRaise(f"`{name}` is a variable of the function or of an enclosing "
                            f"one, not shown to be the exception class the claim names")
+    if isinstance(called, ast.Name) and called.id in ns.rebound:
+        return UnreadRaise(f"`{name}` is assigned by the function through `global`, so it "
+                           f"is not shown to be the exception class the claim names")
     cls = ns.resolve(called)
     if cls is _Namespace._MISSING:
         return UnreadRaise(f"`{name}` does not resolve to an attribute of a module, a "
@@ -661,19 +712,21 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
                 or any(k.arg is None for k in exc.keywords):
             note(UNKNOWN, f"the exception's arguments `{_source(exc)}` are unpacked "
                           f"before the raise")
+        known = True
         for argument in arguments:
-            found, _ = read_expression(argument, kinds, ns)
+            found, value = read_expression(argument, kinds, ns)
             note(found, f"the exception's argument `{_source(argument)}` is evaluated "
                         f"before the raise and may itself raise")
+            known = known and bool(value.types) and value.types <= _PLAIN_ARGUMENTS
         count, keywords = len(exc.args), [k.arg for k in exc.keywords if k.arg]
     else:
-        count, keywords = 0, []
+        count, keywords, known = 0, [], True
     refusal = constructor_refusal(cls, count, keywords)
     if refusal is not None:
         builtin_only = type(cls) is type and not any(
             k.__module__ != "builtins" and ("__init__" in vars(k) or "__new__" in vars(k))
             for k in cls.__mro__)
-        note(HALTS if builtin_only else UNKNOWN, refusal)
+        note(HALTS if builtin_only and known else UNKNOWN, refusal)
     if first is None:
         return ReadRaise(cls, name, getattr(stmt, "lineno", None))
     ordinary = issubclass(cls, (Exception, SystemExit))
