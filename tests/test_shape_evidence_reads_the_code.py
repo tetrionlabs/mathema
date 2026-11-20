@@ -82,6 +82,14 @@ SRC = '''
     def copied(x):
         t = x
         return t[0]
+
+
+    def times(x, scale=None):
+        return x * scale
+
+
+    def below(x):
+        return x < 0
 '''
 
 
@@ -136,7 +144,6 @@ def test_text_joined_with_a_parameter_is_not_arithmetic(mod):
 @pytest.mark.parametrize("name, values, expected", [
     ("length", {"xs": 1.5}, ("xs", 6)),
     ("odd", {"x": 2.0}, ("x", 22)),
-    ("join", {"s": 1.0}, ("s", 14)),
     ("loud", {"obj": 1.0}, ("obj", 30)),
 ])
 def test_a_raise_at_an_operation_on_the_value_names_it(mod, name, values, expected):
@@ -191,3 +198,13 @@ def test_a_raise_on_a_local_copy_names_the_parameter(mod):
         mod.copied(1.0)
     line = info.value.__traceback__.tb_next.tb_lineno
     assert wrong_shape_use(mod.copied, {"x": 1.0}, info.value) == ("x", line)
+
+
+@pytest.mark.parametrize("name, values", [("times", {"x": 1.0}),
+                                          ("below", {"x": [1.0]}),
+                                          ("join", {"s": 1.0})])
+def test_a_raise_naming_a_default_or_a_literal_too_names_nothing(mod, name, values):
+    fn = getattr(mod, name)
+    with pytest.raises(TypeError) as info:
+        fn(*values.values())
+    assert wrong_shape_use(fn, values, info.value) is None

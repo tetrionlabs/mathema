@@ -488,15 +488,21 @@ def not_established_text(fn, shape: ParameterShape) -> str:
             f"annotate it")
 
 
-def wrong_shape_use(fn, values: dict, exc: BaseException) -> "tuple[str, int] | None":
+def wrong_shape_use(fn, values: dict, exc: BaseException,
+                    drawn: "set | frozenset | None" = None) -> "tuple[str, int] | None":
     """Intent:
         `(param, line)` when `exc`, a TypeError or AttributeError, was
         raised by an operation in `fn`'s own body (not in a function it
         calls) that applies directly to `param`'s value, `values[param]`:
         the value indexed, sliced, iterated, measured, read for an
-        attribute, called, put under an operator or passed to a builtin
-        there, the message naming the value's type, and `param` never
-        rebound in the body. None otherwise.
+        attribute, called, put under an operator, used as a key or
+        passed to a builtin there, the message naming the value's type,
+        and `param` never rebound in the body. `drawn` names the
+        parameters whose values were drawn (every one of `values` when
+        None); only a drawn parameter is named. None otherwise, and
+        when the message also names the type of another operand whose
+        value was not drawn (a literal, a held value, a default), whose
+        type then explains the raise as well.
     """
     if not isinstance(exc, (TypeError, AttributeError)):
         return None
@@ -522,15 +528,48 @@ def wrong_shape_use(fn, values: dict, exc: BaseException) -> "tuple[str, int] | 
     rebound = param_uses(fdef, list(values)).assigned
     message = str(exc)
     line = positions[0]
+    drawn = set(values) if drawn is None else set(drawn)
     for node in ast.walk(_with_copies_read_through(fdef, list(values))):
         if not _at(node, positions, offset, fn):
             continue
-        for name in _direct_operands(node):
-            if name not in values or name in rebound:
+        operands = _operand_nodes(node)
+        held = {t.__name__ for o in operands
+                if (t := _held_type(fn, o, values, drawn)) is not None}
+        for name in [o.id for o in operands if isinstance(o, ast.Name)]:
+            if name not in values or name not in drawn or name in rebound:
                 continue
-            if _names_type(message, type(values[name]).__name__):
-                return name, line
+            type_name = type(values[name]).__name__
+            if not _names_type(message, type_name):
+                continue
+            if any(h != type_name and _names_type(message, h) for h in held):
+                return None
+            return name, line
     return None
+
+
+#: the built-in types of each shape's values
+_SHAPE_TYPES = {"number": (int, float, complex), "bool": (bool,),
+                "string": (str,), "sequence": (list, tuple),
+                "mapping": (dict,)}
+
+
+def attribute_no_shape_has(shape: ParameterShape, exc: BaseException) -> bool:
+    """Intent:
+        Whether `exc` is an AttributeError for an attribute no built-in
+        type of `shape`'s values has, while firm evidence (a literal
+        use, a default, an index or a mapping read) establishes that
+        shape: the value was of the shape the code states, and the
+        attribute is missing from every value of it.
+    """
+    name = getattr(exc, "name", None)
+    evidence = shape.evidence
+    if not isinstance(exc, AttributeError) or not name or evidence is None:
+        return False
+    types = _SHAPE_TYPES.get(evidence.shape)
+    if types is None or not any(e.firm and e.shape == evidence.shape
+                                for e in shape.found):
+        return False
+    return not any(hasattr(t, name) for t in types)
 
 
 def _names_type(message: str, type_name: str) -> bool:
@@ -564,34 +603,61 @@ def _indent(fn) -> int:
     return len(first) - len(first.lstrip())
 
 
-def _direct_operands(node) -> list:
-    """The parameter names an operation node applies to directly."""
-    def name(n):
-        return n.id if isinstance(n, ast.Name) else None
+def _operand_nodes(node) -> list:
+    """The operand nodes an operation node applies to directly."""
     found: list = []
     if isinstance(node, ast.Name):
-        found.append(node.id)
+        found.append(node)
     elif isinstance(node, ast.Subscript):
-        found += [name(node.value), name(node.slice)]
+        found += [node.value, node.slice]
     elif isinstance(node, ast.Attribute):
-        found.append(name(node.value))
+        found.append(node.value)
     elif isinstance(node, ast.Dict):
-        found += [name(k) for k in node.keys if k is not None]
+        found += [k for k in node.keys if k is not None]
     elif isinstance(node, ast.Set):
-        found += [name(e) for e in node.elts]
+        found += list(node.elts)
     elif isinstance(node, ast.BinOp):
-        found += [name(node.left), name(node.right)]
+        found += [node.left, node.right]
     elif isinstance(node, ast.UnaryOp):
-        found.append(name(node.operand))
+        found.append(node.operand)
     elif isinstance(node, ast.Compare):
-        found += [name(n) for n in (node.left, *node.comparators)]
+        found += [node.left, *node.comparators]
     elif isinstance(node, ast.Call):
         if isinstance(node.func, ast.Attribute):
-            found.append(name(node.func.value))
-        found.append(name(node.func))
-        found += [name(a) for a in node.args]
-        found += [name(k.value) for k in node.keywords]
-    return [n for n in found if n is not None]
+            found.append(node.func.value)
+        found.append(node.func)
+        found += list(node.args)
+        found += [k.value for k in node.keywords]
+    return found
+
+
+def _direct_operands(node) -> list:
+    """The names an operation node applies to directly."""
+    return [n.id for n in _operand_nodes(node) if isinstance(n, ast.Name)]
+
+
+_LITERAL_TYPES = {ast.List: list, ast.Tuple: tuple, ast.Dict: dict,
+                  ast.Set: set, ast.JoinedStr: str, ast.ListComp: list,
+                  ast.SetComp: set, ast.DictComp: dict}
+
+
+def _held_type(fn, operand, values: dict, drawn: set) -> "type | None":
+    """Intent:
+        The type of an operand whose value was not drawn: a literal, a
+        parameter given a held value (`values`, not in `drawn`), or a
+        parameter left at its default. None for a drawn value and for
+        any other name.
+    """
+    if isinstance(operand, ast.Constant):
+        return type(operand.value)
+    if type(operand) in _LITERAL_TYPES:
+        return _LITERAL_TYPES[type(operand)]
+    if not isinstance(operand, ast.Name):
+        return None
+    if operand.id in values:
+        return None if operand.id in drawn else type(values[operand.id])
+    default = _default_of(fn, operand.id)
+    return None if default is inspect.Parameter.empty else type(default)
 
 
 def parameter_shapes(fn, facts, params, cj_domain: dict,

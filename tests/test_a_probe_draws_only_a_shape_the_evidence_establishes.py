@@ -166,6 +166,16 @@ FNS = '''
         def t():
             return [1.0]
         return t()[0] + y0
+
+
+    def none_default_bug(x, scale=None):
+        return x * scale
+
+
+    def typo(x):
+        if x > 100:
+            return x.offest
+        return x + 1
 '''
 
 
@@ -328,3 +338,11 @@ def test_a_tuple_default_or_annotation_is_drawn_as_a_tuple(mod, name):
 def test_a_copy_is_read_through_only_in_its_own_scope_and_binding(mod, name):
     p = _row(getattr(mod, name), "f(y0) == y0 + 1.0")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+@pytest.mark.parametrize("name, text", [("none_default_bug", "f(x) >= 0"),
+                                        ("typo", "f(x) >= x")])
+def test_a_raise_the_drawn_shape_does_not_explain_is_a_finding(mod, name, text):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert "mathema.draw_defect" not in (p.meta or {})

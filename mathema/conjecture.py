@@ -8308,6 +8308,9 @@ class _ClaimContext:
     # the parameters the probe draws whose shape rests on the code (a
     # default or a body use), `{param: ParameterShape}`
     drawn_shapes: dict = field(default_factory=dict)
+    # the parameters the claim holds at a literal, a kept default or a
+    # pin rather than drawing them
+    shape_held: frozenset = frozenset()
     # True for `assuming is_defined(f)`: the claim quantifies over the
     # exact region where every call to f returns, derive excludes
     # f's raise regions by construction (their negations feed the
@@ -12510,6 +12513,7 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
     except Exception:
         kept, pins = {}, {}
     held |= set(kept) | set(pins)
+    ctx.shape_held = frozenset(held)
     named = _names_in_claim(cj)
     drawn = [p for p in params
              if p in named and p not in held and p not in bundles
@@ -12551,12 +12555,17 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
         The draw defect `exc` shows, when f itself raised it at an
         operation on the value of a parameter whose shape only the code
         established (`ctx.drawn_shapes`): `{param, raised, line, place,
-        quoted, drawn, evidence}`; None otherwise.
+        quoted, drawn, evidence}`; None otherwise, and when the raise
+        is explained by a value the claim holds (`ctx.shape_held`), a
+        default or a literal, or is an attribute missing from every
+        value of the shape firm evidence establishes
+        (`attribute_no_shape_has`).
     """
     if not ctx.drawn_shapes or call_raised[0] != "f" \
             or call_raised_at[0] is None:
         return None
-    from ._shape_evidence import definition_line_text, wrong_shape_use
+    from ._shape_evidence import (attribute_no_shape_has, definition_line_text,
+                                  wrong_shape_use)
     from ._signatures import callable_signature
     _callee, args, kwargs = call_raised_at[0]
     try:
@@ -12564,9 +12573,10 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
                       .arguments)
     except (TypeError, ValueError):
         return None
-    found = wrong_shape_use(fn, values, exc)
+    found = wrong_shape_use(fn, values, exc, set(values) - ctx.shape_held)
     if found is None or found[0] not in ctx.drawn_shapes \
-            or ctx.drawn_shapes[found[0]].stated:
+            or ctx.drawn_shapes[found[0]].stated \
+            or attribute_no_shape_has(ctx.drawn_shapes[found[0]], exc):
         return None
     p, line = found
     place, quoted = definition_line_text(fn, line)
