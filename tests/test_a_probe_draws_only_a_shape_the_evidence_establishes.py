@@ -107,6 +107,24 @@ FNS = '''
 
         def __le__(self, other):
             return self.a <= other.a
+
+
+    _CACHE = {}
+
+
+    def keyed(key=(1, 2)):
+        d = {key: 1}
+        return len(d)
+
+
+    def cached(key=(1, 2)):
+        _CACHE[key] = 1
+        return 1
+
+
+    def keyed_by(key: tuple):
+        d = {key: 1}
+        return len(d)
 '''
 
 
@@ -256,3 +274,9 @@ def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert p.meta.get("mathema.probe_gap") == "shape-not-established"
     assert "other" in p.meta["mathema.shape"]
+
+
+@pytest.mark.parametrize("name", ["keyed", "cached", "keyed_by"])
+def test_a_tuple_default_or_annotation_is_drawn_as_a_tuple(mod, name):
+    p = _row(getattr(mod, name), "f(key) == 1")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)

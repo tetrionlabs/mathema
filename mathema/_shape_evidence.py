@@ -135,6 +135,19 @@ def _default_shape(value) -> "str | None":
     return None
 
 
+def default_container(fn, shape: "ParameterShape | None") -> "type | None":
+    """Intent:
+        `tuple` when a sequence parameter's shape rests on a tuple
+        default, so each draw of it is passed as a tuple; None
+        otherwise.
+    """
+    if shape is None or shape.evidence is None \
+            or shape.evidence.source != "default" \
+            or shape.evidence.shape != "sequence":
+        return None
+    return tuple if isinstance(_default_of(fn, shape.param), tuple) else None
+
+
 def _function_def(fn) -> "tuple[Any, int]":
     """Intent:
         `fn`'s definition parsed from its source, with the line offset
@@ -515,9 +528,17 @@ def wrong_shape_use(fn, values: dict, exc: BaseException) -> "tuple[str, int] | 
         for name in _direct_operands(node):
             if name not in values or name in rebound:
                 continue
-            if f"'{type(values[name]).__name__}'" in message:
+            if _names_type(message, type(values[name]).__name__):
                 return name, line
     return None
+
+
+def _names_type(message: str, type_name: str) -> bool:
+    """Whether an error message names the type `type_name` as a word,
+    bare, in single quotes or in double quotes."""
+    import re
+    return re.search(rf"(?<![\w.]){re.escape(type_name)}(?!\w)",
+                     message) is not None
 
 
 def _at(node, positions, offset: int, fn) -> bool:
@@ -550,8 +571,14 @@ def _direct_operands(node) -> list:
     found: list = []
     if isinstance(node, ast.Name):
         found.append(node.id)
-    elif isinstance(node, (ast.Subscript, ast.Attribute)):
+    elif isinstance(node, ast.Subscript):
+        found += [name(node.value), name(node.slice)]
+    elif isinstance(node, ast.Attribute):
         found.append(name(node.value))
+    elif isinstance(node, ast.Dict):
+        found += [name(k) for k in node.keys if k is not None]
+    elif isinstance(node, ast.Set):
+        found += [name(e) for e in node.elts]
     elif isinstance(node, ast.BinOp):
         found += [name(node.left), name(node.right)]
     elif isinstance(node, ast.UnaryOp):

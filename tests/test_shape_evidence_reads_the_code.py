@@ -52,6 +52,31 @@ SRC = '''
     def rebinds(x):
         x = [x]
         return x[0][0]
+
+
+    _STORE = {}
+
+
+    def keys(k):
+        return {k: 1}
+
+
+    def members(k):
+        return {k}
+
+
+    def stored(k):
+        _STORE[k] = 1
+        return 1
+
+
+    def fmt(x):
+        return "%d items" % x
+
+
+    def shout_at(x):
+        prefix = "hi "
+        return prefix + x
 '''
 
 
@@ -137,3 +162,20 @@ def test_the_kinds_the_walk_gives_are_unchanged_by_the_extra_uses():
         "u": "scalar"}
     uses = param_uses(fdef, ["xs", "d", "x", "s", "u"])
     assert set(uses.numeric) == {"x"} and set(uses.text) == {"s"}
+
+
+@pytest.mark.parametrize("name, values", [
+    ("keys", {"k": [1.0]}),
+    ("members", {"k": [1.0]}),
+    ("stored", {"k": [1.0]}),
+    ("fmt", {"x": "a"}),
+    ("shout_at", {"x": 1.0}),
+])
+def test_a_key_a_subscript_and_any_quoting_of_the_type_name_count(
+        mod, name, values):
+    fn = getattr(mod, name)
+    with pytest.raises(TypeError) as info:
+        fn(*values.values())
+    line = info.value.__traceback__.tb_next.tb_lineno
+    assert wrong_shape_use(fn, values, info.value) == ("k" if "k" in values
+                                                       else "x", line)
