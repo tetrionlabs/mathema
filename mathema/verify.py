@@ -1863,8 +1863,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         one key (a `RecursionError` included) fails that key alone, puts
         back the record it had before the run and drops what the run
         gathered for it, and the sweep goes on. `MemoryError`,
-        `KeyboardInterrupt`, `SystemExit` and the wall-clock alarm pass
-        through the guard and end the run.
+        `KeyboardInterrupt`, `SystemExit` and the wall-clock alarm end
+        the run, after the guard puts back the key's record the same
+        way.
     """
     from . import analyze, check
     from .compendium import external_premises as _external_premises
@@ -2595,9 +2596,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             pending.append((key, why, list(rec.probes), rec, rec.dependencies,
                             risk, rec.facts.unresolved, verified_info))
             out.adjudicated += 1
-        except MemoryError:
-            raise
-        except Exception as exc:
+        except BaseException as exc:
+            if not isinstance(exc, Exception) or isinstance(exc, MemoryError):
+                # the sweep ends; the key's record is put back first
+                if key in prior_records:
+                    _put_back(prior_records[key])
+                raise
             _drop_key_state(key)
             restore_error = (_put_back(prior_records[key])
                              if record_written else None)
@@ -2698,9 +2702,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                {key: entry["entry"]},
                                header=f"machine record; binds to form "
                                       f"{recorded_form}")
-        except MemoryError:
-            raise
-        except Exception as exc:
+        except BaseException as exc:
+            if not isinstance(exc, Exception) or isinstance(exc, MemoryError):
+                # the sweep ends; the key's record is put back first
+                if key in prior_records:
+                    _put_back(prior_records[key])
+                raise
             _drop_key_state(key)
             restore_error = (_put_back(prior_records[key])
                              if key in prior_records else None)
@@ -2891,17 +2898,21 @@ def _record_before(root: str, key: str) -> tuple:
 def _put_back(before: tuple) -> "str | None":
     """Intent:
         Return a record file to the bytes `_record_before` read, or
-        remove it when there was none. None when that worked, else the
-        error that stopped it, as `<type>: <message>`.
+        remove it when there was none, so that a read of the store
+        later in the same run scope sees what is on disk. None when
+        that worked, else the error that stopped it, as `<type>:
+        <message>`.
     """
+    from . import _run_scope
+    from .spec import atomic_write_bytes
     path, data = before
     try:
         if data is None:
             if os.path.exists(path):
                 os.remove(path)
+            _run_scope.wrote(path)
         else:
-            with open(path, "wb") as fh:
-                fh.write(data)
+            atomic_write_bytes(path, data)
     except OSError as exc:
         return f"{type(exc).__name__}: {exc}"
     return None

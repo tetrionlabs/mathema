@@ -578,13 +578,22 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
 
 def atomic_write_text(path: str, text: str) -> str:
     """Intent:
-        Replace the file at `path` with `text` all at once, creating
-        the parent directory first. The text goes to a temporary file
-        in the same directory, is flushed to disk, and is renamed over
-        `path`; a rename within one filesystem is atomic, so a reader
-        (or an interrupted run) sees either the old file or the new
-        one, never a truncated one. An existing file's permission
-        bits carry over. Returns `path`.
+        Replace the file at `path` with `text`, encoded as UTF-8, all
+        at once (`atomic_write_bytes`). Returns `path`.
+    """
+    return atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def atomic_write_bytes(path: str, data: bytes) -> str:
+    """Intent:
+        Replace the file at `path` with `data` all at once, creating
+        the parent directory first. The bytes go to a temporary file
+        in the same directory, are flushed to disk, and are renamed
+        over `path`; a rename within one filesystem is atomic, so a
+        reader (or an interrupted run) sees either the old file or the
+        new one, never a truncated one. An existing file's permission
+        bits carry over, and the run scope forgets what it kept from
+        the file (`_run_scope.wrote`). Returns `path`.
     """
     import tempfile
     d = os.path.dirname(path)
@@ -594,8 +603,8 @@ def atomic_write_text(path: str, text: str) -> str:
                                prefix=f".{os.path.basename(path)}.",
                                suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
         if os.path.exists(path):
