@@ -70,6 +70,11 @@ def _rl():
     return record_language
 
 
+def _rc():
+    from mathema.koine import record_claims
+    return record_claims
+
+
 def _document(t: int):
     return _rm().membership_document(TERMS[int(t)])
 
@@ -426,4 +431,118 @@ def a_question_over_two_vectors_agrees_with_the_reference(i: int, j: int) -> boo
     if found.status == "member":
         return rl.member(left, found.member, bound="at_most") \
             and not rl.member(right, found.member, bound="at_least")
+    return found.status == "none"
+
+
+# ---- a statement about every member of a record language -------------------
+
+NAMESETS = BASE.NAMESETS
+#: a closed record of three required fields, and the same with one more
+#: optional key
+THREE = REF.record(("edit", REF.FLAG, True), ("publish", REF.FLAG, True),
+                   ("root", REF.text(REF.SHALLOW), True))
+THREE_AND_SHELL = REF.record(("edit", REF.FLAG, True), ("publish", REF.FLAG, True),
+                             ("root", REF.text(REF.SHALLOW), True),
+                             ("shell", REF.FLAG, False))
+
+
+def _breaks_the_keys(value, names) -> bool:
+    """Whether a value has a key outside `names`, or has no keys to
+    speak of because it is no map."""
+    return not isinstance(value, dict) or not set(value) <= set(names)
+
+
+def every_key_of_every_member_is_named_agrees_with_the_reference(t: int, n: int) -> bool:
+    """Whether "every key of every member of term `t` is one of name
+    set `n`" is decided as the reference decides "term `t` is included
+    in the closed record of those names, each optional and holding any
+    value": proven exactly when that inclusion is proven; falsified
+    only by a map the reference places in the term that holds a key
+    outside the names, and always when the catalogue holds such a map;
+    and otherwise undecided with the reason that the statement has no
+    value at a member that is no map."""
+    rl, rc = _rl(), _rc()
+    term, names = TERMS[int(t)], NAMESETS[int(n)]
+    closed = REF.record(*[(name, REF.ANY, False) for name in names])
+    reference = REF.includes(term, closed)[0]
+    decided = rc.decide_every_member(REF._exact(term), rc.every_key_is_one_of(names))
+    if (decided.verdict == "proven") != (reference == "proven"):
+        return False
+    if decided.verdict == "proven":
+        return decided.witness is None
+    a_map_breaks = any(rl.member(term, x) and isinstance(x, dict)
+                       and not set(x) <= set(names) for x in VALUES)
+    if decided.verdict == "falsified":
+        x = decided.witness["value"]
+        return rl.member(term, x) and isinstance(x, dict) and not set(x) <= set(names)
+    return decided.verdict == "unknown" and not a_map_breaks and "no value" in decided.reason
+
+
+def the_closed_record_has_no_other_key() -> bool:
+    """Whether, for the closed record of edit, publish and root: every
+    key of every member is one of the three names, proven; with root
+    left out of the names the statement is falsified by a member
+    holding root; and for the record with one more optional key, shell,
+    it is falsified by a member holding shell."""
+    rl, rc = _rl(), _rc()
+    names = ["edit", "publish", "root"]
+    proven = rc.decide_every_member(REF._exact(THREE), rc.every_key_is_one_of(names))
+    short = rc.decide_every_member(REF._exact(THREE),
+                                   rc.every_key_is_one_of(["edit", "publish"]))
+    wide = rc.decide_every_member(REF._exact(THREE_AND_SHELL), rc.every_key_is_one_of(names))
+    if not (proven.verdict == "proven" and short.verdict == wide.verdict == "falsified"):
+        return False
+    a, b = short.witness["value"], wide.witness["value"]
+    return (rl.member(THREE, a) and "root" in a
+            and rl.member(THREE_AND_SHELL, b) and "shell" in b)
+
+
+def a_statement_about_every_member_is_asked_of_the_right_bound(d: int, n: int) -> bool:
+    """Whether, for definition `d` that may be a pair of bounds and
+    name set `n`: a proven verdict means no catalogue value in the
+    at_least bound, which holds every member, breaks the statement; and
+    a falsified one carries a value of the at_most bound, which holds
+    only members, that breaks it."""
+    rl, rc = _rl(), _rc()
+    definition, names = DEFINITIONS[int(d)], NAMESETS[int(n)]
+    decided = rc.decide_every_member(definition, rc.every_key_is_one_of(names))
+    if decided.verdict == "proven":
+        return not any(rl.member(definition, x, bound="at_least")
+                       and _breaks_the_keys(x, names) for x in VALUES)
+    if decided.verdict == "falsified":
+        x = decided.witness["value"]
+        return rl.member(definition, x, bound="at_most") and isinstance(x, dict) \
+            and not set(x) <= set(names)
+    return decided.verdict == "unknown" and bool(decided.reason)
+
+
+def generated_statements_about_keys_agree_with_the_reference(seed: int) -> bool:
+    """Whether, for a term drawn from `seed` and the names x and y, the
+    statement about every key of every member is proven exactly when
+    the reference proves the inclusion in the closed record of those
+    names, and a falsifying value is a map the reference places in the
+    term, holding another key."""
+    rl, rc = _rl(), _rc()
+    term, names = REF.generated_term(int(seed)), ["x", "y"]
+    closed = REF.record(*[(name, REF.ANY, False) for name in names])
+    reference = REF.includes(term, closed)[0]
+    decided = rc.decide_every_member(REF._exact(term), rc.every_key_is_one_of(names))
+    if (decided.verdict == "proven") != (reference == "proven"):
+        return False
+    if decided.verdict == "falsified":
+        x = decided.witness["value"]
+        return rl.member(term, x) and isinstance(x, dict) and not set(x) <= set(names)
+    return decided.verdict == "proven" or bool(decided.reason)
+
+
+def only_valued_points_are_asked_for_on_request(e: int) -> bool:
+    """Whether the question restricted to points where every document
+    has a value gives, for the document of expression `e` asked false,
+    either none or a value at which the interpreter returns false."""
+    from mathema.koine.interpret import Value
+    rt, sq = _rt(), _sq()
+    document = rt.function_of_one_value(_expressions()[int(e)])
+    found = sq.find_member([], [document], valued_only=True)
+    if found.status == "member":
+        return rt.interpret(document, [found.member]) == Value(False)
     return found.status == "none"
