@@ -543,18 +543,23 @@ def _split_unparseable(claims: list, grammar: str, fn,
         `(readable, unreadable)`: the claims kept for adjudication, and
         `(name, error)` for each claim an authoring surface states
         (its name in `authored`) whose mathema-grammar statement does
-        not parse, so that claim is reported on its own while the
-        others are adjudicated. A claim only the verified record holds
-        is kept as it is.
+        not parse, and for each claim whose stored text mathema cannot
+        write (`CanonicalTextError`), so that claim is reported on its
+        own while the others are adjudicated. Any other claim only the
+        verified record holds is kept as it is.
     """
     from .conjecture import InvalidConjecture
     from .spec import claims_fingerprint
+    from .conjecture import CanonicalTextError
     readable, unreadable = [], []
     for c in claims:
-        if c.get("name") in authored:
-            try:
-                claims_fingerprint([c], grammar, fn)
-            except InvalidConjecture as e:
+        try:
+            claims_fingerprint([c], grammar, fn)
+        except CanonicalTextError as e:
+            unreadable.append((c.get("name") or c.get("statement"), e))
+            continue
+        except InvalidConjecture as e:
+            if c.get("name") in authored:
                 unreadable.append((c.get("name") or c.get("statement"), e))
                 continue
         readable.append(c)
@@ -591,14 +596,87 @@ def split_unparseable_entry(entry: dict) -> tuple:
 
 
 def unparseable_claim_message(key: str, name: str, where: "str | None",
-                              error, rerun: str = "verify") -> str:
+                              error, rerun: str = "verify",
+                              location: "dict | None" = None) -> str:
     """Intent:
         The one line naming a declared claim that does not parse, with
-        the parser's message and where to correct it.
+        the parser's message and where to correct it; for a claim that
+        parses but whose stored text does not read back as it
+        (`CanonicalTextError`), `canonical_text_defect_message` at
+        `location`.
     """
+    from .conjecture import CanonicalTextError
+    if isinstance(error, CanonicalTextError):
+        return canonical_text_defect_message(key, name, where, error, location)
     where = where or "its docstring or claims file"
     return (f"{key}: claim {name!r} declared in {where} does not parse "
             f"({error}); correct it there and re-run {rerun}")
+
+
+def claim_location(root: str, source: "str | None", key: str,
+                   name: str) -> "dict | None":
+    """Intent:
+        Where claim `name` of `key` is stated in the claims file or
+        record at `source` (relative to `root`), as `{"file", "line",
+        "text"}` (the line holding its statement, stripped), or None
+        when there is no source or the claim is not found in it.
+    """
+    from .spec import claim_statement_line
+    if not source:
+        return None
+    path = os.path.join(root, source)
+    line = claim_statement_line(path, key, name)
+    if line is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read().splitlines()[line - 1].strip()
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+    return {"file": source, "line": line, "text": text}
+
+
+def canonical_text_defect_message(key: str, name: str, where: "str | None",
+                                  error, location: "dict | None" = None,
+                                  command: str = "verify") -> str:
+    """Intent:
+        The diagnostic for a claim whose stored text mathema cannot
+        write (`CanonicalTextError`): a summary line naming the claim,
+        then `Error: <title>`, where the claim is stated (`on <file>
+        line <n>:` and the quoted line, when `location` is known, else
+        the file or docstring and the claim's text), and one sentence
+        saying it is a defect in mathema to report and what became of
+        the claim in this `command` run.
+    """
+    shown = where or "its docstring or claims file"
+    done = ("was not checked" if command == "verify"
+            else "was not compared with its record")
+    summary = (f"{key}: claim {name!r} declared in {shown} {done}: "
+               f"this is a defect in mathema's rendering of the claim, not "
+               f"in the claim")
+    lines = [summary, "", "Error: mathema cannot write this claim's stored text", ""]
+    if location is not None:
+        lines.append(f"  on {location['file']} line {location['line']}:")
+        lines.append(f"  {location['line']}:   {location['text']}")
+    else:
+        lines.append(f"  in {shown}:")
+        stated = getattr(error, "text", None)
+        if stated:
+            lines.append(f"      {stated}")
+    problem = getattr(error, "problem", None) or "it does not read back"
+    rendered = getattr(error, "text", None)
+    wrote = f" ({rendered})" if rendered else ""
+    if command == "verify":
+        became = ("the claim is unchecked this run and no record was written "
+                  "for it (an earlier record of it is kept as it was)")
+    else:
+        became = ("its record is left as it was and verify reports it the "
+                  "same way")
+    lines += ["", f"The text mathema wrote for it{wrote} does not read back "
+                  f"as the claim: {problem}; this is a defect in mathema, not "
+                  f"in the claim, so please report it with this claim, and "
+                  f"{became}."]
+    return "\n".join(lines)
 
 
 @dataclass
@@ -1072,7 +1150,9 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
         InvalidConjecture: a claim the fingerprint cannot read.
 
     Notes:
-        A claim named in an authoring `conflicts` entry is left out.
+        A claim named in an authoring `conflicts` entry is left out; one
+        named in a `canonical-text-defect` entry is left out and listed
+        in `unreadable` with its error.
         A pending supersession keeps the verified version. The verified
         layer is append-only in membership: a claim removed from every
         authoring surface is rebuilt from its verified row, so the set
@@ -1096,6 +1176,12 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
     grammar = merged.get("grammar", GRAMMAR)
     authored = {c.get("name") for c in merged.get("claims") or []}
     claims, unreadable = _split_unparseable(claims, grammar, fn, authored)
+    defects = {c["claim"]: c["error"] for c in conflicts
+               if c.get("kind") == "canonical-text-defect"}
+    if defects:
+        claims = [c for c in claims if c.get("name") not in defects]
+        named = {name for name, _ in unreadable}
+        unreadable += [(name, e) for name, e in defects.items() if name not in named]
     entry = dict(merged)
     entry["claims"] = claims
     return {"entry": entry, "claims": claims, "grammar": grammar,
@@ -1792,7 +1878,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
-    from .conjecture import InvalidConjecture, _resolve_func_ref
+    from .conjecture import CanonicalTextError, InvalidConjecture, _resolve_func_ref
     from .inventory import chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
@@ -1808,6 +1894,18 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
+    # claims whose record differs only in how an earlier release quoted
+    # a string literal in the stored text, reported once for the run
+    quoting_moved: list = []
+    # claims whose record differs only in an earlier release writing a
+    # negated relation without its parentheses, reported once for the run
+    negation_moved: list = []
+    # per key, the claims whose record row stores a statement that does
+    # not parse: each is adjudicated again and its row rewritten
+    stale_rows: dict = {}
+    # per key, the claims recorded when a domain value's escapes were read
+    # as their characters undecoded: each is adjudicated again
+    escapes_moved: dict = {}
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -1977,6 +2075,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         supersessions.pop(key, None)
         grammar_changes.pop(key, None)
         release_moved[:] = [m for m in release_moved if m[0] != key]
+        quoting_moved[:] = [m for m in quoting_moved if m[0] != key]
+        negation_moved[:] = [m for m in negation_moved if m[0] != key]
+        stale_rows.pop(key, None)
+        escapes_moved.pop(key, None)
 
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
@@ -2108,7 +2210,37 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
                 for conflict in _conflicts:
                     if conflict.get("kind") == "release-move":
-                        release_moved.append((key, conflict["claim"]))
+                        moved = conflict.get("moved") or ()
+                        if "domain-escapes" in moved:
+                            escapes_moved.setdefault(key, []).append(conflict["claim"])
+                            read_now = ", ".join(
+                                f"{written} now reads as {value!r}"
+                                for written, value in conflict.get("escapes") or ())
+                            out.lines.append(
+                                f"note {key}: claim {conflict['claim']!r}: a backslash "
+                                f"escape in a domain value is now read as the "
+                                f"character it names, as in an expression "
+                                f"({read_now}); to mean the backslash itself, write "
+                                f"it doubled (\"\\\\t\" is a backslash and a t); "
+                                f"the claim is checked again on the values it now "
+                                f"names")
+                        if "literal-quoting" in moved:
+                            quoting_moved.append((key, conflict["claim"]))
+                        if "not-parentheses" in moved:
+                            negation_moved.append((key, conflict["claim"]))
+                        if not moved:
+                            release_moved.append((key, conflict["claim"]))
+                        continue
+                    if conflict.get("kind") == "canonical-text-defect":
+                        # reported with the claims `claims_now` leaves out
+                        continue
+                    if conflict.get("kind") == "unreadable-record":
+                        stale_rows.setdefault(key, []).append(conflict["claim"])
+                        out.lines.append(
+                            f"note {key}: the stored text of claim "
+                            f"{conflict['claim']!r} could not be read and was "
+                            f"replaced; the claim is checked again as written "
+                            f"(it read: {conflict['verified']})")
                         continue
                     if conflict.get("kind") == "supersession":
                         supersessions.setdefault(key, {})[conflict["claim"]] = \
@@ -2135,17 +2267,38 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 retired_noted = {ln.split("'")[1] for ln in retired_notes}
                 entry_grammar = now["grammar"]
                 current_claims = now["claims"]
+                kept_rows = []
                 for claim_name, error in now["unreadable"]:
+                    source = (declared_info or {}).get("source")
                     msg = unparseable_claim_message(
-                        key, claim_name, (declared_info or {}).get("source"),
-                        error)
-                    out.authoring_errors.append(msg)
+                        key, claim_name, source, error,
+                        location=claim_location(root, source, key, claim_name)
+                        if isinstance(error, CanonicalTextError) else None)
+                    if isinstance(error, CanonicalTextError):
+                        kept_rows.append(claim_name)
+                    if not isinstance(error, CanonicalTextError):
+                        # a claim mathema cannot render is mathema's defect,
+                        # not one the author fixes on an authoring surface
+                        out.authoring_errors.append(msg)
                     out.problems.append(msg)
                     out.lines.append(f"FAIL {msg}")
                 merged_entry = now["entry"]
                 out.grammars_seen.update(c.get("grammar", entry_grammar)
                                          for c in current_claims)
                 current_fp = now["fingerprint"]
+            except CanonicalTextError as e:
+                # mathema cannot write a claim's stored text: its defect, and
+                # the record is left as it was
+                source = (declared_info or {}).get("source")
+                name = getattr(e, "claim_name", None) or "a claim"
+                msg = canonical_text_defect_message(
+                    key, name, source, e, claim_location(root, source, key, name))
+                out.problems.append(msg)
+                out.lines.append(f"FAIL {msg}")
+                out.keys.append({"key": key, "why": "canonical-text-defect",
+                                 "passed": False, "problems": [msg],
+                                 "counts": {}, "claims": []})
+                continue
             except InvalidConjecture as e:
                 if _record_has_unreadable_claim(verified_entry):
                     from .spec import record_file_name
@@ -2246,6 +2399,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
                         and not pinf_moved and not definitions_moved
+                        and not stale_rows.get(key) and not escapes_moved.get(key)
                         and (premise_now == (recorded_premises or {})
                              if premise_now or recorded_premises else True))
             deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2385,6 +2539,12 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else "forced (--all)" if all and is_fresh
                    else "targeted re-verify" if only and is_fresh
                    else "no baseline record" if not recorded_form
+                   else "domain escapes now decoded" if escapes_moved.get(key)
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else "stored text unreadable" if stale_rows.get(key)
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
                    else "claims changed" if same_form(facts_now.form, recorded_form)
                    else "form changed")
             rec.meta = {**(getattr(rec, "meta", None) or {}),
@@ -2420,7 +2580,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             written = write_record(rec, key=key, root=root,
                                    claims=current_claims,
                                    declared_intent=merged_entry.get("intent"),
-                                   grammar=entry_grammar, fn=fn)
+                                   grammar=entry_grammar, fn=fn,
+                                   keep_rows=kept_rows)
             record_written = True
             _carry_recorded_verdicts(rec.probes, written, key)
             # the record just written carries each acceptance forward or
@@ -2677,7 +2838,39 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
             f"re-recorded under the new text; nothing the author wrote "
             f"changed")
+    if quoting_moved:
+        out.lines.append(quoting_moved_note(len(quoting_moved)))
+    if negation_moved:
+        out.lines.append(negation_moved_note(len(negation_moved)))
     return out
+
+
+def quoting_moved_note(count: int) -> str:
+    """Intent:
+        The run's note for `count` claims whose record an earlier
+        release wrote with its literal quoting.
+    """
+    many = count != 1
+    return (f"note: the stored text of a string literal is corrected in "
+            f"{count} claim{'s' if many else ''} recorded by an earlier "
+            f"release, which wrote its quotes in a spelling this release "
+            f"does not write; {'each is' if many else 'it is'} checked "
+            f"again and re-recorded under the corrected text; nothing the "
+            f"author wrote changed")
+
+
+def negation_moved_note(count: int) -> str:
+    """Intent:
+        The run's note for `count` claims whose record an earlier
+        release wrote with a negated relation out of its parentheses.
+    """
+    many = count != 1
+    return (f"note: the stored text of a negated relation is rewritten in "
+            f"{count} claim{'s' if many else ''} recorded by an earlier "
+            f"release, which wrote a `not` over a relation without "
+            f"parentheses of its own; {'each is' if many else 'it is'} "
+            f"checked again and re-recorded under the text this release "
+            f"writes; nothing the author wrote changed")
 
 
 def _record_before(root: str, key: str) -> tuple:

@@ -1867,6 +1867,16 @@ def cmd_docsync(args) -> int:
                      "  (add with --write-docstrings)"))
     for k in report.docstrings_written:
         print(f"wrote missing claim names into {k}'s Claims: block")
+    for r in report.stale_records:
+        print(f"note {r['key']}: the stored text of claim {r['claim']!r} "
+              f"could not be read; the next verify checks the claim again "
+              f"and replaces it")
+    for d in report.defects:
+        print(f"FAIL {d['message']}")
+    for u in report.unreadable:
+        which = f"claim {u['claim']!r}" if u["claim"] else "a claim"
+        print(f"UNREADABLE {u['where']} {u['key']}: {which} does not read "
+              f"({u['error']}); this function was not synced")
     if report.index_path:
         print(f"index -> {report.index_path}")
     if report.index_error:
@@ -1882,6 +1892,10 @@ def cmd_docsync(args) -> int:
             shim = types.SimpleNamespace(target=t, root=args.root,
                                          write=args.write)
             _docsync_checklist(shim)
+    if report.unreadable:
+        return 2
+    if report.defects:
+        return 1
     return 1 if ((report.conflicts and not args.yes)
                  or report.index_error) else 0
 

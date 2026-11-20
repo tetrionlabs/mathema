@@ -1883,6 +1883,24 @@ class InvalidConjecture(ValueError):
     `Conjecture` (bad syntax, an unrecognized relation, ...)."""
 
 
+class CanonicalTextError(InvalidConjecture):
+    """Raised by `spec.canonical_claim_text` when the text it rendered
+    for a claim does not read back as that claim (another string
+    literal value, another statement, or text that does not parse), so
+    the claim has no stored text and no record is written for it.
+
+    `claim_name` is the claim's name, `problem` says how the text
+    fails to read back, and `text` is the text rendered; each is None
+    when not given."""
+
+    def __init__(self, message: str = "", *, claim_name: "str | None" = None,
+                 problem: "str | None" = None, text: "str | None" = None):
+        super().__init__(message)
+        self.claim_name = claim_name
+        self.problem = problem
+        self.text = text
+
+
 class ConflictingDomainBinding(InvalidConjecture):
     """Raised by `claim()` when the same name is given a domain both by
     a leading `let name be bounds` and an ordinary `for name in bounds`
@@ -1955,10 +1973,12 @@ def claim(law: str, name: str | None = None, source: str = "user",
 
     Inside a run scope (`_run_scope.run_scope`) a claim stated again with
     the same text and arguments is parsed once for the run; each call
-    gets its own copy of the parse."""
+    gets its own copy of the parse, except under
+    `_scan.legacy_domain_escapes`, which reads the same text another way."""
     from . import _run_scope
+    from ._scan import uses_legacy_domain_escapes
     kept = _run_scope.kept("claims")
-    if kept is not None:
+    if kept is not None and not uses_legacy_domain_escapes():
         key = _claim_cache_key(law, name, source, route, grammar, funcs,
                                tolerance, pseudo_infinity, meta,
                                matrix_names, trials)

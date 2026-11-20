@@ -31,6 +31,14 @@ from .routes import examine_predicates, is_proof_route
 # CHANGELOG.md. Stamped into every record's lineage.CDD_spec_version field.
 SPEC_VERSION = "0.3.0"
 
+#: the release whose rules write the stored statement text of a record:
+#: each string literal respelled from its value, a negated relation in
+#: its parentheses, and a domain set's string member read with its
+#: backslash escapes decoded. A record states it as
+#: `lineage.statement_text`; one without it was written by an earlier
+#: release.
+STATEMENT_TEXT_RELEASE = "0.6.6.2"
+
 
 def reasoning_chain(ex) -> list[dict]:
     """The persistent chain of reasoning: intent → structure → formalization →
@@ -212,6 +220,11 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                     "CDD_spec_version": SPEC_VERSION,
                     "date": datetime.date.today().isoformat()},
     }
+    from ._scan import uses_legacy_rendering
+    if not uses_legacy_rendering():
+        # the statement text rules this record's rows are written under;
+        # absent when an earlier release's rendering is reproduced
+        spec["lineage"]["statement_text"] = STATEMENT_TEXT_RELEASE
     from .runtime_types import identity_entries
     runtime = identity_entries(f)
     if runtime:
@@ -1036,7 +1049,8 @@ def authored_route(row: dict) -> str:
 
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None,
-          grammar: str = "mathema", fn=None) -> str:
+          grammar: str = "mathema", fn=None,
+          keep_rows: "list | None" = None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
@@ -1054,7 +1068,11 @@ def record(ex, key: str | None = None, root: str = ".",
     own `intent` when the docstring provided none, and stamps
     `meta["mathema.intent_provenance"]: declared`. Every stated intent
     starts on the `declared` rung; `documented` is the human act of
-    accepting it (`mathema accept --intent`)."""
+    accepting it (`mathema accept --intent`).
+
+    `keep_rows` names claims whose row in the record already on disk is
+    written again exactly as it stands, beside the rows `ex` gives (a
+    claim this run did not check)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = record_path(verified_dir(root), key)
     if os.path.exists(path):
@@ -1103,6 +1121,9 @@ def record(ex, key: str | None = None, root: str = ".",
                                 & set(sum(sources.values(), [])))
             if documented:
                 sources["documented"] = documented
+    if keep_rows:
+        spec["claims"].extend(_prior_rows(path, key, keep_rows,
+                                          {c.get("name") for c in spec["claims"]}))
     # deterministic claim order, so a re-adjudication never reorders rows
     # in the diff (identity and the checksum sort independently, so this is
     # purely for a clean file)
@@ -1140,6 +1161,23 @@ def record(ex, key: str | None = None, root: str = ".",
     out = write_yaml(path, {key: spec},
                      header=f"machine record; binds to form {ex.facts.form}")
     return out
+
+
+def _prior_rows(path: str, key: str, names: list, have: set) -> list:
+    """Intent:
+        The live claim rows of the record at `path` for `key` named in
+        `names` and not in `have`, as they stand on disk; none when the
+        record does not exist or does not read.
+    """
+    import copy
+    if not os.path.exists(path):
+        return []
+    data, reason = read_verified_file(path)
+    if reason is not None or not isinstance(data, dict):
+        return []
+    rows = ((data.get(key) or {}).get("claims") or [])
+    return [copy.deepcopy(r) for r in rows if isinstance(r, dict)
+            and r.get("name") in set(names) and r.get("name") not in have]
 
 
 def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
@@ -2428,6 +2466,40 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     return data
 
 
+def claim_statement_line(path: str, key: str, name: str) -> "int | None":
+    """Intent:
+        The 1-based line of the statement of claim `name` under `key`
+        in the claims file or verified record at `path` (the
+        `{key: {claims: [{name, statement}, ...]}}` shape both share),
+        or None when the file does not read or holds no such claim.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            node = yaml.compose(fh, Loader=yaml.SafeLoader)
+    except (OSError, yaml.YAMLError, UnicodeDecodeError):
+        return None
+
+    def value(mapping, word):
+        if not isinstance(mapping, yaml.MappingNode):
+            return None
+        for k, v in mapping.value:
+            if getattr(k, "value", None) == word:
+                return v
+        return None
+
+    claims = value(value(node, key), "claims")
+    if not isinstance(claims, yaml.SequenceNode):
+        return None
+    for row in claims.value:
+        named = value(row, "name")
+        if getattr(named, "value", None) != name:
+            continue
+        stated = value(row, "statement") or value(row, "law") or named
+        return stated.start_mark.line + 1
+    return None
+
+
 def stamp_library_rows(data: dict, tag: str) -> None:
     """Intent:
         Mark every claim row of a library claims file (one declaring
@@ -3125,8 +3197,142 @@ def canonical_claim_text(cj) -> str:
     unicode, symbology-renamed) parses to the same Conjecture; this is
     the spelling mathema's own artifacts write back, and the basis
     `claims_fingerprint` hashes. Unicode output stays a display
-    rendering, recomputed from the parse at read time, never stored."""
-    return render_claim_text(cj, unicode=False, canonical=True)
+    rendering, recomputed from the parse at read time, never stored.
+
+    The text is read back before it is returned: it must parse, and
+    state the same relation, the same bound names and the same string
+    literal values (in expressions and in domain sets) as the claim.
+    Text that fails raises `CanonicalTextError`, an `InvalidConjecture`
+    naming the claim and the text."""
+    from ._scan import uses_legacy_rendering
+    text = render_claim_text(cj, unicode=False, canonical=True)
+    if uses_legacy_rendering() or getattr(cj, "relation", None) == "policy" \
+            or getattr(cj, "grammar", "mathema") != "mathema":
+        return text
+    problem = _reads_back_problem(cj, text)
+    if problem is not None:
+        from .conjecture import CanonicalTextError
+        raise CanonicalTextError(
+            f"the stored text of claim {getattr(cj, 'name', None)!r} does "
+            f"not read back as the claim ({problem}): {text}",
+            claim_name=getattr(cj, "name", None), problem=problem, text=text)
+    return text
+
+
+def _literal_values(text: str) -> list:
+    """Intent:
+        The value of each string literal in one expression text, as
+        Python reads the expression: implicitly concatenated literals
+        (`'a' 'b'`) are one value, and triple quotes and prefixes (`r`,
+        `u`, `b`) are read as Python reads them. A text Python does not
+        read as an expression (an `assuming` conjunct in words, say) is
+        read one quoted token at a time (`_scan.mask_strings`), each
+        token decoded as a literal on its own.
+    """
+    import ast
+
+    from ._scan import mask_strings
+    try:
+        tree = ast.parse(text, mode="eval")
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        tree = None
+    if tree is not None:
+        return [repr(node.value) for node in ast.walk(tree)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, (str, bytes))]
+    values = []
+    for literal in mask_strings(text)[1]:
+        try:
+            values.append(repr(ast.literal_eval(literal)))
+        except (ValueError, SyntaxError, MemoryError, RecursionError):
+            values.append(literal)
+    return values
+
+
+def _string_values(cj) -> list:
+    """Intent:
+        Every string literal value a conjecture states, sorted: those in
+        its expressions (sides, chain links, and each conjunct of its
+        premise, as `_literal_values` reads them) and the string members
+        of its domain sets (read as written), each tagged with where it
+        sits.
+    """
+    from .conjecture import _split_top_and
+    texts = [cj.lhs, cj.rhs]
+    texts += [t for link in (getattr(cj, "links", None) or []) for t in (link[0], link[2])]
+    if isinstance(cj.assuming, str) and cj.assuming:
+        premise = re.sub(r"^assuming\s+", "", cj.assuming.strip())
+        try:
+            texts += _split_top_and(premise)
+        except Exception:
+            texts.append(premise)
+    values = [("expression", v) for t in texts if isinstance(t, str) and t
+              for v in _literal_values(t)]
+    from .domain import _as_domain
+    for name, bound in (cj.domain or {}).items():
+        try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            pieces = ()
+        for piece in pieces:
+            if isinstance(piece, frozenset):
+                values.extend(("domain", name, v) for v in piece if isinstance(v, str))
+    return sorted(values)
+
+
+def _read_back_shape(cj) -> tuple:
+    """Intent:
+        What a reading of a claim's stored text has to keep: its
+        relation, its negation, its bound domain names, and its string
+        literal values.
+    """
+    return (cj.relation, bool(getattr(cj, "negated", False)),
+            tuple(sorted(cj.domain or {})), tuple(_string_values(cj)))
+
+
+def _reread(text: str, context: tuple) -> tuple:
+    """Intent:
+        `text` read back as a claim: `(None, its read-back shape)`, or
+        `(the reason, None)` when it does not parse. `context` is the
+        render context the reading happens under. Inside a run scope
+        (`_run_scope.run_scope`) a text read once under one context is
+        not read again in that run; outside one, every call reads it.
+    """
+    from .conjecture import InvalidConjecture
+    from .conjecture import claim as _claim
+    kept = _run_scope.kept("claim_read_back")
+    if kept is not None and (text, context) in kept:
+        return kept[(text, context)]
+    try:
+        back = _claim(text)
+    except InvalidConjecture as e:
+        found: tuple = (f"it does not parse ({e})", None)
+    else:
+        found = (None, _read_back_shape(back))
+    if kept is not None:
+        kept[(text, context)] = found
+    return found
+
+
+def _reads_back_problem(cj, text: str) -> "str | None":
+    """Intent:
+        Why `text`, rendered as `cj`'s canonical text, does not read
+        back as `cj`, or None when it does: it parses and keeps the
+        relation, the bound names and the string literal values.
+    """
+    from .grammar import (_BAR_MATRICES, _COMPLEX_NAMES, _ORDERED_MATRICES,
+                          _RENDER_MATRICES)
+    context = (_BAR_MATRICES.get(), _COMPLEX_NAMES.get(),
+               _ORDERED_MATRICES.get(), _RENDER_MATRICES.get())
+    problem, shape = _reread(text, context)
+    if problem is not None:
+        return problem
+    want = _read_back_shape(cj)
+    for i, what in enumerate(("relation", "negation", "bound names",
+                              "string literal values")):
+        if shape[i] != want[i]:
+            return f"it reads back with other {what}"
+    return None
 
 
 def _strip_pinned_regions(assuming: str) -> str:
@@ -3134,7 +3340,9 @@ def _strip_pinned_regions(assuming: str) -> str:
         The assuming clause with every `--> <region>` pin removed, per
         conjunct: `assuming f is defined --> b != 0 and lemma --> x > 0`
         becomes `assuming f is defined and lemma`. A conjunct with no
-        arrow (a plain relation premise) passes through whole.
+        arrow (a plain relation premise) passes through whole. An arrow
+        or an ` and ` inside a string literal (as `_scan.mask_strings`
+        reads them) is part of the literal and never cuts or splits.
 
     Notes:
         The pinned region is resolved evidence, recomputed at
@@ -3144,11 +3352,13 @@ def _strip_pinned_regions(assuming: str) -> str:
     """
     import re as _re
 
+    from ._scan import mask_strings, unmask_strings
     from .conjecture import _split_top_and
     text = _re.sub(r"^assuming\s+", "", assuming.strip())
+    masked, literals = mask_strings(text)
     kept = [_re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
-            for part in _split_top_and(text)]
-    return "assuming " + " and ".join(k for k in kept if k)
+            for part in _split_top_and(masked)]
+    return "assuming " + unmask_strings(" and ".join(k for k in kept if k), literals)
 
 
 def fingerprint_text(cj) -> str:
