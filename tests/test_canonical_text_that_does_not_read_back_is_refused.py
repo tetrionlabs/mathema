@@ -129,7 +129,8 @@ def _verify_with_the_old_quoting(tmp_path):
 
 def test_verify_says_a_refused_claim_is_a_defect_in_mathema(tmp_path):
     run = _verify_with_the_old_quoting(tmp_path)
-    lines = [ln for ln in run.stdout.splitlines() if "two_literals" in ln]
+    lines = [ln for ln in run.stdout.splitlines()
+             if "two_literals" in ln and ln.startswith("FAIL")]
     assert len(lines) == 1, run.stdout
     assert "defect in mathema's rendering" in lines[0], lines[0]
     assert "not checked" in lines[0], lines[0]

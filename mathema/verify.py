@@ -2290,7 +2290,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         # a claim mathema cannot render is mathema's defect,
                         # not one the author fixes on an authoring surface
                         out.authoring_errors.append(msg)
-                    _fail(key, msg)
+                        out.problems.append(msg)
+                        out.lines.append(f"FAIL {msg}")
+                    else:
+                        _fail(key, msg)
                 if kept_rows:
                     unchecked_rows[key] = [
                         r for r in (verified_entry or {}).get("claims") or []
