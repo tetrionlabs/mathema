@@ -177,19 +177,19 @@ def a_language_term_is_written_with_the_ruled_head(i: int) -> bool:
 
 def _malformed_language_terms() -> list:
     s = _syntax()
-    T, I, L = s.Term, s.Int, s.List
-    a = T("language::literal", (L((I(97),)),))
+    T, N, L = s.Term, s.Int, s.List
+    a = T("language::literal", (L((N(97),)),))
     return [
-        s.Name("x"), I(1), T("language::regex", (s.Str("a"),)), T("language::empty", (a,)),
-        T("language::literal", (I(97),)), T("language::literal", (L((s.Str("a"),)),)),
+        s.Name("x"), N(1), T("language::regex", (s.Str("a"),)), T("language::empty", (a,)),
+        T("language::literal", (N(97),)), T("language::literal", (L((s.Str("a"),)),)),
         T("language::literal", (L((s.Bool(True),)),)),
-        T("language::characters", (L((I(1), I(2))),)),
-        T("language::characters", (L((L((I(1),)),)),)),
+        T("language::characters", (L((N(1), N(2))),)),
+        T("language::characters", (L((L((N(1),)),)),)),
         T("language::complement", ()), T("language::complement", (a, a)),
-        T("language::repetition::bounded", (a, I(1))),
-        T("language::repetition::unbounded", (a, I(1), I(2))),
-        T("language::repetition::bounded", (a, s.Str("1"), I(2))),
-        T("language::union", (a, I(1))),
+        T("language::repetition::bounded", (a, N(1))),
+        T("language::repetition::unbounded", (a, N(1), N(2))),
+        T("language::repetition::bounded", (a, s.Str("1"), N(2))),
+        T("language::union", (a, N(1))),
         T("language::union", (a,), (("alphabet", a),)),
         T("language::regular::exact", (a,)),
         T("language::regular::exact", (a, T("alphabet::bytes"))),
@@ -292,7 +292,7 @@ def a_text_is_in_its_language(i: int, t: int) -> bool:
     text."""
     from mathema import regular
     from mathema.koine.interpret import Value
-    lt, s, rt = _lt(), _syntax(), _rt()
+    lt, s = _lt(), _syntax()
     node, text = REGULAR[int(i)], TEXTS[int(t)]
     term = s.Term(lt.IN_LANGUAGE, (_present(), lt.exact(lt.from_node(node))))
     return _at(term, text) == Value(regular.node_member(node, text))
