@@ -414,7 +414,8 @@ def _outcome(document: Document, value):
     return None
 
 
-def find_member(inside, outside, *, timeout_ms: int = 5000) -> Found:
+def find_member(inside, outside, *, valued_only: bool = False,
+                timeout_ms: int = 5000) -> Found:
     """Intent:
         A JSON value at which every document in `inside` returns true
         and every document in `outside` returns false: `member` with
@@ -423,7 +424,9 @@ def find_member(inside, outside, *, timeout_ms: int = 5000) -> Found:
 
     Notes:
         `none` is a proof, and also says every document has a value at
-        every JSON value. A value is returned only when
+        every JSON value. With `valued_only` the question is asked only
+        of the points where every document has a value, and `none` then
+        says nothing of the other points. A value is returned only when
         `record_terms.interpret` gives those truths at it. `unknown`
         when a document has no solver reading, when a document has no
         value at the point the solver gives, when the interpreter does
@@ -445,7 +448,7 @@ def find_member(inside, outside, *, timeout_ms: int = 5000) -> Found:
     valueless = z3.Or(*[z3.Not(t.defined) for t in truths])
     solver = z3.Solver()
     solver.add(*reading.shape())
-    solver.add(z3.Or(valueless, asked))
+    solver.add(z3.And(z3.Not(valueless), asked) if valued_only else z3.Or(valueless, asked))
     outcome = _checked(z3, solver, timeout_ms)
     if outcome == z3.unsat:
         return Found("none")
