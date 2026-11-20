@@ -415,21 +415,16 @@ class ParamUses:
         `math`/`cmath` function or of a numeric builtin; `text`: joined
         with or compared to a string literal), each as `(line, text)`.
         A product with a number literal is no such use: it repeats a
-        string or a sequence as well. A use that only an integer
-        supports is a numeric use that also states an integer
-        (`integer`): a count of repeats (`x * "ab"`, `[0] * x`), a shift
-        or a bitwise operation with a number literal, an argument of
-        `range`, an index into a literal sequence or a local bound to
-        one. A sum with a literal list or tuple (`[0] + xs`) names the
-        container the parameter is (`container`: `(line, text, "list" or
-        "tuple")`). `assigned` holds the parameters the body rebinds.
+        string or a sequence as well. A sum with a literal list or tuple
+        (`[0] + xs`) names the container the parameter is (`container`:
+        `(line, (text, "list" or "tuple"))`). `assigned` holds the
+        parameters the body rebinds.
     """
     iterated: frozenset = frozenset()
     arithmetic: frozenset = frozenset()
     mapping: frozenset = frozenset()
     numeric: dict = field(default_factory=dict)
     text: dict = field(default_factory=dict)
-    integer: dict = field(default_factory=dict)
     container: dict = field(default_factory=dict)
     assigned: frozenset = frozenset()
 
@@ -464,10 +459,8 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
     pset = set(params)
     numeric: dict = {}
     text: dict = {}
-    integer: dict = {}
     container: dict = {}
     assigned: set = set()
-    sequences = _literal_sequence_locals(fdef)
 
     def note(table: dict, name, node, what: str) -> None:
         if name in pset:
@@ -475,8 +468,8 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                 (getattr(node, "lineno", 0), what))
 
     for node in ast.walk(fdef):
-        _note_kind_uses(node, note, numeric, text, assigned, integer)
-        _note_integer_uses(node, note, numeric, integer, container, sequences)
+        _note_kind_uses(node, note, numeric, text, assigned)
+        _note_container_uses(node, note, container)
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
             iterated.add(node.iter.id)
         elif isinstance(node, ast.comprehension) and isinstance(node.iter, ast.Name):
@@ -537,17 +530,16 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                      mapping=frozenset(mapping),
                      numeric={p: tuple(v) for p, v in numeric.items()},
                      text={p: tuple(v) for p, v in text.items()},
-                     integer={p: tuple(v) for p, v in integer.items()},
                      container={p: tuple(v) for p, v in container.items()},
                      assigned=frozenset(assigned) & pset)
 
 
 def _note_kind_uses(node, note, numeric: dict, text: dict,
-                    assigned: set, integer: "dict | None" = None) -> None:
+                    assigned: set) -> None:
     """Intent:
         Record, for one syntax node, the parameter uses that state a
-        kind of value (`ParamUses.numeric`, `ParamUses.text`,
-        `ParamUses.integer`) and the names it rebinds.
+        kind of value (`ParamUses.numeric`, `ParamUses.text`) and the
+        names it rebinds.
     """
     if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
         assigned.add(node.id)
@@ -561,8 +553,6 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
                 note(text, side.id, node, ast.unparse(node))
             elif _text_literal(other) and isinstance(node.op, ast.Mult):
                 note(numeric, side.id, node, ast.unparse(node))
-                if integer is not None:
-                    note(integer, side.id, node, ast.unparse(node))
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
             and isinstance(node.operand, ast.Name):
         note(numeric, node.operand.id, node, ast.unparse(node))
@@ -594,67 +584,18 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
         assigned.add(node.target.id)
 
 
-_INTEGER_OPERATORS = (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
-
-
-def _literal_sequence(node) -> bool:
-    """Whether `node` is a list or tuple literal, or a list
-    comprehension."""
-    return isinstance(node, (ast.List, ast.Tuple, ast.ListComp))
-
-
-def _literal_sequence_locals(fdef) -> frozenset:
+def _note_container_uses(node, note, container: dict) -> None:
     """Intent:
-        The names `fdef` binds only to list or tuple literals (or list
-        comprehensions), each by a plain assignment.
+        Record, for one syntax node, a sum of a parameter with a literal
+        list or tuple, which names the container the parameter is
+        (`ParamUses.container`).
     """
-    bound: dict = {}
-    for node in ast.walk(fdef):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            bound.setdefault(node.id, []).append(node)
-    literal: set = set()
-    for node in ast.walk(fdef):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
-                and isinstance(node.targets[0], ast.Name) \
-                and _literal_sequence(node.value):
-            literal.add(node.targets[0].id)
-    return frozenset(n for n in literal if len(bound.get(n, ())) == 1)
-
-
-def _note_integer_uses(node, note, numeric: dict, integer: dict,
-                       container: dict, sequences: frozenset) -> None:
-    """Intent:
-        Record, for one syntax node, the parameter uses that only an
-        integer supports (`ParamUses.integer`, each also a numeric use)
-        and the sums with a literal list or tuple that name a
-        parameter's container (`ParamUses.container`).
-    """
-    def both(name, what):
-        note(numeric, name, node, what)
-        note(integer, name, node, what)
-
-    if isinstance(node, ast.BinOp):
-        for side, other in ((node.left, node.right), (node.right, node.left)):
-            if not isinstance(side, ast.Name):
-                continue
-            if isinstance(node.op, _INTEGER_OPERATORS) and _number_literal(other):
-                note(integer, side.id, node, ast.unparse(node))
-            elif isinstance(node.op, ast.Mult) and _literal_sequence(other):
-                both(side.id, ast.unparse(node))
-            elif isinstance(node.op, ast.Add) \
-                    and isinstance(other, (ast.List, ast.Tuple)):
-                kind = "tuple" if isinstance(other, ast.Tuple) else "list"
-                note(container, side.id, node, (ast.unparse(node), kind))
-    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-            and node.func.id == "range":
-        for arg in node.args:
-            if isinstance(arg, ast.Name):
-                both(arg.id, ast.unparse(node))
-    elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Name) \
-            and (_literal_sequence(node.value)
-                 or (isinstance(node.value, ast.Name)
-                     and node.value.id in sequences)):
-        both(node.slice.id, ast.unparse(node))
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)):
+        return
+    for side, other in ((node.left, node.right), (node.right, node.left)):
+        if isinstance(side, ast.Name) and isinstance(other, (ast.List, ast.Tuple)):
+            kind = "tuple" if isinstance(other, ast.Tuple) else "list"
+            note(container, side.id, node, (ast.unparse(node), kind))
 
 
 def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:

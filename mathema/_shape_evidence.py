@@ -78,9 +78,6 @@ class Evidence:
     #: (`x * y`) names a number when nothing else names a shape, and is
     #: also what a string or a sequence supports
     firm: bool = True
-    #: the kind of number the evidence states, `int` for a use only an
-    #: integer supports (`x * "ab"`, `x << 1`, `range(x)`), else None
-    number_kind: "str | None" = None
     #: the container a sequence is, `tuple` or `list`, when the evidence
     #: names one (`(0,) + xs`), else None
     container: "str | None" = None
@@ -132,16 +129,6 @@ class ParameterShape:
         if self.settled:
             out["settled"] = True
         return out
-
-
-def states_an_integer(shape: ParameterShape) -> bool:
-    """Intent:
-        Whether a number shape read from the code rests on evidence that
-        its values are integers (a count of repeats, `x * "ab"`); never
-        for a shape an author stated.
-    """
-    return shape.evidence is not None and shape.evidence.shape == "number" \
-        and not shape.stated and any(e.number_kind == "int" for e in shape.found)
 
 
 def kind_shape(kind: "str | None") -> "str | None":
@@ -392,11 +379,9 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
                        shape, f"the body uses it as {_SHAPE_WORDS[shape]}")
             out[p].append(Evidence("body use", shape, how,
                                    firm=shape != "number"))
-        counts = set(uses.integer.get(p, ()))
         for line, text in uses.numeric.get(p, ()):
-            out[p].append(Evidence(
-                "body use", "number", f"`{text}` on line {line + offset}",
-                number_kind="int" if (line, text) in counts else None))
+            out[p].append(Evidence("body use", "number",
+                                   f"`{text}` on line {line + offset}"))
         for line, text in uses.text.get(p, ()):
             out[p].append(Evidence("body use", "string",
                                    f"`{text}` on line {line + offset}"))
@@ -409,9 +394,6 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
             written = f"`{p}.{name}{'()' if form != 'attr' else ''}`"
             if shape is not None:
                 out[p].append(Evidence("body use", shape, written))
-            elif _integer_only(form, name):
-                out[p].append(Evidence("body use", "number", written,
-                                       number_kind="int"))
     if depth > 0:
         for p, ev in _passed_on(fn, fdef, params, depth).items():
             out[p].extend(ev)
@@ -432,17 +414,6 @@ def _read_only_for_array_attributes(fdef, p: str) -> bool:
                if isinstance(n, ast.Attribute) and n.attr in _ARRAY_ATTRS
                and isinstance(n.value, ast.Name) and n.value.id == p}
     return bool(reads) and all(id(n) in through for n in reads)
-
-
-def _integer_only(form: str, name: str) -> bool:
-    """Intent:
-        Whether `name` is a method or attribute an `int` has and a
-        `float`, a `str`, a `list` and a `dict` do not (`bit_length`,
-        `to_bytes`).
-    """
-    if form == "@" or hasattr(object, name) or not hasattr(int, name):
-        return False
-    return not any(hasattr(cls, name) for cls in (float, str, list, dict))
 
 
 def _method_shape(form: str, name: str) -> "str | None":

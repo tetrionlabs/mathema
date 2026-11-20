@@ -338,6 +338,26 @@ FNS = '''
 
     def rows(x):
         return x.shape[0]
+
+
+    def int_guarded(x):
+        if isinstance(x, int):
+            return x >> 0
+        return x * 3.0 / 3.0
+
+
+    def none_guarded(x):
+        if x is None:
+            return x * "ab"
+        return x
+
+
+    def triangle(x):
+        return sum(range(x))
+
+
+    def width(x):
+        return x.bit_length()
 '''
 
 
@@ -547,10 +567,10 @@ def test_a_partial_without_source_is_named_by_its_function():
     assert "(the source of hidden is not available)" in p.note
 
 
-def test_a_count_of_text_repeats_is_drawn_as_an_integer(mod):
+def test_a_count_of_text_repeats_drawn_as_a_float_is_a_draw_defect(mod):
     p = _row(mod.repeat, "f(x) == f(x)")
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.draw_defect"]["param"] == "x"
 
 
 def test_a_count_of_repeats_does_not_change_a_float_annotation(mod):
@@ -620,22 +640,26 @@ def test_lambdas_that_cannot_be_told_apart_say_so(mod, monkeypatch):
 
 
 @pytest.mark.parametrize("name, text", [
-    ("count_up", "f(x) >= 0"), ("zeros", "f(x) >= 0"), ("doubled", "f(x) == 2 * x"),
-    ("low_bit", "f(x) <= 1"), ("bits", "f(x) >= 0"),
     ("prefixed", "f(xs) >= 1"), ("tuple_prefixed", "f(xs) >= 1"),
 ])
-def test_a_use_only_an_integer_or_a_container_supports_draws_one(mod, name, text):
+def test_a_sum_with_a_literal_container_draws_that_container(mod, name, text):
     p = _row(getattr(mod, name), text)
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-
-
-def test_an_index_into_a_literal_is_drawn_as_an_integer(mod):
-    p = _row(mod.tenth, "f(x) >= 10")
-    assert "TypeError" not in (p.counterexample or ""), (p.verdict, p.counterexample)
-    assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"
 
 
 def test_an_attribute_read_then_indexed_says_nothing_of_a_sequence(mod):
     p = _row(mod.rows, "f(x) >= 0")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+
+
+@pytest.mark.parametrize("name, text, verdict", [
+    ("int_guarded", "f(x) == x", "falsified"),
+    ("none_guarded", "abs(f(x)) <= 10000000", "falsified"),
+    ("triangle", "f(x) <= 499500", "unknown"),
+    ("width", "f(x) <= 10", "unknown"),
+])
+def test_a_use_only_an_integer_supports_does_not_narrow_the_draw(
+        mod, name, text, verdict):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)

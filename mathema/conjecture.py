@@ -12497,8 +12497,7 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
         `ctx.drawn_shapes`.
     """
     from ._shape_evidence import (element_shape_missing, kind_shape,
-                                  not_established_text, parameter_shapes,
-                                  states_an_integer)
+                                  not_established_text, parameter_shapes)
     cj = ctx.cj
     params = list(facts.params)
     sides = [t for t in (cj.lhs, cj.rhs,
@@ -12547,9 +12546,6 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if evidence.shape in _KIND_OF_SHAPE \
                 and kind_shape(out.get(p)) != evidence.shape:
             out[p] = _KIND_OF_SHAPE[evidence.shape]
-        elif states_an_integer(shape) and not shape.stated \
-                and out.get(p) in ("scalar", "unknown"):
-            out[p] = "int"
         if not shape.stated:
             ctx.drawn_shapes[p] = shape
     return None, out
