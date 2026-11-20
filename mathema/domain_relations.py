@@ -629,6 +629,9 @@ class _Defined:
     hashes: dict
     #: each language piece read: `(text, language, at_most, at_least)`
     read: tuple = ()
+    #: the strings the domain writes out: its listed members and the
+    #: strings it excludes
+    literals: tuple = ()
 
 
 def _literals(values) -> "dict | None":
@@ -667,6 +670,7 @@ def defined_bound(bound) -> "_Defined | None":
     alphabet: list = []
     hashes: dict = {}
     read: list = []
+    written: dict = {v: None for v in excluded if isinstance(v, str)}
     for piece in pieces:
         if isinstance(piece, frozenset):
             node = _literals(piece)
@@ -674,6 +678,7 @@ def defined_bound(bound) -> "_Defined | None":
                 return None
             most.append(node)
             least.append(node)
+            written.update((v, None) for v in sorted(piece))
             # a listed string is a member whatever alphabet a language
             # beside it states, so its characters join the question's
             alphabet.extend([ord(c), ord(c)] for v in piece for c in v)
@@ -701,7 +706,8 @@ def defined_bound(bound) -> "_Defined | None":
         if excluded:
             node = {"op": "inter", "args": [node, {"op": "complement", "arg": removed}]}
         return node
-    return _Defined(joined(most), joined(least), alphabet, hashes, tuple(read))
+    return _Defined(joined(most), joined(least), alphabet, hashes, tuple(read),
+                    tuple(written))
 
 
 #: how many values a guard draws from a language's own sampler
@@ -714,6 +720,8 @@ GUARD_ENUMERATED = 3000
 GUARD_CHARACTERS = "".join(chr(c) for c in range(0x20, 0x7F)) + "\t\n"
 #: how many drawn members a guard takes near misses of
 GUARD_NEAR_MISSES = 12
+#: how many skipped strings a guard's artefact names
+GUARD_SKIPPED_SHOWN = 8
 
 
 def _guard_seed(text: str) -> int:
@@ -724,7 +732,7 @@ def _guard_seed(text: str) -> int:
 
 
 def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
-                   seed: int) -> tuple:
+                   seed: int, literals: tuple = ()) -> tuple:
     """Intent:
         The strings a definition is compared with its language on, and
         what was enumerated: every string up to a length bound over one
@@ -733,8 +741,8 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
         hazards and the values its sampler draws; and, for the shortest
         drawn members, each with one character removed, and with one
         atom character put in or put in place of a character, at every
-        position. Returns `(strings, members drawn, length bound,
-        atoms)`. Nothing here asks a solver, so the same call gives the
+        position; then the `literals` the claim writes. Returns
+        `(strings, members drawn, length bound, atoms)`. Nothing here asks a solver, so the same call gives the
         same strings on any machine.
     """
     import itertools
@@ -776,14 +784,16 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
                 strings[value[:i] + letter + value[i:]] = None
                 if i < len(value):
                     strings[value[:i] + letter + value[i + 1:]] = None
+    strings.update((v, None) for v in literals if isinstance(v, str))
     return list(strings), len(members), bound, len(atoms)
 
 
 def check_definition(text: str, language, at_most: dict, at_least: dict,
-                     alphabet: list) -> dict:
+                     alphabet: list, literals: tuple = ()) -> dict:
     """Intent:
         Check a language's stated definition against the language's own
-        membership on a fixed set of strings (`_guard_strings`): a
+        membership on a fixed set of strings (`_guard_strings`, with
+        the `literals` the claim writes among them): a
         string the term `at_most` holds must be a member by `contains`,
         and a member must be held by `at_least`, each term read by the
         derivative matcher. For an exact definition the two are one
@@ -792,11 +802,13 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
         assumption a verdict rests on: the `statement` (`<text> == its
         stated definition`), its `status`, and the `artefact` to run it
         again (the seed, the members drawn, the length bound, the
-        number of atoms and the number of strings compared).
+        number of atoms, the number of strings compared and skipped,
+        and the first `GUARD_SKIPPED_SHOWN` skipped strings).
 
-        The status is `checked` when every string compared agreed;
-        `assumed` when no check could be run at all, which is when
-        `contains` answered for no string; and `refuted`, with the
+        A string on which `contains` raises is skipped: the definition
+        is not compared there. The status is `checked` when every
+        string was compared and agreed; `assumed` when a string was
+        skipped or none was compared; and `refuted`, with the
         `disagreement` naming the string, when the definition and the
         membership part. When the matcher runs out of its budget the
         result carries `unfinished` and no status is claimed.
@@ -805,14 +817,17 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     seed = _guard_seed(text)
     out = {"language": text, "statement": f"{text} == its stated definition",
            "status": "assumed", "artefact": {"seed": seed}}
-    strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet, seed)
+    strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet,
+                                                  seed, literals)
     in_most, in_least = regular.matcher(at_most), regular.matcher(at_least)
     compared = 0
+    skipped: list = []
     try:
         for value in strings:
             try:
                 is_member = bool(language.contains(value))
             except Exception:
+                skipped.append(value)
                 continue
             compared += 1
             if is_member and not in_least(value):
@@ -826,8 +841,9 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     except regular.MatchBudget:
         return {**out, "unfinished": f"the check of the definition of {text} did not finish"}
     out["artefact"].update({"members drawn": drawn, "length bound": bound, "atoms": atoms,
-                            "strings compared": compared})
-    if compared:
+                            "strings compared": compared, "strings skipped": len(skipped),
+                            "skipped": [repr(v) for v in skipped[:GUARD_SKIPPED_SHOWN]]})
+    if compared and not skipped:
         out["status"] = "checked"
     return out
 
@@ -839,16 +855,19 @@ def _is_member(language, value) -> bool:
         return False
 
 
-def check_definitions(*defined: "_Defined") -> tuple:
+def check_definitions(*defined: "_Defined", literals: tuple = ()) -> tuple:
     """`(assumptions, disagreement)` for every language piece the given
-    domains read, each checked once: the assumptions as
+    domains read, each checked once, on the strings every given domain
+    writes and the `literals` besides: the assumptions as
     `check_definition` returns them, and the first disagreement found
     (a sentence) or None."""
+    written = tuple(dict.fromkeys([*literals, *(v for d in defined for v in d.literals)]))
     seen: dict = {}
     for domain in defined:
         for text, language, most, least in domain.read:
             if text not in seen:
-                seen[text] = check_definition(text, language, most, least, domain.alphabet)
+                seen[text] = check_definition(text, language, most, least, domain.alphabet,
+                                              written)
     refuted = next((a.get("disagreement") or a.get("unfinished") for a in seen.values()
                     if a["status"] == "refuted" or a.get("unfinished")), None)
     return list(seen.values()), refuted

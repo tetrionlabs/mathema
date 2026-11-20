@@ -10951,7 +10951,9 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
         for a refused one). Returns the assumption the proof rests on,
         as `domain_relations.check_definition` does: `checked` with the
         seed and the number of texts run, `assumed` when no member
-        could be drawn, or `refuted` with the `disagreement`.
+        could be drawn or a drawn text was skipped because a
+        language's `contains` raised on it (the artefact names the
+        skipped texts), or `refuted` with the `disagreement`.
     """
     import random
 
@@ -10968,6 +10970,14 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
         accepted_language = resolve_language(stated)
     except Exception:
         return out
+    skipped: list = []
+
+    def member(language, value) -> "bool | None":
+        try:
+            return bool(language.contains(value))
+        except Exception:
+            skipped.append(value)
+            return None
     drawn: list = []
     for _, language, _, _ in domain.read:
         try:
@@ -10979,10 +10989,11 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
                 drawn.append(language.sample(rng))
             except Exception:
                 break
-        texts = sorted({v for v in drawn if isinstance(v, str)
-                        and domain_relations._is_member(language, v)})
+        texts = sorted({v for v in drawn if isinstance(v, str) and member(language, v)})
         for value in texts:
-            predicted = domain_relations._is_member(accepted_language, value)
+            predicted = member(accepted_language, value)
+            if predicted is None:
+                continue
             try:
                 returned = fn(value)
             except Exception as e:
@@ -10999,7 +11010,10 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
                         "disagreement": f"the function does not behave as the membership "
                                         f"statement predicts on {value!r}"}
             out["artefact"]["texts run"] += 1
-    if out["artefact"]["texts run"]:
+    shown = list(dict.fromkeys(skipped))
+    out["artefact"].update({"texts skipped": len(shown), "skipped": [
+        repr(v) for v in shown[:domain_relations.GUARD_SKIPPED_SHOWN]]})
+    if out["artefact"]["texts run"] and not shown:
         out["status"] = "checked"
     return out
 
@@ -11101,7 +11115,8 @@ def _validator_proof(cj, fn, cj_domain):
             # "no such text" rests on the definitions and on the reading
             # of the function, so both are checked by drawing first
             assumptions, refuted = domain_relations.check_definitions(
-                domain, *filter(None, [domain_relations.defined_bound(stated)]))
+                domain, *filter(None, [domain_relations.defined_bound(stated)]),
+                literals=(prefix, suffix, prefix + suffix))
             reading = _validator_reading_check(fn, validator, stated, domain)
             refuted = refuted or reading.get("disagreement")
             if refuted is not None:
