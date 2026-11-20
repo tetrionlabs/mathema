@@ -2070,6 +2070,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # that file's bytes before the run (None when it had none), so a key
     # whose processing raises after the write gets its prior record back
     prior_records: dict = {}
+    # per key, the earlier record rows of claims mathema could not store
+    # this run, kept on disk as they were and unchecked
+    unchecked_rows: dict = {}
 
     def _drop_key_state(key: str) -> None:
         invalidated_keys.discard(key)
@@ -2080,6 +2083,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         negation_moved[:] = [m for m in negation_moved if m[0] != key]
         stale_rows.pop(key, None)
         escapes_moved.pop(key, None)
+        unchecked_rows.pop(key, None)
 
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
@@ -2281,8 +2285,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         # a claim mathema cannot render is mathema's defect,
                         # not one the author fixes on an authoring surface
                         out.authoring_errors.append(msg)
-                    out.problems.append(msg)
-                    out.lines.append(f"FAIL {msg}")
+                    _fail(key, msg)
+                if kept_rows:
+                    unchecked_rows[key] = [
+                        r for r in (verified_entry or {}).get("claims") or []
+                        if isinstance(r, dict) and r.get("name") in kept_rows]
                 merged_entry = now["entry"]
                 out.grammars_seen.update(c.get("grammar", entry_grammar)
                                          for c in current_claims)
@@ -2834,7 +2841,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                            claim_row(c, accepted_risk=accepted), key,
                            supersessions.get(key, {})),
                            grammar_changes.get(key, {}))
-                       for c in claims_for_gate],
+                       for c in claims_for_gate]
+                      + [_unchecked_row(r) for r in unchecked_rows.get(key, [])],
         })
     if release_moved:
         from .sync import IDENTITY_RELEASE
@@ -2878,6 +2886,25 @@ def negation_moved_note(count: int) -> str:
             f"parentheses of its own; {'each is' if many else 'it is'} "
             f"checked again and re-recorded under the text this release "
             f"writes; nothing the author wrote changed")
+
+
+def _unchecked_row(row: dict) -> dict:
+    """Intent:
+        The report row of a claim whose earlier record row is kept as
+        it stands because mathema could not write the claim's stored
+        text this run: the row's `claim_row` with verdict `unchecked`
+        and stance `undecided`, the verdict the row was recorded with
+        as `recorded_verdict`, and a `reason` saying so.
+    """
+    out = claim_row(row)
+    out.pop("counterexample", None)
+    out.pop("blocked_by", None)
+    out.update({"verdict": "unchecked", "stance": "undecided",
+                "recorded_verdict": row.get("verdict"),
+                "reason": "mathema could not write this claim's stored "
+                          "text, so it was not checked this run; its "
+                          "earlier record row is kept as it was"})
+    return out
 
 
 def _record_before(root: str, key: str) -> tuple:
