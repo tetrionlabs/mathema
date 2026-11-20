@@ -291,6 +291,17 @@ FNS = '''
     def unpacked(y0):
         a, t = y0, 1
         return a + 1.0
+
+
+    grow, pick = (lambda x: x + 1.0), (lambda x: x[0] + 1.0)
+
+
+    class Picker:
+        def __call__(self, x):
+            return x[0] + 1.0
+
+
+    picker = Picker()
 '''
 
 
@@ -542,3 +553,31 @@ def test_a_rebound_copy_keeps_the_finding_and_an_unpacked_copy_is_read(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
+
+
+@pytest.mark.parametrize("name, text, verdict", [
+    ("grow", "f(x) > x", "falsified"),
+    ("pick", "f(x) == f(x)", "holds"),
+    ("picker", "f(x) == f(x)", "holds"),
+])
+def test_two_lambdas_on_a_line_and_a_callable_instance_are_read(
+        mod, name, text, verdict):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
+    assert "is not available" not in (p.note or "")
+
+
+def test_lambdas_that_cannot_be_told_apart_say_so(mod, monkeypatch):
+    import weakref
+
+    import mathema._shape_evidence as se
+    monkeypatch.setattr(se, "_lambda_by_position", lambda *a: None)
+    monkeypatch.setattr(se, "_DEFS", weakref.WeakKeyDictionary())
+    shape = se.ParameterShape("x", None)
+    text = se.not_established_text(mod.pick, shape)
+    assert text.startswith("shape of parameter x is not established "
+                           "(shape_evidence_fns.py:")
+    assert text.endswith("): the line defines more than one lambda taking "
+                         "these parameters, and which one this is cannot be "
+                         "told; bind x in the claim (for x in ...), or define "
+                         "the function with def")

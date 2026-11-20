@@ -174,13 +174,17 @@ def default_container(fn, shape: "ParameterShape | None") -> "type | None":
 def _underlying(fn):
     """Intent:
         The plain function `fn` runs: unwrapped through its wrappers
-        (`__wrapped__`) and through each `functools.partial` to the
-        function it binds arguments of.
+        (`__wrapped__`), through each `functools.partial` to the
+        function it binds arguments of, and for an instance of a class
+        that defines `__call__`, that method bound to it.
     """
     import functools
     target = inspect.unwrap(fn)
     while isinstance(target, functools.partial):
         target = inspect.unwrap(target.func)
+    if getattr(target, "__code__", None) is None \
+            and inspect.isfunction(getattr(type(target), "__call__", None)):
+        target = inspect.unwrap(target.__call__)
     return target
 
 
@@ -227,7 +231,62 @@ def _parsed_def(target) -> "tuple[Any, int]":
                    and _arg_names(node.args) == _code_arg_names(target)]
         if len(lambdas) == 1:
             return lambdas[0], max(start, 1) - 1
+        chosen = _lambda_by_position(target, lambdas, max(start, 1) - 1,
+                                     _indent(target))
+        if chosen is not None:
+            return chosen, max(start, 1) - 1
     return None, 0
+
+
+def _lambda_by_position(target, lambdas: list, offset: int, indent: int):
+    """Intent:
+        The one of `lambdas` (nodes parsed from `target`'s source lines,
+        `offset` lines and `indent` columns from the file's own) whose
+        source span holds every source range `target`'s code records
+        (an empty range, such as the one its entry carries, says
+        nothing), the innermost when several do; None when none does,
+        or when two are equally inner.
+    """
+    code = getattr(target, "__code__", None)
+    try:
+        spots = [(line, col) for line, end, col, end_col in code.co_positions()
+                 if None not in (line, end, col, end_col)
+                 and (end, end_col) > (line, col)]
+    except AttributeError:
+        return None
+    if not spots:
+        return None
+    holding = []
+    for node in lambdas:
+        first = (node.lineno + offset, node.col_offset + indent)
+        last = (node.end_lineno + offset, node.end_col_offset + indent)
+        if all(first <= spot <= last for spot in spots):
+            holding.append((last[0] - first[0], last[1] - first[1], node))
+    if not holding:
+        return None
+    holding.sort(key=lambda h: h[:2])
+    if len(holding) > 1 and holding[0][:2] == holding[1][:2]:
+        return None
+    return holding[0][2]
+
+
+def _lambdas_alike(fn) -> int:
+    """Intent:
+        How many lambdas in a lambda's source lines take the same
+        parameters as it does; 0 for any other function or when its
+        source cannot be read.
+    """
+    target = _underlying(fn)
+    if getattr(target, "__name__", "") != "<lambda>":
+        return 0
+    import textwrap
+    try:
+        lines, _start = inspect.getsourcelines(target)
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError):
+        return 0
+    return sum(1 for node in ast.walk(tree) if isinstance(node, ast.Lambda)
+               and _arg_names(node.args) == _code_arg_names(target))
 
 
 def _arg_names(args) -> list:
@@ -601,6 +660,12 @@ def not_established_text(fn, shape: ParameterShape) -> str:
         return (f"shape of parameter {p} is not established ({where}): "
                 f"nothing in its signature says what kind of value it takes; "
                 f"bind {p} in the claim (for {p} in ...), or annotate it")
+    if _function_def(fn)[0] is None and _lambdas_alike(fn) > 1:
+        return (f"shape of parameter {p} is not established ({where}): "
+                f"the line defines more than one lambda taking these "
+                f"parameters, and which one this is cannot be told; bind {p} "
+                f"in the claim (for {p} in ...), or define the function with "
+                f"def")
     return (f"shape of parameter {p} is not established ({where}): "
             f"no annotation, default or use in the body says what kind of "
             f"value it takes; bind {p} in the claim (for {p} in ...), or "
