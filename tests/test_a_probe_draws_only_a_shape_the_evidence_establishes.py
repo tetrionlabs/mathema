@@ -27,8 +27,8 @@ FNS = '''
         return x
 
 
-    def square(x):
-        return x * x
+    def less(x):
+        return x - 1
 
 
     def wave(x):
@@ -99,7 +99,7 @@ def test_binding_the_parameter_in_the_claim_draws_it(mod):
 
 
 def test_arithmetic_in_the_body_establishes_a_number_and_the_record_says_so(mod):
-    p = _row(mod.square, "f(x) >= 0")
+    p = _row(mod.less, "f(x) <= x")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     shapes = p.meta["mathema.drawn_shapes"]
     assert shapes["x"]["source"] == "body use"
@@ -114,7 +114,7 @@ def test_a_numeric_function_or_a_callee_establishes_a_number(mod, name, var):
 
 
 def test_a_stated_shape_is_not_restated_on_the_record(mod):
-    p = _row(mod.plus, "f(x) > x")
+    p = _row(mod.plus, "f(x) >= x")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     assert "mathema.drawn_shapes" not in (p.meta or {})
 
