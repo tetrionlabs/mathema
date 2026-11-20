@@ -68,9 +68,11 @@ _SHAPE_WORDS = {"number": "a number", "string": "a string", "bool": "a bool",
 
 @dataclass(frozen=True)
 class Evidence:
-    """One piece of evidence for a parameter's shape: where it comes
-    from (`source`, one of `EVIDENCE_ORDER`), the shape it names and
-    what it is, as a reader would point at it (`detail`)."""
+    """Intent:
+        One piece of evidence for a parameter's shape: where it comes
+        from (`source`, one of `EVIDENCE_ORDER`), the shape it names and
+        what it is, as a reader would point at it (`detail`).
+    """
     source: str
     shape: str
     detail: str
@@ -397,7 +399,8 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
                                    container=made))
         for form, name in methods.get(p, ()):
             shape = _method_shape(form, name)
-            written = f"`{p}.{name}{'()' if form != 'attr' else ''}`"
+            written = (f"`{_written_name(fdef, p, name)}.{name}"
+                       f"{'()' if form != 'attr' else ''}`")
             if shape is not None:
                 out[p].append(Evidence("body use", shape, written))
     if depth > 0:
@@ -709,9 +712,7 @@ def not_established_text(fn, shape: ParameterShape) -> str:
     if shape.disagree and first is not None:
         other = shape.disagree[0]
         return (f"shape of parameter {p} is not established ({where}): "
-                f"{first.detail} ({_SHAPE_WORDS.get(first.shape, first.shape)}), "
-                f"but {other.detail} "
-                f"({_SHAPE_WORDS.get(other.shape, other.shape)}); bind {p} in "
+                f"{_with_shape(first)}, but {_with_shape(other)}; bind {p} in "
                 f"the claim, or make {_sources_text([first, *shape.disagree])} "
                 f"agree")
     if place == "<unknown>":
@@ -738,6 +739,28 @@ def _function_name(fn) -> str:
     target = _underlying(fn)
     return (getattr(target, "__qualname__", None)
             or getattr(target, "__name__", None) or type(fn).__name__)
+
+
+def _with_shape(piece: Evidence) -> str:
+    """Intent:
+        A piece of evidence as the diagnostic quotes it: its detail,
+        followed by the shape it names in parentheses unless the detail
+        already names it.
+    """
+    word = _SHAPE_WORDS.get(piece.shape, piece.shape)
+    return piece.detail if word in piece.detail else f"{piece.detail} ({word})"
+
+
+def _written_name(fdef, p: str, attr: str) -> str:
+    """Intent:
+        The name the source writes where `fdef` reads attribute `attr`
+        off `p`: `p` itself, or the local copy read through as `p`.
+    """
+    for node in ast.walk(fdef):
+        if isinstance(node, ast.Attribute) and node.attr == attr \
+                and isinstance(node.value, ast.Name) and node.value.id == p:
+            return getattr(node.value, "_local", p)
+    return p
 
 
 def _sources_text(pieces: list) -> str:

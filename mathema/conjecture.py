@@ -12593,7 +12593,9 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
 
 def _draw_defect_row(ctx: "_ClaimContext", statement: str, note: str,
                      defect: dict) -> "Probe":
-    """The unknown outcome of a probe whose draw had the wrong shape."""
+    """Intent:
+        The unknown outcome of a probe whose draw had the wrong shape.
+    """
     p = defect["param"]
     quoted = f' "{defect["quoted"]}"' if defect["quoted"] else ""
     text = (f"the draw for {p} had the wrong shape ({defect['place']}{quoted}): "

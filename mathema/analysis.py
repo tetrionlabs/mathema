@@ -438,8 +438,10 @@ _NUMERIC_MODULES = frozenset({"math", "cmath"})
 
 
 def _number_literal(node) -> bool:
-    """Whether `node` is a literal int, float or complex (a bool is not),
-    signed or not."""
+    """Intent:
+        Whether `node` is a literal int, float or complex (a bool is
+        not), signed or not.
+    """
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         node = node.operand
     return isinstance(node, ast.Constant) and isinstance(
@@ -447,9 +449,27 @@ def _number_literal(node) -> bool:
 
 
 def _text_literal(node) -> bool:
-    """Whether `node` is a string literal or an f-string."""
+    """Intent:
+        Whether `node` is a string literal or an f-string.
+    """
     return isinstance(node, ast.JoinedStr) or (
         isinstance(node, ast.Constant) and isinstance(node.value, str))
+
+
+def _written(node) -> str:
+    """Intent:
+        The source text of `node` as written: a name read through as
+        another (a local copy of a parameter, marked `_local`) shown by
+        its own name.
+    """
+    if not any(getattr(n, "_local", None) for n in ast.walk(node)):
+        return ast.unparse(node)
+    import copy
+    shown = copy.deepcopy(node)
+    for n in ast.walk(shown):
+        if isinstance(n, ast.Name) and getattr(n, "_local", None):
+            n.id = n._local
+    return ast.unparse(shown)
 
 
 def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
@@ -553,14 +573,14 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
             if not isinstance(side, ast.Name):
                 continue
             if _number_literal(other) and not isinstance(node.op, ast.Mult):
-                note(numeric, side.id, node, ast.unparse(node))
+                note(numeric, side.id, node, _written(node))
             elif _text_literal(other) and isinstance(node.op, ast.Add):
-                note(text, side.id, node, ast.unparse(node))
+                note(text, side.id, node, _written(node))
             elif _text_literal(other) and isinstance(node.op, ast.Mult):
-                note(numeric, side.id, node, ast.unparse(node))
+                note(numeric, side.id, node, _written(node))
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
             and isinstance(node.operand, ast.Name):
-        note(numeric, node.operand.id, node, ast.unparse(node))
+        note(numeric, node.operand.id, node, _written(node))
     elif isinstance(node, ast.Compare):
         operands = [node.left, *node.comparators]
         for i, op in enumerate(node.ops):
@@ -570,11 +590,11 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
                     continue
                 if isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) \
                         and _number_literal(other):
-                    note(numeric, side.id, node, ast.unparse(node))
+                    note(numeric, side.id, node, _written(node))
                 elif isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
                                      ast.Gt, ast.GtE)) \
                         and _text_literal(other):
-                    note(text, side.id, node, ast.unparse(node))
+                    note(text, side.id, node, _written(node))
     elif isinstance(node, ast.Call):
         func = node.func
         numeric_callee = (
@@ -587,9 +607,9 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
         if numeric_callee:
             for arg in node.args:
                 if isinstance(arg, ast.Name):
-                    note(numeric, arg.id, node, ast.unparse(node))
+                    note(numeric, arg.id, node, _written(node))
                     if module_callee and scalar is not None:
-                        note(scalar, arg.id, node, ast.unparse(node))
+                        note(scalar, arg.id, node, _written(node))
     elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
         assigned.add(node.target.id)
 
@@ -605,7 +625,7 @@ def _note_container_uses(node, note, container: dict) -> None:
     for side, other in ((node.left, node.right), (node.right, node.left)):
         if isinstance(side, ast.Name) and isinstance(other, (ast.List, ast.Tuple)):
             kind = "tuple" if isinstance(other, ast.Tuple) else "list"
-            note(container, side.id, node, (ast.unparse(node), kind))
+            note(container, side.id, node, (_written(node), kind))
 
 
 def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:

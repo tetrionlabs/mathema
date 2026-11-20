@@ -413,6 +413,11 @@ FNS = '''
 
 
     maker = lambda x: (lambda x: x[0])
+
+
+    def copied_text_or_mapping(y0):
+        t = y0
+        return t.upper(), t.keys()
 '''
 
 
@@ -754,3 +759,10 @@ def test_a_lambda_is_told_from_the_lambda_it_returns(mod):
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
     shape = p.meta["mathema.drawn_shapes"]["x"]
     assert shape["source"] == "not read by the body"
+
+
+def test_a_disagreement_quotes_the_source_as_written(mod):
+    p = _row(mod.copied_text_or_mapping, "f(y0) == f(y0)")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "`t.upper()`" in p.note and "y0.upper()" not in p.note
+    assert "a mapping (a mapping)" not in p.note
