@@ -10949,6 +10949,14 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     return validator, param, base, stated
 
 
+def _premise_is_f_defined(cj) -> bool:
+    """Whether a claim's premise is exactly `f is defined` (or its
+    other spelling, `is_defined(f)`), with no region pinned to it and
+    nothing joined to it."""
+    text = re.sub(r"^\s*assuming\s+", "", getattr(cj, "assuming", "") or "").strip()
+    return re.fullmatch(r"f\s+is\s+defined|is_defined\(\s*f\s*\)", text) is not None
+
+
 def _beyond_a_plain_validator_claim(cj, bound) -> "str | None":
     """Intent:
         What a claim states that the validator proof does not account
@@ -11086,6 +11094,12 @@ def _validator_proof(cj, fn, cj_domain):
         calls the function on the parameter with text added (`f(s +
         "x")`), those texts must all lie in the parameter's language
         for the statement to cover them, which is asked first.
+
+        Under the premise `f is defined`, read only for `f(s) == s`
+        about a refusing validator, the function is called only on the
+        texts it returns, those of the stated language, so a breaking
+        text is one the definitions may place in that language and do
+        not surely place there.
     """
     from . import domain_relations, regular
     from ._validators import read_validator
@@ -11106,6 +11120,15 @@ def _validator_proof(cj, fn, cj_domain):
 
     def undecided(why: str):
         return ProofResult("undecided", sketch=f"{path}: {why}")
+    # under `f is defined`, a refusing validator is called only where it
+    # returns: on the texts of the language its match accepts
+    defined = _premise_is_f_defined(cj)
+    if defined:
+        if not (validator.raises is not None and question == ("", "", True)
+                and cj.relation == "=="):
+            return undecided("the premise f is defined is read only for f(s) == s about "
+                             "a function that refuses every text outside its language")
+        cj = _dc_replace(cj, assuming="")
     beyond = _beyond_a_plain_validator_claim(cj, bound)
     if beyond is not None:
         return undecided(f"{beyond}, which this route does not account for")
@@ -11148,6 +11171,12 @@ def _validator_proof(cj, fn, cj_domain):
             else ([called_on(domain.at_least), at_least], []))
     narrow = (([called_on(domain.at_most)], [at_least]) if accepted
               else ([called_on(domain.at_most), at_most], []))
+    if defined:
+        # the function is defined exactly on the stated language, so a
+        # breaking text is one of the domain the definition may hold in
+        # that language and does not surely hold there
+        wide = ([domain.at_least, at_least], [at_most])
+        narrow = ([domain.at_most, at_most], [at_least])
     meta = {"mathema.derive_route": "smt",
             "mathema.smt": {"path": "membership, validator",
                             "statement": f"{param} in {stated!r}",
@@ -11174,12 +11203,19 @@ def _validator_proof(cj, fn, cj_domain):
                     "standard": domain_relations.standard_assumptions(),
                     "definitions": assumptions}},
                 sketch=(f"{path}, read from {validator.described()}: no text {param} "
-                        f"in the domain makes {cj.lhs.strip()} a text "
+                        f"in the domain{' where f is defined' if defined else ''} "
+                        f"makes {cj.lhs.strip()} a text "
                         f"{'outside' if accepted else 'in'} that language; "
                         f"{domain_relations.assuming_text(assumptions)}"))
         if found.status == "unknown":
             why = why or found.reason
         if found.status != "member":
+            continue
+        if defined:
+            # a text the function refuses is outside the premise, and on
+            # one it accepts it returns its argument, so no text found
+            # here breaks the claim; the definitions are too loose to say
+            why = why or "the definitions do not settle where the function is defined"
             continue
         text = found.member
         if not regular.places(text, inside, outside):
