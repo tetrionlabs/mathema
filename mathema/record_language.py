@@ -530,47 +530,58 @@ def _literal(text: str) -> dict:
     return regular.canonical({"op": "literal", "codes": [ord(c) for c in text]})
 
 
-def _names(node: dict, into: dict, lists: dict, path: tuple = ()) -> None:
+def _names(node: dict, into: dict, lists: dict, path: tuple = (), denied: bool = False) -> None:
     """What the nodes that may stand at each place use: `into[path]` is
     the set of field names of the records at `path`, and `lists[path]`
-    the number of list nodes there."""
+    the number of list nodes there that the question may ask a value to
+    be outside of because of an item: those under an odd number of
+    complements (`denied`), whose item is not `any`. A place where a
+    list node stands at all has an entry, 0 when none is such a node."""
     op = node["op"]
     if op == "record":
         into.setdefault(path, set())
         for name, inner, _ in node["fields"]:
             into[path].add(name)
-            _names(inner, into, lists, (*path, name))
+            _names(inner, into, lists, (*path, name), denied)
     elif op == "list":
-        lists[path] = lists.get(path, 0) + 1
-        _names(node["item"], into, lists, (*path, _ITEM))
+        lists[path] = lists.get(path, 0) + (1 if denied and node["item"] != _ANY else 0)
+        _names(node["item"], into, lists, (*path, _ITEM), denied)
     elif op == "complement":
-        _names(node["arg"], into, lists, path)
+        _names(node["arg"], into, lists, path, not denied)
     elif op in ("union", "inter"):
         for arg in node["args"]:
-            _names(arg, into, lists, path)
+            _names(arg, into, lists, path, denied)
 
 
 class _Lowering:
     """One question's nodes as formulas over one value.
 
-    A list is held as its length and its first `k` items, `k` being the
-    number of list nodes that may stand at its place. That is enough:
-    whether a list is in `list {item, min, max}` rests on its length and
-    on whether some item is outside `item`, never on order or
-    repetition, so a list that answers a question can be rebuilt, at the
-    same length, from one item kept for each list node it has an item
-    outside of, the other positions filled with copies. A list read
-    from a model is those items and, past the `k`-th, copies of the
-    first."""
+    A list is held as its length and its first `k` items. Whether a
+    list is in `list {item, min, max}` rests on its length and on
+    whether some item is outside `item`, never on order or repetition.
+    So a list that answers a question can be rebuilt, at the same
+    length, from one item kept for each list node the question needs it
+    to be outside of because of an item, the other positions filled
+    with copies: every list node it was inside, it is still inside, and
+    a node the question only ever asks a value to be inside can only
+    gain. `k` is therefore the number of list nodes at the place that
+    stand under an odd number of complements, a node among `outside`
+    counting one, and whose item is not `any` (such a node is left only
+    by length); and at least one, for the items a list that is not
+    empty has. A list read from a model is those items and, past the
+    `k`-th, copies of the first."""
 
-    def __init__(self, z3, nodes: list) -> None:
+    def __init__(self, z3, inside: list, outside: "list | tuple" = ()) -> None:
         self.z3 = z3
         texts: list = []
         self.names: dict = {}
         self.lists: dict = {}
-        for node in nodes:
+        for node in inside:
             _texts(node, texts)
             _names(node, self.names, self.lists)
+        for node in outside:
+            _texts(node, texts)
+            _names(node, self.names, self.lists, (), True)
         self.texts = regular._Lowering(z3, [[0, regular.MAX_CODE_POINT]], texts)
         self.root = _Value(z3, "value")
         self.shape: list = []
@@ -587,8 +598,14 @@ class _Lowering:
             _, inner = value.key(name)
             self._shaped(inner, (*path, name))
         self.shape.append(value.length >= 0)
-        for i in range(self.lists.get(path, 0)):
+        for i in range(self.kept(path)):
             self._shaped(value.item(i), (*path, _ITEM))
+
+    def kept(self, path: tuple) -> int:
+        """How many items of a list at `path` the question holds as
+        variables: none where no list node stands, else one for each
+        node counted there and at least one."""
+        return max(1, self.lists[path]) if path in self.lists else 0
 
     def holds(self, node: dict, value: _Value, path: tuple = ()):
         z3, op = self.z3, node["op"]
@@ -609,7 +626,7 @@ class _Lowering:
             parts = [value.is_("list"), value.length >= node["min"]]
             if node["max"] is not None:
                 parts.append(value.length <= node["max"])
-            for i in range(self.lists.get(path, 0)):
+            for i in range(self.kept(path)):
                 parts.append(z3.Implies(value.length > i,
                                         self.holds(node["item"], value.item(i), (*path, _ITEM))))
             return z3.And(*parts)
@@ -650,7 +667,7 @@ class _Lowering:
         if kind == "other":
             return 1.5
         if kind == "list":
-            kept = self.lists.get(path, 0)
+            kept = self.kept(path)
             if not kept:
                 return []
             length = model.eval(value.length, model_completion=True).as_long()
@@ -687,7 +704,7 @@ def find_member(inside, outside, *, timeout_ms: int = 5000) -> Found:
         import z3
     except ImportError:
         return Found("unknown", reason="z3 is not installed (the mathema[smt] extra)")
-    lowering = _Lowering(z3, inside + outside)
+    lowering = _Lowering(z3, inside, outside)
     solver = z3.Solver()
     solver.set("timeout", int(timeout_ms))
     solver.add(*lowering.shape)
