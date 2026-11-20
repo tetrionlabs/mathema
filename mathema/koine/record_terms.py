@@ -123,7 +123,7 @@ def _names_of(node) -> "list | None":
     return names if len(set(names)) == len(names) else None
 
 
-def _shape_problem(term: Term) -> "str | None":
+def shape_problem(term: Term) -> "str | None":
     """What is wrong with the shape of one term of this module, or
     None."""
     head, args = term.head, term.args
@@ -193,7 +193,7 @@ def lower(document: Document) -> Document:
         shape is wrong is left as it is.
     """
     def rewrite(term: Term):
-        if term.head not in HEADS or _shape_problem(term) is not None:
+        if term.head not in HEADS or shape_problem(term) is not None:
             return term
         if term.head == OPTIONAL:
             return term.args[0]
@@ -210,7 +210,7 @@ def _without_languages(node):
     """`node` with the language of each well-shaped `in_language` term
     dropped, leaving its operand."""
     if isinstance(node, Term):
-        if node.head == IN_LANGUAGE and _shape_problem(node) is None:
+        if node.head == IN_LANGUAGE and shape_problem(node) is None:
             return Term(_STAND_IN[IN_LANGUAGE], (_without_languages(node.args[0]),))
         return Term(node.head, tuple(_without_languages(a) for a in node.args),
                     tuple((k, _without_languages(v)) for k, v in node.named))
@@ -232,7 +232,7 @@ def validate(document) -> list:
     for i, top in enumerate(document.terms):
         for term in _terms(top):
             if term.head in HEADS:
-                problem = _shape_problem(term)
+                problem = shape_problem(term)
                 if problem is not None:
                     out.append(f"[{i}]: {problem}")
     return out + _validate(lower(document))
@@ -306,12 +306,12 @@ def interpret(document: Document, point, calls: "dict | None" = None):
     table: dict = {}
 
     def rewrite(term: Term):
-        if term.head == OPTIONAL and _shape_problem(term) is None:
+        if term.head == OPTIONAL and shape_problem(term) is None:
             return term.args[0]
         if term.head not in EXPRESSIONS:
             return term
-        if _shape_problem(term) is not None:
-            raise InterpretError(f"{term.head}: {_shape_problem(term)}")
+        if shape_problem(term) is not None:
+            raise InterpretError(f"{term.head}: {shape_problem(term)}")
         key = f"{_CALL}{len(table)}"
         table[key] = _meaning(term)
         return Term("call::library", (Str(key), term.args[0]))
@@ -370,4 +370,4 @@ def function_of_one_value(expression, *, name: str = "f", key: "str | None" = No
 __all__ = ["ABSENT_CLASS", "EXPRESSIONS", "HAS_KEY", "HAS_NO_KEY_OTHER_THAN", "HEADS",
            "IN_LANGUAGE", "IS_ABSENT", "IS_OF_KIND", "OPTIONAL", "PARAMETER", "TESTED_KINDS",
            "VALUE_AT_KEY", "VALUE_OF_PRESENT", "function_of_one_value", "interpret", "kind_of",
-           "lower", "validate"]
+           "lower", "shape_problem", "validate"]
