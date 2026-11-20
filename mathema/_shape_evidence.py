@@ -901,7 +901,8 @@ def _with_copies_read_through(fdef, params: list):
         `fdef` with each read of a plain local copy of a parameter read
         as the parameter itself. A copy is a statement in the function's
         own scope that binds a local to the parameter's value (`local =
-        param`), the only binding of `local` before it, the parameter
+        param`, or a name of `a, local = x, param` matched by position),
+        the only binding of `local` before it, the parameter
         never rebound. A read of `local` after the copy's line is read
         through unless another binding of `local` may come before it: a
         binding on an earlier line, or on the same line in another
@@ -961,15 +962,26 @@ def _with_copies_read_through(fdef, params: list):
 
 def _copy_pairs(node, params: list, rebound) -> list:
     """Intent:
-        `[(local, param Name node)]` for a plain copy `local = param`
-        one statement makes, else `[]`.
+        `[(local, param Name node), ...]` for the plain copies one
+        statement makes: `local = param`, and each `local` matched by
+        position to a `param` in `a, local = x, param` (a tuple or list
+        of names against a tuple or list of the same length).
     """
-    if isinstance(node, ast.Assign) and len(node.targets) == 1 \
-            and isinstance(node.targets[0], ast.Name) \
-            and isinstance(node.value, ast.Name) \
-            and node.value.id in params and node.value.id not in rebound:
-        return [(node.targets[0].id, node.value)]
-    return []
+    if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+        return []
+    target, value = node.targets[0], node.value
+    if isinstance(target, ast.Name):
+        pairs = [(target, value)]
+    elif isinstance(target, (ast.Tuple, ast.List)) \
+            and isinstance(value, (ast.Tuple, ast.List)) \
+            and len(target.elts) == len(value.elts) \
+            and not any(isinstance(e, ast.Starred) for e in target.elts):
+        pairs = list(zip(target.elts, value.elts))
+    else:
+        return []
+    return [(t.id, v) for t, v in pairs
+            if isinstance(t, ast.Name) and isinstance(v, ast.Name)
+            and v.id in params and v.id not in rebound]
 
 
 def _own_scope_parents(fdef) -> dict:

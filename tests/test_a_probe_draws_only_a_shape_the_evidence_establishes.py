@@ -238,6 +238,59 @@ FNS = '''
             acc = acc + x
             acc = str(acc)
         return acc
+
+
+    class _Ctx:
+        def __enter__(self):
+            return "ctx"
+
+        def __exit__(self, *a):
+            return False
+
+
+    def rebound_in_a_branch(y0, flag: bool):
+        t = y0
+        if flag:
+            t = "s"
+        return t + 1.0
+
+
+    def rebound_by_with(y0):
+        t = y0
+        with _Ctx() as t:
+            pass
+        return t + 1.0
+
+
+    def rebound_by_walrus(y0):
+        t = y0
+        if (t := "w"):
+            pass
+        return t + 1.0
+
+
+    def rebound_after_del(y0):
+        t = y0
+        del t
+        t = "d"
+        return t + 1.0
+
+
+    def rebound_by_star(y0):
+        t = y0
+        *t, = ["a"]
+        return t + 1.0
+
+
+    def rebound_by_augmenting(y0):
+        t = y0
+        t += 1.0
+        return t.upper()
+
+
+    def unpacked(y0):
+        a, t = y0, 1
+        return a + 1.0
 '''
 
 
@@ -474,3 +527,18 @@ def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod, name, va
     p = _row(getattr(mod, name), f"f({var}) == f({var})")
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
     assert "mathema.draw_defect" not in (p.meta or {})
+
+
+@pytest.mark.parametrize("name, text, verdict", [
+    ("rebound_in_a_branch", "f(y0, flag) == f(y0, flag)", "falsified"),
+    ("rebound_by_with", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_walrus", "f(y0) == f(y0)", "falsified"),
+    ("rebound_after_del", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_star", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_augmenting", "f(y0) == f(y0)", "falsified"),
+    ("unpacked", "f(y0) == f(y0)", "holds"),
+])
+def test_a_rebound_copy_keeps_the_finding_and_an_unpacked_copy_is_read(
+        mod, name, text, verdict):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
