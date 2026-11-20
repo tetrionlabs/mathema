@@ -26,6 +26,13 @@ sequence theory over one symbol per atom. The answer is the same as
 over the whole alphabet, since no node can distinguish two characters
 of one atom, and a string found is mapped back to a character of each
 atom. The `z3-solver` dependency is the optional `mathema[smt]` extra.
+
+Membership needs no solver: `member` and `matcher` read a definition by
+derivatives over its own alphabet, within a budget, and `node_member`
+and `node_matcher` read a bare node over all characters. `validate`,
+`member` and `matcher` on a definition, `node_member`, `node_matcher`,
+`atoms`, `shortest_member` and `MATCH_BUDGET` are draft, not part of the
+public interface yet.
 """
 from __future__ import annotations
 
@@ -321,6 +328,22 @@ def canonical_text(document) -> str:
     return _serial(meaning)
 
 
+def validate(document) -> None:
+    """Intent:
+        Nothing when `document` is a well-formed definition of any kind
+        and version: an object stating a whole-number version, an
+        alphabet of code point ranges written as lists, an exact flag
+        that is true with `language` and no bound or false with
+        `at_least` and `at_most` and no `language`, and nodes of the
+        schema. `is_definition` says whether this module answers
+        questions about it, which also needs this kind and version.
+
+    Raises:
+        InvalidTerm: naming the rule the document breaks.
+    """
+    canonical_text(document)
+
+
 def term_hash(document) -> str:
     """Intent:
         The identity of a definition's meaning: the SHA-256, in lower
@@ -345,7 +368,13 @@ _MATCH_DEPTH = 300
 
 
 class MatchBudget(Exception):
-    """A membership question built more derivative terms than allowed."""
+    """A membership question built more derivative terms than allowed,
+    or went deeper into a term than `_MATCH_DEPTH`: `budget` is the most
+    it might build and `spent` how many it had built, when known."""
+
+    def __init__(self, budget: "int | None" = None, spent: "int | None" = None) -> None:
+        super().__init__("the membership question did not finish within its budget")
+        self.budget, self.spent = budget, spent
 
 
 def _as_term(node: dict) -> tuple:
@@ -411,7 +440,8 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
     key = (t, code)
     if key in seen:
         return seen[key]
-    if len(seen) > _MATCH_STEPS or depth > _MATCH_DEPTH:
+    limit = getattr(seen, "budget", None)
+    if len(seen) > (_MATCH_STEPS if limit is None else limit) or depth > _MATCH_DEPTH:
         raise MatchBudget
     depth += 1
     op = t[0]
@@ -454,12 +484,83 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
     return out
 
 
-def member(node, text: str, *, _seen: "dict | None" = None) -> bool:
+#: the number of derivative terms a matcher may build when no budget is
+#: given
+MATCH_BUDGET = _MATCH_STEPS
+
+
+class _Steps(dict):
+    """The derivatives one matcher has taken, by `(term, code)`, with
+    the most it may take (`budget`, `_MATCH_STEPS` when None)."""
+
+    def __init__(self, budget: "int | None" = None) -> None:
+        super().__init__()
+        self.budget = budget
+
+
+class _Prepared:
+    """A term prepared for many membership questions: each term reached
+    is given a number, and the step from a numbered term by a character
+    is remembered, so a string costs one lookup per character once its
+    steps have been taken. Calling it on a string says whether the
+    term's language holds it; `spent` is the number of derivative terms
+    built so far and `budget` the most it may build."""
+
+    def __init__(self, term: tuple, budget: "int | None") -> None:
+        self.terms = [term]
+        self.number_of = {term: 0}
+        self.accepts = [_nullable(term)]
+        self.step: dict = {}
+        self.seen = _Steps(budget)
+
+    @property
+    def budget(self) -> int:
+        return _MATCH_STEPS if self.seen.budget is None else self.seen.budget
+
+    @property
+    def spent(self) -> int:
+        return len(self.seen)
+
+    def __call__(self, text: str) -> bool:
+        try:
+            return self._stepped(text)
+        except MatchBudget as stopped:
+            stopped.budget, stopped.spent = self.budget, self.spent
+            raise
+        except RecursionError:
+            raise MatchBudget(self.budget, self.spent) from None
+
+    def _stepped(self, text: str) -> bool:
+        state = 0
+        for ch in text:
+            key = (state, ch)
+            following = self.step.get(key)
+            if following is None:
+                reached = _derivative(self.terms[state], ord(ch), self.seen)
+                following = self.number_of.get(reached)
+                if following is None:
+                    following = len(self.terms)
+                    self.number_of[reached] = following
+                    self.terms.append(reached)
+                    self.accepts.append(_nullable(reached))
+                self.step[key] = following
+            state = following
+        return self.accepts[state]
+
+
+def _prepared_node(node, budget: "int | None" = None) -> _Prepared:
+    try:
+        return _Prepared(_as_term(canonical(node)), budget)
+    except RecursionError:
+        raise MatchBudget(budget, 0) from None
+
+
+def node_member(node, text: str) -> bool:
     """Intent:
-        Whether the string `text` is in the language of `node`, decided
-        by taking the derivative of the term by each character in turn
-        and asking whether what is left holds the empty string. No
-        solver is involved, so the answer does not depend on one and
+        Whether the string `text` is in the language of a bare `node`,
+        decided by taking the derivative of the term by each character
+        in turn and asking whether what is left holds the empty string.
+        No solver is involved, so the answer does not depend on one and
         cannot time out; a complement is every string outside its
         argument, over all characters.
 
@@ -469,63 +570,91 @@ def member(node, text: str, *, _seen: "dict | None" = None) -> bool:
             allowed, or went deeper into the term than `_MATCH_DEPTH`,
             which no term of ordinary size does.
     """
-    try:
-        term = _as_term(canonical(node))
-        seen = {} if _seen is None else _seen
-        for ch in text:
-            term = _derivative(term, ord(ch), seen)
-            if term == _EMPTY_T:
-                return False
-        return _nullable(term)
-    except RecursionError:
-        raise MatchBudget from None
+    return _prepared_node(node)(text)
 
 
-def matcher(node):
+def node_matcher(node) -> _Prepared:
     """Intent:
-        `member` for one node, prepared once: a function from a string
-        to whether the node's language holds it, for asking about many
-        strings. Each term reached is given a number, and the step from
-        a numbered term by a character is remembered, so a string costs
-        one lookup per character once its steps have been taken.
+        `node_member` for one bare node, prepared once: a function from
+        a string to whether the node's language holds it, for asking
+        about many strings, reporting the work it has `spent`.
 
     Raises:
         InvalidTerm: the node is not of the schema.
-        MatchBudget: as `member`, when the node is prepared or when the
-            returned function is called.
+        MatchBudget: as `node_member`, when the node is prepared or
+            when the returned function is called.
     """
-    try:
-        terms = [_as_term(canonical(node))]
-        accepts = [_nullable(terms[0])]
-    except RecursionError:
-        raise MatchBudget from None
-    number_of = {terms[0]: 0}
-    step: dict = {}
-    seen: dict = {}
+    return _prepared_node(node)
 
-    def holds(text: str) -> bool:
-        try:
-            return stepped(text)
-        except RecursionError:
-            raise MatchBudget from None
 
-    def stepped(text: str) -> bool:
-        state = 0
-        for ch in text:
-            key = (state, ch)
-            following = step.get(key)
-            if following is None:
-                reached = _derivative(terms[state], ord(ch), seen)
-                following = number_of.get(reached)
-                if following is None:
-                    following = len(terms)
-                    number_of[reached] = following
-                    terms.append(reached)
-                    accepts.append(_nullable(reached))
-                step[key] = following
-            state = following
-        return accepts[state]
-    return holds
+#: the prepared definitions, by `(term hash, bound, budget)`
+_PREPARED: dict = {}
+#: how many prepared definitions are kept
+_PREPARED_KEPT = 256
+_BOUNDS = ("at_least", "at_most")
+
+
+def _prepared_definition(document, bound: "str | None", budget: "int | None") -> _Prepared:
+    _, exact, _, _ = _read(document)
+    if bound is not None and bound not in _BOUNDS:
+        raise InvalidTerm(f"the bound {bound!r} is not at_least or at_most")
+    if not exact and bound is None:
+        raise InvalidTerm("the definition is not exact: ask for its at_least or at_most bound")
+    key = (term_hash(document), bound if not exact else None, budget)
+    kept = _PREPARED.get(key)
+    if kept is None:
+        at_most, at_least = bounds(document)
+        kept = _prepared_node(at_least if bound == "at_least" else at_most, budget)
+        if len(_PREPARED) >= _PREPARED_KEPT:
+            _PREPARED.clear()
+        _PREPARED[key] = kept
+    return kept
+
+
+def member(document, text: str, *, bound: "str | None" = None,
+           budget: "int | None" = None) -> bool:
+    """Intent:
+        Whether the string `text` is in the language a definition
+        states, read over the definition's own alphabet (a text with a
+        character outside it is no member, and a complement is taken
+        inside it), or, with `bound` (`at_least` or `at_most`), in that
+        bound of a definition that is not exact. `budget` is the most
+        derivative terms the question may build (`MATCH_BUDGET` when
+        None). The prepared term is remembered by the definition's hash,
+        so asking again costs one step per character; `matcher` gives
+        the work spent.
+
+        A bare node (an object with an `op`) is read as `node_member`
+        reads it.
+
+    Raises:
+        InvalidTerm: the document is not a definition of this kind and
+            version, the bound is neither bound, or the definition is
+            not exact and no bound is named.
+        MatchBudget: the question built more derivative terms than the
+            budget, or went deeper into the term than `_MATCH_DEPTH`;
+            it carries the `budget` and the work `spent`.
+    """
+    if isinstance(document, dict) and "op" in document:
+        return node_member(document, text)
+    return _prepared_definition(document, bound, budget)(text)
+
+
+def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None):
+    """Intent:
+        `member` for one definition, prepared once and remembered by the
+        definition's hash: a function from a string to whether the
+        definition's language (or its `bound`) holds it, with the
+        `budget` it works within and the derivative terms it has
+        `spent`. A bare node is prepared as `node_matcher` prepares it.
+
+    Raises:
+        InvalidTerm: as `member`.
+        MatchBudget: as `member`, when the returned function is called.
+    """
+    if isinstance(document, dict) and "op" in document:
+        return node_matcher(document)
+    return _prepared_definition(document, bound, budget)
 
 
 def places(text: str, inside, outside) -> bool:
@@ -552,6 +681,74 @@ def representatives(nodes, alphabet=None) -> list:
 
 
 # ---- atoms ------------------------------------------------------------
+
+def atoms(nodes, alphabet=None) -> list:
+    """Intent:
+        The atoms of `alphabet` (all of Unicode when None) under the
+        character sets of `nodes`, as `(ranges, representative)` pairs:
+        the code point ranges, written as lists, of the characters no
+        node tells apart, and one character of the atom, a printable
+        ASCII one where the atom has one (as `representatives` gives).
+
+    Raises:
+        InvalidTerm: a node or the alphabet is not of the schema.
+    """
+    sets: list = []
+    for node in nodes:
+        _char_sets(canonical(node), sets)
+    ranges = _ranges(alphabet, "alphabet") if alphabet is not None else [[0, MAX_CODE_POINT]]
+    starts, atom_of, members = _atoms(ranges, sets)
+    ends: list = []
+    for i, start in enumerate(starts):
+        later = starts[i + 1] if i + 1 < len(starts) else MAX_CODE_POINT + 1
+        # a stretch ends where the next begins or where the alphabet stops
+        j = bisect_right(ranges, [start, MAX_CODE_POINT + 1]) - 1
+        ends.append(min(later - 1, ranges[j][1]))
+    held: list = [[] for _ in members]
+    for start, end, k in zip(starts, ends, atom_of):
+        if held[k] and held[k][-1][1] + 1 == start:
+            held[k][-1][1] = end
+        else:
+            held[k].append([start, end])
+    return [(held[k], chr(members[k])) for k in range(len(members))]
+
+
+def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) -> "str | None":
+    """Intent:
+        A shortest string of at most `limit` characters in the language
+        a definition states (or in its `bound`), or None when it holds
+        none that short. The search goes breadth first over the
+        derivatives of the prepared term, by one character of each atom
+        of the definition's alphabet under its character sets; no node
+        tells two characters of one atom apart, so a None is a proof
+        that no member is that short. No solver is asked.
+
+    Raises:
+        InvalidTerm: as `member`.
+        MatchBudget: the search built more derivative terms than
+            `MATCH_BUDGET`.
+    """
+    prepared = _prepared_definition(document, bound, None)
+    at_most, at_least = bounds(document)
+    node = at_least if bound == "at_least" else at_most
+    letters = [shown for _, shown in atoms([node], alphabet_of(document))]
+    frontier = [("", 0)]
+    reached = {0}
+    for _ in range(limit + 1):
+        following = []
+        for text, state in frontier:
+            if prepared.accepts[state]:
+                return text
+            for letter in letters:
+                prepared(text + letter)
+                after = prepared.step[(state, letter)]
+                if after not in reached and prepared.terms[after] != _EMPTY_T:
+                    reached.add(after)
+                    following.append((text + letter, after))
+        frontier = following
+        if not frontier:
+            return None
+    return None
 
 def _char_sets(node: dict, into: list) -> None:
     """Every distinct character set a node tells characters apart by:
@@ -752,7 +949,7 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
     return Found("member", member=lowering.decode(value.as_string()))
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "bounds", "canonical",
-           "canonical_text", "MatchBudget", "matcher", "member", "places",
-           "representatives",
-           "find_member", "is_definition", "term_hash"]
+__all__ = ["Found", "InvalidTerm", "KIND", "MATCH_BUDGET", "VERSION", "alphabet_of", "atoms",
+           "bounds", "canonical", "canonical_text", "MatchBudget", "matcher", "member",
+           "node_matcher", "node_member", "places", "representatives", "shortest_member",
+           "find_member", "is_definition", "term_hash", "validate"]
