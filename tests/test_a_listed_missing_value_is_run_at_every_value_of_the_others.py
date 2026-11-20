@@ -59,6 +59,14 @@ def curved_when_absent(x, y):
     return y
 
 
+def zero_but_rare(x, y):
+    if x is None:
+        if y == 0.123456:
+            return 1.0
+        return 0.0
+    return 0.0
+
+
 def zero_everywhere(x, y):
     if x is None:
         return 0.0
@@ -120,6 +128,18 @@ def test_beside_a_finite_set_every_combination_is_run():
     assert row.counterexample == "x = None, y = 0.5", row.counterexample
 
 
+def test_beside_a_finite_set_a_point_off_the_corners_is_run():
+    row = _row(zero_but_rare,
+               "for x in {1, None}, y in {0, 0.123456, 1}, f(x, y) == 0")
+    assert row.verdict == "falsified", (row.verdict, row.route, row.note)
+    assert row.counterexample == "x = None, y = 0.123456", row.counterexample
+
+
+def test_beside_an_interval_a_rare_failing_point_is_never_proven():
+    row = _row(zero_but_rare, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
+    assert row.verdict in ("holds", "falsified"), (row.verdict, row.route, row.note)
+
+
 def test_a_chained_comparison_runs_the_listed_value_inside_the_interval():
     row = _row(bump_when_absent,
                "for x in {1, None}, y in [0, 1], f(x, y) in [0, 0.5]")
@@ -130,15 +150,15 @@ def test_a_claim_that_cannot_be_run_at_a_point_is_not_proven_at_the_listed_value
     row = _row(curved_when_absent,
                "for x in {1, None}, y in [0, 1], d(f(x, y), y, y) == 0")
     assert row.verdict != "proven", (row.verdict, row.route, row.note)
-    assert "x = None was not checked" in row.note, row.note
+    assert "x = None was not run" in row.note, row.note
 
 
 def test_a_true_claim_beside_an_interval_holds_and_says_what_was_sampled():
     row = _row(zero_everywhere, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
     assert row.verdict == "holds", (row.verdict, row.route, row.note)
-    assert "the real points are proven" in row.note, row.note
-    assert "x = None was checked at" in row.note, row.note
-    assert "sampled points of y" in row.note, row.note
+    assert "the real points were derived" in row.note, row.note
+    assert "x = None was run at" in row.note, row.note
+    assert "points of y" in row.note, row.note
 
 
 def test_a_true_claim_beside_finite_sets_stays_proven():
