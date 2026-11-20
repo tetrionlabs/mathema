@@ -50,9 +50,19 @@ import dis
 import inspect
 import re
 import textwrap
+import types
 from dataclasses import dataclass
 
 MODES = ("fullmatch", "match", "search")
+
+#: the `re` module's own functions as they are when this module is
+#: first imported: what a call of `re.fullmatch` in a function under
+#: reading must still be
+_RE_FUNCTIONS = {name: getattr(re, name) for name in (*MODES, "compile")}
+#: the types a code object's constants may have for its source to be
+#: taken as the code it runs
+_CONSTANT_TYPES = (str, bytes, int, float, complex, bool, type(None), type(...),
+                   tuple, frozenset, types.CodeType)
 
 
 @dataclass(frozen=True)
@@ -109,18 +119,19 @@ class _Reader:
 
     def __init__(self, fn, tree: ast.FunctionDef) -> None:
         self.fn = fn
-        self.globals = getattr(fn, "__globals__", {})
+        self.globals = fn.__globals__
         self.local = _stored_names(tree)
 
     def _global(self, name: str):
-        """The object a free name is bound to in the function's globals
-        or the builtins."""
+        """The object a free name is bound to where the function itself
+        resolves it: its globals, then the builtins those globals
+        name, which must be the real builtins."""
         if name in self.local:
             raise _Declined(f"{name!r} is a parameter or is assigned in the function")
         if name in self.globals:
-            return self.globals[name]
-        if hasattr(builtins, name):
-            return getattr(builtins, name)
+            return dict.__getitem__(self.globals, name)
+        if name in vars(builtins):
+            return vars(builtins)[name]
         raise _Declined(f"{name!r} is not bound where the function is defined")
 
     def value(self, node: ast.AST):
@@ -129,13 +140,23 @@ class _Reader:
             return self._global(node.id)
         if isinstance(node, ast.Attribute):
             owner = self.value(node.value)
-            if not inspect.ismodule(owner):
-                raise _Declined(f"{ast.unparse(node)} is not a name in a module")
-            try:
-                return getattr(owner, node.attr)
-            except AttributeError:
-                raise _Declined(f"{ast.unparse(node)} is not bound") from None
+            if type(owner) is not types.ModuleType:
+                raise _Declined(f"{ast.unparse(node)} is not a name in a plain module")
+            namespace = vars(owner)
+            if "__getattr__" in namespace or node.attr not in namespace:
+                raise _Declined(f"{ast.unparse(node)} is not a name the module holds "
+                                f"itself (it may be computed when read)")
+            return namespace[node.attr]
         raise _Declined(f"{ast.unparse(node)} is not a name")
+
+    def _re_function(self, node: ast.AST, name: str) -> bool:
+        """Whether the callee is NOT the `re` module's own function of
+        that name: the object the function reaches must be the one `re`
+        held when this module was imported, a function defined in `re`."""
+        reached = self.value(node)
+        original = _RE_FUNCTIONS[name]
+        return not (reached is original and type(reached) is types.FunctionType
+                    and reached.__module__ == "re")
 
     def _text(self, node: ast.AST) -> str:
         """A pattern written as a string literal, or a name bound to a
@@ -162,7 +183,7 @@ class _Reader:
         """The compiled pattern an expression is: a name bound to one,
         or a call of `re.compile` on a literal."""
         if isinstance(node, ast.Call):
-            if self.value(node.func) is not re.compile or node.keywords \
+            if self._re_function(node.func, "compile") or node.keywords \
                     or not 1 <= len(node.args) <= 2:
                 raise _Declined(f"{ast.unparse(node)} is not a call of re.compile "
                                 f"on a pattern and flags")
@@ -196,7 +217,7 @@ class _Reader:
         if isinstance(owner, (ast.Name, ast.Attribute)):
             module_call = self.value(owner) is re
         if module_call:
-            if self.value(node.func) is not getattr(re, mode) or not 2 <= len(node.args) <= 3:
+            if self._re_function(node.func, mode) or not 2 <= len(node.args) <= 3:
                 raise _Declined(f"{ast.unparse(node)} is not re.{mode}(pattern, text[, flags])")
             on_param(node.args[1])
             flags = self._flags(node.args[2]) if len(node.args) == 3 else 0
@@ -279,35 +300,58 @@ class _Reader:
 def _same_code(fn, source: str, name: str) -> bool:
     """Whether the function's running code is the code its source text
     compiles to: the same instructions on the same names, variables and
-    constants. How a call's callee is pushed differs with what the
-    enclosing module imports (an attribute of an imported module is
-    loaded without the method-call form), so the comparison reads each
-    instruction's name and value and passes over that difference."""
+    constants, a jump reaching the same instruction. How a call's
+    callee is pushed differs with what the enclosing module imports (an
+    attribute of an imported module is loaded without the method-call
+    form), so the comparison passes over that difference alone.
+    Constants are compared by exact type and value, and a constant of
+    any type outside the builtin constant types fails the comparison."""
+    skipped = ("PUSH_NULL", "CACHE", "NOP")
+
+    def constant(value):
+        if type(value) not in _CONSTANT_TYPES:
+            raise TypeError(type(value).__name__)
+        if type(value) is types.CodeType:
+            return "<code>"
+        if type(value) in (tuple, frozenset):
+            return (type(value).__name__, tuple(sorted((constant(v) for v in value),
+                                                       key=repr)) if type(value) is frozenset
+                    else tuple(constant(v) for v in value))
+        return (type(value).__name__, repr(value))
+
     def shape(code) -> tuple:
+        for value in code.co_consts:
+            constant(value)
+        kept = [step for step in dis.get_instructions(code) if step.opname not in skipped]
+        index_at = {}
+        for i, step in enumerate(kept):
+            index_at.setdefault(step.offset, i)
+        offsets = sorted(index_at)
+
+        def reached(offset) -> int:
+            later = [o for o in offsets if o >= offset]
+            return index_at[later[0]] if later else len(kept)
         steps = []
-        for step in dis.get_instructions(code):
-            if step.opname in ("PUSH_NULL", "CACHE", "NOP"):
-                continue
+        for step in kept:
             value = step.argval
-            if hasattr(value, "co_code"):
-                value = "<code>"
             if "JUMP" in step.opname or step.opname.startswith("FOR_"):
-                # a target is an offset, which the pushes passed over move
-                value = "<target>"
-            if step.opname in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_METHOD"):
+                value = ("to", reached(value)) if isinstance(value, int) else value
+            elif step.opname in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_METHOD"):
                 # the name alone: the flag beside it says how a callee
                 # is pushed, not what is loaded
                 value = step.argrepr.split(" + ")[0]
+            elif step.opname in ("LOAD_CONST", "RETURN_CONST", "KW_NAMES"):
+                value = constant(value)
             steps.append(("LOAD_ATTR" if step.opname == "LOAD_METHOD" else step.opname,
-                          repr(value)))
+                          value if isinstance(value, tuple) else repr(value)))
         return tuple(steps), code.co_varnames, code.co_freevars
     try:
         module = compile(source, "<validator source>", "exec")
-    except (SyntaxError, ValueError):
+        read = next((c for c in module.co_consts
+                     if hasattr(c, "co_code") and c.co_name == name), None)
+        return read is not None and shape(read) == shape(fn.__code__)
+    except (SyntaxError, ValueError, TypeError):
         return False
-    read = next((c for c in module.co_consts
-                 if hasattr(c, "co_code") and c.co_name == name), None)
-    return read is not None and shape(read) == shape(fn.__code__)
 
 
 def _require_a_plain_function(fn) -> None:
@@ -317,6 +361,11 @@ def _require_a_plain_function(fn) -> None:
     coroutine nor a generator."""
     if not inspect.isfunction(fn):
         raise _Declined("it is not a plain function object")
+    if type(fn.__globals__) is not dict:
+        raise _Declined("its globals are not a plain dict")
+    named = dict.get(fn.__globals__, "__builtins__", builtins)
+    if (vars(named) if type(named) is types.ModuleType else named) is not vars(builtins):
+        raise _Declined("its builtins are not the real builtins")
     if hasattr(fn, "__wrapped__"):
         raise _Declined("it wraps another function, whose source is not its own behaviour")
     code = fn.__code__

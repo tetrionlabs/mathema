@@ -350,3 +350,95 @@ def test_a_module_that_rebinds_a_checked_name_is_declined(tmp_path, monkeypatch,
         assert isinstance(read, str), read
     finally:
         sys.modules.pop(name, None)
+
+
+# ---- names resolved where the function resolves them, and its own code ----
+
+_REFUSING_SOURCE = ("def f(s):\n    if not PAT.fullmatch(s):\n        raise ValueError(s)\n"
+                    "    return s\n")
+_PREDICATE_SOURCE = "def f(s):\n    return bool(PAT.fullmatch(s))\n"
+_RE_CALL_SOURCE = ("def f(s):\n    if not re.fullmatch(r'[a-z]+', s):\n"
+                   "        raise ValueError(s)\n    return s\n")
+_DOTTED_SOURCE = ("def f(s):\n    if not {module}.PAT.fullmatch(s):\n"
+                  "        raise ValueError(s)\n    return s\n")
+
+
+def _define(source, namespace, tag):
+    """A function compiled from `source` into `namespace`, its source
+    kept where `inspect` finds it, as a notebook cell's is."""
+    import linecache
+    filename = f"<validator cell {tag}>"
+    linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
+    exec(compile(source, filename, "exec"), namespace)
+    return namespace["f"]
+
+
+def test_a_function_with_builtins_of_its_own_is_declined():
+    import builtins
+    for tag, source, replaced in (("bool", _PREDICATE_SOURCE, {"bool": lambda m: True}),
+                                  ("error", _REFUSING_SOURCE, {"ValueError": KeyError})):
+        fn = _define(source, {"PAT": PAT, "__builtins__": {**vars(builtins), **replaced}}, tag)
+        assert read_validator(fn) == "its builtins are not the real builtins"
+
+
+def test_a_replaced_function_of_the_re_module_is_declined(monkeypatch):
+    original = re.fullmatch
+    monkeypatch.setattr(re, "fullmatch", lambda p, s, flags=0: original(p, s, flags))
+    fn = _define(_RE_CALL_SOURCE, {"re": re}, "replaced")
+    assert "is not re.fullmatch(pattern, text[, flags])" in read_validator(fn)
+
+
+def test_a_dotted_pattern_is_read_only_from_a_modules_own_names():
+    import types
+    plain = types.ModuleType("plain_patterns")
+    plain.PAT = PAT
+    read = read_validator(_define(_DOTTED_SOURCE.format(module="plain_patterns"),
+                                  {"plain_patterns": plain}, "plain"))
+    assert isinstance(read, Validator) and read.pattern is PAT
+    lazy = types.ModuleType("lazy_patterns")
+    lazy.__getattr__ = lambda name: PAT
+    declined = read_validator(_define(_DOTTED_SOURCE.format(module="lazy_patterns"),
+                                      {"lazy_patterns": lazy}, "lazy"))
+    assert "is not a name the module holds itself" in declined
+
+
+def test_a_code_constant_of_another_type_with_the_same_repr_is_declined():
+    class Sly(str):
+        def __repr__(self):
+            return repr("[a-z]+")
+    fn = _define(_RE_CALL_SOURCE, {"re": re}, "constant")
+    code = fn.__code__
+    fn.__code__ = code.replace(co_consts=tuple(
+        Sly("[0-9]+") if c == "[a-z]+" else c for c in code.co_consts))
+    assert "its source text is not the code it runs" in read_validator(fn)
+
+
+def test_a_retargeted_jump_is_declined():
+    import dis
+    fn = _define(_REFUSING_SOURCE, {"PAT": PAT}, "jump")
+    code = fn.__code__
+    raw = bytearray(code.co_code)
+    for step in dis.get_instructions(code):
+        if step.opname.startswith("POP_JUMP_IF"):
+            raw[step.offset + 1] = 0
+    fn.__code__ = code.replace(co_code=bytes(raw))
+    assert "its source text is not the code it runs" in read_validator(fn)
+
+
+def test_globals_that_are_not_a_plain_dict_are_declined():
+    import builtins
+    import types
+
+    class Watching(dict):
+        def __getitem__(self, key):
+            return dict.__getitem__(self, key)
+    source = _REFUSING_SOURCE
+    code = compile(source, "<validator cell globals>", "exec").co_consts[0]
+    fn = types.FunctionType(code, Watching({"PAT": PAT, "__builtins__": builtins}), "f")
+    assert read_validator(fn) in ("its globals are not a plain dict",
+                                  "its source is not available")
+
+
+def test_a_cell_with_ordinary_globals_is_read():
+    read = read_validator(_define(_REFUSING_SOURCE, {"PAT": PAT}, "ordinary"))
+    assert isinstance(read, Validator), read
