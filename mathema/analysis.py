@@ -403,15 +403,68 @@ def _top_level_split(text: str, sep: str) -> list[str]:
     return parts
 
 
-def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
-    kinds: dict[str, str] = {}
-    ann = {a.arg: ast.unparse(a.annotation).lower()
-           for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]
-           if a.annotation is not None}
+@dataclass(frozen=True)
+class ParamUses:
+    """Intent:
+        What a function body does with each of its parameters, read off
+        the syntax tree: the names it iterates, indexes or turns into an
+        array (`iterated`), reads as a mapping (`mapping`) or puts under
+        an arithmetic operator (`arithmetic`); and, by name, where a use
+        states a kind of value (`numeric`: arithmetic with a number
+        literal, an ordering against one, a sign, an argument of a
+        `math`/`cmath` function or of a numeric builtin; `text`: joined
+        with or compared to a string literal), each as `(line, text)`.
+        A product with a number literal is no such use: it repeats a
+        string or a sequence as well. `assigned` holds the parameters
+        the body rebinds.
+    """
+    iterated: frozenset = frozenset()
+    arithmetic: frozenset = frozenset()
+    mapping: frozenset = frozenset()
+    numeric: dict = field(default_factory=dict)
+    text: dict = field(default_factory=dict)
+    assigned: frozenset = frozenset()
+
+
+_NUMERIC_BUILTINS = frozenset({"abs", "round", "pow", "divmod", "float",
+                               "int", "complex"})
+_NUMERIC_MODULES = frozenset({"math", "cmath"})
+
+
+def _number_literal(node) -> bool:
+    """Whether `node` is a literal int, float or complex (a bool is not),
+    signed or not."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    return isinstance(node, ast.Constant) and isinstance(
+        node.value, (int, float, complex)) and not isinstance(node.value, bool)
+
+
+def _text_literal(node) -> bool:
+    """Whether `node` is a string literal or an f-string."""
+    return isinstance(node, ast.JoinedStr) or (
+        isinstance(node, ast.Constant) and isinstance(node.value, str))
+
+
+def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
+    """Intent:
+        The uses of each parameter in `fdef`'s body (`ParamUses`).
+    """
     iterated: set[str] = set()
     arithmetic: set[str] = set()
     mapping: set[str] = set()
+    pset = set(params)
+    numeric: dict = {}
+    text: dict = {}
+    assigned: set = set()
+
+    def note(table: dict, name, node, what: str) -> None:
+        if name in pset:
+            table.setdefault(name, []).append(
+                (getattr(node, "lineno", 0), what))
+
     for node in ast.walk(fdef):
+        _note_kind_uses(node, note, numeric, text, assigned)
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
             iterated.add(node.iter.id)
         elif isinstance(node, ast.comprehension) and isinstance(node.iter, ast.Name):
@@ -467,6 +520,71 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
             for side in (node.left, node.right):
                 if isinstance(side, ast.Name):
                     side_of.add(side.id)
+    return ParamUses(iterated=frozenset(iterated),
+                     arithmetic=frozenset(arithmetic),
+                     mapping=frozenset(mapping),
+                     numeric={p: tuple(v) for p, v in numeric.items()},
+                     text={p: tuple(v) for p, v in text.items()},
+                     assigned=frozenset(assigned) & pset)
+
+
+def _note_kind_uses(node, note, numeric: dict, text: dict,
+                    assigned: set) -> None:
+    """Intent:
+        Record, for one syntax node, the parameter uses that state a
+        kind of value (`ParamUses.numeric`, `ParamUses.text`) and the
+        names it rebinds.
+    """
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        assigned.add(node.id)
+    elif isinstance(node, ast.BinOp) and not isinstance(node.op, ast.MatMult):
+        for side, other in ((node.left, node.right), (node.right, node.left)):
+            if not isinstance(side, ast.Name):
+                continue
+            if _number_literal(other) and not isinstance(node.op, ast.Mult):
+                note(numeric, side.id, node, ast.unparse(node))
+            elif _text_literal(other) and isinstance(node.op, ast.Add):
+                note(text, side.id, node, ast.unparse(node))
+            elif _text_literal(other) and isinstance(node.op, ast.Mult):
+                note(numeric, side.id, node, ast.unparse(node))
+    elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
+            and isinstance(node.operand, ast.Name):
+        note(numeric, node.operand.id, node, ast.unparse(node))
+    elif isinstance(node, ast.Compare):
+        operands = [node.left, *node.comparators]
+        for i, op in enumerate(node.ops):
+            left, right = operands[i], operands[i + 1]
+            for side, other in ((left, right), (right, left)):
+                if not isinstance(side, ast.Name):
+                    continue
+                if isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) \
+                        and _number_literal(other):
+                    note(numeric, side.id, node, ast.unparse(node))
+                elif isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
+                                     ast.Gt, ast.GtE)) \
+                        and _text_literal(other):
+                    note(text, side.id, node, ast.unparse(node))
+    elif isinstance(node, ast.Call):
+        func = node.func
+        numeric_callee = (
+            (isinstance(func, ast.Name) and func.id in _NUMERIC_BUILTINS)
+            or (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                and func.value.id in _NUMERIC_MODULES))
+        if numeric_callee:
+            for arg in node.args:
+                if isinstance(arg, ast.Name):
+                    note(numeric, arg.id, node, ast.unparse(node))
+    elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+        assigned.add(node.target.id)
+
+
+def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
+    kinds: dict[str, str] = {}
+    ann = {a.arg: ast.unparse(a.annotation).lower()
+           for a in [*fdef.args.posonlyargs, *fdef.args.args, *fdef.args.kwonlyargs]
+           if a.annotation is not None}
+    uses = param_uses(fdef, params)
+    iterated, arithmetic, mapping = uses.iterated, uses.arithmetic, uses.mapping
     for p in params:
         stated = annotation_kind(ann.get(p, ""))
         if stated is not None:
@@ -480,6 +598,7 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
         else:
             kinds[p] = "unknown"
     return kinds
+
 
 
 def annotation_kind(text: str) -> "str | None":
