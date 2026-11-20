@@ -125,9 +125,10 @@ def test_no_evidence_leaves_the_shape_unestablished(mod):
     assert found.evidence is None and not found.established
 
 
-def test_an_annotation_the_body_contradicts_disagrees(mod):
+def test_an_annotation_the_body_contradicts_disagrees_and_settles_it(mod):
     found = callee_shape(mod.odd, "x")
-    assert not found.established
+    assert found.established and found.settled
+    assert found.evidence.source == "annotation"
     assert [e.shape for e in found.disagree] == ["sequence"]
 
 

@@ -3,8 +3,9 @@
 """The probe route draws a parameter only in a shape positive evidence
 establishes: the claim's domain, a type marker, the annotation, the
 default, or how the body uses it. A parameter with no evidence, or with
-evidence that disagrees, is not drawn and the claim's probe outcome is
-unknown with the reason. A body that only ever does arithmetic with a
+evidence that disagrees and nothing settles, is not drawn and the
+claim's probe outcome is unknown with the reason; an annotation or a
+number use the body contradicts is drawn, and the raise stands. A body that only ever does arithmetic with a
 parameter establishes a number, so the common unannotated numeric
 function keeps drawing, and its record says which evidence it rests on.
 A TypeError or AttributeError the drawn value causes at the operation
@@ -188,6 +189,20 @@ FNS = '''
 
 
     add_one = functools.partial(add, y=1.0)
+
+
+    def label(n):
+        if n > 0:
+            return "count: " + n
+        return ""
+
+
+    def either(x):
+        return x == "a" or x + 1 > 3
+
+
+    def indexed(x=1.0):
+        return x[0]
 '''
 
 
@@ -255,12 +270,11 @@ def test_a_body_that_uses_text_is_never_given_a_number(mod, name, var):
     assert "raised" not in (p.counterexample or "")
 
 
-def test_an_annotation_the_body_contradicts_is_not_drawn(mod):
+def test_an_annotation_the_body_contradicts_is_drawn_and_the_raise_stands(mod):
     p = _row(mod.first, "f(x) == f(x)")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
-    assert "annotated float (a number)" in p.note
-    assert "indexes" in p.note and "(a sequence)" in p.note
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert "raised TypeError" in p.counterexample
+    assert "mathema.probe_gap" not in (p.meta or {})
 
 
 def test_a_default_establishes_its_own_shape(mod):
@@ -365,3 +379,15 @@ def test_a_lambda_or_a_partial_is_read_from_its_source(mod, name):
     p = _row(getattr(mod, name), "f(x) >= x")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     assert p.meta["mathema.drawn_shapes"]["x"]["source"] == "body use"
+
+
+def test_a_number_use_the_body_contradicts_is_drawn_and_the_raise_stands(mod):
+    p = _row(mod.label, "f(n) == f(n)")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert "mathema.draw_defect" not in (p.meta or {})
+
+
+@pytest.mark.parametrize("name", ["either", "indexed"])
+def test_a_settled_disagreement_draws_the_shape_that_settles_it(mod, name):
+    p = _row(getattr(mod, name), "f(x) == f(x)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)

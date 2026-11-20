@@ -12559,7 +12559,8 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
         is explained by a value the claim holds (`ctx.shape_held`), a
         default or a literal, or is an attribute missing from every
         value of the shape firm evidence establishes
-        (`attribute_no_shape_has`).
+        (`attribute_no_shape_has`), or the shape settles a
+        disagreement (`ParameterShape.settled`).
     """
     if not ctx.drawn_shapes or call_raised[0] != "f" \
             or call_raised_at[0] is None:
@@ -12576,6 +12577,7 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
     found = wrong_shape_use(fn, values, exc, set(values) - ctx.shape_held)
     if found is None or found[0] not in ctx.drawn_shapes \
             or ctx.drawn_shapes[found[0]].stated \
+            or ctx.drawn_shapes[found[0]].settled \
             or attribute_no_shape_has(ctx.drawn_shapes[found[0]], exc):
         return None
     p, line = found

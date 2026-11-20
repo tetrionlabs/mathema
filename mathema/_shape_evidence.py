@@ -27,8 +27,11 @@ shape comes from positive evidence, read in this order:
    another function of the same module whose parameter has evidence.
 
 Evidence that names two different kinds for one parameter is a
-disagreement, and the parameter is then not drawn; neither is one with
-no evidence at all. A claim domain, an inferred domain, a type marker
+disagreement. An annotation, or a firm number use, against uses in the
+body settles it, and so does a firm use against the default: the
+parameter is drawn in the settling shape, and a raise at a use against
+it is a finding. An unsettled disagreement is not drawn, nor is a
+parameter with no evidence at all. A claim domain, an inferred domain, a type marker
 and an annotation are stated evidence; a default and a body use are
 read from the code.
 
@@ -84,18 +87,21 @@ class ParameterShape:
         first piece in `EVIDENCE_ORDER` (`evidence`), every piece found
         (`found`), and the pieces that name another shape than the
         first (`disagree`). `evidence` is None when nothing establishes
-        the shape.
+        the shape. A disagreement one piece settles (`settled`, see
+        `_settling`) draws that piece's shape, and `disagree` then holds
+        the pieces against it.
     """
     param: str
     evidence: "Evidence | None"
     found: tuple = ()
     disagree: tuple = ()
+    settled: bool = False
 
     @property
     def established(self) -> bool:
         """Whether the parameter may be drawn: some evidence, none of
-        it disagreeing."""
-        return self.evidence is not None and not self.disagree
+        it disagreeing, or a disagreement it settles."""
+        return self.evidence is not None and (not self.disagree or self.settled)
 
     @property
     def stated(self) -> bool:
@@ -111,6 +117,8 @@ class ParameterShape:
         if self.disagree:
             out["disagree"] = [{"source": e.source, "shape": e.shape,
                                 "detail": e.detail} for e in self.disagree]
+        if self.settled:
+            out["settled"] = True
         return out
 
 
@@ -420,7 +428,41 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
         return ParameterShape(param, first, tuple(found))
     disagree = tuple(e for e in found[1:]
                      if e.firm and not _compatible(first.shape, e.shape))
+    if disagree:
+        settling = _settling(found)
+        if settling is not None:
+            return ParameterShape(param, settling, tuple(found),
+                                  _against(found, settling), settled=True)
     return ParameterShape(param, first, tuple(found), disagree)
+
+
+def _against(found: list, piece: Evidence) -> tuple:
+    """The firm pieces of `found` that name a shape `piece`'s shape
+    cannot describe."""
+    return tuple(e for e in found if e is not piece and e.firm
+                 and not _compatible(piece.shape, e.shape))
+
+
+def _settling(found: list) -> "Evidence | None":
+    """Intent:
+        The piece of evidence that settles a disagreement among `found`,
+        or None: the annotation, when every piece against it is a body
+        use; else a firm number use in the body, when every piece
+        against it is a body use or the default; else a firm body use,
+        when only the default is against it. The value is drawn in that
+        piece's shape, and a raise at a use against it stands as a
+        finding.
+    """
+    ranked = [
+        *[(e, {"body use"}) for e in found if e.source == "annotation"],
+        *[(e, {"body use", "default"}) for e in found
+          if e.source == "body use" and e.firm and e.shape == "number"],
+        *[(e, {"default"}) for e in found
+          if e.source == "body use" and e.firm]]
+    for piece, allowed in ranked:
+        if all(e.source in allowed for e in _against(found, piece)):
+            return piece
+    return None
 
 
 def _compatible(a: str, b: str) -> bool:
