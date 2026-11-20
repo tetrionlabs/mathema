@@ -31,8 +31,10 @@ Membership needs no solver: `member` and `matcher` read a definition by
 derivatives over its own alphabet, within a budget, and `node_member`
 and `node_matcher` read a bare node over all characters. `validate`,
 `member` and `matcher` on a definition, `node_member`, `node_matcher`,
-`atoms`, `shortest_member` and `MATCH_BUDGET` are draft, not part of the
-public interface yet. `member` and `matcher` also accept a bare node (an
+`atoms`, `shortest_member`, `MATCH_BUDGET` and `Lowering` (one
+question's nodes lowered to z3 over one symbol per atom, so the text
+nodes of one question share atoms) are draft, not part of the public
+interface yet. `member` and `matcher` also accept a bare node (an
 object with an `op`) and read it as `node_member` and `node_matcher` do,
 for the callers that pass one.
 """
@@ -901,6 +903,10 @@ class _Lowering:
         return "".join(chr(self.members[ord(ch) - _SYMBOL_BASE]) for ch in plain)
 
 
+#: the draft name of the lowering
+Lowering = _Lowering
+
+
 def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
     """Intent:
         A string over `alphabet` (code point ranges) that every node in
@@ -951,7 +957,7 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
     return Found("member", member=lowering.decode(value.as_string()))
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "MATCH_BUDGET", "VERSION", "alphabet_of", "atoms",
+__all__ = ["Found", "InvalidTerm", "KIND", "Lowering", "MATCH_BUDGET", "VERSION", "alphabet_of", "atoms",
            "bounds", "canonical", "canonical_text", "MatchBudget", "matcher", "member",
            "node_matcher", "node_member", "places", "representatives", "shortest_member",
            "find_member", "is_definition", "term_hash", "validate"]
