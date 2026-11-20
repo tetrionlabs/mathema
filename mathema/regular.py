@@ -329,6 +329,199 @@ def term_hash(document) -> str:
     return hashlib.sha256(canonical_text(document).encode("ascii")).hexdigest()
 
 
+# ---- membership of one string, by derivatives --------------------------
+
+_EMPTY_T = ("empty",)
+_EPSILON_T = ("epsilon",)
+#: how many derivative terms one membership question may build
+_MATCH_STEPS = 200_000
+
+
+class MatchBudget(Exception):
+    """A membership question built more derivative terms than allowed."""
+
+
+def _as_term(node: dict) -> tuple:
+    """A canonical node as a nested tuple, which can be remembered."""
+    op = node["op"]
+    if op in _LEAVES:
+        return (op,)
+    if op == "literal":
+        return ("literal", tuple(node["codes"]))
+    if op == "chars":
+        return ("chars", tuple((lo, hi) for lo, hi in node["ranges"]))
+    if op == "complement":
+        return ("complement", _as_term(node["arg"]))
+    if op == "repeat":
+        return ("repeat", _as_term(node["arg"]), node["min"], node["max"])
+    return (op, tuple(_as_term(a) for a in node["args"]))
+
+
+def _nullable(t: tuple) -> bool:
+    """Whether the term holds the empty string."""
+    op = t[0]
+    if op == "empty" or op == "chars":
+        return False
+    if op == "epsilon":
+        return True
+    if op == "literal":
+        return not t[1]
+    if op == "concat" or op == "inter":
+        return all(_nullable(a) for a in t[1])
+    if op == "union":
+        return any(_nullable(a) for a in t[1])
+    if op == "complement":
+        return not _nullable(t[1])
+    return t[2] == 0 or _nullable(t[1])
+
+
+def _cat(a: tuple, b: tuple) -> tuple:
+    if a == _EMPTY_T or b == _EMPTY_T:
+        return _EMPTY_T
+    if a == _EPSILON_T:
+        return b
+    if b == _EPSILON_T:
+        return a
+    return ("concat", (a, b))
+
+
+def _alt(parts) -> tuple:
+    kept = tuple(dict.fromkeys(p for p in parts if p != _EMPTY_T))
+    if not kept:
+        return _EMPTY_T
+    return kept[0] if len(kept) == 1 else ("union", kept)
+
+
+def _derivative(t: tuple, code: int, seen: dict) -> tuple:
+    """The term holding each string `w` such that the character `code`
+    followed by `w` is in `t`."""
+    key = (t, code)
+    if key in seen:
+        return seen[key]
+    if len(seen) > _MATCH_STEPS:
+        raise MatchBudget
+    op = t[0]
+    if op in ("empty", "epsilon"):
+        out = _EMPTY_T
+    elif op == "literal":
+        codes = t[1]
+        out = (_EPSILON_T if len(codes) == 1 else ("literal", codes[1:])) \
+            if codes and codes[0] == code else _EMPTY_T
+    elif op == "chars":
+        out = _EPSILON_T if any(lo <= code <= hi for lo, hi in t[1]) else _EMPTY_T
+    elif op == "concat":
+        first, rest = t[1][0], t[1][1:]
+        tail = _EPSILON_T if not rest else rest[0] if len(rest) == 1 else ("concat", rest)
+        parts = [_cat(_derivative(first, code, seen), tail)]
+        if _nullable(first):
+            parts.append(_derivative(tail, code, seen))
+        out = _alt(parts)
+    elif op == "union":
+        out = _alt(_derivative(a, code, seen) for a in t[1])
+    elif op == "inter":
+        parts = tuple(dict.fromkeys(_derivative(a, code, seen) for a in t[1]))
+        out = _EMPTY_T if _EMPTY_T in parts else parts[0] if len(parts) == 1 \
+            else ("inter", parts)
+    elif op == "complement":
+        out = ("complement", _derivative(t[1], code, seen))
+    else:
+        arg, lo, hi = t[1], t[2], t[3]
+        if hi == 0:
+            out = _EMPTY_T
+        else:
+            # after one copy the rest is fewer copies; a copy that may be
+            # empty makes the lower count no constraint
+            fewer = 0 if _nullable(arg) else max(lo - 1, 0)
+            rest = ("repeat", arg, fewer, None if hi is None else hi - 1)
+            if rest[3] == 0:
+                rest = _EPSILON_T
+            out = _cat(_derivative(arg, code, seen), rest)
+    seen[key] = out
+    return out
+
+
+def member(node, text: str, *, _seen: "dict | None" = None) -> bool:
+    """Intent:
+        Whether the string `text` is in the language of `node`, decided
+        by taking the derivative of the term by each character in turn
+        and asking whether what is left holds the empty string. No
+        solver is involved, so the answer does not depend on one and
+        cannot time out; a complement is every string outside its
+        argument, over all characters.
+
+    Raises:
+        InvalidTerm: the node is not of the schema.
+        MatchBudget: the question built more derivative terms than
+            allowed, which no term of ordinary size does.
+    """
+    term = _as_term(canonical(node))
+    seen = {} if _seen is None else _seen
+    for ch in text:
+        term = _derivative(term, ord(ch), seen)
+        if term == _EMPTY_T:
+            return False
+    return _nullable(term)
+
+
+def matcher(node):
+    """Intent:
+        `member` for one node, prepared once: a function from a string
+        to whether the node's language holds it, for asking about many
+        strings. Each term reached is given a number, and the step from
+        a numbered term by a character is remembered, so a string costs
+        one lookup per character once its steps have been taken.
+
+    Raises:
+        InvalidTerm: the node is not of the schema.
+    """
+    terms = [_as_term(canonical(node))]
+    number_of = {terms[0]: 0}
+    accepts = [_nullable(terms[0])]
+    step: dict = {}
+    seen: dict = {}
+
+    def holds(text: str) -> bool:
+        state = 0
+        for ch in text:
+            key = (state, ch)
+            following = step.get(key)
+            if following is None:
+                reached = _derivative(terms[state], ord(ch), seen)
+                following = number_of.get(reached)
+                if following is None:
+                    following = len(terms)
+                    number_of[reached] = following
+                    terms.append(reached)
+                    accepts.append(_nullable(reached))
+                step[key] = following
+            state = following
+        return accepts[state]
+    return holds
+
+
+def places(text: str, inside, outside) -> bool:
+    """Whether the matcher puts `text` in every node of `inside` and in
+    no node of `outside`: a second reading of a string a solver
+    returned for that question."""
+    try:
+        return all(member(n, text) for n in inside) \
+            and not any(member(n, text) for n in outside)
+    except MatchBudget:
+        return False
+
+
+def representatives(nodes, alphabet=None) -> list:
+    """One character for each atom of `alphabet` (all of Unicode when
+    None) under the character sets of `nodes`: the characters no node
+    tells apart share an atom, and a printable ASCII character stands
+    for an atom that has one."""
+    sets: list = []
+    for node in nodes:
+        _char_sets(canonical(node), sets)
+    ranges = _ranges(alphabet, "alphabet") if alphabet is not None else [[0, MAX_CODE_POINT]]
+    return [chr(code) for code in _atoms(ranges, sets)[2]]
+
+
 # ---- atoms ------------------------------------------------------------
 
 def _char_sets(node: dict, into: list) -> None:
@@ -531,5 +724,6 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
 
 
 __all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "bounds", "canonical",
-           "canonical_text",
+           "canonical_text", "MatchBudget", "matcher", "member", "places",
+           "representatives",
            "find_member", "is_definition", "term_hash"]
