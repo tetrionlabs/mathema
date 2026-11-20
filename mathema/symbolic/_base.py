@@ -1437,9 +1437,10 @@ def _wrapper_is_read(fn) -> bool:
     """Whether `fn` is a wrapper whose call is read as calling the
     function it wraps and returning or raising what it does: the
     `functools.lru_cache` and `functools.cache` wrapper, a
-    `staticmethod`, and a wrapper defined in mathema itself (its call
-    adapters and its domain and dimension guards, which core reads on
-    their own)."""
+    `staticmethod`, an instance whose `__call__` hands its arguments to
+    the wrapped function unchanged (`hands_over_to_wrapped`), and a
+    wrapper defined in mathema itself (its call adapters and its domain
+    and dimension guards, which core reads on their own)."""
     import functools
     import os
     import types
@@ -1448,7 +1449,9 @@ def _wrapper_is_read(fn) -> bool:
         return True
     package = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
     if type(fn) is not types.FunctionType:
-        return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema"
+        from .._instance_callable import hands_over_to_wrapped
+        return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema" \
+            or hands_over_to_wrapped(fn)
     return os.path.abspath(fn.__code__.co_filename).startswith(package)
 
 
