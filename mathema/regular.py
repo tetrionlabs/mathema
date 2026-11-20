@@ -87,8 +87,9 @@ def _ranges(raw, where: str) -> list:
         raise InvalidTerm(f"{where}: ranges must be a list of [lo, hi] pairs")
     pairs = []
     for pair in raw:
-        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "
+                              f"(a list of two code points, as JSON writes it)")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
         if lo > hi:
             raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
@@ -247,6 +248,9 @@ def _meaning(document) -> tuple:
         raise InvalidTerm("a definition is an object")
     alphabet = _ranges(document.get("alphabet"), "alphabet")
     exact = document.get("exact")
+    if "language" in document and ("at_least" in document or "at_most" in document):
+        raise InvalidTerm("a definition states either 'language' or the bounds 'at_least' "
+                          "and 'at_most', not both")
     if exact is True and "language" in document:
         node = canonical(document["language"])
         return alphabet, True, node, node
