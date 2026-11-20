@@ -381,3 +381,46 @@ def test_a_review_reader_case_is_unread_and_not_known_to_finish(fn, kinds):
     kind = ANY if kinds is None else ValueKind(frozenset({float}))
     reading = read_raise_path(fn, [("stmt", s) for s in body[:-1]], body[-1], {"x": kind})
     assert isinstance(reading, UnreadRaise) and not reading.halts, reading
+
+
+# ---- third review: a lambda's defaults run when the lambda is built ---------
+
+def pol_lam(x: Optional[float], y: float) -> float:
+    g = lambda a=1 / (y - 0.123456): a  # noqa: E731,F841
+    if x is None:
+        raise TypeError("x is required")
+    return x * y
+
+
+def pol_lam_inner(x: Optional[float], y: float) -> float:
+    if x is None:
+        g = lambda a=1 / (y - 0.123456): a  # noqa: E731,F841
+        raise TypeError("x is required")
+    return x * y
+
+
+def pol_lam_kw(x: Optional[float], y: float) -> float:
+    g = lambda *, a=1 / (y - 0.123456): a  # noqa: E731,F841
+    if x is None:
+        raise TypeError("x is required")
+    return x * y
+
+
+def pol_lam_plain(x: Optional[float], y: float) -> float:
+    g = lambda: 1 / (y - 0.123456)  # noqa: E731,F841
+    if x is None:
+        raise TypeError("x is required")
+    return x * y
+
+
+@pytest.mark.parametrize("fn,verdict", [
+    (pol_lam, "holds"), (pol_lam_inner, "holds"), (pol_lam_kw, "holds"),
+    (pol_lam_plain, "proven"),
+], ids=lambda v: getattr(v, "__name__", v))
+def test_a_lambda_default_is_read_where_the_lambda_is_built(fn, verdict):
+    if fn is not pol_lam_plain:
+        with pytest.raises(ZeroDivisionError):
+            fn(None, 0.123456)
+    rows = check_conjectures(fn, [claim("for x in [0, 1], y in [-1, 1], f(x, y) == x * y"),
+                                  claim("absent(f, x) raises(TypeError)")])
+    assert rows[-1].verdict == verdict, (rows[-1].verdict, rows[-1].note)

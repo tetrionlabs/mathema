@@ -831,6 +831,14 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
             if isinstance(node.value, ast.Lambda):
+                # building a lambda evaluates its positional and keyword
+                # defaults, and nothing of its body
+                lam = node.value.args
+                for default in [*lam.defaults, *(d for d in lam.kw_defaults if d is not None)]:
+                    found, _ = read_expression(default, kinds, ns)
+                    note(found, f"the default `{_source(default)}`{_where(default)} is "
+                                f"evaluated before the raise and is not shown to be unable "
+                                f"to raise")
                 kinds[node.targets[0].id] = ANY
                 continue
             found, value = read_expression(node.value, kinds, ns)
