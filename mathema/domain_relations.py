@@ -662,7 +662,11 @@ def defined_bound(bound) -> "_Defined | None":
         return None
     pieces = (bound,) if isinstance(bound, frozenset) else tuple(bound.pieces)
     excluded = frozenset() if isinstance(bound, frozenset) else bound.excluded
-    most, least, alphabet, hashes, read = [], [], [], {}, []
+    most: list = []
+    least: list = []
+    alphabet: list = []
+    hashes: dict = {}
+    read: list = []
     for piece in pieces:
         if isinstance(piece, frozenset):
             node = _literals(piece)
@@ -700,10 +704,16 @@ def defined_bound(bound) -> "_Defined | None":
     return _Defined(joined(most), joined(least), alphabet, hashes, tuple(read))
 
 
-#: how many members a guard draws from a language, and how many
-#: strings of a definition it asks the solver for
+#: how many values a guard draws from a language's own sampler
 GUARD_DRAWS = 48
-GUARD_STRINGS = 4
+#: how many strings over one character per atom a guard enumerates at
+#: most; the length bound is the longest whose strings all fit
+GUARD_ENUMERATED = 3000
+#: the characters a guard also tries every string of up to two of: the
+#: printable ASCII characters, a tab and a newline
+GUARD_CHARACTERS = "".join(chr(c) for c in range(0x20, 0x7F)) + "\t\n"
+#: how many drawn members a guard takes near misses of
+GUARD_NEAR_MISSES = 12
 
 
 def _guard_seed(text: str) -> int:
@@ -713,25 +723,36 @@ def _guard_seed(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
 
 
-def check_definition(text: str, language, at_most: dict, at_least: dict,
-                     alphabet: list) -> dict:
+def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
+                   seed: int) -> tuple:
     """Intent:
-        Check a language's stated definition against the language's own
-        membership, as far as drawing can: members drawn through the
-        language's hazards and `sample` must all lie in `at_least`, and
-        strings the solver takes from `at_most` must all be members by
-        `contains`. Returns the assumption the proof rests on: the
-        `statement` (`<text> == its stated definition`), its `status`
-        (`checked` when at least one member was drawn and nothing
-        disagreed, `assumed` when no member could be drawn, `refuted`
-        with the `disagreement` when a string shows the definition and
-        the membership apart), and the `artefact` to run it again (the
-        seed and the counts).
+        The strings a definition is compared with its language on, and
+        what was enumerated: every string up to a length bound over one
+        character per atom of the definition's character sets; every
+        string of up to two of `GUARD_CHARACTERS`; the language's
+        hazards and the values its sampler draws; and, for the shortest
+        drawn members, each with one character removed, and with one
+        atom character put in or put in place of a character, at every
+        position. Returns `(strings, members drawn, length bound,
+        atoms)`. Nothing here asks a solver, so the same call gives the
+        same strings on any machine.
     """
+    import itertools
     import random
 
     from . import regular
-    seed = _guard_seed(text)
+    atoms = regular.representatives([at_most, at_least], alphabet or None)
+    bound, total = 0, 1
+    while atoms and bound < 6 and total + len(atoms) ** (bound + 1) <= GUARD_ENUMERATED:
+        bound += 1
+        total += len(atoms) ** bound
+    strings: dict = {}
+    for n in range(bound + 1):
+        for letters in itertools.product(atoms, repeat=n):
+            strings["".join(letters)] = None
+    for n in (1, 2):
+        for letters in itertools.product(GUARD_CHARACTERS, repeat=n):
+            strings["".join(letters)] = None
     rng = random.Random(seed)
     drawn: list = []
     try:
@@ -743,33 +764,70 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
             drawn.append(language.sample(rng))
         except Exception:
             break
-    members = sorted({v for v in drawn if isinstance(v, str) and _is_member(language, v)})
+    drawn = [v for v in drawn if isinstance(v, str)]
+    members = sorted({v for v in drawn if _is_member(language, v)}, key=lambda v: (len(v), v))
+    for value in drawn:
+        strings[value] = None
+    for value in members[:GUARD_NEAR_MISSES]:
+        for i in range(len(value) + 1):
+            if i < len(value):
+                strings[value[:i] + value[i + 1:]] = None
+            for letter in atoms:
+                strings[value[:i] + letter + value[i:]] = None
+                if i < len(value):
+                    strings[value[:i] + letter + value[i + 1:]] = None
+    return list(strings), len(members), bound, len(atoms)
+
+
+def check_definition(text: str, language, at_most: dict, at_least: dict,
+                     alphabet: list) -> dict:
+    """Intent:
+        Check a language's stated definition against the language's own
+        membership on a fixed set of strings (`_guard_strings`): a
+        string the term `at_most` holds must be a member by `contains`,
+        and a member must be held by `at_least`, each term read by the
+        derivative matcher. For an exact definition the two are one
+        term, so the term and `contains` must agree on every string;
+        for a pair the membership must lie between them. Returns the
+        assumption a verdict rests on: the `statement` (`<text> == its
+        stated definition`), its `status`, and the `artefact` to run it
+        again (the seed, the members drawn, the length bound, the
+        number of atoms and the number of strings compared).
+
+        The status is `checked` when every string compared agreed;
+        `assumed` when no check could be run at all, which is when
+        `contains` answered for no string; and `refuted`, with the
+        `disagreement` naming the string, when the definition and the
+        membership part. When the matcher runs out of its budget the
+        result carries `unfinished` and no status is claimed.
+    """
+    from . import regular
+    seed = _guard_seed(text)
     out = {"language": text, "statement": f"{text} == its stated definition",
-           "status": "assumed",
-           "artefact": {"seed": seed, "members drawn": len(members),
-                        "strings of the definition confirmed": 0}}
-    wide = alphabet + [[ord(c), ord(c)] for v in members for c in v]
-    if members:
-        listed = _literals(members)
-        missed = regular.find_member(wide, [listed], [at_least])
-        if missed.status == "member":
-            return {**out, "status": "refuted",
-                    "disagreement": f"{missed.member!r} is a member of {text} and is "
-                                    f"outside its stated definition"}
-        if missed.status == "unknown":
-            return out
-    found: list = []
-    for _ in range(GUARD_STRINGS):
-        other = regular.find_member(wide, [at_most], [_literals(found)] if found else [])
-        if other.status != "member":
-            break
-        if not _is_member(language, other.member):
-            return {**out, "status": "refuted",
-                    "disagreement": f"{other.member!r} is in the stated definition of "
-                                    f"{text} and is not a member"}
-        found.append(other.member)
-    out["artefact"]["strings of the definition confirmed"] = len(found)
-    if members:
+           "status": "assumed", "artefact": {"seed": seed}}
+    strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet, seed)
+    in_most, in_least = regular.matcher(at_most), regular.matcher(at_least)
+    compared = 0
+    try:
+        for value in strings:
+            try:
+                is_member = bool(language.contains(value))
+            except Exception:
+                continue
+            compared += 1
+            if is_member and not in_least(value):
+                return {**out, "status": "refuted",
+                        "disagreement": f"{value!r} is a member of {text} and is "
+                                        f"outside its stated definition"}
+            if not is_member and in_most(value):
+                return {**out, "status": "refuted",
+                        "disagreement": f"{value!r} is in the stated definition of "
+                                        f"{text} and is not a member"}
+    except regular.MatchBudget:
+        return {**out, "unfinished": f"the check of the definition of {text} did not finish"}
+    out["artefact"].update({"members drawn": drawn, "length bound": bound, "atoms": atoms,
+                            "strings compared": compared})
+    if compared:
         out["status"] = "checked"
     return out
 
@@ -791,7 +849,8 @@ def check_definitions(*defined: "_Defined") -> tuple:
         for text, language, most, least in domain.read:
             if text not in seen:
                 seen[text] = check_definition(text, language, most, least, domain.alphabet)
-    refuted = next((a["disagreement"] for a in seen.values() if a["status"] == "refuted"), None)
+    refuted = next((a.get("disagreement") or a.get("unfinished") for a in seen.values()
+                    if a["status"] == "refuted" or a.get("unfinished")), None)
     return list(seen.values()), refuted
 
 
@@ -865,6 +924,11 @@ def _decide_languages(rel: Relation) -> Decision:
             if found.status != "member":
                 continue
             member = found.member
+            if not regular.places(member, *question):
+                # the matcher reads the solver's string otherwise than
+                # the solver did, so the string settles nothing
+                why = why or UNCONFIRMED
+                continue
             if all(domain_contains(member, t.bound) for t in inside) and \
                     not any(domain_contains(member, t.bound) for t in outside):
                 witness = {"value": repr(member), "member": member,

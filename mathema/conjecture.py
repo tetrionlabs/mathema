@@ -11116,6 +11116,9 @@ def _validator_proof(cj, fn, cj_domain):
         if found.status != "member":
             continue
         text = found.member
+        if not regular.places(text, inside, outside):
+            why = why or domain_relations.UNCONFIRMED
+            continue
         value = text[len(prefix):len(text) - len(suffix)]
         try:
             matched = validator.accepts(text) is not None

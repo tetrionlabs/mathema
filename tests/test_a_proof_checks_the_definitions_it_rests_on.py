@@ -174,3 +174,85 @@ def test_a_falsified_by_an_executed_string_assumes_nothing(served):
     assert row.verdict == "falsified", (row.verdict, row.note)
     assert "assuming" not in (row.note or "") + (row.sketch or "")
     assert row.meta["mathema.rests_on_membership"] == ["L[onlya]", "L[right]"]
+
+
+LOWER_UP_TO_SIX = _exact({"op": "repeat", "arg": {"op": "chars", "ranges": [[97, 122]]},
+                          "min": 0, "max": 6})
+
+
+def _line_accepts(s):
+    body = s[:-2] if s.endswith("-x") else s
+    return len(body) <= 6 and set(body) <= set("abcdefghijklmnopqrstuvwxyz")
+
+
+#: up to six lower-case letters, optionally followed by -x; it samples
+#: letters only and states [a-z]{0,6}
+LINE = StringLanguage(
+    "line", level="predicate", accepts=_line_accepts, pool="abcdefghijklmnopqrstuvwxyz",
+    generate=lambda rng: "".join(rng.choice("abcxyz") for _ in range(rng.randint(0, 6))),
+    schema={"definition": LOWER_UP_TO_SIX})
+
+
+@pytest.fixture
+def line():
+    register_language("line", LINE)
+    try:
+        yield
+    finally:
+        unregister_language("line")
+
+
+def test_a_member_the_sampler_never_draws_is_found_by_enumeration(served, line):
+    row = _row(check, 'L[line] disjoint {"a-x"}')
+    assert row.verdict == "unknown", (row.verdict, row.sketch)
+    assert "'-x' is a member of L[line] and is outside its stated definition" in row.note
+    negative = _row(check, "L[line] not subset L[right]")
+    assert negative.verdict != "falsified" or "assuming" not in (negative.note or "")
+
+
+def test_a_checked_definition_says_what_was_enumerated(served):
+    from mathema import domain_relations
+    from mathema.domain import parse_binding
+    defined = domain_relations.defined_bound(parse_binding("s in L[right]")[1])
+    (text, language, most, least), = defined.read
+    checked = domain_relations.check_definition(text, language, most, least, defined.alphabet)
+    assert checked["status"] == "checked"
+    artefact = checked["artefact"]
+    assert artefact["atoms"] == 2 and artefact["length bound"] >= 6
+    assert artefact["strings compared"] > 9000 and artefact["members drawn"] >= 1
+    again = domain_relations.check_definition(text, language, most, least, defined.alphabet)
+    assert again == checked
+
+
+def test_the_check_of_a_definition_asks_no_solver(served, monkeypatch):
+    from mathema import domain_relations, regular
+    from mathema.domain import parse_binding
+    defined = domain_relations.defined_bound(parse_binding("s in L[right]")[1])
+    (text, language, most, least), = defined.read
+
+    def no_solver(*args, **kwargs):
+        raise AssertionError("the check of a definition asked the solver")
+    monkeypatch.setattr(regular, "find_member", no_solver)
+    assert domain_relations.check_definition(
+        text, language, most, least, defined.alphabet)["status"] == "checked"
+
+
+def test_a_check_that_does_not_finish_claims_no_status(served, monkeypatch):
+    from mathema import domain_relations, regular
+    from mathema.domain import parse_binding
+    defined = domain_relations.defined_bound(parse_binding("s in L[right]")[1])
+    (text, language, most, least), = defined.read
+    monkeypatch.setattr(regular, "_MATCH_STEPS", 0)
+    unfinished = domain_relations.check_definition(text, language, most, least,
+                                                   defined.alphabet)
+    assert unfinished.get("unfinished") == "the check of the definition of L[right] did not finish"
+    row = _row(check, "L[onlya] subset L[right]")
+    assert row.verdict == "unknown"
+    assert "did not finish" in row.note
+
+
+def test_a_solver_string_the_matcher_reads_otherwise_is_not_reported(served, monkeypatch):
+    from mathema import regular
+    monkeypatch.setattr(regular, "places", lambda text, inside, outside: False)
+    row = _row(check, "L[right] subset L[onlya]")
+    assert row.verdict == "unknown", (row.verdict, row.counterexample)
