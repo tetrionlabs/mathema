@@ -78,6 +78,9 @@ class Evidence:
     #: (`x * y`) names a number when nothing else names a shape, and is
     #: also what a string or a sequence supports
     firm: bool = True
+    #: the kind of number the evidence states, `int` for a count of
+    #: repeats (`x * "ab"`), else None
+    number_kind: "str | None" = None
 
 
 @dataclass(frozen=True)
@@ -122,14 +125,25 @@ class ParameterShape:
         return out
 
 
+def states_an_integer(shape: ParameterShape) -> bool:
+    """Intent:
+        Whether a number shape rests on evidence that its values are
+        integers (a count of repeats, `x * "ab"`).
+    """
+    return shape.evidence is not None and shape.evidence.shape == "number" \
+        and any(e.number_kind == "int" for e in shape.found)
+
+
 def kind_shape(kind: "str | None") -> "str | None":
     """The shape a `Facts.param_kinds` kind names, None for `unknown`."""
     return _KIND_SHAPES.get(kind or "")
 
 
 def _default_shape(value) -> "str | None":
-    """The shape a default value states, None for any other value
-    (None included)."""
+    """Intent:
+        The shape a default value states, None for any other value (None
+        included).
+    """
     if isinstance(value, bool):
         return "bool"
     if isinstance(value, (int, float, complex)):
@@ -189,7 +203,11 @@ _DEFS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
 def _parsed_def(target) -> "tuple[Any, int]":
-    """`_function_def` without the cache."""
+    """Intent:
+        `_function_def` without the cache: the first function definition
+        in `target`'s source, or for a lambda the one lambda in its
+        source lines whose parameters are the lambda's own.
+    """
     try:
         lines, start = inspect.getsourcelines(target)
     except (OSError, TypeError):
@@ -212,7 +230,9 @@ def _parsed_def(target) -> "tuple[Any, int]":
 
 
 def _arg_names(args) -> list:
-    """The parameter names an `ast.arguments` declares, in order."""
+    """Intent:
+        The parameter names an `ast.arguments` declares, in order.
+    """
     names = [a.arg for a in [*args.posonlyargs, *args.args]]
     if args.vararg is not None:
         names.append(args.vararg.arg)
@@ -223,8 +243,10 @@ def _arg_names(args) -> list:
 
 
 def _code_arg_names(fn) -> list:
-    """The parameter names `fn`'s code object declares, in the order
-    `_arg_names` reads them from source."""
+    """Intent:
+        The parameter names `fn`'s code object declares, in the order
+        `_arg_names` reads them from source.
+    """
     code = getattr(fn, "__code__", None)
     if code is None:
         return []
@@ -289,9 +311,11 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
                        shape, f"the body uses it as {_SHAPE_WORDS[shape]}")
             out[p].append(Evidence("body use", shape, how,
                                    firm=shape != "number"))
+        counts = set(uses.integer.get(p, ()))
         for line, text in uses.numeric.get(p, ()):
-            out[p].append(Evidence("body use", "number",
-                                   f"`{text}` on line {line + offset}"))
+            out[p].append(Evidence(
+                "body use", "number", f"`{text}` on line {line + offset}",
+                number_kind="int" if (line, text) in counts else None))
         for line, text in uses.text.get(p, ()):
             out[p].append(Evidence("body use", "string",
                                    f"`{text}` on line {line + offset}"))
@@ -437,8 +461,10 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
 
 
 def _against(found: list, piece: Evidence) -> tuple:
-    """The firm pieces of `found` that name a shape `piece`'s shape
-    cannot describe."""
+    """Intent:
+        The firm pieces of `found` that name a shape `piece`'s shape
+        cannot describe.
+    """
     return tuple(e for e in found if e is not piece and e.firm
                  and not _compatible(piece.shape, e.shape))
 
@@ -581,8 +607,10 @@ def not_established_text(fn, shape: ParameterShape) -> str:
 
 
 def _function_name(fn) -> str:
-    """`fn`'s qualified name, read through wrappers and partials, else
-    its type's name."""
+    """Intent:
+        `fn`'s qualified name, read through wrappers and partials, else
+        its type's name.
+    """
     target = _underlying(fn)
     return (getattr(target, "__qualname__", None)
             or getattr(target, "__name__", None) or type(fn).__name__)
@@ -701,8 +729,10 @@ def attribute_no_shape_has(shape: ParameterShape, exc: BaseException) -> bool:
 
 
 def _names_type(message: str, type_name: str) -> bool:
-    """Whether an error message names the type `type_name` as a word,
-    bare, in single quotes or in double quotes."""
+    """Intent:
+        Whether an error message names the type `type_name` as a word,
+        bare, in single quotes or in double quotes.
+    """
     import re
     return re.search(rf"(?<![\w.]){re.escape(type_name)}(?!\w)",
                      message) is not None
@@ -732,7 +762,9 @@ def _indent(fn) -> int:
 
 
 def _operand_nodes(node) -> list:
-    """The operand nodes an operation node applies to directly."""
+    """Intent:
+        The operand nodes an operation node applies to directly.
+    """
     found: list = []
     if isinstance(node, ast.Name):
         found.append(node)
@@ -760,7 +792,9 @@ def _operand_nodes(node) -> list:
 
 
 def _direct_operands(node) -> list:
-    """The names an operation node applies to directly."""
+    """Intent:
+        The names an operation node applies to directly.
+    """
     return [n.id for n in _operand_nodes(node) if isinstance(n, ast.Name)]
 
 
@@ -924,9 +958,12 @@ def _own_scope(fdef):
 
 
 def _bound_names(node) -> list:
-    """The names one node binds in the scope that runs it: an assignment
-    or deletion target, an `except ... as` name, an import alias, a
-    function or class name, a pattern capture, a parameter."""
+    """Intent:
+        The names one node binds in the scope that runs it: an
+        assignment or deletion target, an `except ... as` name, an
+        import alias, a function or class name, a pattern capture, a
+        parameter.
+    """
     if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
         return [node.id]
     if isinstance(node, ast.ExceptHandler) and node.name:

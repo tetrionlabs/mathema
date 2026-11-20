@@ -415,14 +415,16 @@ class ParamUses:
         `math`/`cmath` function or of a numeric builtin; `text`: joined
         with or compared to a string literal), each as `(line, text)`.
         A product with a number literal is no such use: it repeats a
-        string or a sequence as well. `assigned` holds the parameters
-        the body rebinds.
+        string or a sequence as well. A product with a string literal is
+        a numeric use that also states an integer (`integer`, the count
+        of repeats). `assigned` holds the parameters the body rebinds.
     """
     iterated: frozenset = frozenset()
     arithmetic: frozenset = frozenset()
     mapping: frozenset = frozenset()
     numeric: dict = field(default_factory=dict)
     text: dict = field(default_factory=dict)
+    integer: dict = field(default_factory=dict)
     assigned: frozenset = frozenset()
 
 
@@ -456,6 +458,7 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
     pset = set(params)
     numeric: dict = {}
     text: dict = {}
+    integer: dict = {}
     assigned: set = set()
 
     def note(table: dict, name, node, what: str) -> None:
@@ -464,7 +467,7 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                 (getattr(node, "lineno", 0), what))
 
     for node in ast.walk(fdef):
-        _note_kind_uses(node, note, numeric, text, assigned)
+        _note_kind_uses(node, note, numeric, text, assigned, integer)
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
             iterated.add(node.iter.id)
         elif isinstance(node, ast.comprehension) and isinstance(node.iter, ast.Name):
@@ -525,15 +528,16 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                      mapping=frozenset(mapping),
                      numeric={p: tuple(v) for p, v in numeric.items()},
                      text={p: tuple(v) for p, v in text.items()},
+                     integer={p: tuple(v) for p, v in integer.items()},
                      assigned=frozenset(assigned) & pset)
 
 
 def _note_kind_uses(node, note, numeric: dict, text: dict,
-                    assigned: set) -> None:
+                    assigned: set, integer: "dict | None" = None) -> None:
     """Intent:
         Record, for one syntax node, the parameter uses that state a
-        kind of value (`ParamUses.numeric`, `ParamUses.text`) and the
-        names it rebinds.
+        kind of value (`ParamUses.numeric`, `ParamUses.text`,
+        `ParamUses.integer`) and the names it rebinds.
     """
     if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
         assigned.add(node.id)
@@ -547,6 +551,8 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
                 note(text, side.id, node, ast.unparse(node))
             elif _text_literal(other) and isinstance(node.op, ast.Mult):
                 note(numeric, side.id, node, ast.unparse(node))
+                if integer is not None:
+                    note(integer, side.id, node, ast.unparse(node))
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
             and isinstance(node.operand, ast.Name):
         note(numeric, node.operand.id, node, ast.unparse(node))
@@ -598,7 +604,6 @@ def _param_kinds(fdef: ast.FunctionDef, params: list[str]) -> dict[str, str]:
         else:
             kinds[p] = "unknown"
     return kinds
-
 
 
 def annotation_kind(text: str) -> "str | None":

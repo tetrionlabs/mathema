@@ -207,6 +207,10 @@ FNS = '''
 
     def text_or_mapping(x):
         return x.upper(), x.keys()
+
+
+    def repeat(x):
+        return x * "ab"
 '''
 
 
@@ -411,3 +415,9 @@ def test_a_partial_without_source_is_named_by_its_function():
     p = _row(functools.partial(ns["hidden"], y=1), "f(x) == x")
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert "(the source of hidden is not available)" in p.note
+
+
+def test_a_count_of_text_repeats_is_drawn_as_an_integer(mod):
+    p = _row(mod.repeat, "f(x) == f(x)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"
