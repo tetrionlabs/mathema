@@ -1000,9 +1000,8 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
             if shape.evidence is None and p not in loaded:
                 out[p] = ParameterShape(p, Evidence(
                     "not read by the body", "any",
-                    "the body reads it only through a local it may bind to "
-                    "another value first" if p in copied
-                    else "the body never reads it"))
+                    "the body copies it to a local it never reads"
+                    if p in copied else "the body never reads it"))
     return out
 
 
@@ -1023,8 +1022,9 @@ def _with_copies_read_through(fdef, params: list):
         declares `nonlocal`, or assigns with `:=`, is never read
         through, nor is one a nested scope reads or binds when the
         function binds it again after the copy. The returned tree marks
-        each copy's own read of the parameter (`_copy_source`), and is
-        `fdef` itself when the body makes no copy.
+        the copy's own read of the parameter (`_copy_source`) when no
+        read of the local is left that is not read through, in any
+        scope, and is `fdef` itself when the body makes no copy.
     """
     import copy
     from .analysis import param_uses
@@ -1053,8 +1053,6 @@ def _with_copies_read_through(fdef, params: list):
         spans[local] = (source, stmt, others)
     if not spans:
         return fdef
-    for local, (source, stmt, others) in spans.items():
-        source._copy_source = True
     for node in list(_own_scope(read)):
         if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
             continue
@@ -1067,6 +1065,11 @@ def _with_copies_read_through(fdef, params: list):
             continue
         node._local = node.id
         node.id = source.id
+    unread = {n.id for n in ast.walk(read)
+              if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    for local, (source, _stmt, _others) in spans.items():
+        if local not in unread:
+            source._copy_source = True
     return read
 
 

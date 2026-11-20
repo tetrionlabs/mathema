@@ -358,6 +358,24 @@ FNS = '''
 
     def width(x):
         return x.bit_length()
+
+
+    def closure_copy(y0):
+        t = y0
+        g = lambda: t[0]
+        return g() + 1.0
+
+
+    def comp_copy(y0):
+        t = y0
+        return sum([t[i] for i in range(2)])
+
+
+    def copy_then_branch(y0, flag: bool):
+        t = y0
+        if flag:
+            t = [1.0]
+        return t[0]
 '''
 
 
@@ -471,11 +489,8 @@ def test_a_plain_local_copy_carries_the_parameters_uses(mod):
 
 def test_a_copy_rebound_before_its_use_carries_nothing(mod):
     p = _row(mod.replaced, "f(y0) == 2")
-    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    shape = p.meta["mathema.drawn_shapes"]["y0"]
-    assert shape["source"] == "not read by the body"
-    assert shape["detail"] == ("the body reads it only through a local it may "
-                               "bind to another value first")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
 
 
 def test_a_parameter_the_body_never_reads_is_drawn_and_said_so(mod):
@@ -588,24 +603,27 @@ def test_the_family_rows_of_a_float_annotation_draw_floats(mod, monkeypatch):
     assert rows.get("idempotent") == "falsified", rows
 
 
-@pytest.mark.parametrize("name, var", [("copied_in_a_loop", "y0"),
-                                       ("turned_to_text", "x")])
-def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod, name, var):
-    p = _row(getattr(mod, name), f"f({var}) == f({var})")
+def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod):
+    p = _row(mod.turned_to_text, "f(x) == f(x)")
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
     assert "mathema.draw_defect" not in (p.meta or {})
 
 
+def test_a_copy_rebound_in_a_loop_leaves_the_shape_unread(mod):
+    p = _row(mod.copied_in_a_loop, "f(y0) == f(y0)")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+
+
 @pytest.mark.parametrize("name, text, verdict", [
-    ("rebound_in_a_branch", "f(y0, flag) == f(y0, flag)", "falsified"),
-    ("rebound_by_with", "f(y0) == f(y0)", "falsified"),
-    ("rebound_by_walrus", "f(y0) == f(y0)", "falsified"),
-    ("rebound_after_del", "f(y0) == f(y0)", "falsified"),
-    ("rebound_by_star", "f(y0) == f(y0)", "falsified"),
-    ("rebound_by_augmenting", "f(y0) == f(y0)", "falsified"),
+    ("rebound_in_a_branch", "f(y0, flag) == f(y0, flag)", "unknown"),
+    ("rebound_by_with", "f(y0) == f(y0)", "unknown"),
+    ("rebound_by_walrus", "f(y0) == f(y0)", "unknown"),
+    ("rebound_after_del", "f(y0) == f(y0)", "unknown"),
+    ("rebound_by_star", "f(y0) == f(y0)", "unknown"),
+    ("rebound_by_augmenting", "f(y0) == f(y0)", "unknown"),
     ("unpacked", "f(y0) == f(y0)", "holds"),
 ])
-def test_a_rebound_copy_keeps_the_finding_and_an_unpacked_copy_is_read(
+def test_a_rebound_copy_leaves_the_shape_unread_and_an_unpacked_copy_is_read(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
@@ -663,3 +681,15 @@ def test_a_use_only_an_integer_supports_does_not_narrow_the_draw(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
+
+
+@pytest.mark.parametrize("name, text", [
+    ("closure_copy", "f(y0) == f(y0)"),
+    ("comp_copy", "f(y0) == f(y0)"),
+    ("copy_then_branch", "f(y0, flag) == f(y0, flag)"),
+])
+def test_a_copy_read_in_a_way_not_read_through_leaves_the_shape_unread(
+        mod, name, text):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert "may bind" not in (p.note or "")
