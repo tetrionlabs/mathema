@@ -1412,6 +1412,27 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
                         "category": "missing-return"}
 
 
+def call_suspends(fn) -> "str | None":
+    """Intent:
+        What calling `fn` returns in place of running its body, read
+        from its code flags: "a generator", "a coroutine" or "an async
+        generator" (each an object the body runs in only when it is
+        iterated or awaited); None for a function whose call runs its
+        body.
+    """
+    code = getattr(fn, "__code__", None)
+    flags = getattr(code, "co_flags", 0)
+    if not isinstance(flags, int):
+        return None
+    if flags & inspect.CO_ASYNC_GENERATOR:
+        return "an async generator"
+    if flags & (inspect.CO_COROUTINE | inspect.CO_ITERABLE_COROUTINE):
+        return "a coroutine"
+    if flags & inspect.CO_GENERATOR:
+        return "a generator"
+    return None
+
+
 def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
         _ctx: "_LiftCtx | None" = None, _opaque: "OpaqueRegistry | None" = None) -> "Lifted | None":
     """Translate a function body to a sympy expression. Only a loop-free,
@@ -1448,6 +1469,8 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
     callee-inlining chain; an external caller never sets it (a fresh
     registry is built automatically)."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
+        return None
+    if call_suspends(fn) is not None:
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None

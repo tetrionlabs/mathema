@@ -1137,6 +1137,9 @@ def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
+    from ._base import call_suspends
+    if call_suspends(fn) is not None:
+        return None
 
     unmodified = _unmodified_params(facts.tree, set(facts.params))
     body = strip_docstring(facts.tree.body)

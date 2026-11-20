@@ -3329,6 +3329,9 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     false wherever the code raises. `~=` is decided as `abs(lhs - rhs)
     <= ε` (see `_try_prove_within_epsilon`), or, under a tolerance kind,
     as the bound the kind states (`_try_prove_within_kind`)."""
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
     from .._tolerance import ToleranceKind, bare
     if isinstance(tolerance, ToleranceKind):
         if relation != "~=":
@@ -4744,6 +4747,21 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
 
 
+def suspended_call_refusal(fn) -> "str | None":
+    """Intent:
+        Why derive reads nothing of `fn` when calling it returns a
+        generator or coroutine object in place of running its body
+        (`call_suspends`), or None when the call runs the body.
+    """
+    from ._base import call_suspends
+    kind = call_suspends(fn)
+    if kind is None:
+        return None
+    return (f"calling the function returns {kind} object, which runs none of the "
+            f"body until it is iterated or awaited, so the body is not what the "
+            f"call does")
+
+
 def _listed_missing(domain: dict) -> list:
     """Intent:
         `x = nan` for each missing value a parameter's bound lists (a
@@ -4782,6 +4800,10 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
+
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
 
     listed = _listed_missing(domain or {})
     if listed:

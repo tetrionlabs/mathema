@@ -11011,6 +11011,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
+    from .symbolic._prove import suspended_call_refusal
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {suspended}".lstrip("; "),
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     # A registered family's own "derive" route is tried before
     # the ordinary derive_ineligible check below; it doesn't
     # go through try_prove()'s lhs/rhs machinery at all (a
