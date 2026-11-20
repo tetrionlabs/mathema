@@ -3,8 +3,8 @@
 """A record-language definition has the canonical text and hash its
 vectors state, a document outside the schema is refused, every law the
 claims file states of the module holds on the catalogues it is stated
-over, and the question the term is for is answered: a child set of
-permissions is inside its parent, and the child with one flag widened
+over, and the question the term is for is answered: a nested record
+is inside a wider one, and the child with one flag widened
 is not, by a value `member` places.
 
 The vectors are literals in `tests/data/record_language_vectors.json`.
@@ -97,7 +97,7 @@ def test_a_law_of_the_claims_file_holds_over_its_domain(target):
         assert broken[:3] == [], claim["name"]
 
 
-def test_a_child_set_of_permissions_is_inside_its_parent():
+def test_a_nested_record_is_inside_a_wider_one():
     pytest.importorskip("z3")
     child, parent, widened = SUPPORT.CHILD, SUPPORT.PARENT, SUPPORT.WIDENED
     assert record_language.find_member([child], [parent]).status == "none"
@@ -105,7 +105,7 @@ def test_a_child_set_of_permissions_is_inside_its_parent():
     assert found.status == "member"
     assert record_language.member(widened, found.member)
     assert not record_language.member(child, found.member)
-    assert found.member["merge"] is True
+    assert found.member["publish"] is True
 
 
 def test_without_a_solver_the_answer_is_unknown(monkeypatch):

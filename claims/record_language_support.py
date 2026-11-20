@@ -4,7 +4,7 @@
 
 Each takes whole numbers a claim can quantify: indices into `TERMS`, a
 fixed catalogue of record-language nodes (every node kind, nested
-records, optional and required fields, shapes of a set of permissions),
+records, optional and required fields, shapes of a nested configuration record),
 into `VALUES`, a fixed catalogue of JSON values (scalars, texts with and
 without a trailing newline, maps with missing, extra and wrong-kind
 keys, a list, a number that is not whole), and into `DOCUMENTS`,
@@ -97,12 +97,12 @@ FLAG = choice(True, False)
 OFF = choice(False)
 _CHILD_SHELL = record(("git", choice("status", "diff"), True))
 _PARENT_SHELL = record(("git", choice("status", "diff", "commit"), True))
-#: a child set of permissions, its parent, and the child with `merge` widened
-CHILD = record(("edit", FLAG, True), ("merge", OFF, True), ("root", text(DEEP), True),
+#: a nested configuration record, a wider one, and the child with `publish` widened
+CHILD = record(("edit", FLAG, True), ("publish", OFF, True), ("root", text(DEEP), True),
                ("shell", _CHILD_SHELL, False))
-PARENT = record(("edit", FLAG, True), ("merge", FLAG, True), ("root", text(SHALLOW), True),
+PARENT = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(SHALLOW), True),
                 ("shell", _PARENT_SHELL, False))
-WIDENED = record(("edit", FLAG, True), ("merge", FLAG, True), ("root", text(DEEP), True),
+WIDENED = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(DEEP), True),
                  ("shell", _CHILD_SHELL, False))
 
 TERMS = [
@@ -125,12 +125,12 @@ VALUES = [
     "/wt/task-7/src", "/wt/other", "/wt/task-7\n", [], [True], {}, {"x": True}, {"x": False},
     {"x": None}, {"x": 1}, {"x": True, "y": "a"}, {"x": False, "y": "c"}, {"y": "a"},
     {"x": True, "w": 1}, {"x": {"z": None}}, {"x": {"z": 0}}, {"x": {}}, {"x": [True]},
-    {"edit": True, "merge": False, "root": "/wt/task-7/src"},
-    {"edit": False, "merge": False, "root": "/wt/task-7", "shell": {"git": "diff"}},
-    {"edit": True, "merge": True, "root": "/wt/task-7"},
-    {"edit": True, "merge": False, "root": "/wt/elsewhere", "shell": {"git": "commit"}},
-    {"edit": True, "merge": False, "root": "/etc"},
-    {"edit": True, "merge": False},
+    {"edit": True, "publish": False, "root": "/wt/task-7/src"},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": {"git": "diff"}},
+    {"edit": True, "publish": True, "root": "/wt/task-7"},
+    {"edit": True, "publish": False, "root": "/wt/elsewhere", "shell": {"git": "commit"}},
+    {"edit": True, "publish": False, "root": "/etc"},
+    {"edit": True, "publish": False},
 ]
 
 
@@ -571,8 +571,8 @@ def inclusion_is_transitive(t: int, u: int, w: int) -> bool:
 
 
 def the_child_is_inside_its_parent() -> bool:
-    """Whether the child set of permissions is included in its parent,
-    and the child with `merge` widened is not included in the child,
+    """Whether the nested configuration record is included in the wider one,
+    and the child with `publish` widened is not included in the child,
     with a value `member` puts in the one and outside the other."""
     rl = _rl()
     verdict, witness = includes(WIDENED, CHILD)

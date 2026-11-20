@@ -826,7 +826,7 @@
    "hash": "c37115f8ad8bf0e8286d653d4e8d2b80ba897786455dc993f477963416ff6136"
   },
   {
-   "name": "a child set of permissions",
+   "name": "a nested configuration record",
    "document": {
     "kind": "record_language",
     "version": 1,
@@ -846,7 +846,7 @@
        true
       ],
       [
-       "merge",
+       "publish",
        {
         "op": "choice",
         "values": [
@@ -949,11 +949,11 @@
      }
     }
    },
-   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
-   "hash": "3bc7947b509401a6baedf384439888dc7997d13b5560019d34a2303808f73ec2"
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"publish\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "6af1054d8076ab8e432d8888690deeab4b9663f52883509d97e5703c9fdb9073"
   },
   {
-   "name": "its parent",
+   "name": "a wider record",
    "document": {
     "kind": "record_language",
     "version": 1,
@@ -973,7 +973,7 @@
        true
       ],
       [
-       "merge",
+       "publish",
        {
         "op": "choice",
         "values": [
@@ -1071,11 +1071,11 @@
      }
     }
    },
-   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"commit\",\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
-   "hash": "470b9ce606093f65d919e3d3a5df1a613283d09fa617196ac3bd90c46cfb3e99"
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"publish\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"commit\",\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "09b35fb8972adcd6b2e54c87899c8dcb60a6750d23b5241c9f391719531cc3b9"
   },
   {
-   "name": "the child with one flag widened",
+   "name": "the nested record with one flag widened",
    "document": {
     "kind": "record_language",
     "version": 1,
@@ -1095,7 +1095,7 @@
        true
       ],
       [
-       "merge",
+       "publish",
        {
         "op": "choice",
         "values": [
@@ -1199,8 +1199,8 @@
      }
     }
    },
-   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
-   "hash": "8111b3522c4c7c1a793a061118d536a9a4be608a6c9222329019d2514922749f"
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"publish\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "1743bd4e61c8606db151437da2f8c9a2786fbf49b34608f1809ed07bbb09c03f"
   },
   {
    "name": "exact: either boolean",
@@ -1284,7 +1284,7 @@
    "hash": "aa0924735daa2161e54ccf924478710ef93f6d33cea9b2b8b0b0c47d41166f3d"
   },
   {
-   "name": "exact: a child set of permissions",
+   "name": "exact: a nested configuration record",
    "document": {
     "kind": "record_language",
     "version": 1,
@@ -1304,7 +1304,7 @@
        true
       ],
       [
-       "merge",
+       "publish",
        {
         "op": "choice",
         "values": [
@@ -1407,8 +1407,8 @@
      }
     }
    },
-   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
-   "hash": "3bc7947b509401a6baedf384439888dc7997d13b5560019d34a2303808f73ec2"
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"publish\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "6af1054d8076ab8e432d8888690deeab4b9663f52883509d97e5703c9fdb9073"
   },
   {
    "name": "exact: every value",

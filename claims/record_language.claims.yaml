@@ -152,7 +152,7 @@ claims.record_language_support.inclusion_is_transitive:
       statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, u in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, w in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, f(t, u, w) == True'
 claims.record_language_support.the_child_is_inside_its_parent:
   claims:
-    - name: a_child_permission_set_is_inside_its_parent
+    - name: a_nested_record_is_inside_a_wider_one
       statement: 'f() == True'
 claims.record_language_support.generated_terms_keep_the_laws:
   claims:
