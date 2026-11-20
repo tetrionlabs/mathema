@@ -2210,8 +2210,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
                 for conflict in _conflicts:
                     if conflict.get("kind") == "release-move":
-                        moved = conflict.get("moved") or ()
-                        if "domain-escapes" in moved:
+                        moves = conflict.get("moved") or ()
+                        if "domain-escapes" in moves:
                             escapes_moved.setdefault(key, []).append(conflict["claim"])
                             read_now = ", ".join(
                                 f"{written} now reads as {value!r}"
@@ -2224,11 +2224,11 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                 f"it doubled (\"\\\\t\" is a backslash and a t); "
                                 f"the claim is checked again on the values it now "
                                 f"names")
-                        if "literal-quoting" in moved:
+                        if "literal-quoting" in moves:
                             quoting_moved.append((key, conflict["claim"]))
-                        if "not-parentheses" in moved:
+                        if "not-parentheses" in moves:
                             negation_moved.append((key, conflict["claim"]))
-                        if not moved:
+                        if not moves:
                             release_moved.append((key, conflict["claim"]))
                         continue
                     if conflict.get("kind") == "canonical-text-defect":
