@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """A `raises(f(x), E)` claim over a domain that lists a missing value
-(`{-1, -2, nan}`, `{-1, None}`, `{missing}`, `[-5, -1] | {nan}`) states
-the raise at that value too. Derive reads only the real points of a
+(`{-1, -2, nan}`, `{-1, None}`, `{missing}`) states the raise at that
+value too; a missing value a type clause admits beside an interval is
+the type's, read by the missing-value policies, not the claim's. Derive reads only the real points of a
 domain, so it does not prove such a claim; a finite domain is then swept
 point by point, the missing values run as the values they stand for."""
 import math
@@ -43,9 +44,9 @@ def test_a_listed_missing_value_where_the_function_does_not_raise_falsifies(doma
     assert row.verdict == "falsified", (row.verdict, row.route, row.sketch)
 
 
-def test_a_missing_value_beside_an_interval_is_not_proven():
-    row = _row(raises_below_zero, "[-5, -1] | {nan}")
-    assert row.verdict != "proven", (row.verdict, row.route, row.sketch)
+def test_a_missing_value_a_type_clause_admits_beside_an_interval_is_not_listed():
+    row = _row(raises_below_zero, "[-5.0, -1.0] : float|missing", route="derive")
+    assert row.verdict == "proven", (row.verdict, row.route, row.sketch)
 
 
 def test_a_listed_missing_value_where_the_function_raises_is_proven():

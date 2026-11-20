@@ -4769,17 +4769,21 @@ def suspended_call_refusal(fn) -> "str | None":
 
 def _listed_missing(domain: dict) -> list:
     """Intent:
-        `x = nan` for each missing value a parameter's bound lists (a
-        sentinel in a finite set or in a domain's pieces, or the
-        absence a domain admits), in parameter order; empty when the
-        bounds list none.
+        `x = nan` for each missing value a parameter's finite set lists
+        (a sentinel member, or the absence the set admits), in parameter
+        order; empty when no finite set lists one. A missing value a
+        type clause admits beside an interval (`[-5, -1] : float|nan`)
+        is the type's, governed by the missing-value policies, and is
+        not listed.
     """
-    from ..domain import ABSENT, Domain, _as_domain, _set_sentinels
+    from ..domain import ABSENT, Domain, _as_domain, _is_enumerated, _set_sentinels
     out = []
     for param, bound in domain.items():
         try:
             dom = _as_domain(bound)
         except Exception:
+            continue
+        if not _is_enumerated(dom):
             continue
         found = [str(s) for s in _set_sentinels(dom)]
         if isinstance(dom, Domain) and dom.absent and ABSENT not in _set_sentinels(dom):
