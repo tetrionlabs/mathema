@@ -390,6 +390,26 @@ FNS = '''
 
     def root_and_length(x):
         return math.sqrt(x) + len(x)
+
+
+    def bound_twice(y0):
+        t, t = y0, [1.0]
+        return t[0] + y0
+
+
+    _G = None
+
+
+    def set_g_list():
+        global _G
+        _G = [1.0]
+
+
+    def global_copy(y0):
+        global _G
+        _G = y0
+        set_g_list()
+        return _G[0] + y0
 '''
 
 
@@ -718,3 +738,9 @@ def test_a_math_argument_is_a_number_a_sequence_use_contradicts(mod):
     p = _row(mod.root_and_length, "f(x) == f(x)")
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
     assert "mathema.draw_defect" not in (p.meta or {})
+
+
+@pytest.mark.parametrize("name", ["bound_twice", "global_copy"])
+def test_a_name_bound_twice_or_declared_global_is_not_a_copy(mod, name):
+    p = _row(getattr(mod, name), "f(y0) == 1.0 + y0")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)

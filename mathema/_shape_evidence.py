@@ -1032,8 +1032,9 @@ def _with_copies_read_through(fdef, params: list):
         through unless another binding of `local` may come before it: a
         binding on an earlier line, or on the same line in another
         statement, or one anywhere in a loop around both. Only reads in the
-        function's own scope are read through; a local a nested scope
-        declares `nonlocal`, or assigns with `:=`, is never read
+        function's own scope are read through; a name the function
+        declares `global` or `nonlocal`, or a local a nested scope
+        declares `nonlocal` or assigns with `:=`, is never read
         through, nor is one a nested scope reads or binds when the
         function binds it again after the copy. The returned tree marks
         the copy's own read of the parameter (`_copy_source`) when no
@@ -1053,6 +1054,9 @@ def _with_copies_read_through(fdef, params: list):
         for bound in _bound_names(node):
             bindings.setdefault(bound, []).append(node)
     mentioned, rebinding = _nested_names(read)
+    rebinding |= {name for node in _own_scope(read)
+                  if isinstance(node, (ast.Global, ast.Nonlocal))
+                  for name in node.names}
     spans: dict = {}
     for local, made in copies.items():
         if len(made) != 1 or local in params or local in rebinding:
@@ -1092,7 +1096,8 @@ def _copy_pairs(node, params: list, rebound) -> list:
         `[(local, param Name node), ...]` for the plain copies one
         statement makes: `local = param`, and each `local` matched by
         position to a `param` in `a, local = x, param` (a tuple or list
-        of names against a tuple or list of the same length).
+        of names against a tuple or list of the same length), a name the
+        target binds once only.
     """
     if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
         return []
@@ -1106,9 +1111,11 @@ def _copy_pairs(node, params: list, rebound) -> list:
         pairs = list(zip(target.elts, value.elts))
     else:
         return []
+    names = [t.id for t in ast.walk(target) if isinstance(t, ast.Name)]
     return [(t.id, v) for t, v in pairs
             if isinstance(t, ast.Name) and isinstance(v, ast.Name)
-            and v.id in params and v.id not in rebound]
+            and v.id in params and v.id not in rebound
+            and names.count(t.id) == 1]
 
 
 def _own_scope_parents(fdef) -> dict:
