@@ -246,7 +246,7 @@ def _lambda_by_position(target, lambdas: list, offset: int, indent: int):
     """Intent:
         The one of `lambdas` (nodes parsed from `target`'s source lines,
         `offset` lines and `indent` columns from the file's own) whose
-        source span holds every source range `target`'s code records
+        body's source span holds every source range `target`'s code records
         (an empty range, such as the one its entry carries, says
         nothing), the innermost when several do; None when none does,
         or when two are equally inner.
@@ -262,8 +262,9 @@ def _lambda_by_position(target, lambdas: list, offset: int, indent: int):
         return None
     holding = []
     for node in lambdas:
-        first = (node.lineno + offset, node.col_offset + indent)
-        last = (node.end_lineno + offset, node.end_col_offset + indent)
+        body = node.body
+        first = (body.lineno + offset, body.col_offset + indent)
+        last = (body.end_lineno + offset, body.end_col_offset + indent)
         if all(first <= spot <= last for spot in spots):
             holding.append((last[0] - first[0], last[1] - first[1], node))
     if not holding:
@@ -992,7 +993,8 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
     fdef, offset = _function_def(fn)
     body: dict = {}
     if fdef is not None:
-        read = _with_copies_read_through(fdef, params)
+        read = _with_copies_read_through(_without_shadowing(fdef, params),
+                                         params)
         body_kinds = _param_kinds(_without_annotations(read), params)
         body = body_evidence(fn, read, params, body_kinds, 1, offset)
     for p, found in (getattr(facts, "runtime_types", None) or {}).items():
@@ -1019,6 +1021,46 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
                     "the body copies it to a local it never reads"
                     if p in copied else "the body never reads it"))
     return out
+
+
+def _without_shadowing(fdef, params: list):
+    """Intent:
+        `fdef` without the nested functions and lambdas that declare a
+        parameter of the same name as one of `params`: their uses are of
+        their own parameter, not of the outer one. `fdef` itself when
+        none does.
+    """
+    names = set(params)
+
+    def _shadows(node) -> bool:
+        return isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef)) \
+            and bool(names & set(_arg_names(node.args)))
+
+    if not any(_shadows(n) for n in ast.walk(fdef) if n is not fdef):
+        return fdef
+    import copy
+    bare = copy.deepcopy(fdef)
+
+    class _Strip(ast.NodeTransformer):
+        def generic_visit(self, node):
+            for field, value in ast.iter_fields(node):
+                if isinstance(value, list):
+                    value[:] = [ast.copy_location(ast.Pass(), v)
+                                if isinstance(v, ast.stmt) and _shadows(v) else v
+                                for v in value]
+                    for v in value:
+                        if isinstance(v, ast.AST):
+                            self.visit(v)
+                elif isinstance(value, ast.AST):
+                    if _shadows(value) and isinstance(value, ast.expr):
+                        setattr(node, field, ast.copy_location(
+                            ast.Constant(value=None), value))
+                    else:
+                        self.visit(value)
+            return node
+
+    _Strip().generic_visit(bare)
+    return bare
 
 
 def _with_copies_read_through(fdef, params: list):

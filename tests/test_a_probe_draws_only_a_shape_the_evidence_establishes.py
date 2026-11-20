@@ -410,6 +410,9 @@ FNS = '''
         _G = y0
         set_g_list()
         return _G[0] + y0
+
+
+    maker = lambda x: (lambda x: x[0])
 '''
 
 
@@ -744,3 +747,10 @@ def test_a_math_argument_is_a_number_a_sequence_use_contradicts(mod):
 def test_a_name_bound_twice_or_declared_global_is_not_a_copy(mod, name):
     p = _row(getattr(mod, name), "f(y0) == 1.0 + y0")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+def test_a_lambda_is_told_from_the_lambda_it_returns(mod):
+    p = _row(mod.maker, "f(x) == f(x)")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    shape = p.meta["mathema.drawn_shapes"]["x"]
+    assert shape["source"] == "not read by the body"
