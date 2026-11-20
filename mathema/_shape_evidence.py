@@ -552,31 +552,68 @@ def definition_place(fn) -> "tuple[str, str]":
 def not_established_text(fn, shape: ParameterShape) -> str:
     """Intent:
         The diagnostic for a parameter that is not drawn: a title, the
-        function's location and definition line, and the fix.
+        function's location and definition line (or that its source is
+        not available), and the fix.
     """
     p = shape.param
     place, line = definition_place(fn)
-    quoted = f' "{line}"' if line else ""
     if place == "<unknown>":
-        name = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", "f")
-        return (f"shape of parameter {p} is not established (the source of "
-                f"{name} is not available): nothing in its signature says "
-                f"what kind of value it takes; bind {p} in the claim (for {p} "
-                f"in ...), or annotate it")
-    if shape.disagree:
-        first = shape.evidence
-        assert first is not None
+        where = f"the source of {_function_name(fn)} is not available"
+    else:
+        where = place + (f' "{line}"' if line else "")
+    first = shape.evidence
+    if shape.disagree and first is not None:
         other = shape.disagree[0]
-        return (f"shape of parameter {p} is not established "
-                f"({place}{quoted}): {first.detail} "
-                f"({_SHAPE_WORDS.get(first.shape, first.shape)}), but "
-                f"{other.detail} ({_SHAPE_WORDS.get(other.shape, other.shape)}); "
-                f"bind {p} in the claim, or make its annotation and its use "
+        return (f"shape of parameter {p} is not established ({where}): "
+                f"{first.detail} ({_SHAPE_WORDS.get(first.shape, first.shape)}), "
+                f"but {other.detail} "
+                f"({_SHAPE_WORDS.get(other.shape, other.shape)}); bind {p} in "
+                f"the claim, or make {_sources_text([first, *shape.disagree])} "
                 f"agree")
-    return (f"shape of parameter {p} is not established ({place}{quoted}): "
+    if place == "<unknown>":
+        return (f"shape of parameter {p} is not established ({where}): "
+                f"nothing in its signature says what kind of value it takes; "
+                f"bind {p} in the claim (for {p} in ...), or annotate it")
+    return (f"shape of parameter {p} is not established ({where}): "
             f"no annotation, default or use in the body says what kind of "
             f"value it takes; bind {p} in the claim (for {p} in ...), or "
             f"annotate it")
+
+
+def _function_name(fn) -> str:
+    """`fn`'s qualified name, read through wrappers and partials, else
+    its type's name."""
+    target = _underlying(fn)
+    return (getattr(target, "__qualname__", None)
+            or getattr(target, "__name__", None) or type(fn).__name__)
+
+
+def _sources_text(pieces: list) -> str:
+    """Intent:
+        The sources of the evidence `pieces` as a reader would name
+        them, each once, joined with commas and a final "and": "its
+        annotation", "its default", and each use in the body by its
+        text when it has one ("its use `x[0]` on line 3").
+    """
+    names: list = []
+    for e in pieces:
+        if e.source == "annotation":
+            name = "its annotation"
+        elif e.source == "default":
+            name = "its default"
+        elif e.source == "body use" and e.detail.startswith("`"):
+            name = f"its use {e.detail}"
+        elif e.source == "body use" and e.detail.startswith("passed to "):
+            name = f"its use {e.detail.split(',')[0]}"
+        elif e.source == "body use":
+            name = "its use in the body"
+        else:
+            name = f"its {e.source}"
+        if name not in names:
+            names.append(name)
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def wrong_shape_use(fn, values: dict, exc: BaseException,

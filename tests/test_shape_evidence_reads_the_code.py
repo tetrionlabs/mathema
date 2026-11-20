@@ -10,7 +10,8 @@ import textwrap
 
 import pytest
 
-from mathema._shape_evidence import callee_shape, wrong_shape_use
+from mathema._shape_evidence import (callee_shape, not_established_text,
+                                     shape_of, wrong_shape_use)
 from mathema.analysis import _param_kinds, param_uses
 
 SRC = '''
@@ -209,3 +210,15 @@ def test_a_raise_naming_a_default_or_a_literal_too_names_nothing(mod, name, valu
     with pytest.raises(TypeError) as info:
         fn(*values.values())
     assert wrong_shape_use(fn, values, info.value) is None
+
+
+def test_a_disagreement_without_source_says_both_and_names_the_sources():
+    ns: dict = {}
+    exec("def hidden(x: float = 'a'):\n    return x\n", ns)
+    shape = shape_of(ns["hidden"], "x", stated_kind="scalar")
+    assert not shape.established
+    assert not_established_text(ns["hidden"], shape) == (
+        "shape of parameter x is not established (the source of hidden is "
+        "not available): annotated float (a number), but default 'a' (a "
+        "string); bind x in the claim, or make its annotation and its "
+        "default agree")

@@ -203,6 +203,10 @@ FNS = '''
 
     def indexed(x=1.0):
         return x[0]
+
+
+    def text_or_mapping(x):
+        return x.upper(), x.keys()
 '''
 
 
@@ -391,3 +395,19 @@ def test_a_number_use_the_body_contradicts_is_drawn_and_the_raise_stands(mod):
 def test_a_settled_disagreement_draws_the_shape_that_settles_it(mod, name):
     p = _row(getattr(mod, name), "f(x) == f(x)")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+def test_a_disagreement_in_the_body_names_the_uses(mod):
+    p = _row(mod.text_or_mapping, "f(x) == f(x)")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "its annotation" not in p.note
+    assert "make its use in the body and its use `x.upper()` agree" in p.note
+
+
+def test_a_partial_without_source_is_named_by_its_function():
+    import functools
+    ns: dict = {}
+    exec("def hidden(x, y):\n    return x\n", ns)
+    p = _row(functools.partial(ns["hidden"], y=1), "f(x) == x")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "(the source of hidden is not available)" in p.note
