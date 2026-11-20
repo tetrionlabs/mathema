@@ -488,3 +488,51 @@ def test_a_module_name_rebound_after_its_import_is_not_the_module():
     reading = read_raise_path(import_rebind, [("stmt", s) for s in body[:-1]], body[-1],
                               {"x": ValueKind(frozenset({float}), 5.0, 1.0)})
     assert not isinstance(reading, ReadRaise), reading
+
+
+# ---- third review: an instance wrapper whose attribute read runs code -------
+
+def _p1(x: float) -> float:
+    if x < 0:
+        raise TypeError("neg")
+    return x
+
+
+def _p2(x: float) -> float:
+    if x < 0:
+        raise TypeError("neg")
+    return x
+
+
+class Shadow:
+    fn = property(lambda self: (lambda x: 0.0))
+
+    def __init__(self, fn):
+        self.__dict__["fn"] = fn
+        functools.update_wrapper(self, fn)
+        self.__name__ = "shadow_" + fn.__name__
+
+    def __call__(self, x):
+        return self.fn(x)
+
+
+class GetAttr:
+    def __init__(self, fn):
+        self.fn = fn
+        functools.update_wrapper(self, fn)
+        self.__name__ = "getattr_" + fn.__name__
+
+    def __getattribute__(self, name):
+        if name == "fn":
+            return lambda x: 0.0
+        return object.__getattribute__(self, name)
+
+    def __call__(self, x):
+        return self.fn(x)
+
+
+@pytest.mark.parametrize("wrapper", [Shadow(_p1), GetAttr(_p2)], ids=["Shadow", "GetAttr"])
+def test_an_instance_whose_attribute_read_runs_code_is_not_read_through(wrapper):
+    assert wrapper(-2.0) == 0.0
+    (row,) = check_conjectures(wrapper, [claim("for x in [-5, -1], raises(f(x), TypeError)")])
+    assert row.verdict != "proven", (row.verdict, row.route, row.sketch)

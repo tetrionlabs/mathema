@@ -77,6 +77,9 @@ def _is_plain_instance(fn: Any) -> bool:
     return inspect.isfunction(getattr(type(fn), "__call__", None))
 
 
+_MISSING = object()
+
+
 def hands_over_to_wrapped(fn: Any) -> bool:
     """Intent:
         Whether `fn`, an instance that links a function as
@@ -84,6 +87,9 @@ def hands_over_to_wrapped(fn: Any) -> bool:
         `__call__` whose source is `return self.<attr>(<its own
         parameters>)` with `<attr>` holding that same function: the call
         hands every argument to it and returns what comes back as it is.
+        `self.<attr>` is read as the instance's own attribute only when
+        the class keeps the default attribute lookup and defines nothing
+        of that name (a property or other descriptor would decide it).
     """
     if inspect.isroutine(fn) or inspect.isclass(fn) \
             or not inspect.isfunction(getattr(type(fn), "__call__", None)):
@@ -93,7 +99,10 @@ def hands_over_to_wrapped(fn: Any) -> bool:
     if parsed is None or not held:
         return False
     attr = _hands_over_unchanged(parsed[0], parsed[1], held)
-    return attr is not None and held[attr] is getattr(fn, "__wrapped__", None)
+    if attr is None or type(fn).__getattribute__ is not object.__getattribute__ \
+            or inspect.getattr_static(type(fn), attr, _MISSING) is not _MISSING:
+        return False
+    return held[attr] is getattr(fn, "__wrapped__", None)
 
 
 def _held_callables(fn: Any) -> "dict[str, Callable[..., Any]]":
