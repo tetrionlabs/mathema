@@ -1137,8 +1137,8 @@ def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
-    from ._base import call_suspends
-    if call_suspends(fn) is not None:
+    from ._base import call_suspends, innermost, wrapper_refusal
+    if call_suspends(innermost(fn)) is not None or wrapper_refusal(fn) is not None:
         return None
 
     unmodified = _unmodified_params(facts.tree, set(facts.params))
@@ -1192,7 +1192,9 @@ def _read_the_raise(fn, facts: Facts, domain: dict, trace: list, stmt: ast.Raise
         The reading of the path `trace` up to the `raise` statement
         `stmt` it reaches (`read_raise_path`), each parameter bound to a
         value of its declared bound (any object for one the domain does
-        not bound).
+        not bound). Names resolve in the function under every wrapper
+        `fn` links, which `lift_conditioned` reads only when each such
+        wrapper's call is read (`wrapper_refusal`).
     """
     from .._raise_reading import ANY, kind_of_bound
     steps = []
@@ -1201,4 +1203,5 @@ def _read_the_raise(fn, facts: Facts, domain: dict, trace: list, stmt: ast.Raise
             break
         steps.append(step)
     kinds = {p: kind_of_bound(domain[p]) if p in domain else ANY for p in facts.params}
-    return read_raise_path(fn, steps, stmt, kinds)
+    from ._base import innermost
+    return read_raise_path(innermost(fn), steps, stmt, kinds)

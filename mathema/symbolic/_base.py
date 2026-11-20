@@ -1433,6 +1433,77 @@ def call_suspends(fn) -> "str | None":
     return None
 
 
+def _wrapper_is_read(fn) -> bool:
+    """Whether `fn` is a wrapper whose call is read as calling the
+    function it wraps and returning or raising what it does: the
+    `functools.lru_cache` and `functools.cache` wrapper, a
+    `staticmethod`, and a wrapper defined in mathema itself (its call
+    adapters and its domain and dimension guards, which core reads on
+    their own)."""
+    import functools
+    import os
+    import types
+    if type(fn) is getattr(functools, "_lru_cache_wrapper", None) \
+            or type(fn) is staticmethod:
+        return True
+    package = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+    if type(fn) is not types.FunctionType:
+        return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema"
+    return os.path.abspath(fn.__code__.co_filename).startswith(package)
+
+
+def _wrapper_name(fn) -> str:
+    """The wrapper's own name and place: its code's qualified name, file
+    and first line for a Python function, its type's name otherwise."""
+    import types
+    if type(fn) is types.FunctionType:
+        code = fn.__code__
+        name = getattr(code, "co_qualname", code.co_name)
+        return f"`{name}` ({code.co_filename} line {code.co_firstlineno})"
+    return f"a `{type(fn).__name__}` object"
+
+
+def wrapper_refusal(fn) -> "str | None":
+    """Intent:
+        Why derive reads no body for `fn` when it is a wrapper a
+        decorator bound in place of the function its `def` compiled (it
+        links that function as `__wrapped__`, as `functools.wraps`
+        does), naming the wrapper; None when `fn` is the function
+        itself, or every wrapper down to it is one whose call is read
+        (`_wrapper_is_read`).
+    """
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return None
+        if not _wrapper_is_read(fn):
+            return (f"the name is bound to the wrapper {_wrapper_name(fn)}, which its "
+                    f"decorator made in place of the function, and what the wrapper "
+                    f"does around the call is not read")
+        fn = inner
+        seen += 1
+    return "the function is wrapped more than 16 times over"
+
+
+def innermost(fn):
+    """The function under every wrapper `fn` links as `__wrapped__`."""
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return fn
+        fn = inner
+        seen += 1
+    return fn
+
+
 def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
         _ctx: "_LiftCtx | None" = None, _opaque: "OpaqueRegistry | None" = None) -> "Lifted | None":
     """Translate a function body to a sympy expression. Only a loop-free,
@@ -1470,7 +1541,7 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
     registry is built automatically)."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
         return None
-    if call_suspends(fn) is not None:
+    if call_suspends(innermost(fn)) is not None or wrapper_refusal(fn) is not None:
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None

@@ -4749,12 +4749,17 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
 
 def suspended_call_refusal(fn) -> "str | None":
     """Intent:
-        Why derive reads nothing of `fn` when calling it returns a
-        generator or coroutine object in place of running its body
-        (`call_suspends`), or None when the call runs the body.
+        Why derive reads nothing of `fn`: it is a wrapper whose call is
+        not read (`wrapper_refusal`), or calling it returns a generator
+        or coroutine object in place of running its body
+        (`call_suspends`). None when the call runs the body derive
+        reads.
     """
-    from ._base import call_suspends
-    kind = call_suspends(fn)
+    from ._base import call_suspends, innermost, wrapper_refusal
+    wrapped = wrapper_refusal(fn)
+    if wrapped is not None:
+        return wrapped
+    kind = call_suspends(innermost(fn))
     if kind is None:
         return None
     return (f"calling the function returns {kind} object, which runs none of the "
