@@ -46,7 +46,7 @@ def _points(statement: str) -> list:
 
 
 def test_the_claims_file_holds_what_it_is_expected_to():
-    assert len(CLAIMS) == 13
+    assert len(CLAIMS) == 16
     assert len(SUPPORT._expressions()) == SUPPORT.EXPRESSIONS
     assert len(SUPPORT._outside_the_reading()) == SUPPORT.OUTSIDE_THE_READING
 
@@ -76,7 +76,7 @@ def test_a_nested_closed_record_is_a_subset_of_a_wider_one():
     exact = SUPPORT.REF._exact
     assert record_relations.decide("subset", exact(child), exact(parent)).verdict == "proven"
     decided = record_relations.decide("subset", exact(widened), exact(child))
-    assert decided.verdict == "falsified" and decided.witness["publish"] is True
+    assert decided.verdict == "falsified" and decided.witness["value"]["publish"] is True
 
 
 def test_without_a_solver_the_answer_is_unknown(monkeypatch):

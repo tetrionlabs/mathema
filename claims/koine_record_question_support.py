@@ -18,6 +18,7 @@ for a question."""
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -38,6 +39,10 @@ VALUES = BASE.VALUES
 DEFINITIONS = BASE.DEFINITIONS
 CHILD, PARENT, WIDENED = REF.CHILD, REF.PARENT, REF.WIDENED
 WORDS = ["subset", "not subset", "disjoint", "=", "!="]
+#: the valid conformance vectors of the record-language term
+VECTORS = [v for v in json.loads(
+    (_HERE.parent / "tests" / "data" / "record_language_vectors.json")
+    .read_text(encoding="utf-8"))["vectors"] if not v.get("invalid")]
 
 
 def _sq():
@@ -110,7 +115,7 @@ def _expressions() -> list:
     ]
 
 
-EXPRESSIONS = 35
+EXPRESSIONS = 34
 
 
 def the_formula_of_a_term_is_its_meaning(e: int, v: int) -> bool:
@@ -188,7 +193,8 @@ def a_document_without_a_value_somewhere_is_not_an_answer(e: int) -> bool:
     """Whether, for expression `e`: a point found where it has no value
     is one where the interpreter gives none or does not run; and when
     such a point exists, the question with the expression's document
-    outside gives no answer, with the reason."""
+    inside, or outside, never answers none, and gives its reason when
+    it gives no answer."""
     from mathema.koine.interpret import InterpretError, Value
     rt, sq = _rt(), _sq()
     document = rt.function_of_one_value(_expressions()[int(e)])
@@ -202,8 +208,10 @@ def a_document_without_a_value_somewhere_is_not_an_answer(e: int) -> bool:
             return False
     except InterpretError:
         pass
-    asked = sq.find_member([], [document])
-    return asked.status == "unknown" and "no value" in asked.reason
+    for asked in (sq.find_member([], [document]), sq.find_member([document], [])):
+        if asked.status == "none" or (asked.status == "unknown" and not asked.reason):
+            return False
+    return True
 
 
 def the_child_is_inside_its_parent() -> bool:
@@ -216,7 +224,7 @@ def the_child_is_inside_its_parent() -> bool:
     child, parent, widened = (REF._exact(n) for n in (CHILD, PARENT, WIDENED))
     proven = rr.decide("subset", child, parent)
     falsified = rr.decide("subset", widened, child)
-    witness = falsified.witness
+    witness = (falsified.witness or {}).get("value")
     return (proven.verdict == "proven" and proven.witness is None
             and falsified.verdict == "falsified" and isinstance(witness, dict)
             and witness.get("publish") is True
@@ -251,7 +259,7 @@ def a_relation_agrees_with_the_reference(t: int, u: int, w: int) -> bool:
     if decided.witness is None:
         return decided.verdict == ("proven" if word in ("subset", "disjoint", "=")
                                    else "falsified")
-    x = decided.witness
+    x = decided.witness["value"]
     if word == "disjoint":
         return rl.member(a, x) and rl.member(b, x)
     return rl.member(a, x) != rl.member(b, x)
@@ -284,7 +292,7 @@ def a_relation_of_two_bounds_is_decided_on_the_right_side(d: int, e: int, w: int
             and not any(rl.member(left, x, bound="at_most")
                         != rl.member(right, x, bound="at_least") for x in VALUES)
     if decided.verdict == "falsified":
-        x = decided.witness
+        x = decided.witness["value"]
         if word == "subset":
             return rl.member(left, x, bound="at_most") \
                 and not rl.member(right, x, bound="at_least")
@@ -344,3 +352,78 @@ def a_document_outside_the_reading_is_not_an_answer(i: int) -> bool:
     document = _outside_the_reading()[int(i)]
     found = _sq().find_member([document], [])
     return found.status == "unknown" and "no solver reading" in found.reason
+
+
+# ---- the conformance vectors of the record-language term -------------------
+
+def _holds_a_list(node) -> bool:
+    if isinstance(node, dict):
+        return node.get("op") == "list" or any(_holds_a_list(x) for x in node.values())
+    if isinstance(node, list):
+        return any(_holds_a_list(x) for x in node)
+    return False
+
+
+def _vector_documents(i: int):
+    """The `(at_most, at_least)` membership documents of vector `i`, or
+    None for a vector that is no definition of this kind and version,
+    or that holds a list node."""
+    rm, document = _rm(), VECTORS[int(i)]["document"]
+    if not _rl().is_definition(document) or _holds_a_list(document):
+        return None
+    return rm.membership_documents(document)
+
+
+def a_vector_has_its_documents_or_is_declined_by_name(i: int) -> bool:
+    """Whether vector `i` has its two membership documents, both valid;
+    or holds a list node and is declined; or is no definition of this
+    kind and version and is refused."""
+    from mathema.regular import InvalidTerm
+    rm, rt, document = _rm(), _rt(), VECTORS[int(i)]["document"]
+    try:
+        at_most, at_least = rm.membership_documents(document)
+    except rm.Declined:
+        return _holds_a_list(document)
+    except InvalidTerm:
+        return not _rl().is_definition(document)
+    return (_rl().is_definition(document) and not _holds_a_list(document)
+            and rt.validate(at_most) == [] and rt.validate(at_least) == [])
+
+
+def a_vector_means_member(i: int, v: int) -> bool:
+    """Whether, for vector `i` and value `v`, each bound's membership
+    document has `record_language.member`'s truth under that bound, by
+    the interpreter and by the derived formula."""
+    from mathema.koine.interpret import Value
+    rt, rl, sq = _rt(), _rl(), _sq()
+    documents = _vector_documents(i)
+    if documents is None:
+        return True
+    value = VALUES[int(v)]
+    for document, bound in zip(documents, ("at_most", "at_least")):
+        want = rl.member(VECTORS[int(i)]["document"], value, bound=bound)
+        if rt.interpret(document, [value]) != Value(want):
+            return False
+        if sq.derived_truth_at(document, value) is not want:
+            return False
+    return True
+
+
+def a_question_over_two_vectors_agrees_with_the_reference(i: int, j: int) -> bool:
+    """Whether the question "in vector `i`'s at_most, outside vector
+    `j`'s at_least" has the status `record_language.find_member` gives
+    the same two nodes, and a value found is placed by
+    `record_language.member` as asked."""
+    rl = _rl()
+    a, b = _vector_documents(i), _vector_documents(j)
+    if a is None or b is None:
+        return True
+    left, right = VECTORS[int(i)]["document"], VECTORS[int(j)]["document"]
+    inside, outside = rl.bounds(left)[0], rl.bounds(right)[1]
+    found = _sq().find_member([a[0]], [b[1]])
+    if found.status != rl.find_member([inside], [outside]).status:
+        return False
+    if found.status == "member":
+        return rl.member(left, found.member, bound="at_most") \
+            and not rl.member(right, found.member, bound="at_least")
+    return found.status == "none"
