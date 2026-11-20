@@ -211,6 +211,16 @@ FNS = '''
 
     def repeat(x):
         return x * "ab"
+
+
+    def float_repeat_kind(x: float):
+        if x != x:
+            return x * "ab"
+        return 1 if isinstance(x, float) else 0
+
+
+    def float_repeat(x: float):
+        return x * "ab"
 '''
 
 
@@ -421,3 +431,18 @@ def test_a_count_of_text_repeats_is_drawn_as_an_integer(mod):
     p = _row(mod.repeat, "f(x) == f(x)")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"
+
+
+def test_a_count_of_repeats_does_not_change_a_float_annotation(mod):
+    p = _row(mod.float_repeat_kind, "f(x) == 1")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    p = _row(mod.float_repeat, "f(x) == f(x)")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+
+
+def test_the_family_rows_of_a_float_annotation_draw_floats(mod, monkeypatch):
+    import mathema
+    monkeypatch.setenv("MATHEMA_BUILTIN_CHECKS", "on")
+    rows = {p.name: p.verdict for p in mathema.check(mod.float_repeat_kind).probes}
+    assert rows.get("odd") == "falsified", rows
+    assert rows.get("idempotent") == "falsified", rows

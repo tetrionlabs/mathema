@@ -127,11 +127,12 @@ class ParameterShape:
 
 def states_an_integer(shape: ParameterShape) -> bool:
     """Intent:
-        Whether a number shape rests on evidence that its values are
-        integers (a count of repeats, `x * "ab"`).
+        Whether a number shape read from the code rests on evidence that
+        its values are integers (a count of repeats, `x * "ab"`); never
+        for a shape an author stated.
     """
     return shape.evidence is not None and shape.evidence.shape == "number" \
-        and any(e.number_kind == "int" for e in shape.found)
+        and not shape.stated and any(e.number_kind == "int" for e in shape.found)
 
 
 def kind_shape(kind: "str | None") -> "str | None":
