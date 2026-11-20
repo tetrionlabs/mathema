@@ -747,6 +747,243 @@ def no_answer_from_the_solver_is_unknown() -> bool:
     return found.status == "unknown" and found.member is None and "no answer" in found.reason
 
 
+# ---- lists -------------------------------------------------------------
+
+def lists(item: dict, lo: int = 0, hi: "int | None" = None) -> dict:
+    return {"op": "list", "item": item, "min": lo, "max": hi}
+
+
+_X = record(("x", FLAG, True))
+#: list terms: of flags, texts, records and lists, bounded and not, and
+#: boolean combinations of them with one another and with other kinds
+LISTS = [
+    lists(FLAG), lists(FLAG, 1), lists(FLAG, 0, 2), lists(FLAG, 2, 3), lists(OFF, 0, 1),
+    lists(choice("a", "b")), lists(text(DOLLAR), 1, 2), lists(ANY), lists(ANY, 3), lists(ANY, 0, 0),
+    lists(EMPTY), lists(EMPTY, 1), lists(FLAG, 2, 1), lists(_X), lists(_X, 1, 1),
+    lists(lists(FLAG)), lists(lists(FLAG, 1), 0, 2), lists(lists(ANY, 0, 0), 1),
+    record(("tools", lists(choice("a", "b")), True)),
+    record(("tools", lists(choice("a")), True), ("more", lists(FLAG, 1), False)),
+    lists(record(("tools", lists(choice("a", "b"), 0, 1), False))),
+    union(lists(FLAG), lists(choice("a", "b"))), inter(lists(FLAG, 1), lists(OFF)),
+    inter(lists(ANY, 2), lists(FLAG, 0, 2)), complement(lists(FLAG)), complement(lists(ANY)),
+    inter(lists(ANY), complement(lists(FLAG))),
+    inter(lists(ANY, 0, 2), complement(lists(FLAG)), complement(lists(choice("a", "b")))),
+    inter(lists(ANY, 0, 1), complement(lists(FLAG)), complement(lists(choice("a", "b")))),
+    union(FLAG, lists(OFF, 1)), inter(complement(lists(ANY)), complement(FLAG)),
+    lists(complement(lists(ANY))), lists(union(FLAG, lists(FLAG))),
+    FLAG, EMPTY, ANY, _X,
+]
+#: the item values enumeration builds lists from
+_ITEMS = [True, False, "a", "c", {"x": True}, [], [True]]
+
+
+def _small_lists() -> list:
+    """Every list of up to three of the item values, and of up to two of
+    the lists of up to one of them, with the other values lists are told
+    apart from."""
+    import itertools
+    out = [list(t) for n in range(4) for t in itertools.product(_ITEMS[:5], repeat=n)]
+    inner = [[], [True], [False], ["a"], [True, False], [{"x": True}]]
+    out += [list(t) for n in range(1, 3) for t in itertools.product(inner, repeat=n)]
+    out += [[[True], "a"], [{"x": True}, [True]], ["a\n"], ["a", "a\n"], [[[]]],
+            [{"tools": ["a"]}], [{"tools": ["a", "b"]}], [{}], [{"tools": "a"}]]
+    out += [None, True, "a", 1, 1.5, {}, {"x": True}, {"tools": []}, {"tools": ["a", "b"]},
+            {"tools": ["a"], "more": [True]}, {"tools": ["a"], "more": []}, {"tools": [True]}]
+    return out
+
+
+LVALUES = _small_lists()
+
+
+def _lm(t: int, v: int) -> bool:
+    return _rl().member(LISTS[int(t)], LVALUES[int(v)])
+
+
+def a_list_is_its_items_and_its_length(i: int, lo: int, hi: int, v: int) -> bool:
+    """Whether value `v` is in the list of item term `i` with lengths
+    from `lo` to `hi` (`hi` 4 standing for no end) exactly when it is a
+    list, of a length in the interval, with every item in the term."""
+    rl, item, value = _rl(), TERMS[int(i)], LVALUES[int(v)]
+    top = None if int(hi) == 4 else int(hi)
+    wanted = (isinstance(value, list) and int(lo) <= len(value) and (top is None or len(value) <= top)
+              and all(rl.member(item, x) for x in value))
+    return rl.member(lists(item, int(lo), top), value) == wanted
+
+
+def a_list_is_of_no_other_kind(t: int, v: int) -> bool:
+    """Whether a list value `v` is outside term `t` when the term is a
+    choice, a text or a record, and inside its complement; and whether a
+    value that is no list is outside every list term."""
+    rl, value = _rl(), LVALUES[int(v)]
+    a = TERMS[int(t)]
+    if isinstance(value, list):
+        return a["op"] not in ("choice", "text", "record") or (
+            not rl.member(a, value) and rl.member(complement(a), value))
+    return not rl.member(lists(a), value)
+
+
+def the_list_of_nothing_is_in_every_list_from_zero(t: int) -> bool:
+    rl, a = _rl(), TERMS[int(t)]
+    return rl.member(lists(a), []) and rl.member(lists(a, 0, 0), []) and not rl.member(lists(a, 1), [])
+
+
+def a_list_is_monotone(t: int, u: int, v: int) -> bool:
+    """Whether, when every catalogue member of term `t` is in term `u`,
+    a list of `t` holding value `v` is a list of `u`; and whether a list
+    within lengths 1 to 2 is within 0 to 3."""
+    rl, a, b, value = _rl(), TERMS[int(t)], TERMS[int(u)], LVALUES[int(v)]
+    if rl.member(lists(a, 1, 2), value) and not rl.member(lists(a, 0, 3), value):
+        return False
+    if any(not rl.member(b, x) for x in _members(a)):
+        return True
+    if isinstance(value, list) and not all(x in VALUES for x in value):
+        return True
+    return not rl.member(lists(a), value) or rl.member(lists(b), value)
+
+
+def lists_meet_item_by_item(t: int, u: int, v: int) -> bool:
+    """Whether the intersection of a list of term `t` of 1 to 3 items
+    and a list of term `u` of up to 2 has the members of the list of
+    their intersection of 1 to 2 items."""
+    rl, a, b, value = _rl(), TERMS[int(t)], TERMS[int(u)], LVALUES[int(v)]
+    return (rl.member(inter(lists(a, 1, 3), lists(b, 0, 2)), value)
+            == rl.member(lists(inter(a, b), 1, 2), value))
+
+
+def the_complement_of_a_list(t: int, v: int) -> bool:
+    """Whether the complement of the list of term `t` of 1 to 2 items
+    holds a list value `v` exactly when its length is not 1 or 2 or some
+    item is outside the term, and holds every value that is no list."""
+    rl, a, value = _rl(), TERMS[int(t)], LVALUES[int(v)]
+    inside = rl.member(complement(lists(a, 1, 2)), value)
+    if not isinstance(value, list):
+        return inside
+    return inside == (len(value) not in (1, 2) or any(not rl.member(a, x) for x in value))
+
+
+def one_more_item(t: int, v: int, w: int) -> bool:
+    """Whether a member `v` of the unbounded list of term `t`, with
+    catalogue value `w` appended, is still a member exactly when `w` is
+    in the term."""
+    rl, a, value, more = _rl(), TERMS[int(t)], LVALUES[int(v)], VALUES[int(w)]
+    if not rl.member(lists(a), value):
+        return True
+    return rl.member(lists(a), [*value, more]) == rl.member(a, more)
+
+
+def list_rules_of_the_canonical_form(t: int) -> bool:
+    """Whether, for item term `t`: a list whose longest length is below
+    its shortest is `empty`; a list of at most nothing is the list of
+    nothing whatever its item; an item of no value gives the list of
+    nothing from zero and `empty` from one; and an item otherwise keeps
+    the list a list."""
+    rl, a = _rl(), TERMS[int(t)]
+    nothing = {"op": "list", "item": EMPTY, "min": 0, "max": 0}
+    gone = rl.canonical(a) == EMPTY
+    return (rl.canonical(lists(a, 2, 1)) == EMPTY and rl.canonical(lists(a, 0, 0)) == nothing
+            and (rl.canonical(lists(a)) == nothing) == gone
+            and (rl.canonical(lists(a, 1)) == EMPTY) == gone
+            and (gone or rl.canonical(lists(a, 1, 3)) == lists(rl.canonical(a), 1, 3)))
+
+
+def list_terms_keep_the_standing_laws(t: int, u: int, v: int) -> bool:
+    """Whether, for list terms `t` and `u` and value `v`: canonical is
+    idempotent and keeps membership, complement is not, union is or and
+    intersection is and."""
+    rl, a, b, value = _rl(), LISTS[int(t)], LISTS[int(u)], LVALUES[int(v)]
+    once = rl.canonical(a)
+    x, y = _lm(t, v), _lm(u, v)
+    return (rl.canonical(once) == once and rl.member(once, value) == x
+            and rl.member(complement(a), value) == (not x)
+            and rl.member(union(a, b), value) == (x or y)
+            and rl.member(inter(a, b), value) == (x and y))
+
+
+def a_malformed_list_is_refused(i: int) -> bool:
+    rl = _rl()
+    bad = [{"op": "list", "item": FLAG}, {"op": "list", "item": FLAG, "min": 0},
+           lists(FLAG, -1), lists(FLAG, True), lists(FLAG, 0, False), lists(FLAG, 1.0),
+           {"op": "list", "item": 1, "min": 0, "max": None},
+           {"op": "list", "item": FLAG, "min": 0, "max": None, "distinct": True},
+           lists(FLAG, 0, "2"), {"op": "list", "items": FLAG, "min": 0, "max": None}][int(i)]
+    try:
+        rl.validate(_exact(bad))
+    except rl.InvalidTerm:
+        return True
+    return False
+
+
+def find_member_agrees_with_enumeration(t: int, u: int) -> bool:
+    """Whether what `find_member` answers for a value in list term `t`
+    and outside list term `u` agrees with running every small list and
+    catalogue value: it finds a member, which `member` places, whenever
+    one of them is such a value, and says none only when none of them
+    is. It is never left without an answer."""
+    rl, a, b = _rl(), LISTS[int(t)], LISTS[int(u)]
+    found = rl.find_member([a], [b])
+    exists = any(rl.member(a, v) and not rl.member(b, v) for v in LVALUES)
+    if found.status == "member":
+        return rl.member(a, found.member) and not rl.member(b, found.member)
+    return found.status == "none" and not exists
+
+
+def a_length_is_exact_at_its_bounds(t: int, n: int) -> bool:
+    """Whether, for item term `t` with a member in the catalogue: the
+    list of exactly `n` items is inside the list of `n` to `n + 1`; the
+    list of up to `n + 1` is outside the list of up to `n` by a list of
+    `n + 1` items; and the unbounded list is outside the list of up to
+    five by a list of six."""
+    rl, a, n = _rl(), TERMS[int(t)], int(n)
+    if not _members(a):
+        return True
+    if includes(lists(a, n, n), lists(a, n, n + 1))[0] != "proven":
+        return False
+    verdict, witness = includes(lists(a, 0, n + 1), lists(a, 0, n))
+    if verdict != "falsified" or len(witness) != n + 1:
+        return False
+    verdict, witness = includes(lists(a), lists(a, 0, 5))
+    return verdict == "falsified" and len(witness) == 6 and all(rl.member(a, x) for x in witness)
+
+
+def generated_list(seed: int, depth: int = 0) -> dict:
+    """A term drawn from `seed` in which lists stand beside the other
+    nodes: lists of generated terms, bounded and not, to three deep."""
+    rng = random.Random(f"list {seed} {depth}")
+    leaves = [EMPTY, ANY, FLAG, OFF, choice("a", "c"), text(_lit("a")), _X]
+    if depth >= 3 or rng.random() < 0.3:
+        return rng.choice(leaves)
+    kind = rng.choice(["list", "list", "list", "union", "inter", "complement", "record"])
+    if kind == "list":
+        lo = rng.randint(0, 2)
+        return lists(generated_list(seed * 5 + 1, depth + 1), lo, rng.choice([None, lo, lo + 1, 3]))
+    if kind == "complement":
+        return complement(generated_list(seed * 7 + 1, depth + 1))
+    if kind == "record":
+        return record(("x", generated_list(seed * 11 + 2, depth + 1), rng.random() < 0.6))
+    return {"op": kind, "args": [generated_list(seed * 13 + i + 3, depth + 1)
+                                 for i in range(rng.randint(1, 3))]}
+
+
+def generated_lists_agree_with_enumeration(seed: int) -> bool:
+    """Whether, for two terms with lists drawn from `seed`, the laws of
+    membership hold on the small lists, and `find_member` for the first
+    inside the second finds a value `member` places whenever a small
+    list is one, and says none only when none is."""
+    rl = _rl()
+    a, b = generated_list(int(seed)), generated_list(int(seed) + 5000)
+    once = rl.canonical(a)
+    for value in LVALUES[::7]:
+        x, y = rl.member(a, value), rl.member(b, value)
+        if rl.member(once, value) != x or rl.member(complement(a), value) == x \
+                or rl.member(inter(a, b), value) != (x and y):
+            return False
+    found = rl.find_member([a], [b])
+    exists = any(rl.member(a, v) and not rl.member(b, v) for v in LVALUES)
+    if found.status == "member":
+        return rl.member(a, found.member) and not rl.member(b, found.member)
+    return found.status == "none" and not exists
+
+
 # ---- generated terms and values -----------------------------------------
 
 def generated_term(seed: int, depth: int = 0) -> dict:
