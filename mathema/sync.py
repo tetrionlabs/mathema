@@ -261,19 +261,20 @@ def text_rules_of(verified_entry: "dict | None") -> "str | None":
     return rules if isinstance(rules, str) else None
 
 
-def written_under_earlier_text(verified_entry: "dict | None") -> bool:
+def written_under_earlier_text(verified_entry: "dict | None",
+                               row: "dict | None" = None) -> bool:
     """Intent:
-        Whether a verified record was written before the statement text
-        rules of `spec.STATEMENT_TEXT_RELEASE`: it states no rules, or
-        the rules of an earlier release.
+        Whether a verified claim `row` of the record `verified_entry`,
+        or the record as a whole when no row is given, was written
+        before the statement text rules of `spec.STATEMENT_TEXT_RELEASE`:
+        it states no rules (`spec.row_origin`, a row falling back on its
+        record's), or the rules of an earlier release.
     """
-    from .spec import STATEMENT_TEXT_RELEASE
-
-    def parts(v):
-        return tuple(int(p) if p.isdigit() else 0 for p in v.split("."))
-
-    rules = text_rules_of(verified_entry)
-    return rules is None or parts(rules) < parts(STATEMENT_TEXT_RELEASE)
+    from .spec import STATEMENT_TEXT_RELEASE, release_parts, row_origin
+    rules = (row_origin(row, verified_entry).get("statement_text")
+             if row is not None else text_rules_of(verified_entry))
+    return rules is None or release_parts(rules) < release_parts(
+        STATEMENT_TEXT_RELEASE)
 
 
 def _recorded_set_strings(row: dict) -> "dict | None":
@@ -464,8 +465,8 @@ def claim_conflicts(fn, file_entry: dict,
           or with the domain reading, that release wrote; the claim is
           adjudicated as written, with no supersession. A move of
           literal quoting, negation parentheses or domain escapes is
-          recognised only in a record written under earlier statement
-          text rules (`written_under_earlier_text`).
+          recognised only in a row written under earlier statement
+          text rules (`written_under_earlier_text` of the row).
         - kind "supersession": an authored surface differs from the
           VERIFIED row. The verified layer is the record and wins
           (materialization adjudicates its version); changing a
@@ -481,8 +482,6 @@ def claim_conflicts(fn, file_entry: dict,
     doc_claims = {c.get("name"): c
                   for c in parse_docstring_claims(docstring_of(fn),
                                                   owner=_fn_key(fn))}
-    earlier = written_under_earlier_text(verified_entry)
-
     def defect(name, surface, error, c, row=None):
         return {"kind": "canonical-text-defect", "claim": name,
                 "surface": surface, "error": error,
@@ -513,6 +512,7 @@ def claim_conflicts(fn, file_entry: dict,
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
                 continue
+            earlier = written_under_earlier_text(verified_entry, v)
             escapes = _domain_escapes_move(c, v, fn) if earlier else None
             if escapes and not _checked_differently(c, v):
                 # the row records the values an earlier release read for

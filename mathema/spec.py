@@ -34,10 +34,79 @@ SPEC_VERSION = "0.3.0"
 #: the release whose rules write the stored statement text of a record:
 #: each string literal respelled from its value, a negated relation in
 #: its parentheses, and a domain set's string member read with its
-#: backslash escapes decoded. A record states it as
-#: `lineage.statement_text`; one without it was written by an earlier
-#: release.
+#: backslash escapes decoded. Each claim row states the rules it was
+#: written under as `mathema.statement_text` in its meta, and a record
+#: states the earliest among its rows as `lineage.statement_text`; a
+#: row or record without it was written by an earlier release.
 STATEMENT_TEXT_RELEASE = "0.6.6.2"
+
+#: the stamps a claim row's meta carries naming the rules the row was
+#: written under, by the name `row_origin` gives each
+ROW_ORIGIN_STAMPS = {"statement_text": "mathema.statement_text"}
+
+
+def release_parts(release: str) -> tuple:
+    """Intent:
+        A dotted release (`"0.6.6.2"`) as a tuple that orders releases,
+        each part that is not a number counting as 0.
+    """
+    return tuple(int(p) if p.isdigit() else 0 for p in release.split("."))
+
+
+def row_origin(row: dict, entry: "dict | None" = None) -> dict:
+    """Intent:
+        The rules a verified claim row was written under, as `{name:
+        release}` for each stamp of `ROW_ORIGIN_STAMPS` it holds: the
+        row's own stamp in its meta, else, for `statement_text`, the
+        `lineage.statement_text` of its record `entry`. A stamp neither
+        gives is absent, which means the row was written by a release
+        before that stamp.
+    """
+    meta = row.get("meta") if isinstance(row, dict) else None
+    meta = meta if isinstance(meta, dict) else {}
+    out = {}
+    for name, field_name in ROW_ORIGIN_STAMPS.items():
+        stamp = meta.get(field_name)
+        if not isinstance(stamp, str) and name == "statement_text":
+            lineage = (entry or {}).get("lineage")
+            stamp = (lineage.get("statement_text")
+                     if isinstance(lineage, dict) else None)
+        if isinstance(stamp, str):
+            out[name] = stamp
+    return out
+
+
+def _stamp_statement_text(rows: list) -> None:
+    """Intent:
+        Stamp each claim row in `rows` that states a statement with the
+        statement text rules of this release, in its meta.
+    """
+    field_name = ROW_ORIGIN_STAMPS["statement_text"]
+    for row in rows:
+        if isinstance(row, dict) and (row.get("statement") or row.get("law")):
+            meta = row.get("meta")
+            if not isinstance(meta, dict):
+                meta = row["meta"] = {}
+            meta[field_name] = STATEMENT_TEXT_RELEASE
+
+
+def _settle_statement_text(spec: dict) -> None:
+    """Intent:
+        Set a record's `lineage.statement_text` to the earliest rules
+        among its claim rows that state a statement, or remove it when
+        one of them states none; a record with no such row keeps what
+        it states.
+    """
+    origins = [row_origin(r).get("statement_text")
+               for r in spec.get("claims") or []
+               if isinstance(r, dict) and (r.get("statement") or r.get("law"))]
+    if not origins:
+        return
+    lineage = spec.setdefault("lineage", {})
+    if any(o is None for o in origins):
+        lineage.pop("statement_text", None)
+    else:
+        lineage["statement_text"] = min(origins, key=release_parts)
 
 
 def reasoning_chain(ex) -> list[dict]:
@@ -1094,6 +1163,9 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
+    from ._scan import uses_legacy_rendering
+    if not uses_legacy_rendering():
+        _stamp_statement_text(spec["claims"])
     spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
                                                                 grammar, fn)
     _stamp_authored_routes(spec, claims or [])
@@ -1133,6 +1205,7 @@ def record(ex, key: str | None = None, root: str = ".",
     if keep_rows:
         spec["claims"].extend(_prior_rows(path, key, keep_rows,
                                           {c.get("name") for c in spec["claims"]}))
+    _settle_statement_text(spec)
     # deterministic claim order, so a re-adjudication never reorders rows
     # in the diff (identity and the checksum sort independently, so this is
     # purely for a clean file)
@@ -1175,8 +1248,10 @@ def record(ex, key: str | None = None, root: str = ".",
 def _prior_rows(path: str, key: str, names: list, have: set) -> list:
     """Intent:
         The live claim rows of the record at `path` for `key` named in
-        `names` and not in `have`, as they stand on disk; none when the
-        record does not exist or does not read.
+        `names` and not in `have`, as they stand on disk, each holding
+        the statement text stamp it was written under (`row_origin`,
+        its record's lineage for a row with none of its own); none when
+        the record does not exist or does not read.
     """
     import copy
     if not os.path.exists(path):
@@ -1184,9 +1259,22 @@ def _prior_rows(path: str, key: str, names: list, have: set) -> list:
     data, reason = read_verified_file(path)
     if reason is not None or not isinstance(data, dict):
         return []
-    rows = ((data.get(key) or {}).get("claims") or [])
-    return [copy.deepcopy(r) for r in rows if isinstance(r, dict)
-            and r.get("name") in set(names) and r.get("name") not in have]
+    entry = data.get(key) or {}
+    kept = []
+    for r in entry.get("claims") or []:
+        if not (isinstance(r, dict) and r.get("name") in set(names)
+                and r.get("name") not in have):
+            continue
+        row = copy.deepcopy(r)
+        origin = row_origin(r, entry).get("statement_text")
+        field_name = ROW_ORIGIN_STAMPS["statement_text"]
+        if origin is not None and (row.get("statement") or row.get("law")):
+            meta = row.get("meta")
+            if not isinstance(meta, dict):
+                meta = row["meta"] = {}
+            meta[field_name] = origin
+        kept.append(row)
+    return kept
 
 
 def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
