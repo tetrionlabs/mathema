@@ -2,6 +2,11 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## Unreleased
+
+### Fixes
+- A claim whose domain lists a missing value (`x in {1, None}`, `x in {1, nan}`) is proven only when that value holds at every value of the other parameters: beside finite sets every combination is run, and beside an interval the listed value is run at sampled points and the claim holds, or is falsified at the point that fails, instead of being proven from a run at the interval's ends.
+
 ## 0.6.6.1
 
 ### Upgrading from 0.6.6
