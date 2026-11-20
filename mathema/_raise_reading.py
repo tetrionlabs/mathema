@@ -68,20 +68,54 @@ def _union(a: ValueKind, b: ValueKind) -> ValueKind:
                      min(a.least, b.least))
 
 
+def _up(bound: float) -> float:
+    """The next float above a non-negative bound computed in float
+    arithmetic, which rounds to nearest: at least the exact result of the
+    operation that gave it. Zero and infinity are exact and stay."""
+    return math.nextafter(bound, math.inf) if 0.0 < bound < math.inf else bound
+
+
 def _magnitude(value) -> float:
+    """An upper bound on `abs(value)` as a float: the float conversion
+    rounds an int to nearest, so a conversion below the int is moved up
+    one float; `math.inf` when the bound is past the largest float or the
+    value is no number."""
     try:
-        found = float(abs(value))
+        exact = abs(value)
+        found = float(exact)
     except (OverflowError, TypeError, ValueError):
         return math.inf
+    if found < exact:
+        found = math.nextafter(found, math.inf)
     return found if found <= _FLOAT_MAX else math.inf
+
+
+def _least(value) -> float:
+    """A lower bound on `abs(value)` as a float: a conversion above the
+    int is moved down one float, and an int past the largest float is at
+    least that float; 0 for anything that is no number."""
+    try:
+        exact = abs(value)
+    except (TypeError, ValueError):
+        return 0.0
+    try:
+        found = float(exact)
+    except OverflowError:
+        return _FLOAT_MAX
+    except (TypeError, ValueError):
+        return 0.0
+    if found != found:
+        return 0.0
+    if found > exact:
+        found = math.nextafter(found, 0.0)
+    return found
 
 
 def kind_of_value(value) -> ValueKind:
     """The kind of one known value: its exact type, and its magnitude
     when it is a number."""
     if type(value) in _NUMBERS:
-        size = _magnitude(value)
-        return ValueKind(frozenset({type(value)}), size, size)
+        return ValueKind(frozenset({type(value)}), _magnitude(value), _least(value))
     return ValueKind(frozenset({type(value)}))
 
 
@@ -91,7 +125,7 @@ _EMPTY = ValueKind(frozenset(), 0.0, math.inf)
 def _interval_kind(lo, hi) -> ValueKind:
     least = 0.0
     if type(lo) in _NUMBERS and type(hi) in _NUMBERS and (lo > 0 or hi < 0):
-        least = min(abs(lo), abs(hi))
+        least = min(_least(lo), _least(hi))
     return ValueKind(_NUMBERS, max(_magnitude(lo), _magnitude(hi)), least)
 
 
@@ -285,14 +319,15 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
     mixes = (float in ta and not _converts_to_float(b)) \
         or (float in tb and not _converts_to_float(a))
     if isinstance(op, (ast.Add, ast.Sub)):
-        return (HALTS if mixes else TOTAL), ValueKind(out_types, a.magnitude + b.magnitude)
+        return (HALTS if mixes else TOTAL), ValueKind(out_types,
+                                                       _up(a.magnitude + b.magnitude))
     if isinstance(op, ast.Mult):
-        size = 0.0 if 0.0 in (a.magnitude, b.magnitude) else a.magnitude * b.magnitude
+        size = 0.0 if 0.0 in (a.magnitude, b.magnitude) else _up(a.magnitude * b.magnitude)
         return (HALTS if mixes else TOTAL), ValueKind(out_types, size)
     if isinstance(op, ast.Div) and b.least > 0 and _converts_to_float(a) \
             and _converts_to_float(b):
         return TOTAL, ValueKind(frozenset({float}),
-                                a.magnitude / b.least if math.isfinite(a.magnitude)
+                                _up(a.magnitude / b.least) if math.isfinite(a.magnitude)
                                 else math.inf)
     if isinstance(op, (ast.Div, ast.FloorDiv, ast.Mod)):
         divisor = right.value if isinstance(right, ast.Constant) else None
@@ -304,7 +339,7 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
             if isinstance(op, ast.Div):
                 size = a.magnitude
             elif isinstance(op, ast.FloorDiv):
-                size = a.magnitude + 1.0
+                size = _up(a.magnitude + 1.0)
             else:
                 size = max(a.magnitude, _magnitude(divisor))
             kind = ValueKind(frozenset({float}) if isinstance(op, ast.Div) else out_types,

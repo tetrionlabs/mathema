@@ -78,3 +78,46 @@ def test_the_remainder_of_a_negative_number_is_bounded_by_its_divisor():
     assert kind.magnitude >= 6
     assert -5 // -1 == 5 and -5 % _BIG == _BIG - 5
     assert sys.float_info.max > _BIG
+
+
+# ---- bounds rounded up -------------------------------------------------------
+
+def sum_just_past_the_float_maximum(x: int) -> int:
+    if x < 0:
+        y = 179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497791 + 4989600773836799529132479070093925771226990714529979588052066548876451785318362793117968131290681654971765441016278723103616304651091870092985811934760035582204005558722307158063310116666923386609933687578536986926478638411270796957755769718436085405946387916809117520482063620781496216846336
+        w = y + 0.5  # noqa: F841
+        raise ValueError("neg")
+    return x
+
+
+def test_a_sum_just_past_the_float_maximum_is_not_proven_to_raise():
+    with pytest.raises(OverflowError):
+        sum_just_past_the_float_maximum(-1)
+    assert _row(sum_just_past_the_float_maximum, route="derive").verdict != "proven"
+    assert _row(sum_just_past_the_float_maximum).verdict == "falsified"
+
+
+def test_the_magnitude_of_an_int_is_rounded_up_and_its_least_down():
+    from mathema._raise_reading import kind_of_value
+    for value in (2 ** 53 + 1, -(2 ** 53 + 1), 10 ** 300 + 1, 3 ** 500,
+                  int(sys.float_info.max) - 1):
+        kind = kind_of_value(value)
+        assert kind.magnitude >= abs(value), value
+        assert kind.least <= abs(value), value
+    assert kind_of_value(int(sys.float_info.max) + 1).magnitude == float("inf")
+
+
+def test_every_arithmetic_bound_covers_the_exact_result():
+    import ast
+    from fractions import Fraction
+    from mathema._raise_reading import _arithmetic, kind_of_value
+    values = [2 ** 53 + 1, 2 ** 60 + 3, 10 ** 300 + 7, 3, 1]
+    for op, exact in ((ast.Add(), lambda a, b: a + b), (ast.Sub(), lambda a, b: a - b),
+                      (ast.Mult(), lambda a, b: a * b),
+                      (ast.Div(), lambda a, b: Fraction(a, b))):
+        for a in values:
+            for b in values:
+                _, kind = _arithmetic(op, kind_of_value(a), kind_of_value(b),
+                                      ast.Name("b"))
+                if kind.types:
+                    assert kind.magnitude >= abs(exact(a, b)), (type(op).__name__, a, b)
