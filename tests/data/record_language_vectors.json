@@ -1,0 +1,2235 @@
+{
+ "schema": "record_language",
+ "version": 1,
+ "hash": "sha256 of canonical",
+ "vectors": [
+  {
+   "name": "no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "every value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "any"
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"any\"},\"version\":1}",
+   "hash": "ae86d3b8ba57bee0b4f9bfe2e976e8ca6c435668028201ccbd95ad653221f72f"
+  },
+  {
+   "name": "null alone",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      null
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[null]},\"version\":1}",
+   "hash": "77fc0c5225cbf98a231561017e29cab0aecec9913be876dd55829f23b6b155b0"
+  },
+  {
+   "name": "true alone",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[true]},\"version\":1}",
+   "hash": "86d60fa6585fedc49ca4f1724c58590d802de83c991fe194b8ba572c351a36a4"
+  },
+  {
+   "name": "either boolean",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[false,true]},\"version\":1}",
+   "hash": "2916ea53a361462940be4976fff8afd4cb8304fc3fe87a89a74a9f6960456212"
+  },
+  {
+   "name": "the number one",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      1
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[1]},\"version\":1}",
+   "hash": "d60538f05e7c49df856169d99cf894a2dc88bf63f590a9c522a2326f5db87a87"
+  },
+  {
+   "name": "one, true and the text 1",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      1,
+      true,
+      "1"
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[\"1\",1,true]},\"version\":1}",
+   "hash": "e456bebcf52f5ca22e38ae6e4d6a5975578fe929dd3a49f106cc447ec2131ec2"
+  },
+  {
+   "name": "two texts",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      "a",
+      "b"
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},\"version\":1}",
+   "hash": "9d373388fbed60c301ed7e9743eea0ce75dadc58f3be04b1f778a9d6868f3d1e"
+  },
+  {
+   "name": "a choice of nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": []
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "a text by a literal",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"language\":{\"codes\":[97],\"op\":\"literal\"},\"op\":\"text\"},\"version\":1}",
+   "hash": "f0e0c908b0cfd4bee1377ca04bc681508f698ccb7b50e8203720b1c7de310907"
+  },
+  {
+   "name": "a text ending at a dollar",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "concat",
+      "args": [
+       {
+        "op": "literal",
+        "codes": [
+         97
+        ]
+       },
+       {
+        "op": "repeat",
+        "arg": {
+         "op": "literal",
+         "codes": [
+          10
+         ]
+        },
+        "min": 0,
+        "max": 1
+       }
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"version\":1}",
+   "hash": "601d152d18289ff4d2f061abe7c073b4607deb1e8bf8684896f2ce93c0a0ab30"
+  },
+  {
+   "name": "paths under a root",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "concat",
+      "args": [
+       {
+        "op": "literal",
+        "codes": [
+         47,
+         119,
+         116
+        ]
+       },
+       {
+        "op": "repeat",
+        "arg": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              97,
+              122
+             ],
+             [
+              48,
+              57
+             ],
+             [
+              45,
+              45
+             ]
+            ]
+           },
+           "min": 1,
+           "max": null
+          }
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"language\":{\"args\":[{\"codes\":[47,119,116],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"version\":1}",
+   "hash": "0e0fee110c467523d590b2b3dfad037a54805735e07db7ef8c2a9137a2c7ce36"
+  },
+  {
+   "name": "paths under a deeper root",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "concat",
+      "args": [
+       {
+        "op": "literal",
+        "codes": [
+         47,
+         119,
+         116,
+         47,
+         116,
+         97,
+         115,
+         107,
+         45,
+         55
+        ]
+       },
+       {
+        "op": "repeat",
+        "arg": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "chars",
+            "ranges": [
+             [
+              97,
+              122
+             ],
+             [
+              48,
+              57
+             ],
+             [
+              45,
+              45
+             ]
+            ]
+           },
+           "min": 1,
+           "max": null
+          }
+         ]
+        },
+        "min": 0,
+        "max": null
+       }
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"version\":1}",
+   "hash": "b5117cdfb321417e29b3bc782be6f49cdf29ff0c64785321fb17276e8d95e7d7"
+  },
+  {
+   "name": "a text of the empty language",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "the record of no field",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "9da1771da5d25ce885c0b5b4837096216cbcf8a15286cdc12e69550d2fd99692"
+  },
+  {
+   "name": "one required flag",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "aa0924735daa2161e54ccf924478710ef93f6d33cea9b2b8b0b0c47d41166f3d"
+  },
+  {
+   "name": "one optional flag",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "4f5e55b9184d2338b04a86d7b3df76de1504b863d7f176bb874829f7d2214253"
+  },
+  {
+   "name": "a required field of no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "empty"
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "an optional field of no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "empty"
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"empty\"},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "c2e7eb760eaba2d7add24698ae61c706a315bbbfda59a7424601da65d6650c42"
+  },
+  {
+   "name": "a required flag and an optional text",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "y",
+       {
+        "op": "choice",
+        "values": [
+         "a",
+         "b"
+        ]
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"y\",{\"op\":\"choice\",\"values\":[\"a\",\"b\"]},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "b61fc3160916d367ef1f828a345445b47d1b3c45efcc20e5b67c89b2f4ded9f5"
+  },
+  {
+   "name": "fields written out of order",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "y",
+       {
+        "op": "choice",
+        "values": [
+         "a"
+        ]
+       },
+       false
+      ],
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false]},true],[\"y\",{\"op\":\"choice\",\"values\":[\"a\"]},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "c2b8636f2041a265477273384a7915776cb09966fd0c92fbe35da321ab89e86d"
+  },
+  {
+   "name": "a record inside a record",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "record",
+        "fields": [
+         [
+          "z",
+          {
+           "op": "choice",
+           "values": [
+            null,
+            0
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"fields\":[[\"z\",{\"op\":\"choice\",\"values\":[0,null]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "c4e71e8b324d52970aa36a596ed5e57ab1e00e118e444a3dcf41a8ee96787a42"
+  },
+  {
+   "name": "a union of a text and the booleans",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        "a"
+       ]
+      },
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"op\":\"choice\",\"values\":[\"a\"]},{\"op\":\"choice\",\"values\":[false,true]}],\"op\":\"union\"},\"version\":1}",
+   "hash": "dd498f5350f4793ae15f34e321fd88a5e6bf9763dab4d5acd660df034407aa3c"
+  },
+  {
+   "name": "an intersection of two choices",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      {
+       "op": "choice",
+       "values": [
+        true,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"op\":\"choice\",\"values\":[1,true]},{\"op\":\"choice\",\"values\":[false,true]}],\"op\":\"inter\"},\"version\":1}",
+   "hash": "5ac3d1b766ed83784c74d7c576293500bfce68846e4c3646e7661636aa1c2cf2"
+  },
+  {
+   "name": "a union of nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": []
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "an intersection of nothing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "inter",
+     "args": []
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"any\"},\"version\":1}",
+   "hash": "ae86d3b8ba57bee0b4f9bfe2e976e8ca6c435668028201ccbd95ad653221f72f"
+  },
+  {
+   "name": "a complement of a choice",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"arg\":{\"op\":\"choice\",\"values\":[false,true]},\"op\":\"complement\"},\"version\":1}",
+   "hash": "007ea6bcc024a6396b06cd5a85f9dca76b0bf864b9fbbbe78240c69674a8f1ed"
+  },
+  {
+   "name": "a complement of a record",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "record",
+      "fields": [
+       [
+        "x",
+        {
+         "op": "choice",
+         "values": [
+          true,
+          false
+         ]
+        },
+        true
+       ]
+      ],
+      "rest": {
+       "op": "empty"
+      }
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"arg\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"op\":\"complement\"},\"version\":1}",
+   "hash": "04bde4730defba6f51d535cb7cd4fa052b9141b72bdc045fc93f8e6b65f700c9"
+  },
+  {
+   "name": "a double complement",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "arg": {
+      "op": "complement",
+      "arg": {
+       "op": "text",
+       "language": {
+        "op": "concat",
+        "args": [
+         {
+          "op": "literal",
+          "codes": [
+           97
+          ]
+         },
+         {
+          "op": "repeat",
+          "arg": {
+           "op": "literal",
+           "codes": [
+            10
+           ]
+          },
+          "min": 0,
+          "max": 1
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"arg\":{\"arg\":{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"op\":\"complement\"},\"op\":\"complement\"},\"version\":1}",
+   "hash": "f742b5bd3b45fbbc9cff004c31711984dbdb9c358ddc04159b6d4dc30b164adc"
+  },
+  {
+   "name": "a union with a complement",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "record",
+       "fields": [
+        [
+         "x",
+         {
+          "op": "choice",
+          "values": [
+           false
+          ]
+         },
+         true
+        ]
+       ],
+       "rest": {
+        "op": "empty"
+       }
+      },
+      {
+       "op": "complement",
+       "arg": {
+        "op": "record",
+        "fields": [
+         [
+          "x",
+          {
+           "op": "choice",
+           "values": [
+            true,
+            false
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       }
+      }
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"args\":[{\"arg\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"op\":\"complement\"},{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}}],\"op\":\"union\"},\"version\":1}",
+   "hash": "c37115f8ad8bf0e8286d653d4e8d2b80ba897786455dc993f477963416ff6136"
+  },
+  {
+   "name": "a child set of permissions",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "edit",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "merge",
+       {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "root",
+       {
+        "op": "text",
+        "language": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47,
+            119,
+            116,
+            47,
+            116,
+            97,
+            115,
+            107,
+            45,
+            55
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "concat",
+            "args": [
+             {
+              "op": "literal",
+              "codes": [
+               47
+              ]
+             },
+             {
+              "op": "repeat",
+              "arg": {
+               "op": "chars",
+               "ranges": [
+                [
+                 97,
+                 122
+                ],
+                [
+                 48,
+                 57
+                ],
+                [
+                 45,
+                 45
+                ]
+               ]
+              },
+              "min": 1,
+              "max": null
+             }
+            ]
+           },
+           "min": 0,
+           "max": null
+          }
+         ]
+        }
+       },
+       true
+      ],
+      [
+       "shell",
+       {
+        "op": "record",
+        "fields": [
+         [
+          "git",
+          {
+           "op": "choice",
+           "values": [
+            "status",
+            "diff"
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "3bc7947b509401a6baedf384439888dc7997d13b5560019d34a2303808f73ec2"
+  },
+  {
+   "name": "its parent",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "edit",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "merge",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "root",
+       {
+        "op": "text",
+        "language": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47,
+            119,
+            116
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "concat",
+            "args": [
+             {
+              "op": "literal",
+              "codes": [
+               47
+              ]
+             },
+             {
+              "op": "repeat",
+              "arg": {
+               "op": "chars",
+               "ranges": [
+                [
+                 97,
+                 122
+                ],
+                [
+                 48,
+                 57
+                ],
+                [
+                 45,
+                 45
+                ]
+               ]
+              },
+              "min": 1,
+              "max": null
+             }
+            ]
+           },
+           "min": 0,
+           "max": null
+          }
+         ]
+        }
+       },
+       true
+      ],
+      [
+       "shell",
+       {
+        "op": "record",
+        "fields": [
+         [
+          "git",
+          {
+           "op": "choice",
+           "values": [
+            "status",
+            "diff",
+            "commit"
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"commit\",\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "470b9ce606093f65d919e3d3a5df1a613283d09fa617196ac3bd90c46cfb3e99"
+  },
+  {
+   "name": "the child with one flag widened",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "edit",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "merge",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "root",
+       {
+        "op": "text",
+        "language": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47,
+            119,
+            116,
+            47,
+            116,
+            97,
+            115,
+            107,
+            45,
+            55
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "concat",
+            "args": [
+             {
+              "op": "literal",
+              "codes": [
+               47
+              ]
+             },
+             {
+              "op": "repeat",
+              "arg": {
+               "op": "chars",
+               "ranges": [
+                [
+                 97,
+                 122
+                ],
+                [
+                 48,
+                 57
+                ],
+                [
+                 45,
+                 45
+                ]
+               ]
+              },
+              "min": 1,
+              "max": null
+             }
+            ]
+           },
+           "min": 0,
+           "max": null
+          }
+         ]
+        }
+       },
+       true
+      ],
+      [
+       "shell",
+       {
+        "op": "record",
+        "fields": [
+         [
+          "git",
+          {
+           "op": "choice",
+           "values": [
+            "status",
+            "diff"
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "8111b3522c4c7c1a793a061118d536a9a4be608a6c9222329019d2514922749f"
+  },
+  {
+   "name": "exact: either boolean",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[false,true]},\"version\":1}",
+   "hash": "2916ea53a361462940be4976fff8afd4cb8304fc3fe87a89a74a9f6960456212"
+  },
+  {
+   "name": "exact: a text ending at a dollar",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "concat",
+      "args": [
+       {
+        "op": "literal",
+        "codes": [
+         97
+        ]
+       },
+       {
+        "op": "repeat",
+        "arg": {
+         "op": "literal",
+         "codes": [
+          10
+         ]
+        },
+        "min": 0,
+        "max": 1
+       }
+      ]
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"version\":1}",
+   "hash": "601d152d18289ff4d2f061abe7c073b4607deb1e8bf8684896f2ce93c0a0ab30"
+  },
+  {
+   "name": "exact: one required flag",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"x\",{\"op\":\"choice\",\"values\":[false,true]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "aa0924735daa2161e54ccf924478710ef93f6d33cea9b2b8b0b0c47d41166f3d"
+  },
+  {
+   "name": "exact: a child set of permissions",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "edit",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "merge",
+       {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "root",
+       {
+        "op": "text",
+        "language": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            47,
+            119,
+            116,
+            47,
+            116,
+            97,
+            115,
+            107,
+            45,
+            55
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "concat",
+            "args": [
+             {
+              "op": "literal",
+              "codes": [
+               47
+              ]
+             },
+             {
+              "op": "repeat",
+              "arg": {
+               "op": "chars",
+               "ranges": [
+                [
+                 97,
+                 122
+                ],
+                [
+                 48,
+                 57
+                ],
+                [
+                 45,
+                 45
+                ]
+               ]
+              },
+              "min": 1,
+              "max": null
+             }
+            ]
+           },
+           "min": 0,
+           "max": null
+          }
+         ]
+        }
+       },
+       true
+      ],
+      [
+       "shell",
+       {
+        "op": "record",
+        "fields": [
+         [
+          "git",
+          {
+           "op": "choice",
+           "values": [
+            "status",
+            "diff"
+           ]
+          },
+          true
+         ]
+        ],
+        "rest": {
+         "op": "empty"
+        }
+       },
+       false
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"fields\":[[\"edit\",{\"op\":\"choice\",\"values\":[false,true]},true],[\"merge\",{\"op\":\"choice\",\"values\":[false]},true],[\"root\",{\"language\":{\"args\":[{\"codes\":[47,119,116,47,116,97,115,107,45,55],\"op\":\"literal\"},{\"arg\":{\"args\":[{\"codes\":[47],\"op\":\"literal\"},{\"arg\":{\"op\":\"chars\",\"ranges\":[[45,45],[48,57],[97,122]]},\"max\":null,\"min\":1,\"op\":\"repeat\"}],\"op\":\"concat\"},\"max\":null,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true],[\"shell\",{\"fields\":[[\"git\",{\"op\":\"choice\",\"values\":[\"diff\",\"status\"]},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},false]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"version\":1}",
+   "hash": "3bc7947b509401a6baedf384439888dc7997d13b5560019d34a2303808f73ec2"
+  },
+  {
+   "name": "exact: every value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "any"
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"any\"},\"version\":1}",
+   "hash": "ae86d3b8ba57bee0b4f9bfe2e976e8ca6c435668028201ccbd95ad653221f72f"
+  },
+  {
+   "name": "exact: no value",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"empty\"},\"version\":1}",
+   "hash": "1428ffe45787a6892743a7e38e012566c7a5d2cedacd601228f7a53263e13d38"
+  },
+  {
+   "name": "a pair of text bounds",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "text",
+     "language": {
+      "op": "concat",
+      "args": [
+       {
+        "op": "literal",
+        "codes": [
+         97
+        ]
+       },
+       {
+        "op": "repeat",
+        "arg": {
+         "op": "literal",
+         "codes": [
+          10
+         ]
+        },
+        "min": 0,
+        "max": 1
+       }
+      ]
+     }
+    },
+    "at_most": {
+     "op": "text",
+     "language": {
+      "op": "literal",
+      "codes": [
+       97
+      ]
+     }
+    }
+   },
+   "canonical": "{\"at_least\":{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},\"at_most\":{\"language\":{\"codes\":[97],\"op\":\"literal\"},\"op\":\"text\"},\"exact\":false,\"version\":1}",
+   "hash": "14f46e2850f37d02bf0de1dc07135faa58b1ec06e43c94787fcf00ba36d544a9"
+  },
+  {
+   "name": "a pair of record bounds",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "record",
+     "fields": [
+      [
+       "r",
+       {
+        "op": "text",
+        "language": {
+         "op": "concat",
+         "args": [
+          {
+           "op": "literal",
+           "codes": [
+            97
+           ]
+          },
+          {
+           "op": "repeat",
+           "arg": {
+            "op": "literal",
+            "codes": [
+             10
+            ]
+           },
+           "min": 0,
+           "max": 1
+          }
+         ]
+        }
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    },
+    "at_most": {
+     "op": "record",
+     "fields": [
+      [
+       "r",
+       {
+        "op": "text",
+        "language": {
+         "op": "literal",
+         "codes": [
+          97
+         ]
+        }
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "canonical": "{\"at_least\":{\"fields\":[[\"r\",{\"language\":{\"args\":[{\"codes\":[97],\"op\":\"literal\"},{\"arg\":{\"codes\":[10],\"op\":\"literal\"},\"max\":1,\"min\":0,\"op\":\"repeat\"}],\"op\":\"concat\"},\"op\":\"text\"},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"at_most\":{\"fields\":[[\"r\",{\"language\":{\"codes\":[97],\"op\":\"literal\"},\"op\":\"text\"},true]],\"op\":\"record\",\"rest\":{\"op\":\"empty\"}},\"exact\":false,\"version\":1}",
+   "hash": "7398bc9ebb6a30c33b86bb1b8aafc76cd55085cbdbf81f867a94b132ab25e2d3"
+  },
+  {
+   "name": "the widest pair",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "any"
+    },
+    "at_most": {
+     "op": "empty"
+    }
+   },
+   "canonical": "{\"at_least\":{\"op\":\"any\"},\"at_most\":{\"op\":\"empty\"},\"exact\":false,\"version\":1}",
+   "hash": "46832d577be5fac845252de0dd54dda4b3dc9afea04c90f2422073d9eb9fad02"
+  },
+  {
+   "name": "a pair of choices",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "union",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      {
+       "op": "choice",
+       "values": [
+        "a"
+       ]
+      }
+     ]
+    },
+    "at_most": {
+     "op": "choice",
+     "values": [
+      false
+     ]
+    }
+   },
+   "canonical": "{\"at_least\":{\"args\":[{\"op\":\"choice\",\"values\":[\"a\"]},{\"op\":\"choice\",\"values\":[false,true]}],\"op\":\"union\"},\"at_most\":{\"op\":\"choice\",\"values\":[false]},\"exact\":false,\"version\":1}",
+   "hash": "bb1565051c75582bb93f018c05e01cead3470701cce9eb421d88e24787da1adf"
+  },
+  {
+   "name": "a source is carried and not hashed",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "source": {
+     "written": "by hand"
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[false,true]},\"version\":1}",
+   "hash": "2916ea53a361462940be4976fff8afd4cb8304fc3fe87a89a74a9f6960456212"
+  },
+  {
+   "name": "another kind is hashed",
+   "document": {
+    "kind": "other",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[false,true]},\"version\":1}",
+   "hash": "2916ea53a361462940be4976fff8afd4cb8304fc3fe87a89a74a9f6960456212"
+  },
+  {
+   "name": "version is hashed",
+   "document": {
+    "kind": "record_language",
+    "version": 2,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "canonical": "{\"exact\":true,\"language\":{\"op\":\"choice\",\"values\":[false,true]},\"version\":2}",
+   "hash": "5e05f006cee09d4f22ec9a9fc0d4ac220f5d3a36c2750e1bd49eb256385adee1"
+  },
+  {
+   "name": "null",
+   "document": null,
+   "invalid": true
+  },
+  {
+   "name": "a list",
+   "document": [],
+   "invalid": true
+  },
+  {
+   "name": "an empty object",
+   "document": {},
+   "invalid": true
+  },
+  {
+   "name": "only a language",
+   "document": {
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "the version is true",
+   "document": {
+    "kind": "record_language",
+    "version": true,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "the version is text",
+   "document": {
+    "kind": "record_language",
+    "version": "1",
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "exact is 1",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": 1,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "not exact with only a language",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a language and both bounds",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "at_least": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "at_most": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "bounds and a language",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "at_most": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "language": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "exact with only the bounds",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "at_least": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    },
+    "at_most": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "one bound missing",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": false,
+    "at_least": {
+     "op": "choice",
+     "values": [
+      true,
+      false
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "an unknown op",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "set"
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a key the op does not hold",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "empty",
+     "extra": 1
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "no op",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "values": [
+      1
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a choice of a number that is not whole",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      1.5
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a choice of a list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      [
+       1
+      ]
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a choice of a map",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "choice",
+     "values": [
+      {
+       "a": 1
+      }
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a text of a malformed regular node",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "chars",
+      "ranges": [
+       [
+        5,
+        1
+       ]
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a text of a record node",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "text",
+     "language": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a record with no rest",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ]
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a record with rest any",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "any"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a field named twice",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ],
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "required is 1",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       1
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a field name that is no text",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       1,
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       },
+       true
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a field of two parts",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": [
+      [
+       "x",
+       {
+        "op": "choice",
+        "values": [
+         true,
+         false
+        ]
+       }
+      ]
+     ],
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "fields as a map",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "record",
+     "fields": {
+      "x": {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      }
+     },
+     "rest": {
+      "op": "empty"
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "args that are no list",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": {
+      "op": "choice",
+      "values": [
+       true,
+       false
+      ]
+     }
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "an arg that is no node",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "union",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      },
+      1
+     ]
+    }
+   },
+   "invalid": true
+  },
+  {
+   "name": "a complement with args",
+   "document": {
+    "kind": "record_language",
+    "version": 1,
+    "exact": true,
+    "language": {
+     "op": "complement",
+     "args": [
+      {
+       "op": "choice",
+       "values": [
+        true,
+        false
+       ]
+      }
+     ]
+    }
+   },
+   "invalid": true
+  }
+ ]
+}
