@@ -50,8 +50,10 @@ Changelog = "https://github.com/tetrionlabs/mathema/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Documentation site tooling only, not needed to use mathema itself.
+# One documentation plugin needs Python 3.11.5 or later: the patched releases
+# of the HTML selector library it parses with no longer support earlier versions.
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.25",
-        "mkdocs-llmstxt>=0.2"]
+        "mkdocs-llmstxt>=0.2; python_full_version >= '3.11.5'"]
 # numpy is not a runtime dependency of mathema itself; installed, it
 # turns on the array fast paths (matrix structure checks, array-shaped
 # parameter synthesis) and is exercised unconditionally by the tests.
@@ -105,7 +107,7 @@ coverage = ["coverage>=7"]
 symbology = ["mathema-symbology>=0.3"]
 # String and structured-value domains, the `L[...]` languages a claim
 # names (see docs/language.md), installed separately.
-language = ["mathema-language>=0.2.0,<0.3"]
+language = ["mathema-language>=0.2.0,<0.4"]
 # Every runtime CAPABILITY at once (not the docs/test dev tooling):
 # `pip install "mathema[all]"`. smt pulls z3-solver (~100 MB native).
 all = ["mathema[numpy,smt,mcp,coverage,language]"]

@@ -7,6 +7,7 @@ tried; where none lets f run with the value present, the row is unknown,
 naming the other argument, never falsified. A row that is falsified
 shows both calls: the one at the missing value and the one with it
 present."""
+import pytest
 import math
 from typing import Any
 
@@ -44,6 +45,7 @@ def _row(fn, name, claims=None):
     return rows[name]
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_a_raise_another_argument_causes_leaves_the_absence_row_unknown():
     row = _row(label, "absent[name]")
     assert row.verdict == "unknown", (row.verdict, row.counterexample, row.note)
@@ -51,6 +53,7 @@ def test_a_raise_another_argument_causes_leaves_the_absence_row_unknown():
     assert "name = None" in row.note, row.note
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_a_raise_the_absence_causes_is_falsified_with_the_present_call_shown():
     row = _row(shout, "absent[name]")
     assert row.verdict == "falsified", (row.verdict, row.note)

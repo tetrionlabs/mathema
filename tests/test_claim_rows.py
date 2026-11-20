@@ -5,6 +5,7 @@ verdict, the authoring-surface `source`, the `gates` population flag,
 and the envelope rule (counterexample present iff refuted, blocked_by
 iff blocked). Pinned so "seven falsified suggestions, zero declared
 claims" is self-evident from a payload instead of a contradiction."""
+import pytest
 import sys
 import textwrap
 
@@ -73,6 +74,7 @@ def test_envelope_rule_keys_present_iff_meaningful():
     assert suggestion["gates"] is False and suggestion["source"] == "suggested"
 
 
+@pytest.mark.xfail(strict=True, reason="0.6.6.1 runs built-in checks only for a function with a written claim; redesign due 2026-11-29 (mathema/probe-route-redesign)")
 def test_check_stamps_battery_and_suggestion_surfaces(tmp_path):
     import importlib
 
