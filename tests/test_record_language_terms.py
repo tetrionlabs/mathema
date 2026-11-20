@@ -44,12 +44,15 @@ SUPPORT = _support()
 SOLVER = ("a_found_member_is_a_member", "none_found_means_no_catalogue_value",
           "a_catalogue_value_is_found", "a_term_and_its_complement_share_nothing",
           "a_term_equals_its_canonical_form", "inclusion_is_monotone", "inclusion_is_transitive",
-          "the_child_is_inside_its_parent", "generated_terms_keep_the_laws")
+          "the_child_is_inside_its_parent", "generated_terms_keep_the_laws",
+          "a_text_of_any_character_is_found", "a_value_member_does_not_place_is_not_returned",
+          "a_solver_value_of_each_kind_is_read", "the_solvers_record_is_closed",
+          "no_answer_from_the_solver_is_unknown")
 
 
 def test_the_vector_file_holds_what_it_is_expected_to():
     assert (len(VALID), len(INVALID)) == (46, 30)
-    assert len(CLAIMS) == 40
+    assert len(CLAIMS) == 50
 
 
 @pytest.mark.parametrize("vector", VALID, ids=[v["name"] for v in VALID])
