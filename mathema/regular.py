@@ -32,7 +32,9 @@ derivatives over its own alphabet, within a budget, and `node_member`
 and `node_matcher` read a bare node over all characters. `validate`,
 `member` and `matcher` on a definition, `node_member`, `node_matcher`,
 `atoms`, `shortest_member` and `MATCH_BUDGET` are draft, not part of the
-public interface yet.
+public interface yet. `member` and `matcher` also accept a bare node (an
+object with an `op`) and read it as `node_member` and `node_matcher` do,
+for the callers that pass one.
 """
 from __future__ import annotations
 
