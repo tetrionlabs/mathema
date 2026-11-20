@@ -1873,6 +1873,9 @@ def cmd_docsync(args) -> int:
               f"and replaces it")
     for d in report.defects:
         print(f"FAIL {d['message']}")
+    for a in report.ambiguous:
+        from .verify import ambiguous_text_note
+        print(ambiguous_text_note(a["key"], a, command="docsync"))
     for u in report.unreadable:
         from .conjecture import _diagnostic
         which = f"claim {u['claim']!r}" if u["claim"] else "a claim"

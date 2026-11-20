@@ -1882,6 +1882,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .conjecture import CanonicalTextError, InvalidConjecture, _resolve_func_ref
     from .inventory import chain_moved, function_dependencies
+    from .sync import earlier_literal_rows
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
                        record as write_record, write_yaml)
@@ -2074,6 +2075,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # per key, the earlier record rows of claims mathema could not store
     # this run, kept on disk as they were and unchecked
     unchecked_rows: dict = {}
+    # per key, the claims whose stored text an earlier release wrote for
+    # two claims: claim name -> the row's stored statement and verdict
+    ambiguous_rows: dict = {}
 
     def _drop_key_state(key: str) -> None:
         invalidated_keys.discard(key)
@@ -2085,6 +2089,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         stale_rows.pop(key, None)
         escapes_moved.pop(key, None)
         unchecked_rows.pop(key, None)
+        ambiguous_rows.pop(key, None)
 
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
@@ -2227,6 +2232,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                             negation_moved.append((key, conflict["claim"]))
                         if not moves:
                             release_moved.append((key, conflict["claim"]))
+                        continue
+                    if conflict.get("kind") == "ambiguous-text":
+                        ambiguous_rows.setdefault(key, {})[conflict["claim"]] = {
+                            "statement": conflict.get("verified"),
+                            "verdict": conflict.get("verdict")}
+                        if "domain-escapes" in (conflict.get("moved") or ()):
+                            escapes_moved.setdefault(key, []).append(conflict["claim"])
+                        out.lines.append(ambiguous_text_note(key, conflict))
                         continue
                     if conflict.get("kind") == "canonical-text-defect":
                         # reported with the claims `claims_now` leaves out
@@ -2400,6 +2413,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         and version_moved is None and body_moved is None
                         and not pinf_moved and not definitions_moved
                         and not stale_rows.get(key) and not escapes_moved.get(key)
+                        and not earlier_literal_rows(verified_entry)
                         and (premise_now == (recorded_premises or {})
                              if premise_now or recorded_premises else True))
             deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2545,6 +2559,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else "stored text unreadable" if stale_rows.get(key)
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
+                   else "string literals stored by an earlier release"
+                   if earlier_literal_rows(verified_entry)
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
                    else "claims changed" if same_form(facts_now.form, recorded_form)
                    else "form changed")
             rec.meta = {**(getattr(rec, "meta", None) or {}),
@@ -2576,6 +2594,13 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 rec.meta["mathema.invalidated_by"] = []
             if definitions_now:
                 rec.meta["mathema.definition_rows"] = definitions_now
+            for probe in rec.probes:
+                earlier = ambiguous_rows.get(key, {}).get(getattr(probe, "name", None))
+                if earlier is not None:
+                    # the row's earlier reading rides on the claim as
+                    # written, for `mathema accept --as superseded`
+                    probe.meta = {**(probe.meta or {}),
+                                  "mathema.earlier_reading": earlier}
             prior_records[key] = _record_before(root, key)
             written = write_record(rec, key=key, root=root,
                                    claims=current_claims,
@@ -2850,6 +2875,29 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     if negation_moved:
         out.lines.append(negation_moved_note(len(negation_moved)))
     return out
+
+
+def ambiguous_text_note(key: str, conflict: dict,
+                        command: str = "verify") -> str:
+    """Intent:
+        The warning for an `ambiguous-text` conflict of `key`: the
+        stored text, the claim this release reads it as, the claim as
+        written that an earlier release also wrote it for, what this
+        `command` run does with the claim, and the remedy when the
+        author edited the first claim into the second.
+    """
+    name = conflict["claim"]
+    done = ("the claim is checked as written and re-recorded"
+            if command == "verify" else
+            "verify checks the claim as written and re-records it")
+    return (f"warning {key}: claim {name!r}: the stored text "
+            f"{conflict.get('verified')} is ambiguous: this release reads it "
+            f"as {conflict.get('reads_as')}, and an earlier release wrote "
+            f"the same text for the claim as written, "
+            f"{conflict.get('authored')}. {done[0].upper()}{done[1:]}; if you "
+            f"edited the claim from the first to the second, record the "
+            f"edit with: mathema accept {key} {name} --as superseded; if you "
+            f"did not, nothing needs doing")
 
 
 #: the characters a domain escape most often names, by the words a

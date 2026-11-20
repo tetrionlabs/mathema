@@ -140,7 +140,7 @@ def test_docsync_reads_a_record_with_the_old_quoting(tmp_path):
 
 
 def test_verify_says_the_stored_text_of_a_literal_was_corrected(tmp_path):
-    env = _project(tmp_path, ("two_literals", "plain"))
+    env = _project(tmp_path, ("both_quotes", "plain"))
     _old_and_current(tmp_path, env)
     run = _run(tmp_path, env, "verify")
     assert run.returncode == 0, run.stdout + run.stderr

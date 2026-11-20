@@ -47,6 +47,7 @@ class SyncReport:
     unreadable: list = field(default_factory=list)     # {key, claim, where, error}
     stale_records: list = field(default_factory=list)  # {key, claim, verified}
     defects: list = field(default_factory=list)        # {key, claim, message}
+    ambiguous: list = field(default_factory=list)      # {key, claim, verified, reads_as, authored}
 
 
 def _completed(cj, fn):
@@ -395,6 +396,62 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
     return moved or None
 
 
+def _other_reading(c: dict, row: dict, fn=None) -> "str | None":
+    """Intent:
+        The canonical text of the claim a verified row's stored
+        statement reads as in this release, when that is a claim other
+        than the authored `c`; None when the stored text does not read,
+        or reads as `c`.
+    """
+    try:
+        authored, stored = _claim_identity(c, fn), _row_identity(row, fn)
+    except Exception:
+        return None
+    if not authored or not stored or authored == stored:
+        return None
+    return _display_claim(as_recorded(row))
+
+
+def _ambiguous(name: str, surface: str, c: dict, row: dict, reads_as: str,
+               moved: tuple, escapes: "list | None" = None) -> dict:
+    """Intent:
+        The `ambiguous-text` conflict for claim `name`: the verified
+        `row`'s stored statement is the text an earlier release wrote
+        for the authored claim `c` (under the renderings `moved`) and
+        also, read in this release, the text of another claim
+        (`reads_as`), so the record cannot say which of the two it
+        holds the verdict of.
+    """
+    return {"kind": "ambiguous-text", "claim": name, "surface": surface,
+            "authored": _display_claim(c), "verified": row.get("statement"),
+            "reads_as": reads_as, "verdict": row.get("verdict"),
+            "moved": moved, "escapes": escapes}
+
+
+def earlier_literal_rows(verified_entry: "dict | None") -> list:
+    """Intent:
+        The names of the authored claim rows of a verified record that
+        an earlier release wrote (`written_under_earlier_text` of the
+        row) and whose stored statement holds a string literal: text
+        whose reading this release cannot take on trust, so each such
+        claim is checked again as written and re-recorded once.
+    """
+    out = []
+    for row in (verified_entry or {}).get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        meta = row.get("meta") or {}
+        if (meta.get("mathema.surface") in ("mathema", "builtin", "types")
+                or meta.get("mathema.companion_of")
+                or row.get("name") == "dependencies_current"):
+            continue
+        statement = row.get("statement") or ""
+        if (('"' in statement or "'" in statement)
+                and written_under_earlier_text(verified_entry, row)):
+            out.append(row["name"])
+    return out
+
+
 def _checked_differently(c: dict, row: dict) -> bool:
     """Intent:
         Whether an authored claim asks to be checked differently from
@@ -467,6 +524,12 @@ def claim_conflicts(fn, file_entry: dict,
           literal quoting, negation parentheses or domain escapes is
           recognised only in a row written under earlier statement
           text rules (`written_under_earlier_text` of the row).
+        - kind "ambiguous-text": the verified row's stored text is
+          what an earlier release wrote for the authored claim under
+          its literal quoting, and is also, read in this release, the
+          text of another claim (`reads_as`); the claim is adjudicated
+          as written, and the run says the text is ambiguous rather
+          than calling it a release move.
         - kind "supersession": an authored surface differs from the
           VERIFIED row. The verified layer is the record and wins
           (materialization adjudicates its version); changing a
@@ -518,6 +581,13 @@ def claim_conflicts(fn, file_entry: dict,
                 # the row records the values an earlier release read for
                 # this claim's domain: adjudicated on the values it names
                 seen.add((name, "supersession"))
+                other = (_other_reading(c, v, fn)
+                         if "literal-quoting" in escapes[1] else None)
+                if other is not None:
+                    out.append(_ambiguous(name, surface, c, v, other,
+                                          ("domain-escapes",) + escapes[1],
+                                          escapes[0]))
+                    continue
                 out.append({"kind": "release-move", "claim": name,
                             "moved": ("domain-escapes",) + escapes[1],
                             "escapes": escapes[0],
@@ -531,6 +601,11 @@ def claim_conflicts(fn, file_entry: dict,
                 # rendering wrote for it: adjudicated as written, the
                 # same way as a release move of the canonical text
                 seen.add((name, "supersession"))
+                other = (_other_reading(c, v, fn)
+                         if "literal-quoting" in moved else None)
+                if other is not None:
+                    out.append(_ambiguous(name, surface, c, v, other, moved))
+                    continue
                 out.append({"kind": "release-move", "claim": name,
                             "moved": moved,
                             "surface": surface,
@@ -914,7 +989,10 @@ def _sync(targets: list, root: str, write_docstrings: bool) -> SyncReport:
         report.conflicts.extend(
             {"key": key, **c} for c in conflicts
             if c.get("kind") not in ("release-move", "unreadable-record",
-                                     "canonical-text-defect"))
+                                     "canonical-text-defect",
+                                     "ambiguous-text"))
+        report.ambiguous.extend(
+            {"key": key, **c} for c in conflicts if c.get("kind") == "ambiguous-text")
         report.stale_records.extend(
             {"key": key, **c} for c in conflicts if c.get("kind") == "unreadable-record")
         report.materialized.append(key)
