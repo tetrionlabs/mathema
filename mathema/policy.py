@@ -395,15 +395,17 @@ def guard_is_read(guard) -> bool:
 
 
 def _guard_raises_the_claimed(guard, expected: "str | None", fn) -> bool:
-    """Whether a guard's behaviour meets a stated `raises(...)`: any
-    exception when the statement names none, else the class the guard
-    raises is the claimed class or a subclass of it, compared as
-    classes."""
-    if guard[0] != "raises" or expected is None:
+    """Whether a guard's behaviour meets a stated `raises(...)`: the
+    guard's path was read as raising one class (`guard_is_read`), and
+    when the statement names a class, the class the guard raises is the
+    claimed class or a subclass of it, compared as classes."""
+    if guard[0] != "raises":
         return True
     cls = guard[3] if len(guard) > 3 else None
     if cls is None:
         return False
+    if expected is None:
+        return True
     from .conjecture import _resolve_exception_type
     try:
         claimed = _resolve_exception_type(expected, fn)
