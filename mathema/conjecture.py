@@ -8300,6 +8300,9 @@ class _ClaimContext:
     # synthesises to, and the derive backend turns into sympy
     # assumptions (Q.symmetric, Q.positive_definite, ...)
     premise_structures: dict = field(default_factory=dict)
+    # the parameters the probe draws whose shape rests on the code (a
+    # default or a body use), `{param: ParameterShape}`
+    drawn_shapes: dict = field(default_factory=dict)
     # True for `assuming is_defined(f)`: the claim quantifies over the
     # exact region where every call to f returns, derive excludes
     # f's raise regions by construction (their negations feed the
@@ -12467,6 +12470,117 @@ def _family_premise_guard(ctx: "_ClaimContext", fn, facts, kinds: dict,
         ignore=ignore)
 
 
+#: the kind a parameter whose kind is unknown is drawn as, by the shape
+#: its evidence establishes; a number keeps the scalar draw
+_KIND_OF_SHAPE = {"string": "string", "sequence": "sequence",
+                  "mapping": "dict", "bool": "bool"}
+
+
+def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                bundles: dict) -> "tuple[Probe | None, dict]":
+    """Intent:
+        The shape evidence for each parameter the claim passes whole to
+        f and leaves for the probe to draw (no domain binds it, no
+        literal or default holds it): `(row, kinds)`, `row` the unknown
+        outcome when one of them has no evidence or disagreeing
+        evidence, else None with `kinds` updated to the shape the
+        evidence establishes for a parameter whose kind was unknown.
+        The parameters whose shape rests on the code are kept on
+        `ctx.drawn_shapes`.
+    """
+    from ._shape_evidence import (element_shape_missing, kind_shape,
+                                  not_established_text, parameter_shapes)
+    cj = ctx.cj
+    params = list(facts.params)
+    sides = [t for t in (cj.lhs, cj.rhs,
+                         *[part for link in (cj.links or ())
+                           for part in (link[0], link[2])]) if t]
+    varied: set = set()
+    held = set(_literal_call_args(cj.lhs, params, varied))
+    if cj.rhs:
+        held |= set(_literal_call_args(cj.rhs, params, varied))
+    held -= varied
+    try:
+        kept, pins, _problem = call_defaults(fn, cj)
+    except Exception:
+        kept, pins = {}, {}
+    held |= set(kept) | set(pins)
+    named = _names_in_claim(cj)
+    drawn = [p for p in params
+             if p in named and p not in held and p not in bundles
+             and p not in ctx.receiver
+             and ctx.cj_domain.get(p) is None
+             and any(_passed_whole(t, params, p) for t in sides)]
+    if not drawn:
+        return None, kinds
+    shapes = parameter_shapes(fn, facts, drawn, ctx.cj_domain,
+                              written=set(cj.domain or {}))
+    out = dict(kinds)
+    for p in drawn:
+        shape = shapes[p]
+        text = (not_established_text(fn, shape) if not shape.established
+                else element_shape_missing(fn, shape))
+        if text is not None:
+            return Probe(cj.name, ctx.statement, "unknown", route=None,
+                         note=f"{ctx.note}; {text}".lstrip("; "),
+                         meta={"mathema.probe_gap": "shape-not-established",
+                               "mathema.shape": {p: shape.as_record()}}), kinds
+        assert shape.evidence is not None
+        if shape.evidence.shape in _KIND_OF_SHAPE \
+                and kind_shape(out.get(p)) != shape.evidence.shape:
+            out[p] = _KIND_OF_SHAPE[shape.evidence.shape]
+        if not shape.stated:
+            ctx.drawn_shapes[p] = shape
+    return None, out
+
+
+def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
+                 call_raised_at: list, exc: BaseException) -> "dict | None":
+    """Intent:
+        The draw defect `exc` shows, when f itself raised it at an
+        operation on the value of a parameter whose shape only the code
+        established (`ctx.drawn_shapes`): `{param, raised, line, place,
+        quoted, drawn, evidence}`; None otherwise.
+    """
+    if not ctx.drawn_shapes or call_raised[0] != "f" \
+            or call_raised_at[0] is None:
+        return None
+    from ._shape_evidence import definition_line_text, wrong_shape_use
+    from ._signatures import callable_signature
+    _callee, args, kwargs = call_raised_at[0]
+    try:
+        values = dict(callable_signature(fn).bind_partial(*args, **kwargs)
+                      .arguments)
+    except (TypeError, ValueError):
+        return None
+    found = wrong_shape_use(fn, values, exc)
+    if found is None or found[0] not in ctx.drawn_shapes:
+        return None
+    p, line = found
+    place, quoted = definition_line_text(fn, line)
+    evidence = ctx.drawn_shapes[p].evidence
+    return {"param": p, "raised": type(exc).__name__, "line": line,
+            "place": place, "quoted": quoted,
+            "drawn": type(values[p]).__name__,
+            "evidence": evidence.detail if evidence is not None else ""}
+
+
+def _draw_defect_row(ctx: "_ClaimContext", statement: str, note: str,
+                     defect: dict) -> "Probe":
+    """The unknown outcome of a probe whose draw had the wrong shape."""
+    p = defect["param"]
+    quoted = f' "{defect["quoted"]}"' if defect["quoted"] else ""
+    text = (f"the draw for {p} had the wrong shape ({defect['place']}{quoted}): "
+            f"f raised {defect['raised']} at an operation on {p}, drawn as "
+            f"{defect['drawn']} because {defect['evidence']}; bind {p} in "
+            f"the claim (for {p} in ...), or annotate it")
+    return Probe(ctx.cj.name, statement, "unknown", route=None,
+                 note=f"{note}; {text}".lstrip("; "),
+                 meta={"mathema.draw_defect": {
+                     k: defect[k] for k in ("param", "raised", "line",
+                                            "drawn")}})
+
+
 def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
                  sampling) -> "Probe":
     """Intent:
@@ -12476,10 +12590,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         `_null_is_a_hole`).
     """
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
+    ctx.drawn_shapes = {}
     try:
         row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
+    if ctx.drawn_shapes and row.verdict in ("holds", "falsified", "proven"):
+        row.meta = {**(row.meta or {}), "mathema.drawn_shapes": {
+            p: shape.as_record() for p, shape in ctx.drawn_shapes.items()}}
     # a negated predicate's probe ran the positive claim
     return _negation_of(row) if ctx.cj.negated else row
 
@@ -12728,6 +12846,14 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the built-in claim {cj.relation} could not "
                           "decide it, and the probe has no other way to "
                           "check it")
+    # every parameter the claim passes to f is drawn in a shape positive
+    # evidence establishes, or not at all
+    shape_row, kinds = _shape_gate(ctx, fn, facts, kinds, bundles)
+    if shape_row is not None:
+        return shape_row
+    bare = [p for p, k in kinds.items()
+            if k in ("scalar", "unknown") and ctx.cj_domain.get(p) is None
+            and p not in shaped and p not in bundles]
     # a string parameter with no stated domain has no honest sampling
     # story, as in the automatic probes: numbers drawn for it would
     # falsify the claim on inputs the function was never meant to take
@@ -13611,6 +13737,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             try:
                 v = eval(code_l, {"__builtins__": {}}, env)
             except Exception as e:
+                defect = _draw_defect(ctx, fn, call_raised, call_raised_at, e)
+                if defect is not None:
+                    return _draw_defect_row(ctx, statement, note, defect)
                 checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
                     cx = (f"{_point_text(args)}: raised "
@@ -13800,6 +13929,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     # number representation's last ulp
                     cx_stratum = {"mathematics": "sound", **cx_stratum}
                 break
+            # a TypeError or AttributeError at an operation on a value
+            # whose shape only the code suggested is a defect of the draw
+            defect = _draw_defect(ctx, fn, call_raised, call_raised_at, e)
+            if defect is not None:
+                return _draw_defect_row(ctx, statement, note, defect)
             # a TypeError under a NON-INTEGER sample against a callable
             # with an int-typed parameter is a claim-domain
             # misspecification, not a counterexample: the sampled point
