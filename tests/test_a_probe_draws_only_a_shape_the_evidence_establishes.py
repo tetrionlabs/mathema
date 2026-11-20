@@ -376,6 +376,16 @@ FNS = '''
         if flag:
             t = [1.0]
         return t[0]
+
+
+    def wrapped_each_time(y0):
+        t = y0
+        out = 0.0
+        for k in range(2):
+            if k > 0:
+                out = out + t[0]
+            t = [t]
+        return out
 '''
 
 
@@ -481,10 +491,10 @@ def test_a_claim_that_binds_the_value_is_judged_on_it(mod):
     assert held.verdict == "holds", (held.verdict, held.note)
 
 
-def test_a_plain_local_copy_carries_the_parameters_uses(mod):
+def test_a_copy_an_accumulating_loop_binds_again_carries_nothing(mod):
     p = _row(mod.running, "abs(f(xs, y0) - y0) <= abs(y0) + 1e9")
-    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
-    assert p.meta["mathema.drawn_shapes"]["y0"]["shape"] == "number"
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
 
 
 def test_a_copy_rebound_before_its_use_carries_nothing(mod):
@@ -693,3 +703,8 @@ def test_a_copy_read_in_a_way_not_read_through_leaves_the_shape_unread(
     p = _row(getattr(mod, name), text)
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert "may bind" not in (p.note or "")
+
+
+def test_a_binding_later_in_a_loop_stops_the_read_through(mod):
+    p = _row(mod.wrapped_each_time, "f(y0) == y0")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)

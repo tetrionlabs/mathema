@@ -1015,9 +1015,7 @@ def _with_copies_read_through(fdef, params: list):
         never rebound. A read of `local` after the copy's line is read
         through unless another binding of `local` may come before it: a
         binding on an earlier line, or on the same line in another
-        statement, or one later in a loop around both that gives
-        `local` a value not read from `local` itself (an accumulator,
-        `local = local + v`, keeps the read). Only reads in the
+        statement, or one anywhere in a loop around both. Only reads in the
         function's own scope are read through; a local a nested scope
         declares `nonlocal`, or assigns with `:=`, is never read
         through, nor is one a nested scope reads or binds when the
@@ -1139,37 +1137,19 @@ def _owner(binding, parents: dict):
 
 def _may_precede(binding, read, parents: dict) -> bool:
     """Intent:
-        Whether `binding` may take effect before `read` with a value not
-        read from the bound name itself: it is on an earlier line, or on
-        the read's line in another statement, or it lies in a loop that
-        also holds the read and binds a value that does not read the
-        name (`t = "x"`, unlike `t = t + v`).
+        Whether `binding` may take effect before `read`: it lies in a
+        loop that also holds the read, or it is on an earlier line, or
+        on the read's line in another statement.
     """
-    owner = _owner(binding, parents)
+    loops = [n for n in _ancestors(read, parents)
+             if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
+    around = {id(a) for a in _ancestors(binding, parents)}
+    if any(id(n) in around for n in loops):
+        return True
     if binding.lineno < read.lineno:
         return True
     if binding.lineno == read.lineno:
-        return owner is not _owner(read, parents)
-    loops = [n for n in _ancestors(read, parents)
-             if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
-    if not any(id(n) in {id(a) for a in _ancestors(binding, parents)}
-               for n in loops):
-        return False
-    return not _reads_itself(owner, binding)
-
-
-def _reads_itself(owner, binding) -> bool:
-    """Intent:
-        Whether the statement `owner` binds the name `binding` to a value
-        read from that name: an augmented assignment, or an assignment
-        whose value reads the name.
-    """
-    name = getattr(binding, "id", None)
-    if isinstance(owner, ast.AugAssign):
-        return True
-    if isinstance(owner, ast.Assign) and name is not None:
-        return any(isinstance(n, ast.Name) and n.id == name
-                   and isinstance(n.ctx, ast.Load) for n in ast.walk(owner.value))
+        return _owner(binding, parents) is not _owner(read, parents)
     return False
 
 
