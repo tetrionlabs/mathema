@@ -417,8 +417,10 @@ class ParamUses:
         A product with a number literal is no such use: it repeats a
         string or a sequence as well. A sum with a literal list or tuple
         (`[0] + xs`) names the container the parameter is (`container`:
-        `(line, (text, "list" or "tuple"))`). `assigned` holds the
-        parameters the body rebinds.
+        `(line, (text, "list" or "tuple"))`). An argument of a
+        `math`/`cmath` function is a numeric use only a number supports,
+        never a sequence (`scalar`). `assigned` holds the parameters the
+        body rebinds.
     """
     iterated: frozenset = frozenset()
     arithmetic: frozenset = frozenset()
@@ -426,6 +428,7 @@ class ParamUses:
     numeric: dict = field(default_factory=dict)
     text: dict = field(default_factory=dict)
     container: dict = field(default_factory=dict)
+    scalar: dict = field(default_factory=dict)
     assigned: frozenset = frozenset()
 
 
@@ -460,6 +463,7 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
     numeric: dict = {}
     text: dict = {}
     container: dict = {}
+    scalar: dict = {}
     assigned: set = set()
 
     def note(table: dict, name, node, what: str) -> None:
@@ -468,7 +472,7 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                 (getattr(node, "lineno", 0), what))
 
     for node in ast.walk(fdef):
-        _note_kind_uses(node, note, numeric, text, assigned)
+        _note_kind_uses(node, note, numeric, text, assigned, scalar)
         _note_container_uses(node, note, container)
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
             iterated.add(node.iter.id)
@@ -531,15 +535,16 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
                      numeric={p: tuple(v) for p, v in numeric.items()},
                      text={p: tuple(v) for p, v in text.items()},
                      container={p: tuple(v) for p, v in container.items()},
+                     scalar={p: tuple(v) for p, v in scalar.items()},
                      assigned=frozenset(assigned) & pset)
 
 
 def _note_kind_uses(node, note, numeric: dict, text: dict,
-                    assigned: set) -> None:
+                    assigned: set, scalar: "dict | None" = None) -> None:
     """Intent:
         Record, for one syntax node, the parameter uses that state a
-        kind of value (`ParamUses.numeric`, `ParamUses.text`) and the
-        names it rebinds.
+        kind of value (`ParamUses.numeric`, `ParamUses.text`,
+        `ParamUses.scalar`) and the names it rebinds.
     """
     if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
         assigned.add(node.id)
@@ -576,10 +581,15 @@ def _note_kind_uses(node, note, numeric: dict, text: dict,
             (isinstance(func, ast.Name) and func.id in _NUMERIC_BUILTINS)
             or (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
                 and func.value.id in _NUMERIC_MODULES))
+        module_callee = isinstance(func, ast.Attribute) \
+            and isinstance(func.value, ast.Name) \
+            and func.value.id in _NUMERIC_MODULES
         if numeric_callee:
             for arg in node.args:
                 if isinstance(arg, ast.Name):
                     note(numeric, arg.id, node, ast.unparse(node))
+                    if module_callee and scalar is not None:
+                        note(scalar, arg.id, node, ast.unparse(node))
     elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
         assigned.add(node.target.id)
 

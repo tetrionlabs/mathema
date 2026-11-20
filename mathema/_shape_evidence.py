@@ -78,6 +78,9 @@ class Evidence:
     #: (`x * y`) names a number when nothing else names a shape, and is
     #: also what a string or a sequence supports
     firm: bool = True
+    #: whether only a number, never a sequence or a table, has the use
+    #: (an argument of a `math` or `cmath` function)
+    scalar_only: bool = False
     #: the container a sequence is, `tuple` or `list`, when the evidence
     #: names one (`(0,) + xs`), else None
     container: "str | None" = None
@@ -379,9 +382,11 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
                        shape, f"the body uses it as {_SHAPE_WORDS[shape]}")
             out[p].append(Evidence("body use", shape, how,
                                    firm=shape != "number"))
+        scalars = set(uses.scalar.get(p, ()))
         for line, text in uses.numeric.get(p, ()):
             out[p].append(Evidence("body use", "number",
-                                   f"`{text}` on line {line + offset}"))
+                                   f"`{text}` on line {line + offset}",
+                                   scalar_only=(line, text) in scalars))
         for line, text in uses.text.get(p, ()):
             out[p].append(Evidence("body use", "string",
                                    f"`{text}` on line {line + offset}"))
@@ -540,7 +545,7 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
                         "receiver"):
         return ParameterShape(param, first, tuple(found))
     disagree = tuple(e for e in found[1:]
-                     if e.firm and not _compatible(first.shape, e.shape))
+                     if e.firm and _clashes(first.shape, e))
     if disagree:
         settling = _settling(found)
         if settling is not None:
@@ -555,7 +560,7 @@ def _against(found: list, piece: Evidence) -> tuple:
         cannot describe.
     """
     return tuple(e for e in found if e is not piece and e.firm
-                 and not _compatible(piece.shape, e.shape))
+                 and _clashes(piece.shape, e))
 
 
 def _settling(found: list) -> "Evidence | None":
@@ -578,6 +583,17 @@ def _settling(found: list) -> "Evidence | None":
         if all(e.source in allowed for e in _against(found, piece)):
             return piece
     return None
+
+
+def _clashes(shape: str, piece: Evidence) -> bool:
+    """Intent:
+        Whether evidence `piece` rules out a value of shape `shape`: it
+        names a shape `shape` cannot be (`_compatible`), or it is a use
+        only a number has against a sequence or a table.
+    """
+    if piece.scalar_only and shape in ("sequence", "table"):
+        return True
+    return not _compatible(shape, piece.shape)
 
 
 def _compatible(a: str, b: str) -> bool:

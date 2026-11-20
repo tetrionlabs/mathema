@@ -386,6 +386,10 @@ FNS = '''
                 out = out + t[0]
             t = [t]
         return out
+
+
+    def root_and_length(x):
+        return math.sqrt(x) + len(x)
 '''
 
 
@@ -708,3 +712,9 @@ def test_a_copy_read_in_a_way_not_read_through_leaves_the_shape_unread(
 def test_a_binding_later_in_a_loop_stops_the_read_through(mod):
     p = _row(mod.wrapped_each_time, "f(y0) == y0")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+
+
+def test_a_math_argument_is_a_number_a_sequence_use_contradicts(mod):
+    p = _row(mod.root_and_length, "f(x) == f(x)")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert "mathema.draw_defect" not in (p.meta or {})
