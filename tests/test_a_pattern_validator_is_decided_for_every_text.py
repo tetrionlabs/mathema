@@ -200,12 +200,13 @@ def test_the_claims_a_validator_decides(fn, text, verdict):
     assert row.meta["mathema.derive_route"] == "smt"
 
 
-def test_a_call_on_text_outside_the_parameters_language_is_left_to_the_other_routes():
+def test_a_call_on_text_outside_the_parameters_language_is_decided_over_all_text():
     row = _row(is_slug, 'for text in L[slugs], f("-" + text) == True', route="best")
     assert row.verdict == "falsified"
-    assert (row.meta or {}).get("mathema.derive_route") != "smt"
-    assert ('are not all shown to be members of L[slugs], which the membership '
-            'statement speaks of') in row.note
+    assert row.meta["mathema.derive_route"] == "smt"
+    found = re.fullmatch(r"text = '(.*)'", row.counterexample)
+    assert found, row.counterexample
+    assert SLUGS.contains(found.group(1)) and is_slug("-" + found.group(1)) is False
 
 
 def test_the_record_carries_the_hash_of_each_definition_read():

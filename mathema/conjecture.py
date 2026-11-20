@@ -10956,6 +10956,34 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     return validator, param, base, stated
 
 
+def _accepted_over_every_text(validator):
+    """The language of every text the validator's match accepts, as the
+    registered predicate word reading the match states it over a
+    language of all text; a phrase saying why there is none when the
+    word does not apply there or states no definition."""
+    from . import regular
+    from .languages import StringLanguage, word_reading_call
+    reading = word_reading_call(validator.accepts)
+    if reading is None:
+        return "no registered predicate word reads the call"
+    word, arguments = reading
+    every = StringLanguage("text", char_ok=lambda c: True, schema={"definition": {
+        "kind": regular.KIND, "version": regular.VERSION,
+        "alphabet": [[0, regular.MAX_CODE_POINT]], "exact": True,
+        "language": {"op": "repeat", "arg": {"op": "chars",
+                                             "ranges": [[0, regular.MAX_CODE_POINT]]},
+                     "min": 0, "max": None}}})
+    try:
+        if word.applies is not None and not word.applies(every):
+            return f"the word {word.word} does not apply to every text"
+        over = word.refine(every, arguments, False)
+        if regular.is_definition(over.to_json().get("definition")):
+            return over
+    except Exception as e:
+        return f"the word {word.word} gives no language over every text ({e})"
+    return f"the word {word.word} states no definition over every text"
+
+
 def _a_language_of_texts(ref) -> bool:
     """Whether the language `ref` names is a language of `str` values."""
     from .languages import resolve_language
@@ -11012,12 +11040,22 @@ def _beyond_a_plain_validator_claim(cj, bound, variable: str = "") -> "str | Non
     return None
 
 
-def _validator_reading_check(fn, validator, stated, domain) -> dict:
+#: how many members among the definition check's strings the reading
+#: check also runs
+_READING_FROM_DEFINITION = 400
+
+
+def _validator_reading_check(fn, validator, stated, domain, *, over=None,
+                             around: tuple = ("", "")) -> dict:
     """Intent:
         Check the reading of a validator against the function itself:
-        members drawn from the parameter's languages are run through
-        the real function, and each must be accepted exactly when it is
-        a member of the stated language (returned unchanged, or True,
+        members of the parameter's languages, drawn by their samplers and
+        taken from the strings their definition check compares, with the text
+        `around` them the claim adds (`prefix`, `suffix`), are run
+        through the real function, and each must be accepted exactly
+        when it is a member of the stated language (the language
+        object `over` when given, `stated` naming it in the text)
+        (returned unchanged, or True,
         for an accepted text; the validator's own exception, or False,
         for a refused one). Returns the assumption the proof rests on,
         as `domain_relations.check_definition` does: `checked` with the
@@ -11030,7 +11068,7 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
 
     from . import domain_relations
     from .languages import resolve_language
-    text = repr(stated)
+    text = stated if isinstance(stated, str) else repr(stated)
     seed = domain_relations._guard_seed(f"reading of {text}")
     rng = random.Random(seed)
     out = {"language": text,
@@ -11038,9 +11076,10 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
                         f"is in {text}",
            "status": "assumed", "artefact": {"seed": seed, "texts run": 0}}
     try:
-        accepted_language = resolve_language(stated)
+        accepted_language = over if over is not None else resolve_language(stated)
     except Exception:
         return out
+    prefix, suffix = around
     skipped: list = []
 
     def member(language, value) -> "bool | None":
@@ -11050,7 +11089,7 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
             skipped.append(value)
             return None
     drawn: list = []
-    for _, language, _, _ in domain.read:
+    for piece, language, most, least in domain.read:
         try:
             drawn.extend(h.value for h in language.hazards())
         except Exception:
@@ -11060,8 +11099,15 @@ def _validator_reading_check(fn, validator, stated, domain) -> dict:
                 drawn.append(language.sample(rng))
             except Exception:
                 break
+        # the strings the definition check compares, so a member is run
+        # even where the language's own sampler draws none
+        compared = domain_relations._guard_strings(
+            language, most, least, domain.alphabet,
+            domain_relations._guard_seed(piece))[0]
         texts = sorted({v for v in drawn if isinstance(v, str) and member(language, v)})
-        for value in texts:
+        taken = [v for v in compared if member(language, v)][:_READING_FROM_DEFINITION]
+        texts = sorted(set(texts) | set(taken))
+        for value in (prefix + t + suffix for t in texts):
             predicted = member(accepted_language, value)
             if predicted is None:
                 continue
@@ -11180,13 +11226,28 @@ def _validator_proof(cj, fn, cj_domain):
         return {"op": "concat", "args": [
             {"op": "literal", "codes": [ord(c) for c in prefix]}, node,
             {"op": "literal", "codes": [ord(c) for c in suffix]}]}
+    over, stated_text = None, repr(stated)
+    stated_defined = domain_relations.defined_bound(stated)
     if prefix or suffix:
         beyond = regular.find_member(alphabet, [called_on(domain.at_least)], [domain.at_most])
         if beyond.status != "none":
-            return undecided(
-                f"the texts {cj.lhs.strip()} is called on are not all shown to be members "
-                f"of {base!r}, which the membership statement speaks of"
-                + (f" ({beyond.reason})" if beyond.reason else ""))
+            # the texts called on leave the variable's language, so the
+            # statement is the language the pattern accepts over all text
+            over = _accepted_over_every_text(validator)
+            if isinstance(over, str):
+                return undecided(
+                    f"the texts {cj.lhs.strip()} is called on are not all shown to be "
+                    f"members of {base!r}, which the membership statement speaks of, and "
+                    f"{over}" + (f" ({beyond.reason})" if beyond.reason else ""))
+            stated_text = f"the texts {validator.described()} accepts"
+            path = f"smt: membership, {cj.lhs.strip()} in {stated_text}"
+            document = over.to_json().get("definition")
+            at_most, at_least = regular.bounds(document)
+            alphabet = alphabet + regular.alphabet_of(document)
+            stated_defined = domain_relations._Defined(
+                at_most, at_least, regular.alphabet_of(document),
+                {stated_text: regular.term_hash(document)},
+                ((stated_text, over, at_most, at_least),))
     # a text that breaks the claim is one the claim calls the function
     # on that is outside the stated language (when the claim says all
     # are accepted) or inside it (when it says none is)
@@ -11202,10 +11263,11 @@ def _validator_proof(cj, fn, cj_domain):
         narrow = ([domain.at_most, at_most], [at_least])
     meta = {"mathema.derive_route": "smt",
             "mathema.smt": {"path": "membership, validator",
-                            "statement": f"{param} in {stated!r}",
+                            "statement": (f"{param} in {stated!r}" if over is None
+                                          else f"{cj.lhs.strip()} in {stated_text}"),
                             "call": validator.described(),
                             "definitions": {**domain.hashes,
-                                            repr(stated): regular.term_hash(document)}}}
+                                            stated_text: regular.term_hash(document)}}}
     why = ""
     for inside, outside in (wide, narrow):
         found = regular.find_member(alphabet, inside, outside)
@@ -11213,9 +11275,12 @@ def _validator_proof(cj, fn, cj_domain):
             # "no such text" rests on the definitions and on the reading
             # of the function, so both are checked by drawing first
             assumptions, refuted = domain_relations.check_definitions(
-                domain, *filter(None, [domain_relations.defined_bound(stated)]),
+                domain, *filter(None, [stated_defined]),
                 literals=(prefix, suffix, prefix + suffix))
-            reading = _validator_reading_check(fn, validator, stated, domain)
+            reading = (_validator_reading_check(fn, validator, stated, domain)
+                       if over is None else
+                       _validator_reading_check(fn, validator, stated_text, domain,
+                                                over=over, around=(prefix, suffix)))
             refuted = refuted or reading.get("disagreement")
             if refuted is not None:
                 return undecided(f"{refuted}, so nothing is proven from it")

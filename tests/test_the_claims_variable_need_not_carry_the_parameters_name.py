@@ -46,14 +46,15 @@ def test_a_second_variable_or_a_second_copy_is_not_decided_on_this_route(text):
     assert not T.on_smt(row), (row.verdict, row.sketch)
 
 
-def test_a_prefix_outside_the_variables_language_is_still_left_to_the_other_routes():
-    from mathema.conjecture import _validator_proof, claim
+def test_a_prefix_outside_the_variables_language_is_decided_over_all_text():
     row = T.row(T.is_person, 'let h be L[twodigits], f("p:" + h) == True', route="best")
+    assert row.verdict == "proven" and T.on_smt(row), (row.verdict, row.sketch)
+
+
+def test_text_added_by_more_than_a_literal_still_declines():
+    row = T.row(T.is_person, 'let h be L[twodigits], f("p:" + h.upper()) == True',
+                route="best")
     assert not T.on_smt(row), (row.verdict, row.sketch)
-    outside = claim('let h be L[twodigits], f("p:" + h) == True', route="derive")
-    found = _validator_proof(outside, T.is_person, outside.domain)
-    assert found.status == "undecided"
-    assert "are not all shown to be members of L[twodigits]" in found.sketch
 
 
 def test_a_free_variable_other_than_the_one_called_on_still_declines():
