@@ -77,6 +77,11 @@ SRC = '''
     def shout_at(x):
         prefix = "hi "
         return prefix + x
+
+
+    def copied(x):
+        t = x
+        return t[0]
 '''
 
 
@@ -179,3 +184,10 @@ def test_a_key_a_subscript_and_any_quoting_of_the_type_name_count(
     line = info.value.__traceback__.tb_next.tb_lineno
     assert wrong_shape_use(fn, values, info.value) == ("k" if "k" in values
                                                        else "x", line)
+
+
+def test_a_raise_on_a_local_copy_names_the_parameter(mod):
+    with pytest.raises(TypeError) as info:
+        mod.copied(1.0)
+    line = info.value.__traceback__.tb_next.tb_lineno
+    assert wrong_shape_use(mod.copied, {"x": 1.0}, info.value) == ("x", line)

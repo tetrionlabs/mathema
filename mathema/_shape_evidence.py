@@ -522,7 +522,7 @@ def wrong_shape_use(fn, values: dict, exc: BaseException) -> "tuple[str, int] | 
     rebound = param_uses(fdef, list(values)).assigned
     message = str(exc)
     line = positions[0]
-    for node in ast.walk(fdef):
+    for node in ast.walk(_with_copies_read_through(fdef, list(values))):
         if not _at(node, positions, offset, fn):
             continue
         for name in _direct_operands(node):
@@ -640,48 +640,141 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
 def _with_copies_read_through(fdef, params: list):
     """Intent:
         `fdef` with each read of a plain local copy of a parameter (a
-        statement `local = param`, the only binding of `local` before
-        that read, `param` never rebound) read as the parameter itself,
-        from the line after the copy through the line of the first
-        statement that binds `local` again.
+        statement `local = param` in the function's own scope, the only
+        binding of `local` before that read, `param` never rebound) read
+        as the parameter itself, from the line after the copy through
+        the line of the first statement that binds `local` again. Only
+        reads in the function's own scope are read through: a nested
+        function, lambda, class or comprehension has scopes of its own.
+        A local a nested scope declares `nonlocal`, or assigns with
+        `:=`, is never read through, nor is one a nested scope reads or
+        binds when the function binds it again after the copy.
     """
     import copy
     from .analysis import param_uses
     rebound = param_uses(fdef, params).assigned
     stores: dict = {}
     copies: dict = {}
-    for node in ast.walk(fdef):
+    for node in _own_scope(fdef):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name) \
                 and isinstance(node.value, ast.Name) \
                 and node.value.id in params and node.value.id not in rebound:
             copies.setdefault(node.targets[0].id, []).append(node)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            stores.setdefault(node.id, []).append(node.lineno)
+        for bound in _bound_names(node):
+            stores.setdefault(bound, []).append(node.lineno)
+    mentioned, rebinding = _nested_names(fdef)
     spans: dict = {}
     for local, made in copies.items():
-        if len(made) != 1 or local in params:
+        if len(made) != 1 or local in params or local in rebinding:
             continue
         line = made[0].lineno
         if any(at < line for at in stores.get(local, ())):
             continue
         later = [at for at in stores.get(local, ()) if at > line]
+        if later and local in mentioned:
+            continue
         spans[local] = (made[0].value.id, line, min(later) if later else None)
     if not spans:
         return fdef
+    read = copy.deepcopy(fdef)
+    for node in _own_scope(read):
+        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+            continue
+        span = spans.get(node.id)
+        if span is None:
+            continue
+        param, start, end = span
+        if node.lineno > start and (end is None or node.lineno <= end):
+            node.id = param
+    return read
 
-    class _ReadThrough(ast.NodeTransformer):
-        def visit_Name(self, node):
-            span = spans.get(node.id)
-            if span is None or not isinstance(node.ctx, ast.Load):
-                return node
-            param, start, end = span
-            if node.lineno > start and (end is None or node.lineno <= end):
-                return ast.copy_location(ast.Name(id=param, ctx=ast.Load()),
-                                         node)
-            return node
 
-    return _ReadThrough().visit(copy.deepcopy(fdef))
+#: the nodes that open a scope of their own inside a function
+_NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
+                  ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp,
+                  ast.GeneratorExp)
+
+
+def _enclosing_parts(node) -> list:
+    """Intent:
+        The parts of a nested scope's node evaluated in the scope around
+        it: a definition's decorators and defaults, a class's
+        decorators, bases and keywords, a comprehension's first
+        iterable.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        args = node.args
+        return [*getattr(node, "decorator_list", ()), *args.defaults,
+                *[d for d in args.kw_defaults if d is not None]]
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases,
+                *[k.value for k in node.keywords]]
+    return [node.generators[0].iter]
+
+
+def _own_scope(fdef):
+    """Intent:
+        Every node `fdef`'s own scope evaluates, in source order: its
+        body, the nodes that open a nested scope, and of each of those
+        only the parts evaluated around it (`_enclosing_parts`).
+    """
+    body = fdef.body if isinstance(fdef.body, list) else [fdef.body]
+    stack = list(reversed(body))
+    while stack:
+        node = stack.pop()
+        yield node
+        inner = (_enclosing_parts(node) if isinstance(node, _NESTED_SCOPES)
+                 else list(ast.iter_child_nodes(node)))
+        stack.extend(reversed(inner))
+
+
+def _bound_names(node) -> list:
+    """The names one node binds in the scope that runs it: an assignment
+    or deletion target, an `except ... as` name, an import alias, a
+    function or class name, a pattern capture, a parameter."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        return [node.id]
+    if isinstance(node, ast.ExceptHandler) and node.name:
+        return [node.name]
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return [a.asname or a.name.split(".")[0] for a in node.names]
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+        return [node.name]
+    if isinstance(node, ast.MatchMapping) and node.rest:
+        return [node.rest]
+    if isinstance(node, ast.arg):
+        return [node.arg]
+    return []
+
+
+def _nested_names(fdef) -> "tuple[set, set]":
+    """Intent:
+        `(mentioned, rebinding)` over the scopes nested in `fdef`: the
+        names they read or bind, and the names they may bind in `fdef`'s
+        own scope (declared `nonlocal` or `global`, or the target of a
+        `:=`).
+    """
+    mentioned: set = set()
+    rebinding: set = set()
+    for node in _own_scope(fdef):
+        if not isinstance(node, _NESTED_SCOPES):
+            continue
+        for inner in ast.walk(node):
+            if inner is node:
+                continue
+            if isinstance(inner, ast.Name):
+                mentioned.add(inner.id)
+            elif isinstance(inner, (ast.Nonlocal, ast.Global)):
+                rebinding.update(inner.names)
+            else:
+                mentioned.update(_bound_names(inner))
+            if isinstance(inner, ast.NamedExpr) \
+                    and isinstance(inner.target, ast.Name):
+                rebinding.add(inner.target.id)
+    return mentioned, rebinding
 
 
 def generated_ordering(fn) -> "tuple[str, type] | None":

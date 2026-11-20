@@ -125,6 +125,47 @@ FNS = '''
     def keyed_by(key: tuple):
         d = {key: 1}
         return len(d)
+
+
+    def nested(y0):
+        t = y0
+        def first(t):
+            return t[0]
+        return t + first([1.0])
+
+
+    def picked(y0):
+        t = y0
+        pick = lambda t: t[0]
+        return t + pick([1.0])
+
+
+    def comprehended(y0):
+        t = y0
+        firsts = [t[0] for t in [[1.0], [2.0]]]
+        return t + firsts[0]
+
+
+    def late(y0):
+        t = y0
+        get = lambda: t[0]
+        t = [1.0]
+        return get() + y0
+
+
+    def matched(y0):
+        t = y0
+        match [[1.0]]:
+            case [t]:
+                pass
+        return t[0] + y0
+
+
+    def defined(y0):
+        t = y0
+        def t():
+            return [1.0]
+        return t()[0] + y0
 '''
 
 
@@ -279,4 +320,11 @@ def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
 @pytest.mark.parametrize("name", ["keyed", "cached", "keyed_by"])
 def test_a_tuple_default_or_annotation_is_drawn_as_a_tuple(mod, name):
     p = _row(getattr(mod, name), "f(key) == 1")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+@pytest.mark.parametrize("name", ["nested", "picked", "comprehended", "late",
+                                  "matched", "defined"])
+def test_a_copy_is_read_through_only_in_its_own_scope_and_binding(mod, name):
+    p = _row(getattr(mod, name), "f(y0) == y0 + 1.0")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
