@@ -176,6 +176,18 @@ FNS = '''
         if x > 100:
             return x.offest
         return x + 1
+
+
+    import functools
+
+    inc = lambda x: x + 1
+
+
+    def add(x, y):
+        return x + y
+
+
+    add_one = functools.partial(add, y=1.0)
 '''
 
 
@@ -346,3 +358,10 @@ def test_a_raise_the_drawn_shape_does_not_explain_is_a_finding(mod, name, text):
     p = _row(getattr(mod, name), text)
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
     assert "mathema.draw_defect" not in (p.meta or {})
+
+
+@pytest.mark.parametrize("name", ["inc", "add_one"])
+def test_a_lambda_or_a_partial_is_read_from_its_source(mod, name):
+    p = _row(getattr(mod, name), "f(x) >= x")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["x"]["source"] == "body use"

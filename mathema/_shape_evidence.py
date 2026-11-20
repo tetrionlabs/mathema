@@ -148,13 +148,26 @@ def default_container(fn, shape: "ParameterShape | None") -> "type | None":
     return tuple if isinstance(_default_of(fn, shape.param), tuple) else None
 
 
+def _underlying(fn):
+    """Intent:
+        The plain function `fn` runs: unwrapped through its wrappers
+        (`__wrapped__`) and through each `functools.partial` to the
+        function it binds arguments of.
+    """
+    import functools
+    target = inspect.unwrap(fn)
+    while isinstance(target, functools.partial):
+        target = inspect.unwrap(target.func)
+    return target
+
+
 def _function_def(fn) -> "tuple[Any, int]":
     """Intent:
         `fn`'s definition parsed from its source, with the line offset
         that maps its line numbers onto the file's, or `(None, 0)` when
         the source cannot be read.
     """
-    target = inspect.unwrap(fn)
+    target = _underlying(fn)
     code = getattr(target, "__code__", None)
     if code is None:
         return _parsed_def(target)
@@ -181,14 +194,50 @@ def _parsed_def(target) -> "tuple[Any, int]":
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return node, max(start, 1) - 1
+    if getattr(target, "__name__", "") == "<lambda>":
+        lambdas = [node for node in ast.walk(tree)
+                   if isinstance(node, ast.Lambda)
+                   and _arg_names(node.args) == _code_arg_names(target)]
+        if len(lambdas) == 1:
+            return lambdas[0], max(start, 1) - 1
     return None, 0
+
+
+def _arg_names(args) -> list:
+    """The parameter names an `ast.arguments` declares, in order."""
+    names = [a.arg for a in [*args.posonlyargs, *args.args]]
+    if args.vararg is not None:
+        names.append(args.vararg.arg)
+    names += [a.arg for a in args.kwonlyargs]
+    if args.kwarg is not None:
+        names.append(args.kwarg.arg)
+    return names
+
+
+def _code_arg_names(fn) -> list:
+    """The parameter names `fn`'s code object declares, in the order
+    `_arg_names` reads them from source."""
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return []
+    count = code.co_argcount + code.co_kwonlyargcount \
+        + bool(code.co_flags & inspect.CO_VARARGS) \
+        + bool(code.co_flags & inspect.CO_VARKEYWORDS)
+    names = list(code.co_varnames[:count])
+    positional = code.co_argcount
+    if code.co_flags & inspect.CO_VARARGS:
+        star = names[positional + code.co_kwonlyargcount]
+        names = [*names[:positional], star,
+                 *names[positional:positional + code.co_kwonlyargcount],
+                 *names[positional + code.co_kwonlyargcount + 1:]]
+    return names
 
 
 def _source_line(fn, line: int) -> str:
     """The text of `line` in `fn`'s file, stripped, or ''."""
     import linecache
     try:
-        path = inspect.getsourcefile(inspect.unwrap(fn)) or ""
+        path = inspect.getsourcefile(_underlying(fn)) or ""
     except TypeError:
         return ""
     return linecache.getline(path, line).strip()
@@ -198,7 +247,7 @@ def _place(fn, line: int) -> str:
     """`file:line` for a line of `fn`'s file, the file by its base name."""
     import os
     try:
-        path = inspect.getsourcefile(inspect.unwrap(fn)) or ""
+        path = inspect.getsourcefile(_underlying(fn)) or ""
     except TypeError:
         path = ""
     return f"{os.path.basename(path) or '<unknown>'}:{line}"
@@ -269,14 +318,14 @@ def _passed_on(fn, fdef, params: list, depth: int) -> dict:
         to a plain Python function its module binds by name, read from
         that function's own parameter (its annotation, then its body).
     """
-    scope = getattr(inspect.unwrap(fn), "__globals__", None) or {}
+    scope = getattr(_underlying(fn), "__globals__", None) or {}
     out: dict = {}
     pset = set(params)
     for node in ast.walk(fdef):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
             continue
         callee = scope.get(node.func.id)
-        if not inspect.isfunction(callee) or callee is inspect.unwrap(fn):
+        if not inspect.isfunction(callee) or callee is _underlying(fn):
             continue
         try:
             names = list(inspect.signature(callee).parameters)
@@ -448,7 +497,7 @@ def _annotation_words(fn, param: str) -> str:
 def definition_place(fn) -> "tuple[str, str]":
     """`(file:line, the def line)` for `fn`'s definition, or
     `('<unknown>', '')` when its source cannot be read."""
-    target = inspect.unwrap(fn)
+    target = _underlying(fn)
     try:
         _lines, start = inspect.getsourcelines(target)
     except (OSError, TypeError):
@@ -506,7 +555,7 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
     """
     if not isinstance(exc, (TypeError, AttributeError)):
         return None
-    target = inspect.unwrap(fn)
+    target = _underlying(fn)
     code = getattr(target, "__code__", None)
     tb = exc.__traceback__
     if code is None or tb is None:
@@ -596,7 +645,7 @@ def _at(node, positions, offset: int, fn) -> bool:
 def _indent(fn) -> int:
     """The indentation `fn`'s source carries in its file."""
     try:
-        lines, _start = inspect.getsourcelines(inspect.unwrap(fn))
+        lines, _start = inspect.getsourcelines(_underlying(fn))
     except (OSError, TypeError):
         return 0
     first = next((ln for ln in lines if ln.strip()), "")
