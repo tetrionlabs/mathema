@@ -105,17 +105,23 @@ class ParameterShape:
 
     @property
     def established(self) -> bool:
-        """Whether the parameter may be drawn: some evidence, none of
-        it disagreeing, or a disagreement it settles."""
+        """Intent:
+            Whether the parameter may be drawn: some evidence, none of it
+            disagreeing, or a disagreement it settles.
+        """
         return self.evidence is not None and (not self.disagree or self.settled)
 
     @property
     def stated(self) -> bool:
-        """Whether the shape rests on evidence an author stated."""
+        """Intent:
+            Whether the shape rests on evidence an author stated.
+        """
         return self.evidence is not None and self.evidence.source in STATED
 
     def as_record(self) -> dict:
-        """The shape and its evidence as plain values for a record."""
+        """Intent:
+            The shape and its evidence as plain values for a record.
+        """
         if self.evidence is None:
             return {"source": "none"}
         out = {"source": self.evidence.source, "shape": self.evidence.shape,
@@ -139,7 +145,9 @@ def states_an_integer(shape: ParameterShape) -> bool:
 
 
 def kind_shape(kind: "str | None") -> "str | None":
-    """The shape a `Facts.param_kinds` kind names, None for `unknown`."""
+    """Intent:
+        The shape a `Facts.param_kinds` kind names, None for `unknown`.
+    """
     return _KIND_SHAPES.get(kind or "")
 
 
@@ -330,7 +338,9 @@ def _code_arg_names(fn) -> list:
 
 
 def _source_line(fn, line: int) -> str:
-    """The text of `line` in `fn`'s file, stripped, or ''."""
+    """Intent:
+        The text of `line` in `fn`'s file, stripped, or ''.
+    """
     import linecache
     try:
         path = inspect.getsourcefile(_underlying(fn)) or ""
@@ -340,7 +350,9 @@ def _source_line(fn, line: int) -> str:
 
 
 def _place(fn, line: int) -> str:
-    """`file:line` for a line of `fn`'s file, the file by its base name."""
+    """Intent:
+        `file:line` for a line of `fn`'s file, the file by its base name.
+    """
     import os
     try:
         path = inspect.getsourcefile(_underlying(fn)) or ""
@@ -434,8 +446,10 @@ def _integer_only(form: str, name: str) -> bool:
 
 
 def _method_shape(form: str, name: str) -> "str | None":
-    """The one shape among the built-in value types whose type has the
-    method or attribute `name`, None when several or none do."""
+    """Intent:
+        The one shape among the built-in value types whose type has the method
+        or attribute `name`, None when several or none do.
+    """
     if form == "@":
         return None
     having = [shape for shape, cls in (("string", str), ("sequence", list),
@@ -501,8 +515,10 @@ def callee_shape(fn, param: str, depth: int = 0) -> ParameterShape:
 
 
 def _without_annotations(fdef):
-    """`fdef` with its parameters' annotations removed, so its kinds are
-    the body's own."""
+    """Intent:
+        `fdef` with its parameters' annotations removed, so its kinds are the
+        body's own.
+    """
     import copy
     bare = copy.deepcopy(fdef)
     for a in [*bare.args.posonlyargs, *bare.args.args, *bare.args.kwonlyargs]:
@@ -594,10 +610,12 @@ def _settling(found: list) -> "Evidence | None":
 
 
 def _compatible(a: str, b: str) -> bool:
-    """Whether evidence naming shape `b` can describe a value of shape
-    `a`: the same shape, a bool among the numbers, or a use (`number`
-    arithmetic, `sequence` indexing) a sequence or table also supports
-    as an array."""
+    """Intent:
+        Whether evidence naming shape `b` can describe a value of shape `a`:
+        the same shape, a bool among the numbers, or a use (`number`
+        arithmetic, `sequence` indexing) a sequence or table also supports as
+        an array.
+    """
     if a == b or {a, b} == {"bool", "number"}:
         return True
     if a in ("sequence", "table") and b in ("number", "sequence", "mapping"):
@@ -610,8 +628,10 @@ def _compatible(a: str, b: str) -> bool:
 
 
 def _bound_shape(bound) -> str:
-    """The shape a domain bound draws: a sequence for a space (`R^n`),
-    else the bound's own values' shape, a number when it states none."""
+    """Intent:
+        The shape a domain bound draws: a sequence for a space (`R^n`), else
+        the bound's own values' shape, a number when it states none.
+    """
     if getattr(bound, "dims", ()):
         return "sequence"
     base = getattr(bound, "base_type", None)
@@ -629,7 +649,9 @@ def _bound_shape(bound) -> str:
 
 
 def _marker_shape(fn, param: str) -> "Evidence | None":
-    """A mathema type marker's evidence for `param`, or None."""
+    """Intent:
+        A mathema type marker's evidence for `param`, or None.
+    """
     from .types import domain_from_signature, shapes_from_signature
     try:
         if param in (shapes_from_signature(fn, guards=False) or {}):
@@ -642,7 +664,9 @@ def _marker_shape(fn, param: str) -> "Evidence | None":
 
 
 def _default_of(fn, param: str):
-    """`param`'s default in `fn`'s signature, or `Parameter.empty`."""
+    """Intent:
+        `param`'s default in `fn`'s signature, or `Parameter.empty`.
+    """
     from ._signatures import callable_signature
     try:
         p = callable_signature(fn).parameters.get(param)
@@ -652,7 +676,9 @@ def _default_of(fn, param: str):
 
 
 def _annotation_words(fn, param: str) -> str:
-    """`param`'s annotation as source text."""
+    """Intent:
+        `param`'s annotation as source text.
+    """
     from ._signatures import callable_signature
     try:
         p = callable_signature(fn).parameters.get(param)
@@ -665,8 +691,10 @@ def _annotation_words(fn, param: str) -> str:
 
 
 def definition_place(fn) -> "tuple[str, str]":
-    """`(file:line, the def line)` for `fn`'s definition, or
-    `('<unknown>', '')` when its source cannot be read."""
+    """Intent:
+        `(file:line, the def line)` for `fn`'s definition, or `('<unknown>',
+        '')` when its source cannot be read.
+    """
     target = _underlying(fn)
     try:
         _lines, start = inspect.getsourcelines(target)
@@ -852,8 +880,10 @@ def _names_type(message: str, type_name: str) -> bool:
 
 
 def _at(node, positions, offset: int, fn) -> bool:
-    """Whether `node` spans exactly the source range `positions` names
-    (file lines; columns of the dedented source shifted back)."""
+    """Intent:
+        Whether `node` spans exactly the source range `positions` names (file
+        lines; columns of the dedented source shifted back).
+    """
     lineno, end_lineno, col, end_col = positions
     if not hasattr(node, "lineno") or node.lineno + offset != lineno \
             or getattr(node, "end_lineno", None) is None \
@@ -865,7 +895,9 @@ def _at(node, positions, offset: int, fn) -> bool:
 
 
 def _indent(fn) -> int:
-    """The indentation `fn`'s source carries in its file."""
+    """Intent:
+        The indentation `fn`'s source carries in its file.
+    """
     try:
         lines, _start = inspect.getsourcelines(_underlying(fn))
     except (OSError, TypeError):
@@ -1109,8 +1141,10 @@ def _own_scope_parents(fdef) -> dict:
 
 
 def _ancestors(node, parents: dict) -> list:
-    """The chain of nodes enclosing `node` in its own scope, nearest
-    first, `node` itself included."""
+    """Intent:
+        The chain of nodes enclosing `node` in its own scope, nearest first,
+        `node` itself included.
+    """
     chain = [node]
     while id(chain[-1]) in parents:
         chain.append(parents[id(chain[-1])])
@@ -1288,7 +1322,9 @@ def generated_ordering(fn) -> "tuple[str, type] | None":
 
 
 def definition_line_text(fn, line: int) -> "tuple[str, str]":
-    """`(file:line, the line's text)` for a line of `fn`'s file."""
+    """Intent:
+        `(file:line, the line's text)` for a line of `fn`'s file.
+    """
     return _place(fn, line), _source_line(fn, line)
 
 
