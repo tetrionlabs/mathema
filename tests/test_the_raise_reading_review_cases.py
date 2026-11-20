@@ -593,3 +593,158 @@ def test_a_rebound_name_says_what_is_not_known_without_naming_a_claim():
     reading = read_raise_path(_nested_rebinds, [], tree.body[-1], {"x": ANY})
     assert isinstance(reading, UnreadRaise), reading
     assert "nested" in reading.reason and "claim" not in reading.reason, reading.reason
+
+
+# ---- third review: every case it probed, by batch ---------------------------
+
+_THIRD = __import__("pathlib").Path(__file__).parent / "raise_review_three"
+
+#: the verdict each third-review case gets, by `cases<N>[<index>]`
+THIRD_EXPECTED = {
+    'cases1[0]': 'proven',
+    'cases1[1]': 'holds',
+    'cases1[2]': 'falsified',
+    'cases1[3]': 'proven',
+    'cases1[4]': 'holds',
+    'cases1[5]': 'proven',
+    'cases1[6]': 'proven',
+    'cases1[7]': 'proven',
+    'cases1[8]': 'proven',
+    'cases1[9]': 'falsified',
+    'cases1[10]': 'holds',
+    'cases1[11]': 'proven',
+    'cases1[12]': 'falsified',
+    'cases1[13]': 'proven',
+    'cases1[14]': 'proven',
+    'cases1[15]': 'falsified',
+    'cases1[16]': 'proven',
+    'cases1[17]': 'holds',
+    'cases1[18]': 'proven',
+    'cases1[19]': 'proven',
+    'cases1[20]': 'proven',
+    'cases1[21]': 'holds',
+    'cases1[23]': 'holds',
+    'cases1[24]': 'falsified',
+    'cases1[25]': 'proven',
+    'cases1[26]': 'falsified',
+    'cases1[27]': 'falsified',
+    'cases1[28]': 'proven',
+    'cases1[29]': 'falsified',
+    'cases1[30]': 'proven',
+    'cases1[31]': 'proven',
+    'cases1[32]': 'proven',
+    'cases1[33]': 'falsified',
+    'cases1[34]': 'holds',
+    'cases2[0]': 'holds',
+    'cases2[1]': 'holds',
+    'cases2[2]': 'falsified',
+    'cases2[3]': 'falsified',
+    'cases2[4]': 'falsified',
+    'cases2[5]': 'falsified',
+    'cases2[6]': 'falsified',
+    'cases2[7]': 'holds',
+    'cases2[8]': 'holds',
+    'cases2[9]': 'holds',
+    'cases2[10]': 'proven',
+    'cases2[11]': 'proven',
+    'cases2[12]': 'holds',
+    'cases2[13]': 'proven',
+    'cases2[14]': 'proven',
+    'cases2[15]': 'holds',
+    'cases2[16]': 'falsified',
+    'cases2[17]': 'holds',
+    'cases2[18]': 'proven',
+    'cases3[0]': 'proven',
+    'cases3[1]': 'holds',
+    'cases3[2]': 'holds',
+    'cases3[3]': 'falsified',
+    'cases3[4]': 'proven',
+    'cases3[5]': 'falsified',
+    'cases3[6]': 'falsified',
+    'cases3[7]': 'proven',
+    'cases3[10]': 'proven',
+    'cases3[11]': 'falsified',
+    'cases3[12]': 'proven',
+    'cases3[13]': 'proven',
+    'cases3[14]': 'skipped',
+    'cases4[0]': 'holds',
+    'cases4[1]': 'falsified',
+    'cases5[0]': 'falsified',
+    'cases5[1]': 'holds',
+    'cases5[2]': 'falsified',
+    'cases5[3]': 'falsified',
+    'cases5[4]': 'proven',
+    'cases5[5]': 'holds',
+    'cases5[6]': 'proven',
+    'cases5[7]': 'falsified',
+    'cases5[8]': 'proven',
+    'cases5[9]': 'proven',
+    'cases5[10]': 'falsified',
+    'cases5[11]': 'holds',
+    'cases5[12]': 'holds',
+    'cases6[0]': 'falsified',
+    'cases6[1]': 'falsified',
+    'cases6[2]': 'falsified',
+    'cases7[0]': 'holds',
+    'cases7[1]': 'holds',
+    'cases7[2]': 'holds',
+    'cases7[3]': 'proven',
+    'cases8[0]': 'holds',
+    'cases8[1]': 'proven',
+}
+
+#: cases whose verdict is a wrong `proven`, on develop too: a missing
+#: value a finite set lists is run only at the other parameter's corners,
+#: so f(None, 0.5) == 1.0 is never seen. Each is expected not proven, and
+#: fails strictly until that is so
+THIRD_KNOWN_WRONG = {
+    'cases3[8]': "a missing value a finite set lists is run only at the other parameter's corners",
+    'cases3[9]': "a missing value a finite set lists is run only at the other parameter's corners",
+    'cases4[2]': "a missing value a finite set lists is run only at the other parameter's corners",
+    'cases4[3]': "a missing value a finite set lists is run only at the other parameter's corners",
+    'cases4[4]': "a missing value a finite set lists is run only at the other parameter's corners",
+}
+
+
+#: cases where check_conjectures itself raises, on develop too
+THIRD_CRASHES = {
+    'cases1[22]': '`x % 0` raises ZeroDivisionError out of check_conjectures, also on develop',
+}
+
+
+def _third_cases():
+    import importlib.util
+    import sys
+    out = []
+    for n in range(1, 9):
+        name = f"raise_review_three_cases{n}"
+        module = sys.modules.get(name)
+        if module is None:
+            spec = importlib.util.spec_from_file_location(name, _THIRD / f"cases{n}.py")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        for index, entry in enumerate(module.CASES):
+            texts = [entry[1]] if isinstance(entry[1], str) else list(entry[1])
+            tag = f"cases{n}[{index}]"
+            marks = ()
+            if tag in THIRD_KNOWN_WRONG:
+                marks = pytest.mark.xfail(strict=True, reason=THIRD_KNOWN_WRONG[tag])
+            elif tag in THIRD_CRASHES:
+                marks = pytest.mark.xfail(strict=True, raises=ZeroDivisionError,
+                                          reason=THIRD_CRASHES[tag])
+            out.append(pytest.param(tag, entry[0], texts, marks=marks, id=tag))
+    return out
+
+
+@pytest.mark.parametrize("tag,fn,texts", _third_cases())
+def test_a_third_review_case_gets_its_verdict(tag, fn, texts):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rows = check_conjectures(fn, [claim(t) for t in texts])
+    if tag in THIRD_KNOWN_WRONG:
+        assert rows[-1].verdict != "proven", (tag, texts[-1])
+        return
+    assert rows[-1].verdict == THIRD_EXPECTED[tag], (tag, texts[-1], rows[-1].verdict,
+                                                     rows[-1].route, rows[-1].note)
