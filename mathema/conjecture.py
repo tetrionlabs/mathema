@@ -1808,7 +1808,18 @@ class CanonicalTextError(InvalidConjecture):
     """Raised by `spec.canonical_claim_text` when the text it rendered
     for a claim does not read back as that claim (another string
     literal value, another statement, or text that does not parse), so
-    the claim has no stored text and no record is written for it."""
+    the claim has no stored text and no record is written for it.
+
+    `claim_name` is the claim's name, `problem` says how the text
+    fails to read back, and `text` is the text rendered; each is None
+    when not given."""
+
+    def __init__(self, message: str = "", *, claim_name: "str | None" = None,
+                 problem: "str | None" = None, text: "str | None" = None):
+        super().__init__(message)
+        self.claim_name = claim_name
+        self.problem = problem
+        self.text = text
 
 
 class ConflictingDomainBinding(InvalidConjecture):
