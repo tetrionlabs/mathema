@@ -383,7 +383,7 @@ def _brace_fields(text: str) -> "list | None":
         if field == "":
             automatic = True
             out.append(len(out))
-        elif field.isdigit():
+        elif field.isdecimal() and field.isascii():
             explicit = True
             out.append(int(field))
         else:

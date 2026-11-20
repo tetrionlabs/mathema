@@ -450,3 +450,19 @@ def test_a_policy_behind_a_wrapper_is_not_proven_from_the_inner_guard():
         claim("for x in [0, 1], y in [-1, 1], f(x, y) == x * y"),
         claim("absent(f, x) raises(TypeError)")])
     assert rows[-1].verdict == "holds", (rows[-1].verdict, rows[-1].note)
+
+
+# ---- third review: a format field that is not a decimal index ---------------
+
+def brace_super_digit(x: float) -> float:
+    if x < 0:
+        raise ValueError("{²}".format(x))
+    return x
+
+
+def test_a_format_field_of_a_digit_that_is_not_decimal_is_not_read():
+    with pytest.raises(KeyError):
+        brace_super_digit(-2.0)
+    (row,) = check_conjectures(brace_super_digit,
+                               [claim("for x in [-5, -1], raises(f(x), ValueError)")])
+    assert row.verdict == "falsified", (row.verdict, row.sketch)
