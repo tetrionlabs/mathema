@@ -415,7 +415,9 @@ def yaml_has_comments(text: str) -> bool:
     return False
 
 
-def materialize_entry(fn, key: str, root: str = ".") -> dict:
+def materialize_entry(fn, key: str, root: str = ".", *,
+                      declared_store: "dict | None" = None,
+                      verified_store: "dict | None" = None) -> dict:
     """Intent:
         The full declared entry for one function, every authoring
         surface merged at the documented precedence, verified
@@ -428,13 +430,31 @@ def materialize_entry(fn, key: str, root: str = ".") -> dict:
         back by the engine (`load_declared` skips `.mathema/` by
         design). The authoring surfaces stay the one source of truth;
         this file is what they resolve to, spelled canonically.
+
+        `declared_store` and `verified_store` are the mappings
+        `spec.load_declared(root)` and `spec.load_verified(root)`
+        return, already loaded; each one not given is loaded here. The
+        entry used from a given store is a copy, so the store is left
+        as it was.
     """
-    from .authoring import retrieve
+    import copy
+
+    from .authoring import _fn_key, retrieve
     from .spec import load_verified, write_yaml
     from .verify import _union_verified_membership
 
-    entry = dict(retrieve(fn, root))
-    verified = load_verified(root).get(key)
+    if declared_store is None:
+        entry = dict(retrieve(fn, root))
+    else:
+        own_key = _fn_key(fn)
+        held = declared_store.get(own_key)
+        entry = dict(retrieve(
+            fn, root,
+            store={} if held is None else {own_key: copy.deepcopy(held)}))
+    if verified_store is None:
+        verified = load_verified(root).get(key)
+    else:
+        verified = copy.deepcopy(verified_store.get(key))
     v_entry = (verified or {}).get("entry") or {}
     # the verified layer is the record: where an authored surface
     # differs from a verified claim WITHOUT an accepted supersession,
@@ -560,6 +580,8 @@ def write_claims_into_docstring(fn, names_with_statements: list) -> bool:
     all_lines[insert_at:insert_at] = additions
     with open(src_file, "w") as fh:
         fh.writelines(all_lines)
+    from ._run_scope import wrote
+    wrote(src_file)
     return True
 
 
@@ -570,6 +592,21 @@ def sync(targets: list, root: str = ".",
         records, materialize every key's declared entry, collect
         conflicts and drift, optionally perform the explicit
         docstring write-back, and regenerate the index.
+
+    Notes:
+        The pass runs in a `_run_scope.run_scope()`, so its reads of
+        the stores, the claims files and the curation file are shared
+        across the functions it syncs.
+    """
+    from ._run_scope import run_scope
+    with run_scope():
+        return _sync(targets, root, write_docstrings)
+
+
+def _sync(targets: list, root: str, write_docstrings: bool) -> SyncReport:
+    """Intent:
+        `sync`'s pass, inside its run scope: both stores are loaded
+        once and every function's entry is materialized from them.
     """
     from .authoring import _fn_key
     from .spec import load_declared, load_verified
@@ -602,7 +639,9 @@ def sync(targets: list, root: str = ".",
             {"key": key, **c}
             for c in claim_conflicts(fn, file_entry, v_entry)
             if c.get("kind") != "release-move")
-        entry = materialize_entry(fn, key, root)
+        entry = materialize_entry(fn, key, root,
+                                  declared_store=declared_store,
+                                  verified_store=verified_store)
         report.materialized.append(key)
         v_entry = (verified_store.get(key) or {}).get("entry")
         for d in docstring_drift(fn, entry, v_entry):

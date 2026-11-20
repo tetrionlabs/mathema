@@ -1088,7 +1088,9 @@ def record(ex, key: str | None = None, root: str = ".",
     if os.path.exists(path):
         import yaml
         try:
-            prior = (yaml.safe_load(open(path)) or {}).get(key)
+            with open(path) as fh:
+                prior = (yaml.load(fh, Loader=_SAFE_LOADER)
+                         or {}).get(key)
         except Exception:
             prior = None
     prior_lineage = (prior or {}).get("lineage") or {}
@@ -1373,7 +1375,7 @@ def _apply_verdict_history(spec: dict, key: str, path: str) -> None:
     try:
         import yaml
         with open(path) as fh:
-            prior_doc = yaml.safe_load(fh) or {}
+            prior_doc = yaml.load(fh, Loader=_SAFE_LOADER) or {}
         prior_entry = prior_doc.get(key) or {}
         prior_claims = prior_entry.get("claims") or []
         prior_commit = (prior_entry.get("lineage") or {}).get("commit")
@@ -1551,7 +1553,7 @@ def record_file_name(key: str) -> str:
     return quote(key, safe="") + _RECORD_SUFFIX
 
 
-def record_key(rel_path: str) -> str:
+def record_key(rel_path: str, held: "list | None" = None) -> str:
     """Intent:
         The key of the record file at `rel_path`, relative to its store
         directory: the decoded name of a file `record_file_name` named,
@@ -1561,8 +1563,12 @@ def record_key(rel_path: str) -> str:
 
     Notes:
         A name is read as encoded when decoding and encoding it again
-        gives it back. An older name holding a literal `%` followed by
-        two hex digits reads as encoded.
+        gives it back. A name alone cannot tell an older name holding a
+        literal `%` and two hex digits (`a%25.yaml` for the key `a%25`)
+        from the encoded name of another key (`a%`). `held`, the keys
+        the file holds, settles it: when the file holds the undecoded
+        name and not the decoded one, the name is the older naming and
+        is the key. Without `held` the name is read as encoded.
     """
     from urllib.parse import quote, unquote
     stem = rel_path.replace(os.sep, "/")
@@ -1571,7 +1577,13 @@ def record_key(rel_path: str) -> str:
     if "/" in stem:
         return stem
     decoded = unquote(stem)
-    return decoded if quote(decoded, safe="") == stem else stem
+    if quote(decoded, safe="") != stem:
+        return stem
+    if held is not None:
+        keys = set(held)
+        if stem in keys and decoded not in keys:
+            return stem
+    return decoded
 
 
 def _record_files(store_dir: str) -> list:
@@ -1587,9 +1599,30 @@ def _record_files(store_dir: str) -> list:
     return sorted(found, key=lambda p: os.path.relpath(p, store_dir))
 
 
-def _is_current_name(path: str, store_dir: str) -> bool:
+def _is_current_name(path: str, store_dir: str,
+                     held: "list | None" = None) -> bool:
     rel = os.path.relpath(path, store_dir)
-    return rel == record_file_name(record_key(rel))
+    return rel == record_file_name(record_key(rel, held))
+
+
+def _held_keys(path: str) -> list:
+    """Intent:
+        The keys the record file at `path` holds, or an empty list when
+        it does not read as a record or cannot be read. Only a name
+        whose decoded form still holds a `%` can collide with the
+        encoded name of another key, so any other file is not opened.
+    """
+    from urllib.parse import unquote
+    stem = os.path.basename(path)
+    if stem.endswith(_RECORD_SUFFIX):
+        stem = stem[:-len(_RECORD_SUFFIX)]
+    if "%" not in unquote(stem):
+        return []
+    try:
+        data, _reason = read_verified_file(path)
+    except (OSError, ValueError):
+        return []
+    return list(data) if isinstance(data, dict) else []
 
 
 def migrate_record_names(store_dir: str) -> list:
@@ -1599,16 +1632,24 @@ def migrate_record_names(store_dir: str) -> list:
         subdirectories that leaves empty. A file whose new name is
         already taken stays where it is. Returns the `(old, new)` paths
         renamed.
+
+    Notes:
+        Inside a `_run_scope.run_scope()` each rename drops what the run
+        kept from both paths, as a write through `atomic_write_text`
+        does.
     """
     moved = []
     for path in _record_files(store_dir):
-        if _is_current_name(path, store_dir):
+        held = _held_keys(path)
+        if _is_current_name(path, store_dir, held):
             continue
-        key = record_key(os.path.relpath(path, store_dir))
+        key = record_key(os.path.relpath(path, store_dir), held)
         target = os.path.join(store_dir, record_file_name(key))
         if os.path.exists(target):
             continue
         os.replace(path, target)
+        _run_scope.wrote(path)
+        _run_scope.wrote(target)
         moved.append((path, target))
     for dirpath, _dirnames, _filenames in os.walk(store_dir,
                                                   topdown=False):
@@ -1668,7 +1709,7 @@ def load_verified(root: str = ".") -> dict:
     current: set = set()
     store = verified_dir(root)
     for path, data, _reason in _verified_reads(root):
-        named = _is_current_name(path, store)
+        named = _is_current_name(path, store, list(data or ()))
         for key, entry in (data or {}).items():
             if key in current and not named:
                 continue
@@ -2546,7 +2587,8 @@ def load_claims(path: str) -> dict:
     import yaml
 
 
-    data = yaml.safe_load(open(path)) or {}
+    with open(path) as fh:
+        data = yaml.load(fh, Loader=_SAFE_LOADER) or {}
     if not isinstance(data, dict):
         return {}
     from .compendium import pop_library_fields

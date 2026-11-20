@@ -239,9 +239,11 @@ def _carry_recorded_verdicts(probes, path: str, key: str) -> None:
     """
     import yaml
 
+    from .spec import _SAFE_LOADER
     try:
         with open(path, encoding="utf-8") as fh:
-            entry = (yaml.safe_load(fh) or {}).get(key) or {}
+            entry = (yaml.load(fh, Loader=_SAFE_LOADER)
+                     or {}).get(key) or {}
     except OSError:
         return
     stored = {c.get("name"): c.get("verdict")
@@ -461,9 +463,12 @@ def _entry_at(path: str, key: str) -> dict:
         or an empty mapping when the file cannot be read.
     """
     import yaml
+
+    from .spec import _SAFE_LOADER
     try:
         with open(path, encoding="utf-8") as fh:
-            return (yaml.safe_load(fh) or {}).get(key) or {}
+            return (yaml.load(fh, Loader=_SAFE_LOADER)
+                    or {}).get(key) or {}
     except OSError:
         return {}
 
