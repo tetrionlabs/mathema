@@ -297,9 +297,18 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
     if isinstance(op, (ast.Div, ast.FloorDiv, ast.Mod)):
         divisor = right.value if isinstance(right, ast.Constant) else None
         if type(divisor) in (int, float) and abs(divisor) >= 1 \
-                and _converts_to_float(a) and math.isfinite(divisor):
+                and _converts_to_float(a) and math.isfinite(_magnitude(divisor)):
+            # |a / c| <= |a| and |a // c| <= |a| + 1 for |c| >= 1, and
+            # `a % c` takes the sign of c with |a % c| <= |c|: the
+            # remainder of a negative a by a positive c is close to c
+            if isinstance(op, ast.Div):
+                size = a.magnitude
+            elif isinstance(op, ast.FloorDiv):
+                size = a.magnitude + 1.0
+            else:
+                size = max(a.magnitude, _magnitude(divisor))
             kind = ValueKind(frozenset({float}) if isinstance(op, ast.Div) else out_types,
-                             a.magnitude)
+                             size)
             return TOTAL, kind
         return HALTS, ValueKind(_NUMBERS)
     return UNKNOWN, ANY
