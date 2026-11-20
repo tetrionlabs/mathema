@@ -15,8 +15,11 @@ canonical form, and nothing else.
 The values a language is of are the JSON values: null, the two
 booleans, numbers, texts, lists, and maps from text keys to values. A
 boolean is never a number, and a number is read by its value, so `1`
-and `1.0` are one value. A key a map does not hold is unset; a key
-holding null holds a value like any other.
+and `1.0` are one value, as are `0`, `0.0` and `-0.0`, while `True` is
+not `1` and `False` is not `0`. Two values are compared by kind and
+then by value, never by Python's `==`, under which `True == 1`. A key a
+map does not hold is unset; a key holding null holds a value like any
+other.
 
 A language is a node keyed by `op`:
 
@@ -582,6 +585,8 @@ class _Lowering:
         for node in outside:
             _texts(node, texts)
             _names(node, self.names, self.lists, (), True)
+        # regular's lowering of every text node and text constant of the
+        # question at once, over one set of atoms, so their formulas agree
         self.texts = regular._Lowering(z3, [[0, regular.MAX_CODE_POINT]], texts)
         self.root = _Value(z3, "value")
         self.shape: list = []
