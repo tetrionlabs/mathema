@@ -344,9 +344,12 @@ _SURROGATE_ESCAPE = re.compile(r"\\(\\|u[0-9A-Fa-f]{4})")
 
 
 def _escaped_str(text: str) -> str:
-    """`text` with each backslash doubled and each lone surrogate
-    written `\\uXXXX`, every other character standing as itself; the
-    result holds no lone surrogate, and `_unescaped_str` reverses it."""
+    """Intent:
+        `text` with each backslash doubled and each lone surrogate
+        written `\\uXXXX`, every other character standing as itself;
+        the result holds no lone surrogate, and `_unescaped_str`
+        reverses it.
+    """
     return "".join(f"\\u{ord(ch):04X}" if 0xD800 <= ord(ch) <= 0xDFFF
                    else "\\\\" if ch == "\\" else ch
                    for ch in text)
