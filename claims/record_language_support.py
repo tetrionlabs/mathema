@@ -1089,6 +1089,21 @@ def the_solver_tells_numbers_from_booleans(c: int, d: int) -> bool:
             and isinstance(found.member, bool) == kinds[int(c)].startswith("b"))
 
 
+def list_of_holds_each_item_under_each_bound(d: int, v: int) -> bool:
+    """Whether, under each bound, the list of one to two values built
+    from definition `d` holds the list of value `v` alone, and of `v`
+    twice, exactly when the definition holds the value under that bound;
+    and whether it is exact exactly when the definition is."""
+    rl, document, value = _rl(), DOCUMENTS[int(d)], VALUES[int(v)]
+    built = rl.list_of(document, 1, 2)
+    rl.validate(built)
+    return built["exact"] == document["exact"] and all(
+        rl.member(built, [value], bound=bound) == rl.member(document, value, bound=bound)
+        and rl.member(built, [value, value], bound=bound) == rl.member(document, value, bound=bound)
+        and not rl.member(built, [], bound=bound)
+        for bound in ("at_least", "at_most"))
+
+
 def generated_list(seed: int, depth: int = 0) -> dict:
     """A term drawn from `seed` in which lists stand beside the other
     nodes: lists of generated terms, bounded and not, to three deep."""
