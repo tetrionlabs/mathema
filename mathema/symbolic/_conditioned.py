@@ -1004,13 +1004,16 @@ def lift_piecewise(fn, facts) -> "ConditionedLift | None":
     raise_guards: list = []
     _RAISED = object()   # sentinel: this path raises rather than returns
 
+    from .._raise_reading import ANY, ReadRaise
+    from ._base import innermost
+
     def exc_name(raise_stmt):
-        exc = raise_stmt.exc
-        if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
-            return exc.func.id
-        if isinstance(exc, ast.Name):
-            return exc.id
-        return None
+        """The name of the class the raise statement is read as raising
+        (`read_raise_path` on the statement alone, every parameter any
+        object), None when it is not read as raising one class."""
+        reading = read_raise_path(innermost(fn), [], raise_stmt,
+                                  {p: ANY for p in facts.params})
+        return reading.cls.__name__ if isinstance(reading, ReadRaise) else None
 
     def walk(stmts, path_cond, env):
         if not stmts:

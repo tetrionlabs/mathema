@@ -710,7 +710,7 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
         if klass.__module__ != "builtins":
             if "__init__" in vars(klass) or "__new__" in vars(klass):
                 return (f"building a `{name}` runs a constructor written outside the "
-                        f"builtins, which may itself raise")
+                        f"builtins, which is not shown to be unable to raise")
             continue
         if getattr(builtins, klass.__name__, None) is not klass \
                 or klass.__name__ not in BUILTIN_CONSTRUCTORS:
@@ -820,7 +820,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
             found, value = read_expression(node, kinds, ns)
             note(min(found, _truth_level(value)),
                  f"the test `{_source(node)}`{_where(node)} is evaluated before the raise "
-                 f"and may itself raise")
+                 f"and is not shown to be unable to raise")
             continue
         imported = _imported(node, ns)
         if imported is not None:
@@ -834,8 +834,8 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
                 kinds[node.targets[0].id] = ANY
                 continue
             found, value = read_expression(node.value, kinds, ns)
-            note(found, f"`{_source(node)}`{_where(node)} runs before the raise and may "
-                        f"itself raise")
+            note(found, f"`{_source(node)}`{_where(node)} runs before the raise and is "
+                        f"not shown to be unable to raise")
             kinds[node.targets[0].id] = value
             continue
         note(UNKNOWN, f"`{_source(node)}`{_where(node)} runs before the raise and is not "
@@ -876,7 +876,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         for argument in arguments:
             found, value = read_expression(argument, kinds, ns)
             note(found, f"the exception's argument `{_source(argument)}` is evaluated "
-                        f"before the raise and may itself raise")
+                        f"before the raise and is not shown to be unable to raise")
             known = known and bool(value.types) and value.types <= _PLAIN_ARGUMENTS
         count, keywords = len(exc.args), [k.arg for k in exc.keywords if k.arg]
     else:
