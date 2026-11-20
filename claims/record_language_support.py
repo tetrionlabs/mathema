@@ -683,6 +683,70 @@ def a_value_member_does_not_place_is_not_returned(i: int) -> bool:
     return found.status == "unknown" and found.member is None
 
 
+def a_solver_value_of_each_kind_is_read(i: int) -> bool:
+    """Whether the value read from a solver model is of the kind the
+    model gives it, when nothing else is asked of it: 0 null, 1 a
+    boolean, 2 a whole number, 3 a text, 4 a map, 5 a value no node
+    tells apart (in `any`, and in no choice, text or record), and 6 a
+    map with a key no record of the question names, which that record
+    refuses."""
+    import z3
+    rl = _rl()
+    flagged = record(("x", FLAG, False))
+    lowering = rl._Lowering(z3, [flagged, text(_lit("a"))])
+    solver = z3.Solver()
+    solver.add(*lowering.shape)
+    solver.add(lowering.root.is_(rl._KINDS[min(int(i), 4)] if int(i) != 5 else "other"))
+    if int(i) == 6:
+        solver.add(lowering.root.other_key)
+    if solver.check() != z3.sat:
+        return False
+    value = lowering.read(solver.model())
+    scalar = value is None or isinstance(value, (bool, int, str))
+    return [
+        value is None,
+        isinstance(value, bool),
+        isinstance(value, int) and not isinstance(value, bool),
+        isinstance(value, str),
+        isinstance(value, dict),
+        not scalar and not isinstance(value, dict) and rl.member(ANY, value)
+        and not rl.member(flagged, value) and not rl.member(text(_lit("a")), value),
+        isinstance(value, dict) and any(k != "x" for k in value) and not rl.member(flagged, value),
+    ][int(i)]
+
+
+def the_solvers_record_is_closed(t: int) -> bool:
+    """Whether, for a record term `t`, the solver has no value that the
+    record's formula holds and that is a map with a key no record of the
+    question names (true of every term that is no record)."""
+    import z3
+    rl, a = _rl(), TERMS[int(t)]
+    if a["op"] != "record":
+        return True
+    node = rl.canonical(a)
+    if node["op"] != "record":
+        return True
+    lowering = rl._Lowering(z3, [node])
+    solver = z3.Solver()
+    solver.add(*lowering.shape)
+    solver.add(lowering.holds(node, lowering.root), lowering.root.other_key)
+    return solver.check() == z3.unsat
+
+
+def no_answer_from_the_solver_is_unknown() -> bool:
+    """Whether `find_member` answers `unknown`, with the reason and no
+    member, when the solver gives no answer."""
+    import z3
+    rl = _rl()
+    real = z3.Solver.check
+    z3.Solver.check = lambda self, *assumptions: z3.unknown
+    try:
+        found = rl.find_member([FLAG], [])
+    finally:
+        z3.Solver.check = real
+    return found.status == "unknown" and found.member is None and "no answer" in found.reason
+
+
 # ---- generated terms and values -----------------------------------------
 
 def generated_term(seed: int, depth: int = 0) -> dict:
