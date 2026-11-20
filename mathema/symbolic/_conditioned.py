@@ -30,6 +30,7 @@ from ._base import (
     NotSymbolic, _LiftCtx, _bind_params, _complex_typed, _expr_to_sympy,
     _simplify_maybe_array,
     strip_docstring, _unmodified_params, _walk_lift_body, UnreadRaise,
+    read_raise_path,
 )
 from ..domain import bound_to_sympy_set
 from ..finite_sets import OpaqueRegistry
@@ -56,15 +57,21 @@ class ConditionedLift:
     """The result of lift_conditioned(): either an ordinary lifted
     expression (`kind="value"`, same shape lift() itself produces), or;
     a path can end in `raise` instead of `return`, a resolved
-    exception (`kind="raises"`, `exc_type` the class name if it could be
-    determined from the raise statement, else None)."""
+    exception (`kind="raises"`, `exc_class` the class the path raises
+    and `exc_type` its name when the path is read as raising exactly one
+    class, else both None)."""
     kind: str                              # "value" | "raises"
     expr: "sympy.Expr | None" = None
     exc_type: str | None = None
-    # why a path ending in `raise` was not read as raising one named
-    # class (an argument whose evaluation may itself raise, a cause, a
-    # re-raise), or None
+    # why a path ending in `raise` was not read as raising one class
+    # (something before the raise that may itself raise, a constructor
+    # that may refuse its arguments, a name that is not the class), or
+    # None
     exc_unread: str | None = None
+    exc_class: "type | None" = None
+    # whether an unread path still ends in an ordinary exception on
+    # every run
+    exc_halts: bool = False
     params: dict = field(default_factory=dict)
     sig_params: list = field(default_factory=list)
     aggregate: dict = field(default_factory=dict)
@@ -834,13 +841,17 @@ def _explain_branch(test: ast.AST, unmodified: set, affine_locals: dict | None =
 
 
 def _prune_body(body: list, domain: dict, unmodified: set, budget: list,
-                affine_locals: dict | None = None, params: dict | None = None) -> list | None:
+                affine_locals: dict | None = None, params: dict | None = None,
+                trace: "list | None" = None) -> list | None:
     """Resolve every `if` in `body` (recursively; an `elif` chain is
     nested `If`s in `orelse`, handled the same way) whose condition
     _branch_condition_truth() can decide, replacing it with whichever
     side is actually taken. `None` if any `if` can't be decided, or a
     loop/while/try is encountered (still refused outright, same as
-    lift(); this only ever extends the branch case)."""
+    lift(); this only ever extends the branch case). `trace`, when
+    given, receives what Python evaluates along the pruned path in
+    order: `("test", <if test>)` for each branch passed and `("stmt",
+    <statement>)` for each statement kept."""
     out = []
     for stmt in body:
         if isinstance(stmt, ast.If):
@@ -848,17 +859,22 @@ def _prune_body(body: list, domain: dict, unmodified: set, budget: list,
                                             affine_locals, params)
             if truth is None:
                 return None
+            if trace is not None:
+                trace.append(("test", stmt.test))
             budget[0] -= 1
             if budget[0] < 0:
                 return None
             pruned = _prune_body(stmt.body if truth else stmt.orelse,
-                                 domain, unmodified, budget, affine_locals, params)
+                                 domain, unmodified, budget, affine_locals, params,
+                                 trace)
             if pruned is None:
                 return None
             out.extend(pruned)
         elif isinstance(stmt, (ast.For, ast.While, ast.Try)):
             return None
         else:
+            if trace is not None:
+                trace.append(("stmt", stmt))
             out.append(stmt)
     return out
 
@@ -1134,8 +1150,9 @@ def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
     params, aggregate = _bind_params(fn, facts)
     affine_locals = _affine_locals(facts.tree, unmodified, params)
 
+    trace: list = []
     pruned = _prune_body(body, domain, unmodified, [_MAX_PRUNED_BRANCHES],
-                         affine_locals, params)
+                         affine_locals, params, trace)
     if pruned is None:
         return None
 
@@ -1155,8 +1172,30 @@ def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
         return ConditionedLift(kind="value", expr=result, params=params,
                                sig_params=sig_params, aggregate=aggregate, opaque=opaque)
     if kind == "raises":
-        unread = result.reason if isinstance(result, UnreadRaise) else None
-        return ConditionedLift(kind="raises", exc_type=None if unread else result,
-                               exc_unread=unread, params=params,
-                               sig_params=sig_params, aggregate=aggregate, opaque=opaque)
+        reading = _read_the_raise(fn, facts, domain, trace, result)
+        unread = isinstance(reading, UnreadRaise)
+        return ConditionedLift(kind="raises",
+                               exc_type=None if unread else reading.cls.__name__,
+                               exc_class=None if unread else reading.cls,
+                               exc_unread=reading.reason if unread else None,
+                               exc_halts=reading.halts if unread else False,
+                               params=params, sig_params=sig_params,
+                               aggregate=aggregate, opaque=opaque)
     return None
+
+
+def _read_the_raise(fn, facts: Facts, domain: dict, trace: list, stmt: ast.Raise):
+    """Intent:
+        The reading of the path `trace` up to the `raise` statement
+        `stmt` it reaches (`read_raise_path`), each parameter bound to a
+        value of its declared bound (any object for one the domain does
+        not bound).
+    """
+    from ._raise_reading import ANY, kind_of_bound
+    steps = []
+    for step in trace:
+        if step[0] == "stmt" and step[1] is stmt:
+            break
+        steps.append(step)
+    kinds = {p: kind_of_bound(domain[p]) if p in domain else ANY for p in facts.params}
+    return read_raise_path(fn, steps, stmt, kinds)
