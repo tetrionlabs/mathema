@@ -1154,7 +1154,8 @@ def tagged() -> dict:
 
 def status(root: str = ".") -> str:
     """One line per tagged function: does a verified record exist, and is
-    it fresh (its recorded form hash matches the code as it is now)?
+    it fresh (its recorded form hash matches the code as it is now, and
+    no row of it is stale under a later soundness epoch, `stale_rows`)?
     Freshness reads only the verified layer (.mathema/verified/), a declared
     claims file never carries an identity hash, so it can't answer this."""
     from .spec import load_verified
@@ -1172,8 +1173,11 @@ def status(root: str = ".") -> str:
             continue
         stored = (rec["entry"].get("identity") or {}).get("form")
         from .identity import same_form
-        state = ("fresh" if stored and same_form(stored, current)
-                 else "stale (code changed since spec)" if stored else "no hash")
+        from .soundness_epoch import stale_rows
+        state = ("stale (code changed since spec)" if stored and not same_form(stored, current)
+                 else "no hash" if not stored
+                 else "stale (proven under an earlier soundness epoch)"
+                 if stale_rows(rec["entry"]) else "fresh")
         lines.append(f"  {'✓' if state == 'fresh' else '✗'} {key}: {state} "
                      f"[{rec['source']}]")
     return "mathema status\n" + ("\n".join(lines) if lines else

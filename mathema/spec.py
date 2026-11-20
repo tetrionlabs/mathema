@@ -1178,7 +1178,8 @@ def _dependency_state(dep: dict, verified: dict,
     """One function-kind dependency's freshness against the verified
     store: `current` (its record's form and body provenance match its
     live ones), `invalidated` (the function changed since its record:
-    its form, or under the same form its body provenance), or
+    its form, or under the same form its body provenance; or a row of
+    the record is stale under a later soundness epoch, `stale_rows`), or
     `unverified` (no record). Freshness only: a callee whose claim
     regressed while its code did not change is `current`, the
     regression showing on the callee's own record.
@@ -1209,7 +1210,8 @@ def _dependency_state(dep: dict, verified: dict,
     from .koine.facts import provenance_change
     moved = provenance_change(dep.get("provenance"),
                               (entry.get("meta") or {}).get("mathema.provenance"))
-    return "current" if moved is None else "invalidated"
+    from .soundness_epoch import stale_rows
+    return "current" if moved is None and not stale_rows(entry) else "invalidated"
 
 
 def _chain_functions(dependencies: list) -> dict:
