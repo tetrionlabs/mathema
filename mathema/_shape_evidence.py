@@ -104,6 +104,9 @@ class ParameterShape:
     found: tuple = ()
     disagree: tuple = ()
     settled: bool = False
+    #: the wrapper around the function that calls it with a value made
+    #: from its own arguments, when that leaves the shape unread
+    wrapper: "str | None" = None
 
     @property
     def established(self) -> bool:
@@ -294,6 +297,56 @@ def _lambdas_alike(fn) -> int:
         return 0
     return sum(1 for node in ast.walk(tree) if isinstance(node, ast.Lambda)
                and _arg_names(node.args) == _code_arg_names(target))
+
+
+def _transforming_wrapper(fn) -> "str | None":
+    """Intent:
+        The qualified name of the first wrapper around `fn` (a layer
+        with `__wrapped__`) whose body passes the function it wraps a
+        value it makes from its own parameters (`fn("b" * n)`), rather
+        than the parameters themselves, the results of calls, or
+        `*args` and `**kwargs`; None when every layer passes them on.
+    """
+    import textwrap
+    layer = fn
+    for _depth in range(32):
+        inner = getattr(layer, "__wrapped__", None)
+        if inner is None:
+            return None
+        code = getattr(layer, "__code__", None)
+        if code is not None:
+            try:
+                lines, _start = inspect.getsourcelines(code)
+                tree = ast.parse(textwrap.dedent("".join(lines)))
+            except (OSError, TypeError, SyntaxError):
+                tree = None
+            fdef = next((n for n in getattr(tree, "body", ())
+                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                        None)
+            if fdef is not None and _makes_arguments(fdef):
+                return getattr(layer, "__qualname__", None) \
+                    or getattr(layer, "__name__", "the wrapper")
+        layer = inner
+    return None
+
+
+def _makes_arguments(fdef) -> bool:
+    """Intent:
+        Whether some call in `fdef`'s body passes an argument that is
+        an expression built from `fdef`'s parameters (not a bare
+        parameter, a starred one, or a call's result).
+    """
+    params = set(_arg_names(fdef.args))
+    for node in ast.walk(fdef):
+        if not isinstance(node, ast.Call):
+            continue
+        for arg in [*node.args, *[k.value for k in node.keywords]]:
+            if isinstance(arg, (ast.Name, ast.Starred, ast.Call)):
+                continue
+            if any(isinstance(n, ast.Name) and n.id in params
+                   for n in ast.walk(arg)):
+                return True
+    return False
 
 
 def _arg_names(args) -> list:
@@ -719,6 +772,12 @@ def not_established_text(fn, shape: ParameterShape) -> str:
         return (f"shape of parameter {p} is not established ({where}): "
                 f"nothing in its signature says what kind of value it takes; "
                 f"bind {p} in the claim (for {p} in ...), or annotate it")
+    if shape.wrapper is not None:
+        return (f"shape of parameter {p} is not established ({where}): "
+                f"{shape.wrapper} calls the function it wraps with a value "
+                f"it makes from its own arguments, so the wrapped function's "
+                f"annotations and uses do not say what kind of value {p} "
+                f"takes; bind {p} in the claim (for {p} in ...)")
     if _function_def(fn)[0] is None and _lambdas_alike(fn) > 1:
         return (f"shape of parameter {p} is not established ({where}): "
                 f"the line defines more than one lambda taking these "
@@ -1031,6 +1090,12 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
                        stated_kind=stated.get(p),
                        receiver=receivers.get(p), body=body.get(p, ()))
            for p in params}
+    wrapper = _transforming_wrapper(fn)
+    if wrapper is not None:
+        return {p: shape if shape.evidence is not None
+                and shape.evidence.source == "claim domain"
+                else ParameterShape(p, None, wrapper=wrapper)
+                for p, shape in out.items()}
     if fdef is not None:
         loaded = {n.id for n in ast.walk(read)
                   if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)

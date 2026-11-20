@@ -418,6 +418,24 @@ FNS = '''
     def copied_text_or_mapping(y0):
         t = y0
         return t.upper(), t.keys()
+
+
+    def as_count(fn):
+        @functools.wraps(fn)
+        def w(n):
+            return fn("b" * n)
+        return w
+
+
+    @as_count
+    def loud(s):
+        return len(s.upper())
+
+
+    def walrus_copy(y0):
+        if (t := y0) is not None:
+            return t[0]
+        return 0.0
 '''
 
 
@@ -766,3 +784,16 @@ def test_a_disagreement_quotes_the_source_as_written(mod):
     assert p.verdict == "unknown", (p.verdict, p.note)
     assert "`t.upper()`" in p.note and "y0.upper()" not in p.note
     assert "a mapping (a mapping)" not in p.note
+
+
+def test_a_wrapper_that_makes_its_argument_does_not_read_the_wrapped_shape(mod):
+    p = _row(mod.loud, "f(s) >= 0")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "a string" not in (p.note or "")
+    assert "calls the function it wraps with a value it makes" in p.note
+
+
+def test_a_walrus_copy_is_read_through(mod):
+    p = _row(mod.walrus_copy, "f(y0) == f(y0)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["y0"]["shape"] == "sequence"
