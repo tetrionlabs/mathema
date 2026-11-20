@@ -1287,13 +1287,21 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
         whose test is true at the hole, every statement before it, its
         test and every statement before the raise must be unable to
         fail (`read_raise_path`), and an earlier guard that may be taken
-        must itself raise a subclass of the class this one raises.
+        must itself raise a subclass of the class this one raises. None
+        too when calling `fn` does not run that body: a wrapper whose call
+        is not read, or a generator or coroutine function
+        (`suspended_call_refusal`).
     """
     from .symbolic._base import strip_docstring
     from ._raise_reading import ANY, ReadRaise, read_raise_path
     import ast
     if fn is None or not _true_at_hole(node.test, param, kind, member):
         return None
+    from .symbolic._prove import suspended_call_refusal
+    from .symbolic._base import innermost
+    if suspended_call_refusal(fn) is not None:
+        return None
+    body_fn = innermost(fn)
     body = strip_docstring(tree.body)
     if not any(stmt is node for stmt in body):
         return None
@@ -1306,7 +1314,7 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
             break
         if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
                 and isinstance(stmt.body[0], ast.Raise):
-            taken = read_raise_path(fn, steps + [("test", stmt.test)], stmt.body[0], kinds)
+            taken = read_raise_path(body_fn, steps + [("test", stmt.test)], stmt.body[0], kinds)
             if not isinstance(taken, ReadRaise):
                 return None
             earlier.append(taken.cls)
@@ -1318,7 +1326,7 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
         if stmt is raise_stmt:
             break
         steps.append(("stmt", stmt))
-    read = read_raise_path(fn, steps, raise_stmt, kinds)
+    read = read_raise_path(body_fn, steps, raise_stmt, kinds)
     if not isinstance(read, ReadRaise) or not all(issubclass(c, read.cls) for c in earlier):
         return None
     return read

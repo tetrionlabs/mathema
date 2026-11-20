@@ -424,3 +424,29 @@ def test_a_lambda_default_is_read_where_the_lambda_is_built(fn, verdict):
     rows = check_conjectures(fn, [claim("for x in [0, 1], y in [-1, 1], f(x, y) == x * y"),
                                   claim("absent(f, x) raises(TypeError)")])
     assert rows[-1].verdict == verdict, (rows[-1].verdict, rows[-1].note)
+
+
+# ---- third review: the policy route reads what the call does ----------------
+
+def _rare_swallow(fn):
+    @functools.wraps(fn)
+    def rarely(x, y):
+        if y == 0.123456:
+            return 0.0
+        return fn(x, y)
+    return rarely
+
+
+@_rare_swallow
+def pol_wrap_rare(x: Optional[float], y: float) -> float:
+    if x is None:
+        raise TypeError("x is required")
+    return x * y
+
+
+def test_a_policy_behind_a_wrapper_is_not_proven_from_the_inner_guard():
+    assert pol_wrap_rare(None, 0.123456) == 0.0
+    rows = check_conjectures(pol_wrap_rare, [
+        claim("for x in [0, 1], y in [-1, 1], f(x, y) == x * y"),
+        claim("absent(f, x) raises(TypeError)")])
+    assert rows[-1].verdict == "holds", (rows[-1].verdict, rows[-1].note)
