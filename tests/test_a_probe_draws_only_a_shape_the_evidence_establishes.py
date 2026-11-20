@@ -309,6 +309,38 @@ FNS = '''
         if out is not None:
             out.append(s)
         return s
+
+
+    def count_up(x):
+        return sum(range(x))
+
+
+    def zeros(x):
+        return len([0] * x)
+
+
+    def doubled(x):
+        return x << 1
+
+
+    def low_bit(x):
+        return x & 1
+
+
+    def bits(x):
+        return x.bit_length()
+
+
+    def tenth(x):
+        return [10, 20, 30][x]
+
+
+    def prefixed(xs):
+        return len([0] + xs)
+
+
+    def tuple_prefixed(xs):
+        return len((0,) + xs)
 '''
 
 
@@ -597,3 +629,19 @@ def test_the_empty_input_row_holds_the_other_parameters_at_their_defaults(mod):
     assert rows, "no is_empty_safe row"
     for row in rows:
         assert row.verdict != "falsified", (row.verdict, row.counterexample)
+
+
+@pytest.mark.parametrize("name, text", [
+    ("count_up", "f(x) >= 0"), ("zeros", "f(x) >= 0"), ("doubled", "f(x) == 2 * x"),
+    ("low_bit", "f(x) <= 1"), ("bits", "f(x) >= 0"),
+    ("prefixed", "f(xs) >= 1"), ("tuple_prefixed", "f(xs) >= 1"),
+])
+def test_a_use_only_an_integer_or_a_container_supports_draws_one(mod, name, text):
+    p = _row(getattr(mod, name), text)
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+
+
+def test_an_index_into_a_literal_is_drawn_as_an_integer(mod):
+    p = _row(mod.tenth, "f(x) >= 10")
+    assert "TypeError" not in (p.counterexample or ""), (p.verdict, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["x"]["shape"] == "number"

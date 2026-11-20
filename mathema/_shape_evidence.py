@@ -78,9 +78,12 @@ class Evidence:
     #: (`x * y`) names a number when nothing else names a shape, and is
     #: also what a string or a sequence supports
     firm: bool = True
-    #: the kind of number the evidence states, `int` for a count of
-    #: repeats (`x * "ab"`), else None
+    #: the kind of number the evidence states, `int` for a use only an
+    #: integer supports (`x * "ab"`, `x << 1`, `range(x)`), else None
     number_kind: "str | None" = None
+    #: the container a sequence is, `tuple` or `list`, when the evidence
+    #: names one (`(0,) + xs`), else None
+    container: "str | None" = None
 
 
 @dataclass(frozen=True)
@@ -158,17 +161,20 @@ def _default_shape(value) -> "str | None":
     return None
 
 
-def default_container(fn, shape: "ParameterShape | None") -> "type | None":
+def drawn_container(fn, shape: "ParameterShape | None") -> "type | None":
     """Intent:
         `tuple` when a sequence parameter's shape rests on a tuple
-        default, so each draw of it is passed as a tuple; None
-        otherwise.
+        default, or on a use that names a tuple (`(0,) + xs`), so each
+        draw of it is passed as a tuple; None otherwise.
     """
     if shape is None or shape.evidence is None \
-            or shape.evidence.source != "default" \
             or shape.evidence.shape != "sequence":
         return None
-    return tuple if isinstance(_default_of(fn, shape.param), tuple) else None
+    if shape.evidence.source == "default":
+        return tuple if isinstance(_default_of(fn, shape.param), tuple) else None
+    if any(e.container == "tuple" for e in shape.found if e.shape == "sequence"):
+        return tuple
+    return None
 
 
 def _underlying(fn):
@@ -379,16 +385,33 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
         for line, text in uses.text.get(p, ()):
             out[p].append(Evidence("body use", "string",
                                    f"`{text}` on line {line + offset}"))
+        for line, (text, made) in uses.container.get(p, ()):
+            out[p].append(Evidence("body use", "sequence",
+                                   f"`{text}` on line {line + offset}",
+                                   container=made))
         for form, name in methods.get(p, ()):
             shape = _method_shape(form, name)
+            written = f"`{p}.{name}{'()' if form != 'attr' else ''}`"
             if shape is not None:
-                out[p].append(Evidence(
-                    "body use", shape,
-                    f"`{p}.{name}{'()' if form != 'attr' else ''}`"))
+                out[p].append(Evidence("body use", shape, written))
+            elif _integer_only(form, name):
+                out[p].append(Evidence("body use", "number", written,
+                                       number_kind="int"))
     if depth > 0:
         for p, ev in _passed_on(fn, fdef, params, depth).items():
             out[p].extend(ev)
     return out
+
+
+def _integer_only(form: str, name: str) -> bool:
+    """Intent:
+        Whether `name` is a method or attribute an `int` has and a
+        `float`, a `str`, a `list` and a `dict` do not (`bit_length`,
+        `to_bytes`).
+    """
+    if form == "@" or hasattr(object, name) or not hasattr(int, name):
+        return False
+    return not any(hasattr(cls, name) for cls in (float, str, list, dict))
 
 
 def _method_shape(form: str, name: str) -> "str | None":

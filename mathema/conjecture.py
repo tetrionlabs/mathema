@@ -13066,16 +13066,16 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
 
     from ._sampling import _RNG_SEED
     from .probing import bound_element_type
-    from ._shape_evidence import default_container
+    from ._shape_evidence import drawn_container
     from .runtime_types import annotated_container, as_annotated, as_element_type
     # the set, frozenset or tuple a sequence parameter's annotation
-    # names (else the tuple its default is), and the type of its
+    # names (else the tuple its default or a use names), and the type of its
     # elements: every draw of it, a recorded witness replayed included,
     # is passed as a member of that type
     containers_of = {_p: made for _p, _k in kinds.items()
                      if _k in SEQUENCE_KINDS
                      and (made := annotated_container(fn, _p)
-                          or default_container(fn, ctx.drawn_shapes.get(_p)))
+                          or drawn_container(fn, ctx.drawn_shapes.get(_p)))
                      is not None}
 
     def as_typed(value, p):
