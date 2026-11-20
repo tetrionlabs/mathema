@@ -312,10 +312,6 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                 if v is not None and v != ""}}
         if row_meta:
             row["meta"] = row_meta
-        # a verdict a soundness epoch could decide differently carries
-        # the epoch of the engine that reached it
-        from .soundness_epoch import stamp as _stamp_epoch
-        row = _stamp_epoch(row)
         source = (p.meta or {}).get("mathema.surface")
         if not include_suggestions and not (p.meta or {}).get("mathema.policy") and (
                 source == "mathema"
@@ -1178,8 +1174,7 @@ def _dependency_state(dep: dict, verified: dict,
     """One function-kind dependency's freshness against the verified
     store: `current` (its record's form and body provenance match its
     live ones), `invalidated` (the function changed since its record:
-    its form, or under the same form its body provenance; or a row of
-    the record is stale under a later soundness epoch, `stale_rows`), or
+    its form, or under the same form its body provenance), or
     `unverified` (no record). Freshness only: a callee whose claim
     regressed while its code did not change is `current`, the
     regression showing on the callee's own record.
@@ -1210,8 +1205,7 @@ def _dependency_state(dep: dict, verified: dict,
     from .koine.facts import provenance_change
     moved = provenance_change(dep.get("provenance"),
                               (entry.get("meta") or {}).get("mathema.provenance"))
-    from .soundness_epoch import stale_rows
-    return "current" if moved is None and not stale_rows(entry) else "invalidated"
+    return "current" if moved is None else "invalidated"
 
 
 def _chain_functions(dependencies: list) -> dict:

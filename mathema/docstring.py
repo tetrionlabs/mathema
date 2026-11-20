@@ -232,8 +232,7 @@ class DocstringSync:
     # claims_in_sync (block names known, zero surface conflicts),
     # intent_in_sync (declared file agrees with the docstring, which
     # wins by design), record_stale (the verified record's form no
-    # longer matches the live code, or a row of it is stale under a
-    # later soundness epoch; its contribution here is dated).
+    # longer matches the live code; its contribution here is dated).
     # None = not applicable, per the same convention as every field.
     claims_in_sync: bool | None = None
     intent_in_sync: bool | None = None
@@ -483,8 +482,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
         score += int(intent_in_sync)
 
     # the record contribution's freshness: a stale record (form
-    # mismatch, or a row proven under an earlier soundness epoch) is
-    # flagged, never silently used as truth
+    # mismatch) is flagged, never silently used as truth
     record_stale = None
     if verified_entry:
         recorded_form = (verified_entry.get("identity") or {}).get("form")
@@ -492,9 +490,7 @@ def docstring_sync(fn, root: str = ".", *, declared: dict | None = None,
             else None
         if recorded_form and live_form:
             from .identity import same_form
-            from .soundness_epoch import stale_rows
-            record_stale = not same_form(recorded_form, live_form) \
-                or bool(stale_rows(verified_entry))
+            record_stale = not same_form(recorded_form, live_form)
 
     # --- the claim triplet: informational only, never scored --------------
     if claims_floor is None:
@@ -630,8 +626,7 @@ def docstring_sync_checklist(sync: DocstringSync) -> list[str]:
                      f"(names known, no surface conflicts)")
     if sync.record_stale:
         lines.append("! verified record is stale (form changed since it "
-                     "was written, or a row was proven under an earlier "
-                     "soundness epoch); its contribution here is dated "
+                     "was written); its contribution here is dated "
                      "(not scored)")
     ctx = sync.intent_context or {}
     if ctx.get("module") or ctx.get("package") or ctx.get("readme"):
