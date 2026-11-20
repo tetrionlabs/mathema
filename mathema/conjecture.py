@@ -11418,6 +11418,30 @@ def _outside_premise_too(ctx: "_ClaimContext", fn, excluded):
     return lambda point: excluded(point) or lacking(point)
 
 
+def _ranges_over_texts_only(cj_domain) -> bool:
+    """Whether a claim binds at least one variable and each ranges over
+    texts only: a language of `str` values, or a set of strings,
+    admitting no missing value."""
+    from .domain import Domain, LanguageRef, _Sentinel
+    if not cj_domain:
+        return False
+    for bound in cj_domain.values():
+        pieces = (bound,) if isinstance(bound, LanguageRef) else (
+            tuple(bound.pieces) if isinstance(bound, Domain) and not bound.absent
+            and not bound.members and bound.policy is None and not any(
+                isinstance(v, _Sentinel) for v in bound.excluded) else None)
+        if not pieces:
+            return False
+        for piece in pieces:
+            if isinstance(piece, LanguageRef):
+                if not _a_language_of_texts(piece):
+                    return False
+            elif not (isinstance(piece, frozenset) and piece
+                      and all(type(v) is str for v in piece)):
+                return False
+    return True
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -11439,6 +11463,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     if mode == "math_only":
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion": "none (derive:math_only)"}
+        return
+    if _ranges_over_texts_only(ctx.cj_domain):
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion":
+                           "none (every variable of the claim is a text, so there is "
+                           "no float arithmetic to run)"}
         return
     if _family_owns_claim(ctx.family):
         # a family claim states a fact about the code itself
