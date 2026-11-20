@@ -9036,14 +9036,16 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         After a proof over the reals, the claim's own listed sentinels
         executed: every sentinel an enumerated binding lists
         (`{0.25, None}`, `{missing}`) belongs to the claim's point set,
-        so the function is called at each, against in-domain points of
-        the other parameters (their domain corners), and a raise or a
+        so the function is called at each, against the other
+        parameters' values (`_listed_value_points`), and a raise or a
         failing relation there falsifies the claim itself. Returns a
         falsified `Probe` naming the first failing point, listed
         sentinels in the order absence, the class, then members; a
-        `Probe` carrying only `meta["mathema.missing"]["tried"]` when
-        every one holds; None when the claim lists none or its points
-        cannot be evaluated here.
+        `Probe` carrying `meta["mathema.missing"]["tried"]` that is
+        `proven` when every listed value held at every value of the
+        other parameters, and `holds` with a note saying what was run
+        when the points run were a sample, or when the claim cannot be
+        evaluated at a point; None when the claim lists none.
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, realise_sentinel)
@@ -9066,27 +9068,52 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                             facts, cj_domain,
                             bound_funcs, assumption)
     if deps is None:
-        return None
+        shown = "; ".join(
+            f"the listed value {_fmt_point({p: v}, [p])} was not run: the "
+            f"claim cannot be evaluated at a point"
+            for p, values in listed.items() for _s, v in values)
+        return Probe(ctx.cj.name, statement, "holds",
+                     note=f"the real points were derived; {shown}")
     names = list(deps["names"])
-    bases = [c for c in deps["corners"][:8] if deps["admits"](c)] or deps["corners"][:1]
     tried: dict = {}
     failures: list = []
+    sampled: list = []
     for p, values in listed.items():
         if p not in names:
             continue
+        others = [n for n in names if n != p]
+        grid = _listed_value_grid(others, cj_domain, listed)
         for sentinel, value in values:
             tried.setdefault(p, []).append(repr(value))
-            for base in bases:
-                point = {**base, p: value}
-                if deps["evaluate"](point) is False:
+            points = _listed_value_points(deps, p, value, others, grid)
+            held = 0
+            for point in points:
+                outcome = deps["evaluate"](point)
+                if outcome is False:
                     rank = (0 if sentinel == ABSENT else 1 if sentinel.member is None
                             else 2)
                     failures.append((rank, point))
                     break
+                held += outcome is True
+            else:
+                shown = _fmt_point({p: value}, [p])
+                if grid is None:
+                    sampled.append(
+                        f"the listed value {shown} was run at {held} points "
+                        f"of {', '.join(others)} and held at each, which is "
+                        f"evidence, not a proof")
+                elif held < len(points):
+                    sampled.append(
+                        f"the listed value {shown} was run at all "
+                        f"{len(points)} points of {', '.join(others)} and "
+                        f"held at {held}; the rest could not be decided")
     from .probing import executed_missing, with_executed
     meta = with_executed({"mathema.missing": {"tried": tried}},
                          executed_missing(deps)) or {}
     if not failures:
+        if sampled:
+            return Probe(ctx.cj.name, statement, "holds", meta=meta,
+                         note="the real points were derived; " + "; ".join(sampled))
         return Probe(ctx.cj.name, statement, "proven", meta=meta)
     point = sorted(failures, key=lambda f: f[0])[0][1]
     witness = _fmt_point(point, names)
@@ -9100,6 +9127,73 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                          + (f": the function raised {raised}" if raised else "")),
                  meta={**meta, "mathema.corroboration": "reproduced",
                        "mathema.witness_executed": True})
+
+
+def _listed_value_grid(others: list, cj_domain: dict, listed: dict) -> "list | None":
+    """Intent:
+        Every combination of the `others` parameters' values, as points
+        (`[{}]` when there are none), when each is bound to a finite set:
+        its members, then the sentinels it lists (`listed`, as
+        `_listed_sentinels_fail` builds it). None when some parameter is
+        not finite, or the combinations number more than the brute-force
+        point budget.
+    """
+    import itertools
+    from ._brute_force import BRUTE_FORCE_POINT_BUDGET
+    from .domain import _member_sort_key
+    axes = []
+    count = 1
+    for n in others:
+        members = _finite_members((cj_domain or {}).get(n))
+        if members is None and n not in listed:
+            return None
+        axis = (sorted(members or (), key=_member_sort_key)
+                + [v for _s, v in listed.get(n, ())])
+        count *= len(axis)
+        if count > BRUTE_FORCE_POINT_BUDGET:
+            return None
+        axes.append(axis)
+    return [dict(zip(others, combo)) for combo in itertools.product(*axes)]
+
+
+def _listed_value_points(deps, p: str, value, others: list, grid) -> list:
+    """Intent:
+        The points a listed value `value` of `p` is run at, each one the
+        domain and the claim's assumptions admit: every point of `grid`
+        when the other parameters are all finite, else the domain's
+        corners followed by `probing._N_BASE` draws of the other
+        parameters from `deps["sample"]` with the sampler's fixed seed.
+    """
+    import random
+    from ._sampling import _RNG_SEED
+    from .probing import _N_BASE
+    if grid is not None:
+        candidates = [{**g, p: value} for g in grid]
+    else:
+        rng = random.Random(_RNG_SEED)
+        candidates = [{**c, p: value} for c in deps["corners"][:8]]
+        candidates += [{**{n: deps["sample"](n, rng) for n in others}, p: value}
+                       for _ in range(_N_BASE)]
+    return [c for c in candidates if deps["admits"](c)]
+
+
+def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":
+    """Intent:
+        A proof over the reals with its listed sentinels' outcome
+        (`_listed_sentinels_fail`) applied: the falsified row when a
+        listed point fails; else the proof carrying the outcome's meta,
+        lowered to `holds` with the outcome's note when the listed
+        values were not shown at every point.
+    """
+    if listed is None:
+        return proven
+    if listed.verdict == "falsified":
+        return listed
+    proven.meta = {**(proven.meta or {}), **(listed.meta or {})}
+    if listed.verdict == "holds":
+        proven.verdict = "holds"
+        proven.note = f"{proven.note or ''}; {listed.note}"
+    return proven
 
 
 def _container_holes(p: str, record, resolution: dict) -> tuple:
@@ -11237,10 +11331,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain,
                                             _bound_callables(cj), assumption or [],
                                             statement, note)
-            if listed is not None:
-                if listed.verdict == "falsified":
-                    return listed
-                proven.meta = {**(proven.meta or {}), **listed.meta}
+            proven = _with_listed_sentinels(proven, listed)
+            if proven.verdict == "falsified":
+                return proven
             _spawn_float_companion(ctx, proven, fn, facts,
                                    _bound_callables(cj), assumption or [])
             return proven
@@ -11568,10 +11661,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         if not route.startswith("derive:brute_force"):
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
                                             assumption or [], statement, note)
-            if listed is not None:
-                if listed.verdict == "falsified":
-                    return listed
-                proven.meta = {**(proven.meta or {}), **listed.meta}
+            proven = _with_listed_sentinels(proven, listed)
+            if proven.verdict == "falsified":
+                return proven
         # a derive proof is exact arithmetic; the computation is the
         # float companion's claim. A proof by executing every point of a
         # finite set already is the computation, and spawns none
