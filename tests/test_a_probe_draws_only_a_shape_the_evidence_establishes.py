@@ -20,6 +20,7 @@ import pytest
 from mathema.conjecture import check_conjectures, claim
 
 FNS = '''
+    import dataclasses
     import math
 
 
@@ -61,6 +62,51 @@ FNS = '''
 
     def plus(x: float):
         return x + 1
+
+
+    def running(xs, y0):
+        total = y0
+        for v in xs:
+            if v > 0:
+                total = total + v
+        return total
+
+
+    def replaced(y0):
+        t = y0
+        t = [1.0]
+        return t[0] + 1
+
+
+    def unused(x, y):
+        return x - 1
+
+
+    @dataclasses.dataclass(order=True)
+    class Pair:
+        a: float
+        b: float
+
+
+    class Bigger(Pair):
+        def __lt__(self, other):
+            return self.a < other.a
+
+
+    @dataclasses.dataclass
+    class Plain:
+        a: float
+
+        def __lt__(self, other):
+            return self.a < other.a
+
+
+    class Bare:
+        def __init__(self, a: float = 0.0):
+            self.a = a
+
+        def __le__(self, other):
+            return self.a <= other.a
 '''
 
 
@@ -86,7 +132,7 @@ def test_a_parameter_nothing_establishes_is_not_drawn(mod):
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert p.meta.get("mathema.probe_gap") == "shape-not-established"
     assert "shape of parameter x is not established" in p.note
-    assert "shape_evidence_fns.py:5" in p.note
+    assert "shape_evidence_fns.py:6" in p.note
     assert '"def same(x):"' in p.note
     assert "bind x in the claim" in p.note and "annotate it" in p.note
     assert p.n == 0 and p.counterexample is None
@@ -149,7 +195,7 @@ def test_a_wrong_shape_raise_on_a_guessed_number_is_a_draw_defect(mod):
     defect = p.meta["mathema.draw_defect"]
     assert defect["param"] == "v" and defect["raised"] == "AttributeError"
     assert "the draw for v had the wrong shape" in p.note
-    assert "shape_evidence_fns.py:34" in p.note
+    assert "shape_evidence_fns.py:35" in p.note
     assert '"return v * 2 + v.offset"' in p.note
 
 
@@ -165,3 +211,48 @@ def test_a_claim_that_binds_the_value_is_judged_on_it(mod):
     assert "raised AttributeError" in falsified.counterexample
     held = _row(mod.scale, "for v in [0, 1], raises(f(v), AttributeError)")
     assert held.verdict == "holds", (held.verdict, held.note)
+
+
+def test_a_plain_local_copy_carries_the_parameters_uses(mod):
+    p = _row(mod.running, "abs(f(xs, y0) - y0) <= abs(y0) + 1e9")
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["y0"]["shape"] == "number"
+
+
+def test_a_copy_rebound_before_its_use_carries_nothing(mod):
+    p = _row(mod.replaced, "f(y0) == 2")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+
+
+def test_a_parameter_the_body_never_reads_is_drawn_and_said_so(mod):
+    p = _row(mod.unused, "f(x, y) <= x")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.drawn_shapes"]["y"]["source"] == "not read by the body"
+
+
+def test_a_function_without_source_says_so():
+    ns: dict = {}
+    exec("def hidden(x):\n    return x\n", ns)
+    p = _row(ns["hidden"], "f(x) == x")
+    assert p.verdict == "unknown", (p.verdict, p.note)
+    assert "<unknown>" not in p.note
+    assert ("shape of parameter x is not established (the source of hidden "
+            "is not available)") in p.note
+
+
+def test_a_generated_dataclass_ordering_draws_an_instance(mod):
+    p = _row(mod.Pair.__lt__, "f(self, other) == f(self, other)")
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    shape = p.meta["mathema.drawn_shapes"]["other"]
+    assert shape["source"] == "generated dataclass method"
+    assert shape["detail"] == "an instance of Pair"
+
+
+@pytest.mark.parametrize("cls, name", [("Bigger", "__lt__"), ("Plain", "__lt__"),
+                                       ("Bare", "__le__")])
+def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
+    p = _row(getattr(getattr(mod, cls), name), "f(self, other) == f(self, other)")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert "other" in p.meta["mathema.shape"]
