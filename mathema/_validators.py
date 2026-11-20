@@ -52,6 +52,7 @@ import re
 import textwrap
 import types
 from dataclasses import dataclass
+from typing import cast
 
 MODES = ("fullmatch", "match", "search")
 
@@ -267,7 +268,7 @@ class _Reader:
                 raise _Declined("the exception is built from more than one argument")
             for arg in node.exc.args:
                 self._total(arg, param)
-        return bound
+        return cast(type, bound)
 
     def _total(self, node: ast.AST, param: str) -> None:
         """Declines unless evaluating `node` cannot raise for a text
@@ -323,7 +324,7 @@ def _same_code(fn, source: str, name: str) -> bool:
         for value in code.co_consts:
             constant(value)
         kept = [step for step in dis.get_instructions(code) if step.opname not in skipped]
-        index_at = {}
+        index_at: dict[int, int] = {}
         for i, step in enumerate(kept):
             index_at.setdefault(step.offset, i)
         offsets = sorted(index_at)
