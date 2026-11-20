@@ -3471,7 +3471,8 @@ def main(argv: list[str] | None = None) -> int:
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
     pv.add_argument("--all", action="store_true",
-                    help="check everything again, ignoring form-hash freshness")
+                    help="check every function again and rewrite its record, "
+                         "even one that is fresh")
     pv.add_argument("--status", nargs="?", const=True, default=None,
                     metavar="TARGET",
                     help="report fresh/stale per @track_claims-tagged "

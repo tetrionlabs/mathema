@@ -20,7 +20,7 @@ import textwrap
 import pytest
 import yaml
 
-from mathema.spec import STATEMENT_TEXT_RELEASE
+from mathema.spec import written_under_earlier_rules
 
 KEY = "ampkg.mod.tag"
 
@@ -66,9 +66,9 @@ def _row(root):
     return {r["name"]: r for r in entry["claims"]}["c"]
 
 
-def _lineage(root):
+def _entry(root):
     return yaml.safe_load((root / ".mathema" / "verified"
-                           / f"{KEY}.yaml").read_text())[KEY]["lineage"]
+                           / f"{KEY}.yaml").read_text())[KEY]
 
 
 def _legacy_record(root, statement):
@@ -79,7 +79,7 @@ def _legacy_record(root, statement):
         verify_project(root=str(root))
     row = _row(root)
     assert row["statement"] == STORED, row
-    assert "statement_text" not in _lineage(root)
+    assert written_under_earlier_rules(_entry(root))
     return row
 
 
@@ -96,7 +96,7 @@ def test_an_edit_to_the_other_reading_is_reported_as_ambiguous(project):
     assert not any("string literal is corrected" in ln for ln in out.lines), out.lines
     row = _row(project)
     assert row["verdict"] == "proven", row
-    assert _lineage(project)["statement_text"] == STATEMENT_TEXT_RELEASE
+    assert not written_under_earlier_rules(_entry(project))
 
 
 def test_the_earlier_reading_is_superseded_when_the_author_says_so(project):
@@ -124,7 +124,7 @@ def test_an_edit_onto_the_stored_text_is_checked_again(project):
     assert rows[KEY]["why"] != "fresh", rows[KEY]
     row = _row(project)
     assert row["verdict"] == "falsified", row
-    assert _lineage(project)["statement_text"] == STATEMENT_TEXT_RELEASE
+    assert not written_under_earlier_rules(_entry(project))
     again = verify_project(root=str(project))
     assert {r["key"]: r for r in again.keys}[KEY]["why"] == "fresh"
 

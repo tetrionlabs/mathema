@@ -669,7 +669,9 @@ def canonical_text_defect_message(key: str, name: str, where: "str | None",
     wrote = f" ({rendered})" if rendered else ""
     if command == "verify":
         became = ("the claim is unchecked this run and no record was written "
-                  "for it (an earlier record of it is kept as it was)")
+                  "for it (an earlier record of it is kept as it was, and its "
+                  "function is checked again on every run until mathema can "
+                  "write the claim's stored text)")
     else:
         became = ("its record is left as it was and verify reports it the "
                   "same way")
@@ -1162,7 +1164,7 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
     """
     from .authoring import resolve_declared
     from .conjecture import GRAMMAR
-    from .spec import claims_fingerprint
+    from .spec import stored_claims_fingerprint
     from .sync import apply_verified_wins
     withheld = {c["claim"] for c in conflicts
                 if c.get("kind") == "authoring"}
@@ -1186,7 +1188,7 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
     entry = dict(merged)
     entry["claims"] = claims
     return {"entry": entry, "claims": claims, "grammar": grammar,
-            "fingerprint": claims_fingerprint(claims, grammar, fn),
+            "fingerprint": stored_claims_fingerprint(claims, grammar, fn),
             "retired_notes": retired_notes, "unreadable": unreadable}
 
 
@@ -1882,7 +1884,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     stub_premises = _external_premises(root, library_claims=library_claims)
     from .conjecture import CanonicalTextError, InvalidConjecture, _resolve_func_ref
     from .inventory import chain_moved, function_dependencies
-    from .sync import earlier_literal_rows
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
                        record as write_record, write_yaml)
@@ -2411,12 +2412,17 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             version_moved = (_library_version_moved(merged_entry, verified_entry)
                              if key in library else None)
             body_moved = _provenance_moved(facts_now, verified_entry)
+            from .spec import recorded_claims_fingerprint
+            recorded_now = recorded_claims_fingerprint(verified_entry, fn)
+            # the record holds the claims as written, made under an
+            # earlier rules number: only the rules moved
+            rules_moved = (recorded_fp != current_fp
+                           and recorded_now == current_fp)
             is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
                         and not pinf_moved and not definitions_moved
                         and not stale_rows.get(key) and not escapes_moved.get(key)
-                        and not earlier_literal_rows(verified_entry)
                         and (premise_now == (recorded_premises or {})
                              if premise_now or recorded_premises else True))
             deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2562,10 +2568,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else "stored text unreadable" if stale_rows.get(key)
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
-                   else "string literals stored by an earlier release"
-                   if earlier_literal_rows(verified_entry)
+                   else "mathema's claim rules changed" if rules_moved
                    and same_form(facts_now.form, recorded_form)
-                   and recorded_fp == current_fp
                    else "claims changed" if same_form(facts_now.form, recorded_form)
                    else "form changed")
             rec.meta = {**(getattr(rec, "meta", None) or {}),
@@ -2577,7 +2581,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             elif recorded_form:
                 triggers = _fired_triggers(
                     form=not same_form(facts_now.form, recorded_form),
-                    claims=recorded_fp != current_fp, defaults=defaults_moved,
+                    claims=recorded_fp != current_fp and not rules_moved,
+                    defaults=defaults_moved,
                     pseudo_infinity=pinf_moved, definitions=definitions_moved,
                     provenance=body_moved, library_version=version_moved,
                     premises=premise_now != (recorded_premises or {})
@@ -2606,7 +2611,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                   "mathema.earlier_reading": earlier}
             prior_records[key] = _record_before(root, key)
             written = write_record(rec, key=key, root=root,
-                                   claims=current_claims,
+                                   claims=current_claims + [
+                                       _unrewritten(r) for r in
+                                       unchecked_rows.get(key, [])],
                                    declared_intent=merged_entry.get("intent"),
                                    grammar=entry_grammar, fn=fn,
                                    keep_rows=kept_rows)
@@ -2998,6 +3005,17 @@ def negation_moved_note(count: int) -> str:
             f"parentheses of its own; {'each is' if many else 'it is'} "
             f"checked again and re-recorded under the text this release "
             f"writes; nothing the author wrote changed")
+
+
+def _unrewritten(row: dict) -> dict:
+    """Intent:
+        A kept record row whose claim mathema could not write this run,
+        as a claim the fingerprint hashes verbatim (in no grammar it
+        parses), so the record's fingerprint never matches the claims
+        as written and the function is checked again on the next run.
+    """
+    return {"name": row.get("name"), "statement": row.get("statement") or "",
+            "grammar": "mathema-unwritten"}
 
 
 def _unchecked_row(row: dict) -> dict:

@@ -250,33 +250,6 @@ def _set_strings(domain: dict) -> dict:
     return out
 
 
-def text_rules_of(verified_entry: "dict | None") -> "str | None":
-    """Intent:
-        The release whose statement text rules a verified record's rows
-        were written under (`lineage.statement_text`), or None for a
-        record written by a release before `spec.STATEMENT_TEXT_RELEASE`,
-        which states none.
-    """
-    lineage = (verified_entry or {}).get("lineage")
-    rules = lineage.get("statement_text") if isinstance(lineage, dict) else None
-    return rules if isinstance(rules, str) else None
-
-
-def written_under_earlier_text(verified_entry: "dict | None") -> bool:
-    """Intent:
-        Whether a verified record was written before the statement text
-        rules of `spec.STATEMENT_TEXT_RELEASE`: it states no rules, or
-        the rules of an earlier release.
-    """
-    from .spec import STATEMENT_TEXT_RELEASE
-
-    def parts(v):
-        return tuple(int(p) if p.isdigit() else 0 for p in v.split("."))
-
-    rules = text_rules_of(verified_entry)
-    return rules is None or parts(rules) < parts(STATEMENT_TEXT_RELEASE)
-
-
 def _recorded_set_strings(row: dict) -> "dict | None":
     """Intent:
         `_set_strings` of a verified row's recorded `domain`, or None
@@ -329,7 +302,7 @@ def _domain_escapes_move(c: dict, row: dict, fn=None) -> "tuple | None":
         otherwise, so any other difference between `c` and the row is
         left to the supersession check. `written` is the member as the
         author wrote it. The caller applies this only to a row of a
-        record written under earlier text rules.
+        record written under an earlier rules number.
     """
     from ._annotation_text import complex_parameters
     from ._scan import legacy_domain_escapes
@@ -377,7 +350,7 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
         written now or no earlier rendering (alone or together) gives
         it. A row a move names records `c`, whether or not its old text
         reads back as `c`. The caller applies this only to a row of a
-        record written under earlier text rules.
+        record written under an earlier rules number.
     """
     from ._annotation_text import complex_parameters
     from .grammar import complex_in_view
@@ -425,30 +398,6 @@ def _ambiguous(name: str, surface: str, c: dict, row: dict, reads_as: str,
             "authored": _display_claim(c), "verified": row.get("statement"),
             "reads_as": reads_as, "verdict": row.get("verdict"),
             "moved": moved, "escapes": escapes}
-
-
-def earlier_literal_rows(verified_entry: "dict | None") -> list:
-    """Intent:
-        The names of the authored claim rows of a verified record that
-        an earlier release wrote (`written_under_earlier_text`) and
-        whose stored statement holds a string literal: text
-        whose reading this release cannot take on trust, so each such
-        claim is checked again as written and re-recorded once.
-    """
-    out = []
-    for row in (verified_entry or {}).get("claims") or []:
-        if not isinstance(row, dict) or not row.get("name"):
-            continue
-        meta = row.get("meta") or {}
-        if (meta.get("mathema.surface") in ("mathema", "builtin", "types")
-                or meta.get("mathema.companion_of")
-                or row.get("name") == "dependencies_current"):
-            continue
-        statement = row.get("statement") or ""
-        if (('"' in statement or "'" in statement)
-                and written_under_earlier_text(verified_entry)):
-            out.append(row["name"])
-    return out
 
 
 def _checked_differently(c: dict, row: dict) -> bool:
@@ -521,8 +470,8 @@ def claim_conflicts(fn, file_entry: dict,
           or with the domain reading, that release wrote; the claim is
           adjudicated as written, with no supersession. A move of
           literal quoting, negation parentheses or domain escapes is
-          recognised only in a record written under earlier statement
-          text rules (`written_under_earlier_text`).
+          recognised only in a record written under an earlier rules
+          number (`spec.written_under_earlier_rules`).
         - kind "ambiguous-text": the verified row's stored text is
           what an earlier release wrote for the authored claim under
           its literal quoting, and is also, read in this release, the
@@ -544,7 +493,8 @@ def claim_conflicts(fn, file_entry: dict,
     doc_claims = {c.get("name"): c
                   for c in parse_docstring_claims(docstring_of(fn),
                                                   owner=_fn_key(fn))}
-    earlier = written_under_earlier_text(verified_entry)
+    from .spec import written_under_earlier_rules
+    earlier = written_under_earlier_rules(verified_entry, fn)
 
     def defect(name, surface, error, c, row=None):
         return {"kind": "canonical-text-defect", "claim": name,

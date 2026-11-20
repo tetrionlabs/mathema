@@ -4,10 +4,9 @@
 
 Releases up to 0.6.6.1 read `{"\\t"}` in a domain set as a backslash
 and a t; this release reads a tab. The stored text is the same bytes
-under both readings, so the claims fingerprint is too: what tells the
-two apart is the record's statement text rules (`lineage.statement_text`,
-absent from an earlier release's record) and the values its row's
-`domain` records. A row of an earlier release's record whose `domain`
+under both readings: what tells the two apart is the rules number the
+record's claims fingerprint was made under (`spec.written_under_earlier_rules`)
+and the values its row's `domain` records. A row of an earlier release's record whose `domain`
 is missing, or does not read, is checked again like one that records
 the old values; it never keeps its verdict.
 """
@@ -19,7 +18,8 @@ import textwrap
 import pytest
 import yaml
 
-from mathema.spec import STATEMENT_TEXT_RELEASE, save_verified_entry
+from mathema.spec import (recorded_claims_fingerprint, save_verified_entry,
+                          written_under_earlier_rules)
 from mathema.sync import claim_conflicts
 
 
@@ -38,11 +38,17 @@ def _kinds(row_domain, lineage) -> list:
     if row_domain is not None:
         row["domain"] = row_domain
     verified = {"claims": [row], "lineage": lineage}
+    if lineage is _NOW:
+        verified["identity"] = {
+            "claims_fingerprint": recorded_claims_fingerprint(verified, width)}
     return [(x["kind"], x.get("moved"))
             for x in claim_conflicts(width, entry, verified)]
 
 
 _EARLIER = {"generated_by": "mathema 0.6.6.1"}
+#: the lineage of a record this release writes; its claims fingerprint
+#: is made under the rules in force
+_NOW = {"generated_by": "mathema"}
 
 
 @pytest.mark.parametrize("row_domain", [
@@ -56,8 +62,7 @@ def test_a_row_with_no_readable_domain_is_a_release_move(row_domain):
 
 
 def test_a_row_this_release_wrote_is_not_moved():
-    now = {"generated_by": "mathema", "statement_text": STATEMENT_TEXT_RELEASE}
-    assert _kinds({"s": {"set": ["\t"]}}, now) == []
+    assert _kinds({"s": {"set": ["\t"]}}, _NOW) == []
 
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,7 +104,7 @@ def test_an_old_row_with_its_domain_removed_is_checked_again(tmp_path):
     old = _run(tmp_path, env, "verify", old=True)
     record = tmp_path / ".mathema" / "verified" / f"{KEY}.yaml"
     entry = yaml.safe_load(record.read_text())[KEY]
-    assert "statement_text" not in entry["lineage"], entry["lineage"]
+    assert written_under_earlier_rules(entry)
     rows = {r["name"]: r for r in entry["claims"]}
     assert rows["one_character"]["verdict"] == "falsified", old.stdout
     del rows["one_character"]["domain"]
@@ -109,4 +114,4 @@ def test_an_old_row_with_its_domain_removed_is_checked_again(tmp_path):
     entry = yaml.safe_load(record.read_text())[KEY]
     rows = {r["name"]: r for r in entry["claims"]}
     assert rows["one_character"]["verdict"] in ("proven", "holds"), rows
-    assert entry["lineage"]["statement_text"] == STATEMENT_TEXT_RELEASE
+    assert not written_under_earlier_rules(entry)

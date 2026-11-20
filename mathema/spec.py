@@ -31,13 +31,6 @@ from .routes import examine_predicates, is_proof_route
 # CHANGELOG.md. Stamped into every record's lineage.CDD_spec_version field.
 SPEC_VERSION = "0.3.0"
 
-#: the release whose rules write the stored statement text of a record:
-#: each string literal respelled from its value, a negated relation in
-#: its parentheses, and a domain set's string member read with its
-#: backslash escapes decoded. A record states it as
-#: `lineage.statement_text`; one without it was written by an earlier
-#: release.
-STATEMENT_TEXT_RELEASE = "0.6.6.2"
 
 
 def reasoning_chain(ex) -> list[dict]:
@@ -220,11 +213,6 @@ def to_spec(ex, include_suggestions: bool = False) -> dict:
                     "CDD_spec_version": SPEC_VERSION,
                     "date": datetime.date.today().isoformat()},
     }
-    from ._scan import uses_legacy_rendering
-    if not uses_legacy_rendering():
-        # the statement text rules this record's rows are written under;
-        # absent when an earlier release's rendering is reproduced
-        spec["lineage"]["statement_text"] = STATEMENT_TEXT_RELEASE
     from .runtime_types import identity_entries
     runtime = identity_entries(f)
     if runtime:
@@ -716,6 +704,85 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
 
 
+def stored_claims_fingerprint(raw_claims: list, grammar: str = "mathema",
+                              fn=None) -> str:
+    """Intent:
+        The value a record stores as `identity.claims_fingerprint`, the
+        one a sweep compares to decide freshness: the claim set's
+        `claims_fingerprint` combined with mathema's rules number
+        (`_rules.rules_in_force`). Under rules 0 it is the claims
+        fingerprint itself, so a record written before the rules number
+        existed reads as written under 0; raising the number moves
+        every stored value, so each record is checked again once.
+    """
+    import hashlib
+
+    from ._rules import rules_in_force
+    pure = claims_fingerprint(raw_claims, grammar, fn)
+    rules = rules_in_force()
+    if not rules:
+        return pure
+    return hashlib.sha256(f"{pure}|rules={rules}".encode()).hexdigest()[:12]
+
+
+def recorded_claims(entry: "dict | None") -> list:
+    """Intent:
+        The authored claims a verified record holds, rebuilt from its
+        live rows as the claim dicts its fingerprint was made over:
+        name, the row's statement (its canonical text), the route it
+        was authored with, and any grammar or tolerance the row states.
+        Rows mathema adds (suggestions, built-in and type rows, float
+        companions, `dependencies_current`) are left out.
+    """
+    out = []
+    for row in (entry or {}).get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        meta: dict = row["meta"] if isinstance(row.get("meta"), dict) else {}
+        statement = row.get("statement") or row.get("law")
+        if (not statement or row.get("name") == "dependencies_current"
+                or meta.get("mathema.surface") in ("mathema", "builtin", "types")
+                or meta.get("mathema.companion_of")):
+            continue
+        rebuilt = {"name": row["name"], "statement": statement,
+                   "route": authored_route(row)}
+        for field_name in ("grammar", "tolerance"):
+            if row.get(field_name) is not None:
+                rebuilt[field_name] = row[field_name]
+        out.append(rebuilt)
+    return out
+
+
+def recorded_claims_fingerprint(entry: "dict | None", fn=None) -> "str | None":
+    """Intent:
+        The stored fingerprint (`stored_claims_fingerprint`), under the
+        rules in force now, of the claims a verified record holds (`recorded_claims`), or None when one of
+        them cannot be fingerprinted.
+    """
+    from .sync import as_recorded
+    claims = [{**c, "statement": as_recorded(c).get("statement")}
+              for c in recorded_claims(entry)]
+    try:
+        return stored_claims_fingerprint(
+            claims, (entry or {}).get("grammar") or "mathema", fn)
+    except Exception:
+        return None
+
+
+def written_under_earlier_rules(entry: "dict | None", fn=None) -> bool:
+    """Intent:
+        Whether a verified record was written under an earlier rules
+        number than the one in force (`_rules`): its stored claims
+        fingerprint is not the fingerprint, under the rules now, of the
+        claims it holds. A record with no stored fingerprint, or whose
+        claims cannot be fingerprinted, reads as earlier.
+    """
+    stored = ((entry or {}).get("identity") or {}).get("claims_fingerprint")
+    if not stored:
+        return True
+    return recorded_claims_fingerprint(entry, fn) != stored
+
+
 def _declared_conjecture(c: dict, default_grammar: str = "mathema"):
     """Intent:
         One declared claim dict as the Conjecture it states, the one
@@ -1063,8 +1130,8 @@ def record(ex, key: str | None = None, root: str = ".",
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
-    folded into `identity.claims_fingerprint` via claims_fingerprint()
-    above, so a later `mathema verify` can detect a claim being added or
+    folded into `identity.claims_fingerprint` via
+    stored_claims_fingerprint() above, so a later `mathema verify` can detect a claim being added or
     edited even when the code itself hasn't changed. Pass the raw declared
     dicts (as loaded from YAML), not Conjecture objects, the fingerprint
     must stay comparable across implementations, and Conjecture is a
@@ -1094,7 +1161,7 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
-    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
+    spec["identity"]["claims_fingerprint"] = stored_claims_fingerprint(claims or [],
                                                                 grammar, fn)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):

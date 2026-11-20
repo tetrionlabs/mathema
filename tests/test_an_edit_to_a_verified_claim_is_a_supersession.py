@@ -15,7 +15,7 @@ a supersession.
 import pytest
 
 from mathema.conjecture import claim
-from mathema.spec import STATEMENT_TEXT_RELEASE, canonical_claim_text
+from mathema.spec import canonical_claim_text, recorded_claims_fingerprint
 from mathema.sync import claim_conflicts
 
 
@@ -24,8 +24,9 @@ def measure(s: str, body: str = "", t: str = "") -> int:
     return len(t)
 
 
-#: the lineage of a record this release writes
-_NOW = {"generated_by": "mathema", "statement_text": STATEMENT_TEXT_RELEASE}
+#: the lineage of a record this release writes; its claims fingerprint
+#: is made under the rules in force
+_NOW = {"generated_by": "mathema"}
 
 
 def _kinds(authored: str, row: dict, lineage: "dict | None" = None) -> list:
@@ -36,6 +37,9 @@ def _kinds(authored: str, row: dict, lineage: "dict | None" = None) -> list:
     verified = {"claims": [{"name": "c", "verdict": "proven",
                             "route": "probe", **row}],
                 "lineage": lineage or {"generated_by": "mathema 0.6.6.1"}}
+    if lineage is _NOW:
+        verified["identity"] = {
+            "claims_fingerprint": recorded_claims_fingerprint(verified, measure)}
     return [(x["kind"], x.get("moved")) for x in claim_conflicts(measure, entry, verified)]
 
 
