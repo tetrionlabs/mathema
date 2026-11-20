@@ -313,10 +313,12 @@ def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
     return None
 
 
-def _domain_escapes_move(c: dict, row: dict, fn=None) -> "list | None":
+def _domain_escapes_move(c: dict, row: dict, fn=None) -> "tuple | None":
     """Intent:
-        The domain values whose reading changed, as `(written, value
-        now)` pairs, when the verified `row` records the authored claim
+        `(pairs, others)`: the domain values whose reading changed, as
+        `(written, value now)` pairs, and the other earlier renderings
+        (by move name) the row's statement was written under, when the
+        verified `row` records the authored claim
         `c` as releases up to 0.6.6.1 read it: `c` has a domain set
         string member whose backslash escape those releases read as its
         characters undecoded, the row's statement is `c`'s text under
@@ -345,8 +347,9 @@ def _domain_escapes_move(c: dict, row: dict, fn=None) -> "list | None":
                 before = _set_strings(old.domain)
                 if now == before:
                     return None
-                if _renders_as(old, stored, ("literal-quoting",
-                                             "not-parentheses")) is None:
+                others = _renders_as(old, stored, ("literal-quoting",
+                                                   "not-parentheses"))
+                if others is None:
                     return None
     except Exception:
         return None
@@ -362,7 +365,7 @@ def _domain_escapes_move(c: dict, row: dict, fn=None) -> "list | None":
                 pairs.append((written, _string_member(written)))
             except ValueError:
                 continue
-    return pairs or None
+    return (pairs, tuple(others)) if pairs else None
 
 
 def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
@@ -516,8 +519,8 @@ def claim_conflicts(fn, file_entry: dict,
                 # this claim's domain: adjudicated on the values it names
                 seen.add((name, "supersession"))
                 out.append({"kind": "release-move", "claim": name,
-                            "moved": ("domain-escapes",),
-                            "escapes": escapes,
+                            "moved": ("domain-escapes",) + escapes[1],
+                            "escapes": escapes[0],
                             "surface": surface,
                             "authored": _display_claim(c),
                             "verified": v.get("statement")})
@@ -958,10 +961,12 @@ def unreadable_claim(key: str, fn, error, declared: "dict | None",
                      verified: "dict | None", root: str = ".") -> dict:
     """Intent:
         The claim of function `key` that docsync could not read, as
-        `{key, claim, where, error}`: `where` is `path:line` of its
-        statement (a verified record, a claims file, or the function's
-        source for a docstring claim), or the path alone when the line
-        is not found. Each claim is read on its own to find the one
+        `{key, claim, where, error, location}`: `where` is `path:line`
+        of its statement (a verified record, a claims file, or the
+        function's source for a docstring claim), or the path alone
+        when the line is not found, and `location` is the same place as
+        `verify.claim_location` gives it (with the quoted line), or
+        None when the line is not found. Each claim is read on its own to find the one
         that fails; when none does, `claim` is None and `where` names
         the claims file or record.
     """
@@ -970,9 +975,17 @@ def unreadable_claim(key: str, fn, error, declared: "dict | None",
     from .conjecture import InvalidConjecture
     from .spec import claim_statement_line, claims_file_paths
 
+    from .verify import claim_location
+
     def located(rel, name):
         line = claim_statement_line(os.path.join(root, rel), key, name)
         return f"{rel}:{line}" if line else rel
+
+    def found(entry):
+        rel = entry["where"].rsplit(":", 1)[0] if entry["claim"] else ""
+        entry["location"] = (claim_location(root, rel, key, entry["claim"])
+                             if rel else None)
+        return entry
 
     def fails(read):
         try:
@@ -984,16 +997,20 @@ def unreadable_claim(key: str, fn, error, declared: "dict | None",
     for row in ((verified or {}).get("entry") or {}).get("claims") or []:
         if row.get("name") and row.get("statement") \
                 and fails(lambda: _row_identity(row, fn)):
-            return {"key": key, "claim": row["name"], "error": str(error),
-                    "where": located((verified or {}).get("source") or "", row["name"])}
+            return found({"key": key, "claim": row["name"], "error": str(error),
+                          "where": located((verified or {}).get("source") or "",
+                                           row["name"])})
     for c in ((declared or {}).get("entry") or {}).get("claims") or []:
         if c.get("name") and fails(lambda: _claim_identity(c, fn)):
             for path in reversed(claims_file_paths(root)):
                 rel = os.path.relpath(path, root)
                 if claim_statement_line(path, key, c["name"]):
-                    return {"key": key, "claim": c["name"], "error": str(error),
-                            "where": located(rel, c["name"])}
+                    return found({"key": key, "claim": c["name"],
+                                  "error": str(error),
+                                  "where": located(rel, c["name"])})
             return {"key": key, "claim": c["name"], "error": str(error),
-                    "where": (declared or {}).get("source") or ""}
+                    "where": (declared or {}).get("source") or "",
+                    "location": None}
     return {"key": key, "claim": None, "error": str(error),
-            "where": (verified or declared or {}).get("source") or ""}
+            "where": (verified or declared or {}).get("source") or "",
+            "location": None}

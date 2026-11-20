@@ -90,14 +90,15 @@ def test_verify_reports_the_defect_and_keeps_the_earlier_row(tmp_path):
     assert "correct it there" not in run.stdout, run.stdout
     assert "does not parse" not in run.stdout, run.stdout
     out = run.stdout.splitlines()
-    summary = [i for i, ln in enumerate(out) if "two_literals" in ln]
+    summary = [i for i, ln in enumerate(out)
+               if "two_literals" in ln and "defect" in ln]
     assert len(summary) == 1, run.stdout
     assert "defect in mathema's rendering" in out[summary[0]], run.stdout
     block = out[summary[0]:summary[0] + 8]
     line, text = _statement_line(tmp_path)
     where = os.path.join("claims", "c.claims.yaml")
     assert "Error: mathema cannot write this claim's stored text" in block, block
-    assert f"  on {where} line {line}:" in block, block
+    assert f"  on {where} line {line}, claim two_literals of {KEY}:" in block, block
     assert f"  {line}:   {text}" in block, block
     explanation = block[-1]
     assert "does not read back" in explanation and "report it" in explanation, block

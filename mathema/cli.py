@@ -1874,16 +1874,25 @@ def cmd_docsync(args) -> int:
     for d in report.defects:
         print(f"FAIL {d['message']}")
     for u in report.unreadable:
+        from .conjecture import _diagnostic
         which = f"claim {u['claim']!r}" if u["claim"] else "a claim"
         print(f"UNREADABLE {u['where']} {u['key']}: {which} does not read "
               f"({u['error']}); this function was not synced")
+        print()
+        print(_diagnostic(
+            "a claim does not read", u["claim"], u["key"],
+            f"in {u['where'] or 'its docstring or claims file'}",
+            f"The claim does not read ({u['error']}), so this function was "
+            f"not synced; correct the claim there and run mathema docsync "
+            f"again.", u.get("location")))
     if report.index_path:
         print(f"index -> {report.index_path}")
     if report.index_error:
+        index = os.path.normpath(os.path.join(args.root, ".mathema", "index.yaml"))
         print(f"Error: the index was not written\n\n"
-              f"  on .mathema/index.yaml\n\n"
+              f"  on {index}\n\n"
               f"index not written: {report.index_error}. Every function "
-              f"named was synced; make .mathema/index.yaml writable and "
+              f"named was synced; make {index} writable and "
               f"run mathema docsync again to write the index.",
               file=sys.stderr)
     if args.report or args.write:

@@ -641,25 +641,26 @@ def canonical_text_defect_message(key: str, name: str, where: "str | None",
                                   command: str = "verify") -> str:
     """Intent:
         The diagnostic for a claim whose stored text mathema cannot
-        write (`CanonicalTextError`): a summary line naming the claim,
-        then `Error: <title>`, where the claim is stated (`on <file>
-        line <n>:` and the quoted line, when `location` is known, else
-        the file or docstring and the claim's text), and one sentence
+        write (`CanonicalTextError`): a summary line naming the function
+        and the claim, then `Error: <title>`, where the claim is stated
+        (`on <file> line <n>, claim <name> of <key>:` and the quoted
+        line, when `location` is known, else the claim, the function and
+        the file or docstring, and the claim's text), and one sentence
         saying it is a defect in mathema to report and what became of
         the claim in this `command` run.
     """
     shown = where or "its docstring or claims file"
     done = ("was not checked" if command == "verify"
             else "was not compared with its record")
-    summary = (f"{key}: claim {name!r} declared in {shown} {done}: "
-               f"this is a defect in mathema's rendering of the claim, not "
-               f"in the claim")
+    summary = (f"{key}: claim {name!r} {done}: mathema cannot write its "
+               f"stored text, a defect in mathema's rendering of the claim")
     lines = [summary, "", "Error: mathema cannot write this claim's stored text", ""]
     if location is not None:
-        lines.append(f"  on {location['file']} line {location['line']}:")
+        lines.append(f"  on {location['file']} line {location['line']}, "
+                     f"claim {name} of {key}:")
         lines.append(f"  {location['line']}:   {location['text']}")
     else:
-        lines.append(f"  in {shown}:")
+        lines.append(f"  claim {name} of {key}, in {shown}:")
         stated = getattr(error, "text", None)
         if stated:
             lines.append(f"      {stated}")
@@ -2218,17 +2219,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         moves = conflict.get("moved") or ()
                         if "domain-escapes" in moves:
                             escapes_moved.setdefault(key, []).append(conflict["claim"])
-                            read_now = ", ".join(
-                                f"{written} now reads as {value!r}"
-                                for written, value in conflict.get("escapes") or ())
-                            out.lines.append(
-                                f"note {key}: claim {conflict['claim']!r}: a backslash "
-                                f"escape in a domain value is now read as the "
-                                f"character it names, as in an expression "
-                                f"({read_now}); to mean the backslash itself, write "
-                                f"it doubled (\"\\\\t\" is a backslash and a t); "
-                                f"the claim is checked again on the values it now "
-                                f"names")
+                            out.lines.append(domain_escapes_note(
+                                key, conflict["claim"], conflict.get("escapes")))
                         if "literal-quoting" in moves:
                             quoting_moved.append((key, conflict["claim"]))
                         if "not-parentheses" in moves:
@@ -2858,6 +2850,75 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     if negation_moved:
         out.lines.append(negation_moved_note(len(negation_moved)))
     return out
+
+
+#: the characters a domain escape most often names, by the words a
+#: note uses for them
+_CHARACTER_WORDS = {"\t": "a tab", "\n": "a newline",
+                    "\r": "a carriage return", "\x00": "a null character",
+                    "\\": "a backslash", '"': "a double quote",
+                    "'": "a single quote", " ": "a space"}
+
+
+def _named_character(ch: str) -> str:
+    """Intent:
+        One character in words with its code point: `a tab (U+0009)`,
+        its Unicode name for another character that has one, else
+        `the character U+XXXX`.
+    """
+    import unicodedata
+    point = f"U+{ord(ch):04X}"
+    words = _CHARACTER_WORDS.get(ch)
+    if words is None:
+        name = unicodedata.name(ch, "")
+        if not name:
+            return f"the character {point}"
+        words = name.lower()
+    return f"{words} ({point})"
+
+
+def _value_in_words(value: str) -> str:
+    """Intent:
+        A string value as a note shows it, so that no escape stands in
+        for the character it names: a single printable character is
+        quoted with its code point (`'A' (U+0041)`); otherwise each run
+        of ordinary printable characters is quoted and every other
+        character named (`'a', a tab (U+0009), 'b'`).
+    """
+    if len(value) == 1 and value.isprintable() and value not in _CHARACTER_WORDS:
+        return f"{value!r} (U+{ord(value):04X})"
+    parts: list = []
+    run = ""
+    for ch in value:
+        if ch.isprintable() and ch not in _CHARACTER_WORDS:
+            run += ch
+            continue
+        if run:
+            parts.append(repr(run))
+            run = ""
+        parts.append(_named_character(ch))
+    if run:
+        parts.append(repr(run))
+    return ", ".join(parts) if parts else "the empty string"
+
+
+def domain_escapes_note(key: str, claim_name: str,
+                        escapes: "list | None") -> str:
+    """Intent:
+        The note for a claim of `key` whose record an earlier release
+        wrote reading a domain value's backslash escapes as their
+        characters undecoded. `escapes` holds `(written, value now)`
+        pairs, each shown with the characters the value now holds
+        named; with none, the note names no value.
+    """
+    read_now = ", ".join(f"{written} now reads as {_value_in_words(value)}"
+                         for written, value in escapes or ())
+    shown = f" ({read_now})" if read_now else ""
+    return (f"note {key}: claim {claim_name!r}: a backslash escape in a "
+            f"domain value is now read as the character it names, as in an "
+            f"expression{shown}; to mean the backslash itself, write it "
+            f"doubled (\"\\\\t\" is a backslash and a t); the claim is "
+            f"checked again on the values it now names")
 
 
 def quoting_moved_note(count: int) -> str:
