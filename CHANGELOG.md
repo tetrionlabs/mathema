@@ -2,6 +2,21 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## Unreleased
+
+### Upgrading from 0.6.6.1
+- Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. `claims_fingerprint` itself, the claim identity, is unchanged.
+- The stored statement text of a string literal is written from its value, a negated relation keeps its parentheses, and a domain set's string member reads its escapes as an expression does (`{"\t"}` is a tab). A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
+- `lineage.statement_text` is no longer written.
+
+### Fixes
+- Stored text an earlier release wrote for two different claims (`f(s, '}"', 's')` and `f(s, '}"", "s')`) is reported as ambiguous, naming both readings and `mathema accept ... --as superseded` for an edit; the claim is checked as written, never kept at its old verdict.
+- A key whose processing raises after its record is written gets the record it had before the run back, whatever stopped it (an exception, running out of memory, an interrupt or the wall-clock alarm), and a read of the store later in the same run sees what is on disk.
+- A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.
+- A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
+- After an earlier key's release move, a moved key still names its rename remedy.
+- The release-move notes name the character an escape now reads as, print every note that applies to a claim, and docsync's diagnostics follow `--root`.
+
 ## 0.6.6.1
 
 ### Upgrading from 0.6.6
