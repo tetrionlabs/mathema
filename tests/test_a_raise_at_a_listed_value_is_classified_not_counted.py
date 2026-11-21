@@ -3,8 +3,8 @@
 """A listed missing value at which every run raised is not judged by the
 proof: the raise is classified by the claim's missing-value rows, and
 the proof of the real points stands with no count of held points. A
-claim that cannot be run at a point at all is unknown at the listed
-value."""
+claim that cannot be run at a point at all is proven over the real
+points and leaves the listed value to its policy row."""
 from mathema.conjecture import check_conjectures, claim
 
 
@@ -43,8 +43,8 @@ def test_a_listed_value_with_no_other_parameter_that_raises_is_classified():
     assert "at x = None f raised TypeError" in row.note, row.note
 
 
-def test_a_claim_that_cannot_be_run_at_a_point_is_unknown_at_the_listed_value():
+def test_a_claim_that_cannot_be_run_at_a_point_is_proven_and_names_the_policy_row():
     row = _row(curved_when_absent,
                "for x in {1, None}, y in [0, 1], d(f(x, y), y, y) == 0")
-    assert row.verdict == "unknown", (row.verdict, row.route, row.note)
-    assert "x = None was not run" in row.note, row.note
+    assert row.verdict == "proven", (row.verdict, row.route, row.note)
+    assert "the listed value x = None is judged by its policy row" in row.note, row.note

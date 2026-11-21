@@ -22,7 +22,7 @@ def test_a_grid_over_the_time_budget_is_sampled_and_holds(monkeypatch):
             "f(a, b, c, x) == 0")
     (row,) = check_conjectures(zero_of_four, [claim(text)])
     assert row.verdict == "holds", (row.verdict, row.route, row.note)
-    assert "the 24 combinations of a, b, c are over the sweep budget" in row.note, \
+    assert "the 24 combinations of a, b, c are over the sweep's time budget" in row.note, \
         row.note
 
 
