@@ -9039,16 +9039,16 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         so the function is called at each, against the other
         parameters' values (`_listed_value_points`). A point where the
         relation fails falsifies the claim; a point where the function
-        raises, or the relation cannot be decided, is counted as
-        undecided. Returns a falsified `Probe` naming the first failing
-        point, listed sentinels in the order absence, the class, then
-        members; else a `Probe` carrying
-        `meta["mathema.missing"]["tried"]`: `proven` when every listed
-        value held at every value of the other parameters, `holds` with
-        a note saying what was run when the points run were a sample,
-        and `unknown` with a note when some listed value was decided at
-        no point run, or the claim cannot be evaluated at a point. None
-        when the claim lists none.
+        raises or gives no value is not judged here, its outcome is
+        classified by the claim's missing-value rows. Returns a
+        falsified `Probe` naming the first failing point, listed
+        sentinels in the order absence, the class, then members; else a
+        `Probe` carrying `meta["mathema.missing"]["tried"]`: `holds`
+        with a note saying what was run when a listed value held at
+        sampled points of the other parameters rather than at every
+        combination of them; `proven` otherwise; `unknown` with a note
+        when the claim cannot be evaluated at a point. None when the
+        claim lists none.
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, realise_sentinel)
@@ -9081,7 +9081,6 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
     tried: dict = {}
     failures: list = []
     sampled: list = []
-    undecided: list = []
     for p, values in listed.items():
         if p not in names:
             continue
@@ -9104,37 +9103,27 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                 held += outcome is True
             else:
                 shown = _fmt_point({p: value}, [p])
-                if held == 0:
-                    undecided.append(
-                        f"the listed value {shown} was run and could not be "
-                        f"decided" if run == 1 and not others else
-                        f"the listed value {shown} was run at {run} points"
-                        f"{of_others} and none could be decided")
-                elif combinations is not None:
+                if held == 0 or (combinations is None and axes is not None):
+                    continue
+                if combinations is not None:
                     sampled.append(
                         f"the {combinations} combinations{of_others} are over "
                         f"the sweep budget, so the listed value {shown} was run "
                         f"at {run} sampled points of them and held at {held}, "
                         f"which is evidence, not a proof")
-                elif axes is None:
+                else:
                     sampled.append(
                         f"the listed value {shown} was run at {run} sampled "
                         f"points{of_others} and held at {held}, which is "
                         f"evidence, not a proof")
-                elif held < run:
-                    sampled.append(
-                        f"the listed value {shown} was run at all {run} "
-                        f"points{of_others} and held at {held}; the rest could "
-                        f"not be decided")
     from .probing import executed_missing, with_executed
     meta = with_executed({"mathema.missing": {"tried": tried}},
                          executed_missing(deps)) or {}
     if not failures:
-        if undecided or sampled:
-            return Probe(ctx.cj.name, statement,
-                         "unknown" if undecided else "holds", meta=meta,
+        if sampled:
+            return Probe(ctx.cj.name, statement, "holds", meta=meta,
                          note="the real points were derived; "
-                              + "; ".join(undecided + sampled))
+                              + "; ".join(sampled))
         return Probe(ctx.cj.name, statement, "proven", meta=meta)
     point = sorted(failures, key=lambda f: f[0])[0][1]
     witness = _fmt_point(point, names)
