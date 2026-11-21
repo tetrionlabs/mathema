@@ -293,13 +293,22 @@ def bounds(document) -> tuple:
 
 
 def alphabet_of(document) -> list:
-    """The definition's alphabet as sorted, merged code point ranges."""
+    """Intent:
+        The definition's alphabet as sorted, merged code point ranges.
+
+    Raises:
+        InvalidTerm: the document is not a definition of this kind and
+            version.
+    """
     return _read(document)[0]
 
 
 def is_definition(document) -> bool:
-    """Whether `document` is a regular-language definition this module
-    reads."""
+    """Intent:
+        Whether `document` is a regular-language definition this module
+        answers questions about: well formed, and of this kind and
+        version.
+    """
     try:
         _read(document)
     except InvalidTerm:
@@ -351,8 +360,13 @@ def validate(document) -> None:
 def term_hash(document) -> str:
     """Intent:
         The identity of a definition's meaning: the SHA-256, in lower
-        case hex, of its `canonical_text`. The same language compiled
-        from another spelling or on another runtime hashes the same.
+        case hex, of its `canonical_text`. It is the same whatever the
+        order of the document's keys, the order of a union's or an
+        intersection's arguments, an argument written twice, the
+        `source` recorded and how the alphabet's ranges are split, and
+        on any runtime. Two nodes the canonical form does not bring to
+        one form hash apart even where they hold the same strings:
+        `a|b` and `[ab]` do.
 
     Raises:
         InvalidTerm: the document is not of the schema.
@@ -662,9 +676,12 @@ def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None
 
 
 def places(text: str, inside, outside) -> bool:
-    """Whether the matcher puts `text` in every node of `inside` and in
-    no node of `outside`: a second reading of a string a solver
-    returned for that question."""
+    """Intent:
+        Whether the matcher puts `text` in every node of `inside` and in
+        no node of `outside`: a second reading of a string a solver
+        returned for that question. False when the matcher runs out of
+        its budget.
+    """
     try:
         return all(member(n, text) for n in inside) \
             and not any(member(n, text) for n in outside)
@@ -673,10 +690,15 @@ def places(text: str, inside, outside) -> bool:
 
 
 def representatives(nodes, alphabet=None) -> list:
-    """One character for each atom of `alphabet` (all of Unicode when
-    None) under the character sets of `nodes`: the characters no node
-    tells apart share an atom, and a printable ASCII character stands
-    for an atom that has one."""
+    """Intent:
+        One character for each atom of `alphabet` (all of Unicode when
+        None) under the character sets of `nodes`: the characters no
+        node tells apart share an atom, and a printable ASCII character
+        stands for an atom that has one.
+
+    Raises:
+        InvalidTerm: a node or the alphabet is not of the schema.
+    """
     sets: list = []
     for node in nodes:
         _char_sets(canonical(node), sets)
@@ -907,12 +929,13 @@ class _Lowering:
 Lowering = _Lowering
 
 
-def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
+def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:
     """Intent:
         A string over `alphabet` (code point ranges) that every node in
         `inside` holds and no node in `outside` holds: `member` with
         the string, `none` when no such string exists, or `unknown`
-        with the reason.
+        with the reason. The solver works within `timeout_ms`, by
+        default the active proof tier's cap (`_timeout.lowering_cap`).
 
     Raises:
         InvalidTerm: a node or the alphabet is not of the schema.
@@ -922,6 +945,9 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
         question over atoms has the answer of the question over the
         whole alphabet.
     """
+    from ._timeout import lowering_cap
+    if timeout_ms is None:
+        timeout_ms = 1000 * lowering_cap()
     alphabet = _ranges(alphabet, "alphabet")
     inside = [canonical(n) for n in inside]
     outside = [canonical(n) for n in outside]
@@ -957,7 +983,7 @@ def find_member(alphabet, inside, outside, *, timeout_ms: int = 5000) -> Found:
     return Found("member", member=lowering.decode(value.as_string()))
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "Lowering", "MATCH_BUDGET", "VERSION", "alphabet_of", "atoms",
-           "bounds", "canonical", "canonical_text", "MatchBudget", "matcher", "member",
+__all__ = ["Found", "InvalidTerm", "KIND", "Lowering", "MATCH_BUDGET", "VERSION", "alphabet_of",
+           "atoms", "bounds", "canonical", "canonical_text", "MatchBudget", "matcher", "member",
            "node_matcher", "node_member", "places", "representatives", "shortest_member",
            "find_member", "is_definition", "term_hash", "validate"]
