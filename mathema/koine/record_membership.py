@@ -27,6 +27,17 @@ A union or an intersection of no node is `false` or `true`, and of one
 node is that node's expression. A `list` node has no expression in this
 version.
 
+A node is read only when it is of the record-language schema, by the
+same rules `check_node` states: each operation has exactly its own
+keys; a choice lists null, truth values, numbers that are whole and
+texts; a field is a list `[name, node, required]` with a text name
+written once in its record; `values`, `args` and `fields` are lists; a
+text's language is a regular-language node; a list's `min` and `max`
+are whole numbers of zero or more; and a record's `rest` is empty in
+canonical form, so `union []` or a choice of nothing closes a record as
+`empty` does. A whole number whose decimal text is longer than the
+interpreter writes is refused.
+
 `membership_document(node)` is the document of the function of one
 JSON value that returns that truth, and `membership_documents` the two
 of a definition, one for each bound.
@@ -36,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from .. import regular
 from ..regular import InvalidTerm
 from . import language_terms as L
 from . import record_terms as T
@@ -87,13 +99,132 @@ def _is_constant(operand, value):
                       f"not {value!r}")
 
 
+#: the keys each operation's node holds beside `op`, and no others
+_NODE_KEYS = {"empty": (), "any": (), "choice": ("values",), "text": ("language",),
+              "record": ("fields", "rest"), "list": ("item", "min", "max"),
+              "union": ("args",), "inter": ("args",), "complement": ("arg",)}
+_EMPTY = {"op": "empty"}
+
+
+def _is_whole_number(value) -> bool:
+    return (isinstance(value, int) and not isinstance(value, bool)) \
+        or (isinstance(value, float) and value.is_integer())
+
+
+def _check_scalar(value) -> None:
+    if value is None or isinstance(value, (bool, str)):
+        return
+    if not _is_whole_number(value):
+        raise InvalidTerm(f"{value!r} is not a value a choice may list (null, a truth value, "
+                          f"a whole number, a text)")
+    try:
+        str(int(value))
+    except ValueError as e:
+        raise InvalidTerm("a whole number in a choice is longer than this interpreter "
+                          "writes") from e
+
+
+def _check_count(value, what: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise InvalidTerm(f"the {what} of a list is a whole number of zero or more, not "
+                          f"{value!r}")
+    return value
+
+
+def _check_language(node) -> None:
+    try:
+        regular.canonical(node)
+    except regular.InvalidTerm:
+        raise
+    except (TypeError, KeyError, AttributeError, IndexError, ValueError) as e:
+        raise InvalidTerm(f"the language of a text is no regular-language node: "
+                          f"{node!r}") from e
+
+
+def check_node(node) -> None:
+    """Intent:
+        Nothing when `node` is a record-language node of the schema the
+        module states, its nodes inside it included.
+
+    Raises:
+        InvalidTerm: naming the rule the node breaks.
+    """
+    op = node.get("op") if isinstance(node, dict) else None
+    if not isinstance(op, str) or op not in _NODE_KEYS:
+        raise InvalidTerm(f"not a record-language node: {node!r}")
+    if set(node) != {"op", *_NODE_KEYS[op]}:
+        raise InvalidTerm(f"a {op} node holds op and {list(_NODE_KEYS[op])}, not "
+                          f"{sorted(map(str, node))}")
+    if op == "choice":
+        if not isinstance(node["values"], list):
+            raise InvalidTerm("the values of a choice are a list")
+        for value in node["values"]:
+            _check_scalar(value)
+    elif op == "text":
+        _check_language(node["language"])
+    elif op == "complement":
+        check_node(node["arg"])
+    elif op in ("union", "inter"):
+        if not isinstance(node["args"], list):
+            raise InvalidTerm(f"the args of a {op} are a list")
+        for arg in node["args"]:
+            check_node(arg)
+    elif op == "list":
+        check_node(node["item"])
+        _check_count(node["min"], "min")
+        if node["max"] is not None:
+            _check_count(node["max"], "max")
+    elif op == "record":
+        if not isinstance(node["fields"], list):
+            raise InvalidTerm("the fields of a record are a list of [name, node, required]")
+        check_node(node["rest"])
+        if not _canonically_empty(node["rest"]):
+            raise InvalidTerm("this version reads a closed record only: rest is empty")
+        names = []
+        for field in node["fields"]:
+            if not (isinstance(field, list) and len(field) == 3 and isinstance(field[0], str)
+                    and isinstance(field[2], bool)):
+                raise InvalidTerm(f"{field!r} is not a field [name, node, required]")
+            check_node(field[1])
+            names.append(field[0])
+        if len(set(names)) != len(names):
+            raise InvalidTerm(f"a record names a field once, not {sorted(names)}")
+
+
+def _canonically_empty(node: dict) -> bool:
+    """Whether a node that `check_node` accepts is `empty` in canonical
+    form: `empty`; a choice of nothing; a text of the empty regular
+    language; a record with a required field of such a node; a list
+    whose `max` is below its `min`, or whose item is such a node and
+    whose length cannot be 0; a union all of whose arguments are such
+    nodes (none included); an intersection one of whose arguments is
+    one. A complement and `any` never are."""
+    op = node["op"]
+    if op == "empty":
+        return True
+    if op == "choice":
+        return not node["values"]
+    if op == "text":
+        return regular.canonical(node["language"]) == {"op": "empty"}
+    if op == "record":
+        return any(required and _canonically_empty(inner)
+                   for _, inner, required in node["fields"])
+    if op == "list":
+        lo, hi = node["min"], node["max"]
+        if hi is not None and hi < lo:
+            return True
+        return hi != 0 and lo != 0 and _canonically_empty(node["item"])
+    if op == "union":
+        return all(_canonically_empty(a) for a in node["args"])
+    if op == "inter":
+        return any(_canonically_empty(a) for a in node["args"])
+    return False
+
+
 def _field(of_map, field) -> Term:
-    if not (isinstance(field, (list, tuple)) and len(field) == 3
-            and isinstance(field[0], str) and isinstance(field[2], bool)):
-        raise InvalidTerm(f"a field is written [name, node, required], not {field!r}")
     name, inner, required = field
     has = Term(T.HAS_KEY, (of_map, Str(name)))
-    inside = membership_expression(inner, Term(T.VALUE_AT_KEY, (of_map, Str(name))))
+    inside = _expression(inner, Term(T.VALUE_AT_KEY, (of_map, Str(name))))
     if required:
         return Term(AND, (has, inside))
     return Term(OR, (Term(NOT, (has,)), inside))
@@ -107,40 +238,36 @@ def membership_expression(node, operand):
 
     Raises:
         InvalidTerm: the node is not of the record-language schema.
-        Declined: the node is, or holds, a `list` node.
+        Declined: the node is, or holds, a `list` node outside a rest.
     """
-    op = node.get("op") if isinstance(node, dict) else None
-    try:
-        if op == "empty":
-            return Bool(False)
-        if op == "any":
-            return Bool(True)
-        if op == "choice":
-            return _joined(OR, [_is_constant(operand, v) for v in node["values"]])
-        if op == "text":
-            return Term(AND, (_kind(operand, "kind::string"),
-                              L.in_language(_present(operand), node["language"])))
-        if op == "complement":
-            return Term(NOT, (membership_expression(node["arg"], operand),))
-        if op in ("union", "inter"):
-            return _joined(OR if op == "union" else AND,
-                           [membership_expression(a, operand) for a in node["args"]])
-        if op == "record":
-            if node["rest"] != {"op": "empty"}:
-                raise InvalidTerm("a record's rest is empty in this version")
-            of_map = _present(operand)
-            names = [f[0] if isinstance(f, (list, tuple)) and f else f for f in node["fields"]]
-            return Term(AND, (
-                _kind(operand, "kind::dict"),
-                Term(T.HAS_NO_KEY_OTHER_THAN, (of_map, List(tuple(Str(n) for n in names)))),
-                *[_field(of_map, f) for f in node["fields"]]))
-    except (KeyError, TypeError) as e:
-        raise InvalidTerm(f"not a record-language node: {node!r}") from e
-    except L.InvalidLanguageTerm as e:
-        raise InvalidTerm(str(e)) from e
-    if op == "list":
-        raise Declined("a list node has no membership expression in this version")
-    raise InvalidTerm(f"not a record-language node: {node!r}")
+    check_node(node)
+    return _expression(node, operand)
+
+
+def _expression(node: dict, operand):
+    op = node["op"]
+    if op == "empty":
+        return Bool(False)
+    if op == "any":
+        return Bool(True)
+    if op == "choice":
+        return _joined(OR, [_is_constant(operand, v) for v in node["values"]])
+    if op == "text":
+        return Term(AND, (_kind(operand, "kind::string"),
+                          L.in_language(_present(operand), node["language"])))
+    if op == "complement":
+        return Term(NOT, (_expression(node["arg"], operand),))
+    if op in ("union", "inter"):
+        return _joined(OR if op == "union" else AND,
+                       [_expression(a, operand) for a in node["args"]])
+    if op == "record":
+        of_map = _present(operand)
+        names = [f[0] for f in node["fields"]]
+        return Term(AND, (
+            _kind(operand, "kind::dict"),
+            Term(T.HAS_NO_KEY_OTHER_THAN, (of_map, List(tuple(Str(n) for n in names)))),
+            *[_field(of_map, f) for f in node["fields"]]))
+    raise Declined("a list node has no membership expression in this version")
 
 
 def membership_document(node, *, name: str = "member") -> Document:
@@ -168,26 +295,36 @@ def membership_documents(definition) -> tuple:
         else of its two bounds.
 
     Raises:
-        InvalidTerm: the definition is not of this kind and version, or
-            states both a language and bounds, or neither.
-        Declined: a node is, or holds, a `list` node.
+        InvalidTerm: the definition is not of this kind and version,
+            states both a language and bounds or neither, or a node is
+            not of the schema. Any other key, `source` among them, is
+            not read.
+        Declined: a node is, or holds, a `list` node outside a rest.
     """
-    if not (isinstance(definition, dict) and definition.get("kind") == KIND
-            and definition.get("version") == VERSION
-            and type(definition.get("version")) is int
-            and isinstance(definition.get("exact"), bool)):
+    if not isinstance(definition, dict):
+        raise InvalidTerm("a definition is an object")
+    version = definition.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise InvalidTerm(f"the version {version!r} is not a whole number")
+    exact = definition.get("exact")
+    bounds = [key for key in ("at_least", "at_most") if key in definition]
+    if exact is True and "language" in definition and not bounds:
+        nodes = (definition["language"],)
+    elif exact is False and len(bounds) == 2 and "language" not in definition:
+        nodes = (definition["at_most"], definition["at_least"])
+    else:
+        raise InvalidTerm("an exact definition states 'language' and no bound; one that is "
+                          "not exact states 'at_least' and 'at_most' and no 'language'")
+    for node in nodes:
+        check_node(node)
+    if definition.get("kind") != KIND or version != VERSION:
         raise InvalidTerm(f"not a {KIND} definition of version {VERSION}")
-    stated = set(definition) - {"kind", "version", "exact", "source"}
-    if definition["exact"]:
-        if stated != {"language"}:
-            raise InvalidTerm("an exact definition states its language and no bound")
+    if exact:
         document = membership_document(definition["language"])
         return document, document
-    if stated != {"at_least", "at_most"}:
-        raise InvalidTerm("a definition that is not exact states at_least and at_most")
     return (membership_document(definition["at_most"], name="member_at_most"),
             membership_document(definition["at_least"], name="member_at_least"))
 
 
-__all__ = ["Declined", "KIND", "VERSION", "membership_document", "membership_documents",
-           "membership_expression"]
+__all__ = ["Declined", "KIND", "VERSION", "check_node", "membership_document",
+           "membership_documents", "membership_expression"]
