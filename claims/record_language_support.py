@@ -1208,3 +1208,25 @@ def generated_terms_keep_the_laws(seed: int) -> bool:
     if found.status == "none":
         return not any(rl.member(a, v) and not rl.member(b, v) for v in values)
     return False
+
+
+def many_list_terms_at_one_place_are_decided(n: int) -> bool:
+    """Whether a question of `n` list terms at one place is decided
+    within `find_member`'s cap. Each term is a list of lists of lists
+    of one of `n + 1` whole numbers, the `i`-th of `i` to `i + n`, so
+    all share the number `n`; the list of lists of empty lists is left
+    out. The question has a member, and it is asked with the default
+    cap of 5000 ms: True when the answer is that member, in every term
+    by `member`, and not `unknown`. A lowering that holds one item
+    variable for every list term at a place, at each of the three
+    depths, passes the cap as `n` grows."""
+    rl, n = _rl(), int(n)
+
+    def nested(node: dict) -> dict:
+        for _ in range(3):
+            node = lists(node)
+        return node
+
+    terms = [nested(choice(*range(i, i + n + 1))) for i in range(n)]
+    found = rl.find_member(terms, [nested({"op": "empty"})])
+    return found.status == "member" and all(rl.member(t, found.member) for t in terms)
