@@ -9054,7 +9054,6 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, realise_sentinel)
-    import time
 
     from . import _brute_force
     from .gates import _fmt_point, _point_evaluator
@@ -9100,12 +9099,12 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
             points, combinations, over, corners = _listed_value_points(
                 deps, names, p, value, others, axes)
             swept = combinations is None and axes is not None
-            started = time.perf_counter()
+            started = _listed_value_clock()
             run = held = 0
             stopped = failed = False
             classified: list = []
             for point in points:
-                if swept and time.perf_counter() - started \
+                if swept and _listed_value_clock() - started \
                         > _brute_force._SWEEP_SECONDS:
                     stopped = True
                     break
@@ -9181,6 +9180,15 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                        "mathema.witness_executed": True})
 
 
+def _listed_value_clock() -> float:
+    """Intent:
+        The seconds clock a listed value's sweep reads for its time
+        budget (`time.perf_counter`).
+    """
+    import time
+    return time.perf_counter()
+
+
 def _listed_value_axes(others: list, cj_domain: dict, listed: dict) -> "list | None":
     """Intent:
         Each of the `others` parameters' values, one list per parameter
@@ -9220,7 +9228,6 @@ def _listed_value_points(deps, names: list, p: str, value, others: list,
     import itertools
     import math
     import random
-    import time
 
     from . import _brute_force
     from ._sampling import _RNG_SEED
@@ -9238,13 +9245,13 @@ def _listed_value_points(deps, names: list, p: str, value, others: list,
                     for combo in itertools.product(*axes)]
             points = [c for c in grid if deps["admits"](c)]
             trial = points[::max(1, len(points) // 5)][:5]
-            started = time.perf_counter()
+            started = _listed_value_clock()
             for pt in trial:
                 try:
                     deps["evaluate"](pt)
                 except Exception:
                     pass
-            per_point = (time.perf_counter() - started) / max(1, len(trial))
+            per_point = (_listed_value_clock() - started) / max(1, len(trial))
             if per_point * len(points) <= _brute_force._SWEEP_SECONDS:
                 return points, None, None, 0
     rng = random.Random(_RNG_SEED)

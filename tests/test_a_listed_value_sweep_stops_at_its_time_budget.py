@@ -5,17 +5,17 @@ run for the brute-force sweep's time budget, whatever the estimate
 before it said: the claim then holds, and the note says the time budget
 stopped it after so many of its points. A grid over the sweep's point
 budget says that budget instead."""
-import time
-
 from mathema.conjecture import check_conjectures, claim
 
-_SLOW_SECONDS = 0.01
+#: the fake clock's reading, in seconds: one second per call of f at the
+#: listed value away from the points the sweep's estimate times
+_TICKS = [0]
 
 
 def slow_off_the_trial(a, x):
     if x is None:
         if a % 10 != 0:
-            time.sleep(_SLOW_SECONDS)
+            _TICKS[0] += 1
         return 0.0
     return 0.0
 
@@ -28,17 +28,15 @@ def zero_of_two(a, x):
 
 def test_a_sweep_slower_than_its_estimate_stops_at_the_time_budget(monkeypatch):
     import mathema._brute_force as B
-    monkeypatch.setattr(B, "_SWEEP_SECONDS", 0.3)
+    import mathema.conjecture as C
+    monkeypatch.setattr(B, "_SWEEP_SECONDS", 10.0)
+    monkeypatch.setattr(C, "_listed_value_clock", lambda: float(_TICKS[0]))
     members = ", ".join(str(i) for i in range(200))
     text = f"for a in {{{members}}}, x in {{1, None}}, f(a, x) == 0"
-    started = time.perf_counter()
     (row,) = check_conjectures(slow_off_the_trial, [claim(text)])
-    spent = time.perf_counter() - started
     assert row.verdict == "holds", (row.verdict, row.route, row.note)
-    assert "the sweep's time budget stopped the listed value x = None after" \
-        in row.note, row.note
-    assert "of its 200 points of a" in row.note, row.note
-    assert spent < 200 * _SLOW_SECONDS + 5, spent
+    assert ("the sweep's time budget stopped the listed value x = None after "
+            "13 of its 200 points of a, which held at 13") in row.note, row.note
 
 
 def test_a_grid_over_the_point_budget_says_so(monkeypatch):
