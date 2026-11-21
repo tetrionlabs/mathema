@@ -495,24 +495,27 @@ def constructors_mean_what_the_nodes_mean(d: int, e: int, v: int) -> bool:
 # ---- find_member and the relations derived from it ----------------------
 
 def includes(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when no value is in node `a` and outside node `b`,
-    `falsified` with such a value, or `unknown` with the reason."""
+    """`("proven", None)` when no value is in node `a` and outside node
+    `b`, `("falsified", [value])` with such a value, or `("unknown",
+    reason)`. The witness is a list of one value, so a witness that is
+    null reads `[None]` and no witness reads `None`."""
     found = _rl().find_member([a], [b], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", found.member)}.get(
+    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
         found.status, ("unknown", found.reason))
 
 
 def disjoint(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when no value is in both nodes, `falsified` with a
-    common member, or `unknown`."""
+    """`("proven", None)` when no value is in both nodes, `("falsified",
+    [value])` with a common member, or `("unknown", reason)`."""
     found = _rl().find_member([a, b], [], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", found.member)}.get(
+    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
         found.status, ("unknown", found.reason))
 
 
 def equal(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when each node includes the other, `falsified` with a
-    value in one and not the other, or `unknown`."""
+    """`("proven", None)` when each node includes the other,
+    `("falsified", [value])` with a value in one and not the other, or
+    `("unknown", reason)`."""
     one, other = includes(a, b, timeout_ms), includes(b, a, timeout_ms)
     if "falsified" in (one[0], other[0]):
         return one if one[0] == "falsified" else other
@@ -577,7 +580,7 @@ def the_child_is_inside_its_parent() -> bool:
     rl = _rl()
     verdict, witness = includes(WIDENED, CHILD)
     return (includes(CHILD, PARENT)[0] == "proven" and verdict == "falsified"
-            and rl.member(WIDENED, witness) and not rl.member(CHILD, witness)
+            and rl.member(WIDENED, witness[0]) and not rl.member(CHILD, witness[0])
             and includes(PARENT, CHILD)[0] == "falsified")
 
 
@@ -939,10 +942,11 @@ def a_length_is_exact_at_its_bounds(t: int, n: int) -> bool:
     if includes(lists(a, n, n), lists(a, n, n + 1))[0] != "proven":
         return False
     verdict, witness = includes(lists(a, 0, n + 1), lists(a, 0, n))
-    if verdict != "falsified" or len(witness) != n + 1:
+    if verdict != "falsified" or len(witness[0]) != n + 1:
         return False
     verdict, witness = includes(lists(a), lists(a, 0, 5))
-    return verdict == "falsified" and len(witness) == 6 and all(rl.member(a, x) for x in witness)
+    return verdict == "falsified" and len(witness[0]) == 6 \
+        and all(rl.member(a, x) for x in witness[0])
 
 
 _NOT_TRUE = complement(choice(True))
