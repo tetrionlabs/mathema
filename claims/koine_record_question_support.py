@@ -546,3 +546,14 @@ def only_valued_points_are_asked_for_on_request(e: int) -> bool:
     if found.status == "member":
         return rt.interpret(document, [found.member]) == Value(False)
     return found.status == "none"
+
+
+def a_vector_document_has_a_value_everywhere(i: int) -> bool:
+    """Whether no JSON value is found at which either membership
+    document of vector `i`, its at_most or its at_least, has no value:
+    a relation between two definitions is asked only of documents with
+    a value at every point."""
+    documents = _vector_documents(i)
+    if documents is None:
+        return True
+    return all(_sq().find_point_without_value(d).status == "none" for d in documents)

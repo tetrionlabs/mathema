@@ -46,7 +46,7 @@ def _points(statement: str) -> list:
 
 
 def test_the_claims_file_holds_what_it_is_expected_to():
-    assert len(CLAIMS) == 21
+    assert len(CLAIMS) == 22
     assert len(SUPPORT._expressions()) == SUPPORT.EXPRESSIONS
     assert len(SUPPORT._outside_the_reading()) == SUPPORT.OUTSIDE_THE_READING
 

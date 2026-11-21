@@ -216,3 +216,25 @@ def a_site_names_what_it_changes(i: int, s: int) -> bool:
     address = ".".join(["return", *[str(n) for n in site.address]])
     return text.startswith(f"{site.operator} at {address}") \
         and ms.site_at(document, text) == site
+
+
+def only_a_dropped_part_can_lose_the_value(i: int, s: int) -> bool:
+    """Whether the document with site `s` changed has a value at every
+    JSON value unless the change is a part dropped from a conjunction;
+    and whether, when a dropped part does leave a point with no value,
+    the question "inside the one document, outside the other" answers
+    none in neither direction, so the two are never taken for one
+    language."""
+    from mathema.koine import solver_question as sq
+    found = _site(i, s)
+    if found is None:
+        return True
+    document, site = found
+    changed = _ms().change(document, site)
+    lost = sq.find_point_without_value(changed)
+    if site.operator != "drop_conjunct" or lost.status == "none":
+        return lost.status == "none"
+    if lost.status != "member":
+        return False
+    return (sq.find_member([changed], [document]).status != "none"
+            and sq.find_member([document], [changed]).status != "none")

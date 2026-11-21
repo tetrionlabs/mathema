@@ -12,7 +12,7 @@ record-language node, as a KOINE document).
 
 Each function takes whole numbers a claim can quantify: indices into
 `TERMS` and `VALUES` (the catalogues of
-`claims/record_language_support.py`, with a few more values), into
+`claims/record_language_support.py`, with more values), into
 `REGULAR` (regular-language nodes, one of each operation), `TEXTS`,
 `NAMESETS`, `DEFINITIONS` and the lists of malformed terms. Each
 returns the truth of one statement, so a claim reads `f(t, v) == True`.
@@ -43,6 +43,81 @@ TERMS = REF.TERMS
 VALUES = REF.VALUES + [
     {"x": None, "y": None}, {"git": "status"}, {"x": 1.0}, -0.0, 2.0, "\ud800", {"": True},
     {"x": True, "\x00": None}, {"x": "a", "y": "a"}, {"shell": {"git": "status"}},
+]
+#: values at which a membership document with one part changed differs
+#: from the document it was made from: a key no term lists, a key unset
+#: against the same key holding null, a required key left out, and a
+#: field holding another kind or the constant beside the one allowed
+VALUES += [
+    {"other": None, "x": False},
+    {"shell": None, "x": False},
+    {"\x00": None, "edit": False, "publish": False, "root": "/wt/task-7"},
+    {"edit": False, "other": None, "publish": False, "root": "/wt/task-7"},
+    {"edit": False,
+     "publish": False,
+     "root": "/wt/task-7",
+     "shell": {"\x00": None, "git": "diff"}},
+    {"edit": False,
+     "publish": False,
+     "root": "/wt/task-7",
+     "shell": {"git": "diff", "other": None}},
+    {"edit": False,
+     "publish": False,
+     "root": "/wt/task-7",
+     "shell": {"git": "diff", "shell": None}},
+    {"other": None},
+    {"\x00": None, "edit": False, "publish": False, "root": "/wt"},
+    {"\x00": None, "r": "a"},
+    {"\x00": None, "x": False},
+    {"\x00": None, "x": {"z": None}},
+    {"edit": False, "other": None, "publish": False, "root": "/wt"},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"\x00": None, "git": "status"}},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"git": "diff", "shell": None}},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"git": "status", "other": None}},
+    {"other": None, "r": "a"},
+    {"other": None, "x": False, "y": "b"},
+    {"other": None, "x": {"z": None}},
+    {"r": "a", "shell": None},
+    {"r": "a"},
+    {"shell": None, "x": False, "y": "a"},
+    {"shell": None, "x": {"z": None}},
+    {"x": False, "y": "a"},
+    {"x": {"\x00": None, "z": None}},
+    {"x": {"other": None, "z": None}},
+    {"x": {"shell": None, "z": None}},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": None},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": {}},
+    {"edit": False, "root": "/wt/task-7"},
+    {"publish": False, "root": "/wt/task-7"},
+    {"x": False, "y": None},
+    {"edit": False, "publish": False, "root": "/wt", "shell": None},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {}},
+    {"edit": False, "root": "/wt"},
+    {"publish": False, "root": "/wt"},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": {"git": ""}},
+    {"edit": 0, "publish": False, "root": "/wt/task-7"},
+    {"edit": 1, "publish": False, "root": "/wt/task-7"},
+    {"edit": False, "publish": 0, "root": "/wt/task-7"},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"git": ""}},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": {"git": "status"}},
+    {"edit": False, "publish": False, "root": "/wt/task-7", "shell": {"git": None}},
+    {"edit": None, "publish": False, "root": "/wt/task-7"},
+    {"edit": 0, "publish": False, "root": "/wt"},
+    {"edit": 1, "publish": False, "root": "/wt"},
+    {"edit": False, "publish": 0, "root": "/wt"},
+    {"edit": False, "publish": 1, "root": "/wt"},
+    {"edit": False, "publish": 1, "root": "/wt/task-7"},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"git": "status"}},
+    {"edit": False, "publish": False, "root": "/wt", "shell": {"git": None}},
+    {"edit": False, "publish": None, "root": "/wt"},
+    {"edit": False, "publish": None, "root": "/wt/task-7"},
+    {"edit": None, "publish": False, "root": "/wt"},
+    {"r": ""},
+    {"r": None},
+    {"x": False, "y": "b"},
+    {"x": {"z": ""}},
+    {"x": {"z": 1.5}},
+    {"x": {"z": False}},
 ]
 DEFINITIONS = REF.DOCUMENTS
 

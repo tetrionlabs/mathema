@@ -22,7 +22,8 @@ CLAIMS = yaml.safe_load((ROOT / "claims" / "koine_record_mutation.claims.yaml")
                         .read_text(encoding="utf-8"))
 SWEEP = 3000
 #: the laws that ask the solver
-SOLVER = ("a_changed_document_has_a_solver_reading",)
+SOLVER = ("a_changed_document_has_a_solver_reading",
+          "only_a_dropped_part_can_lose_the_value")
 
 
 def _support():
@@ -44,7 +45,7 @@ def _points(statement: str) -> list:
 
 
 def test_the_claims_file_holds_what_it_is_expected_to():
-    assert len(CLAIMS) == 7
+    assert len(CLAIMS) == 8
 
 
 @pytest.mark.parametrize("target", sorted(CLAIMS), ids=lambda t: t.rsplit(".", 1)[1])
