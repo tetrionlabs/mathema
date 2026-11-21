@@ -126,6 +126,9 @@ class Decision:
     #: for a verdict that rests on definitions: one entry per definition
     #: read, as `check_definition` returns it
     assumptions: "list | None" = None
+    #: for such a verdict: one entry per language read, as
+    #: `check_holds_only_texts` returns it
+    texts: "list | None" = None
 
 
 # ---- reading ----------------------------------------------------------
@@ -856,11 +859,13 @@ def _is_member(language, value) -> bool:
 
 
 def check_definitions(*defined: "_Defined", literals: tuple = ()) -> tuple:
-    """`(assumptions, disagreement)` for every language piece the given
-    domains read, each checked once, on the strings every given domain
-    writes and the `literals` besides: the assumptions as
-    `check_definition` returns them, and the first disagreement found
-    (a sentence) or None."""
+    """Intent:
+        `(assumptions, disagreement)` for every language piece the given
+        domains read, each checked once, on the strings every given
+        domain writes and the `literals` besides: the assumptions as
+        `check_definition` returns them, and the first disagreement
+        found (a sentence) or None.
+    """
     written = tuple(dict.fromkeys([*literals, *(v for d in defined for v in d.literals)]))
     seen: dict = {}
     for domain in defined:
@@ -873,10 +878,53 @@ def check_definitions(*defined: "_Defined", literals: tuple = ()) -> tuple:
     return list(seen.values()), refuted
 
 
+#: values that are not texts, run through a language's `contains` to
+#: check it holds only texts
+NOT_TEXTS: tuple = (None, 0, 1, 0.0, b"", (), [])
+
+
+def check_holds_only_texts(*defined: "_Defined") -> tuple:
+    """Intent:
+        `(assumptions, disagreement)` for every language piece the given
+        domains read, each checked once: a regular-language definition
+        holds only texts, so a language whose `contains` admits a value
+        that is not a text is not what its definition states. Each
+        language is asked about its own hazard values that are not
+        texts and about `NOT_TEXTS`. An assumption is `<text> holds only
+        texts`, `checked` with the number of values run; the
+        disagreement names the first value admitted, or is None.
+    """
+    seen: dict = {}
+    refuted = None
+    for domain in defined:
+        for text, language, _, _ in domain.read:
+            if text in seen:
+                continue
+            values: list = []
+            try:
+                values.extend(h.value for h in language.hazards()
+                              if not isinstance(h.value, str))
+            except Exception:
+                pass
+            values.extend(NOT_TEXTS)
+            admitted = [v for v in values if _is_member(language, v)]
+            entry = {"language": text, "statement": f"{text} holds only texts",
+                     "status": "checked", "artefact": {"values run": len(values)}}
+            if admitted:
+                entry["status"] = "refuted"
+                entry["disagreement"] = (f"{admitted[0]!r} is a member of {text}, and a "
+                                         f"regular-language definition holds only texts")
+                refuted = refuted or entry["disagreement"]
+            seen[text] = entry
+    return list(seen.values()), refuted
+
+
 def standard_assumptions() -> dict:
-    """The assumptions every proof on the solver route rests on, named
-    once with their versions: the solver's answer and the canonical
-    form of a regular-language term."""
+    """Intent:
+        The assumptions every proof on the solver route rests on, named
+        once with their versions: the solver's answer and the canonical
+        form of a regular-language term.
+    """
     from . import regular
     try:
         import z3
@@ -892,9 +940,11 @@ def standard_assumptions() -> dict:
 
 
 def assuming_text(assumptions: list, verdict: str = "proven") -> str:
-    """`proven, assuming A (checked), B (assumed)` for the definitions a
-    verdict rests on (`falsified, assuming ...` for a falsified one);
-    the verdict word alone when it read none."""
+    """Intent:
+        `proven, assuming A (checked), B (assumed)` for the definitions
+        a verdict rests on (`falsified, assuming ...` for a falsified
+        one); the verdict word alone when it read none.
+    """
     if not assumptions:
         return verdict
     return f"{verdict}, assuming " + ", ".join(
@@ -960,12 +1010,14 @@ def _decide_languages(rel: Relation) -> Decision:
         # the answer "no string separates them" rests on the definitions,
         # so each is checked against its language's own membership first
         assumptions, refuted = check_definitions(left, right)
+        texts, admitted = check_holds_only_texts(left, right)
+        refuted = refuted or admitted
         if refuted is not None:
             return Decision("unknown", f"{refuted}, so the definitions decide nothing here",
                             None, "smt", definitions)
         decided = _from_counter_set(rel, True, None)
         return Decision(decided.verdict, decided.reason, None, "smt", definitions,
-                        assumptions)
+                        assumptions, texts)
     return Decision("unknown", why or UNCONFIRMED, None, "smt", definitions)
 
 
@@ -1102,6 +1154,7 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
            "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
-           "check_definition", "check_definitions", "decide", "not_as_written",
+           "check_definition", "check_definitions", "check_holds_only_texts", "decide",
+           "not_as_written",
            "standard_assumptions",
            "decide_relation", "parse"]

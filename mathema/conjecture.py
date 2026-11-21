@@ -5757,7 +5757,7 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
         # a verdict that rests on definitions says which, and how each stands
         meta["mathema.assumptions"] = {
             "standard": domain_relations.standard_assumptions(),
-            "definitions": decision.assumptions}
+            "definitions": decision.assumptions, "texts": decision.texts or []}
         assumed = "; " + domain_relations.assuming_text(decision.assumptions,
                                                         decision.verdict)
     if decision.verdict == "proven":
@@ -11288,6 +11288,8 @@ def _validator_proof(cj, fn, cj_domain):
             assumptions, refuted = domain_relations.check_definitions(
                 domain, *filter(None, [stated_defined]),
                 literals=(prefix, suffix, prefix + suffix))
+            texts, admitted = domain_relations.check_holds_only_texts(domain)
+            refuted = refuted or admitted
             reading = (_validator_reading_check(fn, validator, stated, domain)
                        if over is None else
                        _validator_reading_check(fn, validator, stated_text, domain,
@@ -11300,7 +11302,7 @@ def _validator_proof(cj, fn, cj_domain):
                 "proven",
                 meta={**meta, "mathema.assumptions": {
                     "standard": domain_relations.standard_assumptions(),
-                    "definitions": assumptions}},
+                    "definitions": assumptions, "texts": texts}},
                 sketch=(f"{path}, read from {validator.described()}: no text {param} "
                         f"in the domain{' where f is defined' if defined else ''} "
                         f"makes {cj.lhs.strip()} a text "

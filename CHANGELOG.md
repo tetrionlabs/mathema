@@ -15,6 +15,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Fixes
 - The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
+- A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
 
