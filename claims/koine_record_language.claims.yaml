@@ -2,9 +2,9 @@ claims.koine_record_language_support.a_language_term_reads_back:
   claims:
     - name: a_language_term_reads_back_to_its_node
       statement: 'for i in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, f(i) == True'
-claims.koine_record_language_support.a_language_term_is_written_with_the_ruled_head:
+claims.koine_record_language_support.a_language_term_is_written_with_its_head:
   claims:
-    - name: each_operation_has_its_ruled_head
+    - name: each_operation_has_its_head
       statement: 'for i in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, f(i) == True'
 claims.koine_record_language_support.a_malformed_language_term_is_refused:
   claims:

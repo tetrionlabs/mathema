@@ -65,7 +65,7 @@ REGULAR = [
     {"op": "concat", "args": []}, {"op": "union", "args": []},
     REF.SHALLOW, REF.DEEP, REF.DOLLAR,
 ]
-#: the ruled head each operation of a regular-language node is written as
+#: the head each operation of a regular-language node is written as
 _HEAD_OF = {"empty": "language::empty", "epsilon": "language::epsilon",
             "literal": "language::literal", "chars": "language::characters",
             "concat": "language::concatenation", "union": "language::union",
@@ -157,8 +157,8 @@ def a_language_term_reads_back(i: int) -> bool:
     return lt.to_node(lt.from_node(node)) == node
 
 
-def a_language_term_is_written_with_the_ruled_head(i: int) -> bool:
-    """Whether node `i` is written with the head ruled for its
+def a_language_term_is_written_with_its_head(i: int) -> bool:
+    """Whether node `i` is written with the head of its
     operation, a repetition with the bounded head when it has an upper
     end and the unbounded one when it has none, and the exact wrapper
     names the alphabet of code points."""
