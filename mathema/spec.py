@@ -3201,6 +3201,12 @@ def render_claim_text(cj, *, unicode: bool | None = None,
 
     Bars around a matrix read as its determinant, so the `abs` of a
     matrix the claim's domain declares keeps its call spelling."""
+    if getattr(cj, "relation", None) == "domains":
+        from . import domain_relations
+        from .grammar import get_unicode_output
+        glyphs = get_unicode_output() if unicode is None else unicode
+        stated = domain_relations.parse(f"{cj.lhs} {cj.rhs}")
+        return stated.text(unicode=bool(glyphs) and not canonical)
     if getattr(cj, "relation", None) == "policy":
         from .policy import parse_policy, policy_text
         body = f"{cj.lhs} {cj.rhs}".strip()

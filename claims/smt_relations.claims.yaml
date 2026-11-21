@@ -1,0 +1,8 @@
+claims.smt_support.interval_verdict:
+  claims:
+    - name: the_verdict_is_the_truth_of_the_relation
+      statement: 'let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == truth(relation, a, b, c, d)'
+claims.smt_support.interval_text_is_stable:
+  claims:
+    - name: the_canonical_text_reads_back_as_itself
+      statement: 'for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == True'

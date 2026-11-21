@@ -321,6 +321,13 @@ class Record:
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
+                # a definition the proof rests on that was not confirmed
+                # on every string it was compared on
+                for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
+                        "definitions") or ():
+                    if isinstance(assumed, dict) and assumed.get("status") != "checked":
+                        line += (f"\n           assuming {assumed.get('statement')} "  # :draft
+                                 f"({assumed.get('status')})")
             else:
                 shown = p.statement
                 if (p.condition or "").startswith("let |inf| be ") \
