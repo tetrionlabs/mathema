@@ -4799,10 +4799,10 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     domain-conditioned branch pruning: a raises claim with no declared
     domain specific enough to determine which branch runs stays
     unliftable, the same as any other derive claim would with an
-    unresolvable branch. `call_src` must be `f(p1, p2, ...)`, the
-    function's parameters by name in order with no keywords: the domain
-    is bound to the parameters, so any other argument is not the call
-    the claim states. `max_callee_depth` is
+    unresolvable branch. `call_src` must be a bare `f(...)` call; the
+    reading binds the domain to the function's own parameters, so a proof
+    stands only when the call passes each parameter the value the domain
+    gives it (`_call_departs_from_domain`). `max_callee_depth` is
     forwarded to lift_conditioned(), see lift()'s own docstring."""
     try:
         tree = ast.parse(call_src, mode="eval")
@@ -4811,15 +4811,66 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
-    call = tree.body
-    if call.keywords or [a.id if isinstance(a, ast.Name) else None  # :draft
-                         for a in call.args] != list(facts.params):
+    proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth)
+    if proof.status == "proven" and _call_departs_from_domain(tree.body, facts.params,
+                                                               domain or {}):  # :draft
         return ProofResult("unliftable", sketch=(
             # :draft
-            f"derive reads raises(...) only at f({', '.join(facts.params)}), each "
-            f"parameter passed by its own name in order, and the call written is "
-            f"{call_src}"))
+            f"derive reads raises(...) at f({', '.join(facts.params)}) over the "
+            f"claim's domain, and the call written is {call_src}"))
+    return proof
 
+
+def _call_departs_from_domain(call: ast.Call, params: list, domain: dict) -> bool:
+    """Intent:
+        Whether the call passes, in some parameter's place, a value other
+        than the one the domain binds to that parameter: an argument
+        naming a variable the domain binds anywhere but as itself in its
+        own parameter's position (`f(-x)`, `f(x + 10)`, `f(y, x)`), or a
+        literal in the place of a parameter the domain binds to anything
+        but that one point (`for x in [-5, -1]`, `f(1)`). A literal in the
+        place of a parameter the domain does not bind, or binds to the
+        literal's own point, departs from nothing.
+    """
+    bound = set(domain)
+    for index, argument in enumerate(call.args):
+        param = params[index] if index < len(params) else None
+        if isinstance(argument, ast.Name) and argument.id == param:
+            continue
+        names = {n.id for n in ast.walk(argument) if isinstance(n, ast.Name)}
+        if names & bound:
+            return True
+        literal = _literal_number(argument)
+        if literal is not None and param in bound:
+            point = domain[param]
+            if not (isinstance(point, tuple) and len(point) == 2
+                    and point[0] == point[1] == literal):
+                return True
+    return any({n.id for n in ast.walk(k.value) if isinstance(n, ast.Name)} & bound
+               for k in call.keywords)
+
+
+def _literal_number(node: ast.AST) -> "float | None":
+    """Intent:
+        The value of a numeric literal argument (`3`, `-1.5`), None for
+        any other expression.
+    """
+    sign = 1.0
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        sign = -1.0 if isinstance(node.op, ast.USub) else 1.0
+        node = node.operand
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+        return sign * float(node.value)
+    return None
+
+
+def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
+                 max_callee_depth: int) -> ProofResult:
+    """Intent:
+        The derive reading of a `raises(...)` claim for the function's
+        own parameters bound to `domain`, as `try_prove_raises` returns
+        it once the call is known to be `f(...)`.
+    """
     suspended = suspended_call_refusal(fn)
     if suspended is not None:
         return ProofResult("unliftable", sketch=suspended)
