@@ -650,31 +650,40 @@ def canonical_text_defect_message(key: str, name: str, where: "str | None",
         the claim in this `command` run.
     """
     shown = where or "its docstring or claims file"
+    # :draft
     done = ("was not checked" if command == "verify"
             else "was not compared with its record")
+    # :draft
     summary = (f"{key}: claim {name!r} {done}: mathema cannot write its "
                f"stored text, a defect in mathema's rendering of the claim")
+    # :draft
     lines = [summary, "", "Error: mathema cannot write this claim's stored text", ""]
     if location is not None:
+        # :draft
         lines.append(f"  on {location['file']} line {location['line']}, "
                      f"claim {name} of {key}:")
         lines.append(f"  {location['line']}:   {location['text']}")
     else:
+        # :draft
         lines.append(f"  claim {name} of {key}, in {shown}:")
         stated = getattr(error, "text", None)
         if stated:
             lines.append(f"      {stated}")
+    # :draft
     problem = getattr(error, "problem", None) or "it does not read back"
     rendered = getattr(error, "text", None)
     wrote = f" ({rendered})" if rendered else ""
     if command == "verify":
+        # :draft
         became = ("the claim is unchecked this run and no record was written "
                   "for it (an earlier record of it is kept as it was, and its "
                   "function is checked again on every run until mathema can "
                   "write the claim's stored text)")
     else:
+        # :draft
         became = ("its record is left as it was and verify reports it the "
                   "same way")
+    # :draft
     lines += ["", f"The text mathema wrote for it{wrote} does not read back "
                   f"as the claim: {problem}; this is a defect in mathema, not "
                   f"in the claim, so please report it with this claim, and "
@@ -2247,6 +2256,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         continue
                     if conflict.get("kind") == "unreadable-record":
                         stale_rows.setdefault(key, []).append(conflict["claim"])
+                        # :draft
                         out.lines.append(
                             f"note {key}: the stored text of claim "
                             f"{conflict['claim']!r} could not be read and was "
@@ -2541,6 +2551,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             rec.probes.append(dependencies_current_probe(rec.dependencies,
                                                          root=root))
             from .transitions import REVERIFY_CAUSE, predates_form_scheme
+            # :draft
             why = (REVERIFY_CAUSE if recorded_form
                    and predates_form_scheme(verified_entry or {})
                    else "dependency changed" if dependency_changed
@@ -2899,6 +2910,7 @@ def no_longer_applying_risk_notes(claims: list, accepted: frozenset) -> list:
     for name, verdict, _meta, _n in map(_claim_fields, claims):
         if name in accepted and classify_verdict(verdict or "") in ("proven", "holds"):
             now = "holds" if classify_verdict(verdict) == "holds" else "is proven"
+            # :draft
             out.append(f"     note: an earlier accepted risk on {name} no longer "
                        f"applies: the claim now {now}")
     return out
@@ -2914,9 +2926,11 @@ def ambiguous_text_note(key: str, conflict: dict,
         author edited the first claim into the second.
     """
     name = conflict["claim"]
+    # :draft
     done = ("the claim is checked as written and re-recorded"
             if command == "verify" else
             "verify checks the claim as written and re-records it")
+    # :draft
     return (f"warning {key}: claim {name!r}: the stored text "
             f"{conflict.get('verified')} is ambiguous: this release reads it "
             f"as {conflict.get('reads_as')}, and an earlier release wrote "
@@ -2929,12 +2943,13 @@ def ambiguous_text_note(key: str, conflict: dict,
 
 #: the characters a domain escape most often names, by the words a
 #: note uses for them
-_CHARACTER_WORDS = {"\t": "a tab", "\n": "a newline",
+_CHARACTER_WORDS = {"\t": "a tab", "\n": "a newline",  # :draft
                     "\r": "a carriage return", "\x00": "a null character",
                     "\\": "a backslash", '"': "a double quote",
                     "'": "a single quote", " ": "a space"}
 
 
+# :draft
 def _named_character(ch: str) -> str:
     """Intent:
         One character in words with its code point: `a tab (U+0009)`,
@@ -2952,6 +2967,7 @@ def _named_character(ch: str) -> str:
     return f"{words} ({point})"
 
 
+# :draft
 def _value_in_words(value: str) -> str:
     """Intent:
         A string value as a note shows it, so that no escape stands in
@@ -2989,6 +3005,7 @@ def domain_escapes_note(key: str, claim_name: str,
     read_now = ", ".join(f"{written} now reads as {_value_in_words(value)}"
                          for written, value in escapes or ())
     shown = f" ({read_now})" if read_now else ""
+    # :draft
     return (f"note {key}: claim {claim_name!r}: a backslash escape in a "
             f"domain value is now read as the character it names, as in an "
             f"expression{shown}; to mean the backslash itself, write it "
@@ -3002,6 +3019,7 @@ def quoting_moved_note(count: int) -> str:
         release wrote with its literal quoting.
     """
     many = count != 1
+    # :draft
     return (f"note: the stored text of a string literal is corrected in "
             f"{count} claim{'s' if many else ''} recorded by an earlier "
             f"release, which wrote its quotes in a spelling this release "
@@ -3016,6 +3034,7 @@ def negation_moved_note(count: int) -> str:
         release wrote with a negated relation out of its parentheses.
     """
     many = count != 1
+    # :draft
     return (f"note: the stored text of a negated relation is rewritten in "
             f"{count} claim{'s' if many else ''} recorded by an earlier "
             f"release, which wrote a `not` over a relation without "
@@ -3024,6 +3043,7 @@ def negation_moved_note(count: int) -> str:
             f"writes; nothing the author wrote changed")
 
 
+# :draft
 def _unrewritten(row: dict) -> dict:
     """Intent:
         A kept record row whose claim mathema could not write this run,
@@ -3046,6 +3066,7 @@ def _unchecked_row(row: dict) -> dict:
     out = claim_row(row)
     out.pop("counterexample", None)
     out.pop("blocked_by", None)
+    # :draft
     out.update({"verdict": "unchecked", "stance": "undecided",
                 "recorded_verdict": row.get("verdict"),
                 "reason": "mathema could not write this claim's stored "
@@ -3109,14 +3130,17 @@ def _key_crash_message(key: str, exc: Exception, doing: str, *,
     """
     import traceback
     frames = traceback.extract_tb(exc.__traceback__)
+    # :draft
     where = (f" (raised at {os.path.basename(frames[-1].filename)}:"
              f"{frames[-1].lineno} in {frames[-1].name})" if frames else "")
+    # :draft
     record = ("its record was written before the error and could not be "
               f"put back ({restore_error}), so it holds this run's verdicts "
               "and the run that settles them did not finish; delete it and "
               "re-run verify" if written and restore_error else
               "its record was put back as it was before the run" if written else
               "its record was left exactly as it was")
+    # :draft
     return (f"{key}: internal error while {doing}: "
             f"{type(exc).__name__}: {exc}{where}; {record}, and the sweep "
             f"went on to the next key. This is most likely a defect in "

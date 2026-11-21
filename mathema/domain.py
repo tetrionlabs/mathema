@@ -336,6 +336,7 @@ def _string_member(literal: str) -> str:
         else:
             if isinstance(value, str):
                 return value
+    # :draft
     raise InvalidSetMember(
         f"the set member {literal} holds the escape {bad}, which names no "
         f"character; a backslash itself is written doubled (\\\\)")

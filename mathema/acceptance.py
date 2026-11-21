@@ -1294,6 +1294,7 @@ def _apply_attested(plan: dict, attestation) -> str:
             write_yaml(plan["path"], doc,
                        header=f"machine record; supersession of "
                               f"{target.get('name')}")
+            # :draft
             return (f"superseded: the earlier reading of {target.get('name')} "
                     f"({earlier.get('statement')}); the claim as written "
                     f"stays as checked")

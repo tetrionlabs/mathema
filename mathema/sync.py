@@ -368,6 +368,7 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
     return moved or None
 
 
+# :draft
 def _other_reading(c: dict, row: dict, fn=None) -> "str | None":
     """Intent:
         The canonical text of the claim a verified row's stored

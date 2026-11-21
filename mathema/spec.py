@@ -725,6 +725,7 @@ def stored_claims_fingerprint(raw_claims: list, grammar: str = "mathema",
     return hashlib.sha256(f"{pure}|rules={rules}".encode()).hexdigest()[:12]
 
 
+# :draft
 def recorded_claims(entry: "dict | None") -> list:
     """Intent:
         The authored claims a verified record holds, rebuilt from its
@@ -769,6 +770,7 @@ def recorded_claims_fingerprint(entry: "dict | None", fn=None) -> "str | None":
         return None
 
 
+# :draft
 def written_under_earlier_rules(entry: "dict | None", fn=None) -> bool:
     """Intent:
         Whether a verified record was written under an earlier rules
@@ -3288,6 +3290,7 @@ def canonical_claim_text(cj) -> str:
     problem = _reads_back_problem(cj, text)
     if problem is not None:
         from .conjecture import CanonicalTextError
+        # :draft
         raise CanonicalTextError(
             f"the stored text of claim {getattr(cj, 'name', None)!r} does "
             f"not read back as the claim ({problem}): {text}",
@@ -3382,6 +3385,7 @@ def _reread(text: str, context: tuple) -> tuple:
     try:
         back = _claim(text)
     except InvalidConjecture as e:
+        # :draft
         found: tuple = (f"it does not parse ({e})", None)
     else:
         found = (None, _read_back_shape(back))
@@ -3407,6 +3411,7 @@ def _reads_back_problem(cj, text: str) -> "str | None":
     for i, what in enumerate(("relation", "negation", "bound names",
                               "string literal values")):
         if shape[i] != want[i]:
+            # :draft
             return f"it reads back with other {what}"
     return None
 

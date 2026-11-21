@@ -1868,6 +1868,7 @@ def cmd_docsync(args) -> int:
     for k in report.docstrings_written:
         print(f"wrote missing claim names into {k}'s Claims: block")
     for r in report.stale_records:
+        # :draft
         print(f"note {r['key']}: the stored text of claim {r['claim']!r} "
               f"could not be read; the next verify checks the claim again "
               f"and replaces it")
@@ -1879,9 +1880,11 @@ def cmd_docsync(args) -> int:
     for u in report.unreadable:
         from .conjecture import _diagnostic
         which = f"claim {u['claim']!r}" if u["claim"] else "a claim"
+        # :draft
         print(f"UNREADABLE {u['where']} {u['key']}: {which} does not read "
               f"({u['error']}); this function was not synced")
         print()
+        # :draft
         print(_diagnostic(
             "a claim does not read", u["claim"], u["key"],
             f"in {u['where'] or 'its docstring or claims file'}",
@@ -1892,6 +1895,7 @@ def cmd_docsync(args) -> int:
         print(f"index -> {report.index_path}")
     if report.index_error:
         index = os.path.normpath(os.path.join(args.root, ".mathema", "index.yaml"))
+        # :draft
         print(f"Error: the index was not written\n\n"
               f"  on {index}\n\n"
               f"index not written: {report.index_error}. Every function "
@@ -3470,6 +3474,7 @@ def main(argv: list[str] | None = None) -> int:
                          "functions the project calls")
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
+    # :draft
     pv.add_argument("--all", action="store_true",
                     help="check every function again and rewrite its record, "
                          "even one that is fresh")
