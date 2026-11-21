@@ -56,14 +56,21 @@ def test_a_found_member_is_told_from_a_value_with_a_dotted_name():
     assert rl.member(node, found.member) and not rl.member(other, found.member)
 
 
-@pytest.mark.parametrize("text", [PAIR, "\ud800", "a\udfffb"])
-def test_a_text_holding_a_surrogate_is_refused_where_json_cannot_keep_it(text):
+@pytest.mark.parametrize("text", [PAIR, "a" + PAIR, PAIR + "b"])
+def test_a_text_holding_a_surrogate_pair_is_refused_where_json_cannot_keep_it(text):
     with pytest.raises(InvalidTerm, match="surrogate"):
         rl.canonical(choice(text))
     with pytest.raises(InvalidTerm, match="surrogate"):
         rl.canonical(record([text, choice(1), True]))
     with pytest.raises(InvalidTerm, match="surrogate"):
         rl.term_hash(exact(choice(text)))
+
+
+@pytest.mark.parametrize("text", ["\ud800", "a\udfffb", "\udc00\ud800"])
+def test_a_surrogate_on_its_own_is_kept_by_the_canonical_form(text):
+    node = choice(text)
+    assert rl.canonical(node) == node
+    assert rl.member(node, text)
 
 
 def test_an_astral_character_is_kept_by_the_canonical_form():
