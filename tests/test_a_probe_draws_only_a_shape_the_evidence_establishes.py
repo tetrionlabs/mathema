@@ -461,11 +461,11 @@ def _row(fn, text):
     return p
 
 
-def test_a_parameter_nothing_establishes_is_drawn_over_base_kinds(mod):
+def test_a_parameter_nothing_establishes_is_drawn_as_a_float(mod):
     p = _row(mod.same, "f(x) == x")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
     assert "x was drawn as a float because nothing says what x is" in p.note
-    assert "x" in p.meta["mathema.base_kinds"]
+    assert p.meta["mathema.assumed_shape"] == {"x": "float"}
 
 
 def test_binding_the_parameter_in_the_claim_draws_it(mod):
@@ -542,7 +542,7 @@ def test_a_claim_that_binds_the_value_is_judged_on_it(mod):
     assert held.verdict == "holds", (held.verdict, held.note)
 
 
-def test_a_copy_an_accumulating_loop_binds_again_is_drawn_over_base_kinds(mod):
+def test_a_copy_an_accumulating_loop_binds_again_is_drawn_as_a_float(mod):
     p = _row(mod.running, "abs(f(xs, y0) - y0) <= abs(y0) + 1e9")
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
 
@@ -581,7 +581,6 @@ def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
     p = _row(getattr(getattr(mod, cls), name), "f(self, other) == f(self, other)")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert p.meta["mathema.draw_defect"]["param"] == "other"
-    assert "other" in p.meta["mathema.base_kinds"]
 
 
 @pytest.mark.parametrize("name", ["keyed", "cached", "keyed_by"])
@@ -667,7 +666,7 @@ def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod):
     assert "mathema.draw_defect" not in (p.meta or {})
 
 
-def test_a_copy_rebound_in_a_loop_is_drawn_over_base_kinds(mod):
+def test_a_copy_rebound_in_a_loop_is_drawn_as_a_float(mod):
     p = _row(mod.copied_in_a_loop, "f(y0) == f(y0)")
     assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
 
@@ -736,7 +735,7 @@ def test_an_attribute_read_then_indexed_says_nothing_of_a_sequence(mod):
     ("triangle", "f(x) <= 499500", "unknown"),
     ("width", "f(x) <= 10", "unknown"),
 ])
-def test_a_use_only_an_integer_supports_is_decided_over_base_kinds(
+def test_a_use_only_an_integer_supports_is_decided_on_its_float_draw(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
@@ -747,7 +746,7 @@ def test_a_use_only_an_integer_supports_is_decided_over_base_kinds(
     ("comp_copy", "f(y0) == f(y0)", "unknown"),
     ("copy_then_branch", "f(y0, flag) == f(y0, flag)", "unknown"),
 ])
-def test_a_copy_read_in_a_way_not_read_through_is_drawn_over_base_kinds(
+def test_a_copy_read_in_a_way_not_read_through_is_drawn_as_a_float(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
