@@ -4798,9 +4798,10 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     domain-conditioned branch pruning: a raises claim with no declared
     domain specific enough to determine which branch runs stays
     unliftable, the same as any other derive claim would with an
-    unresolvable branch. `call_src` must be a bare `f(...)` call (no
-    multi-function claims here, same restriction check_conjectures()
-    already applies before this is ever called). `max_callee_depth` is
+    unresolvable branch. `call_src` must be `f(p1, p2, ...)`, the
+    function's parameters by name in order with no keywords: the domain
+    is bound to the parameters, so any other argument is not the call
+    the claim states. `max_callee_depth` is
     forwarded to lift_conditioned(), see lift()'s own docstring."""
     try:
         tree = ast.parse(call_src, mode="eval")
@@ -4809,6 +4810,13 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
+    call = tree.body
+    if call.keywords or [a.id if isinstance(a, ast.Name) else None
+                         for a in call.args] != list(facts.params):
+        return ProofResult("unliftable", sketch=(
+            f"derive reads raises(...) only at f({', '.join(facts.params)}), each "
+            f"parameter passed by its own name in order, and the call written is "
+            f"{call_src}"))
 
     suspended = suspended_call_refusal(fn)
     if suspended is not None:
