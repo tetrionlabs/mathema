@@ -461,15 +461,11 @@ def _row(fn, text):
     return p
 
 
-def test_a_parameter_nothing_establishes_is_not_drawn(mod):
+def test_a_parameter_nothing_establishes_is_drawn_over_base_kinds(mod):
     p = _row(mod.same, "f(x) == x")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
-    assert "shape of parameter x is not established" in p.note
-    assert "shape_evidence_fns.py:6" in p.note
-    assert '"def same(x):"' in p.note
-    assert "bind x in the claim" in p.note and "annotate it" in p.note
-    assert p.n == 0 and p.counterexample is None
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert "holds for x drawn as bool, int, float" in p.note
+    assert "x" in p.meta["mathema.base_kinds"]
 
 
 def test_binding_the_parameter_in_the_claim_draws_it(mod):
@@ -546,16 +542,15 @@ def test_a_claim_that_binds_the_value_is_judged_on_it(mod):
     assert held.verdict == "holds", (held.verdict, held.note)
 
 
-def test_a_copy_an_accumulating_loop_binds_again_carries_nothing(mod):
+def test_a_copy_an_accumulating_loop_binds_again_is_drawn_over_base_kinds(mod):
     p = _row(mod.running, "abs(f(xs, y0) - y0) <= abs(y0) + 1e9")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
 
 
 def test_a_copy_rebound_before_its_use_carries_nothing(mod):
     p = _row(mod.replaced, "f(y0) == 2")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert "holds for y0 drawn as" in p.note
 
 
 def test_a_parameter_the_body_never_reads_is_drawn_and_said_so(mod):
@@ -568,10 +563,8 @@ def test_a_function_without_source_says_so():
     ns: dict = {}
     exec("def hidden(x):\n    return x\n", ns)
     p = _row(ns["hidden"], "f(x) == x")
-    assert p.verdict == "unknown", (p.verdict, p.note)
-    assert "<unknown>" not in p.note
-    assert ("shape of parameter x is not established (the source of hidden "
-            "is not available)") in p.note
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "holds for x drawn as" in p.note
 
 
 def test_a_generated_dataclass_ordering_draws_an_instance(mod):
@@ -588,7 +581,7 @@ def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
     p = _row(getattr(getattr(mod, cls), name), "f(self, other) == f(self, other)")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
     assert p.meta.get("mathema.probe_gap") == "shape-not-established"
-    assert "other" in p.meta["mathema.shape"]
+    assert "other" in p.meta["mathema.base_kinds"]
 
 
 @pytest.mark.parametrize("name", ["keyed", "cached", "keyed_by"])
@@ -643,8 +636,8 @@ def test_a_partial_without_source_is_named_by_its_function():
     ns: dict = {}
     exec("def hidden(x, y):\n    return x\n", ns)
     p = _row(functools.partial(ns["hidden"], y=1), "f(x) == x")
-    assert p.verdict == "unknown", (p.verdict, p.note)
-    assert "(the source of hidden is not available)" in p.note
+    assert p.verdict == "holds", (p.verdict, p.note)
+    assert "holds for x drawn as" in p.note
 
 
 def test_a_count_of_text_repeats_drawn_as_a_float_is_a_draw_defect(mod):
@@ -674,21 +667,21 @@ def test_a_raise_on_a_value_that_is_not_the_drawn_one_is_a_finding(mod):
     assert "mathema.draw_defect" not in (p.meta or {})
 
 
-def test_a_copy_rebound_in_a_loop_leaves_the_shape_unread(mod):
+def test_a_copy_rebound_in_a_loop_is_drawn_over_base_kinds(mod):
     p = _row(mod.copied_in_a_loop, "f(y0) == f(y0)")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "falsified", (p.verdict, p.note, p.counterexample)
 
 
 @pytest.mark.parametrize("name, text, verdict", [
-    ("rebound_in_a_branch", "f(y0, flag) == f(y0, flag)", "unknown"),
-    ("rebound_by_with", "f(y0) == f(y0)", "unknown"),
-    ("rebound_by_walrus", "f(y0) == f(y0)", "unknown"),
-    ("rebound_after_del", "f(y0) == f(y0)", "unknown"),
-    ("rebound_by_star", "f(y0) == f(y0)", "unknown"),
-    ("rebound_by_augmenting", "f(y0) == f(y0)", "unknown"),
+    ("rebound_in_a_branch", "f(y0, flag) == f(y0, flag)", "falsified"),
+    ("rebound_by_with", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_walrus", "f(y0) == f(y0)", "falsified"),
+    ("rebound_after_del", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_star", "f(y0) == f(y0)", "falsified"),
+    ("rebound_by_augmenting", "f(y0) == f(y0)", "falsified"),
     ("unpacked", "f(y0) == f(y0)", "holds"),
 ])
-def test_a_rebound_copy_leaves_the_shape_unread_and_an_unpacked_copy_is_read(
+def test_a_rebound_copy_keeps_the_finding_and_an_unpacked_copy_is_read(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
@@ -739,30 +732,30 @@ def test_an_attribute_read_then_indexed_says_nothing_of_a_sequence(mod):
 @pytest.mark.parametrize("name, text, verdict", [
     ("int_guarded", "f(x) == x", "falsified"),
     ("none_guarded", "abs(f(x)) <= 10000000", "falsified"),
-    ("triangle", "f(x) <= 499500", "unknown"),
-    ("width", "f(x) <= 10", "unknown"),
+    ("triangle", "f(x) <= 499500", "holds"),
+    ("width", "f(x) <= 10", "holds"),
 ])
-def test_a_use_only_an_integer_supports_does_not_narrow_the_draw(
+def test_a_use_only_an_integer_supports_is_decided_over_base_kinds(
         mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
 
 
-@pytest.mark.parametrize("name, text", [
-    ("closure_copy", "f(y0) == f(y0)"),
-    ("comp_copy", "f(y0) == f(y0)"),
-    ("copy_then_branch", "f(y0, flag) == f(y0, flag)"),
+@pytest.mark.parametrize("name, text, verdict", [
+    ("closure_copy", "f(y0) == f(y0)", "holds"),
+    ("comp_copy", "f(y0) == f(y0)", "falsified"),
+    ("copy_then_branch", "f(y0, flag) == f(y0, flag)", "holds"),
 ])
-def test_a_copy_read_in_a_way_not_read_through_leaves_the_shape_unread(
-        mod, name, text):
+def test_a_copy_read_in_a_way_not_read_through_is_drawn_over_base_kinds(
+        mod, name, text, verdict):
     p = _row(getattr(mod, name), text)
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)
     assert "may bind" not in (p.note or "")
 
 
 def test_a_binding_later_in_a_loop_stops_the_read_through(mod):
     p = _row(mod.wrapped_each_time, "f(y0) == y0")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
 
 
 def test_a_math_argument_is_a_number_a_sequence_use_contradicts(mod):

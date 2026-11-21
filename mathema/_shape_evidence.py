@@ -50,7 +50,7 @@ from dataclasses import dataclass
 #: the sources, in the order a parameter's shape is read from them
 EVIDENCE_ORDER = ("claim domain", "inferred domain", "type marker",
                   "annotation", "receiver", "generated dataclass method",
-                  "default", "body use", "not read by the body")
+                  "default", "body use", "not read by the body", "assumed")
 #: the sources an author states, or that a definition fixes, rather than
 #: ones read from the code
 STATED = frozenset({"claim domain", "inferred domain", "type marker",
@@ -750,6 +750,72 @@ def definition_place(fn) -> "tuple[str, str]":
     return _place(fn, line), _source_line(fn, line)
 
 
+#: the base kinds a parameter whose shape nothing establishes is drawn as,
+#: one companion run each: the numbers apart, and each container or text
+#: kind empty and non-empty apart
+BASE_KINDS = ("None", "bool", "int", "float", "complex",
+              "empty str", "non-empty str", "empty bytes", "non-empty bytes",
+              "empty list", "non-empty list", "empty tuple", "non-empty tuple",
+              "empty dict", "non-empty dict", "empty set", "non-empty set")
+
+
+def base_kind_value(kind: str, rng, trial: int):
+    """Intent:
+        One draw of base kind `kind` (one of `BASE_KINDS`) for trial
+        number `trial`, drawn as core draws a value of that kind: a bool
+        alternating, an int between -10**6 and 10**6 (0 and the small
+        ints among them), a float (the probe draws the float kind itself,
+        as it draws an unannotated parameter), a complex, a string (as text or
+        UTF-8 bytes), a list of floats (as a tuple or a set), a dict;
+        an empty kind's one empty value.
+    """
+    from .probing import _synth
+    if kind == "None":
+        return None
+    if kind == "bool":
+        return trial % 2 == 1
+    if kind == "int":
+        return rng.choice([0, 1, -1, 2, rng.randint(-100, 100),
+                           rng.randint(-10 ** 6, 10 ** 6)])
+    if kind == "float":
+        return float(_synth("scalar", rng))
+    if kind == "complex":
+        return complex(_synth("complex", rng))
+    empty, _sep, base = kind.partition(" ")
+    if empty == "empty":
+        return {"str": "", "bytes": b"", "list": [], "tuple": (),
+                "dict": {}, "set": set()}[base]
+    if base in ("str", "bytes"):
+        text = str(_synth("string", rng)) or "a"
+        return text if base == "str" else text.encode("utf-8", "replace")
+    if base == "dict":
+        return dict(_synth("dict", rng)) or {"k": 1.0}
+    items = list(_synth("sequence", rng)) or [1.0]
+    return {"list": items, "tuple": tuple(items), "set": set(items)}[base]
+
+
+def kinds_held_text(params: list, held: list, paired: bool) -> str:
+    """Intent:
+        The note of a claim decided over base kinds: the kinds each
+        parameter was drawn as where the claim holds, and whether the
+        parameters were drawn as one kind together.
+    """
+    names = ", ".join(params)
+    text = f"holds for {names} drawn as {', '.join(held)}"
+    if paired:
+        text += " (the parameters drawn as one kind together)"
+    return text
+
+
+def assumed_shape(param: str) -> ParameterShape:
+    """Intent:
+        The shape of a parameter nothing establishes, drawn as an
+        unannotated parameter is drawn.
+    """
+    return ParameterShape(param, Evidence("assumed", "any",
+                                          "nothing establishes its shape"))
+
+
 def not_established_text(fn, shape: ParameterShape) -> str:
     """Intent:
         The diagnostic for a parameter that is not drawn: a title, the
@@ -852,7 +918,8 @@ def _sources_text(pieces: list) -> str:
 
 
 def wrong_shape_use(fn, values: dict, exc: BaseException,
-                    drawn: "set | frozenset | None" = None) -> "tuple[str, int] | None":
+                    drawn: "set | frozenset | None" = None,
+                    held_explains: bool = True) -> "tuple[str, int] | None":
     """Intent:
         `(param, line)` when `exc`, a TypeError or AttributeError, was
         raised by an operation in `fn`'s own body (not in a function it
@@ -865,7 +932,8 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
         None); only a drawn parameter is named. None otherwise, and
         when the message also names the type of another operand whose
         value was not drawn (a literal, a held value, a default), whose
-        type then explains the raise as well.
+        type then explains the raise as well (unless `held_explains` is
+        False, for a value whose shape was assumed).
     """
     if not isinstance(exc, (TypeError, AttributeError)):
         return None
@@ -909,7 +977,8 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
             type_name = type(runtime[name]).__name__
             if not _names_type(message, type_name):
                 continue
-            if any(h != type_name and _names_type(message, h) for h in held):
+            if held_explains and any(h != type_name and _names_type(message, h)
+                                     for h in held):
                 return None
             return name, line
     return None
@@ -1019,6 +1088,79 @@ _LITERAL_TYPES = {ast.List: list, ast.Tuple: tuple, ast.Dict: dict,
                   ast.SetComp: set, ast.DictComp: dict}
 
 
+def raised_on_drawn(fn, exc: BaseException, params) -> "tuple[str, int] | None":
+    """Intent:
+        `(param, line)` when `exc`, a TypeError or AttributeError, was
+        raised at an operation whose operand is the very object `fn`'s
+        own frame holds for one of `params`, in whatever frame the
+        operation ran (`fn`'s own, a function nested in it, or one it
+        called), the message naming that object's type; None otherwise.
+    """
+    if not isinstance(exc, (TypeError, AttributeError)):
+        return None
+    code = getattr(_underlying(fn), "__code__", None)
+    frames = []
+    tb = exc.__traceback__
+    while tb is not None:
+        frames.append(tb)
+        tb = tb.tb_next
+    outer = next((t for t in frames if t.tb_frame.f_code is code), None)
+    if code is None or outer is None:
+        return None
+    held = dict(outer.tb_frame.f_locals)
+    drawn = {p: held[p] for p in params if p in held}
+    last = frames[-1]
+    try:
+        positions = list(last.tb_frame.f_code.co_positions())[last.tb_lasti // 2]
+    except (IndexError, AttributeError):
+        return None
+    node = _node_at(last.tb_frame.f_code, positions)
+    if node is None:
+        return None
+    runtime = {**last.tb_frame.f_globals, **dict(last.tb_frame.f_locals)}
+    message = str(exc)
+    for operand in _operand_nodes(node):
+        if not (isinstance(operand, ast.Name) and operand.id in runtime):
+            continue
+        for p, value in drawn.items():
+            if runtime[operand.id] is value \
+                    and _names_type(message, type(value).__name__):
+                return p, int(positions[0])
+    return None
+
+
+def _node_at(code, positions):
+    """Intent:
+        The syntax node of `code`'s file that spans exactly the source
+        range `positions` names, or None when the file cannot be read.
+    """
+    import linecache
+    line, end_line, col, end_col = positions
+    if None in positions:
+        return None
+    path = code.co_filename
+    text = "".join(linecache.getlines(path))
+    if not text:
+        return None
+    tree = _PARSED.get(path)
+    if tree is None or tree[0] != text:
+        try:
+            tree = (text, ast.parse(text))
+        except SyntaxError:
+            return None
+        _PARSED[path] = tree
+    for node in ast.walk(tree[1]):
+        if getattr(node, "lineno", None) == line \
+                and getattr(node, "end_lineno", None) == end_line \
+                and node.col_offset == col and node.end_col_offset == end_col:
+            return node
+    return None
+
+
+#: each source file's text and parsed tree, by path
+_PARSED: dict = {}
+
+
 def _drawn_operand(operand, values: dict, drawn: set, runtime: dict) -> "str | None":
     """Intent:
         The drawn parameter an operand is, or None: a name (or a local
@@ -1122,6 +1264,10 @@ def _without_shadowing(fdef, params: list):
     names = set(params)
 
     def _shadows(node) -> bool:
+        """Intent:
+            Whether `node` is a function or lambda that declares a
+            parameter named like one of `params`.
+        """
         return isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef)) \
             and bool(names & set(_arg_names(node.args)))
 
@@ -1132,6 +1278,10 @@ def _without_shadowing(fdef, params: list):
 
     class _Strip(ast.NodeTransformer):
         def generic_visit(self, node):
+            """Intent:
+                Replace, below `node`, each shadowing function statement
+                with `pass` and each shadowing lambda with `None`.
+            """
             for field, value in ast.iter_fields(node):
                 if isinstance(value, list):
                     value[:] = [ast.copy_location(ast.Pass(), v)

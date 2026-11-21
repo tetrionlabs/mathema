@@ -7426,11 +7426,21 @@ def _derive_attempt_label(fallback: "Probe") -> str:
     return f"derive: {display}" + (f" ({reason})" if reason else "")
 
 
+#: the openings of a probe's shape clauses, each holding a `; ` of its own
+_SHAPE_CLAUSES = ("shape of parameter ", "the draw for ", "no base kind applies to ")
+
+
 def _last_probe_clause(note: str) -> str:
-    """The last `; `-separated clause of a probe's note, a Decimal
-    arithmetic clause (`_decimal_rounding.REASONS`, each holding a `; `
-    of its own) kept whole when it ends the note."""
+    """Intent:
+        The last `; `-separated clause of a probe's note, a Decimal
+        arithmetic clause (`_decimal_rounding.REASONS`) or a shape
+        clause (`_SHAPE_CLAUSES`), each holding a `; ` of its own, kept
+        whole when it ends the note.
+    """
     from ._decimal_rounding import REASONS
+    at = max(note.rfind(opening) for opening in _SHAPE_CLAUSES)
+    if at >= 0:
+        return note[at:]
     for reason in REASONS:
         _head, found, tail = note.rpartition(reason)
         if found and "; " not in tail:
@@ -8308,6 +8318,10 @@ class _ClaimContext:
     # the parameters the probe draws whose shape rests on the code (a
     # default or a body use), `{param: ParameterShape}`
     drawn_shapes: dict = field(default_factory=dict)
+    # the parameters whose shape nothing establishes, decided over the
+    # base kinds, and the kind each is drawn as in the current run
+    base_kind_params: list = field(default_factory=list)
+    base_kind: "dict | None" = None
     # the parameters the claim holds at a literal, a kept default or a
     # pin rather than drawing them
     shape_held: frozenset = frozenset()
@@ -12496,8 +12510,9 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
         The parameters whose shape rests on the code are kept on
         `ctx.drawn_shapes`.
     """
-    from ._shape_evidence import (element_shape_missing, kind_shape,
-                                  not_established_text, parameter_shapes)
+    from ._shape_evidence import (assumed_shape, element_shape_missing,
+                                  kind_shape, not_established_text,
+                                  parameter_shapes)
     cj = ctx.cj
     params = list(facts.params)
     sides = [t for t in (cj.lhs, cj.rhs,
@@ -12533,6 +12548,12 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
     out = dict(kinds)
     for p in drawn:
         shape = shapes[p]
+        if shape.evidence is None and not shape.disagree \
+                and shape.wrapper is None:
+            ctx.drawn_shapes[p] = assumed_shape(p)
+            if p not in ctx.base_kind_params:
+                ctx.base_kind_params.append(p)
+            continue
         text = (not_established_text(fn, shape) if not shape.established
                 else element_shape_missing(fn, shape))
         if text is not None:
@@ -12576,7 +12597,14 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
                       .arguments)
     except (TypeError, ValueError):
         return None
+    assumed = {p for p, s in ctx.drawn_shapes.items()
+               if s.evidence is not None and s.evidence.source == "assumed"}
     found = wrong_shape_use(fn, values, exc, set(values) - ctx.shape_held)
+    if found is None and assumed:
+        found = wrong_shape_use(fn, values, exc, assumed, held_explains=False)
+    if found is None and assumed:
+        from ._shape_evidence import raised_on_drawn
+        found = raised_on_drawn(fn, exc, assumed)
     if found is None or found[0] not in ctx.drawn_shapes \
             or ctx.drawn_shapes[found[0]].stated \
             or ctx.drawn_shapes[found[0]].settled \
@@ -12589,6 +12617,69 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
             "place": place, "quoted": quoted,
             "drawn": type(values[p]).__name__,
             "evidence": evidence.detail if evidence is not None else ""}
+
+
+def _over_base_kinds(ctx: "_ClaimContext", fn, facts, kinds: dict,
+                     sampling) -> "Probe":
+    """Intent:
+        The probe of a claim with parameters whose shape nothing
+        establishes (`ctx.base_kind_params`): the claim run once per
+        base kind (`BASE_KINDS`), each such parameter drawn as that
+        kind, every one of them as the same kind when there are several.
+        Holds, naming the kinds it holds on, when there is one; else
+        falsified with the first failing kind's witness, or unknown when
+        no kind applied (every draw raised a TypeError or AttributeError
+        at an operation on the drawn value). Holds is the most a kind
+        gives. Each kind's outcome, with its witness, is kept in the
+        row's meta (`mathema.base_kinds`).
+    """
+    from ._shape_evidence import BASE_KINDS, kinds_held_text
+    params = list(ctx.base_kind_params)
+    held: list = []
+    rows: dict = {}
+    first_failed = None
+    record: dict = {}
+    for kind in BASE_KINDS:
+        ctx.base_kind = {p: kind for p in params}
+        ctx.drawn_shapes = {}
+        try:
+            row = _probe_stage_in_slots(ctx, fn, facts, dict(kinds), sampling)
+        finally:
+            ctx.base_kind = None
+        rows[kind] = row
+        defect = (row.meta or {}).get("mathema.draw_defect")
+        if row.verdict in ("holds", "proven"):
+            held.append(kind)
+            record[kind] = {"verdict": "holds"}
+        elif row.verdict == "falsified":
+            record[kind] = {"verdict": "falsified",
+                            "witness": row.counterexample}
+            if first_failed is None:
+                first_failed = row
+        elif defect is not None:
+            record[kind] = {"verdict": "does not apply",
+                            "raised": defect.get("raised"),
+                            "line": defect.get("line")}
+        else:
+            record[kind] = {"verdict": row.verdict}
+    meta = {"mathema.base_kinds": {p: record for p in params}}
+    if held:
+        base = rows[held[0]]
+        text = kinds_held_text(params, held, len(params) > 1)
+        return Probe(ctx.cj.name, base.statement, "holds", route=base.route,
+                     n=sum(rows[k].n or 0 for k in held),
+                     note=f"{ctx.note}; {text}".lstrip("; "),
+                     meta={**(base.meta or {}), **meta})
+    if first_failed is not None:
+        first_failed.meta = {**(first_failed.meta or {}), **meta}
+        return first_failed
+    names = ", ".join(params)
+    return Probe(ctx.cj.name, ctx.statement, "unknown", route=None,
+                 note=f"{ctx.note}; no base kind applies to {names}: each "
+                      f"kind's draws raised a TypeError or AttributeError "
+                      f"at an operation on it; bind {names} in the claim "
+                      f"(for {names} in ...), or annotate it".lstrip("; "),
+                 meta={"mathema.probe_gap": "shape-not-established", **meta})
 
 
 def _draw_defect_row(ctx: "_ClaimContext", statement: str, note: str,
@@ -12876,9 +12967,12 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                           "check it")
     # every parameter the claim passes to f is drawn in a shape positive
     # evidence establishes, or not at all
+    kinds_given = dict(kinds)
     shape_row, kinds = _shape_gate(ctx, fn, facts, kinds, bundles)
     if shape_row is not None:
         return shape_row
+    if ctx.base_kind_params and ctx.base_kind is None:
+        return _over_base_kinds(ctx, fn, facts, kinds_given, sampling)
     bare = [p for p, k in kinds.items()
             if k in ("scalar", "unknown") and ctx.cj_domain.get(p) is None
             and p not in shaped and p not in bundles]
@@ -13012,6 +13106,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     if getattr(cj, "trials", None) is not None:
         # the claim's own trials, which may exceed the usual limit
         budget = cj.trials
+    if ctx.base_kind is not None and not set(ctx.base_kind.values()) \
+            & {"int", "float", "complex"}:
+        # one base kind of a run over several; a number kind keeps the
+        # whole budget, its specials among it
+        budget = min(budget, 24)
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
     # whether a draw evaluated this pass sat on an analytically
@@ -13677,6 +13776,13 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 if p in literal_args:
                     continue
                 v = as_typed(draw(rng, trial_sizes.get(resolver.key(p, 0))), p)
+                env[p] = v
+                args[list(kinds).index(p)] = v
+        for p, kind in (ctx.base_kind or {}).items():
+            # a float is drawn as an unannotated parameter is drawn
+            if p in env and p not in literal_args and kind != "float":
+                from ._shape_evidence import base_kind_value
+                v = base_kind_value(kind, rng, trial)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:
