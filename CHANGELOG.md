@@ -12,12 +12,19 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A regular-language definition writes its ranges as lists; ranges written as tuples are refused, and so is a definition that states both `language` and the bounds `at_least` and `at_most`.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
+- The probe draws a parameter in the shape something establishes: the claim's domain, a type marker, the annotation, the default, or how the body uses it (indexed, iterated, measured, read with a key or a mapping method, put under arithmetic with a number, joined with a string, passed whole to a function whose parameter has evidence). A parameter whose shape nothing establishes is drawn as a float, as an unannotated parameter always was, and the row says so (`x was drawn as a float because nothing says what x is`, `mathema.assumed_shape`); a TypeError or AttributeError at an operation on that float is a draw defect (`unknown`), not a falsification, while f has returned on no draw. A string use with no domain or language to draw strings from is noted (`a string use of x was seen, ...; to draw strings, bind it (for x in L[...])`) and not acted on: the parameter is drawn as before. Evidence that disagrees and that nothing settles leaves the parameter undrawn, and the outcome `unknown` with `shape of parameter x is not established` and the fix.
+- An annotation, or a number use in the body (an ordering against a number, arithmetic with one, a `math` or `cmath` argument), settles a disagreement with another use in the body: the parameter is drawn in that shape and a raise at the other use is a finding (`def first(x: float): return x[0]` is falsified).
+- A TypeError or AttributeError raised at an operation on a drawn value whose shape only the code suggested is reported as a draw defect (`unknown`, `the draw for x had the wrong shape`), not a falsification. It is one only when the raising frame holds the drawn value itself and no literal, default, held value or other local of another type named in the message explains the raise, and not when firm evidence fixes the shape and the attribute is missing from every value of it.
 
 ### Fixes
 - The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
+- A tuple default, or a sum with a tuple literal (`(0,) + xs`), draws a tuple.
+- A local copy of a parameter (`t = y0`, `a, t = x, y0`, `(t := y0)`) is read as the parameter only in the function's own scope and where no other binding of the local may come first; a binding anywhere in a loop around the read stops it.
+- Lambdas, `functools.partial` objects and callable instances are read from their source: two lambdas on one line are told apart by position, and when they cannot be the message says so. A wrapper that calls the function it wraps with a value it makes from its own arguments leaves the parameter's shape unread.
+- `x.shape[0]`, on the parameter or on a copy of it, is not read as indexing the parameter.
 
 ## 0.6.6.1
 
