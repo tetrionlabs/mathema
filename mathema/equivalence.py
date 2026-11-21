@@ -545,6 +545,7 @@ def _coinciding_raise_proof(case: _Case,
         same = "both sides raise the same exception on the same region"
     else:
         where = "; ".join(
+            # :draft
             f"{side} raises {', '.join(sorted(e or 'an exception' for e in by_side))} where "
             f"{_region_text(_union(by_side.values()), name)}"
             for side, by_side in (("f", regions["f"]),

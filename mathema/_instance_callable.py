@@ -80,7 +80,7 @@ def _is_plain_instance(fn: Any) -> bool:
 _MISSING = object()
 
 
-def hands_over_to_wrapped(fn: Any) -> bool:
+def hands_over_to_wrapped(fn: Any) -> bool:  # :draft
     """Intent:
         Whether `fn`, an instance that links a function as
         `__wrapped__` (as `functools.update_wrapper` does), has a

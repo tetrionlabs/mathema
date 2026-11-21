@@ -771,6 +771,7 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
     """
     name = cls.__name__
     if type(cls) is not type:
+        # :draft
         return (f"`{name}` is made by the metaclass `{type(cls).__name__}`, whose call "
                 f"may run code of its own")
     for klass in cls.__mro__:
@@ -778,18 +779,22 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
             continue
         if klass.__module__ != "builtins":
             if "__init__" in vars(klass) or "__new__" in vars(klass):
+                # :draft
                 return (f"building a `{name}` runs a constructor written outside the "
                         f"builtins, which is not shown to be unable to raise")
             continue
         if getattr(builtins, klass.__name__, None) is not klass \
                 or klass.__name__ not in BUILTIN_CONSTRUCTORS:
+            # :draft
             return (f"building `{name}` runs the constructor of `{klass.__name__}`, "
                     f"which checks its arguments and may raise instead")
         if keywords:
+            # :draft
             return (f"`{name}` is built with the keyword argument `{keywords[0]}`, and "
                     f"the constructor of `{klass.__name__}` is not read to accept it")
         most = BUILTIN_CONSTRUCTORS[klass.__name__]
         if most is not None and count > most:
+            # :draft
             return (f"`{name}` is built from {count} arguments, and the constructor of "
                     f"`{klass.__name__}` is read only with at most {most}")
     return None
@@ -877,7 +882,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
     """
     ns = _Namespace(fn)
     if not ns.ok:
-        return UnreadRaise("the function has no Python code object to resolve its names in")
+        return UnreadRaise("the function has no Python code object to resolve its names in")  # :draft
     kinds = dict(kinds)
     first: "str | None" = None
     level = TOTAL
@@ -896,6 +901,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         if kind_of_step == "test":
             found, value = read_expression(node, kinds, ns)
             note(min(found, _truth_level(value)),
+                 # :draft
                  f"the test `{_source(node)}`{_where(node)} is evaluated before the raise "
                  f"and is not shown to be unable to raise")
             continue
@@ -915,54 +921,64 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
                 lam = node.value.args
                 for default in [*lam.defaults, *(d for d in lam.kw_defaults if d is not None)]:
                     found, _ = read_expression(default, kinds, ns)
+                    # :draft
                     note(found, f"the default `{_source(default)}`{_where(default)} is "
                                 f"evaluated before the raise and is not shown to be unable "
                                 f"to raise")
                 kinds[node.targets[0].id] = ANY
                 continue
             found, value = read_expression(node.value, kinds, ns)
+            # :draft
             note(found, f"`{_source(node)}`{_where(node)} runs before the raise and is "
                         f"not shown to be unable to raise")
             kinds[node.targets[0].id] = value
             continue
+        # :draft
         note(UNKNOWN, f"`{_source(node)}`{_where(node)} runs before the raise and is not "
                       f"read")
 
     exc = stmt.exc
     if exc is None:
-        return UnreadRaise("a bare `raise` re-raises whatever is being handled")
+        return UnreadRaise("a bare `raise` re-raises whatever is being handled")  # :draft
     if stmt.cause is not None and not (isinstance(stmt.cause, ast.Constant)
                                        and stmt.cause.value is None):
         found, _ = read_expression(stmt.cause, kinds, ns)
+        # :draft
         note(min(found, HALTS), f"the cause `{_source(stmt.cause)}` is evaluated before "
                                 f"the raise")
     called = exc.func if isinstance(exc, ast.Call) else exc
     if not isinstance(called, (ast.Name, ast.Attribute)):
-        return UnreadRaise(f"`{_source(called)}` is not a bare exception name")
+        return UnreadRaise(f"`{_source(called)}` is not a bare exception name")  # :draft
     name = _source(called)
     if isinstance(called, ast.Name) and called.id in ns.locals:
+        # :draft
         return UnreadRaise(f"`{name}` is a variable of the function or of an enclosing "
                            f"one, so the class it holds when the raise runs is not known")
     if isinstance(called, ast.Name) and called.id in ns.rebound:
+        # :draft
         return UnreadRaise(f"`{name}` is assigned as a module global by the function or a "
                            f"function nested in it, so the class it holds when the raise "
                            f"runs is not known")
     cls = ns.resolve(called)
     if cls is _Namespace._MISSING:
+        # :draft
         return UnreadRaise(f"`{name}` does not resolve to an attribute of a module, a "
                            f"global or a builtin where the function is defined")
     if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+        # :draft
         return UnreadRaise(f"`{name}` where the function is defined is not an exception "
                            f"class")
     if isinstance(exc, ast.Call):
         arguments = list(exc.args) + [k.value for k in exc.keywords]
         if any(isinstance(a, ast.Starred) for a in exc.args) \
                 or any(k.arg is None for k in exc.keywords):
+            # :draft
             note(UNKNOWN, f"the exception's arguments `{_source(exc)}` are unpacked "
                           f"before the raise")
         known = True
         for argument in arguments:
             found, value = read_expression(argument, kinds, ns)
+            # :draft
             note(found, f"the exception's argument `{_source(argument)}` is evaluated "
                         f"before the raise and is not shown to be unable to raise")
             known = known and bool(value.types) and value.types <= _PLAIN_ARGUMENTS

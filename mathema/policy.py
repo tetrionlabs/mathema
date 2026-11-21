@@ -1249,7 +1249,7 @@ def _hole_kind(fn, param: str, kind: str, member: "str | None"):
     return ANY
 
 
-def _true_at_hole(test, param: str, kind: str, member: "str | None", fn=None) -> bool:
+def _true_at_hole(test, param: str, kind: str, member: "str | None", fn=None) -> bool:  # :draft
     """Intent:
         Whether a guard's test is true when `param` holds the hole the
         policy names: `param is None` (or `== None`) at an absence,
@@ -1867,6 +1867,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
             and _guard_raised_it(fn, guard, calls):
         if not guard_is_read(guard):
             return row("holds", behaviour, exception, "derived",
+                       # :draft
                        f"from the guard on line {guard[2]}, whose path to its raise "
                        f"is not read; {evidence}")
         return row("proven", behaviour, exception, "derived",

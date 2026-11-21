@@ -1425,7 +1425,7 @@ def call_suspends(fn) -> "str | None":
     if not isinstance(flags, int):
         return None
     if flags & inspect.CO_ASYNC_GENERATOR:
-        return "an async generator"
+        return "an async generator"  # :draft
     if flags & (inspect.CO_COROUTINE | inspect.CO_ITERABLE_COROUTINE):
         return "a coroutine"
     if flags & inspect.CO_GENERATOR:
@@ -1433,7 +1433,7 @@ def call_suspends(fn) -> "str | None":
     return None
 
 
-def _wrapper_is_read(fn) -> bool:
+def _wrapper_is_read(fn) -> bool:  # :draft
     """Intent:
         Whether `fn` is a wrapper whose call is read as calling the function it
         wraps and returning or raising what it does: the `functools.lru_cache`
@@ -1469,9 +1469,9 @@ def _wrapper_name(fn) -> str:
         name = getattr(code, "co_qualname", code.co_name)
         module = fn.__globals__.get("__name__") if isinstance(fn.__globals__, dict) else None
         where = f"module {module} line" if isinstance(module, str) else "line"
-        return f"the function `{name}` ({where} {code.co_firstlineno})"
+        return f"the function `{name}` ({where} {code.co_firstlineno})"  # :draft
     cls = type(fn)
-    return f"an instance of `{cls.__qualname__}` (module {cls.__module__})"
+    return f"an instance of `{cls.__qualname__}` (module {cls.__module__})"  # :draft
 
 
 def wrapper_refusal(fn) -> "str | None":
@@ -1492,12 +1492,13 @@ def wrapper_refusal(fn) -> "str | None":
         if inner is None:
             return None
         if not _wrapper_is_read(fn):
+            # :draft
             return (f"the object called is {_wrapper_name(fn)}, which links the "
                     f"function as `__wrapped__`, and what it does around the call is "
                     f"not read")
         fn = inner
         seen += 1
-    return "the function is wrapped more than 16 times over"
+    return "the function is wrapped more than 16 times over"  # :draft
 
 
 def innermost(fn):
