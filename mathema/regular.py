@@ -98,7 +98,7 @@ def _ranges(raw, where: str) -> list:
         raise InvalidTerm(f"{where}: ranges must be a list of [lo, hi] pairs")
     pairs = []
     for pair in raw:
-        if not isinstance(pair, list) or len(pair) != 2:
+        if not isinstance(pair, list) or len(pair) != 2:  # :draft
             raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "
                               f"(a list of two code points, as JSON writes it)")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
@@ -261,7 +261,7 @@ def _meaning(document) -> tuple:
     exact = document.get("exact")
     if "language" in document and ("at_least" in document or "at_most" in document):
         raise InvalidTerm("a definition states either 'language' or the bounds 'at_least' "
-                          "and 'at_most', not both")
+                          "and 'at_most', not both")  # :draft
     if exact is True and "language" in document:
         node = canonical(document["language"])
         return alphabet, True, node, node
@@ -341,7 +341,7 @@ def canonical_text(document) -> str:
     return _serial(meaning)
 
 
-def validate(document) -> None:
+def validate(document) -> None:  # :draft
     """Intent:
         Nothing when `document` is a well-formed definition of any kind
         and version: an object stating a whole-number version, an
@@ -504,7 +504,7 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
 
 #: the number of derivative terms a matcher may build when no budget is
 #: given
-MATCH_BUDGET = _MATCH_STEPS
+MATCH_BUDGET = _MATCH_STEPS  # :draft
 
 
 class _Steps(dict):
@@ -573,7 +573,7 @@ def _prepared_node(node, budget: "int | None" = None) -> _Prepared:
         raise MatchBudget(budget, 0) from None
 
 
-def node_member(node, text: str) -> bool:
+def node_member(node, text: str) -> bool:  # :draft
     """Intent:
         Whether the string `text` is in the language of a bare `node`,
         decided by taking the derivative of the term by each character
@@ -591,7 +591,7 @@ def node_member(node, text: str) -> bool:
     return _prepared_node(node)(text)
 
 
-def node_matcher(node) -> _Prepared:
+def node_matcher(node) -> _Prepared:  # :draft
     """Intent:
         `node_member` for one bare node, prepared once: a function from
         a string to whether the node's language holds it, for asking
@@ -629,7 +629,7 @@ def _prepared_definition(document, bound: "str | None", budget: "int | None") ->
     return kept
 
 
-def member(document, text: str, *, bound: "str | None" = None,
+def member(document, text: str, *, bound: "str | None" = None,  # :draft
            budget: "int | None" = None) -> bool:
     """Intent:
         Whether the string `text` is in the language a definition
@@ -653,12 +653,12 @@ def member(document, text: str, *, bound: "str | None" = None,
             budget, or went deeper into the term than `_MATCH_DEPTH`;
             it carries the `budget` and the work `spent`.
     """
-    if isinstance(document, dict) and "op" in document:
+    if isinstance(document, dict) and "op" in document:  # :draft
         return node_member(document, text)
     return _prepared_definition(document, bound, budget)(text)
 
 
-def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None):
+def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None):  # :draft
     """Intent:
         `member` for one definition, prepared once and remembered by the
         definition's hash: a function from a string to whether the
@@ -670,7 +670,7 @@ def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None
         InvalidTerm: as `member`.
         MatchBudget: as `member`, when the returned function is called.
     """
-    if isinstance(document, dict) and "op" in document:
+    if isinstance(document, dict) and "op" in document:  # :draft
         return node_matcher(document)
     return _prepared_definition(document, bound, budget)
 
@@ -708,7 +708,7 @@ def representatives(nodes, alphabet=None) -> list:
 
 # ---- atoms ------------------------------------------------------------
 
-def atoms(nodes, alphabet=None) -> list:
+def atoms(nodes, alphabet=None) -> list:  # :draft
     """Intent:
         The atoms of `alphabet` (all of Unicode when None) under the
         character sets of `nodes`, as `(ranges, representative)` pairs:
@@ -739,7 +739,7 @@ def atoms(nodes, alphabet=None) -> list:
     return [(held[k], chr(members[k])) for k in range(len(members))]
 
 
-def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) -> "str | None":
+def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) -> "str | None":  # :draft
     """Intent:
         A shortest string of at most `limit` characters in the language
         a definition states (or in its `bound`), or None when it holds
@@ -926,7 +926,7 @@ class _Lowering:
 
 
 #: the draft name of the lowering
-Lowering = _Lowering
+Lowering = _Lowering  # :draft
 
 
 def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:

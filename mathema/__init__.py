@@ -326,7 +326,7 @@ class Record:
                 for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
                         "definitions") or ():
                     if isinstance(assumed, dict) and assumed.get("status") != "checked":
-                        line += (f"\n           assuming {assumed.get('statement')} "
+                        line += (f"\n           assuming {assumed.get('statement')} "  # :draft
                                  f"({assumed.get('status')})")
             else:
                 shown = p.statement

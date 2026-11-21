@@ -234,7 +234,7 @@ class _Reader:
                     and len(arg.values) == 2 and isinstance(arg.values[1], ast.Constant) \
                     and type(arg.values[1].value) is str and arg.values[1].value == "" \
                     and isinstance(arg.values[0], ast.Name) and arg.values[0].id == param:
-                self.or_empty = True
+                self.or_empty = True  # :draft
                 return
             if not (isinstance(arg, ast.Name) and arg.id == param):
                 raise _Declined(f"the match is on {ast.unparse(arg)}, not on the "
@@ -289,7 +289,7 @@ class _Reader:
         if not builtin:
             plain = _plain_exception_class(bound, self.fn)
             if plain is not None:
-                raise _Declined(f"{exc.id} is not the builtin exception class of that name, "
+                raise _Declined(f"{exc.id} is not the builtin exception class of that name, "  # :draft
                                 f"and {plain}, so building it may do anything")
         if isinstance(node.exc, ast.Call):
             if node.exc.keywords or len(node.exc.args) > 1:
@@ -321,7 +321,7 @@ class _Reader:
                     continue
                 if isinstance(part, ast.FormattedValue) and part.format_spec is None \
                         and isinstance(part.value, ast.Name) \
-                        and type(self._global(part.value.id)) is str:
+                        and type(self._global(part.value.id)) is str:  # :draft
                     if part.value.id not in self.constants:
                         self.constants.append(part.value.id)
                     continue

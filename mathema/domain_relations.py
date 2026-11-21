@@ -37,10 +37,10 @@ from .domain import (Domain, InvalidDomain, LanguageRef, _Sentinel,
                      parse_binding, render_domain)
 
 #: the relation a claim between two domains carries in `Conjecture.relation`
-RELATION = "domains"
+RELATION = "domains"  # :draft
 
 #: the canonical relation words, ascii and unicode
-WORDS = {"subset": "⊆", "not subset": "⊈", "=": "=", "!=": "≠",
+WORDS = {"subset": "⊆", "not subset": "⊈", "=": "=", "!=": "≠",  # :draft
          "disjoint": "disjoint"}
 
 NUMBERS = "a set of numbers"
@@ -51,7 +51,7 @@ LANGUAGE = "a language"
 _SPELLINGS = {
     "subset": ("subset", False), "⊆": ("subset", False),
     "supset": ("subset", True), "⊇": ("subset", True),
-    "not subset": ("not subset", False), "⊈": ("not subset", False),
+    "not subset": ("not subset", False), "⊈": ("not subset", False),  # :draft
     "disjoint": ("disjoint", False),
     "==": ("=", False), "=": ("=", False),
     "!=": ("!=", False), "≠": ("!=", False),
@@ -317,7 +317,7 @@ def _stated(term: Term, unicode: bool) -> str:
     return f"{text} : real" if brackets else text
 
 
-def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | None":
+def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | None":  # :draft
     """Intent:
         One relation between two domains read from `text`; the pair of
         relations a `⊊` stands for; or None when `text` is not a
@@ -379,7 +379,7 @@ def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | 
             meant = Relation(left, "!=" if sign == "!=" else "=", right).text()
             meant = meant.replace(" = ", " == ", 1) if sign == "==" else meant
             raise InvalidDomainRelation(
-                f"`{text.strip()}` reads two ways: two lists of two numbers, or two "
+                f"`{text.strip()}` reads two ways: two lists of two numbers, or two "  # :draft
                 f"intervals. Did you mean the intervals, `{meant}`? A bracket pair is "
                 f"an interval where it carries a type clause (`: real`, `: int`) "
                 f"and a list of values where the claim binds or calls beside it")
@@ -389,7 +389,7 @@ def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | 
             f"`{left.text}` is {left.kind} and `{right.text}` is {right.kind}")
     if spelling == "⊂":
         raise InvalidDomainRelation(
-            f"`⊂` reads two ways: write `{left.text} subset {right.text}` for "
+            f"`⊂` reads two ways: write `{left.text} subset {right.text}` for "  # :draft
             f"every member of {left.text} is in {right.text}, equality "
             f"included, or `{left.text} subset {right.text} and {left.text} "
             f"!= {right.text}` for a proper subset")
@@ -399,7 +399,7 @@ def _relation(text: str, bound: frozenset = frozenset()) -> "Relation | tuple | 
     return Relation(right, word, left) if swapped else Relation(left, word, right)
 
 
-def parse(text: str, bound: frozenset = frozenset()) -> "Statement | None":
+def parse(text: str, bound: frozenset = frozenset()) -> "Statement | None":  # :draft
     """Intent:
         The relation between domains a normalized claim statement
         states, or None when it states something else.
@@ -818,7 +818,7 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     """
     from . import regular
     seed = _guard_seed(text)
-    out = {"language": text, "statement": f"{text} == its stated definition",
+    out = {"language": text, "statement": f"{text} == its stated definition",  # :draft
            "status": "assumed", "artefact": {"seed": seed}}
     strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet,
                                                   seed, literals)
@@ -835,11 +835,11 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
             compared += 1
             if is_member and not in_least(value):
                 return {**out, "status": "refuted",
-                        "disagreement": f"{value!r} is a member of {text} and is "
+                        "disagreement": f"{value!r} is a member of {text} and is "  # :draft
                                         f"outside its stated definition"}
             if not is_member and in_most(value):
                 return {**out, "status": "refuted",
-                        "disagreement": f"{value!r} is in the stated definition of "
+                        "disagreement": f"{value!r} is in the stated definition of "  # :draft
                                         f"{text} and is not a member"}
     except regular.MatchBudget:
         return {**out, "unfinished": f"the check of the definition of {text} did not finish"}
@@ -908,12 +908,12 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
                 pass
             values.extend(NOT_TEXTS)
             admitted = [v for v in values if _is_member(language, v)]
-            entry = {"language": text, "statement": f"{text} holds only texts",
+            entry = {"language": text, "statement": f"{text} holds only texts",  # :draft
                      "status": "checked", "artefact": {"values run": len(values)}}
             if admitted:
                 entry["status"] = "refuted"
                 entry["disagreement"] = (f"{admitted[0]!r} is a member of {text}, and a "
-                                         f"regular-language definition holds only texts")
+                                         f"regular-language definition holds only texts")  # :draft
                 refuted = refuted or entry["disagreement"]
             seen[text] = entry
     return list(seen.values()), refuted
@@ -947,7 +947,7 @@ def assuming_text(assumptions: list, verdict: str = "proven") -> str:
     """
     if not assumptions:
         return verdict
-    return f"{verdict}, assuming " + ", ".join(
+    return f"{verdict}, assuming " + ", ".join(  # :draft
         f"{a['statement']} ({a['status']})" for a in assumptions)
 
 
