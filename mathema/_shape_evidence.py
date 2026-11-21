@@ -460,22 +460,22 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
             # `x.shape[0]` indexes the attribute, not `x`
             shape = None
         if shape is not None:
-            how = {"sequence": "the body indexes, iterates or measures it",
+            how = {"sequence": "the body indexes, iterates or measures it",  # :draft
                    "mapping": "the body reads it as a mapping",
                    "number": "the body puts it under arithmetic"}.get(
                        shape, f"the body uses it as {_SHAPE_WORDS[shape]}")
-            out[p].append(Evidence("body use", shape, how,
+            out[p].append(Evidence("body use", shape, how,  # :draft
                                    firm=shape != "number"))
         scalars = set(uses.scalar.get(p, ()))
         for line, text in uses.numeric.get(p, ()):
-            out[p].append(Evidence("body use", "number",
+            out[p].append(Evidence("body use", "number",  # :draft
                                    f"`{text}` on line {line + offset}",
                                    scalar_only=(line, text) in scalars))
         for line, text in uses.text.get(p, ()):
-            out[p].append(Evidence("body use", "string",
+            out[p].append(Evidence("body use", "string",  # :draft
                                    f"`{text}` on line {line + offset}"))
         for line, (text, made) in uses.container.get(p, ()):
-            out[p].append(Evidence("body use", "sequence",
+            out[p].append(Evidence("body use", "sequence",  # :draft
                                    f"`{text}` on line {line + offset}",
                                    container=made))
         for form, name in methods.get(p, ()):
@@ -483,7 +483,7 @@ def body_evidence(fn, fdef, params: list, kinds: dict,
             written = (f"`{_written_name(fdef, p, name)}.{name}"
                        f"{'()' if form != 'attr' else ''}`")
             if shape is not None:
-                out[p].append(Evidence("body use", shape, written))
+                out[p].append(Evidence("body use", shape, written))  # :draft
     if depth > 0:
         for p, ev in _passed_on(fn, fdef, params, depth).items():
             out[p].extend(ev)
@@ -549,7 +549,7 @@ def _passed_on(fn, fdef, params: list, depth: int) -> dict:
                 continue
             shape = callee_shape(callee, target, depth - 1)
             if shape.evidence is not None and shape.established:
-                out.setdefault(arg.id, []).append(Evidence(
+                out.setdefault(arg.id, []).append(Evidence(  # :draft
                     "body use", shape.evidence.shape,
                     f"passed to {callee.__name__}({target}), "
                     f"{shape.evidence.detail}"))
@@ -604,7 +604,7 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
     """
     found: list = []
     if bound is not None:
-        found.append(Evidence("claim domain" if written else "inferred domain",
+        found.append(Evidence("claim domain" if written else "inferred domain",  # :draft
                               _bound_shape(bound), "bound in the claim"
                               if written else "a domain its annotation, "
                               "default or guard states"))
@@ -613,16 +613,16 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
         found.append(marker)
     shape = kind_shape(stated_kind)
     if shape is not None:
-        found.append(Evidence("annotation", shape,
+        found.append(Evidence("annotation", shape,  # :draft
                               f"annotated {_annotation_words(fn, param)}"))
     if receiver is not None:
-        found.append(Evidence("receiver", "instance",
+        found.append(Evidence("receiver", "instance",  # :draft
                               f"an instance of {receiver}"))
     default = _default_of(fn, param)
     if default is not inspect.Parameter.empty:
         shape = _default_shape(default)
         if shape is not None:
-            found.append(Evidence("default", shape, f"default {default!r}"))
+            found.append(Evidence("default", shape, f"default {default!r}"))  # :draft
     found.extend(body)
     if not found:
         return ParameterShape(param, None)
@@ -633,7 +633,7 @@ def shape_of(fn, param: str, *, bound=None, written: bool = False,
     disagree = tuple(e for e in found[1:]
                      if e.firm and _clashes(first.shape, e))
     if disagree:
-        settling = _settling(found)
+        settling = _settling(found)  # :draft
         if settling is not None:
             return ParameterShape(param, settling, tuple(found),
                                   _against(found, settling), settled=True)
@@ -649,7 +649,7 @@ def _against(found: list, piece: Evidence) -> tuple:
                  and _clashes(piece.shape, e))
 
 
-def _settling(found: list) -> "Evidence | None":
+def _settling(found: list) -> "Evidence | None":  # :draft
     """Intent:
         The piece of evidence that settles a disagreement among `found`,
         or None: the annotation, when every piece against it is a body
@@ -728,9 +728,9 @@ def _marker_shape(fn, param: str) -> "Evidence | None":
     from .types import domain_from_signature, shapes_from_signature
     try:
         if param in (shapes_from_signature(fn, guards=False) or {}):
-            return Evidence("type marker", "sequence", "a shape marker")
+            return Evidence("type marker", "sequence", "a shape marker")  # :draft
         if param in domain_from_signature(fn, guards=False):
-            return Evidence("type marker", "number", "a bound marker")
+            return Evidence("type marker", "number", "a bound marker")  # :draft
     except Exception:
         return None
     return None
@@ -783,7 +783,7 @@ def string_seen_text(param: str) -> str:
         The note's clause for a parameter with a string use the probe
         has no strings to draw for.
     """
-    return (f"a string use of {param} was seen, and no string is drawn "
+    return (f"a string use of {param} was seen, and no string is drawn "  # :draft
             f"without a domain; to draw strings, bind it (for {param} in "
             f"L[...])")
 
@@ -795,7 +795,7 @@ def assumed_float_text(params: list) -> str:
     """
     names = ", ".join(params)
     verb = "was" if len(params) == 1 else "were"
-    return (f"{names} {verb} drawn as a float because nothing says what "
+    return (f"{names} {verb} drawn as a float because nothing says what "  # :draft
             f"{names} {'is' if len(params) == 1 else 'are'}; annotate it or "
             f"bind it in the claim (for {params[0]} in ...)")
 
@@ -805,7 +805,7 @@ def assumed_shape(param: str) -> ParameterShape:
         The shape of a parameter nothing establishes, drawn as an
         unannotated parameter is drawn.
     """
-    return ParameterShape(param, Evidence("assumed", "any",
+    return ParameterShape(param, Evidence("assumed", "any",  # :draft
                                           "nothing establishes its shape"))
 
 
@@ -824,27 +824,27 @@ def not_established_text(fn, shape: ParameterShape) -> str:
     first = shape.evidence
     if shape.disagree and first is not None:
         other = shape.disagree[0]
-        return (f"shape of parameter {p} is not established ({where}): "
+        return (f"shape of parameter {p} is not established ({where}): "  # :draft
                 f"{_with_shape(first)}, but {_with_shape(other)}; bind {p} in "
                 f"the claim, or make {_sources_text([first, *shape.disagree])} "
                 f"agree")
     if place == "<unknown>":
-        return (f"shape of parameter {p} is not established ({where}): "
+        return (f"shape of parameter {p} is not established ({where}): "  # :draft
                 f"nothing in its signature says what kind of value it takes; "
                 f"bind {p} in the claim (for {p} in ...), or annotate it")
     if shape.wrapper is not None:
-        return (f"shape of parameter {p} is not established ({where}): "
+        return (f"shape of parameter {p} is not established ({where}): "  # :draft
                 f"{shape.wrapper} calls the function it wraps with a value "
                 f"it makes from its own arguments, so the wrapped function's "
                 f"annotations and uses do not say what kind of value {p} "
                 f"takes; bind {p} in the claim (for {p} in ...)")
     if _function_def(fn)[0] is None and _lambdas_alike(fn) > 1:
-        return (f"shape of parameter {p} is not established ({where}): "
+        return (f"shape of parameter {p} is not established ({where}): "  # :draft
                 f"the line defines more than one lambda taking these "
                 f"parameters, and which one this is cannot be told; bind {p} "
                 f"in the claim (for {p} in ...), or define the function with "
                 f"def")
-    return (f"shape of parameter {p} is not established ({where}): "
+    return (f"shape of parameter {p} is not established ({where}): "  # :draft
             f"no annotation, default or use in the body says what kind of "
             f"value it takes; bind {p} in the claim (for {p} in ...), or "
             f"annotate it")
@@ -892,15 +892,15 @@ def _sources_text(pieces: list) -> str:
     names: list = []
     for e in pieces:
         if e.source == "annotation":
-            name = "its annotation"
+            name = "its annotation"  # :draft
         elif e.source == "default":
-            name = "its default"
+            name = "its default"  # :draft
         elif e.source == "body use" and e.detail.startswith("`"):
-            name = f"its use {e.detail}"
+            name = f"its use {e.detail}"  # :draft
         elif e.source == "body use" and e.detail.startswith("passed to "):
-            name = f"its use {e.detail.split(',')[0]}"
+            name = f"its use {e.detail.split(',')[0]}"  # :draft
         elif e.source == "body use":
-            name = "its use in the body"
+            name = "its use in the body"  # :draft
         else:
             name = f"its {e.source}"
         if name not in names:
@@ -1279,7 +1279,7 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
     for p, found in (getattr(facts, "runtime_types", None) or {}).items():
         shape = kind_shape(found[0].kind) if found else None
         if p in body and shape is not None and kind_shape(stated.get(p)) is None:
-            body[p].insert(0, Evidence("body use", shape,
+            body[p].insert(0, Evidence("body use", shape,  # :draft
                                        "the body uses it as "
                                        + (found[0].adapter or "an array")))
     receivers = receivers or {}
@@ -1301,7 +1301,7 @@ def parameter_shapes(fn, facts, params, cj_domain: dict,
                   if getattr(n, "_copy_source", False)}
         for p, shape in out.items():
             if shape.evidence is None and p not in loaded:
-                out[p] = ParameterShape(p, Evidence(
+                out[p] = ParameterShape(p, Evidence(  # :draft
                     "not read by the body", "any",
                     "the body copies it to a local it never reads"
                     if p in copied else "the body never reads it"))
@@ -1678,7 +1678,7 @@ def element_shape_missing(fn, shape: ParameterShape) -> "str | None":
     p = shape.param
     place, line = definition_place(fn)
     quoted = f' "{line}"' if line else ""
-    return (f"shape of the elements of parameter {p} is not established "
+    return (f"shape of the elements of parameter {p} is not established "  # :draft
             f"({place}{quoted}): {evidence.detail} names elements mathema "
             f"does not draw; bind {p} in the claim (for {p} in L[...]), "
             f"or annotate its elements as numbers or strings")

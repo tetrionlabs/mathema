@@ -12542,7 +12542,7 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
     from ._shape_evidence import Evidence, ParameterShape, generated_ordering
     ordering = generated_ordering(fn)
     if ordering is not None and ordering[0] in bundles and ordering[0] in named:
-        ctx.drawn_shapes[ordering[0]] = ParameterShape(ordering[0], Evidence(
+        ctx.drawn_shapes[ordering[0]] = ParameterShape(ordering[0], Evidence(  # :draft
             "generated dataclass method", "instance",
             f"an instance of {ordering[1].__name__}"))
     if not drawn:
@@ -12552,12 +12552,14 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
     out = dict(kinds)
     for p in drawn:
         shape = shapes[p]
+        # :draft
         if shape.evidence is None and not shape.disagree \
                 and shape.wrapper is None:
             ctx.drawn_shapes[p] = assumed_shape(p)
             if p not in ctx.assumed_float:
                 ctx.assumed_float.append(p)
             continue
+        # :draft
         if shape.established and shape.evidence is not None \
                 and shape.evidence.shape == "string" and not shape.stated \
                 and out.get(p) != "string":
@@ -12574,7 +12576,7 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
         if text is not None:
             return Probe(cj.name, ctx.statement, "unknown", route=None,
                          note=f"{ctx.note}; {text}".lstrip("; "),
-                         meta={"mathema.probe_gap": "shape-not-established",
+                         meta={"mathema.probe_gap": "shape-not-established",  # :draft
                                "mathema.shape": {p: shape.as_record()}}), kinds
         evidence = shape.evidence
         if evidence is None:
@@ -12603,7 +12605,7 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
         disagreement (`ParameterShape.settled`).
     """
     if not ctx.drawn_shapes or call_raised[0] != "f" \
-            or call_raised_at[0] is None or ctx.f_returned:
+            or call_raised_at[0] is None or ctx.f_returned:  # :draft
         return None
     from ._shape_evidence import (attribute_no_shape_has, definition_line_text,
                                   wrong_shape_use)
@@ -12643,13 +12645,13 @@ def _draw_defect_row(ctx: "_ClaimContext", statement: str, note: str,
     """
     p = defect["param"]
     quoted = f' "{defect["quoted"]}"' if defect["quoted"] else ""
-    text = (f"the draw for {p} had the wrong shape ({defect['place']}{quoted}): "
+    text = (f"the draw for {p} had the wrong shape ({defect['place']}{quoted}): "  # :draft
             f"f raised {defect['raised']} at an operation on {p}, drawn as "
             f"{defect['drawn']} because {defect['evidence']}; bind {p} in "
             f"the claim (for {p} in ...), or annotate it")
     return Probe(ctx.cj.name, statement, "unknown", route=None,
                  note=f"{note}; {text}".lstrip("; "),
-                 meta={"mathema.draw_defect": {
+                 meta={"mathema.draw_defect": {  # :draft
                      k: defect[k] for k in ("param", "raised", "line",
                                             "drawn")}})
 
@@ -12673,14 +12675,14 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
         _NULL_IS_A_HOLE.reset(token)
     if ctx.assumed_float or ctx.string_seen:
         from ._shape_evidence import assumed_float_text, string_seen_text
-        row.meta = {**(row.meta or {}), "mathema.assumed_shape": {
+        row.meta = {**(row.meta or {}), "mathema.assumed_shape": {  # :draft
             p: "float" for p in ctx.assumed_float}}
         said = ([assumed_float_text(ctx.assumed_float)] if ctx.assumed_float
                 and (row.meta or {}).get("mathema.draw_defect") is None else [])
         said += [string_seen_text(p) for p in ctx.string_seen]
         row.note = "; ".join([*said, row.note or ""]).rstrip("; ")
     if ctx.drawn_shapes and row.verdict in ("holds", "falsified", "proven"):
-        row.meta = {**(row.meta or {}), "mathema.drawn_shapes": {
+        row.meta = {**(row.meta or {}), "mathema.drawn_shapes": {  # :draft
             p: shape.as_record() for p, shape in ctx.drawn_shapes.items()}}
     # a negated predicate's probe ran the positive claim
     return _negation_of(row) if ctx.cj.negated else row
@@ -13842,7 +13844,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
-                ctx.f_returned = True
+                ctx.f_returned = True  # :draft
         except Exception as e:
             if not call_raised[0] and admitted_hole(args):
                 # the claim's own words at a hole or absence it only
