@@ -29,7 +29,7 @@ import sympy
 from ._base import (
     NotSymbolic, _LiftCtx, _bind_params, _complex_typed, _expr_to_sympy,
     _simplify_maybe_array,
-    strip_docstring, _unmodified_params, _walk_lift_body,
+    strip_docstring, _unmodified_params, _walk_lift_body, UnreadRaise,
 )
 from ..domain import bound_to_sympy_set
 from ..finite_sets import OpaqueRegistry
@@ -61,6 +61,10 @@ class ConditionedLift:
     kind: str                              # "value" | "raises"
     expr: "sympy.Expr | None" = None
     exc_type: str | None = None
+    # why a path ending in `raise` was not read as raising one named
+    # class (an argument whose evaluation may itself raise, a cause, a
+    # re-raise), or None
+    exc_unread: str | None = None
     params: dict = field(default_factory=dict)
     sig_params: list = field(default_factory=list)
     aggregate: dict = field(default_factory=dict)
@@ -1151,6 +1155,8 @@ def lift_conditioned(fn: Callable[..., Any], facts: Facts, domain: dict,
         return ConditionedLift(kind="value", expr=result, params=params,
                                sig_params=sig_params, aggregate=aggregate, opaque=opaque)
     if kind == "raises":
-        return ConditionedLift(kind="raises", exc_type=result, params=params,
+        unread = result.reason if isinstance(result, UnreadRaise) else None
+        return ConditionedLift(kind="raises", exc_type=None if unread else result,
+                               exc_unread=unread, params=params,
                                sig_params=sig_params, aggregate=aggregate, opaque=opaque)
     return None
