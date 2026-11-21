@@ -9075,11 +9075,12 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                             bound_funcs, assumption)
     if deps is None:
         shown = "; ".join(
+            # :draft
             f"the listed value {_fmt_point({p: v}, [p])} is judged by its "
             f"policy row"
             for p, values in listed.items() for _s, v in values)
         return Probe(ctx.cj.name, statement, "proven",
-                     note=f"the relation was derived over the real points; {shown}")
+                     note=f"the relation was derived over the real points; {shown}")  # :draft
     names = list(deps["names"])
     tried: dict = {}
     failures: list = []
@@ -9090,7 +9091,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
             continue
         others = [n for n in names if n != p]
         axes = _listed_value_axes(others, cj_domain, listed)
-        of_others = f" of {', '.join(others)}" if others else ""
+        of_others = f" of {', '.join(others)}" if others else ""  # :draft
         for sentinel, value in values:
             tried.setdefault(p, []).append(repr(value))
             points, combinations, over = _listed_value_points(
@@ -9107,6 +9108,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                     break
                 run += 1
                 outcome = deps["evaluate"](point)
+                # :draft
                 if outcome is False:
                     rank = (0 if sentinel == ABSENT else 1 if sentinel.member is None
                             else 2)
@@ -9122,6 +9124,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
             shown = _fmt_point({p: value}, [p])
             if stopped:
                 sampled.append(
+                    # :draft
                     f"the sweep's time budget stopped the listed value {shown} "
                     f"after {run} of its {len(points)} points{of_others}, which "
                     f"held at {held}, which is evidence, not a proof")
@@ -9131,16 +9134,19 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                 kinds = _listed_value_outcomes(fn, facts, classified)
                 if kinds:
                     notes.append(
+                        # :draft
                         f"the listed value {shown} was run at {run} sampled "
                         f"points{of_others} and {kinds}")
             elif combinations is not None:
                 sampled.append(
+                    # :draft
                     f"the {combinations} combinations{of_others} are over the "
                     f"sweep's {over} budget, so the listed value {shown} was "
                     f"run at {run} sampled points of them and held at {held}, "
                     f"which is evidence, not a proof")
             else:
                 sampled.append(
+                    # :draft
                     f"the listed value {shown} was run at {run} sampled "
                     f"points{of_others} and held at {held}, which is "
                     f"evidence, not a proof")
@@ -9150,6 +9156,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
     if not failures:
         if sampled:
             return Probe(ctx.cj.name, statement, "holds", meta=meta,
+                         # :draft
                          note="the real points were derived; "
                               + "; ".join(sampled + notes))
         return Probe(ctx.cj.name, statement, "proven", meta=meta,
@@ -9258,11 +9265,11 @@ def _listed_value_outcomes(fn, facts, points: list) -> str:
     counts: Counter = Counter()
     for point in points:
         raised = _raised_at(call_fn, facts, point)
-        counts[f"raised {raised}" if raised else "gave no value"] += 1
+        counts[f"raised {raised}" if raised else "gave no value"] += 1  # :draft
     if len(counts) == 1:
         (kind,) = counts
-        return f"{kind} at each"
-    return ", ".join(f"{kind} at {n}" for kind, n in sorted(counts.items()))
+        return f"{kind} at each"  # :draft
+    return ", ".join(f"{kind} at {n}" for kind, n in sorted(counts.items()))  # :draft
 
 
 def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":
@@ -9281,7 +9288,7 @@ def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":
     if listed.verdict in ("holds", "unknown"):
         proven.verdict = listed.verdict
     if listed.note:
-        proven.note = f"{proven.note or ''}; {listed.note}"
+        proven.note = f"{proven.note or ''}; {listed.note}"  # :draft
     return proven
 
 
