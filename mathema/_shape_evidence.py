@@ -262,6 +262,10 @@ def _lambda_by_code(target, lambdas: list):
         return None
 
     def signature(c):
+        """Intent:
+            What tells two compiled lambdas apart: instructions,
+            constants (not nested code), names and parameter names.
+        """
         return (c.co_code, tuple(k for k in c.co_consts if not hasattr(k, "co_code")),
                 c.co_names, c.co_varnames)
 
@@ -792,23 +796,28 @@ def string_seen_text(param: str) -> str:
 
 def assumed_float_text(params: list) -> str:
     """Intent:
-        The note's clause saying a parameter whose shape nothing
-        establishes was drawn as a float on mathema's assumption.
+        The note's clause saying the parameters whose shape nothing
+        establishes were drawn as floats on mathema's assumption.
     """
     names = ", ".join(params)
-    verb = "was" if len(params) == 1 else "were"
-    return (f"{names} {verb} drawn as a float because nothing says what "  # :draft
-            f"{names} {'is' if len(params) == 1 else 'are'}; annotate it or "
-            f"bind it in the claim (for {params[0]} in ...)")
+    if len(params) == 1:
+        return (f"{names} was drawn as a float because nothing says what "  # :draft
+                f"{names} is; annotate it or bind it in the claim (for "
+                f"{params[0]} in ...)")
+    return (f"{names} were drawn as floats because nothing says what "  # :draft
+            f"{names} are; annotate them or bind them in the claim (for "
+            f"{params[0]} in ...)")
 
 
-def assumed_shape(param: str) -> ParameterShape:
+def assumed_shape(param: str, string_seen: bool = False) -> ParameterShape:
     """Intent:
-        The shape of a parameter nothing establishes, drawn as an
-        unannotated parameter is drawn.
+        The shape of a parameter drawn as an unannotated parameter is
+        drawn: nothing establishes its shape, or (`string_seen`) a string
+        use was read and no string can be drawn without a domain.
     """
-    return ParameterShape(param, Evidence("assumed", "any",  # :draft
-                                          "nothing establishes its shape"))
+    detail = ("a string use was seen and no string is drawn without a "  # :draft
+              "domain" if string_seen else "nothing establishes its shape")
+    return ParameterShape(param, Evidence("assumed", "any", detail))
 
 
 def not_established_text(fn, shape: ParameterShape) -> str:
@@ -1333,6 +1342,11 @@ def _without_shadowing(fdef, params: list):
     bare = copy.deepcopy(fdef)
 
     class _Strip(ast.NodeTransformer):
+        """Intent:
+            A copy of `fdef` without the nested scopes that shadow one
+            of `params`.
+        """
+
         def generic_visit(self, node):
             """Intent:
                 Replace, below `node`, each shadowing function statement

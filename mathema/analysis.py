@@ -486,7 +486,11 @@ def param_uses(fdef: ast.FunctionDef, params: list[str]) -> ParamUses:
     scalar: dict = {}
     assigned: set = set()
 
-    def note(table: dict, name, node, what: str) -> None:
+    def note(table: dict, name, node, what) -> None:
+        """Intent:
+            Record `what` at `node`'s line under `name` in `table`, for a
+            parameter name only.
+        """
         if name in pset:
             table.setdefault(name, []).append(
                 (getattr(node, "lineno", 0), what))

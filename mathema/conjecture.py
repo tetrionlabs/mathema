@@ -12567,7 +12567,7 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 and out.get(p) != "string":
             # no string can be drawn without a domain: the use is noted,
             # and the parameter is drawn as an unannotated one is
-            ctx.drawn_shapes[p] = assumed_shape(p)
+            ctx.drawn_shapes[p] = assumed_shape(p, string_seen=True)
             ctx.string_seen.append(p)
             if out.get(p) in ("scalar", "unknown", None) \
                     and p not in ctx.assumed_float:
@@ -13831,14 +13831,17 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             try:
                 v = eval(code_l, {"__builtins__": {}}, env)
             except Exception as e:
-                defect = _draw_defect(ctx, fn, call_raised, call_raised_at, e)
-                if defect is not None:
-                    return _draw_defect_row(ctx, statement, note, defect)
-                checked += 1
                 if raised_type is not None and not isinstance(e, raised_type):
+                    # only a raise the claim does not expect can be the
+                    # draw's defect
+                    defect = _draw_defect(ctx, fn, call_raised, call_raised_at, e)
+                    if defect is not None:
+                        return _draw_defect_row(ctx, statement, note, defect)
+                    checked += 1
                     cx = (f"{_point_text(args)}: raised "
                           f"{_exits.exception_name(e)}, claimed {cj.rhs}")
                     break
+                checked += 1
                 continue
             checked += 1
             cx = f"{_point_text(args)}: returned {v!r} instead of raising"

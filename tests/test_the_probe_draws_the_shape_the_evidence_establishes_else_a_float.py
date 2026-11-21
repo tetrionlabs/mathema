@@ -529,10 +529,10 @@ def test_a_wrong_shape_raise_on_a_guessed_number_is_a_draw_defect(mod):
     assert '"return v * 2 + v.offset"' in p.note
 
 
-def test_a_raises_claim_passing_only_on_a_wrong_shape_is_a_draw_defect(mod):
+def test_a_raises_claim_is_judged_on_the_raise_it_expects(mod):
     p = _row(mod.scale, "raises(f(v), AttributeError)")
-    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta["mathema.draw_defect"]["param"] == "v"
+    assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
+    assert "mathema.draw_defect" not in (p.meta or {})
 
 
 def test_a_claim_that_binds_the_value_is_judged_on_it(mod):
