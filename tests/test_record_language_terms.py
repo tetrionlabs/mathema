@@ -56,7 +56,7 @@ SOLVER = ("a_found_member_is_a_member", "none_found_means_no_catalogue_value",
 
 def test_the_vector_file_holds_what_it_is_expected_to():
     assert (len(VALID), len(INVALID)) == (79, 36)
-    assert len(CLAIMS) == 69
+    assert len(CLAIMS) == 70
 
 
 @pytest.mark.parametrize("vector", VALID, ids=[v["name"] for v in VALID])

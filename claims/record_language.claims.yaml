@@ -274,3 +274,7 @@ claims.record_language_support.list_of_holds_each_item_under_each_bound:
   claims:
     - name: a_built_list_keeps_each_bound
       statement: 'for d in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, v in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39}, f(d, v) == True'
+claims.record_language_support.many_list_terms_at_one_place_are_decided:
+  claims:
+    - name: many_list_terms_at_one_place_are_decided
+      statement: 'for n in {2, 4, 6, 8, 10, 12}, f(n) == True'
