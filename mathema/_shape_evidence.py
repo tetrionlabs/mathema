@@ -1120,6 +1120,21 @@ _LITERAL_TYPES = {ast.List: list, ast.Tuple: tuple, ast.Dict: dict,
                   ast.SetComp: set, ast.DictComp: dict}
 
 
+def _shared(value) -> bool:
+    """Intent:
+        Whether Python may hand out `value`'s very object to code that
+        never saw it: None, a bool, a small int, an empty tuple, and a
+        str or bytes that may be interned.
+    """
+    if value is None or isinstance(value, bool):
+        return True
+    if isinstance(value, int):
+        return -5 <= value <= 256
+    if isinstance(value, (str, bytes)):
+        return len(value) <= 1 or (isinstance(value, str) and value.isidentifier())
+    return isinstance(value, tuple) and not value
+
+
 def raised_on_drawn(fn, exc: BaseException, params) -> "tuple[str, int] | None":
     """Intent:
         `(param, line)` when `exc`, a TypeError or AttributeError, was
@@ -1152,7 +1167,7 @@ def raised_on_drawn(fn, exc: BaseException, params) -> "tuple[str, int] | None":
             if not (isinstance(operand, ast.Name) and operand.id in runtime):
                 continue
             for p, value in drawn.items():
-                if runtime[operand.id] is value \
+                if runtime[operand.id] is value and not _shared(value) \
                         and _names_type(message, type(value).__name__):
                     return p, int(positions[0])
     return None

@@ -8321,6 +8321,8 @@ class _ClaimContext:
     # the parameters whose shape nothing establishes, drawn as floats on
     # mathema's assumption
     assumed_float: list = field(default_factory=list)
+    # whether f has returned on a draw of this claim's probe
+    f_returned: bool = False
     # the parameters the claim holds at a literal, a kept default or a
     # pin rather than drawing them
     shape_held: frozenset = frozenset()
@@ -12576,8 +12578,10 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
     """Intent:
         The draw defect `exc` shows, when f itself raised it at an
         operation on the value of a parameter whose shape only the code
-        established (`ctx.drawn_shapes`): `{param, raised, line, place,
-        quoted, drawn, evidence}`; None otherwise, and when the raise
+        established (`ctx.drawn_shapes`), and f has returned on no earlier
+        draw of the claim (`ctx.f_returned`): `{param, raised, line,
+        place, quoted, drawn, evidence}`; None otherwise, and when the
+        raise
         is explained by a value the claim holds (`ctx.shape_held`), a
         default or a literal, or is an attribute missing from every
         value of the shape firm evidence establishes
@@ -12585,7 +12589,7 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
         disagreement (`ParameterShape.settled`).
     """
     if not ctx.drawn_shapes or call_raised[0] != "f" \
-            or call_raised_at[0] is None:
+            or call_raised_at[0] is None or ctx.f_returned:
         return None
     from ._shape_evidence import (attribute_no_shape_has, definition_line_text,
                                   wrong_shape_use)
@@ -12647,6 +12651,7 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     ctx.drawn_shapes = {}
     ctx.assumed_float = []
+    ctx.f_returned = False
     try:
         row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
@@ -13821,6 +13826,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     as watch:
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
+                ctx.f_returned = True
         except Exception as e:
             if not call_raised[0] and admitted_hole(args):
                 # the claim's own words at a hole or absence it only
