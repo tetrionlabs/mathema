@@ -1,0 +1,26 @@
+claims.smt_support.literal_hash:
+  claims:
+    - name: the_hash_never_reads_the_source
+      statement: 'for text in L[ascii], note in L[ascii], f(text, note) == f(text, "")'
+    - name: two_texts_are_two_hashes
+      statement: 'let other be {"", "a", "b", "ab", "ba"}, for text in {"", "a", "b", "ab", "ba"}, assuming text != other, f(text, "") != f(other, "")'
+claims.smt_support.canonical_twice_is_canonical:
+  claims:
+    - name: canonical_is_idempotent
+      statement: 'for a in [32, 126] subset Z, b in [32, 126] subset Z, shape in {0, 1, 2, 3}, f(a, b, shape) == True'
+claims.smt_support.separating_status:
+  claims:
+    - name: no_member_exactly_when_the_span_is_inside
+      statement: 'let inside = claims.smt_support.span_inside, for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == inside(a, b)'
+claims.smt_support.member_found_separates:
+  claims:
+    - name: a_member_found_is_inside_and_outside
+      statement: 'for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == True'
+claims.smt_support.reading_agrees_with_the_function:
+  claims:
+    - name: the_reading_accepts_what_the_function_accepts
+      statement: 'for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) == True'
+claims.smt_support.is_declined:
+  claims:
+    - name: a_function_that_is_no_validator_is_declined
+      statement: 'for which in {0, 1, 2, 3}, f(which) == True'
