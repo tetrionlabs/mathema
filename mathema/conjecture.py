@@ -15622,8 +15622,10 @@ EVIDENCE_LADDER = (
     ("probe:semi_analytical", "probe:algorithmic", "probe:minimal_example",
      "probe:counterfactual"),
     # a compendium definition row (`axiom`) is trusted testimony, as
-    # strong as a plain holds and never stronger
-    ("probe", "probe:lifted_numeric", "axiom"),
+    # strong as a plain holds and never stronger; a proof over the real
+    # points whose listed missing value was run at sampled points of the
+    # other parameters is a sampled holds  # :draft
+    ("probe", "probe:lifted_numeric", "axiom", "derive:listed_value_sampled"),
     ("documented",),
     ("declared",),
 )
