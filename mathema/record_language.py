@@ -100,18 +100,21 @@ def _serial(value) -> str:
 
 
 def _no_surrogate(text: str, what: str) -> str:
-    """`text`, when it holds no surrogate code point (U+D800 to U+DFFF).
-    JSON text carries none: two surrogates written as escapes read back
-    as the one character they encode, so a term holding one would not
-    keep its meaning through its own canonical text.
+    """`text`, when it holds no high surrogate followed by a low one.
+    ASCII JSON writes such a pair as the same two escapes as the one
+    character beyond the basic plane they encode, and reads those
+    escapes back as that character, so a term holding the pair would not
+    keep its meaning through its own canonical text. A surrogate on its
+    own is written and read back as itself.
 
     Raises:
-        InvalidTerm: the text holds a surrogate.
+        InvalidTerm: the text holds such a pair.
     """
-    for c in text:
-        if "\ud800" <= c <= "\udfff":
-            raise InvalidTerm(f"{what} {text!r} holds the surrogate U+{ord(c):04X}, which JSON "
-                              "text does not carry")
+    for i in range(len(text) - 1):
+        if "\ud800" <= text[i] <= "\udbff" and "\udc00" <= text[i + 1] <= "\udfff":
+            raise InvalidTerm(f"{what} {text!r} holds the surrogate pair U+{ord(text[i]):04X} "
+                              f"U+{ord(text[i + 1]):04X}, which JSON text reads back as one "
+                              "character")
     return text
 
 
