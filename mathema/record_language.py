@@ -202,7 +202,7 @@ def _canonical_record(node: dict) -> dict:
                 or not isinstance(field[2], bool):
             raise InvalidTerm(f"{field!r} is not a field [name, node, required]")
         fields.append([field[0], canonical(field[1]), field[2]])
-    names = [name for name, _, _ in fields]
+    names: list[str] = [name for name, _, _ in fields]
     if len(set(names)) != len(names):
         raise InvalidTerm(f"a record names a field once, not {sorted(names)}")
     if any(required and value == _EMPTY for _, value, required in fields):
