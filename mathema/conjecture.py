@@ -4866,7 +4866,8 @@ def pins_into_calls(cj, fn):
         `cj` written with its pins in the call: each `let p be v` that
         pins a parameter of f (`call_defaults`) and that the claim reads
         nowhere else becomes the keyword `p=v` on every call to f that
-        leaves `p` out, and its `let` goes. `cj` unchanged when it pins
+        leaves `p` out (a call that passes `p` by keyword, even into f's
+        `**kwargs`, keeps its own), and its `let` goes. `cj` unchanged when it pins
         nothing that can move.
     """
     import math
@@ -4916,8 +4917,9 @@ def pins_into_calls(cj, fn):
                                             if k.arg is not None})
             except TypeError:
                 continue
+            passed = {k.arg for k in n.keywords if k.arg is not None}
             for p, v in movable.items():
-                if p not in bound.arguments:
+                if p not in bound.arguments and p not in passed:
                     n.keywords.append(ast.keyword(arg=p, value=literal(v)))
                     changed = True
         return ast.unparse(tree) if changed else src
