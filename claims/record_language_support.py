@@ -105,6 +105,9 @@ PARENT = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(SHA
 WIDENED = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(DEEP), True),
                  ("shell", _CHILD_SHELL, False))
 
+#: an astral character written as the two surrogates that encode it in UTF-16
+_PAIR = chr(0xD83D) + chr(0xDE00)
+
 TERMS = [
     EMPTY, ANY, choice(None), choice(True), FLAG, choice(1), choice(1, True, "1"),
     choice("a", "b"), choice(), text(_lit("a")), text(DOLLAR), text(SHALLOW), text(DEEP),
@@ -118,6 +121,13 @@ TERMS = [
     complement(FLAG), complement(record(("x", FLAG, True))), complement(complement(text(DOLLAR))),
     union(record(("x", OFF, True)), complement(record(("x", FLAG, True)))),
     CHILD, PARENT, WIDENED,
+    # field names a path-like reading of names would confuse, and a
+    # character outside the basic plane
+    record(("a.b", choice(1), True), ("a", record(("b", choice(2), True)), True)),
+    record(("x[0]", choice(4), True),
+           ("x", {"op": "list", "item": choice(3), "min": 1, "max": 1}, True)),
+    record(("\x00", FLAG, True), ("", choice(1), False)),
+    choice("\U0001F600", "a"),
 ]
 
 VALUES = [
@@ -131,6 +141,8 @@ VALUES = [
     {"edit": True, "publish": False, "root": "/wt/elsewhere", "shell": {"git": "commit"}},
     {"edit": True, "publish": False, "root": "/etc"},
     {"edit": True, "publish": False},
+    {"a.b": 1, "a": {"b": 2}}, {"a.b": 2, "a": {"b": 1}}, {"x[0]": 4, "x": [3]},
+    {"\x00": True}, {"\x00": False, "": 1}, "\U0001F600", _PAIR,
 ]
 
 
@@ -181,6 +193,8 @@ INVALID = [
     _exact({"op": "record", "fields": {"x": FLAG}, "rest": EMPTY}),
     _exact({"op": "union", "args": FLAG}), _exact({"op": "union", "args": [FLAG, 1]}),
     _exact({"op": "complement", "args": [FLAG]}),
+    _exact(choice(_PAIR)), _exact(record((_PAIR, FLAG, True))),
+    _exact({"op": "choice", "values": [10 ** 5000]}), _exact({"op": ["choice"], "values": [1]}),
 ]
 
 
