@@ -35,7 +35,7 @@ REF = Q.REF
 VECTORS = Q.VECTORS
 VALUES = Q.VALUES
 #: no document of a vector has more sites than this
-MOST_SITES = 120
+MOST_SITES = 64
 #: the operators that have an inverse, and the operator that undoes each
 INVERSE = {"swap_required_and_optional": "swap_required_and_optional",
            "negate_has_key": "negate_has_key",
@@ -130,9 +130,9 @@ def a_changed_document_is_valid_and_another_document(i: int, s: int) -> bool:
 
 def a_change_with_an_inverse_is_undone(i: int, s: int) -> bool:
     """Whether site `s` has an inverse exactly when its operator is one
-    of those with one, the inverse is of the operator that undoes it,
-    and the changed document changed at the inverse is the document it
-    was made from, term for term."""
+    of those with one, the inverse is of the operator that undoes it at
+    the same address, and the changed document changed at the inverse
+    is the document it was made from, term for term."""
     ms = _ms()
     found = _site(i, s)
     if found is None:
@@ -143,9 +143,9 @@ def a_change_with_an_inverse_is_undone(i: int, s: int) -> bool:
         return inverse is None
     if inverse is None or inverse.operator != INVERSE[site.operator]:
         return False
-    changed = ms.change(document, site)
-    return inverse in ms.sites(changed, more_names=(site.name,) if site.name else ()) \
-        and ms.change(changed, inverse) == document
+    if inverse.address != site.address:
+        return False
+    return ms.change(ms.change(document, site), inverse) == document
 
 
 def a_change_moves_the_language_the_way_its_site_says(i: int, s: int, v: int) -> bool:

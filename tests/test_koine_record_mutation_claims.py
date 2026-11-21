@@ -64,3 +64,16 @@ def test_every_site_of_every_vector_is_within_the_index_set():
               for i in range(len(SUPPORT.VECTORS)) if SUPPORT._document(i) is not None]
     assert counts and max(counts) <= SUPPORT.MOST_SITES
     assert sum(counts) > 0
+
+
+def test_every_change_of_every_vector_keeps_to_its_direction_at_every_value():
+    law = SUPPORT.a_change_moves_the_language_the_way_its_site_says
+    from mathema.koine import record_mutation_sites
+    broken = []
+    for i in range(len(SUPPORT.VECTORS)):
+        document = SUPPORT._document(i)
+        if document is None:
+            continue
+        for s in range(len(record_mutation_sites.sites(document))):
+            broken += [(i, s, v) for v in range(len(SUPPORT.VALUES)) if law(i, s, v) is not True]
+    assert broken[:3] == []
