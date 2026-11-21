@@ -621,6 +621,24 @@ def member_of(value) -> "str | None":
 _is_missing = is_missing
 
 
+@dataclass(frozen=True, order=True)
+class Predicate:
+    """One predicate a language piece applies to its members,
+    `starts with ("http://")`: the `word` in its canonical lower-case
+    spelling, the `arguments` as their canonical texts, and whether the
+    predicate is `negated` (`not starts with (...)`). Core reads the
+    shape only; the word's meaning belongs to whatever registers it."""
+    word: str
+    arguments: tuple = ()
+    negated: bool = False
+
+    @property
+    def text(self) -> str:
+        """`word (argument, ...)`, with `not` in front when negated."""
+        said = f"{self.word} ({', '.join(self.arguments)})"
+        return f"not {said}" if self.negated else said
+
+
 @dataclass(frozen=True)
 class LanguageRef:
     """One language piece of a domain, `L[ascii]`: the name a language
@@ -637,6 +655,10 @@ class LanguageRef:
     #: order (`L[json, depth <= 6, nodes <= 200]`); a key is served by
     #: whatever refinement is registered under it
     refinements: tuple = ()
+    #: the predicates the piece applies to its members, each a
+    #: `Predicate`, in sorted order (`L[text, starts with ("a")]`); a
+    #: word is served by whatever predicate is registered under it
+    predicates: tuple = ()
 
     def refinement(self, key: str):
         """The interval refinement `key` states, or None."""
@@ -644,10 +666,13 @@ class LanguageRef:
 
     @property
     def text(self) -> str:
-        """What sits inside the brackets: the name, then each
-        refinement, `json, depth <= 6, nodes <= 200`."""
-        return ", ".join([self.name, *(render_refinement(key, interval)
-                                       for key, interval in self.refinements)])
+        """What sits inside the brackets: the name, each measure
+        refinement, then each predicate, `json, depth <= 6, nodes <=
+        200, has key ("id")`."""
+        return ", ".join([self.name,
+                          *(render_refinement(key, interval)
+                            for key, interval in self.refinements),
+                          *(p.text for p in self.predicates)])
 
     def __repr__(self) -> str:
         return f"L[{self.text}]"
@@ -709,16 +734,267 @@ def _parse_refinement(text: str, whole: str) -> tuple:
     return key, interval
 
 
+_STRING_PLACEHOLDER = re.compile(r"[rR]?_mathema_str_\d+_")
+_PREDICATE_CALL = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s*\((?P<args>.*)\)$", re.DOTALL)
+_PREDICATE_KEYWORD = re.compile(r"^(?P<word>[A-Za-z_][A-Za-z_ ]*?)\s+(?P<arg>_mathema_str_\d+_)$")
+# the claim grammar writes a caret as `**` before a domain is read, so
+# `**=` is the `^=` operator
+_PREDICATE_SUGAR = re.compile(
+    r"^(?P<op>\^=|\*\*=|\$=|\*=|==|!=|=|not\s+in\b|in\b)\s*(?P<arg>.+)$", re.DOTALL)
+_DOTTED_OBJECT = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
+#: an operator that negates the word its positive form reads as
+_NEGATED_SUGAR = {"!=": "==", "not in": "in"}
+
+
+def predicate_key(word: str) -> str:
+    """The form a predicate word is matched in: its letters in lower
+    case, so `startsWith`, `starts_with` and `Starts With` are one
+    word."""
+    return re.sub(r"[\s_]+", "", word).lower()
+
+
+def _as_words(word: str) -> str:
+    """A word as lower-case words: an underscore or a capital inside it
+    starts a new word (`soundsLike`, `sounds_like` are `sounds like`)."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", word.replace("_", " "))
+    return re.sub(r"\s+", " ", spaced).strip().lower()
+
+
+#: a bare word in a call's argument list, optionally followed by a
+#: version number (`python 3.13`); nothing follows the number
+_WORD_WITH_VERSION = re.compile(
+    r"(?P<word>[A-Za-z_][A-Za-z_ ]*?)(?:[\s_]+(?P<version>\d+(?:\.\d+)*))?")
+_ALPHABET_NAME = re.compile(r"^[A-Za-z_][\w-]*$")
+
+
+def alphabet_pieces(text: str, single: bool = False) -> "tuple | None":
+    """Intent:
+        The pieces of an alphabet expression, named alphabets and
+        quoted characters joined by `+` (`lower + digit + "_"`), as
+        `("name", name)` and `("char", character)` pairs in written
+        order, a quoted string of several characters giving one piece
+        per character. None when `text` is not such an expression: a
+        single name is a language name, not an expression, unless
+        `single` is set.
+    """
+    import ast
+    masked, literals = mask_strings(text.strip())
+    parts = [p.strip() for p in masked.split("+")]
+    if len(parts) == 1 and not single and _ALPHABET_NAME.match(parts[0]) \
+            and not _STRING_PLACEHOLDER.fullmatch(parts[0]):
+        return None
+    pieces: list = []
+    for part in parts:
+        if _STRING_PLACEHOLDER.fullmatch(part):
+            try:
+                value = ast.literal_eval(unmask_strings(part, literals))
+            except (ValueError, SyntaxError):
+                return None
+            if not isinstance(value, str) or not value:
+                return None
+            pieces.extend(("char", ch) for ch in value)
+        elif _ALPHABET_NAME.match(part):
+            pieces.append(("name", part))
+        else:
+            return None
+    return tuple(pieces)
+
+
+def render_alphabet(pieces) -> str:
+    """An alphabet expression as text: each name bare, each character
+    in double quotes, joined by ` + `."""
+    import json
+    return " + ".join(value if kind == "name" else json.dumps(value, ensure_ascii=False)
+                      for kind, value in pieces)
+
+
+def _canonical_alphabet(pieces: tuple) -> tuple:
+    """The pieces once each, in the order the registered alphabet
+    constructor writes them, or in written order when none is
+    registered."""
+    from .languages import alphabet_constructor
+    kept = tuple(dict.fromkeys(pieces))
+    constructor = alphabet_constructor()
+    if constructor is not None and constructor.order is not None:
+        try:
+            ordered = tuple(constructor.order(kept))
+        except Exception:
+            return kept
+        if set(ordered) == set(kept):
+            return ordered
+    return kept
+
+
+def read_call(text: str) -> "tuple | None":
+    """Intent:
+        `(function, first, words, bindings)` for an argument written as
+        a call whose first argument is a quoted literal or a dotted
+        object and whose other arguments are bare words or bindings,
+        `re(r"[a-z]+", python, ignore case)`, `shape("AW{0+}", W =
+        alnum + "_")`: the function's name in its matching form
+        (`predicate_key`), the first argument as written, each word as
+        lower-case words (`ignoreCase`, `ignore_case` and `Ignore Case`
+        are `ignore case`), a version number after a word kept after
+        one space (`python 3.13`), and each binding `NAME = alphabet
+        expression` as `(NAME, pieces)` (`alphabet_pieces`). None when
+        `text` is not such a call. The word that owns the function
+        orders the words, fills its defaults and writes the canonical
+        text.
+    """
+    call = _PREDICATE_CALL.match(text.strip())
+    if call is None or not _balanced_call(call.group("args")):
+        return None
+    parts = [p.strip() for p in _split_commas(call.group("args"))]
+    if not parts or not parts[0]:
+        return None
+    masked, _ = mask_strings(parts[0])
+    if not (_STRING_PLACEHOLDER.fullmatch(masked) or _DOTTED_OBJECT.match(parts[0])
+            or re.fullmatch(r"[A-Za-z_]\w*", parts[0])):
+        return None
+    words: list = []
+    bindings: list = []
+    for part in parts[1:]:
+        bound = re.fullmatch(r"([A-Za-z_]\w*)\s*=(?!=)\s*(.+)", mask_strings(part)[0],
+                             flags=re.DOTALL)
+        if bound is not None:
+            pieces = alphabet_pieces(part.split("=", 1)[1], single=True)
+            if pieces is None:
+                return None
+            bindings.append((bound.group(1), pieces))
+        elif _WORD_WITH_VERSION.fullmatch(part):
+            word = _WORD_WITH_VERSION.fullmatch(part)
+            version = word.group("version")
+            words.append(_as_words(word.group("word"))
+                         + (f" {version}" if version else ""))
+        else:
+            return None
+    return predicate_key(call.group("word")), parts[0], tuple(words), tuple(bindings)
+
+
+def _argument_text(arg: str) -> str:
+    """One argument as written, with the space around it and the runs
+    of space outside its quoted text removed."""
+    masked, literals = mask_strings(arg.strip())
+    return unmask_strings(re.sub(r"\s+", " ", masked), literals)
+
+
+def _balanced_call(args: str) -> bool:
+    """Whether `args`, the text between a call's outer brackets, closes
+    no bracket it did not open."""
+    depth = 0
+    for ch in mask_strings(args)[0]:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _parse_predicate(text: str, whole: str) -> "Predicate | None":
+    """Intent:
+        The predicate one refinement spells, or None when it spells
+        none: a call `word (arguments)`, a keyword spelling `word
+        "text"` for a word that allows one, an operator a registered
+        word reads (`^= "a"`), or a bare dotted object a registered
+        word claims; `not` in front negates a call.
+
+    Raises:
+        InvalidDomain: an operator or a bare object no registered word
+            reads, or arguments the word refuses.
+    """
+    from .languages import predicate_word, word_for_sugar
+    t = text.strip()
+    negated = False
+    sugar = None
+    m = _PREDICATE_SUGAR.match(t)
+    if m is not None:
+        op = re.sub(r"\s+", " ", m.group("op"))
+        op = {"=": "==", "**=": "^="}.get(op, op)
+        negated, sugar = op in _NEGATED_SUGAR, _NEGATED_SUGAR.get(op, op)
+        registered = word_for_sugar(sugar)
+        if registered is None:
+            raise InvalidDomain(f"{whole!r}: no registered predicate reads `{op}`")
+        word, args = registered.word, [m.group("arg")]
+    else:
+        if re.match(r"not\b", t):
+            negated, t = True, t[3:].strip()
+        masked, literals = mask_strings(t)
+        call = _PREDICATE_CALL.match(t)
+        keyword = _PREDICATE_KEYWORD.match(masked)
+        if call is not None and _balanced_call(call.group("args")):
+            word, args = call.group("word"), _split_commas(call.group("args"))
+        elif keyword is not None:
+            registered = predicate_word(keyword.group("word"))
+            if registered is None or not registered.keyword:
+                return None
+            word, args = keyword.group("word"), [unmask_strings(keyword.group("arg"), literals)]
+        elif _DOTTED_OBJECT.match(t) and not negated:
+            reads = word_for_sugar("in")
+            meant = (f". Did you mean `{reads.word} ({t})`?" if reads is not None
+                     else f"; state the predicate, `word ({t})`")
+            raise InvalidDomain(
+                f"{whole!r}: the object {t!r} alone is not a refinement{meant}")
+        else:
+            return None
+        registered = predicate_word(word)
+        word = registered.word if registered is not None else _as_words(word)
+    arguments = tuple(_argument_text(a) for a in args if a.strip())
+    if registered is not None and registered.arguments is not None:
+        try:
+            arguments = tuple(registered.arguments(arguments, sugar))
+        except ValueError as e:
+            raise InvalidDomain(f"{whole!r}: {e}") from e
+    return Predicate(word, arguments, negated)
+
+
 def _parse_refinements(text: str, whole: str) -> tuple:
-    """Every refinement a piece states, in key order; a key stated twice
-    is refused."""
+    """`(measures, predicates)` for the refinements a piece states: the
+    measure comparisons as `(key, Interval)` pairs in key order, a key
+    stated twice refused, and the predicates sorted, one stated twice
+    kept once."""
     found: dict = {}
+    predicates: set = set()
     for part in _split_commas(text):
+        if not (_REFINE_BOUND.match(part.strip()) or _REFINE_INTERVAL.match(part.strip())):
+            predicate = _parse_predicate(part, whole)
+            if predicate is not None:
+                predicates.add(predicate)
+                continue
         key, interval = _parse_refinement(part, whole)
         if key in found:
             raise InvalidDomain(f"{whole!r}: the refinement {key!r} is stated twice")
         found[key] = interval
-    return tuple(sorted(found.items()))
+    return tuple(sorted(found.items())), tuple(sorted(predicates))
+
+
+def _language_piece(text: str) -> "LanguageRef | None":
+    """Intent:
+        The `LanguageRef` a piece `L[...]` spells, or None when `text`
+        is not one. The head is a language name, a dotted path, or an
+        alphabet expression (`lower + digit + "_"`), which is kept as
+        its canonical text.
+    """
+    m = _PIECE_LANGUAGE.match(text)
+    if m is not None:
+        return _language_ref(m.group("name"), m.group("refine"), text)
+    opened = re.match(r"^(?:L|\U0001d543)\[(?P<inside>.*)\]$", text.strip(), flags=re.DOTALL)
+    if opened is None or not _balanced_call(opened.group("inside")):
+        return None
+    head, *rest = _split_commas(opened.group("inside"))
+    pieces = alphabet_pieces(head)
+    if pieces is None:
+        return None
+    refine = ",".join(rest).strip() or None
+    return _language_ref(render_alphabet(_canonical_alphabet(pieces)), refine, text)
+
+
+def _language_ref(name: str, refine: "str | None", whole: str) -> "LanguageRef":
+    """The `LanguageRef` for a piece naming `name` with the refinement
+    text `refine`."""
+    measures, predicates = _parse_refinements(refine, whole) if refine else ((), ())
+    return LanguageRef(name, measures, predicates)
 
 
 _PATH_STEP = re.compile(r"\.(\w+)|\[(\d+|\*)\]")
@@ -886,11 +1162,7 @@ def path_bindings_hold(value, root: str, bindings: dict) -> bool:
 def language_ref(text: str) -> "LanguageRef | None":
     """The `LanguageRef` the inside of `L[...]` spells (`unicode`,
     `unicode, len <= 80`), or None when it spells none."""
-    m = _PIECE_LANGUAGE.match(f"L[{text}]")
-    if m is None:
-        return None
-    refine = m.group("refine")
-    return LanguageRef(m.group("name"), _parse_refinements(refine, text) if refine else ())
+    return _language_piece(f"L[{text}]")
 
 
 @dataclass(frozen=True)
@@ -2216,8 +2488,12 @@ def domain_bound_to_json(b) -> str | dict:
             out["clause"] = True
         return out
     if isinstance(b, LanguageRef):
-        return {"language": b.name,
-                **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
+        out = {"language": b.name,
+               **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
+        if b.predicates:
+            out["predicates"] = [{"word": p.word, "arguments": list(p.arguments),
+                                  "negated": p.negated} for p in b.predicates]
+        return out
     if isinstance(b, str):
         return b
     if isinstance(b, frozenset):
@@ -2250,9 +2526,14 @@ def domain_bound_from_json(v: Any) -> Any:
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
     if "language" in v:
-        return LanguageRef(str(v["language"]), tuple(sorted(
-            (key, domain_bound_from_json(interval))
-            for key, interval in v.items() if key != "language")))
+        return LanguageRef(
+            str(v["language"]),
+            tuple(sorted((key, domain_bound_from_json(interval))
+                         for key, interval in v.items()
+                         if key not in ("language", "predicates"))),
+            tuple(sorted(Predicate(str(p["word"]), tuple(p.get("arguments", ())),
+                                   bool(p.get("negated", False)))
+                         for p in v.get("predicates", ()))))
     if "base_type" in v:
         return Domain(base_type=v["base_type"],
                       pieces=tuple(domain_bound_from_json(p) for p in v["pieces"]),
@@ -2326,11 +2607,9 @@ def _parse_piece(text: str, *, in_element: bool = False, on_field: bool = False)
                              for v in _split_commas(m.group(1)) if v.strip())
         except ValueError:
             return None
-    m = _PIECE_LANGUAGE.match(text)
-    if m is not None:
-        refine = m.group("refine")
-        return LanguageRef(m.group("name"),
-                           _parse_refinements(refine, text) if refine else ())
+    spelled = _language_piece(text)
+    if spelled is not None:
+        return spelled
     m = _PIECE_NAMED.match(text)
     if m is not None:
         return _SUBSET_ASCII.get(m.group(1), m.group(1))
@@ -2374,6 +2653,13 @@ def _merge_exclude_keyword_parts(parts: list[str]) -> list[str]:
             continue
         out.append(part)
     return out
+
+
+def _union_parts(text: str) -> list:
+    """The pieces of a union, split at each `|` or `∪` outside quotes:
+    a bar inside a quoted member is that member's text."""
+    masked, literals = mask_strings(text)
+    return [unmask_strings(piece, literals) for piece in _UNION_SPLIT.split(masked)]
 
 
 def parse_binding(part: str):
@@ -2525,10 +2811,13 @@ def _parse_binding(part: str):
     tail_words = more + tail_words
 
     excluded_text = None
-    m = _EXCLUDE_SUFFIX.search(text)
+    # the exclusion is looked for outside quotes: a `\{` inside a quoted
+    # member is that member's text
+    masked, literals = mask_strings(text)
+    m = _EXCLUDE_SUFFIX.search(masked)
     if m is not None:
-        excluded_text = m.group("set")
-        text = text[:m.start()].rstrip()
+        excluded_text = unmask_strings(m.group("set"), literals)
+        text = unmask_strings(masked[:m.start()], literals).rstrip()
         text, more = _peel_trailing_sentinels(text)
         tail_words = more + tail_words
 
@@ -2562,7 +2851,7 @@ def _parse_binding(part: str):
             if inner is not None:
                 rest, in_element = inner, True
     pieces = []
-    for pt in (_UNION_SPLIT.split(rest) if rest else []):
+    for pt in (_union_parts(rest) if rest else []):
         # a type clause alone (`s in : str`) is the whole type
         piece = (_parse_piece(pt, in_element=in_element or element_path,
                               on_field=on_field) if pt else None)
@@ -2739,6 +3028,29 @@ def _exclude_point(bound, value: float):
     return bound
 
 
+_REBOUND = re.compile(r"^\s*(?P<name>[A-Za-z_]\w*)\s*(?:\bin\b|∈)\s*(?P<domain>.+?)\s*$",
+                      re.DOTALL)
+
+
+def _inclusion_meant(segments: list) -> str:
+    """Intent:
+        The sentence added to the refusal of a quantifier whose last
+        segment binds again a name an earlier one bound (`for c in
+        L[A], c in L[B]`, `for x in [0, 1], x in [0, 2]`): the spelling
+        of the inclusion it reads like, the two domains as written.
+        Empty for any other quantifier.
+    """
+    last = _REBOUND.match(segments[-1])
+    if last is None:
+        return ""
+    for seg in segments[:-1]:
+        first = _REBOUND.match(seg)
+        if first is not None and first.group("name") == last.group("name"):
+            a, b = first.group("domain"), last.group("domain")
+            return f". To state that every member of {a} is in {b}, write: {a} subset {b}"  # :draft
+    return ""
+
+
 def split_quantifier(text: str) -> tuple[dict, str]:
     """Peel a leading quantifier off a normalized law, lifting it into
     domain structure: `for x in [0, ..., 1], y in [-1, ..., 1], f(x, y) <= 1`
@@ -2828,7 +3140,8 @@ def split_quantifier(text: str) -> tuple[dict, str]:
     if n_bindings == len(segments):
         raise InvalidDomain(
             f"{text!r}: every segment after 'for' parses as a binding, "
-            "the quantifier has no statement left to quantify")
+            "the quantifier has no statement left to quantify"
+            + _inclusion_meant(segments))
     domain = {}
     ne_pending: list = []
     # the exclude-keyword splice rewrites binding text, so merged parts

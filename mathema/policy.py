@@ -1341,6 +1341,14 @@ def guard_policies(facts) -> dict:
         if not covered(node.test):
             shadowed.update(checks(node.test, compound=True))
         raise_stmt = next((s for s in node.body if isinstance(s, ast.Raise)), None)
+        if raise_stmt is not None:
+            # a raise whose exception may not be the one it names (an
+            # argument that can itself raise, a cause, a re-raise) is no
+            # guard to prove a policy from
+            from .symbolic._base import UnreadRaise, read_raise
+            if isinstance(read_raise(raise_stmt, set(getattr(facts, "params", ()) or ())),
+                          UnreadRaise):
+                continue
         if not keys and raise_stmt is not None:
             keys = [k for k in entry_check(node.test) if k not in shadowed]
         if not keys:
