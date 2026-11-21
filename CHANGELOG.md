@@ -18,6 +18,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
+- A claim whose domain lists a missing value (`x in {1, None}`, `x in {1, nan}`) is proven only when that value holds at every value of the other parameters: beside finite sets every combination is run, and beside an interval (or more combinations than the brute-force sweep's budget) the listed value is run at sampled points and the claim holds, or is falsified at the point that fails, instead of being proven from a run at the domain's corners. A raise or a missing result at the listed value, and a claim that cannot be run at a point (a derivative), are judged by their policy rows, as before.
 
 ## 0.6.6.1
 
