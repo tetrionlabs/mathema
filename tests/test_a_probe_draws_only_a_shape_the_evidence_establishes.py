@@ -464,7 +464,7 @@ def _row(fn, text):
 def test_a_parameter_nothing_establishes_is_drawn_over_base_kinds(mod):
     p = _row(mod.same, "f(x) == x")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    assert "holds for x drawn as bool, int, float" in p.note
+    assert "x was drawn as a float because nothing says what x is" in p.note
     assert "x" in p.meta["mathema.base_kinds"]
 
 
@@ -550,7 +550,7 @@ def test_a_copy_an_accumulating_loop_binds_again_is_drawn_over_base_kinds(mod):
 def test_a_copy_rebound_before_its_use_carries_nothing(mod):
     p = _row(mod.replaced, "f(y0) == 2")
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    assert "holds for y0 drawn as" in p.note
+    assert "y0 was drawn as a float because nothing says what y0 is" in p.note
 
 
 def test_a_parameter_the_body_never_reads_is_drawn_and_said_so(mod):
@@ -564,7 +564,7 @@ def test_a_function_without_source_says_so():
     exec("def hidden(x):\n    return x\n", ns)
     p = _row(ns["hidden"], "f(x) == x")
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "holds for x drawn as" in p.note
+    assert "x was drawn as a float because nothing says what x is" in p.note
 
 
 def test_a_generated_dataclass_ordering_draws_an_instance(mod):
@@ -580,7 +580,7 @@ def test_a_generated_dataclass_ordering_draws_an_instance(mod):
 def test_an_ordering_method_not_generated_leaves_other_unknown(mod, cls, name):
     p = _row(getattr(getattr(mod, cls), name), "f(self, other) == f(self, other)")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.meta["mathema.draw_defect"]["param"] == "other"
     assert "other" in p.meta["mathema.base_kinds"]
 
 
@@ -637,7 +637,7 @@ def test_a_partial_without_source_is_named_by_its_function():
     exec("def hidden(x, y):\n    return x\n", ns)
     p = _row(functools.partial(ns["hidden"], y=1), "f(x) == x")
     assert p.verdict == "holds", (p.verdict, p.note)
-    assert "holds for x drawn as" in p.note
+    assert "x was drawn as a float because nothing says what x is" in p.note
 
 
 def test_a_count_of_text_repeats_drawn_as_a_float_is_a_draw_defect(mod):
@@ -727,14 +727,14 @@ def test_a_sum_with_a_literal_container_draws_that_container(mod, name, text):
 def test_an_attribute_read_then_indexed_says_nothing_of_a_sequence(mod):
     p = _row(mod.rows, "f(x) >= 0")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.meta["mathema.draw_defect"]["param"] == "x"
 
 
 @pytest.mark.parametrize("name, text, verdict", [
     ("int_guarded", "f(x) == x", "falsified"),
     ("none_guarded", "abs(f(x)) <= 10000000", "falsified"),
-    ("triangle", "f(x) <= 499500", "holds"),
-    ("width", "f(x) <= 10", "holds"),
+    ("triangle", "f(x) <= 499500", "unknown"),
+    ("width", "f(x) <= 10", "unknown"),
 ])
 def test_a_use_only_an_integer_supports_is_decided_over_base_kinds(
         mod, name, text, verdict):
@@ -743,9 +743,9 @@ def test_a_use_only_an_integer_supports_is_decided_over_base_kinds(
 
 
 @pytest.mark.parametrize("name, text, verdict", [
-    ("closure_copy", "f(y0) == f(y0)", "holds"),
-    ("comp_copy", "f(y0) == f(y0)", "falsified"),
-    ("copy_then_branch", "f(y0, flag) == f(y0, flag)", "holds"),
+    ("closure_copy", "f(y0) == f(y0)", "unknown"),
+    ("comp_copy", "f(y0) == f(y0)", "unknown"),
+    ("copy_then_branch", "f(y0, flag) == f(y0, flag)", "unknown"),
 ])
 def test_a_copy_read_in_a_way_not_read_through_is_drawn_over_base_kinds(
         mod, name, text, verdict):
@@ -801,4 +801,4 @@ def test_a_walrus_copy_is_read_through(mod):
 def test_an_attribute_read_then_indexed_off_a_copy_says_nothing_of_a_sequence(mod):
     p = _row(mod.copied_rows, "f(x) >= 0")
     assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "shape-not-established"
+    assert p.meta["mathema.draw_defect"]["param"] == "x"

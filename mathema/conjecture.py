@@ -8322,6 +8322,10 @@ class _ClaimContext:
     # base kinds, and the kind each is drawn as in the current run
     base_kind_params: list = field(default_factory=list)
     base_kind: "dict | None" = None
+    # in a base kind's run: the values drawn for it, and where the last
+    # raise came from ("f", "claim", "complex")
+    base_kind_seen: list = field(default_factory=list)
+    base_kind_raise: "str | None" = None
     # the parameters the claim holds at a literal, a kept default or a
     # pin rather than drawing them
     shape_held: frozenset = frozenset()
@@ -12619,67 +12623,98 @@ def _draw_defect(ctx: "_ClaimContext", fn, call_raised: list,
             "evidence": evidence.detail if evidence is not None else ""}
 
 
+def _ordering_raises(relation: str, left, right) -> bool:
+    """Intent:
+        Whether an ordering relation (`<`, `<=`, `>`, `>=`) raises a
+        TypeError between `left` and `right`, values that do not order.
+    """
+    import operator
+    compare = {"<": operator.lt, "<=": operator.le, ">": operator.gt,
+               ">=": operator.ge}.get(relation)
+    if compare is None:
+        return False
+    try:
+        compare(left, right)
+    except TypeError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def _over_base_kinds(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      sampling) -> "Probe":
     """Intent:
         The probe of a claim with parameters whose shape nothing
-        establishes (`ctx.base_kind_params`): the claim run once per
-        base kind (`BASE_KINDS`), each such parameter drawn as that
-        kind, every one of them as the same kind when there are several.
-        Holds, naming the kinds it holds on, when there is one; else
-        falsified with the first failing kind's witness, or unknown when
-        no kind applied (every draw raised a TypeError or AttributeError
-        at an operation on the drawn value). Holds is the most a kind
-        gives. Each kind's outcome, with its witness, is kept in the
-        row's meta (`mathema.base_kinds`).
+        establishes (`ctx.base_kind_params`): decided on their float
+        draw, as an unannotated parameter is, the float marked as
+        assumed by mathema (`mathema.assumed_shape`), and a TypeError or
+        AttributeError at an operation on the drawn float a draw defect.
+        Each such parameter is then varied alone over the other base
+        kinds (`BASE_KINDS`), the others drawn as floats; those runs
+        decide nothing. Each kind's outcome (`base_kind_outcome`) is
+        kept with its witness in `mathema.base_kinds`, and the kinds the
+        claim held on become suggested claims (`mathema.
+        suggested_claims`, shown as the row's next step).
     """
-    from ._shape_evidence import BASE_KINDS, kinds_held_text
+    from ._shape_evidence import (BASE_KINDS, assumed_float_text,
+                                  base_kind_outcome, suggestions_for)
     params = list(ctx.base_kind_params)
-    held: list = []
-    rows: dict = {}
-    first_failed = None
-    record: dict = {}
-    for kind in BASE_KINDS:
-        ctx.base_kind = {p: kind for p in params}
+
+    import dataclasses
+    from . import policy as _policy
+
+    def run(binding: dict):
+        ctx.base_kind = binding
+        ctx.base_kind_seen = []
         ctx.drawn_shapes = {}
         try:
             row = _probe_stage_in_slots(ctx, fn, facts, dict(kinds), sampling)
         finally:
             ctx.base_kind = None
-        rows[kind] = row
-        defect = (row.meta or {}).get("mathema.draw_defect")
-        if row.verdict in ("holds", "proven"):
-            held.append(kind)
-            record[kind] = {"verdict": "holds"}
-        elif row.verdict == "falsified":
-            record[kind] = {"verdict": "falsified",
-                            "witness": row.counterexample}
-            if first_failed is None:
-                first_failed = row
-        elif defect is not None:
-            record[kind] = {"verdict": "does not apply",
-                            "raised": defect.get("raised"),
-                            "line": defect.get("line")}
-        else:
-            record[kind] = {"verdict": row.verdict}
-    meta = {"mathema.base_kinds": {p: record for p in params}}
-    if held:
-        base = rows[held[0]]
-        text = kinds_held_text(params, held, len(params) > 1)
-        return Probe(ctx.cj.name, base.statement, "holds", route=base.route,
-                     n=sum(rows[k].n or 0 for k in held),
-                     note=f"{ctx.note}; {text}".lstrip("; "),
-                     meta={**(base.meta or {}), **meta})
-    if first_failed is not None:
-        first_failed.meta = {**(first_failed.meta or {}), **meta}
-        return first_failed
+        return row, list(ctx.base_kind_seen), ctx.base_kind_raise
+
+    row, _seen, _site = run({p: "float" for p in params})
+    record: dict = {}
+    # the other kinds' runs leave no trace: no call is filed for the
+    # policy rows, and the claim's context is as the float run left it
+    kept = {f.name: getattr(ctx, f.name) for f in dataclasses.fields(ctx)}
+    token = _policy.OUTSIDE_REMIT.set(True)
+    try:
+        for p in params:
+            record[p] = {}
+            for kind in BASE_KINDS:
+                if kind == "float":
+                    continue
+                if kind == "None":
+                    record[p][kind] = base_kind_outcome(kind, None, [], None)
+                    continue
+                for name, value in kept.items():
+                    if isinstance(value, (dict, list, set)):
+                        setattr(ctx, name, type(value)(value))
+                kind_row, seen, site = run({p: kind})
+                record[p][kind] = base_kind_outcome(kind, kind_row, seen, site)
+    finally:
+        _policy.OUTSIDE_REMIT.reset(token)
+        for name, value in kept.items():
+            setattr(ctx, name, value)
+    suggested, steps, held = suggestions_for(params, record, ctx.statement)
+    defect = (row.meta or {}).get("mathema.draw_defect")
     names = ", ".join(params)
-    return Probe(ctx.cj.name, ctx.statement, "unknown", route=None,
-                 note=f"{ctx.note}; no base kind applies to {names}: each "
-                      f"kind's draws raised a TypeError or AttributeError "
-                      f"at an operation on it; bind {names} in the claim "
-                      f"(for {names} in ...), or annotate it".lstrip("; "),
-                 meta={"mathema.probe_gap": "shape-not-established", **meta})
+    pieces = [f"{p} drawn as {', '.join(ks)}" for p, ks in held.items() if ks]
+    if defect is not None and pieces:
+        row.note = (f"{row.note}; bind {names}: the claim held with "
+                    + "; ".join(pieces)).lstrip("; ")
+    elif defect is None:
+        row.note = "; ".join([assumed_float_text(params), row.note or ""]).rstrip("; ")
+    row.meta = {**(row.meta or {}),
+                "mathema.assumed_shape": {p: "float" for p in params},
+                "mathema.base_kinds": record,
+                "mathema.suggested_claims": suggested}
+    if steps:
+        row.meta["mathema.next_steps"] = [
+            *(row.meta.get("mathema.next_steps") or []), *steps]
+    return row
 
 
 def _draw_defect_row(ctx: "_ClaimContext", statement: str, note: str,
@@ -13613,6 +13648,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         f_call.record(executed_record, dict(zip(kinds, args)))
         call_raised[0] = call_nan[0] = call_inf[0] = call_hole[0] = None
         outside_draw[0] = False
+        ctx.base_kind_raise = None
         # the first sampled trials are a claim's guaranteed small draws:
         # length 1 and a 1-by-1 matrix, then 1-by-n, then n-by-1
         small_round = trial - len(pinned) \
@@ -13783,6 +13819,7 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if p in env and p not in literal_args and kind != "float":
                 from ._shape_evidence import base_kind_value
                 v = base_kind_value(kind, rng, trial)
+                ctx.base_kind_seen.append(v)
                 env[p] = v
                 args[list(kinds).index(p)] = v
         if outside_draw[0]:
@@ -13893,6 +13930,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                 lv = eval(code_l, {"__builtins__": {}}, env)
                 rv = eval(code_r, {"__builtins__": {}}, env) if code_r is not None else None
         except Exception as e:
+            ctx.base_kind_raise = ("complex" if isinstance(e, ComplexResult)
+                                   else "f" if call_raised[0] == "f"
+                                   else "claim")
             if not call_raised[0] and admitted_hole(args):
                 # the claim's own words at a hole or absence it only
                 # admits: classified, the companions judge f there
@@ -14472,6 +14512,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                              _exact_slack(cj) if overflow_read
                              else cj.tolerance,
                              0.0, side, exact_inequality=cj.tolerance is None)
+        if ok is False and ctx.base_kind is not None \
+                and _ordering_raises(cj.relation, compare_l, compare_r):
+            # the claim's own ordering does not apply to these values
+            ctx.base_kind_raise = "claim"
         ll_false = ll_decided is False and ok is True
         if ll_decided is not None:
             ok = ll_decided

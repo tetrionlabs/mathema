@@ -822,17 +822,137 @@ def base_kind_value(kind: str, rng, trial: int):
     return {"list": items, "tuple": tuple(items), "set": set(items)}[base]
 
 
-def kinds_held_text(params: list, held: list, paired: bool) -> str:
+#: the binding core's claim grammar spells for each base kind it can name
+_KIND_BINDINGS = {"None": "{None}", "bool": "{False, True}", "int": "Z",
+                  "complex": "C", "empty str": "{''}", "non-empty list": "R^n"}
+
+#: what the draws of each base kind are, in words
+_KIND_DRAWN = {
+    "bool": "both bools",
+    "int": "0, 1, -1, 2, ints in [-100, 100] and in [-10**6, 10**6]",
+    "complex": "complex numbers as core draws them for C",
+    "non-empty str": "strings from core's edge-case corpus and short mixed "
+                     "strings (an empty one replaced by 'a')",
+    "non-empty bytes": "those strings as UTF-8 bytes (valid UTF-8 only)",
+    "non-empty list": "lists of 1 to 8 floats, mostly in [-10, 10], some "
+                      "at 0, 1e-9 or 1e6",
+    "non-empty tuple": "tuples of those floats",
+    "non-empty set": "sets of those floats",
+    "non-empty dict": "dicts of 1 to 4 str keys with float values",
+}
+
+#: the base kinds whose values are all values of another kind
+_MEMBER_OF = {"bool": "int", "empty str": "non-empty str",
+              "empty bytes": "non-empty bytes", "empty list": "non-empty list",
+              "empty tuple": "non-empty tuple", "empty dict": "non-empty dict",
+              "empty set": "non-empty set"}
+
+
+def base_kind_outcome(kind: str, row, seen: list, site: "str | None") -> dict:
     """Intent:
-        The note of a claim decided over base kinds: the kinds each
-        parameter was drawn as where the claim holds, and whether the
-        parameters were drawn as one kind together.
+        The one outcome of a claim's run with a parameter drawn as base
+        kind `kind`, with its witness: `checked-all` (it held at every
+        value of the kind: bool at both, an empty kind at its one),
+        `sampled-true` (it held on `n` draws of `distinct` values),
+        `counterexample` (f returned and the claim is false there),
+        `f-undefined` (f raised), `claim-undefined` (the claim's own
+        relation raised, or f returned a complex value a real claim
+        does not compare), `undecided` (with the reason). `site` says
+        where the run's last raise came from ("f", "claim", "complex"),
+        `seen` holds the values drawn for the kind.
+    """
+    if kind == "None":
+        return {"outcome": "undecided",
+                "reason": "core reads None as a value that is not there, so "
+                          "a draw of it is classified, not judged; it is not "
+                          "run as a kind"}
+    distinct = len({repr(v) for v in seen})
+    defect = (row.meta or {}).get("mathema.draw_defect")
+    if defect is not None:
+        return {"outcome": "f-undefined", "raised": defect.get("raised"),
+                "n": row.n or 0, "distinct": distinct}
+    if row.verdict in ("holds", "proven"):
+        every = (kind == "bool" and {repr(v) for v in seen} == {"False", "True"}) \
+            or (kind.startswith("empty ") and distinct == 1)
+        return ({"outcome": "checked-all", "values": distinct} if every
+                else {"outcome": "sampled-true", "n": row.n or 0,
+                      "distinct": distinct})
+    if row.verdict == "falsified":
+        outcome = {"f": "f-undefined", "claim": "claim-undefined",
+                   "complex": "claim-undefined"}.get(site or "", "counterexample")
+        return {"outcome": outcome, "n": row.n or 0, "distinct": distinct,
+                "witness": (row.counterexample or "").split(": ", 1)[0]}
+    reason = (row.note or "").rsplit("; ", 1)[-1].split("\n")[0]
+    return {"outcome": "undecided", "reason": reason}
+
+
+def suggestions_for(params: list, record: dict, claim_text: str):
+    """Intent:
+        `(claims, lines, held)` for a claim decided on floats: the
+        claims binding one parameter to a base kind the claim held on
+        (`checked-all` or `sampled-true`, and not a kind whose values
+        belong to a kind with a counterexample), the next-step lines
+        that offer them with what was drawn, and the held kinds by
+        parameter.
+    """
+    from ._missing_words import numbered
+    claims: list = []
+    drawn: list = []
+    unspelled: list = []
+    narrowed: list = []
+    held: dict = {}
+    for p in params:
+        outcomes = record[p]
+        held[p] = []
+        for kind, out in outcomes.items():
+            if out["outcome"] not in ("checked-all", "sampled-true"):
+                continue
+            wider = outcomes.get(_MEMBER_OF.get(kind, ""), {})
+            if wider.get("outcome") == "counterexample":
+                only = (f"{p} in {{False, True}}" if kind == "bool"
+                        else f"{p} drawn as {kind}")
+                narrowed.append(f"The claim holds with {only} only; it fails "
+                                f"on {_MEMBER_OF[kind]} at "
+                                f"{wider.get('witness')}.")
+                continue
+            held[p].append(kind)
+            seen = ("checked at every value" if out["outcome"] == "checked-all"
+                    else f"{out['n']} draws, {out['distinct']} distinct")
+            what = _KIND_DRAWN.get(kind)
+            drawn.append(f"{p} as {kind}: {seen}"
+                         + (f" ({what})" if what and out["outcome"] != "checked-all"
+                            else ""))
+            domain = _KIND_BINDINGS.get(kind)
+            if domain is None:
+                unspelled.append(f"{p} drawn as {kind}")
+            else:
+                claims.append(f"for {p} in {domain}, {claim_text}")
+    lines: list = []
+    alone = (", each parameter varied alone with the others drawn as floats"
+             if len(params) > 1 else "")
+    if claims:
+        lines.append(numbered(
+            f"The claim also held on other kinds{alone}; to adopt one, "
+            f"write one of these claims", claims))
+    if unspelled:
+        lines.append(f"It also held with {', '.join(unspelled)}, which no "
+                     f"claim binds yet.")
+    if drawn:
+        lines.append(f"What was drawn: {'; '.join(drawn)}.")
+    lines.extend(narrowed)
+    return claims, lines, held
+
+
+def assumed_float_text(params: list) -> str:
+    """Intent:
+        The note's clause saying a parameter whose shape nothing
+        establishes was drawn as a float on mathema's assumption.
     """
     names = ", ".join(params)
-    text = f"holds for {names} drawn as {', '.join(held)}"
-    if paired:
-        text += " (the parameters drawn as one kind together)"
-    return text
+    verb = "was" if len(params) == 1 else "were"
+    return (f"{names} {verb} drawn as a float because nothing says what "
+            f"{names} {'is' if len(params) == 1 else 'are'}; annotate it or "
+            f"bind it in the claim (for {params[0]} in ...)")
 
 
 def assumed_shape(param: str) -> ParameterShape:

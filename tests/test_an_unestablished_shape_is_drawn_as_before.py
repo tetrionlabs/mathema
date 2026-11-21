@@ -1,16 +1,10 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """A parameter whose shape nothing establishes (no annotation, default or
-use the reading follows says what kind of value it takes) is drawn over
-the base kinds, one companion run each: None, bool, int, float,
-complex, and str, bytes, list, tuple, dict and set empty and non-empty.
-The claim holds for the kinds it holds on, and the row names them; a
-kind where the claim fails, or where the draw does not apply (a
-TypeError or AttributeError at an operation on the drawn value), is
-left out and kept in the row's meta. With no kind left the claim is
-falsified at the first failing kind's witness, or unknown when no kind
-applied. A parameter whose shape is established still falsifies on one
-failure."""
+use the reading follows says what kind of value it takes) is decided on
+its float draw, as develop decides it: these cases keep develop's
+verdict for the claim develop was run with. A parameter whose shape is
+established still falsifies on one failure."""
 import importlib.util
 import sys
 import textwrap
@@ -213,35 +207,11 @@ def test_a_shape_nothing_establishes_keeps_develops_verdict(mod, name, text,
     ("has_any", "f(xs) == (xs != 0)", "xs"),
     ("last_or_zero", "f(xs) == xs", "xs"),
 ])
-def test_a_claim_decided_over_base_kinds_names_them(mod, name, text, param):
+def test_a_claim_decided_on_floats_says_the_float_was_assumed(mod, name, text,
+                                                              param):
     p = _row(getattr(mod, name), text, None)
     assert p.verdict == "holds", (p.verdict, p.note, p.counterexample)
-    assert f"holds for {param} drawn as " in p.note
-
-
-def test_same_holds_on_every_kind_core_compares(mod):
-    p = _row(mod.same, "f(x) == x")
-    kinds = p.meta["mathema.base_kinds"]["x"]
-    held = {k for k, r in kinds.items() if r["verdict"] == "holds"}
-    # None is an absent value and a complex result is not real: core
-    # decides neither under a real claim
-    assert held == set(kinds) - {"None", "complex"}, kinds
-
-
-def test_is_empty_holds_on_numbers_and_is_not_falsified(mod):
-    p = _row(mod.is_empty, "f(xs) == (xs == 0)")
-    assert p.verdict == "holds", (p.verdict, p.note)
-    kinds = p.meta["mathema.base_kinds"]["xs"]
-    assert {"int", "float", "complex"} <= {
-        k for k, r in kinds.items() if r["verdict"] == "holds"}
-    assert kinds["empty list"]["verdict"] == "falsified"
-
-
-def test_acc_keeps_holds_on_the_real_numbers(mod):
-    p = _row(mod.acc_keeps, "f(y0) == y0 + 3.0")
-    assert "holds for y0 drawn as bool, int, float" in p.note
-    kinds = p.meta["mathema.base_kinds"]["y0"]
-    assert kinds["non-empty str"]["verdict"] == "does not apply"
+    assert f"{param} was drawn as a float because nothing says what" in p.note
 
 
 def test_a_claim_failing_on_every_kind_is_falsified_with_a_witness(mod):
@@ -261,6 +231,5 @@ def test_an_annotated_parameter_still_falsifies_on_one_failure(mod):
 ])
 def test_a_wrong_shape_draw_never_falsifies(mod, name, text):
     p = _row(getattr(mod, name), text)
-    kinds = p.meta["mathema.base_kinds"]["x"]
-    assert all(r["verdict"] != "falsified" or "TypeError" not in str(r.get("witness"))
-               for r in kinds.values()), kinds
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.draw_defect"]["param"] == "x"
