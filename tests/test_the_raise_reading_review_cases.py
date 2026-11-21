@@ -558,7 +558,8 @@ def test_a_guard_callee_counts_by_what_it_is_not_by_its_name():
     exec(_ALIASED, space)
     test = ast.parse("isnan(x)", mode="eval").body
     assert not _true_at_hole(test, "x", "missing", "nan", space["pol_alias_isnan"])
-    assert _true_at_hole(test, "x", "missing", "nan", _a_true_isnan_guard)
+    qualified = ast.parse("math.isnan(x)", mode="eval").body
+    assert _true_at_hole(qualified, "x", "missing", "nan", _a_true_isnan_guard)
 
 
 def _a_true_isnan_guard(x: float) -> float:
