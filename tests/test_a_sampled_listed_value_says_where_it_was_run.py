@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright 2026 Tetrion Ltd
+"""Beside an interval a listed missing value is run at sampled points;
+where it raised, or gave no value, at every one of them, the note says
+at how many sampled points of the other parameters it was run and what
+it did there, rather than reading as true of every point."""
+from mathema.conjecture import check_conjectures, claim
+
+
+def raises_when_absent(x, y):
+    if x is None:
+        raise ValueError("no x")
+    return 0.0 * y
+
+
+def nan_when_absent(x, y):
+    if x is None:
+        return float("inf") - float("inf")
+    return 0.0 * y
+
+
+def _row(fn, text):
+    (row,) = check_conjectures(fn, [claim(text)])
+    return row
+
+
+def test_a_raise_at_every_sampled_point_is_counted_in_the_note():
+    row = _row(raises_when_absent, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
+    assert "the listed value x = None was run at" in row.note, row.note
+    assert "sampled points of y and raised ValueError at each" in row.note, row.note
+
+
+def test_no_value_at_every_sampled_point_is_counted_in_the_note():
+    row = _row(nan_when_absent, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
+    assert "sampled points of y and gave no value at each" in row.note, row.note
