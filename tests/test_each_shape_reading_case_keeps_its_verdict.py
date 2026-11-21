@@ -6,7 +6,7 @@ annotation, a default or a use in the body; a local copy read through
 or not; a raise blamed on the draw only when the raising frame holds the
 drawn value; lambdas, partials, wrappers and callable instances read
 through to their source. A parameter whose shape nothing establishes
-(`same(x): return x`) is not drawn, and its verdict is unknown."""
+(`same(x): return x`) is drawn as a float, as develop draws it."""
 import importlib.util
 import sys
 

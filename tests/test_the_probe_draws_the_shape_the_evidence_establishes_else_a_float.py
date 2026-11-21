@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The probe route draws a parameter only in a shape positive evidence
+"""The probe route draws a parameter in the shape its evidence
 establishes: the claim's domain, a type marker, the annotation, the
-default, or how the body uses it. A parameter with no evidence, or with
-evidence that disagrees and nothing settles, is not drawn and the
-claim's probe outcome is unknown with the reason; an annotation or a
-number use the body contradicts is drawn, and the raise stands. A body that only ever does arithmetic with a
-parameter establishes a number, so the common unannotated numeric
-function keeps drawing, and its record says which evidence it rests on.
-A TypeError or AttributeError the drawn value causes at the operation
-that applies to it, when the shape rests only on the code (a default or
-a use), is a draw defect, never a falsification; a claim that binds the
-value itself is still judged on it."""
+default, or how the body uses it. A parameter with no evidence is drawn
+as a float, as an unannotated parameter is, and its record says so;
+evidence that disagrees with nothing to settle it leaves the parameter
+undrawn and the outcome unknown with the reason; an annotation or a
+number use the body contradicts is drawn, and the raise stands. A body
+that only ever does arithmetic with a parameter establishes a number,
+and its record says which evidence it rests on. A TypeError or
+AttributeError the drawn value causes at the operation that applies to
+it, when the shape rests only on the code (a default, a use, or nothing)
+and f has returned on no draw, is a draw defect, never a falsification;
+a claim that binds the value itself is still judged on it."""
 import importlib.util
 import sys
 import textwrap

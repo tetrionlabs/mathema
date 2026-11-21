@@ -12508,11 +12508,13 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
         The shape evidence for each parameter the claim passes whole to
         f and leaves for the probe to draw (no domain binds it, no
         literal or default holds it): `(row, kinds)`, `row` the unknown
-        outcome when one of them has no evidence or disagreeing
-        evidence, else None with `kinds` updated to the shape the
-        evidence establishes for a parameter whose kind was unknown.
-        The parameters whose shape rests on the code are kept on
-        `ctx.drawn_shapes`.
+        outcome when one of them has disagreeing evidence nothing
+        settles, else None with `kinds` updated to the shape the
+        evidence establishes for a parameter whose kind was unknown. A
+        parameter with no evidence, or only a string use and no strings
+        to draw, keeps its kind and is recorded as an assumed float
+        (`ctx.assumed_float`). The parameters whose shape rests on the
+        code are kept on `ctx.drawn_shapes`.
     """
     from ._shape_evidence import (assumed_shape, element_shape_missing,
                                   kind_shape, not_established_text,
@@ -12932,8 +12934,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                      note=f"{note}; the built-in claim {cj.relation} could not "
                           "decide it, and the probe has no other way to "
                           "check it")
-    # every parameter the claim passes to f is drawn in a shape positive
-    # evidence establishes, or not at all
+    # every parameter the claim passes to f is drawn in the shape its
+    # evidence establishes; one whose shape nothing establishes is drawn
+    # as a float, as an unannotated parameter is, and one whose evidence
+    # disagrees with nothing to settle it is not drawn
     shape_row, kinds = _shape_gate(ctx, fn, facts, kinds, bundles)
     if shape_row is not None:
         return shape_row

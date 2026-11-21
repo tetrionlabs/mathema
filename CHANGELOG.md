@@ -15,6 +15,8 @@ Notable changes to mathema are recorded here from its first public release onwar
 - Lambdas, `functools.partial` objects and callable instances are read from their source: two lambdas on one line are told apart by position, and when they cannot be the message says so. A wrapper that calls the function it wraps with a value it makes from its own arguments leaves the parameter's shape unread.
 - `x.shape[0]`, on the parameter or on a copy of it, is not read as indexing the parameter.
 
+## 0.6.6.1
+
 ### Upgrading from 0.6.6
 - Implementation counts only the lines reached by the probes of claims included for a function (in a claims file, its docstring or a decorator, or a suggestion accepted as evidence). A function with no such claim is not run while it is scored, so code with neither tests nor claims reads lower than in 0.6.6.
 - `check()` and `mathema verify` run the built-in checks (the structural battery, the shape and type probes, and the rows for a value that is not there) only for a function with a written claim or a mathema type marker. A function with neither is not called with values mathema generates. `MATHEMA_BUILTIN_CHECKS=on` runs them for every function, `off` for none.

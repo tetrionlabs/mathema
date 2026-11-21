@@ -30,10 +30,12 @@ Evidence that names two different kinds for one parameter is a
 disagreement. An annotation, or a firm number use, against uses in the
 body settles it, and so does a firm use against the default: the
 parameter is drawn in the settling shape, and a raise at a use against
-it is a finding. An unsettled disagreement is not drawn, nor is a
-parameter with no evidence at all. A claim domain, an inferred domain, a type marker
-and an annotation are stated evidence; a default and a body use are
-read from the code.
+it is a finding. An unsettled disagreement is not drawn. A parameter
+with no evidence at all, or with only a string use and no strings to
+draw, is drawn as an unannotated parameter is (a float), on mathema's
+assumption. A claim domain, an inferred domain, a type marker and an
+annotation are stated evidence; a default and a body use are read from
+the code.
 
 `wrong_shape_use` reads a TypeError or AttributeError back to the
 operation in the function's own body that raised it: one applied
