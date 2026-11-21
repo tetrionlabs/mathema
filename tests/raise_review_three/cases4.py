@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 4: a listed missing value beside an interval."""
+"""Raise-reading cases: a listed missing value beside an interval."""
 from typing import Optional
 
 

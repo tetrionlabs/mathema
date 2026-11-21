@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 2: missing-value policies read from a guard."""
+"""Raise-reading cases: missing-value policies read from a guard."""
 import functools
 import math
 from math import isinf as isnan

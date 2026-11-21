@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 7: policy rows through a wrapper and a lambda default."""
+"""Raise-reading cases: policy rows through a wrapper and a lambda default."""
 import functools
 from typing import Optional
 

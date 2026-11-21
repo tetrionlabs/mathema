@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""The functions two reviews of the raise reading used to probe it, each
-with the claim it was probed with and the verdict mathema gives: a
-`proven` only where the claim is true and was read, and for every case
-where the function's real behaviour contradicts the claim, a verdict
-that is not `proven`. A function that exits the process or never
-finishes is checked through the derive prover directly and never run."""
+"""Raise-reading cases, each a function with a claim and the verdict
+mathema gives it: `proven` only where the claim is true and the path to
+the raise is read, and a verdict other than `proven` wherever the
+function's behaviour contradicts the claim. A function that exits the
+process or never finishes is checked through the derive prover alone and
+never run."""
 import builtins
 import functools
 import math
@@ -383,7 +383,7 @@ def test_a_review_reader_case_is_unread_and_not_known_to_finish(fn, kinds):
     assert isinstance(reading, UnreadRaise) and not reading.halts, reading
 
 
-# ---- third review: a lambda's defaults run when the lambda is built ---------
+# ---- a lambda's defaults run when the lambda is built --------------------------
 
 def pol_lam(x: Optional[float], y: float) -> float:
     g = lambda a=1 / (y - 0.123456): a  # noqa: E731,F841
@@ -426,7 +426,7 @@ def test_a_lambda_default_is_read_where_the_lambda_is_built(fn, verdict):
     assert rows[-1].verdict == verdict, (rows[-1].verdict, rows[-1].note)
 
 
-# ---- third review: the policy route reads what the call does ----------------
+# ---- the policy route reads what the call does ---------------------------------
 
 def _rare_swallow(fn):
     @functools.wraps(fn)
@@ -452,7 +452,7 @@ def test_a_policy_behind_a_wrapper_is_not_proven_from_the_inner_guard():
     assert rows[-1].verdict == "holds", (rows[-1].verdict, rows[-1].note)
 
 
-# ---- third review: a format field that is not a decimal index ---------------
+# ---- a format field that is not a decimal index --------------------------------
 
 def brace_super_digit(x: float) -> float:
     if x < 0:
@@ -468,7 +468,7 @@ def test_a_format_field_of_a_digit_that_is_not_decimal_is_not_read():
     assert row.verdict == "falsified", (row.verdict, row.sketch)
 
 
-# ---- third review: a name imported then rebound -----------------------------
+# ---- a name imported then rebound ----------------------------------------------
 
 def import_rebind(x: float) -> float:
     import math as m  # noqa: F401
@@ -490,7 +490,7 @@ def test_a_module_name_rebound_after_its_import_is_not_the_module():
     assert not isinstance(reading, ReadRaise), reading
 
 
-# ---- third review: an instance wrapper whose attribute read runs code -------
+# ---- an instance wrapper whose attribute read runs code ------------------------
 
 def _p1(x: float) -> float:
     if x < 0:
@@ -538,7 +538,7 @@ def test_an_instance_whose_attribute_read_runs_code_is_not_read_through(wrapper)
     assert row.verdict != "proven", (row.verdict, row.route, row.sketch)
 
 
-# ---- third review: names, places and wording --------------------------------
+# ---- names, places and wording -------------------------------------------------
 
 _ALIASED = """
 from math import isinf as isnan
@@ -596,11 +596,11 @@ def test_a_rebound_name_says_what_is_not_known_without_naming_a_claim():
     assert "nested" in reading.reason and "claim" not in reading.reason, reading.reason
 
 
-# ---- third review: every case it probed, by batch ---------------------------
+# ---- batches of cases kept beside this file --------------------------------
 
 _THIRD = __import__("pathlib").Path(__file__).parent / "raise_review_three"
 
-#: the verdict each third-review case gets, by `cases<N>[<index>]`
+#: the verdict each case of `raise_review_three` gets, by `cases<N>[<index>]`
 THIRD_EXPECTED = {
     'cases1[0]': 'proven',
     'cases1[1]': 'holds',
@@ -694,7 +694,7 @@ THIRD_EXPECTED = {
     'cases8[1]': 'proven',
 }
 
-#: cases whose verdict is a wrong `proven`, on develop too: a missing
+#: cases whose verdict is a wrong `proven` today: a missing
 #: value a finite set lists is run only at the other parameter's corners,
 #: so f(None, 0.5) == 1.0 is never seen. Each is expected not proven, and
 #: fails strictly until that is so
@@ -707,9 +707,9 @@ THIRD_KNOWN_WRONG = {
 }
 
 
-#: cases where check_conjectures itself raises, on develop too
+#: cases where check_conjectures itself raises today
 THIRD_CRASHES = {
-    'cases1[22]': '`x % 0` raises ZeroDivisionError out of check_conjectures, also on develop',
+    'cases1[22]': '`x % 0` raises ZeroDivisionError out of check_conjectures',
 }
 
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 8: a mathema domain wrapper whose own check fires on part of the claim's domain."""
+"""Raise-reading cases: a mathema domain wrapper whose own check fires on part of the claim's domain."""
 from mathema.authoring import enforce_domain
 
 D = {"x": (-5, -1)}

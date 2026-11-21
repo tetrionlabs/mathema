@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 6: instance wrappers."""
+"""Raise-reading cases: instance wrappers."""
 import functools
 
 NEG = "for x in [-5, -1], "

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 5: wrappers and generator shapes."""
+"""Raise-reading cases: wrappers and generator shapes."""
 import functools
 
 from mathema.authoring import enforce_domain

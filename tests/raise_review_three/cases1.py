@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Review-three cases, batch 1: messages, bounds, lambdas, aliases."""
+"""Raise-reading cases: messages, bounds, lambdas, aliases."""
 import math
 from math import isinf as isnan  # noqa: F401  a misleading alias, used by pol_alias
 from math import isnan as true_isnan
